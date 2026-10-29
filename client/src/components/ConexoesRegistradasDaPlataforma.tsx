@@ -30,8 +30,8 @@ type Etapa = ConexaoDaPlataforma["status"];
 type StatusDeComissao = ConexaoDaPlataforma["statusComissao"];
 
 const ROTULO_DA_ORIGEM: Record<Origem, string> = {
-  PLATFORM_MATCH: "Entre membras da plataforma",
-  NETWORK_PLATFORM_MATCH: "Network × membra da plataforma",
+  PLATFORM_MATCH: "Entre membros da plataforma",
+  NETWORK_PLATFORM_MATCH: "Network × membro da plataforma",
   PRIVATE_NETWORK_MATCH: "Dentro de um mesmo network",
   NETWORK_NETWORK_MATCH: "Network × outro network",
 };
@@ -133,7 +133,7 @@ function CartaoDaConexao({ conexao, aoApurar, apurando }: {
             <p className="text-white/80">
               {lado.tipo === "contato"
                 ? <>Contato <span className="font-mono text-amber-200">{lado.codigoAnonimo ?? "—"}</span> · network da conta {lado.conta ? `${lado.conta.nome ?? "sem nome"} (#${lado.conta.id})` : "removida"}</>
-                : <>Membra da plataforma · conta {lado.conta ? `${lado.conta.nome ?? "sem nome"} (#${lado.conta.id})` : "removida"}</>}
+                : <>Membro da plataforma · conta {lado.conta ? `${lado.conta.nome ?? "sem nome"} (#${lado.conta.id})` : "removida"}</>}
             </p>
             {lado.originador && (
               <p className="text-white/50">

@@ -130,10 +130,13 @@ describe("cartão sem itens mostra o motivo", () => {
       origem: "PLATFORM_MATCH",
       itens: [],
       pontuacao: 72,
-      motivo: "Conexão sugerida pelo motor de perfis entre duas membras da plataforma: compatibilidade de 72%.",
+      motivo: "MOTIVO CRU DO SERVIDOR: esta frase não pode chegar à tela.",
     }));
 
-    expect(screen.getByText(/compatibilidade de 72%/)).toBeInTheDocument();
+    expect(screen.getByText(
+      "Sugerida pelo motor de perfis entre dois membros que tinham o termo do Smart Match aceito quando a conexão foi registrada: compatibilidade de 72%.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/MOTIVO CRU DO SERVIDOR/)).not.toBeInTheDocument();
   });
 
   it("quando o outro lado tirou a autorização, o cartão diz isso em vez de ficar vazio", () => {
@@ -182,7 +185,7 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     renderizar(entreMembras({ id: PAR_A }));
 
     expect(screen.getByText("Seu lado")).toBeInTheDocument();
-    expect(screen.getByText("Membra da plataforma")).toBeInTheDocument();
+    expect(screen.getByText("Membro da plataforma")).toBeInTheDocument();
   });
 
   it("dois pares da mesma rodada, com a mesma nota e o mesmo minuto, se separam pela referência", () => {
@@ -213,7 +216,7 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
 
     const dialogo = screen.getByRole("dialog");
-    expect(within(dialogo).getByText("Entre membras da plataforma")).toBeInTheDocument();
+    expect(within(dialogo).getByText("Entre membros da plataforma")).toBeInTheDocument();
     expect(within(dialogo).getByText(`Referência ${referenciaDaConexao(PAR_A)}`)).toBeInTheDocument();
     expect(within(dialogo).getByText(/O outro lado continua anônimo/)).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: `Descartar ${referenciaDaConexao(PAR_A)}` })).toBeInTheDocument();

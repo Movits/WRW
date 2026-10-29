@@ -62,7 +62,7 @@ const fechada = conexao({
   ],
 });
 const entreMembras = conexao({
-  id: "c-membras", origem: "PLATFORM_MATCH", itens: [], motivo: "Conexão sugerida pelo motor de perfis entre duas membras da plataforma.",
+  id: "c-membras", origem: "PLATFORM_MATCH", itens: [], motivo: "Conexão sugerida pelo motor de perfis entre dois membros da plataforma.",
   lados: [lado({ id: 3, lado: "a", tipo: "membro", conta: { id: 1, nome: "Membra Um" } }), lado({ id: 4, lado: "b", tipo: "membro", conta: { id: 3, nome: "Membra Três" } })],
 });
 
@@ -88,8 +88,9 @@ describe("Conexões registradas — a lista", () => {
     expect(within(primeira).getByText("NW-AAAAAA")).toBeInTheDocument();
     expect(within(segunda).getByText("Negócio fechado")).toBeInTheDocument();
     expect(within(segunda).getByText("Comissão da plataforma: a apurar")).toBeInTheDocument();
-    expect(within(terceira).getByText("Entre membras da plataforma")).toBeInTheDocument();
-    expect(within(terceira).getAllByText(/Membra da plataforma · conta/)).toHaveLength(2);
+    expect(within(terceira).getByText("Entre membros da plataforma")).toBeInTheDocument();
+    expect(within(terceira).getAllByText(/Membro da plataforma · conta/)).toHaveLength(2);
+    expect(within(terceira).getByText(/entre dois membros da plataforma/)).toBeInTheDocument();
   });
 
   it("os filtros de origem e etapa vão na consulta", () => {

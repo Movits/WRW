@@ -30,7 +30,7 @@ import { mascararContatosEmTexto } from "../shared/contato-em-texto";
  * Duas origens nascem aqui (item 17):
  * - NETWORK_NETWORK_MATCH: contato autorizado desta dona × contato autorizado
  *   de OUTRA dona; as duas são originadoras (item 18).
- * - NETWORK_PLATFORM_MATCH: contato autorizado × membra da plataforma (o que
+ * - NETWORK_PLATFORM_MATCH: contato autorizado × membro da plataforma (o que
  *   ela declarou em "O que tenho" e "O que preciso" no perfil).
  *
  * Quem participa do cruzamento autorizou: a dona do contato pelo SIM e pelo
@@ -359,7 +359,7 @@ export async function procurarConexoesNaRedeGlobal(
         pontuacao: resultado.pontuacao, encontros: resultado.encontros.map(paraMim),
       });
     } else {
-      const { motivo, itens } = motivoEItens(meu.codigoAnonimo, "uma membra da plataforma", null, resultado);
+      const { motivo, itens } = motivoEItens(meu.codigoAnonimo, "um membro da plataforma", null, resultado);
       const conexaoId = await registrarConexao(db, {
         origem: "NETWORK_PLATFORM_MATCH",
         a: ladoA,

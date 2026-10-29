@@ -1977,7 +1977,7 @@
       "empty": "Nenhuma conexão registrada ainda.",
       "noConsent": "Para ver e registrar conexões, ative as Conexões Inteligentes.",
       "internalAlert": "Encontramos uma oportunidade dentro do seu próprio network.",
-      "memberSide": "Membra da plataforma",
+      "memberSide": "Membro da plataforma",
       "mySide": "Seu lado",
       "reference": "Referência {{codigo}}",
       "contactSide": "Contato de outro network ({{codigo}})",
@@ -1997,8 +1997,8 @@
         "descartada": "Descartada"
       },
       "origin": {
-        "PLATFORM_MATCH": "Entre membras da plataforma",
-        "NETWORK_PLATFORM_MATCH": "Seu network × membra da plataforma",
+        "PLATFORM_MATCH": "Entre membros da plataforma",
+        "NETWORK_PLATFORM_MATCH": "Seu network × membro da plataforma",
         "PRIVATE_NETWORK_MATCH": "Dentro do seu network",
         "NETWORK_NETWORK_MATCH": "Seu network × outro network"
       },
@@ -2019,11 +2019,11 @@
       "otherSideAnonymous": "O outro lado continua anônimo: a plataforma não mostra quem é. Confira a referência acima — é ela que identifica esta conexão, e o descarte não volta atrás.",
       "discardConfirmButton": "Descartar {{codigo}}",
       "discardConfirmCancel": "Cancelar",
-      "reasonPlatformMatch": "Sugerida pelo motor de perfis entre duas membras que tinham o termo do Smart Match aceito quando a conexão foi registrada: compatibilidade de {{pontuacao}}%.",
+      "reasonPlatformMatch": "Sugerida pelo motor de perfis entre dois membros que tinham o termo do Smart Match aceito quando a conexão foi registrada: compatibilidade de {{pontuacao}}%.",
       "reasonNoAuthorization": "O outro lado retirou a autorização, então os detalhes desta conexão deixaram de aparecer."
     },
     "global": {
-      "description": "Contatos que você disponibilizar entram no cruzamento com as membras da plataforma e com outros networks autorizados — só pelo ID anônimo, O Que Tenho e O Que Preciso. Nome, telefone, e-mail, áudio, transcrição e notas nunca saem.",
+      "description": "Contatos que você disponibilizar entram no cruzamento com os membros da plataforma e com outros networks autorizados — só pelo ID anônimo, O Que Tenho e O Que Preciso. Nome, telefone, e-mail, áudio, transcrição e notas nunca saem.",
       "search": "Procurar conexões na rede global",
       "searching": "Procurando…",
       "found": "Conexões encontradas e registradas: {{quantidade}}.",
@@ -2047,7 +2047,7 @@
       "availableContacts": "Contatos disponibilizados",
       "availableContactsDetail": "Só ID anônimo, O Que Tenho e O Que Preciso",
       "globalConnections": "Conexões com a rede global",
-      "globalConnectionsDetail": "Com membras e outros networks autorizados",
+      "globalConnectionsDetail": "Com membros e outros networks autorizados",
       "opportunities": "Oportunidades encontradas",
       "opportunitiesDetail": "Conexões registradas e não descartadas",
       "intermediations": "Intermediações",
