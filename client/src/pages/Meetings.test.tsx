@@ -68,6 +68,8 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
+      resumir: duble.registrar("resumir"),
+      perguntar: duble.registrar("perguntar"),
     },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {
@@ -616,5 +618,28 @@ describe("Detalhe da reunião — pendências de Tenho/Preciso na aba Contatos",
     duble.get.mockReturnValue(detalheCom("ready"));
     rerender(<Meetings />);
     expect(duble.utils.networkInteligente.pendencias.reset).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+  });
+});
+
+describe("Detalhe da reunião — resumo e perguntas pela IA", () => {
+  const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "Ana: vamos fechar o contrato até sexta-feira.", language: "pt" };
+
+  it("reunião pronta com transcrição: o Gerar resumo e o Pergunte à reunião aparecem na aba Resumo", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(screen.getByText("Pergunte à reunião")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+
+    expect(duble.mutacoes.resumir.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, idioma: "pt-BR" });
+  });
+
+  it.each([
+    ["pronta sem transcrição", "ready", null],
+    ["em processamento", "processing", TRANSCRICAO],
+    ["com falha", "failed", TRANSCRICAO],
+  ])("reunião %s: nenhum dos dois aparece", (_caso, status, transcript) => {
+    abrirDetalhe({ status }, { transcript });
+    expect(screen.queryByRole("button", { name: /Gerar resumo/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Pergunte à reunião")).not.toBeInTheDocument();
   });
 });

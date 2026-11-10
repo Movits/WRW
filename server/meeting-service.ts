@@ -115,7 +115,7 @@ export type MeetingExtraction = {
 
 export const MEETING_TRANSCRIPT_LANGUAGES = ["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"] as const;
 
-const MEETING_LANGUAGES: Record<(typeof MEETING_TRANSCRIPT_LANGUAGES)[number], string> = {
+export const MEETING_LANGUAGES: Record<(typeof MEETING_TRANSCRIPT_LANGUAGES)[number], string> = {
   "pt-BR": "português do Brasil",
   en: "inglês",
   es: "espanhol",
