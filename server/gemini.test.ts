@@ -39,11 +39,17 @@ function responderCom(payload: unknown) {
 beforeEach(() => {
   fetchOriginal = globalThis.fetch;
   ambiente.ENV.llmApiKey = "chave-de-teste-que-nunca-sai-daqui";
+  // O modelo de áudio sai do ambiente (LLM_AUDIO_MODEL): o .env de quem roda a
+  // suíte não pode trocar o modelo que o teste espera.
+  vi.stubEnv("LLM_AUDIO_MODEL", undefined);
   urlPedida = "";
   corpoPedido = null;
 });
 
-afterEach(() => { globalThis.fetch = fetchOriginal; });
+afterEach(() => {
+  globalThis.fetch = fetchOriginal;
+  vi.unstubAllEnvs();
+});
 
 describe("Gemini — o pedido que montamos e a resposta que lemos", () => {
   it("pede o embedding ao modelo certo e devolve o vetor", async () => {

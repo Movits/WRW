@@ -15,6 +15,7 @@ import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
+import { linhaDosModelosDeIa } from "./modelos-de-ia";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -81,6 +82,11 @@ function antiScanMiddleware(req: Request, res: Response, next: NextFunction) {
 }
 
 async function startServer() {
+  // Os modelos de IA em uso, já depois da guarda do modelo concreto: um id
+  // recusado aparece no log do boot, e não só na primeira chamada à IA. Sem a
+  // chave, de propósito.
+  console.log(linhaDosModelosDeIa());
+
   // Migrações no boot, ANTES de aceitar tráfego — só em produção. O deploy do
   // Render publica o código na hora, mas ninguém no time roda migração na mão:
   // a 0003 ficou dias pendente na produção, e a 0004 sem este passo derrubaria

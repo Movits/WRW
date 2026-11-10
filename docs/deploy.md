@@ -150,11 +150,25 @@ código conseguia assinar uma sessão válida.
 |---|---|---|
 | `NODE_ENV` | modo produção | `production` |
 | `FRONTEND_URL` | links de e-mail e redirects | o endereço público do site |
-| `LLM_API_URL` | matches, enriquecimento, transcrição | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `LLM_API_URL` | as chamadas de texto: matches, enriquecimento, extração, tradução | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `LLM_API_KEY` | a chave do endpoint acima | Google AI Studio |
 | `RESEND_API_KEY` | e-mail de recuperação de senha | resend.com |
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
-| `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; sempre id concreto, nunca alias |
+| `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
+| `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
+| `LLM_MODEL` | opcional: modelo das chamadas de texto (extração, tradução, FAQ, Memória), que vão ao `LLM_API_URL` | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
+
+A transcrição e os embeddings (`server/gemini.ts`) não usam o `LLM_API_URL`:
+vão sempre à API do Gemini, com o id na URL e a mesma chave (`LLM_API_KEY` ou,
+sem ela, `GOOGLE_API_KEY`). Por isso o modelo do áudio só aceita o formato
+`gemini-<versão>`. Pôr o texto em outro provedor deixaria a transcrição e os
+embeddings com a chave errada: chaves separadas ainda não existem no código.
+
+No boot, o log mostra `[IA] áudio … · reserva … · texto …` com os modelos
+que valem depois da guarda, sem a chave (id de outro provedor no texto aparece
+como "fora do log"). Os ids que a chave do Gemini enxerga saem de
+`node scripts/listar-modelos-gemini.mjs --conferir id1,id2` (ver
+`scripts/README.md`); existir na lista não prova que o id é concreto.
 
 `PORT` a hospedagem injeta sozinha (o Render e o Railway fazem isso). Não defina na mão.
 

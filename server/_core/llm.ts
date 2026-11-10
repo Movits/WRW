@@ -1,4 +1,5 @@
 import { ENV } from "./env";
+import { modeloDeTexto } from "./modelos-de-ia";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -468,8 +469,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   // campo `model` com 400 — foi o que derrubou FAQ, matches e compliance em
   // produção quando LLM_MODEL não estava definida. Modelo concreto, não o alias
   // gemini-flash-latest: o alias resolve para um modelo com cota gratuita de 20
-  // requisições por dia, que esgota em minutos de uso real.
-  const resolvedModel = process.env.LLM_MODEL || model || "gemini-3.5-flash";
+  // requisições por dia, que esgota em minutos de uso real. Por isso o nome
+  // passa pela guarda de modelos-de-ia.ts, que recusa alias e usa o padrão.
+  const resolvedModel = modeloDeTexto(model);
   payload.model = resolvedModel;
 
   if (tools && tools.length > 0) {

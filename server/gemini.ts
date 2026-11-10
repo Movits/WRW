@@ -1,23 +1,11 @@
 import { ENV } from "./_core/env";
+import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const EMBEDDING_MODEL = "gemini-embedding-001";
-// Alias ativo listado pela API Gemini; evita o modelo 2.5 Flash descontinuado
-// para novas chaves e recebe as atualizações compatíveis da família Flash.
-const AUDIO_MODEL = "gemini-3.5-flash";
-// Reserva para quando o modelo de áudio está lotado (503) ou com a cota do dia
-// esgotada (429 do plano gratuito). Duas regras aprendidas a dor:
-//  1. Modelo CONCRETO, nunca alias -latest — um alias já apontou para modelo
-//     com cota gratuita de 20/dia e derrubou a IA em produção (CLAUDE.md).
-//  2. DIFERENTE do principal — a versão anterior lia LLM_MODEL, que em
-//     produção é exatamente o gemini-3.5-flash principal, e a guarda de
-//     igualdade lá embaixo pulava a reserva: ela NUNCA disparou na prática.
-// gemini-3.5-flash-lite aceita áudio (entradas: texto, imagem, vídeo, áudio e
-// PDF — docs oficiais do Gemini) e tem cota separada da do principal.
-// LLM_AUDIO_MODEL_RESERVA permite trocar sem deploy; se o valor apontado não
-// existir, o catch da reserva registra e devolve o erro original — nunca pior
-// do que não ter reserva.
-const AUDIO_MODEL_RESERVA = () => process.env.LLM_AUDIO_MODEL_RESERVA || "gemini-3.5-flash-lite";
+// Os modelos da transcrição, o principal (LLM_AUDIO_MODEL) e a reserva
+// (LLM_AUDIO_MODEL_RESERVA), vêm de _core/modelos-de-ia.ts, já passados pela
+// guarda do modelo concreto. Os padrões e o porquê de cada um estão lá.
 
 // "High demand" (503), rate limit (429) e soluço interno (500) são passageiros
 // por definição — o Google manda literalmente "try again later". Desistir na
@@ -165,20 +153,21 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
     generationConfig: { temperature: 0 },
   };
 
+  const modelo = modeloDeAudio();
   let payload: RespostaGeracao;
   try {
-    payload = await geminiPost<RespostaGeracao>(`/models/${AUDIO_MODEL}:generateContent`, corpo);
+    payload = await geminiPost<RespostaGeracao>(`/models/${modelo}:generateContent`, corpo);
   } catch (erro) {
     // O modelo de áudio seguiu lotado depois das retentativas: uma última
     // cartada no modelo reserva antes de devolver o erro para a usuária.
     // Recusa (4xx) não é lotação: a reserva receberia a mesma chave inválida
     // ou o mesmo payload recusado — sai na hora, sem o upload inútil.
     if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
-    const reserva = AUDIO_MODEL_RESERVA();
+    const reserva = modeloDeAudioReserva();
     // Reserva igual ao principal seria um 4º upload idêntico no mesmo modelo
     // lotado — sem valor nenhum.
-    if (reserva === AUDIO_MODEL) throw erro;
-    console.warn(`[Gemini] ${AUDIO_MODEL} sobrecarregado; tentando a reserva ${reserva}`);
+    if (reserva === modelo) throw erro;
+    console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
     try {
       payload = await geminiPost<RespostaGeracao>(`/models/${reserva}:generateContent`, corpo, 1);
     } catch (erroDaReserva) {

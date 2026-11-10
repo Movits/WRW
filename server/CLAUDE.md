@@ -224,12 +224,22 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
 e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie HttpOnly
 (`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev.
 
-- **IA:** as chamadas passam por `server/_core/llm.ts`, que aceita qualquer endpoint
-  compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto), configurado por
-  `LLM_API_URL`, `LLM_API_KEY` e `LLM_MODEL`; retenta 4 vezes com backoff. `LLM_API_URL`
-  não tem fallback; o modelo é sempre concreto (regra da raiz). `server/gemini.ts`
-  (transcrição e embeddings) distingue cota esgotada (`GeminiCotaEsgotadaError`) de
-  sobrecarga e cai para um modelo reserva.
+- **IA:** as chamadas de texto passam por `server/_core/llm.ts`, que aceita qualquer
+  endpoint compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto),
+  configurado por `LLM_API_URL`, `LLM_API_KEY` e `LLM_MODEL`; retenta 4 vezes com backoff.
+  `LLM_API_URL` não tem fallback. `server/gemini.ts` (transcrição e embeddings) não usa o
+  `LLM_API_URL`: fala direto com a API do Gemini, com a mesma chave, distingue cota esgotada
+  (`GeminiCotaEsgotadaError`) de sobrecarga e cai para um modelo reserva.
+- **Modelo concreto (regra da raiz):** todo id passa pela guarda de
+  `server/_core/modelos-de-ia.ts`, lido do ambiente a cada chamada. O do áudio
+  (`LLM_AUDIO_MODEL` e `LLM_AUDIO_MODEL_RESERVA`) só passa no formato `gemini-<versão>`,
+  porque vai sempre ao Gemini, com o id na URL. O do texto (`LLM_MODEL`) não fica preso ao
+  Gemini: recusa só `latest` e id sem número de versão, e aceita id de outro provedor
+  (`gpt-4o-2024-08-06`). Vazio usa o padrão em silêncio; recusado avisa no log uma vez por
+  origem e valor e também cai no padrão. O boot imprime `[IA] áudio … · reserva … · texto …`
+  sem a chave (id de outro provedor no texto sai como "fora do log", porque a guarda do
+  texto não o distingue de uma chave colada no campo errado). Os ids que a chave do Gemini
+  enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas
