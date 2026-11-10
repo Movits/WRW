@@ -193,13 +193,20 @@ export const authRouter = router({
       // A mesma resposta é retornada ao exceder o limite para não revelar informações.
       if (Number(rateWindow?.count ?? 0) >= PASSWORD_RESET_RATE_LIMIT) {
         // ...mas o limite não pode ser invisível para NÓS. Sem esta linha, o
-        // pedido recusado some sem deixar rastro: a tela mostra a mesma frase
-        // tranquilizadora ("você receberá instruções em breve"), nenhum e-mail
-        // sai, e não há nada no log do Render que explique o silêncio. Quem
-        // testa o fluxo tenta de novo — o que é o comportamento natural de quem
-        // não recebeu o e-mail — e a partir da quarta tentativa em 15 minutos
-        // nada mais acontece, sem aviso. Foi relatado como "o esqueci a senha
-        // não chega" (Gabriel, reteste de 15/09).
+        // pedido recusado some sem deixar rastro: a tela mostra o mesmo "Pedido
+        // recebido" de qualquer outro pedido, nenhum e-mail sai, e não há nada
+        // no log do Render que explique o silêncio. Foi o relato "o esqueci a
+        // senha não chega" (Gabriel, reteste de 15/09), com este limite ainda
+        // em 3: a partir da quarta tentativa em 15 minutos nada mais saía, sem
+        // aviso. Hoje ele é 300, e o teto em memória (tetoDeRecuperacaoPorRede,
+        // acima) recusa antes, com TOO_MANY_REQUESTS e aviso na tela. Este ramo
+        // só dispara quando a memória não tem a contagem que o banco tem: deploy
+        // ou reinício dentro da janela; a chave desta rede tirada do teto quando
+        // ele passa de MAXIMO_DE_CHAVES_POR_TETO redes (criarTeto, em
+        // assistente-de-texto.ts); ou, por instantes, no fim da janela, porque a
+        // memória marca o pedido ao reservar e o banco só ao gravar, um pouco
+        // depois, e o mesmo pedido sai antes da conta da memória. Em todos os
+        // casos a recusa segue sem aviso na tela.
         //
         // O log NÃO leva o IP nem o e-mail: quem investiga precisa saber que o
         // limite disparou, não quem o disparou, e a tabela

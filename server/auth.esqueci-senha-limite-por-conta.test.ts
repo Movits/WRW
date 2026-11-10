@@ -28,6 +28,9 @@ const estado = vi.hoisted(() => ({
   pedidosDoIp: 0,
   pedidosDaConta: 0,
   insercoes: [] as Array<{ tabela: string; valores: Record<string, unknown> }>,
+  // Inserções e atualizações na ordem em que acontecem, para conferir que o link
+  // anterior é cancelado ANTES de o novo ser gravado.
+  operacoes: [] as Array<{ op: "insert" | "update"; tabela: string; valores: Record<string, unknown>; filtro?: unknown }>,
   filtrosDeContagem: [] as Array<{ tabela: string; filtro: unknown }>,
   sendEmail: vi.fn(async (_dados: unknown) => true),
 }));
@@ -59,9 +62,16 @@ vi.mock("./db", () => ({
     insert: (tabela: Table) => ({
       values: async (valores: Record<string, unknown>) => {
         estado.insercoes.push({ tabela: getTableName(tabela), valores });
+        estado.operacoes.push({ op: "insert", tabela: getTableName(tabela), valores });
       },
     }),
-    update: () => ({ set: () => ({ where: async () => undefined }) }),
+    update: (tabela: Table) => ({
+      set: (valores: Record<string, unknown>) => ({
+        where: async (filtro: unknown) => {
+          estado.operacoes.push({ op: "update", tabela: getTableName(tabela), valores, filtro });
+        },
+      }),
+    }),
   }),
 }));
 
@@ -98,6 +108,7 @@ describe("esqueci a senha — limite por conta e IP real", () => {
     estado.pedidosDoIp = 0;
     estado.pedidosDaConta = 0;
     estado.insercoes = [];
+    estado.operacoes = [];
     estado.filtrosDeContagem = [];
     estado.sendEmail.mockClear();
     tetoDeRecuperacaoPorRede.esquecer();
@@ -149,6 +160,21 @@ describe("esqueci a senha — limite por conta e IP real", () => {
     expect(resposta.message).toBe(PASSWORD_RESET_GENERIC_MESSAGE);
     expect(estado.sendEmail).toHaveBeenCalledTimes(1);
     expect(tokensEmitidos()).toHaveLength(1);
+  });
+
+  it("o pedido novo cancela os links anteriores da conta antes de gravar o seu (a tela promete 'cada pedido cancela o anterior')", async () => {
+    await pedirRecuperacao();
+
+    const cancelamento = estado.operacoes.findIndex(o => o.op === "update" && o.tabela === "password_reset_tokens");
+    const novoToken = estado.operacoes.findIndex(o => o.op === "insert" && o.tabela === "password_reset_tokens");
+    expect(cancelamento).toBeGreaterThanOrEqual(0);
+    expect(novoToken).toBeGreaterThan(cancelamento);
+    expect(estado.operacoes[cancelamento].valores.usedAt).toBeInstanceOf(Date);
+    // Só os links ainda válidos desta conta: com o novo gravado antes, ele nasceria cancelado.
+    const { sql, params } = new MySqlDialect().sqlToQuery(estado.operacoes[cancelamento].filtro as SQL);
+    expect(params).toEqual([7]);
+    // A cláusula inteira: a coluna da conta (e não o id do token), o "e" e o IS NULL.
+    expect(sql).toBe("(`password_reset_tokens`.`userId` = ? and `password_reset_tokens`.`usedAt` IS NULL)");
   });
 
   it("o IP afrouxado: 299 pedidos da mesma rede e a importada ainda recebe o link (com o limite antigo, parava no 3º)", async () => {

@@ -282,7 +282,7 @@ describe("Minha Rede — erro de consulta não é rede vazia", () => {
     expect(duble.refetch).toHaveBeenCalledTimes(1);
   });
 
-  it("erro fora do envelope tRPC (rede fora, 429 em texto puro): o genérico traduzido, nunca 'Failed to fetch'", () => {
+  it("erro fora do envelope tRPC (rede fora, 502 em HTML): o genérico traduzido, nunca 'Failed to fetch'", () => {
     servidorResponde(() => ({ isError: true, error: { message: "Failed to fetch" } }));
     render(<Network />);
 
