@@ -167,6 +167,21 @@ describe("Gravar áudio", () => {
     expect(toast.success).toHaveBeenCalledWith("O texto do áudio foi para o campo. Revise e edite antes de seguir.");
   });
 
+  it("o navegador que grava mp4 manda mp4, o formato que o Gemini transcreve bem (#158)", async () => {
+    vi.stubGlobal("MediaRecorder", class extends GravadorFalso {
+      static isTypeSupported = (tipo: string) => tipo === "audio/mp4;codecs=mp4a.40.2" || tipo === "audio/webm;codecs=opus";
+    });
+    render(<Campo inicial="Oi." />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Gravar áudio/ })); });
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Parar e transcrever/ })); });
+
+    await waitFor(() => expect(campo().value).toBe("Oi. Quero vender para outros estados."));
+    expect(GravadorFalso.criados[0].mimeType).toBe("audio/mp4;codecs=mp4a.40.2");
+    const [, vars] = duble.chamadas[0] as [string, { audioBase64: string; mimeType: string }];
+    expect(vars.mimeType).toBe("audio/mp4");
+    expect(vars.audioBase64).toMatch(/^data:audio\/mp4;codecs=mp4a\.40\.2;base64,/);
+  });
+
   it("navegador sem gravação: avisa e não chama o servidor", async () => {
     vi.stubGlobal("MediaRecorder", undefined);
     render(<Campo />);

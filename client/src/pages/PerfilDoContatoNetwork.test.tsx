@@ -212,6 +212,22 @@ describe("perfil do contato — completar por voz", () => {
     expect(trilhaParada).toHaveBeenCalled();
   });
 
+  it("o navegador que grava mp4 manda mp4 para interpretação", async () => {
+    vi.stubGlobal("MediaRecorder", class extends GravadorFalso {
+      static isTypeSupported = (tipo: string) => tipo === "audio/mp4;codecs=mp4a.40.2" || tipo === "audio/webm;codecs=opus";
+    });
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    await comecarAGravar();
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Parar e enviar/ })); });
+    await waitFor(() => expect(duble.mutacoes.complementarPorVoz).toHaveBeenCalledTimes(1));
+    expect(gravadores[0].mimeType).toBe("audio/mp4;codecs=mp4a.40.2");
+    expect(duble.mutacoes.complementarPorVoz).toHaveBeenCalledWith(expect.objectContaining({
+      contactId: 5, mimeType: "audio/mp4", audioBase64: expect.stringMatching(/^data:audio\/mp4;codecs=mp4a\.40\.2;base64,/),
+    }));
+    expect(trilhaParada).toHaveBeenCalledTimes(1);
+  });
+
   it("sair da tela gravando para o gravador e o microfone e NÃO envia o áudio", async () => {
     responde(perfil());
     const { unmount } = render(<PerfilDoContatoNetwork />);

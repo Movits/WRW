@@ -431,6 +431,28 @@ describe("Reuniões — gravação em curso", () => {
     })));
   });
 
+  it("o navegador que grava mp4 (Safari do iPhone, Chrome novo) envia a reunião em mp4, e não no webm que o Gemini errava", async () => {
+    const pedidos: Array<string | undefined> = [];
+    vi.stubGlobal("MediaRecorder", class extends GravadorFalso {
+      static isTypeSupported = (tipo: string) => tipo.startsWith("audio/mp4") || tipo.startsWith("audio/webm");
+      constructor(_fluxo?: unknown, opcoes?: { mimeType?: string }) {
+        super();
+        pedidos.push(opcoes?.mimeType);
+        this.mimeType = opcoes?.mimeType ?? "audio/webm";
+      }
+    });
+    abrirEm("/gravar");
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
+    await comecarAGravar();
+    expect(pedidos).toEqual(["audio/mp4;codecs=mp4a.40.2"]);
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Transcrever áudio/ })); });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      meetingId: "reuniao-gravada", mimeType: "audio/mp4", audioBase64: expect.stringMatching(/^data:audio\/mp4;codecs=mp4a\.40\.2;base64,/),
+    })));
+    expect(trilha.stop).toHaveBeenCalled();
+  });
+
   it("o microfone que chega depois de a página sair é solto na hora, sem gravar", async () => {
     let entregar: (fluxo: unknown) => void = () => {};
     const trilha = { stop: vi.fn() };
