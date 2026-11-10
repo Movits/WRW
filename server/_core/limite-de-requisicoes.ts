@@ -70,17 +70,22 @@ export function ehRotaDaApi(caminho: string): boolean {
 }
 
 const PREFIXOS_ESTATICOS = ["/assets/", "/brand/", "/images/"];
+// O manifest do app instalável mora na raiz de client/public. O Chrome o
+// busca ao abrir o site, e sem cookie, porque o link não pede credenciais:
+// ele contaria no limite do IP, o mesmo de uma sala inteira no mesmo wi-fi.
+const ARQUIVOS_ESTATICOS_NA_RAIZ = ["/manifest.webmanifest"];
 
 /**
- * Arquivos do build (/assets, com hash) e de client/public (/brand, /images):
- * é tudo o que dist/public tem além do index.html. Uma primeira visita pede 10
- * a 15 deles; contados no limite geral, uma sala no mesmo wi-fi estourava só
- * abrindo a home. Servi-los é barato e a Cloudflare guarda /assets em cache.
- * Caminho que não existe ali (/favicon.ico, /robots.txt) cai no index.html e
- * conta como página.
+ * Arquivos do build (/assets, com hash) e de client/public (/brand, /images e
+ * o manifest do app instalável): é tudo o que dist/public tem além do
+ * index.html. Uma primeira visita pede 10 a 15 deles; contados no limite
+ * geral, uma sala no mesmo wi-fi estourava só abrindo a home. Servi-los é
+ * barato e a Cloudflare guarda /assets em cache. Caminho que não existe ali
+ * (/favicon.ico, /robots.txt) cai no index.html e conta como página.
  */
 export function ehArquivoEstatico(req: Pick<Request, "method" | "path">): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
+  if (ARQUIVOS_ESTATICOS_NA_RAIZ.includes(req.path)) return true;
   return PREFIXOS_ESTATICOS.some(prefixo => req.path.startsWith(prefixo));
 }
 

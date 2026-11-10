@@ -252,11 +252,17 @@ instalado, sem ser usado em lugar nenhum.
 
 ### "Funcionar no celular"
 
-Hoje é site responsivo e nada além: sem `manifest.json`, sem service worker. Um
+Até 10/11/2026 era site responsivo e nada além: sem manifest, sem service worker. Um
 **PWA** atende o pedido de "app" dentro do prazo: ícone na tela inicial, tela cheia,
 e a gravação já funciona por `MediaRecorder` no navegador. É trabalho de front-end,
 algumas horas. App nativo só seria necessário para gravar em segundo plano ou push
 confiável no iOS, e consumiria as duas etapas que ainda não começaram.
+
+**Atualização de 10/11/2026:** o app ficou instalável. O
+`client/public/manifest.webmanifest` põe a WRW na tela inicial e a abre direto no
+gravador (`/gravar`), em janela própria. O service worker continua de fora, de
+propósito, para o aparelho nunca guardar um `index.html` velho. As lojas (App Store
+e Play Store) seguem em aberto: é a pergunta 2, logo abaixo.
 
 ### Perguntas que dependem de decisão de pessoa
 
