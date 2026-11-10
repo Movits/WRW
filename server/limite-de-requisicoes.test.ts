@@ -313,6 +313,9 @@ describe("o 429 da API chega à tela com mensagem", () => {
     expect(clientError.message).toBe(MENSAGEM_DO_LIMITE);
     expect(clientError.data?.code).toBe("TOO_MANY_REQUESTS");
     expect(clientError.data?.httpStatus).toBe(429);
+    // Sem path: ForgotPassword e ResetPassword usam a falta dele para separar
+    // este 429 do TOO_MANY_REQUESTS lançado dentro da rota.
+    expect(clientError.data?.path).toBeUndefined();
     // A tela mostra a frase do servidor, e não o genérico de "servidor indisponível".
     expect(mensagemDeErroParaTela(clientError, chave => `[${chave}]`)).toBe(MENSAGEM_DO_LIMITE);
   });
