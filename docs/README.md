@@ -29,6 +29,10 @@ diverge do código, vale o código.
   datadas que já valem no código (quando, quem decidiu e onde está).
 - [arquitetura/modelo-de-dados.md](./arquitetura/modelo-de-dados.md): é **projeto em
   Postgres**. A fonte do banco real é `drizzle/schema.ts`, com as migrações de `drizzle/`.
+- [arquitetura/gravador-de-reunioes.md](./arquitetura/gravador-de-reunioes.md): o
+  gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
+  agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
+  em 10/11).
 
 ## Operação
 
@@ -162,6 +166,14 @@ uma faixa no topo que diz isso.
   F1: traduzir as três telas em português fixo).
 - **D1, D2…:** as decisões de produto em
   [decisoes-em-aberto.md](./arquitetura/decisoes-em-aberto.md).
+- **Códigos do gravador:** os códigos de PR do plano do gravador de reuniões, em
+  [gravador-de-reunioes.md](./arquitetura/gravador-de-reunioes.md): A1 a A8 (acesso e
+  navegação); G1a, G1b, G2 a G10, G13 e G14 (o gravador e a transcrição de reuniões
+  longas); H1r, H3 a H16 e H9b (resumo, perguntas, agenda e as outras funções em volta
+  da reunião); R1 (reunião compartilhada); D1 (detalhe da reunião); S (sessão ocupada);
+  e DOC-0 (o próprio desenho). A numeração tem lacunas: a G1 virou G1a e G1b, da H1
+  sobrou a H1r, a H2 e a G11 foram absorvidas pela D1, e a G12 saiu do plano. Valem só
+  dentro desse plano e não são os ajustes A1 a A14 nem as decisões D1, D2… acima.
 
 **Processo e operação**
 
