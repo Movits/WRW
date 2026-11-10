@@ -295,19 +295,31 @@ describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma 
   });
 
   it("dois envios do mesmo link ao mesmo tempo: os dois calculam o hash, mas só um troca a senha, derruba as sessões e audita", async () => {
-    // Os dois leem o link antes de qualquer um gastá-lo: nenhum hash termina
-    // antes de os dois envios chegarem a ele. O banco deixa um só alcançar a linha.
+    // Os dois leem o link antes de qualquer um gastá-lo: o primeiro fica parado
+    // no hash, antes da transação, enquanto o segundo lê o link e chega ao hash;
+    // só então os dois seguem. O banco deixa um só alcançar a linha. A ordem é
+    // fixa (o segundo só começa com o primeiro no hash), e um envio que cair
+    // antes do hash abre a barreira: o teste falha pela asserção, mostrando o
+    // erro, e não por tempo esgotado.
     let chegaram = 0;
     let soltar!: () => void;
     const osDoisNoHash = new Promise<void>(resolver => { soltar = () => resolver(); });
+    let primeiroNoHash!: () => void;
+    const primeiroChegou = new Promise<void>(resolver => { primeiroNoHash = () => resolver(); });
     estado.barreiraDoHash = () => {
       chegaram += 1;
+      if (chegaram === 1) primeiroNoHash();
       if (chegaram === 2) soltar();
       return osDoisNoHash;
     };
     estado.linhasDoLink = [LINK];
     estado.alcancadas = [1, 0];
-    const resultados = await Promise.allSettled([redefinir(), redefinir()]);
+    const primeiro = redefinir();
+    void primeiro.catch(() => {}).finally(primeiroNoHash);
+    await primeiroChegou;
+    const segundo = redefinir();
+    void segundo.catch(() => {}).finally(soltar);
+    const resultados = await Promise.allSettled([primeiro, segundo]);
 
     expect(resultados.filter(r => r.status === "fulfilled")).toHaveLength(1);
     const recusados = resultados.filter((r): r is PromiseRejectedResult => r.status === "rejected");
