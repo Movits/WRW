@@ -2,9 +2,9 @@
 
 Plano aprovado pelo Roberto em 30/10/2026 e atualizado com as decisões dele de
 10/11/2026. É desenho, não retrato do código: onde a `main` divergir deste texto, vale a
-`main`. Em 10/11 entraram na `main` a A1 (#169), a A3 (#170), a A4 (#172) e uma
-primeira versão do resumo e do "Pergunte à reunião" (#171), descrita nas linhas da H4 e
-da H6. Quem faz cada PR, o prazo e o status ficam no Notion. O detalhe de cada PR
+`main`. Em 10/11 entraram na `main` a A1 (#169), a A3 (#170), a A4 (#172), a G1a
+(#174) e uma primeira versão do resumo e do "Pergunte à reunião" (#171), descrita nas
+linhas da H4 e da H6. Até a G13, a gravação continua com o teto de 10 minutos. Quem faz cada PR, o prazo e o status ficam no Notion. O detalhe de cada PR
 (arquivos, testes e as correções que a revisão do desenho pediu) fica fora do
 repositório, com o Roberto: quem pegar uma PR pede esse detalhe a ele.
 
@@ -246,9 +246,9 @@ Tamanho: P é pequena, M é média e G é grande.
 | A2 `fix/redefinir-senha-derruba-sessoes` (P) | O reset derruba as sessões abertas, grava a auditoria e consome o token num UPDATE condicional. | — |
 | A3 `feat/gravar-primeira-tela` (M) | `/gravar` abre o gravador e o login cai nele (quem não concluiu o cadastro segue indo ao onboarding); `?voltar=` seguro; `/meetings/:id`; Reuniões em primeiro no menu; botão "Gravar reunião" no Dashboard; a Memória abre o detalhe da reunião. | — |
 | G2 `chore/modelo-de-audio-configuravel` (P) | `LLM_AUDIO_MODEL` com guarda contra alias, e um script que lista os modelos que a chave enxerga. | — |
-| A4 `feat/pwa-instalavel` (P) | Manifest com `start_url /gravar`, só com a marca (WRW) e sem atalhos (`shortcuts`), para não ter texto a traduzir. Ele aponta os ícones que já existem em `client/public/brand/`, e a A4 acrescenta ao `client/index.html` as meta tags da Apple (`apple-mobile-web-app-*`); o `apple-touch-icon` já existe. Sem service worker, e o `.webmanifest` sai sem cache, como o HTML. A dica de instalação fica no `/gravar`, nos 10 idiomas, e avisa que, no iPhone, o app instalado pede um login separado do Safari. Se a dica entrar no `Meetings.tsx`, a A4 segue a regra dos arquivos em série. A #172 entrou sem a dica, que fica para uma PR seguinte. | A3 |
+| A4 `feat/pwa-instalavel` (P) | Manifest com `start_url /gravar`, só com a marca (WRW) e sem atalhos (`shortcuts`), para não ter texto a traduzir. Ele aponta os ícones que já existem em `client/public/brand/`, e a A4 acrescentou ao `client/index.html` as meta tags da Apple (`apple-mobile-web-app-*`); o `apple-touch-icon` já existe. Sem service worker, e o `.webmanifest` sai sem cache, como o HTML. A dica de instalação fica no `/gravar`, nos 10 idiomas, e avisa que, no iPhone, o app instalado pede um login separado do Safari. Se a dica entrar no `Meetings.tsx`, a A4 segue a regra dos arquivos em série. A #172 entrou sem a dica, que fica para uma PR seguinte. | A3 |
 | A5 `chore/abrir-sessao-reaproveitavel` (P) | A sessão de 8 h nasce numa função só, pronta para a passkey. Uma guarda (um teste) impede que o servidor abra sessão pelo `sdk.signSession`: o token (JWT) dele não leva o `sessionToken` conferido no banco, por padrão dura 1 ano e escapa da revogação das sessões. | A2 |
-| G1a `fix/gravadores-mp4` (M) | Um hook de gravação só para os três gravadores (o da reunião, o do ditado e o da voz no perfil do contato), com mp4 antes de webm, como o do ditado já faz desde a #158. O hook já nasce aceitando um MediaStream de fora (um fluxo de áudio entregue pronto, no lugar do microfone que ele abre por padrão), que a H14 vai usar para gravar a aba. | A3 |
+| G1a `fix/gravadores-mp4` (M) | Um hook de gravação só para os três gravadores (o da reunião, o do ditado e o da voz no perfil do contato), com mp4 antes de webm, como o do ditado já faz desde a #158. O hook já nasce aceitando um MediaStream de fora (um fluxo de áudio entregue pronto, no lugar do microfone que ele abre por padrão), que a H14 vai usar para gravar a aba. Entrou na `main` em 10/11 (#174). | A3 |
 | S `feat/sessao-ocupada` (M) | Enquanto há gravação ou envio, o corte por inatividade e o redirecionamento ao login esperam, até um teto de tempo; sair pede confirmação antes de revogar a sessão. | A3 |
 
 **Onda 2: a base da gravação longa e as passkeys.**
