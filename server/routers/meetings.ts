@@ -14,12 +14,15 @@ import {
   iniciarReprocessamento,
   listPrivateMeetings,
   MAX_MEETING_DURATION_SECONDS,
+  MEETING_TRANSCRIPT_LANGUAGES,
   processMeetingRecording,
   ReprocessamentoRecusado,
   ReuniaoForaDoEstado,
   ReuniaoTomadaPorOutraExecucao,
   translatePrivateMeetingTranscript,
 } from "../meeting-service";
+import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { criarTeto } from "../assistente-de-texto";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -34,6 +37,17 @@ const reprocessosPorDona = new Map<string, number[]>();
 export function esquecerTentativasDeReprocesso() {
   reprocessosPorDona.clear();
 }
+
+// Cada resumo e cada pergunta mandam até 24 mil caracteres da transcrição à
+// IA, e cada chamada é paga. Teto brando por dona, resumo e perguntas somados,
+// em memória como o do reprocesso. Conta todo pedido que passa da validação,
+// até o recusado: a recusa não chama a IA, e assim também não serve de sonda.
+export const PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA = 20;
+export const tetoDaIADaReuniao = criarTeto(
+  PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA,
+  10 * 60_000,
+  "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
+);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -55,6 +69,16 @@ async function recusarSeReuniaoProcessando(db: Awaited<ReturnType<typeof exigirD
   const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (reuniao?.status === "processing") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_REUNIAO_PROCESSANDO });
+}
+
+/** As recusas do resumo e da pergunta saem com o código que a tela traduz. */
+async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDaReuniaoComIA) throw new TRPCError({ code: erro.codigo, message: erro.message });
+    throw erro;
+  }
 }
 
 const createMeetingInput = z.object({
@@ -155,6 +179,28 @@ export const meetingsRouter = router({
     .input(z.object({ meetingId: z.string().uuid(), language: z.enum(["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"]) }))
     .mutation(async ({ ctx, input }) => {
       return translatePrivateMeetingTranscript(ctx.user.openId, input.meetingId, input.language);
+    }),
+
+  // Resumo da reunião pela IA (tópicos, decisões e tarefas, cada um com o trecho
+  // que o sustenta) e perguntas sobre ela. Só a dona, só reunião pronta com
+  // transcrição. Nada é gravado: a resposta vai só para a tela, para conferir.
+  // Os dois dividem o teto de pedidos à IA (TOO_MANY_REQUESTS).
+  resumir: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES) }))
+    .mutation(async ({ ctx, input }) => {
+      tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => resumirReuniao(ctx.user.openId, input.meetingId, input.idioma));
+    }),
+
+  perguntar: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      pergunta: z.string().trim().min(2).max(TAMANHO_MAXIMO_DA_PERGUNTA),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma));
     }),
 
   decideEntity: protectedProcedure

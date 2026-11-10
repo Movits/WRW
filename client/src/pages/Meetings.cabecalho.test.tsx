@@ -45,6 +45,8 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
       reprocess: duble.mutacao(),
+      resumir: duble.mutacao(),
+      perguntar: duble.mutacao(),
     },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
