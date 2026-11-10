@@ -12,6 +12,8 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
+import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
+import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 
@@ -114,13 +116,6 @@ function readAsDataUrl(t: TranslateFn, file: Blob) {
   });
 }
 
-function recordedMimeType(value: string) {
-  if (value.includes("ogg")) return "audio/ogg" as const;
-  if (value.includes("wav")) return "audio/wav" as const;
-  if (value.includes("mp4") || value.includes("m4a")) return "audio/mp4" as const;
-  return "audio/webm" as const;
-}
-
 export default function Meetings() {
   const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
@@ -138,20 +133,10 @@ export default function Meetings() {
   });
   const [title, setTitle] = useState("");
   const [consent, setConsent] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
-  const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: "audio/webm" | "audio/ogg" | "audio/wav" | "audio/mp4"; durationSeconds: number } | null>(null);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  const startedAt = useRef(0);
+  const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: TipoDeAudioGravado; durationSeconds: number } | null>(null);
   const audioInput = useRef<HTMLInputElement | null>(null);
-  // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
-  // de /gravar (ver o efeito que devolve a URL, mais abaixo).
-  const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
   // true só enquanto ESTA instância está montada, visível e no gravador. O
   // naGravacao vem do useRoute, que casa como a rota (sem caixa e com barra
   // final opcional). É efeito de layout porque, na primeira ida a uma tela lazy
@@ -164,6 +149,48 @@ export default function Meetings() {
     noGravadorAgora.current = naGravacao;
     return () => { noGravadorAgora.current = false; };
   }, [naGravacao]);
+
+  // O microfone, o formato (mp4 antes de webm) e o teto de duração ficam no hook.
+  // Sair da página fecha o microfone que estava gravando: o hook cuida disso ao desmontar.
+  const gravador = useGravadorDeAudio({
+    limiteSegundos: MAX_DURATION,
+    bitsPorSegundo: 64_000,
+    // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
+    // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
+    // ida à lista ou a um detalhe na mesma instância e para o desmonte, porque
+    // a limpeza do efeito do noGravadorAgora o zera nos dois casos.
+    podeGravar: () => noGravadorAgora.current,
+    aoTerminar: ({ blob, mimeType, duracaoMs }) => {
+      if (!blob.size) {
+        toast.error(t("meetings.noAudioGenerated"));
+        return;
+      }
+      setCapturedAudio({
+        blob,
+        url: URL.createObjectURL(blob),
+        mimeType,
+        // O fim automático chega com atraso (aba em segundo plano, celular
+        // lento), e o relógio passa do teto, que o servidor confere sem folga
+        // na duração declarada: 601 s eram recusados. A duração medida nos
+        // bytes, que é a que vale, tem a folga de 5 s.
+        durationSeconds: Math.min(MAX_DURATION, Math.max(1, Math.floor(duracaoMs / 1000))),
+      });
+    },
+    // O pedido do microfone falhou (permissão negada, por exemplo). Se a dona
+    // já saiu do gravador, o hook nem chama: nada de aviso fora dele, nem de
+    // problema guardado para a próxima vez que ela voltar.
+    aoFalhar: error => {
+      const issue = microphoneErrorMessage(t, error);
+      setMicrophoneIssue(issue);
+      toast.error(issue);
+    },
+  });
+  const recording = gravador.estado === "gravando";
+  // Pedindo o microfone ou fechando o arquivo, o gravador fica travado como no envio.
+  const gravadorOcupado = gravador.estado === "pedindoMicrofone" || gravador.estado === "finalizando";
+  // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
+  // de /gravar (ver o efeito que devolve a URL, mais abaixo).
+  const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
 
   const createMeeting = trpc.meetings.create.useMutation();
   const submitRecording = trpc.meetings.submitRecording.useMutation({
@@ -212,16 +239,6 @@ export default function Meetings() {
     },
   });
 
-  useEffect(() => {
-    if (!recording) return;
-    const timer = window.setInterval(() => {
-      const seconds = Math.min(MAX_DURATION, Math.floor((Date.now() - startedAt.current) / 1000));
-      setElapsed(seconds);
-      if (seconds >= MAX_DURATION) stopRecording();
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [recording]);
-
   // As três rotas de Reuniões montam a MESMA instância desta página (App.tsx):
   // ir de /gravar para /meetings ou /meetings/:id (o item Reuniões do menu, ou o
   // voltar do navegador que cai numa delas) não desmonta o gravador. Com a
@@ -246,77 +263,12 @@ export default function Meetings() {
     telaAnterior.current = screen;
   }, [screen]);
 
-  // Sair da página fecha o microfone que estava gravando.
-  useEffect(() => () => stream.current?.getTracks().forEach(track => track.stop()), []);
-
   async function startRecording() {
     if (!title.trim()) return toast.error(t("meetings.titleRequired"));
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast.error(t("meetings.recordingUnsupported"));
-    try {
-      setStarting(true);
-      setMicrophoneIssue(null);
-      const media = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: { ideal: true },
-          noiseSuppression: { ideal: true },
-          autoGainControl: { ideal: true },
-        },
-        video: false,
-      });
-      // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
-      // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
-      // ida à lista ou a um detalhe na mesma instância e para o desmonte, porque
-      // a limpeza do efeito do noGravadorAgora o zera nos dois casos.
-      if (!noGravadorAgora.current) {
-        media.getTracks().forEach(track => track.stop());
-        return;
-      }
-      stream.current = media;
-      const preferredMime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(type => MediaRecorder.isTypeSupported(type));
-      const mediaRecorder = preferredMime
-        ? new MediaRecorder(media, { mimeType: preferredMime, audioBitsPerSecond: 64_000 })
-        : new MediaRecorder(media, { audioBitsPerSecond: 64_000 });
-      chunks.current = [];
-      mediaRecorder.ondataavailable = event => { if (event.data.size) chunks.current.push(event.data); };
-      mediaRecorder.onstop = async () => {
-        stream.current?.getTracks().forEach(track => track.stop());
-        const blob = new Blob(chunks.current, { type: mediaRecorder.mimeType || "audio/webm" });
-        if (!blob.size) {
-          setFinalizing(false);
-          toast.error(t("meetings.noAudioGenerated"));
-          return;
-        }
-        setCapturedAudio({
-          blob,
-          url: URL.createObjectURL(blob),
-          mimeType: recordedMimeType(blob.type),
-          // O fim automático chega com atraso (aba em segundo plano, celular
-          // lento), e o relógio passa do teto, que o servidor confere sem folga
-          // na duração declarada: 601 s eram recusados. A duração medida nos
-          // bytes, que é a que vale, tem a folga de 5 s.
-          durationSeconds: Math.min(MAX_DURATION, Math.max(1, Math.floor((Date.now() - startedAt.current) / 1000))),
-        });
-        setElapsed(0);
-        setFinalizing(false);
-      };
-      recorder.current = mediaRecorder;
-      startedAt.current = Date.now();
-      setElapsed(0);
-      mediaRecorder.start(250);
-      setRecording(true);
-    } catch (error) {
-      stream.current?.getTracks().forEach(track => track.stop());
-      // O pedido do microfone falhou (permissão negada, por exemplo) depois de a
-      // dona sair do gravador: nada de aviso fora dele, nem de problema guardado
-      // para a próxima vez que ela voltar.
-      if (!noGravadorAgora.current) return;
-      const issue = microphoneErrorMessage(t, error);
-      setMicrophoneIssue(issue);
-      toast.error(issue);
-    } finally {
-      setStarting(false);
-    }
+    if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
+    setMicrophoneIssue(null);
+    await gravador.comecar();
   }
 
   async function uploadAudio(file: File) {
@@ -385,15 +337,10 @@ export default function Meetings() {
   function discardCapturedAudio() {
     if (capturedAudio) URL.revokeObjectURL(capturedAudio.url);
     setCapturedAudio(null);
-    setElapsed(0);
   }
 
   function stopRecording() {
-    if (recorder.current?.state === "recording") {
-      setFinalizing(true);
-      recorder.current.stop();
-    }
-    setRecording(false);
+    gravador.parar();
   }
 
   // O cabeçalho (menu global, sino, idioma) sai de UM lugar só, acima dos três
@@ -408,7 +355,7 @@ export default function Meetings() {
   const conteudo = screen === "new" ? (
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
-      recording={recording} elapsed={elapsed} processing={starting || finalizing || submitRecording.isPending}
+      recording={recording} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}

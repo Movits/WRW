@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Loader2, Mic, Send, ShieldCheck, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { gravacaoDeAudioSuportada, useGravadorDeAudio, type AudioGravado } from "@/hooks/useGravadorDeAudio";
 
 /**
  * Meu Network Inteligente — as três peças do contato que MUDAM dado (spec da
@@ -191,31 +192,12 @@ function lerComoDataUrl(blob: Blob) {
   });
 }
 
-function tipoDoAudio(valor: string) {
-  if (valor.includes("ogg")) return "audio/ogg" as const;
-  if (valor.includes("mp4") || valor.includes("m4a")) return "audio/mp4" as const;
-  if (valor.includes("wav")) return "audio/wav" as const;
-  return "audio/webm" as const;
-}
-
 export function CompletarInformacoes({ contactId }: { contactId: number }) {
   const { t } = useTranslation();
   const utils = trpc.useUtils();
   const [modo, setModo] = useState<"texto" | "voz">("texto");
   const [texto, setTexto] = useState("");
-  const [gravando, setGravando] = useState(false);
-  const [segundos, setSegundos] = useState(0);
   const [entendido, setEntendido] = useState<string | null>(null);
-  const gravador = useRef<MediaRecorder | null>(null);
-  const fluxo = useRef<MediaStream | null>(null);
-  const pedacos = useRef<Blob[]>([]);
-  const inicio = useRef(0);
-  const descartar = useRef(false);
-  // Um pedido de microfone por vez: o duplo clique abria dois MediaRecorder e o
-  // primeiro ficava com o microfone aceso, empurrando pedaços para a gravação seguinte.
-  // A ref barra já o segundo clique; o estado desabilita o botão enquanto o navegador responde.
-  const pedindoMicrofone = useRef(false);
-  const [aguardandoMicrofone, setAguardandoMicrofone] = useState(false);
 
   const depoisDeInterpretar = (criadas: number) => {
     if (criadas > 0) toast.success(t("networkInteligente.complete.created", { quantidade: criadas }));
@@ -231,79 +213,42 @@ export function CompletarInformacoes({ contactId }: { contactId: number }) {
     onError: erro => toast.error(["TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE", "BAD_REQUEST"].includes(erro.data?.code ?? "") ? erro.message : t("networkInteligente.complete.error")),
   });
 
-  useEffect(() => {
-    if (!gravando) return;
-    const relogio = window.setInterval(() => {
-      const passados = Math.floor((Date.now() - inicio.current) / 1000);
-      setSegundos(passados);
-      if (passados >= LIMITE_DA_VOZ_SEGUNDOS) parar();
-    }, 500);
-    return () => window.clearInterval(relogio);
-  }, [gravando]);
+  // Saiu da tela gravando: o hook para o gravador e o microfone e não entrega
+  // nada (o áudio abandonado não vai à IA, não conta minutos nem cria sugestão).
+  const gravador = useGravadorDeAudio({
+    limiteSegundos: LIMITE_DA_VOZ_SEGUNDOS,
+    bitsPorSegundo: 48_000,
+    aoTerminar: audio => void enviarVoz(audio),
+    aoFalhar: () => toast.error(t("networkInteligente.complete.micError")),
+  });
+  const gravando = gravador.estado === "gravando";
+  const segundos = gravador.segundos;
+  // Um pedido de microfone por vez: o duplo clique abria dois MediaRecorder e o
+  // primeiro ficava com o microfone aceso, empurrando pedaços para a gravação seguinte.
+  // O hook barra já o segundo clique; o estado desabilita o botão enquanto o navegador responde.
+  const aguardandoMicrofone = gravador.estado === "pedindoMicrofone";
 
-  // Saiu da tela gravando: para o gravador e o microfone e não manda nada (o
-  // áudio abandonado não vai à IA, não conta minutos nem cria sugestão). O
-  // `false` na montagem cobre o StrictMode, que monta, desmonta e monta de novo.
-  useEffect(() => {
-    descartar.current = false;
-    return () => {
-      descartar.current = true;
-      if (gravador.current?.state === "recording") gravador.current.stop();
-      fluxo.current?.getTracks().forEach(trilha => trilha.stop());
-    };
-  }, []);
-
-  async function gravar() {
-    if (pedindoMicrofone.current || gravador.current?.state === "recording") return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === "undefined") {
-      toast.error(t("networkInteligente.complete.unsupported"));
-      return;
-    }
-    pedindoMicrofone.current = true;
-    setAguardandoMicrofone(true);
+  async function enviarVoz({ blob, mimeType, duracaoMs }: AudioGravado) {
+    const duracao = Math.max(1, Math.min(LIMITE_DA_VOZ_SEGUNDOS, Math.round(duracaoMs / 1000)));
+    if (!blob.size) return;
     try {
-      const midia = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      // Saiu da tela enquanto o navegador pedia o microfone: solta e não grava.
-      if (descartar.current) {
-        midia.getTracks().forEach(trilha => trilha.stop());
-        return;
-      }
-      fluxo.current = midia;
-      const preferido = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(tipo => MediaRecorder.isTypeSupported(tipo));
-      const recorder = preferido ? new MediaRecorder(midia, { mimeType: preferido, audioBitsPerSecond: 48_000 }) : new MediaRecorder(midia);
-      pedacos.current = [];
-      recorder.ondataavailable = evento => { if (evento.data.size) pedacos.current.push(evento.data); };
-      recorder.onstop = async () => {
-        midia.getTracks().forEach(trilha => trilha.stop());
-        if (descartar.current) return;
-        const blob = new Blob(pedacos.current, { type: recorder.mimeType || "audio/webm" });
-        const duracao = Math.max(1, Math.min(LIMITE_DA_VOZ_SEGUNDOS, Math.round((Date.now() - inicio.current) / 1000)));
-        if (!blob.size) return;
-        try {
-          const audioBase64 = await lerComoDataUrl(blob);
-          porVoz.mutate({ contactId, audioBase64, mimeType: tipoDoAudio(blob.type), durationSeconds: duracao });
-        } catch {
-          toast.error(t("networkInteligente.complete.error"));
-        }
-      };
-      gravador.current = recorder;
-      inicio.current = Date.now();
-      setSegundos(0);
-      setEntendido(null);
-      recorder.start(250);
-      setGravando(true);
+      const audioBase64 = await lerComoDataUrl(blob);
+      porVoz.mutate({ contactId, audioBase64, mimeType, durationSeconds: duracao });
     } catch {
-      fluxo.current?.getTracks().forEach(trilha => trilha.stop());
-      toast.error(t("networkInteligente.complete.micError"));
-    } finally {
-      pedindoMicrofone.current = false;
-      if (!descartar.current) setAguardandoMicrofone(false);
+      toast.error(t("networkInteligente.complete.error"));
     }
   }
 
+  async function gravar() {
+    if (!gravacaoDeAudioSuportada()) {
+      toast.error(t("networkInteligente.complete.unsupported"));
+      return;
+    }
+    if (await gravador.comecar()) setEntendido(null);
+  }
+
   function parar() {
-    if (gravador.current?.state === "recording") gravador.current.stop();
-    setGravando(false);
+    gravador.parar();
   }
 
   const relogio = `${String(Math.floor(segundos / 60)).padStart(2, "0")}:${String(segundos % 60).padStart(2, "0")}`;
