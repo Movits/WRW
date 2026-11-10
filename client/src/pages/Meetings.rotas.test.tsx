@@ -64,6 +64,8 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
+      resumir: duble.registrar("resumir"),
+      perguntar: duble.registrar("perguntar"),
     },
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
