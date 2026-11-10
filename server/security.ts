@@ -280,8 +280,11 @@ const TIPOS_FORA_DO_BLOQUEIO_AUTOMATICO: TipoDeEventoDeSeguranca[] = [
  * conta a linha que o WHERE ENCONTROU, e não a que mudou de valor — é o que uma
  * trava otimista quer. Sem cabeçalho reconhecível, zero: quem não consegue
  * provar que escreveu não age como se tivesse escrito.
+ *
+ * Exportada para a mesma trava fora deste arquivo (o consumo do link de
+ * redefinir a senha, em routers/auth.ts), em vez de outra cópia.
  */
-function linhasAlcancadas(resultado: unknown) {
+export function linhasAlcancadas(resultado: unknown): number {
   const cabecalho = Array.isArray(resultado) ? resultado[0] : resultado;
   return (cabecalho as { affectedRows?: number } | null | undefined)?.affectedRows ?? 0;
 }
