@@ -379,6 +379,8 @@ describe("Memória — órfão não sobrevive à fonte", () => {
     const doc = escritas.inseridos.find(item => item.sourceType === "meeting");
     expect(doc?.title).toBe("Reunião com a vinícola");
     expect(String(doc?.content)).toContain("Reunião: Reunião com a vinícola");
+    // O "Abrir fonte" leva ao detalhe da reunião, não à lista (30/10/2026).
+    expect(doc?.metadata).toMatchObject({ href: "/meetings/m-1", meetingId: "m-1" });
   });
 
   it("transcrição sem reunião VIVA não vira documento: nem a de reunião sumida, nem a de reunião 'deleted'", async () => {

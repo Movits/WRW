@@ -5,6 +5,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { opportunitySectorLabel } from "@/lib/opportunity-sectors";
 import { rotuloDaBusca, rotuloDeInteresse } from "@/lib/interesses";
 import { ehChaveDeSetor, rotuloDoSetor } from "@shared/setores";
+import { ROTA_GRAVAR } from "@shared/rotas";
 import { getLoginUrl } from "@/const";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1207,21 +1208,27 @@ export default function Dashboard() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 
         {/* ─── HEADER ─── */}
-        <div className="mb-8 animate-fade-in-up">
-          <h1 className="text-3xl font-black mb-1">
-            {t("dashboard.title")}, {profile?.displayName || user?.name || ""} 👋
-          </h1>
-          {/* Plural por chave (_one/_other e as formas do russo e do árabe),
-              nunca por sufixo concatenado: "novo{s} match{es}" só existe em
-              português. A parte destacada e o complemento são duas chaves. */}
-          <p className="text-white/40">
-            {novidades > 0
-              ? <><span className="text-[#c98f70] font-semibold">{t("dashboard.greetingUnseen", { count: novidades })}</span> {t("dashboard.greetingUnseenSuffix")}</>
-              : stats?.total && stats.total > 0
-                ? t("dashboard.greetingTotal", { count: stats.total })
-                // Em erro, nada de convite a "gerar os primeiros matches": eles podem existir.
-                : statsQuery.isError ? "" : t("dashboard.greetingWelcome")}
-          </p>
+        <div className="mb-8 animate-fade-in-up flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-black mb-1">
+              {t("dashboard.title")}, {profile?.displayName || user?.name || ""} 👋
+            </h1>
+            {/* Plural por chave (_one/_other e as formas do russo e do árabe),
+                nunca por sufixo concatenado: "novo{s} match{es}" só existe em
+                português. A parte destacada e o complemento são duas chaves. */}
+            <p className="text-white/40">
+              {novidades > 0
+                ? <><span className="text-[#c98f70] font-semibold">{t("dashboard.greetingUnseen", { count: novidades })}</span> {t("dashboard.greetingUnseenSuffix")}</>
+                : stats?.total && stats.total > 0
+                  ? t("dashboard.greetingTotal", { count: stats.total })
+                  // Em erro, nada de convite a "gerar os primeiros matches": eles podem existir.
+                  : statsQuery.isError ? "" : t("dashboard.greetingWelcome")}
+            </p>
+          </div>
+          {/* O gravador em um toque, também daqui (pedido da cliente de 20/10/2026). */}
+          <Link href={ROTA_GRAVAR} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#c98f70] px-5 py-3 font-bold text-[#1a120c] hover:bg-[#efcba8]">
+            <Mic size={18} /> {t("dashboard.recordMeeting")}
+          </Link>
         </div>
 
         {/* ─── STATS ─── */}

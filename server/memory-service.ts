@@ -12,6 +12,7 @@ import {
   privateContacts,
 } from "../drizzle/schema";
 import { sql } from "drizzle-orm";
+import { rotaDaReuniao } from "@shared/rotas";
 import { exigirDb } from "./db";
 import { embedManyWithGemini, embedWithGemini } from "./gemini";
 import { invokeLLM } from "./_core/llm";
@@ -254,7 +255,9 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
         `Reunião: ${tituloDaReuniao.get(transcript.meetingId)}`,
         transcript.transcript,
       ].filter(Boolean).join("\n"),
-      metadata: { href: "/meetings", meetingId: transcript.meetingId, kind: "Reunião", language: transcript.language },
+      // O "Abrir fonte" leva ao detalhe da reunião. Documento já indexado guarda
+      // "/meetings" até a reunião mudar; a tela abre pelo meetingId mesmo assim.
+      metadata: { href: rotaDaReuniao(transcript.meetingId), meetingId: transcript.meetingId, kind: "Reunião", language: transcript.language },
     }));
 
   return [...contactSources, ...contextSources, ...catalogSources, ...transcriptSources].filter(source => source.content.trim().length > 2);

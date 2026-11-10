@@ -10,6 +10,7 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NotificationBell } from "@/components/NotificationBell";
+import { ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -27,14 +28,16 @@ type Traduzir = (key: string) => string;
 // dentro de um componente (molde: getNiveisDeVisibilidade em Network.tsx). O
 // array fixo em português era o motivo de a navegação primária do app inteiro
 // sair em pt-BR para as outras 9 línguas, ao lado de um título já traduzido.
+// Reuniões vem em primeiro: o gravador é a primeira coisa que a cliente quer
+// ver depois do login (pedido de 20/10/2026; ver shared/rotas.ts).
 export function getMenuItems(t: Traduzir) {
   return [
+    { href: ROTA_DAS_REUNIOES, icon: Mic, label: t("appHeader.menu.meetings"), desc: t("appHeader.menu.meetingsDesc") },
     { href: "/meu-network-inteligente", icon: Network, label: t("appHeader.menu.smartNetwork"), desc: t("appHeader.menu.smartNetworkDesc") },
     { href: "/opportunities", icon: Briefcase, label: t("appHeader.menu.opportunities"), desc: t("appHeader.menu.opportunitiesDesc") },
     { href: "/verification", icon: ShieldCheck, label: t("appHeader.menu.verification"), desc: t("appHeader.menu.verificationDesc") },
     { href: "/network", icon: Users, label: t("appHeader.menu.network"), desc: t("appHeader.menu.networkDesc") },
     { href: "/contexts", icon: MapPin, label: t("appHeader.menu.contexts"), desc: t("appHeader.menu.contextsDesc") },
-    { href: "/meetings", icon: Mic, label: t("appHeader.menu.meetings"), desc: t("appHeader.menu.meetingsDesc") },
     { href: "/memory", icon: Brain, label: t("appHeader.menu.memory"), desc: t("appHeader.menu.memoryDesc") },
     { href: "/intelligent-matches", icon: Sparkles, label: t("appHeader.menu.intelligentMatches"), desc: t("appHeader.menu.intelligentMatchesDesc") },
   ];

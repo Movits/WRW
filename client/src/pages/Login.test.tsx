@@ -8,7 +8,8 @@ import i18n, { LANGUAGES } from "@/i18n";
  * entrava pela primeira vez lia "Boas-vindas de volta" — mensagem de quem
  * volta. Quem decide é o `onboardingCompleted` que a resposta do login traz:
  * cadastro por concluir = primeiro acesso (auth.welcomeFirst, e o destino é
- * /onboarding); cadastro concluído = auth.welcomeBack, com o /dashboard.
+ * /onboarding); cadastro concluído = auth.welcomeBack, com o gravador (/gravar)
+ * ou a tela do ?voltar=.
  */
 
 type Opcoes = {
@@ -81,10 +82,39 @@ describe("Login — saudação do primeiro acesso", () => {
     expect(destino.href).toBe("/onboarding");
   });
 
-  it("quem volta vai ao /dashboard", () => {
+  // O gravador é a primeira tela depois do login (pedido da cliente de
+  // 20/10/2026); o fim do cadastro continua levando ao Dashboard (Onboarding.tsx).
+  it("quem volta vai ao gravador, /gravar", () => {
     entrar(true);
     act(() => vi.advanceTimersByTime(600));
-    expect(destino.href).toBe("/dashboard");
+    expect(destino.href).toBe("/gravar");
+  });
+
+  it("com ?voltar= seguro, volta à tela que pediu", () => {
+    destino = { href: "", search: "?voltar=%2Fnetwork" } as typeof destino;
+    vi.stubGlobal("location", destino);
+    entrar(true);
+    act(() => vi.advanceTimersByTime(600));
+    expect(destino.href).toBe("/network");
+  });
+
+  it.each(["?voltar=https%3A%2F%2Fexemplo.com", "?voltar=%2F%2Fexemplo.com", "?voltar=%2F%5Cexemplo.com", "?voltar=%2F..%2F%2Fexemplo.com"])(
+    "com ?voltar= para fora do site (%s), ignora e vai ao gravador",
+    (search) => {
+      destino = { href: "", search } as typeof destino;
+      vi.stubGlobal("location", destino);
+      entrar(true);
+      act(() => vi.advanceTimersByTime(600));
+      expect(destino.href).toBe("/gravar");
+    },
+  );
+
+  it("cadastro por concluir vai ao /onboarding mesmo com ?voltar=", () => {
+    destino = { href: "", search: "?voltar=%2Fnetwork" } as typeof destino;
+    vi.stubGlobal("location", destino);
+    entrar(false);
+    act(() => vi.advanceTimersByTime(600));
+    expect(destino.href).toBe("/onboarding");
   });
 
   it.each(LANGUAGES.map(l => l.code))("em %s as duas saudações existem, são diferentes e trazem o nome", async (idioma) => {

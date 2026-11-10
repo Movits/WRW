@@ -42,11 +42,12 @@ afterEach(async () => {
 describe("AppHeader — o menu global fala o idioma da usuária", () => {
   it("getMenuItems em inglês: 8 itens, nenhum rótulo ou descrição em português", () => {
     const itens = getMenuItems(i18n.getFixedT("en"));
+    // Reuniões em primeiro: o gravador é a primeira tela do app (30/10/2026).
     expect(itens.map(i => i.href)).toEqual([
-      "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/meetings", "/memory", "/intelligent-matches",
+      "/meetings", "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/memory", "/intelligent-matches",
     ]);
     expect(itens.map(i => i.label)).toEqual([
-      "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "Meetings", "AI Memory", "Smart Connections",
+      "Meetings", "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "AI Memory", "Smart Connections",
     ]);
     for (const item of itens) {
       for (const pt of PORTUGUES) {

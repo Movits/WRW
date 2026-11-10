@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
+import { destinoDepoisDoLogin } from "@/lib/caminho-de-volta";
 
 /**
  * O menu global em TODAS as telas autenticadas (vídeo do Rosber, 14/09/2026,
@@ -73,6 +75,8 @@ function paginasImportadas(): Map<string, string> {
 
 type Rota = {
   caminho: string;
+  /** O bloco da rota no App.tsx, do "<Route" ao "</Route>" (ou ao "/>"). */
+  trecho: string;
   autenticada: boolean;
   rotaMontaCabecalho: boolean;
   paginas: string[];
@@ -95,6 +99,7 @@ function rotas(): Rota[] {
     );
     return {
       caminho,
+      trecho,
       autenticada: /ProtectedRoute|TelaAutenticada/.test(trecho),
       // O invólucro monta o cabeçalho, a menos que a rota diga que a página
       // monta o seu; um `<AppHeader` escrito à mão na rota também conta.
@@ -104,6 +109,36 @@ function rotas(): Rota[] {
     };
   });
 }
+
+// As rotas de Reuniões (30/10/2026) estão registradas com os mesmos caminhos de
+// shared/rotas.ts: o App.tsx os escreve à mão, porque este teste lê
+// `path="..."` literal. Mudou uma constante sem mudar a rota, este teste cai.
+describe("as rotas de Reuniões estão no App.tsx com os caminhos de shared/rotas.ts", () => {
+  it.each([ROTA_GRAVAR, `${ROTA_DAS_REUNIOES}/:id`, ROTA_DAS_REUNIOES])("%s é rota autenticada que monta a Meetings", (caminho) => {
+    const rota = rotas().find((r) => r.caminho === caminho);
+    expect(rota, caminho).toBeDefined();
+    expect(rota!.autenticada).toBe(true);
+    expect(rota!.paginas).toContain("Meetings");
+  });
+
+  it("as três montam a MESMA instância da Meetings: o mesmo invólucro, as mesmas props e nenhuma key", () => {
+    // O Switch do wouter devolve uma Route só, sem key: o React reaproveita a
+    // página entre as três rotas só se os blocos forem iguais. Meetings.tsx conta
+    // com isso para, gravando, devolver a URL ao gravador em vez de desmontar a
+    // página e perder o áudio.
+    const blocos = [ROTA_GRAVAR, `${ROTA_DAS_REUNIOES}/:id`, ROTA_DAS_REUNIOES].map(
+      (caminho) => rotas().find((r) => r.caminho === caminho)!.trecho.replace(/\s*path=\{?"[^"]+"\}?/, ""),
+    );
+    expect(blocos[0]).toContain("<Meetings");
+    expect(new Set(blocos).size, "um invólucro diferente remonta a Meetings e descarta a gravação").toBe(1);
+    expect(blocos[0]).not.toMatch(/\bkey=/);
+  });
+
+  it("o destino do login sem ?voltar= é uma rota registrada", () => {
+    const destino = destinoDepoisDoLogin(true, "");
+    expect(rotas().some((r) => r.caminho === destino)).toBe(true);
+  });
+});
 
 /**
  * A página monta o próprio cabeçalho: o AppHeader inteiro (título, voltar e

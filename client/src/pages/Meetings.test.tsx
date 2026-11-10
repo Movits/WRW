@@ -82,6 +82,9 @@ vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: 
 beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // A URL escolhe o ramo da tela (lista, gravador, detalhe), e o setup limpa só
+  // o state do histórico: sem isto, o detalhe aberto num teste abriria o seguinte.
+  window.history.replaceState(null, "", "/meetings");
 });
 
 // Erro como o servidor devolve (envelope tRPC, com data.code): é a mensagem
@@ -248,11 +251,12 @@ const botaoReprocessar = () => screen.queryByRole("button", { name: /Reprocessar
 const sugestaoPendente = { id: "s1", fullName: "Ana Souza", jobTitle: null, company: null, email: null, status: "pending" };
 
 describe("Gravação — envio que falha", () => {
-  it("a lista é relida quando o envio falha: a reunião 'failed' aparece ao voltar, e com ela o Reprocessar", () => {
+  it("a lista aberta durante o envio se relê quando ele falha: a reunião 'failed' aparece nela, e com ela o Reprocessar", () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
     render(<Meetings />);
-    act(() => { duble.mutacoes.submitRecording.opcoes.onError?.({ message: "O limite de uso gratuito do serviço de IA foi atingido." }, {}); });
-    expect(toast.error).toHaveBeenCalledWith("O limite de uso gratuito do serviço de IA foi atingido.");
+    // As variáveis do envio, como o React Query passa: o aviso leva o id da reunião.
+    act(() => { duble.mutacoes.submitRecording.opcoes.onError?.({ message: "O limite de uso gratuito do serviço de IA foi atingido." }, { meetingId: "reuniao-x" }); });
+    expect(toast.error).toHaveBeenCalledWith("O limite de uso gratuito do serviço de IA foi atingido.", { id: "reuniao-falhou-reuniao-x" });
     expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
   });
 });
@@ -401,7 +405,7 @@ describe("Detalhe da reunião — enquanto processa", () => {
     duble.get.mockReturnValue(detalheCom(fim));
     rerender(<Meetings />);
 
-    expect(toast[tipo]).toHaveBeenCalledWith(frase);
+    expect(toast[tipo]).toHaveBeenCalledWith(frase, { id: `reuniao-${fim === "ready" ? "processada" : "falhou"}-${REUNIAO.id}` });
   });
 
   it.each(["ready", "failed"])("abrir uma reunião %s não dispara aviso de término: só a troca a partir de 'processing' avisa", status => {
@@ -429,7 +433,11 @@ describe("Detalhe da reunião — enquanto processa", () => {
     });
     render(<Meetings />);
     fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Reunião não encontrada.");
+    // A frase da tela, e não a do servidor (que também começa por "Reunião não
+    // encontrada."), e sem o tentar de novo: com a reunião já na tela, o
+    // NOT_FOUND troca o detalhe pelo aviso definitivo.
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("meetings.meetingNotFound"));
+    expect(screen.queryByRole("button", { name: /Tentar novamente/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Transcrevendo e analisando/)).not.toBeInTheDocument();
 
     const opcoes = duble.get.mock.calls[0][1] as { refetchInterval: (consulta: unknown) => number | false; retry: (tentativas: number, erro: unknown) => boolean };
@@ -526,17 +534,27 @@ describe("Envio de arquivo — a duração não é inventada", () => {
     await waitFor(() => expect(duble.duracao).toHaveBeenCalledWith(arquivo));
   }
 
+  // O envio trava o formulário do começo ao fim; a recusa tem de soltá-lo, ou o
+  // gravador fica em "Transcrevendo..." sem os botões até recarregar a página.
+  async function formularioDestravado() {
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
+    expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
+  }
+
   it("o navegador não lê a duração: recusa com a frase, sem criar a reunião nem enviar o áudio", async () => {
     await enviarArquivo(null);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível ler a duração deste áudio. Envie o arquivo em MP3 ou M4A."));
     expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
     expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
+    await formularioDestravado();
   });
 
   it("25 minutos lidos: recusa pelo limite", async () => {
     await enviarArquivo(25 * 60);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("No modo atual, o áudio deve ter no máximo 10 minutos."));
     expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
+    await formularioDestravado();
   });
 
   it("duração legível dentro do limite: envia com a duração lida", async () => {

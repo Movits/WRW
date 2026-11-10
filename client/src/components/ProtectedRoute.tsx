@@ -31,6 +31,17 @@ interface ProtectedRouteProps {
 const cadastroIncompleto = (user?: { onboardingCompleted?: boolean | null } | null) =>
   user?.onboardingCompleted === false;
 
+/**
+ * A tela pedida vai junto para o login, que devolve a pessoa a ela depois de
+ * entrar: quem abre deslogada o link de uma reunião volta a ela, e não ao
+ * gravador. No dublê de location dos testes ({ href: "" }) não há pathname, e
+ * o destino segue sendo /login.
+ */
+const caminhoAtual = () => {
+  const { pathname, search } = window.location;
+  return pathname ? pathname + (search ?? "") : undefined;
+};
+
 // Hierarquia de acesso
 const isGoldOrAbove = (role?: string) =>
   role === "gold" || role === "president" || role === "admin";
@@ -71,7 +82,7 @@ export default function ProtectedRoute({
     if (verificacaoFalhou) return;
 
     if (!isAuthenticated) {
-      window.location.href = redirectTo ?? getLoginUrl();
+      window.location.href = redirectTo ?? getLoginUrl(caminhoAtual());
       return;
     }
 
