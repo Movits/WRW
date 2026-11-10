@@ -21,6 +21,9 @@ const TIMEOUT_DA_IA_MS = 45_000;
 const ORCAMENTO_DA_IA_MS = 60_000;
 // Menos que isso ("sim", "ok", um nome) aparece em qualquer transcrição e não prova nada.
 const TAMANHO_MINIMO_DO_TRECHO = 8;
+// Cada pedaço entre reticências: sem esse mínimo, "a ... e ... i" juntaria
+// letras soltas de qualquer ponto da transcrição.
+const TAMANHO_MINIMO_DO_PEDACO = 4;
 
 export const MENSAGEM_SEM_TRANSCRICAO = "Esta reunião ainda não tem transcrição pronta para a IA ler.";
 export const MENSAGEM_IA_INDISPONIVEL = "O serviço de IA não respondeu agora. Tente de novo em instantes.";
@@ -58,17 +61,27 @@ function normalizarParaComparar(texto: string): string {
 
 /**
  * O trecho citado está na transcrição? Com reticências ("vamos fechar ... até
- * sexta"), cada pedaço precisa estar. Não usa o trechoEstaNaFonte do Network
+ * sexta"), cada pedaço precisa estar, com pelo menos 4 letras ou números e na
+ * mesma ordem da transcrição. Não usa o trechoEstaNaFonte do Network
  * Inteligente de propósito: ele recusa trecho com negação, e "decidimos não
  * renovar" é uma decisão legítima de resumo.
  */
 export function trechoApareceNaTranscricao(trecho: unknown, transcricao: string): boolean {
   if (typeof trecho !== "string") return false;
   const pedacos = trecho.split(/\.{3}|…/).map(normalizarParaComparar).filter(Boolean);
-  const tamanho = pedacos.reduce((soma, pedaco) => soma + pedaco.replace(/ /g, "").length, 0);
+  const letras = (pedaco: string) => pedaco.replace(/ /g, "").length;
+  const tamanho = pedacos.reduce((soma, pedaco) => soma + letras(pedaco), 0);
   if (!pedacos.length || tamanho < TAMANHO_MINIMO_DO_TRECHO) return false;
+  if (pedacos.some(pedaco => letras(pedaco) < TAMANHO_MINIMO_DO_PEDACO)) return false;
   const fonte = normalizarParaComparar(transcricao);
-  return pedacos.every(pedaco => fonte.includes(pedaco));
+  // Cada pedaço é procurado depois do fim do anterior: fora de ordem não vale.
+  let desde = 0;
+  for (const pedaco of pedacos) {
+    const onde = fonte.indexOf(pedaco, desde);
+    if (onde < 0) return false;
+    desde = onde + pedaco.length;
+  }
+  return true;
 }
 
 /**

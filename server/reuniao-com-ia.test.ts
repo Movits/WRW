@@ -95,6 +95,17 @@ describe("trechoApareceNaTranscricao", () => {
   it("com reticências, cada pedaço precisa estar", () => {
     expect(trechoApareceNaTranscricao("a Carla fecha o contrato … até sexta-feira", TRANSCRICAO)).toBe(true);
     expect(trechoApareceNaTranscricao("a Carla fecha o contrato ... até segunda-feira", TRANSCRICAO)).toBe(false);
+    expect(trechoApareceNaTranscricao("… fecha o contrato com o importador …", TRANSCRICAO)).toBe(true);
+  });
+
+  it("com reticências, os pedaços vêm na ordem da transcrição", () => {
+    expect(trechoApareceNaTranscricao("até sexta-feira … a Carla fecha o contrato", TRANSCRICAO)).toBe(false);
+    expect(trechoApareceNaTranscricao("Decidimos não renovar ... vamos falar da exportação", TRANSCRICAO)).toBe(false);
+  });
+
+  it("pedaço curto entre reticências não junta letras soltas de qualquer ponto", () => {
+    expect(trechoApareceNaTranscricao("a ... e ... i ... o ... u ... a ... e ... i", TRANSCRICAO)).toBe(false);
+    expect(trechoApareceNaTranscricao("Bom dia ... sai do ... de", TRANSCRICAO)).toBe(false);
   });
 
   it("paráfrase, trecho curto demais e valor que não é texto saem", () => {
