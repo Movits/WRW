@@ -12,6 +12,18 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png" />
+    <!-- App instalável (PWA): o manifest abre o app direto no gravador (/gravar).
+         Sem service worker, de propósito: nada guarda no aparelho um index.html
+         velho. O mobile-web-app-capable acompanha o da Apple porque o Chrome
+         avisa no console quando só o da Apple existe. A barra de status é
+         "black", e não "black-translucent": a translúcida desenha a página por
+         baixo do relógio do iPhone, e o topo do cabeçalho grudado ficaria
+         coberto. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="WRW" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta property="og:title" content="WRW — Women Rocking the World" />
     <meta property="og:description" content="WRW — CRM inteligente de networking para mulheres empreendedoras e líderes de negócios." />
     <meta property="og:type" content="website" />

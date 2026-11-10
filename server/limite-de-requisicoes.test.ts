@@ -104,14 +104,14 @@ describe("pularNoLimiteGeral", () => {
   const pedido = (method: string, url: string) => ({ method, url, path: url.split("?")[0] });
 
   it("pula estáticos do build e de client/public em GET e HEAD", () => {
-    for (const url of ["/assets/index-DpIvNu2D.js", "/brand/favicon-32.png", "/images/hero-globo.webp"]) {
+    for (const url of ["/assets/index-DpIvNu2D.js", "/brand/favicon-32.png", "/images/hero-globo.webp", "/manifest.webmanifest"]) {
       expect(pularNoLimiteGeral(pedido("GET", url), FORA_DO_RENDER)).toBe(true);
       expect(pularNoLimiteGeral(pedido("HEAD", url), FORA_DO_RENDER)).toBe(true);
     }
   });
 
   it("conta a página, o storage, o cron e qualquer POST, mesmo em caminho de estático", () => {
-    for (const url of ["/", "/dashboard", "/manus-storage/x.png", "/api/scheduled/cleanup-sessions", "/assetsX", "/favicon.ico"]) {
+    for (const url of ["/", "/dashboard", "/manus-storage/x.png", "/api/scheduled/cleanup-sessions", "/assetsX", "/favicon.ico", "/manifest.json"]) {
       expect(pularNoLimiteGeral(pedido("GET", url), FORA_DO_RENDER)).toBe(false);
     }
     expect(pularNoLimiteGeral(pedido("POST", "/assets/x.js"), FORA_DO_RENDER)).toBe(false);
