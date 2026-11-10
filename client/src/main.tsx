@@ -1,12 +1,11 @@
 import { trpc } from "@/lib/trpc";
-import { UNAUTHED_ERR_MSG } from '@shared/const';
+import { destinoPorSessaoVencida } from "@/lib/sessao-vencida";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpBatchLink, TRPCClientError } from "@trpc/client";
+import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import "./i18n"; // must be imported before App
 import App from "./App";
-import { getLoginUrl } from "./const";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -28,20 +27,13 @@ window.addEventListener("vite:preloadError", event => {
   window.location.reload();
 });
 
+// A sessão que vence no meio do uso volta à mesma tela depois do login; as
+// regras (só o "não autenticada" do tRPC, nunca nas páginas públicas) estão em
+// lib/sessao-vencida.ts, com teste.
 const redirectToLoginIfUnauthorized = (error: unknown) => {
-  if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
-
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
-  if (!isUnauthorized) return;
-
-  // Não redirecionar se já está em páginas públicas (evita loop de login duplo)
-  const publicPaths = ["/login", "/register", "/forgot-password", "/reset-password", "/"];
-  const currentPath = window.location.pathname;
-  const isPublicPage = publicPaths.some(p => currentPath === p || currentPath.startsWith(p + "?"));
-  if (isPublicPage) return;
-
-  window.location.href = getLoginUrl();
+  const destino = destinoPorSessaoVencida(error, window.location);
+  if (destino) window.location.href = destino;
 };
 
 queryClient.getQueryCache().subscribe(event => {

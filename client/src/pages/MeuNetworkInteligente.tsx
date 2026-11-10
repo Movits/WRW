@@ -11,6 +11,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { rotuloDoCampo } from "@/components/CompletudeDoContato";
 import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
+import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
 
 /**
  * Meu Network Inteligente — o painel da rede particular (pedido do Nicolas,
@@ -178,7 +179,7 @@ export default function MeuNetworkInteligente() {
           ) : (
             <>
               <section aria-label={t("networkPanel.title")} className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
-                <Indicador rotulo={t("networkPanel.meetings")} valor={dados.reunioes.total} icone={Mic} href="/meetings"
+                <Indicador rotulo={t("networkPanel.meetings")} valor={dados.reunioes.total} icone={Mic} href={ROTA_DAS_REUNIOES}
                   detalhe={t("networkPanel.meetingsDetail", { transcritas: dados.reunioes.transcritas })} />
                 <Indicador rotulo={t("networkPanel.contacts")} valor={dados.contatos.total} icone={Users} href="/network"
                   detalhe={t("networkPanel.contactsDetail")} />
@@ -255,7 +256,7 @@ export default function MeuNetworkInteligente() {
               <section aria-labelledby="nwi-atalhos" className="mt-8">
                 <h2 id="nwi-atalhos" className="mb-3 text-lg font-bold">{t("networkPanel.actionsTitle")}</h2>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Atalho href="/meetings" icone={Mic} titulo={t("networkPanel.actionRecord")}
+                  <Atalho href={ROTA_GRAVAR} icone={Mic} titulo={t("networkPanel.actionRecord")}
                     descricao={t("networkPanel.actionRecordDesc", { minutos: limite })}>
                     <span className="mt-3 block rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-white/50">
                       {t("networkPanel.consentNotice")}

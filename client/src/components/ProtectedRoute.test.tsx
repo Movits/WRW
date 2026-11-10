@@ -98,6 +98,22 @@ describe("ProtectedRoute", () => {
       esperaBarrar("/entrar");
     });
 
+    // Quem abre /gravar ou o link de uma reunião deslogada volta a ela depois
+    // de entrar (Login.tsx lê o ?voltar=). Os casos acima seguem em /login
+    // porque o dublê de location não tem pathname.
+    it.each([
+      ["/gravar", "", "/login?voltar=%2Fgravar"],
+      ["/meetings/abc", "?t=90", "/login?voltar=%2Fmeetings%2Fabc%3Ft%3D90"],
+      ["/login", "", "/login"],
+      ["/", "", "/login"],
+    ])("em %s%s leva o caminho de volta ao login: %s", (pathname, search, esperado) => {
+      destino = { href: "", pathname, search } as typeof destino;
+      vi.stubGlobal("location", destino);
+      simularAuth({});
+      renderizar();
+      esperaBarrar(esperado);
+    });
+
     it.each([
       ["requireAdmin", { requireAdmin: true }],
       ["requireGold", { requireGold: true }],

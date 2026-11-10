@@ -210,7 +210,25 @@ function Router() {
         {/* Assistente de Reuniões — gravação e transcrição privada. A isenção
             vale para a tela inteira: a página monta o cabeçalho ACIMA dos seus
             três ramos (lista, nova reunião, detalhe), e não dentro de um deles
-            — montado só na lista, os outros dois ficavam sem menu nenhum. */}
+            — montado só na lista, os outros dois ficavam sem menu nenhum.
+            A URL escolhe o ramo (shared/rotas.ts): /gravar é o gravador, o
+            link exclusivo e a primeira tela depois do login (pedido da cliente
+            de 20/10/2026); /meetings/:id é o detalhe; /meetings, a lista.
+            Os três blocos ficam idênticos, sem key: assim montam a MESMA
+            instância da página, e a gravação em curso não se perde entre eles
+            (App.cabecalho-de-todas-as-telas.test.ts confere). */}
+        <Route path="/gravar">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/meetings/:id">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/meetings">
           <TelaAutenticada cabecalhoProprio>
             <Meetings />

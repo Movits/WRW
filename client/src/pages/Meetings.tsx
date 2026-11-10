@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useRoute } from "wouter";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Users, X } from "lucide-react";
 import { toast } from "sonner";
@@ -7,10 +7,12 @@ import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
+import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 
 const MAX_DURATION = 10 * 60;
 
@@ -36,11 +38,17 @@ function microphoneErrorMessage(t: TranslateFn, error: unknown) {
   return t("meetings.micGenericError");
 }
 
+// O código tRPC do erro (data.code). Só o erro que o servidor devolveu tem um;
+// o da rede, por exemplo, não.
+function codigoDoErro(erro: unknown) {
+  return (erro as { data?: { code?: string } } | null)?.data?.code;
+}
+
 // O código tRPC decide a frase: as mensagens do servidor vêm em português, e a
 // tela fala o idioma da dona. Cada ramo chama t() com a chave literal, para o
 // teste de chaves usadas conferir que todas existem.
 function mensagemDoReprocesso(t: TranslateFn, erro: unknown) {
-  switch ((erro as { data?: { code?: string } } | null)?.data?.code) {
+  switch (codigoDoErro(erro)) {
     case "CONFLICT": return t("meetings.reprocessConflict");
     case "PRECONDITION_FAILED": return t("meetings.reprocessUnavailable");
     case "TOO_MANY_REQUESTS": return t("meetings.reprocessTooMany");
@@ -51,7 +59,39 @@ function mensagemDoReprocesso(t: TranslateFn, erro: unknown) {
 // NOT_FOUND é definitivo: a reunião foi excluída (em outra aba, pelo app) ou
 // não é da dona. Tentar de novo ou continuar consultando não a traz de volta.
 function reuniaoNaoExiste(erro: unknown) {
-  return (erro as { data?: { code?: string } } | null)?.data?.code === "NOT_FOUND";
+  return codigoDoErro(erro) === "NOT_FOUND";
+}
+
+// BAD_REQUEST também é definitivo: o único dado da consulta é o id que veio na
+// URL, então ele quer dizer um link cortado ou editado à mão
+// (/meetings/8b1f6a2e-3c4d). A mensagem crua do zod é JSON em inglês.
+function linkDeReuniaoInvalido(erro: unknown) {
+  return codigoDoErro(erro) === "BAD_REQUEST";
+}
+
+// Os dois desfechos definitivos da consulta da reunião: reler não muda nenhum.
+function erroDefinitivoDaReuniao(erro: unknown) {
+  return reuniaoNaoExiste(erro) || linkDeReuniaoInvalido(erro);
+}
+
+// O mesmo desfecho do envio chega por dois caminhos: o fim do envio e o detalhe
+// aberto, que vê o status mudar (a lista mostra a reunião durante o envio). Com o
+// mesmo id, o sonner troca o aviso que já está na tela em vez de empilhar outro.
+function avisoDaReuniao(desfecho: "processada" | "falhou", meetingId: string) {
+  return { id: `reuniao-${desfecho}-${meetingId}` };
+}
+
+// A causa gravada pelo servidor, como a dona a lê. ERRO_INTERROMPIDO é um
+// CÓDIGO gravado pela varredura de reuniões presas, não uma frase: o servidor
+// não sabe o idioma da dona, então a tradução é aqui. A frase do áudio que
+// sumiu do bucket vem em português do servidor e também é traduzida aqui, como
+// as frases conhecidas do servidor (o erro de consulta ao banco, por exemplo),
+// que também chegam pelo aviso do envio. As demais mensagens vêm em português,
+// pensadas para a tela.
+function causaDaFalha(t: TranslateFn, processingError: string | null | undefined) {
+  if (processingError === CODIGO_ERRO_INTERROMPIDO) return t("meetings.processingInterrupted");
+  if (processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE) return t("meetings.storedAudioMissing");
+  return processingError ? traduzirMensagemDoServidor(processingError, t) : null;
 }
 
 function supportedAudioMime(file: File) {
@@ -83,14 +123,18 @@ function recordedMimeType(value: string) {
 export default function Meetings() {
   const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
+  // A URL escolhe o ramo (App.tsx monta esta página nas três rotas): /gravar é
+  // o gravador, /meetings/:id o detalhe e /meetings a lista. Era estado interno
+  // e tudo caía na lista: o voltar do celular saía da tela, recarregar perdia o
+  // detalhe e não havia link para gravar nem para abrir uma reunião.
+  const [naGravacao] = useRoute(ROTA_GRAVAR);
+  const [, reuniaoAberta] = useRoute<{ id: string }>(`${ROTA_DAS_REUNIOES}/:id`);
   const utils = trpc.useUtils();
   // Enquanto alguma reunião processa (o reprocessamento roda em segundo plano),
   // a lista se atualiza sozinha a cada 10 s; sem nada processando, não consulta.
   const { data: meetings, isLoading, isError, error, refetch } = trpc.meetings.list.useQuery(undefined, {
     refetchInterval: consulta => consulta.state.data?.some(reuniao => reuniao.status === "processing") ? 10_000 : false,
   });
-  const [screen, setScreen] = useState<"list" | "new" | "detail">("list");
-  const [meetingId, setMeetingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [consent, setConsent] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -104,19 +148,66 @@ export default function Meetings() {
   const chunks = useRef<Blob[]>([]);
   const startedAt = useRef(0);
   const audioInput = useRef<HTMLInputElement | null>(null);
+  // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
+  // de /gravar (ver o efeito que devolve a URL, mais abaixo).
+  const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
+  // true só enquanto ESTA instância está montada, visível e no gravador. O
+  // naGravacao vem do useRoute, que casa como a rota (sem caixa e com barra
+  // final opcional). É efeito de layout porque, na primeira ida a uma tela lazy
+  // cujo código ainda não chegou (o Dashboard logo depois do login, que cai em
+  // /gravar), o Suspense do App esconde esta página sem desmontá-la e limpa só
+  // os efeitos de layout: com o efeito comum, o ref seguia true e o fim do
+  // envio trocava a tela pedida pelo detalhe.
+  const noGravadorAgora = useRef(false);
+  useLayoutEffect(() => {
+    noGravadorAgora.current = naGravacao;
+    return () => { noGravadorAgora.current = false; };
+  }, [naGravacao]);
 
   const createMeeting = trpc.meetings.create.useMutation();
   const submitRecording = trpc.meetings.submitRecording.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (_dados, variaveis) => {
+      // A lista pode estar aberta: a dona vai a ela pelo menu durante o envio, e
+      // ela foi lida com a reunião ainda em 'recording', estado em que não se
+      // consulta sozinha. Sem esta releitura, a lista aberta não mostra o desfecho.
       await utils.meetings.list.invalidate();
-      toast.success(t("meetings.processedSuccess"));
-      setScreen("detail");
+      toast.success(t("meetings.processedSuccess"), avisoDaReuniao("processada", variaveis.meetingId));
+      // O gravador recomeça vazio: sem isto, "Nova reunião" reabria o áudio já
+      // enviado, e um segundo toque duplicava a reunião.
+      discardCapturedAudio();
+      setTitle("");
+      setConsent(false);
+      // Só leva ao detalhe quem continua no gravador desta mesma tela. O
+      // onSuccess roda mesmo com a página desmontada, e o processamento leva
+      // minutos: quem saiu, ou já abriu outro gravador para a reunião seguinte,
+      // não é arrastada de volta. O replace troca a entrada do gravador pela do
+      // detalhe; as que a volta ao gravador empilha durante a gravação (cada
+      // toque no menu Reuniões) continuam embaixo.
+      if (noGravadorAgora.current) navigate(rotaDaReuniao(variaveis.meetingId), { replace: true });
     },
-    // Em falha também: a reunião criada ficou 'failed' no banco, e sem reler a
-    // lista ela não aparece ao voltar — nem o Reprocessar do detalhe dela.
-    onError: (error) => {
-      toast.error(error.message || t("meetings.processError"));
+    // Em falha também, pelo mesmo motivo do onSuccess: a lista aberta durante o
+    // envio não mostra o desfecho sem esta releitura (quem chega à lista depois
+    // já relê, pelo efeito da tela anterior ou pelo remonte). Se o servidor
+    // chegou a processar o áudio, a reunião ficou 'failed', com
+    // o Reprocessar no detalhe (no CONFLICT, outra execução segue com ela). Se o
+    // envio parou antes disso (rede, deploy, sessão vencida, entrada recusada),
+    // ela continua em "Gravação pendente": a varredura do servidor só encerra
+    // as que ficaram em 'processing'.
+    onError: (error, variaveis) => {
+      // As frases conhecidas do servidor (banco fora do ar, sessão vencida...)
+      // saem no idioma da tela; as demais, como vieram.
+      toast.error(traduzirMensagemDoServidor(error.message, t) || t("meetings.processError"), avisoDaReuniao("falhou", variaveis.meetingId));
       void utils.meetings.list.invalidate();
+    },
+    // O detalhe dessa reunião pode já estar aberto (a lista mostra a reunião
+    // durante o envio): nos dois desfechos ele se relê e mostra o status que o
+    // servidor gravou (fica em "gravação pendente" se o envio parou antes de o
+    // servidor processar o áudio, como diz o onError).
+    // As pendências de Tenho/Preciso lidas no meio do envio vieram vazias: o
+    // reset as tira da tela ("carregando", e não FALTANDO) e relê.
+    onSettled: (_dados, _erro, variaveis) => {
+      void utils.meetings.get.invalidate({ meetingId: variaveis.meetingId });
+      void utils.networkInteligente.pendencias.reset({ meetingId: variaveis.meetingId });
     },
   });
 
@@ -130,6 +221,31 @@ export default function Meetings() {
     return () => window.clearInterval(timer);
   }, [recording]);
 
+  // As três rotas de Reuniões montam a MESMA instância desta página (App.tsx):
+  // ir de /gravar para /meetings ou /meetings/:id (o item Reuniões do menu, ou o
+  // voltar do navegador que cai numa delas) não desmonta o gravador. Com a
+  // gravação em curso, a URL volta para /gravar e a tela continua nele: sem
+  // isto, a lista aparecia e o microfone seguia gravando escondido. Qualquer
+  // outro destino (os outros itens do menu, o logo, a seta, o avatar, o sino, o
+  // voltar que sai de Reuniões) desmonta a página e descarta a gravação, como
+  // antes; confirmar antes de sair é a PR da "sessão ocupada".
+  useEffect(() => {
+    if (!recording || naGravacao) return;
+    navigate(ROTA_GRAVAR, { replace: true });
+    // Um aviso só, com o mesmo id, mesmo com vários toques no menu ou no voltar.
+    toast.info(t("meetings.stopRecordingToLeave"), { id: "gravacao-em-curso" });
+  }, [recording, naGravacao]);
+
+  // A página não remonta entre as três rotas, e criar a reunião não relê a lista:
+  // quem chega à lista vinda do gravador ou de um detalhe vê o estado atual,
+  // inclusive a reunião que acabou de enviar e ainda processa.
+  const telaAnterior = useRef(screen);
+  useEffect(() => {
+    if (screen === "list" && telaAnterior.current !== "list") void utils.meetings.list.invalidate();
+    telaAnterior.current = screen;
+  }, [screen]);
+
+  // Sair da página fecha o microfone que estava gravando.
   useEffect(() => () => stream.current?.getTracks().forEach(track => track.stop()), []);
 
   async function startRecording() {
@@ -147,6 +263,14 @@ export default function Meetings() {
         },
         video: false,
       });
+      // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
+      // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
+      // ida à lista ou a um detalhe na mesma instância e para o desmonte, porque
+      // a limpeza do efeito do noGravadorAgora o zera nos dois casos.
+      if (!noGravadorAgora.current) {
+        media.getTracks().forEach(track => track.stop());
+        return;
+      }
       stream.current = media;
       const preferredMime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(type => MediaRecorder.isTypeSupported(type));
       const mediaRecorder = preferredMime
@@ -166,7 +290,11 @@ export default function Meetings() {
           blob,
           url: URL.createObjectURL(blob),
           mimeType: recordedMimeType(blob.type),
-          durationSeconds: Math.max(1, Math.floor((Date.now() - startedAt.current) / 1000)),
+          // O fim automático chega com atraso (aba em segundo plano, celular
+          // lento), e o relógio passa do teto, que o servidor confere sem folga
+          // na duração declarada: 601 s eram recusados. A duração medida nos
+          // bytes, que é a que vale, tem a folga de 5 s.
+          durationSeconds: Math.min(MAX_DURATION, Math.max(1, Math.floor((Date.now() - startedAt.current) / 1000))),
         });
         setElapsed(0);
         setFinalizing(false);
@@ -178,6 +306,10 @@ export default function Meetings() {
       setRecording(true);
     } catch (error) {
       stream.current?.getTracks().forEach(track => track.stop());
+      // O pedido do microfone falhou (permissão negada, por exemplo) depois de a
+      // dona sair do gravador: nada de aviso fora dele, nem de problema guardado
+      // para a próxima vez que ela voltar.
+      if (!noGravadorAgora.current) return;
       const issue = microphoneErrorMessage(t, error);
       setMicrophoneIssue(issue);
       toast.error(issue);
@@ -192,29 +324,45 @@ export default function Meetings() {
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
     if (file.size > 10 * 1024 * 1024) return toast.error(t("meetings.fileTooLarge"));
+    let reuniaoCriada: string | undefined;
     try {
+      // O formulário trava já aqui, como no envio da gravação: ler o arquivo leva
+      // segundos, e desmarcar a autorização nesse meio não impedia o create, que
+      // grava consentGranted: true.
+      setFinalizing(true);
       const [audioBase64, durationSeconds] = await Promise.all([readAsDataUrl(t, file), lerDuracaoNoNavegador(file)]);
       // Sem duração legível, recusa: assumir um valor (eram 60 s) deixava um
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
       if (durationSeconds > MAX_DURATION) return toast.error(t("meetings.audioTooLong"));
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: "pt" });
-      setMeetingId(created.id);
+      reuniaoCriada = created.id;
       await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: "pt" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("meetings.uploadError"));
+      // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
+      // troca aquele aviso em vez de pôr outro igual ao lado.
+      // Erro sem mensagem recua como o onError: o aviso nunca fica em branco.
+      const mensagem = (error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || (reuniaoCriada ? t("meetings.processError") : t("meetings.uploadError"));
+      if (reuniaoCriada) toast.error(mensagem, avisoDaReuniao("falhou", reuniaoCriada));
+      else toast.error(mensagem);
+    } finally {
+      setFinalizing(false);
     }
   }
 
   async function processCapturedAudio() {
     if (!capturedAudio) return;
+    // O consentimento vale no envio, não só no início da gravação: desmarcado
+    // depois de gravar, nada vai ao servidor (o create grava consentGranted).
+    if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
+    let reuniaoCriada: string | undefined;
     try {
       setFinalizing(true);
       const [created, audioBase64] = await Promise.all([
         createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: "pt" }),
         readAsDataUrl(t, capturedAudio.blob),
       ]);
-      setMeetingId(created.id);
+      reuniaoCriada = created.id;
       await submitRecording.mutateAsync({
         meetingId: created.id,
         audioBase64,
@@ -223,7 +371,11 @@ export default function Meetings() {
         language: "pt",
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("meetings.sendRecordingError"));
+      // Como no envio de arquivo: depois de criada, o aviso é o mesmo do onError.
+      // Erro sem mensagem recua como o onError: o aviso nunca fica em branco.
+      const mensagem = (error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || (reuniaoCriada ? t("meetings.processError") : t("meetings.sendRecordingError"));
+      if (reuniaoCriada) toast.error(mensagem, avisoDaReuniao("falhou", reuniaoCriada));
+      else toast.error(mensagem);
     } finally {
       setFinalizing(false);
     }
@@ -258,19 +410,21 @@ export default function Meetings() {
       recording={recording} elapsed={elapsed} processing={starting || finalizing || submitRecording.isPending}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
-      onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) setScreen("list"); }}
+      onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
     />
-  ) : screen === "detail" && meetingId ? (
-    <MeetingDetail meetingId={meetingId} onBack={() => setScreen("list")} />
+  ) : screen === "detail" && reuniaoAberta ? (
+    // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
+    // Excluir sai com replace: o voltar não reabre a reunião que deixou de existir.
+    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} />
   ) : (
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></div>
-          <button onClick={() => setScreen("new")} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
+          <button onClick={() => navigate(ROTA_GRAVAR)} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => { setMeetingId(meeting.id); setScreen("detail"); }} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span></div></button>)}</div>}
       </div>
     </main>
   );
@@ -288,6 +442,10 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <h1 className="text-2xl font-bold mt-1">{t("meetings.recorderTitle")}</h1>
       <div className="mt-7 space-y-5">
         <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
+        {/* O aviso de privacidade também aqui: o login, o Dashboard e o link
+            /gravar chegam ao gravador direto, sem passar pela lista, que era o
+            único lugar com ele antes de gravar. */}
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
         <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
       </div>
       <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? "border-red-400 bg-red-500/15 animate-pulse" : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p><p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimit")}</p></div>
@@ -298,15 +456,30 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
   </main>;
 }
 
-function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
+function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; onBack: () => void; aoExcluir: () => void }) {
   const utils = trpc.useUtils();
   const { t, i18n } = useTranslation();
   // Em processamento (inclusive um reprocessamento em segundo plano), o detalhe
-  // se atualiza a cada 5 s até a reunião ficar pronta ou falhar.
+  // se atualiza a cada 5 s até a reunião ficar pronta ou falhar. O erro
+  // definitivo não se relê: nem a cada 5 s, nem em nova tentativa, nem na
+  // volta à aba ou na reconexão. Nessas duas, o padrão do React Query (o
+  // QueryClient de main.tsx não o muda) relê a consulta vencida, e a consulta
+  // sem dado está sempre vencida.
   const { data, isLoading, isError, error, refetch } = trpc.meetings.get.useQuery({ meetingId }, {
-    refetchInterval: consulta => consulta.state.data?.meeting.status === "processing" && !reuniaoNaoExiste(consulta.state.error) ? 5_000 : false,
-    retry: (tentativas, erro) => !reuniaoNaoExiste(erro) && tentativas < 3,
+    refetchInterval: consulta => consulta.state.data?.meeting.status === "processing" && !erroDefinitivoDaReuniao(consulta.state.error) ? 5_000 : false,
+    retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
+    refetchOnWindowFocus: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
+    refetchOnReconnect: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
   });
+  // true só com este detalhe montado e visível: a exclusão que termina depois
+  // de a pessoa sair dele não a puxa de volta para a lista. Efeito de layout
+  // pelo mesmo motivo do noGravadorAgora: escondido pelo Suspense (a ida a uma
+  // tela que ainda carrega), o detalhe só tem os efeitos de layout limpos.
+  const montado = useRef(false);
+  useLayoutEffect(() => {
+    montado.current = true;
+    return () => { montado.current = false; };
+  }, []);
   const [tab, setTab] = useState<"summary" | "transcript" | "contacts">("summary");
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
@@ -322,7 +495,13 @@ function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () =>
   const decideEntity = trpc.meetings.decideEntity.useMutation({ onSuccess: () => utils.meetings.get.invalidate({ meetingId }) });
   // Meu Network Inteligente: o que a IA propôs de O Que Tenho / O Que Preciso
   // para cada pessoa da reunião, ainda pendente de confirmação.
-  const pendenciasDaReuniao = trpc.networkInteligente.pendencias.useQuery({ meetingId }, { refetchOnWindowFocus: false });
+  // Com o id da URL, o link cortado também chega aqui: BAD_REQUEST é definitivo,
+  // sem nova tentativa nem releitura na reconexão.
+  const pendenciasDaReuniao = trpc.networkInteligente.pendencias.useQuery({ meetingId }, {
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: consulta => !linkDeReuniaoInvalido(consulta.state.error),
+    retry: (tentativas, erro) => !linkDeReuniaoInvalido(erro) && tentativas < 3,
+  });
   // Recusada (CONFLICT: já decidida em outra aba), a tela relê o estado real da sugestão.
   const decideContact = trpc.meetings.decideContactSuggestion.useMutation({
     onError: erro => toast.error(erro.message),
@@ -335,7 +514,7 @@ function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () =>
     onError: error => toast.error(error.message || t("meetings.translateError")),
   });
   const deleteMeeting = trpc.meetings.delete.useMutation({
-    onSuccess: async () => { await utils.meetings.list.invalidate(); toast.success(t("meetings.deleteSuccess")); onBack(); },
+    onSuccess: async () => { await utils.meetings.list.invalidate(); toast.success(t("meetings.deleteSuccess")); if (montado.current) aoExcluir(); },
     onError: error => { setConfirmarExclusao(false); toast.error(error.message || t("meetings.deleteError")); },
   });
   const reprocessar = trpc.meetings.reprocess.useMutation({
@@ -360,14 +539,16 @@ function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () =>
   useEffect(() => {
     const status = data?.meeting.status;
     if (statusAnterior.current === "processing" && status === "ready") {
-      toast.success(t("meetings.processedSuccess"));
+      toast.success(t("meetings.processedSuccess"), avisoDaReuniao("processada", meetingId));
       setTab("summary");
       // As pendências de Tenho/Preciso foram lidas antes do fim, com as pessoas
       // da tentativa anterior (ou nenhuma), e a consulta não se relê sozinha. O
       // reset tira o dado velho da tela (vira "carregando", não FALTANDO) e relê.
       void utils.networkInteligente.pendencias.reset({ meetingId });
     } else if (statusAnterior.current === "processing" && status === "failed") {
-      toast.error(t("meetings.processError"));
+      // A causa gravada, e não a frase genérica: com o mesmo id, este aviso troca
+      // o do fim do envio, que trazia a causa enviada pelo servidor.
+      toast.error(causaDaFalha(t, data?.meeting.processingError) ?? t("meetings.processError"), avisoDaReuniao("falhou", meetingId));
     }
     statusAnterior.current = status;
   }, [data?.meeting.status]);
@@ -393,7 +574,14 @@ function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () =>
   // que falha por deploy ou limite de requisições mantém o dado anterior, e
   // esconder a reunião justo enquanto ela processa seria pior. Já a reunião
   // excluída em outro lugar não pode ficar "processando" para sempre.
-  if (isError && (!data || reuniaoNaoExiste(error))) return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
+  // Reunião que não existe (excluída, de outra dona) e link cortado são
+  // definitivos: um aviso no idioma da tela, sem "tentar de novo". A frase do
+  // servidor vem em português, e a do zod em JSON.
+  if (isError && (linkDeReuniaoInvalido(error) || reuniaoNaoExiste(error))) return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
+    <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
+    <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-sm text-white/70">{reuniaoNaoExiste(error) ? t("meetings.meetingNotFound") : t("meetings.invalidMeetingLink")}</div>
+  </div></main>;
+  if (isError && !data) return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} />
   </div></main>;
@@ -414,17 +602,9 @@ function MeetingDetail({ meetingId, onBack }: { meetingId: string; onBack: () =>
   // inexcluível até a varredura passar. O modal só avisa que o trabalho em
   // curso será descartado.
   const emProcessamento = meeting.status === "processing";
-  // ERRO_INTERROMPIDO é um CÓDIGO gravado pela varredura de reuniões presas,
-  // não uma frase: o servidor não sabe o idioma da dona, então a tradução é
-  // aqui. As demais mensagens já vêm em português, pensadas para a tela.
-  // O áudio sumiu do bucket: a frase vem em português do servidor (o app a
-  // mostra como veio); aqui ela é traduzida, e reprocessar de novo não adianta.
+  // O áudio sumiu do bucket: reprocessar de novo não adianta.
   const audioGuardadoAusente = meeting.processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE;
-  const motivoDaFalha = meeting.processingError === CODIGO_ERRO_INTERROMPIDO
-    ? t("meetings.processingInterrupted")
-    : audioGuardadoAusente
-      ? t("meetings.storedAudioMissing")
-      : (meeting.processingError || t("meetings.processingFailedFallback"));
+  const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{t("meetings.privateMeetingEyebrow")}</p><h1 className="text-3xl font-bold mt-1">{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>

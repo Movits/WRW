@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Lock, Mail, ArrowRight, Shield, Sparkles } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { destinoDepoisDoLogin } from "@/lib/caminho-de-volta";
 
 export default function Login() {
   const { t } = useTranslation();
@@ -29,12 +30,11 @@ export default function Login() {
       // já está definido antes de carregar a página protegida.
       // navigate() (client-side) pode carregar a página antes do cookie
       // ser processado, causando loop de login duplo.
+      // Cadastro por concluir vai ao /onboarding; quem já tem cadastro volta
+      // à tela que pediu (?voltar= seguro) ou cai no gravador, a primeira tela
+      // do app a pedido da cliente (20/10/2026).
       setTimeout(() => {
-        if (!data.user.onboardingCompleted) {
-          window.location.href = "/onboarding";
-        } else {
-          window.location.href = "/dashboard";
-        }
+        window.location.href = destinoDepoisDoLogin(Boolean(data.user.onboardingCompleted), window.location.search);
       }, 600);
     },
     onError: (err) => {
