@@ -9,11 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle2, KeyRound, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 
 export default function ResetPassword() {
   const { t } = useTranslation();
   const [, setLocation] = useLocation();
-  const [token, setToken] = useState("");
+  // Lido da URL já no primeiro render. Lido num efeito, o primeiro quadro pintava
+  // o aviso de link inválido para quem abriu um link válido.
+  const [token] = useState(() => new URLSearchParams(window.location.search).get("token") ?? "");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -21,28 +24,46 @@ export default function ResetPassword() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
 
+  // Depois da troca da senha, vai ao login em 3 segundos. Sair da tela antes
+  // cancela a ida: sem isso, o timer puxava a pessoa de volta de outra tela.
   useEffect(() => {
-    // Extrair token da URL: /reset-password?token=xxx
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("token");
-    if (t) setToken(t);
-  }, []);
+    if (!success) return;
+    const timer = window.setTimeout(() => setLocation("/login"), 3000);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
   const resetMutation = trpc.auth.resetPassword.useMutation({
     onSuccess: () => {
       setSuccess(true);
       setError("");
-      // Redirecionar para login após 3 segundos
-      setTimeout(() => setLocation("/login"), 3000);
     },
     onError: (err) => {
-      setError(err.message);
+      // Pelo código, porque o servidor escreve em português. BAD_REQUEST nesta
+      // rota é o link: o token fora do formato (zod) ou o "Token inválido ou
+      // expirado" do servidor (a senha curta é barrada antes de enviar, logo
+      // abaixo). TOO_MANY_REQUESTS com path (o tRPC só o põe no erro lançado
+      // dentro da rota) é a fila do bcrypt cheia; sem path, é o limite geral da
+      // API, montado antes do tRPC, e a frase dele segue pelo tradutor comum,
+      // como o resto (banco fora do ar, rede).
+      const codigo = err.data?.code;
+      setError(
+        codigo === "BAD_REQUEST" ? t("auth.invalidTokenDesc")
+          : codigo === "TOO_MANY_REQUESTS" && err.data?.path ? t("auth.tooManyRequests")
+            : mensagemDeErroParaTela(err, t),
+      );
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    // O minLength do campo não vale para valor posto por script ou por
+    // gerenciador de senhas; sem esta conferência, a senha curta voltava como
+    // BAD_REQUEST e a tela dizia que o link estava vencido.
+    if (newPassword.length < 8) {
+      setError(t("auth.passwordTooShort", "Mínimo 8 caracteres"));
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError(t("auth.passwordMismatch", "As senhas não coincidem."));
       return;
@@ -139,8 +160,17 @@ export default function ResetPassword() {
                     {t("auth.newPassword", "Nova senha")}
                   </Label>
                   <div className="relative">
+                    {/* new-password: o gerenciador de senhas sugere uma senha forte
+                        nos dois campos. A tela não tem o e-mail (o link só traz o
+                        token), então, ao guardar a senha, ele pode perguntar de
+                        qual conta ela é. */}
+                    {/* Só leitura durante o envio: a senha que o servidor grava é a
+                        que está nos campos quando a tela diz "Senha redefinida!". */}
                     <Input
                       id="newPassword"
+                      name="new-password"
+                      autoComplete="new-password"
+                      readOnly={resetMutation.isPending}
                       type={showPassword ? "text" : "password"}
                       placeholder={t("auth.passwordPlaceholder", "Mínimo 8 caracteres")}
                       value={newPassword}
@@ -167,6 +197,9 @@ export default function ResetPassword() {
                   <div className="relative">
                     <Input
                       id="confirmPassword"
+                      name="confirm-password"
+                      autoComplete="new-password"
+                      readOnly={resetMutation.isPending}
                       type={showConfirm ? "text" : "password"}
                       placeholder={t("auth.confirmNewPasswordPlaceholder", "Repita a nova senha")}
                       value={confirmPassword}

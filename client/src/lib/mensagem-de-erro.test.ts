@@ -5,8 +5,8 @@ import { mensagemDeErroParaTela } from "./mensagem-de-erro";
 /**
  * O que a tela mostra quando a consulta falha (revisão da PR-A): só a
  * mensagem que veio do servidor (envelope tRPC, com `data.code`) é para a
- * usuária ler. O resto — 429 do apiLimiter em texto puro, 502/503 em HTML do
- * Render, rede fora — chega como texto técnico em inglês e vira o genérico.
+ * usuária ler. O resto — 502/503 em HTML do Render, JSON fora do envelope,
+ * rede fora — chega como texto técnico em inglês e vira o genérico.
  *
  * Os erros aqui são TRPCClientError de verdade, montados como o cliente
  * monta: `from()` com o envelope do servidor e o construtor com a causa da
@@ -35,7 +35,13 @@ describe("mensagemDeErroParaTela — mensagem do servidor ou o genérico traduzi
     expect(mensagemDeErroParaTela(erro, t)).toBe(GENERICO);
   });
 
-  it("resposta fora do envelope (429 em texto puro, 502 em HTML): 'Unable to transform response from server' vira o genérico", () => {
+  it("502/503 em HTML: o SyntaxError do res.json() vira o genérico", () => {
+    const erro = TRPCClientError.from(new SyntaxError("Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"));
+    expect(erro.data).toBeUndefined();
+    expect(mensagemDeErroParaTela(erro, t)).toBe(GENERICO);
+  });
+
+  it("JSON fora do envelope (como o 403 do bloqueio de scanners): 'Unable to transform response from server' vira o genérico", () => {
     const erro = TRPCClientError.from(new Error("Unable to transform response from server"));
     expect(erro.message).toBe("Unable to transform response from server");
     expect(mensagemDeErroParaTela(erro, t)).toBe(GENERICO);

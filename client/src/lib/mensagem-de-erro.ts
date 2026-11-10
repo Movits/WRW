@@ -11,10 +11,15 @@ import {
  * Nem todo erro que chega ao React Query passou pelo servidor tRPC. O
  * `errorFormatter` (server/_core/trpc.ts) escreve mensagens em português e já
  * mascarou o SQL, mas ele só fala quando a resposta tem o envelope do tRPC.
- * Um 429 do apiLimiter (texto puro), um 502/503 em HTML do Render ou a rede
- * fora chegam como TRPCClientError montado no cliente, com texto técnico em
- * inglês: "Unable to transform response from server", "Failed to fetch". Isso
- * não é para a usuária ler.
+ * Um 502/503 em HTML do Render (o res.json() falha e chega a mensagem do
+ * SyntaxError do navegador, "Unexpected token '<' … is not valid JSON"), um
+ * JSON fora do envelope ("Unable to transform response from server", como o
+ * 403 do bloqueio de scanners) e a rede fora ("Failed to fetch") chegam como
+ * TRPCClientError montado no cliente, com texto técnico em inglês. Isso não é
+ * para a usuária ler. O 429 do limite da API (responderLimite,
+ * server/_core/limite-de-requisicoes.ts) vem no envelope, com data.code
+ * TOO_MANY_REQUESTS e sem path, e passa com a frase do servidor; 429 em texto
+ * puro só existe fora de /api/trpc.
  *
  * O sinal é `data.code`: só um erro devolvido pelo servidor tem o `data` do
  * shape (TRPCClientError.from monta `data` a partir de `result.error.data`,

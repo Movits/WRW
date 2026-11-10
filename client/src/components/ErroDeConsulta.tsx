@@ -11,7 +11,7 @@ import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
  *
  * Recebe o ERRO, não a mensagem: é `mensagemDeErroParaTela` quem decide se o
  * texto é do servidor (envelope tRPC, já mascarado pelo errorFormatter) ou o
- * genérico traduzido (429 em texto puro, 502 em HTML, rede fora).
+ * genérico traduzido (502 em HTML, rede fora).
  * Molde visual: o bloco de erro de RecommendedOpportunities (Dashboard).
  */
 export function ErroDeConsulta({ erro, aoTentarDeNovo }: {
