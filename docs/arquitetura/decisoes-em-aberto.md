@@ -252,7 +252,7 @@ instalado, sem ser usado em lugar nenhum.
 
 ### "Funcionar no celular"
 
-Hoje é site responsivo e nada além: sem `manifest.json`, sem service worker. Um
+Até 10/11/2026 era site responsivo e nada além: sem manifest, sem service worker. Um
 **PWA** atende o pedido de "app" dentro do prazo: ícone na tela inicial, tela cheia,
 e a gravação já funciona por `MediaRecorder` no navegador. É trabalho de front-end,
 algumas horas. App nativo só seria necessário para gravar em segundo plano ou push
