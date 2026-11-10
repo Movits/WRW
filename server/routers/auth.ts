@@ -11,7 +11,7 @@ import {
   ehErroDoDriverDeBanco,
   MENSAGEM_BANCO_INDISPONIVEL,
 } from "../banco-indisponivel";
-import { createAuditLog, invalidateSession } from "../security";
+import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
 import { registerUser, loginUser, toPublicUser } from "../auth";
 import {
@@ -96,6 +96,9 @@ export const tetoDeRecuperacaoPorEmail = criarTeto(
 
 /** E-mail como chave de teto: normalizado e curto (o zod não limita o tamanho). */
 const chaveDoEmail = (email: string) => email.trim().toLowerCase().slice(0, 320);
+
+/** Link vencido, já usado ou inexistente. A tela decide pelo código (BAD_REQUEST), não pela frase. */
+const MENSAGEM_LINK_INVALIDO = "Token inválido ou expirado. Solicite um novo link de recuperação.";
 
 export const authRouter = router({
   // Público de propósito: sem sessão, devolve null e a tela manda para o login.
@@ -294,16 +297,22 @@ export const authRouter = router({
       return genericResponse;
     }),
 
+  // Redefinir a senha derruba TODAS as sessões da conta, inclusive a deste
+  // aparelho: quem redefine muitas vezes desconfia de acesso alheio, e as
+  // sessões de 8 h seguiam vivas. O link é gasto num UPDATE condicional, e só
+  // segue quem alcançou a linha: com o SELECT decidindo e o UPDATE
+  // incondicional, dois envios do mesmo link passavam juntos. Os passos (1) a
+  // (6) abaixo estão na ordem que vale.
   resetPassword: publicProcedure
     .input(z.object({
       token: z.string().min(10),
       newPassword: z.string().min(8),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await exigirDb();
       const tokenHash = hashPasswordResetToken(input.token);
-      // Buscar token válido
-      const [resetToken] = await db.select()
+      // (1) O link válido, só para achar o id e a conta dona dele.
+      const [resetToken] = await db.select({ id: passwordResetTokens.id, userId: passwordResetTokens.userId })
         .from(passwordResetTokens)
         .where(and(
           eq(passwordResetTokens.token, tokenHash),
@@ -312,14 +321,50 @@ export const authRouter = router({
         ))
         .limit(1);
       if (!resetToken) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Token inválido ou expirado. Solicite um novo link de recuperação." });
+        throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_LINK_INVALIDO });
       }
-      // Atualizar senha (na fila do bcrypt, como o cadastro e o login)
       const bcrypt = await import("bcryptjs");
+      // (2) O hash da senha nova, na fila do bcrypt (a mesma do cadastro e do
+      // login), antes de gravar qualquer coisa: com a fila cheia, a tela manda
+      // tentar de novo em segundos (TOO_MANY_REQUESTS), e o mesmo link precisa
+      // continuar valendo. O custo: num envio duplo, quem perde também paga um
+      // hash, e um lote do tRPC com o mesmo link paga um por cópia, até lotar a
+      // fila.
       const passwordHash = await filaDoBcrypt.executar(() => bcrypt.hash(input.newPassword, 12));
-      await db.update(users).set({ passwordHash }).where(eq(users.id, resetToken.userId));
-      // Marcar token como usado
-      await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, resetToken.id));
+      // (3) e (4) numa transação: se a troca da senha falhar, o gasto do link é
+      // desfeito, e o mesmo link continua valendo para tentar de novo.
+      await db.transaction(async tx => {
+        // (3) Gasta o link, se ainda vale.
+        const consumo = await tx.update(passwordResetTokens)
+          .set({ usedAt: new Date() })
+          .where(and(
+            eq(passwordResetTokens.id, resetToken.id),
+            sql`${passwordResetTokens.usedAt} IS NULL`,
+            sql`${passwordResetTokens.expiresAt} > NOW()`
+          ));
+        // Zero linhas: outro envio gastou o link depois do SELECT (este UPDATE
+        // espera a transação do outro terminar e já não alcança a linha), ou o
+        // link venceu. A mesma resposta do link inválido; o erro desfaz a
+        // transação, e a senha não muda.
+        if (linhasAlcancadas(consumo) !== 1) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_LINK_INVALIDO });
+        }
+        // (4) A senha nova vai para a conta.
+        await tx.update(users).set({ passwordHash }).where(eq(users.id, resetToken.userId));
+      });
+      // (5) Todas as sessões caem. Um login que conferiu a senha antiga e grava
+      // a sessão depois daqui é barrado no próprio loginUser (server/auth.ts).
+      await revokeAllUserSessions(resetToken.userId);
+      // (6) Auditoria, sem o token nem a senha nos detalhes.
+      await createAuditLog({
+        userId: resetToken.userId,
+        action: "PASSWORD_RESET",
+        resource: "auth",
+        ipAddress: ipDaCliente(ctx.req),
+        userAgent: ctx.req.headers["user-agent"],
+        status: "success",
+        riskLevel: "medium",
+      });
       return { success: true };
     }),
 

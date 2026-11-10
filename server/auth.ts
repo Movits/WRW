@@ -201,6 +201,21 @@ export async function loginUser(params: {
     throw new Error("Erro interno ao criar sessão. Tente novamente.");
   }
 
+  // A redefinição de senha só derruba as sessões que já existem, e este login
+  // pode ter conferido a senha antiga antes dela (a espera na fila do bcrypt
+  // chega a 1 min). Por isso a conta é relida DEPOIS de gravar a sessão: se a
+  // senha mudou, a sessão cai e o login é recusado como senha errada; se o
+  // reset gravar a senha depois desta leitura, a revogação dele alcança a sessão.
+  const [contaAgora] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+  if (contaAgora?.passwordHash !== passwordHash) {
+    await invalidateSessionByToken(sessionToken);
+    throw new Error("E-mail ou senha incorretos.");
+  }
+
   // Gerar JWT compatível com sdk.verifySession (campos: openId, appId, name)
   // IMPORTANTE: name deve ser string não-vazia (sdk.verifySession usa isNonEmptyString)
   const safeName = (user.name && user.name.trim().length > 0)

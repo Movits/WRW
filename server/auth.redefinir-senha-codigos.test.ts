@@ -15,25 +15,42 @@ vi.hoisted(() => {
  * mesmo tempo, aguarde segundos". Se a rota passasse a embrulhar a fila cheia
  * num BAD_REQUEST, quem tem um link válido leria "link inválido", pediria
  * outro, e o pedido novo cancelaria o link que ainda valia. O mesmo contrato,
- * para o login e o cadastro, está em auth.limite-por-ip.test.ts.
+ * para o login e o cadastro, está em auth.limite-por-ip.test.ts. A rota só grava
+ * (gasta o link e troca a senha, numa transação) depois do hash, que passa pela
+ * fila: com a fila cheia, nada é gravado e o link continua valendo (a transação,
+ * as sessões e a auditoria: auth.redefinir-senha.test.ts).
  */
 
 type Gravacao = { tabela: string; valores: Record<string, unknown>; filtro: unknown };
 const banco = vi.hoisted(() => ({ linhas: [] as unknown[], gravacoes: [] as Gravacao[] }));
 const fila = vi.hoisted(() => ({ executar: vi.fn() }));
 
-vi.mock("./db", async importOriginal => ({
-  ...(await importOriginal<typeof import("./db")>()),
-  exigirDb: async () => ({
+vi.mock("./db", async importOriginal => {
+  const falso = {
     select: () => ({ from: () => ({ where: () => ({ limit: async () => banco.linhas }) }) }),
-    // Guarda O QUE foi gravado e ONDE, e não só quantas vezes.
+    // Guarda O QUE foi gravado e ONDE, e não só quantas vezes. Devolve o
+    // cabeçalho do mysql2 com a linha alcançada: o link só é gasto quando o
+    // UPDATE condicional o alcança.
     update: (tabela: Table) => ({
       set: (valores: Record<string, unknown>) => ({
-        where: async (filtro: unknown) => { banco.gravacoes.push({ tabela: getTableName(tabela), valores, filtro }); },
+        where: async (filtro: unknown) => {
+          banco.gravacoes.push({ tabela: getTableName(tabela), valores, filtro });
+          return [{ affectedRows: 1 }];
+        },
       }),
     }),
-  }),
-}));
+    // A auditoria do reset também conta como gravação.
+    insert: (tabela: Table) => ({
+      values: async (valores: Record<string, unknown>) => {
+        banco.gravacoes.push({ tabela: getTableName(tabela), valores, filtro: null });
+      },
+    }),
+    // O link e a senha vão numa transação, aqui sobre o mesmo banco falso. O
+    // que ela desfaz quando lança é assunto de auth.redefinir-senha.test.ts.
+    transaction: async (tarefa: (tx: object) => Promise<unknown>): Promise<unknown> => tarefa(falso),
+  };
+  return { ...(await importOriginal<typeof import("./db")>()), exigirDb: async () => falso };
+});
 
 vi.mock("./fila-do-bcrypt", () => ({ filaDoBcrypt: { executar: fila.executar } }));
 
