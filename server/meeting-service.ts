@@ -926,9 +926,35 @@ async function executarReprocessamento(db: Banco, execucao: {
   }
 }
 
+/**
+ * As colunas de `meetings` que a lista e o detalhe mandam ao navegador,
+ * escolhidas uma a uma em vez da linha inteira. Privacidade é regra de
+ * consulta, não de tela: coluna nova da tabela só chega à tela entrando aqui.
+ *
+ * Ficam no servidor as colunas de controle da fila de transcrição (attempts,
+ * lockedUntil e lockToken): a reserva de quem está processando a reunião não é
+ * dado da dona e não tem uso na tela. As outras colunas da migração 0014
+ * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
+ * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
+ */
+const COLUNAS_DA_REUNIAO_NA_TELA = {
+  id: meetings.id,
+  ownerId: meetings.ownerId,
+  title: meetings.title,
+  contactId: meetings.contactId,
+  contextId: meetings.contextId,
+  status: meetings.status,
+  consentGranted: meetings.consentGranted,
+  consentAt: meetings.consentAt,
+  language: meetings.language,
+  processingError: meetings.processingError,
+  createdAt: meetings.createdAt,
+  updatedAt: meetings.updatedAt,
+};
+
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select().from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
+  const lista = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
   return lista.map(meeting => ({ ...meeting, processingError: processingErrorSeguro(meeting.processingError) }));
 }
 
@@ -1034,7 +1060,7 @@ export async function limparGravacoesVencidas(limite = 200) {
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  const [meeting] = await db.select().from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  const [meeting] = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));

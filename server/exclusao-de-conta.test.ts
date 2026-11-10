@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { MySqlDialect } from "drizzle-orm/mysql-core";
 import { drizzle } from "drizzle-orm/mysql2";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -37,10 +39,11 @@ import {
   lerChavesDaConta,
   chavesDeArquivosDaConta,
   tirarDosGruposAlheios,
+  MOTIVO_DA_PARTE_QUE_FICOU,
 } from "./exclusao-de-conta";
 import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
 import {
-  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingRecordings,
+  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingRecordings,
   opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
   strategicGroups, users,
 } from "../drizzle/schema";
@@ -77,7 +80,9 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 63: o Meu Network Inteligente somou network_sugestoes.owner_id,
     // conexoes_participantes.owner_id e .userId, consumo_de_minutos.owner_id e
     // assinaturas_de_minutos.userId.
-    expect(PARES).toHaveLength(63);
+    // 64: as partes do áudio da gravação longa somaram meeting_audio_slices.owner_id.
+    expect(PARES).toHaveLength(64);
+    expect(PARES).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
     expect(PARES).toContainEqual({ tabela: "gold_access_grants", coluna: "revokedBy" });
     expect(PARES).toContainEqual({ tabela: "deal_rooms", coluna: "interestedId" });
@@ -120,9 +125,10 @@ describe("A2) a ordem do plano não deixa órfão", () => {
 });
 
 // ═══════════════════════════ banco falso (executa) ════════════════════════════
-type Delecao = { tabela: unknown; colunas: string[]; sql: string };
+// `condicao` é o WHERE inteiro, para os testes que o renderizam pelo dialeto.
+type Delecao = { tabela: unknown; colunas: string[]; sql: string; condicao: unknown };
 let delecoes: Delecao[] = [];
-let atualizacoes: Array<{ tabela: unknown; valores: Record<string, unknown> }> = [];
+let atualizacoes: Array<{ tabela: unknown; valores: Record<string, unknown>; condicao?: unknown }> = [];
 let linhasPorTabela: Map<unknown, unknown[]>;
 let apagadosNoBucket: string[] = [];
 let ordemDosEfeitos: string[] = [];
@@ -174,17 +180,29 @@ const fakeDb = {
   select: () => ({ from: (tabela: unknown) => selecionar(tabela) }),
   delete: (tabela: unknown) => ({
     where: async (condicao: unknown) => {
-      delecoes.push({ tabela, colunas: colunasDe(condicao), sql: textoDe(condicao) });
+      delecoes.push({ tabela, colunas: colunasDe(condicao), sql: textoDe(condicao), condicao });
       ordemDosEfeitos.push("delete");
       return [{ affectedRows: (linhasPorTabela.get(tabela) ?? []).length || 1 }];
     },
   }),
+  // O mysql2 devolve [ResultSetHeader, campos] também no UPDATE.
   update: (tabela: unknown) => ({
     set: (valores: Record<string, unknown>) => ({
-      where: async () => { atualizacoes.push({ tabela, valores }); ordemDosEfeitos.push("update"); },
+      where: async (condicao?: unknown) => {
+        atualizacoes.push({ tabela, valores, condicao });
+        ordemDosEfeitos.push("update");
+        return [{ affectedRows: 1 }];
+      },
     }),
   }),
 } as never;
+
+/** O WHERE renderizado pelo dialeto do MySQL, sem banco: texto e parâmetros. */
+const dialeto = new MySqlDialect();
+const renderizar = (condicao: unknown) => {
+  const { sql: texto, params } = dialeto.sqlToQuery(condicao as SQL);
+  return { sql: texto, params };
+};
 
 const apagarArquivo = async (chave: string) => {
   ordemDosEfeitos.push("bucket");
@@ -207,6 +225,12 @@ beforeEach(() => {
     [privateContacts, [{ foto: "/manus-storage/contacts/open-7/foto.jpg", cartao: null }]],
     [contextMedia, [{ caminho: "contexts/open-7/ctx/imagem.png", miniatura: "contexts/open-7/ctx/mini.png" }]],
     [meetingRecordings, [{ chave: "meetings/open-7/reuniao-1/recording.webm" }]],
+    // A segunda parte vem com o prefixo do proxy: a chave conferida é a mesma
+    // sem ele, e é por ela que o bucket é chamado.
+    [meetingAudioSlices, [
+      { id: "parte-1", chave: "meetings/open-7/reuniao-2/partes/0_aaaa.mp4" },
+      { id: "parte-2", chave: "/manus-storage/meetings/open-7/reuniao-2/partes/1_bbbb.mp4" },
+    ]],
     [sivcDocuments, [{ chave: "sivc/7/9/1234-rg.png" }]],
     [dealRoomDocuments, [{ chave: "deal-rooms/55/1234-planilha.xlsx", sala: 55 }]],
     [strategicGroups, [
@@ -307,6 +331,8 @@ describe("B2) chave de bucket sem prova de posse não é apagada", () => {
       "contexts/open-7/ctx/imagem.png",
       "contexts/open-7/ctx/mini.png",
       "meetings/open-7/reuniao-1/recording.webm",
+      "meetings/open-7/reuniao-2/partes/0_aaaa.mp4",
+      "meetings/open-7/reuniao-2/partes/1_bbbb.mp4",
       "sivc/7/9/1234-rg.png",
       "deal-rooms/55/1234-planilha.xlsx",
     ]);
@@ -316,6 +342,10 @@ describe("B2) chave de bucket sem prova de posse não é apagada", () => {
     linhasPorTabela.set(privateContacts, [{ foto: "contacts/open-OUTRA/foto.jpg", cartao: "/etc/passwd" }]);
     linhasPorTabela.set(contextMedia, [{ caminho: "contexts/open-OUTRA/x.png", miniatura: null }]);
     linhasPorTabela.set(meetingRecordings, [{ chave: "meetings/open-OUTRA/r/recording.webm" }]);
+    linhasPorTabela.set(meetingAudioSlices, [
+      { id: "parte-x", chave: "meetings/open-OUTRA/r/partes/0_x.mp4" },
+      { id: "parte-y", chave: "contexts/open-7/nao-e-reuniao.mp4" },
+    ]);
     linhasPorTabela.set(sivcDocuments, [{ chave: "sivc/999/9/rg.png" }]);
     linhasPorTabela.set(dealRoomDocuments, [{ chave: "deal-rooms/999/doc.pdf", sala: 55 }]);
     const chaves = await lerChavesDaConta(fakeDb, CONTA);
@@ -432,6 +462,88 @@ describe("B5) a tela não diz 'excluídos' quando um arquivo ficou para trás", 
   });
 });
 
+// ═══ B6) parte do áudio de reunião: a linha só sai se o objeto saiu ══════════
+// Correção da revisão do desenho do gravador (G3): apagar a linha da parte cujo
+// objeto o bucket recusou deixaria a voz de quem participou no bucket sem
+// ponteiro nenhum, e a conta já não existe para pedir de novo. A linha fica, mas
+// só como ponteiro: sem a transcrição, fora da fila e já vencida.
+describe("B6) a parte de áudio cujo objeto ficou no bucket fica, só como ponteiro", () => {
+  const PARTE_1 = "meetings/open-7/reuniao-2/partes/0_aaaa.mp4";
+  const PARTE_2 = "meetings/open-7/reuniao-2/partes/1_bbbb.mp4";
+  const delecaoDasPartes = () => delecoes.filter(d => d.tabela === meetingAudioSlices);
+  const atualizacoesDasPartes = () => atualizacoes.filter(a => a.tabela === meetingAudioSlices);
+
+  it("o bucket recusou a parte 1: o DELETE das partes deixa só ela de fora", async () => {
+    bucketFalha.add(PARTE_1);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([PARTE_1]);
+    expect(apagadosNoBucket).toContain(PARTE_2);
+    expect(delecaoDasPartes()).toHaveLength(1);
+    expect(renderizar(delecaoDasPartes()[0].condicao)).toEqual({
+      sql: "(`meeting_audio_slices`.`owner_id` = ? and `meeting_audio_slices`.`id` not in (?))",
+      params: ["open-7", "parte-1"],
+    });
+  });
+
+  it("a parte que fica perde a transcrição, sai da fila e vence na hora", async () => {
+    bucketFalha.add(PARTE_1);
+    const antes = Date.now();
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(atualizacoesDasPartes()).toHaveLength(1);
+    const [ponteiro] = atualizacoesDasPartes();
+    expect(ponteiro.valores).toMatchObject({
+      status: "failed", lastError: MOTIVO_DA_PARTE_QUE_FICOU,
+      result: null, lockedUntil: null, lockToken: null,
+    });
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(ponteiro.valores.expiresAt).toBeLessThanOrEqual(Date.now());
+    // Só a linha DELA, e só a que ficou.
+    expect(renderizar(ponteiro.condicao)).toEqual({
+      sql: "(`meeting_audio_slices`.`owner_id` = ? and `meeting_audio_slices`.`id` in (?))",
+      params: ["open-7", "parte-1"],
+    });
+  });
+
+  it("a linha gravada com o prefixo do proxy também é reconhecida (casa pelo id, não pela chave)", async () => {
+    bucketFalha.add(PARTE_2);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(renderizar(delecaoDasPartes()[0].condicao).params).toEqual(["open-7", "parte-2"]);
+    expect(renderizar(atualizacoesDasPartes()[0].condicao).params).toEqual(["open-7", "parte-2"]);
+  });
+
+  it("o ponteiro é gravado depois do bucket e antes do primeiro DELETE", async () => {
+    bucketFalha.add(PARTE_1);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    const ponteiro = ordemDosEfeitos.indexOf("update");
+    expect(ponteiro).toBeGreaterThan(ordemDosEfeitos.lastIndexOf("bucket"));
+    expect(ponteiro).toBeLessThan(ordemDosEfeitos.indexOf("delete"));
+  });
+
+  it("o relatório nomeia o passo do ponteiro", async () => {
+    bucketFalha.add(PARTE_1);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_audio_slices (ponteiro, UPDATE)");
+  });
+
+  it("sem falha de áudio, todas as partes saem e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toEqual(expect.arrayContaining([PARTE_1, PARTE_2]));
+    expect(atualizacoesDasPartes()).toEqual([]);
+    expect(renderizar(delecaoDasPartes()[0].condicao)).toEqual({
+      sql: "`meeting_audio_slices`.`owner_id` = ?",
+      params: ["open-7"],
+    });
+  });
+
+  it("falha em outro arquivo, inclusive na gravação inteira da reunião, não segura parte nenhuma", async () => {
+    bucketFalha.add("sivc/7/9/1234-rg.png");
+    bucketFalha.add("meetings/open-7/reuniao-1/recording.webm");
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(atualizacoesDasPartes()).toEqual([]);
+    expect(renderizar(delecaoDasPartes()[0].condicao).params).toEqual(["open-7"]);
+  });
+});
+
 // ═════════ C) o SQL que sai de cada passo (sem conectar em banco nenhum) ══════
 // Esta máquina não tem MySQL local nem Docker, e o `.env` de trabalho aponta
 // para a PRODUÇÃO: não há como rodar a exclusão de ponta a ponta aqui sem
@@ -476,6 +588,16 @@ describe("C) cada passo gera um DELETE parametrizado com a coluna certa", () => 
       .where(and(eq(passo.coluna, 7), passo.filtro!(chaves as never)!)).toSQL();
     expect(texto).toMatch(/`action` NOT IN \(\?, \?\)/i);
     expect(params).toEqual([7, ...ACOES_DE_AUDITORIA_PRESERVADAS]);
+  });
+
+  it("o passo das partes de áudio só filtra com o contexto do bucket, e com parâmetro para cada parte que fica", () => {
+    const passo = PLANO_DE_EXCLUSAO.find(p => nomeDoPasso(p) === "meeting_audio_slices.owner_id")!;
+    expect(passo.filtro!(chaves as never)).toBeUndefined();
+    expect(passo.filtro!(chaves as never, { fatiasQueFicam: [] })).toBeUndefined();
+    const { sql: texto, params } = db.delete(passo.tabela)
+      .where(and(eq(passo.coluna, "open-7"), passo.filtro!(chaves as never, { fatiasQueFicam: ["parte-1", "parte-2"] })!)).toSQL();
+    expect(texto).toContain("`meeting_audio_slices`.`id` not in (?, ?)");
+    expect(params).toEqual(["open-7", "parte-1", "parte-2"]);
   });
 
   it("a conta sai com as duas chaves no mesmo WHERE", () => {

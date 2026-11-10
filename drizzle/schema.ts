@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   float,
   tinyint,
+  mediumtext,
 } from "drizzle-orm/mysql-core";
 import { decimal } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
@@ -986,16 +987,45 @@ export const meetings = mysqlTable("meetings", {
   title: varchar("title", { length: 200 }).notNull(),
   contactId: bigint("contact_id", { mode: "number" }),
   contextId: varchar("context_id", { length: 36 }),
-  status: mysqlEnum("status", ["draft", "recording", "processing", "ready", "failed", "deleted"]).default("draft").notNull(),
+  // 'uploading' é o "enviando" da spec da etapa 5: a gravação terminou e as
+  // partes do áudio ainda estão chegando. Fica no FIM da lista de propósito:
+  // acrescentar valor no fim de um enum é alteração instantânea no MySQL 8,
+  // e mudar a ordem reconstruiria a tabela.
+  status: mysqlEnum("status", ["draft", "recording", "processing", "ready", "failed", "deleted", "uploading"]).default("draft").notNull(),
   consentGranted: boolean("consent_granted").default(false).notNull(),
   consentAt: bigint("consent_at", { mode: "number" }),
   language: varchar("language", { length: 12 }).default("pt").notNull(),
   processingError: text("processing_error"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  // Como o áudio chegou: 'single' é o envio único em base64 (meetings.submitRecording);
+  // 'slices' é a gravação enviada em partes, uma linha de meeting_audio_slices
+  // por parte. As partes são internas: para quem grava, a gravação é contínua e
+  // não tem teto de tempo.
+  audioPipeline: mysqlEnum("audio_pipeline", ["single", "slices"]).default("single").notNull(),
+  // De onde a reunião veio. Varchar com o enum só no TypeScript: valor novo não
+  // pede migração. Nula no envio único, que recebe tanto a gravação do
+  // microfone quanto um arquivo escolhido sem dizer qual dos dois: a coluna é
+  // preenchida por quem cria a reunião sabendo de onde ela vem.
+  origem: varchar("origem", { length: 16, enum: ["gravacao", "arquivo", "aba", "pdf", "youtube"] }),
+  // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
+  // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
+  consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
+  // Quantas partes a gravação teve, informado quando ela termina. Nulo
+  // enquanto grava e no envio único.
+  expectedSlices: int("expected_slices"),
+  // Controle da fila de transcrição no passo final da reunião em partes:
+  // tentativas, até quando vale a reserva e de quem ela é. Ficam no servidor;
+  // a lista e o detalhe escolhem as colunas que vão ao navegador
+  // (COLUNAS_DA_REUNIAO_NA_TELA, em server/meeting-service.ts).
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
+  // A fila acha as reuniões em partes pelo estado, sem varrer as do envio único.
+  pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
@@ -1014,11 +1044,70 @@ export const meetingRecordings = mysqlTable("meeting_recordings", {
   ownerExpiresIdx: index("meeting_recordings_owner_expires_idx").on(table.ownerId, table.expiresAt),
 }));
 
+// Partes do áudio de uma reunião gravada em partes (audio_pipeline 'slices').
+// São internas: quem grava aperta começar e encerrar, e o app manda o áudio em
+// partes por baixo para não perder a gravação se a rede cair; as partes se
+// emendam na transcrição. Nenhuma coluna supõe teto de tempo da reunião.
+// Estados: 'uploading' (a linha nasce ANTES de o objeto subir ao bucket, porque
+// é ela o ponteiro para ele), 'received' (o objeto subiu), 'transcribed' (a IA
+// devolveu o resultado) e 'failed'. Nomes em inglês, como as irmãs meeting_*.
+export const meetingAudioSlices = mysqlTable("meeting_audio_slices", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // Posição da parte na gravação, a partir de 0.
+  seq: int("seq").notNull(),
+  status: mysqlEnum("status", ["uploading", "received", "transcribed", "failed"]).default("uploading").notNull(),
+  // A chave é montada pelo servidor (meetings/<openId>/...), e é ela que prova
+  // a posse na exclusão da conta. A url é o caminho do proxy autenticado
+  // (/manus-storage/...), nunca o endereço do bucket.
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  storageUrl: varchar("storage_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  // Do conteúdo recebido: o reenvio da mesma parte é reconhecido, e um
+  // conteúdo diferente na mesma posição, recusado.
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  // Duração medida desta parte e o ponto em que ela começa na reunião, em
+  // milissegundos. O início é a soma das partes anteriores, gravado quando a
+  // parte é transcrita; bigint para nenhuma duração de reunião ter teto.
+  durationMs: int("duration_ms").notNull(),
+  offsetMs: bigint("offset_ms", { mode: "number" }),
+  // Controle da fila de transcrição desta parte; fica no servidor.
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // Código ou frase nossa, nunca o texto do driver ou da IA.
+  lastError: varchar("last_error", { length: 500 }),
+  // O que a IA devolveu para esta parte (as falas, com falante e tempo), que a
+  // montagem da transcrição da reunião lê. É fala de quem participou: na
+  // exclusão da conta, a linha que fica como ponteiro para o objeto perde esta
+  // coluna (server/exclusao-de-conta.ts).
+  result: jsonCompat("result"),
+  // O id do modelo de IA que transcreveu a parte.
+  model: varchar("model", { length: 80 }),
+  // Prazo do áudio desta parte, pela mesma regra do áudio das gravações.
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma linha por posição: a mesma parte enviada duas vezes não duplica.
+  meetingSeqUnique: uniqueIndex("meeting_audio_slices_meeting_seq_unique").on(table.meetingId, table.seq),
+  // A fila reserva pelo estado e pela reserva vencida.
+  statusLockedIdx: index("meeting_audio_slices_status_locked_idx").on(table.status, table.lockedUntil),
+  ownerMeetingIdx: index("meeting_audio_slices_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // A faxina acha o áudio vencido.
+  expiresIdx: index("meeting_audio_slices_expires_idx").on(table.expiresAt),
+}));
+
 export const meetingTranscripts = mysqlTable("meeting_transcripts", {
   id: varchar("id", { length: 36 }).primaryKey(),
   meetingId: varchar("meeting_id", { length: 36 }).notNull().unique(),
   ownerId: varchar("owner_id", { length: 128 }).notNull(),
-  transcript: text("transcript").notNull(),
+  // MEDIUMTEXT (até 16 MiB): o TEXT para em 64 KiB, menos que a transcrição de
+  // uma reunião longa, e no modo estrito o banco recusa o que passa. 16 MiB dão
+  // mais de 100 horas de fala, mesmo traduzidas para escrita de 3 bytes por letra.
+  transcript: mediumtext("transcript").notNull(),
   segments: jsonCompat("segments"),
   language: varchar("language", { length: 12 }),
   durationSeconds: int("duration_seconds"),
@@ -1033,7 +1122,8 @@ export const meetingTranscriptTranslations = mysqlTable("meeting_transcript_tran
   meetingId: varchar("meeting_id", { length: 36 }).notNull(),
   ownerId: varchar("owner_id", { length: 128 }).notNull(),
   language: varchar("language", { length: 12 }).notNull(),
-  translatedText: text("translated_text").notNull(),
+  // MEDIUMTEXT pelo mesmo motivo da transcrição (meeting_transcripts.transcript).
+  translatedText: mediumtext("translated_text").notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
