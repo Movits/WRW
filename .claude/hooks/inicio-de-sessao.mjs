@@ -175,7 +175,7 @@ export function avisosDoBanco(
     );
   } else {
     const sufixoTestes =
-      testes.classe === "ausente" ? " (o teste de integração se pula)" : "";
+      testes.classe === "ausente" ? " (os testes de integração se pulam)" : "";
     linhas.push(
       `Banco: DATABASE_URL ${ROTULO[principal.classe]} · DATABASE_URL_TESTES ${ROTULO[testes.classe]}${sufixoTestes}.`
     );

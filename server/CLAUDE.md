@@ -256,7 +256,7 @@ saem depois de a IA dar certo, e decidir sobre sugestão ou entidade com a reuni
 
 ## Testes do servidor
 
-- Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os dois
+- Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os
   `*.integracao.test.ts`). Padrão: `vi.mock` das dependências; credencial ausente (ex.:
   Resend) se auto-pula com `skipIf`.
 - A suíte NUNCA lê `DATABASE_URL`: `server/test/setup-banco.ts` a troca por

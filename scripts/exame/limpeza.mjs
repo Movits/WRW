@@ -39,6 +39,12 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcript_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Partes do áudio da gravação em partes. O exame não grava reunião, então as
+  // contas QA não têm parte nem objeto no bucket, e este DELETE não olha o
+  // bucket. Se o exame passar a gravar, a linha é o ponteiro para o objeto:
+  // crie em checar-producao.mjs a guarda que context_media tem, para ela só
+  // sair depois dele.
+  { tabela: "meeting_audio_slices", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_recordings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },

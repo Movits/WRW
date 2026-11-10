@@ -1,3 +1,4 @@
+import { getTableColumns } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +35,6 @@ vi.mock("./gemini", async importOriginal => ({
 const schema = await import("../drizzle/schema");
 const { MENSAGEM_ERRO_DE_CONSULTA } = await import("./banco-indisponivel");
 
-const AGORA = Date.now();
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const tabelas = new Map<unknown, Record<string, unknown>[]>();
 
@@ -72,12 +72,27 @@ const consulta = (linhas: Record<string, unknown>[]) => ({
   then: (resolver: (valor: Record<string, unknown>[]) => unknown) => resolver(linhas),
 });
 
+/**
+ * select(projeção) devolve só as colunas pedidas, com o nome dado na projeção,
+ * como o banco faria; select() devolve a linha inteira. Assim o que a lista e o
+ * detalhe escolhem se prova pelo que chega à tela, e não pela forma da chamada.
+ */
+const projetar = (tabela: unknown, projecao: Record<string, unknown> | undefined, linhas: Record<string, unknown>[]) => {
+  if (!projecao) return linhas;
+  const chavePorColuna = new Map<unknown, string>(
+    Object.entries(getTableColumns(tabela as typeof schema.meetings)).map(([chave, coluna]) => [coluna, chave]),
+  );
+  return linhas.map(linha => Object.fromEntries(
+    Object.entries(projecao).map(([nome, coluna]) => [nome, linha[chavePorColuna.get(coluna) ?? ""]]),
+  ));
+};
+
 const fakeDb = {
-  select: () => ({
+  select: (projecao?: Record<string, unknown>) => ({
     from: (tabela: unknown) => ({
       where: (condicao?: SQL) => {
         leituras.push({ tabela, ...renderizar(condicao) });
-        return consulta(tabelas.get(tabela) ?? []);
+        return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
       },
     }),
   }),
@@ -100,6 +115,11 @@ const fakeDb = {
 vi.mock("./db", () => ({ exigirDb: async () => fakeDb as never, getDb: async () => fakeDb as never }));
 
 const servico = await import("./meeting-service");
+
+// Depois do import do serviço, e não antes: importar meeting-service (com o SDK
+// do bucket) passa de 1 s com a máquina ocupada, e a gravação "dentro do prazo"
+// (AGORA + 1000) chegava vencida ao teste.
+const AGORA = Date.now();
 
 const REUNIAO = { id: "reuniao-1", ownerId: "dona-1", title: "Reunião", status: "ready", consentGranted: true, createdAt: AGORA - 1000 };
 const gravacaoCom = (expiresAt: number) => ({
@@ -202,6 +222,50 @@ describe("Leitura — processing_error legado com o SQL do driver não chega à 
     expect(servico.processingErrorSeguro("Arquivo de áudio inválido.")).toBe("Arquivo de áudio inválido.");
     expect(servico.processingErrorSeguro(servico.CODIGO_ERRO_INTERROMPIDO)).toBe("ERRO_INTERROMPIDO");
     expect(servico.processingErrorSeguro(null)).toBeNull();
+  });
+});
+
+describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai ao navegador", () => {
+  // A migração 0014 pôs em `meetings` a reserva da fila de transcrição
+  // (attempts, locked_until, lock_token). Com select() da linha inteira, ela ia
+  // para o navegador em meetings.list e meetings.get. A linha simulada tem TODAS
+  // as colunas do schema (inclusive as que vierem depois), para a projeção ser
+  // provada pelo que chega à tela.
+  const CONTROLE_DA_FILA = ["attempts", "lockedUntil", "lockToken"];
+  const NA_TELA = [
+    "id", "ownerId", "title", "contactId", "contextId", "status", "consentGranted",
+    "consentAt", "language", "processingError", "createdAt", "updatedAt",
+  ];
+  const linhaCompleta = () => ({
+    ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),
+    ...REUNIAO,
+    processingError: null,
+    attempts: 2,
+    lockedUntil: AGORA + 60_000,
+    lockToken: "ficha-da-fila-0123",
+  });
+
+  it("a linha simulada tem mesmo as colunas de controle", () => {
+    for (const coluna of CONTROLE_DA_FILA) expect(linhaCompleta()).toHaveProperty(coluna);
+  });
+
+  it("a lista manda só as colunas escolhidas, sem a reserva da fila", async () => {
+    tabelas.set(schema.meetings, [linhaCompleta()]);
+    const lista = await servico.listPrivateMeetings("dona-1");
+    expect(lista).toHaveLength(1);
+    for (const coluna of CONTROLE_DA_FILA) expect(lista[0]).not.toHaveProperty(coluna);
+    expect(JSON.stringify(lista)).not.toContain("ficha-da-fila-0123");
+    expect(Object.keys(lista[0]).sort()).toEqual([...NA_TELA].sort());
+    expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
+  });
+
+  it("o detalhe também", async () => {
+    tabelas.set(schema.meetings, [linhaCompleta()]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
+    expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA].sort());
+    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready" });
   });
 });
 
