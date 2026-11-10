@@ -1,5 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
+import { renovarCookieDaSessao } from "../auth";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { sdk } from "./sdk";
 
@@ -38,6 +39,11 @@ export async function createContext(
       console.error(`[Auth] Banco de dados indisponível ao ler a sessão: ${descreverErroDeBanco(error)}`);
     }
   }
+
+  // Sessão deslizante (server/duracao-da-sessao.ts): quem está usando o app
+  // ganha token e cookie novos uma vez por dia. Fora do try de propósito: uma
+  // falha aqui não pode virar "sem sessão" e mandar a usuária para o login.
+  if (user) await renovarCookieDaSessao(opts.req, opts.res);
 
   return {
     req: opts.req,

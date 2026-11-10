@@ -13,7 +13,7 @@ import {
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
-import { registerUser, loginUser, toPublicUser } from "../auth";
+import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao } from "../auth";
 import {
   hashPasswordResetToken,
   PASSWORD_RESET_ACCOUNT_LIMIT,
@@ -150,8 +150,7 @@ export const authRouter = router({
       try {
         // O bloqueio do banco conta pela rede (/56); a sessão guarda o IP cru.
         const { token, user, expiresAt } = await loginUser({ email: input.email, password: input.password, ip, chaveDoBloqueio: rede, userAgent: ua });
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 8 * 60 * 60 * 1000 });
+        gravarCookieDaSessao(ctx.req, ctx.res, token);
         await createAuditLog({ userId: user.id, action: "LOGIN", resource: "auth", ipAddress: ip, userAgent: ua, status: "success", riskLevel: "low" });
         return { success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, onboardingCompleted: user.onboardingCompleted } };
       } catch (err: any) {

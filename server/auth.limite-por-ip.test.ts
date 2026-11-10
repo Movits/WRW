@@ -27,6 +27,7 @@ vi.mock("./auth", () => ({
   registerUser: dubles.registerUser,
   loginUser: dubles.loginUser,
   toPublicUser: (u: unknown) => u,
+  gravarCookieDaSessao: vi.fn(),
 }));
 
 vi.mock("./security", async importOriginal => ({

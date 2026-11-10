@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { eq, and, desc, gt, gte, notInArray, sql, count } from "drizzle-orm";
 import { exigirDb } from "./db";
 import { requireSecret } from "./_core/env";
+import { DURACAO_DA_SESSAO_MS } from "./duracao-da-sessao";
 import {
   auditLogs,
   loginAttempts,
@@ -883,8 +884,13 @@ export async function validateSessionToken(sessionToken: string): Promise<number
     return null;
   }
 
-  // Atualizar lastActivityAt
-  await db.update(sessions).set({ lastActivityAt: new Date() }).where(eq(sessions.sessionToken, sessionToken));
+  // Sessão deslizante (server/duracao-da-sessao.ts): o uso empurra o prazo no
+  // mesmo UPDATE que grava a última atividade, sem consulta a mais.
+  const agora = Date.now();
+  await db
+    .update(sessions)
+    .set({ lastActivityAt: new Date(agora), expiresAt: new Date(agora + DURACAO_DA_SESSAO_MS) })
+    .where(eq(sessions.sessionToken, sessionToken));
 
   return session.userId;
 }

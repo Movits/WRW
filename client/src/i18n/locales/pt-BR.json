@@ -677,7 +677,7 @@
     "termsAnd": "e",
     "privacy": "Política de Privacidade",
     "dataProtected": "Seus dados são guardados com proteção de nível bancário.",
-    "securityNote": "Conexão segura. Seus dados ficam protegidos e você permanece conectado por até 8 horas.",
+    "securityNote": "Conexão segura. Seus dados ficam protegidos e o acesso fica salvo neste aparelho até você sair da conta.",
     "registerSecurityNote": "Dados criptografados · Sem spam · Cancele quando quiser",
     "backToHome": "Voltar ao início",
     "forgotPasswordInfo": "Recuperação de senha em breve. Entre em contato com o suporte.",
@@ -1732,18 +1732,6 @@
     "completeByText": "Completar por texto",
     "completeHint": "Responda ao assistente logo abaixo: ele só grava o que você confirmar. Telefone e e-mail também podem ser digitados em Editar.",
     "contactNotFound": "Esse contato não foi encontrado na sua rede."
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ Sessão expirando em {{count}} minuto",
-    "warningTitle_other": "⏰ Sessão expirando em {{count}} minutos",
-    "warningTitle_zero": "⏰ Sessão expirando em {{count}} minutos",
-    "warningTitle_two": "⏰ Sessão expirando em {{count}} minutos",
-    "warningTitle_few": "⏰ Sessão expirando em {{count}} minutos",
-    "warningTitle_many": "⏰ Sessão expirando em {{count}} minutos",
-    "warningDescription": "Mova o mouse ou pressione uma tecla para permanecer conectado.",
-    "continueButton": "Continuar conectado",
-    "timeoutTitle": "🔒 Sessão encerrada por inatividade",
-    "timeoutDescription": "Por segurança, você foi desconectado após 30 minutos sem atividade. Faça login novamente para continuar."
   },
   "errorBoundary": {
     "title": "Algo inesperado aconteceu",

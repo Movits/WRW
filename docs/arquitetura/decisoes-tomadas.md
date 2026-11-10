@@ -204,6 +204,21 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   tinha regra PowerShell no settings do usuário.
 - **Onde:** `.claude/settings.json` e CLAUDE.md da raiz.
 
+## 10/11/2026 — login persistente: a sessão dura 90 dias desde o último uso
+
+- **Quem:** Roberto.
+- **O quê:** quem já entrou não digita e-mail e senha de novo. A sessão passou a ser
+  deslizante: cada requisição autenticada empurra o prazo no banco para 90 dias à frente,
+  e o token (JWT) e o cookie são reemitidos uma vez por dia. O corte de 30 minutos sem
+  mexer na tela saiu, e o `/login` com a sessão viva segue direto para o destino do login.
+  Sair da conta, redefinir a senha, excluir a conta e a desativação continuam encerrando a
+  sessão na hora, porque o sdk confere a linha no banco em toda requisição.
+- **Antes:** 8 horas fixas desde o login (no banco, no token e no cookie) e, no navegador,
+  logout automático aos 30 minutos parada.
+- **Onde:** `server/duracao-da-sessao.ts`, `assinarTokenDaSessao` e
+  `renovarCookieDaSessao` em `server/auth.ts`, `validateSessionToken` em
+  `server/security.ts`, `server/_core/context.ts` e `client/src/pages/Login.tsx`.
+
 ---
 
 ## Lições sem data registrada
