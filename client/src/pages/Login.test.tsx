@@ -168,6 +168,22 @@ describe("Login — quem já está logada não vê o formulário", () => {
     expect(duble.navigate).toHaveBeenCalledWith("/network", { replace: true });
   });
 
+  // Pendência da validação da #179: o caminho de quem já está logada só tinha o
+  // ?voltar= seguro. Endereço de fora, barra dupla, barra invertida e a própria
+  // tela de entrada são ignorados, e a pessoa segue ao gravador.
+  it.each([
+    "?voltar=https%3A%2F%2Fexemplo.com",
+    "?voltar=%2F%2Fexemplo.com",
+    "?voltar=%2F%5Cexemplo.com",
+    "?voltar=%2F..%2F%2Fexemplo.com",
+    "?voltar=%2Flogin",
+  ])("com ?voltar= inseguro ou de tela de entrada (%s), ignora e segue ao gravador", search => {
+    vi.stubGlobal("location", { href: "", search });
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    render(<Login />);
+    expect(duble.navigate).toHaveBeenCalledWith("/gravar", { replace: true });
+  });
+
   it("cadastro por concluir: segue ao /onboarding", () => {
     duble.sessao = { user: { onboardingCompleted: false }, loading: false };
     render(<Login />);
