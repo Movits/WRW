@@ -677,7 +677,7 @@
     "termsAnd": "and",
     "privacy": "Privacy Policy",
     "dataProtected": "Your data is protected with AES-256 encryption.",
-    "securityNote": "Encrypted connection · 8-hour session · AES-256 protection",
+    "securityNote": "Encrypted connection · Stay signed in on this device · AES-256 protection",
     "registerSecurityNote": "Encrypted data · No spam · Cancel anytime",
     "backToHome": "Back to home",
     "forgotPasswordInfo": "Password recovery coming soon. Contact support.",
@@ -1732,18 +1732,6 @@
     "completeByText": "Complete by text",
     "completeHint": "Answer the assistant below: it only saves what you confirm. Phone and email can also be typed in Edit.",
     "contactNotFound": "This contact was not found in your network."
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ Session expiring in {{count}} minute",
-    "warningTitle_other": "⏰ Session expiring in {{count}} minutes",
-    "warningTitle_zero": "⏰ Session expiring in {{count}} minutes",
-    "warningTitle_two": "⏰ Session expiring in {{count}} minutes",
-    "warningTitle_few": "⏰ Session expiring in {{count}} minutes",
-    "warningTitle_many": "⏰ Session expiring in {{count}} minutes",
-    "warningDescription": "Move the mouse or press a key to stay signed in.",
-    "continueButton": "Stay signed in",
-    "timeoutTitle": "🔒 Session ended due to inactivity",
-    "timeoutDescription": "For your security, you were signed out after 30 minutes of inactivity. Sign in again to continue."
   },
   "errorBoundary": {
     "title": "Something unexpected happened",

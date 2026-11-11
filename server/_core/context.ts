@@ -1,5 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
+import { HttpError } from "@shared/_core/errors";
+import { cookieDaSessao, limparCookieDaSessao, renovarCookieDaSessao } from "../auth";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { sdk } from "./sdk";
 
@@ -36,8 +38,20 @@ export async function createContext(
     if (ehErroDeBancoIndisponivel(error)) {
       bancoIndisponivel = true;
       console.error(`[Auth] Banco de dados indisponível ao ler a sessão: ${descreverErroDeBanco(error)}`);
+    } else if (error instanceof HttpError && error.statusCode === 403 && cookieDaSessao(opts.req)) {
+      // O sdk recusou o cookie (revogado, vencido, conta desativada ou
+      // inexistente): ele não volta a valer, então sai do navegador. Sem isto,
+      // com o cookie de 90 dias, um cookie morto ficava meses sendo recusado —
+      // por exemplo o que uma requisição em voo renovou depois do "Sair", ou o
+      // de quem redefiniu a senha logada no mesmo navegador.
+      limparCookieDaSessao(opts.req, opts.res);
     }
   }
+
+  // Sessão deslizante (server/duracao-da-sessao.ts): quem está usando o app
+  // ganha token e cookie novos uma vez por dia. Fora do try de propósito: uma
+  // falha aqui não pode virar "sem sessão" e mandar a usuária para o login.
+  if (user) await renovarCookieDaSessao(opts.req, opts.res);
 
   return {
     req: opts.req,

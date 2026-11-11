@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowLeft, Inbox, Mail, Loader2 } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
+import { LOGIN_COM_FORMULARIO } from "@/lib/caminho-de-volta";
 
 export default function ForgotPassword() {
   const { t } = useTranslation();
@@ -236,7 +237,7 @@ export default function ForgotPassword() {
             )}
 
             <div className="mt-6 text-center">
-              <Link href="/login">
+              <Link href={LOGIN_COM_FORMULARIO}>
                 <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground gap-2">
                   <ArrowLeft className="w-4 h-4" />
                   {t("auth.backToLogin", "Voltar para o login")}

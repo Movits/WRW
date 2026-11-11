@@ -103,7 +103,7 @@ export default function AdminPanel() {
 
   const revokeSessionMutation = trpc.admin.revokeUserSessions.useMutation({
     onSuccess: () => {
-      toast.success("Sessão revogada com sucesso");
+      toast.success("Sessões do usuário revogadas");
       sessionsQuery.refetch();
       statsQuery.refetch();
     },
@@ -323,14 +323,13 @@ export default function AdminPanel() {
                     { layer: "Rate Limiting API (100 req/min/IP)", status: "Ativo" },
                     { layer: "Rate Limiting OAuth (10 req/min/IP)", status: "Ativo" },
                     { layer: "Logs de Auditoria Imutáveis", status: "Ativo" },
-                    { layer: "Sessões com Expiração (8h)", status: "Ativo" },
+                    { layer: "Sessões com Expiração (90 dias sem uso)", status: "Ativo" },
                     { layer: "RBAC (5 níveis de permissão)", status: "Ativo" },
                     { layer: "Detecção de IP Suspeito", status: "Ativo" },
                     { layer: "Detecção de Múltiplas Sessões", status: "Ativo" },
                     { layer: "Bloqueio por Brute Force (5 tentativas)", status: "Ativo" },
                     { layer: "Headers HTTP (Helmet + HSTS)", status: "Ativo" },
                     { layer: "Anti-Scanner (Nikto, SQLMap, etc.)", status: "Ativo" },
-                    { layer: "Auto-Logout por Inatividade (30min)", status: "Ativo" },
                     { layer: "Revogação Real de Sessão no Banco", status: "Ativo" },
                     { layer: "Verificação de Integridade SHA-256", status: "Ativo" },
                     { layer: "Cookie SameSite=Lax + HttpOnly", status: "Ativo" },
@@ -543,8 +542,10 @@ export default function AdminPanel() {
                           <td className="px-6 py-4">
                             <button
                               onClick={() => {
-                                if (confirm(`Revogar sessão #${session.id}? O usuário será desconectado imediatamente.`)) {
-                                  revokeSessionMutation.mutate({ userId: session.id });
+                                // revokeUserSessions recebe o id da CONTA: era o
+                                // id da linha de sessions, e caía a conta errada.
+                                if (confirm(`Revogar todas as sessões de ${session.userName ?? `#${session.userId}`}? O usuário será desconectado imediatamente.`)) {
+                                  revokeSessionMutation.mutate({ userId: session.userId });
                                 }
                               }}
                               disabled={revokeSessionMutation.isPending}
