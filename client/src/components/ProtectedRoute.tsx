@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -132,7 +133,10 @@ export default function ProtectedRoute({
       <div className="min-h-screen flex items-center justify-center bg-[#1B1714] p-4">
         <div role="alert" className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow-lg">
           <h1 className="text-lg font-semibold text-[#1A120C]">{t("protectedRoute.checkFailedTitle")}</h1>
-          <p className="mt-2 text-sm text-gray-600">{error.message}</p>
+          {/* Pela tela, e não error.message cru: um 502/503 em HTML do Render
+              chegava como o SyntaxError do navegador ("Unexpected token '<'…"),
+              em inglês, e a queda do banco saía em português em todo idioma. */}
+          <p className="mt-2 text-sm text-gray-600">{mensagemDeErroParaTela(error, t)}</p>
           <button
             type="button"
             onClick={tentarDeNovo}
