@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 
@@ -454,6 +454,13 @@ describe("o INSERT da carga casa com o schema", () => {
 // responder outra, ela fica sem saída — foi o que acontecia com a mensagem
 // antiga, que mandava tentar com Google num produto sem login por provedor.
 describe("carga e login dizem a mesma coisa sobre a conta sem senha", () => {
+  // O server/auth.ts puxa o servidor quase inteiro (banco, bcrypt, sessões).
+  // Importado dentro do teste, com a máquina carregada, passava dos 5 s do
+  // prazo padrão; aqui ele tem prazo próprio, e o import do teste sai do cache.
+  beforeAll(async () => {
+    await import("./auth");
+  }, 30_000);
+
   it("a mensagem do login cita Esqueci minha senha, e o script também", async () => {
     const { MENSAGEM_CONTA_SEM_SENHA } = await import("./auth");
     expect(MENSAGEM_CONTA_SEM_SENHA).toContain("Esqueci minha senha");
