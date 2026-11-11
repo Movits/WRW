@@ -677,7 +677,7 @@
     "termsAnd": "y",
     "privacy": "Política de Privacidad",
     "dataProtected": "Tus datos están protegidos con cifrado AES-256.",
-    "securityNote": "Conexión cifrada · Sesión de 8 horas · Protección AES-256",
+    "securityNote": "Conexión cifrada · Sesión guardada en este dispositivo · Protección AES-256",
     "registerSecurityNote": "Datos cifrados · Sin spam · Cancela cuando quieras",
     "backToHome": "Volver al inicio",
     "forgotPasswordInfo": "Recuperación de contraseña próximamente. Contacta soporte.",
@@ -1732,18 +1732,6 @@
     "completeByText": "Completar por texto",
     "completeHint": "Responde al asistente de abajo: solo guarda lo que confirmes. El teléfono y el correo también se pueden escribir en Editar.",
     "contactNotFound": "Este contacto no se encontró en tu red."
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ La sesión expira en {{count}} minuto",
-    "warningTitle_other": "⏰ La sesión expira en {{count}} minutos",
-    "warningTitle_zero": "⏰ La sesión expira en {{count}} minutos",
-    "warningTitle_two": "⏰ La sesión expira en {{count}} minutos",
-    "warningTitle_few": "⏰ La sesión expira en {{count}} minutos",
-    "warningTitle_many": "⏰ La sesión expira en {{count}} minutos",
-    "warningDescription": "Mueve el mouse o presiona una tecla para permanecer conectado.",
-    "continueButton": "Continuar conectado",
-    "timeoutTitle": "🔒 Sesión finalizada por inactividad",
-    "timeoutDescription": "Por seguridad, se cerró tu sesión después de 30 minutos sin actividad. Inicia sesión de nuevo para continuar."
   },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",

@@ -69,6 +69,16 @@ describe("Redefinir a senha — o link e a volta ao login", () => {
     expect(window.location.pathname).toBe("/reset-password");
     act(() => vi.advanceTimersByTime(1));
     expect(window.location.pathname).toBe("/login");
+    // Com ?entrar: num aparelho com outra conta logada, o /login simples
+    // seguiria para dentro dela em vez de mostrar o formulário (PR #179).
+    expect(new URLSearchParams(window.location.search).has("entrar")).toBe(true);
+  });
+
+  it("o botão 'Ir para o login' da confirmação também pede o formulário (?entrar)", () => {
+    render(<ResetPassword />);
+    act(() => (duble.opcoes as unknown as { onSuccess: () => void }).onSuccess());
+    const link = screen.getByText(i18n.t("auth.goToLogin")).closest("a");
+    expect(link).toHaveAttribute("href", "/login?entrar=1");
   });
 
   it("sair da tela antes dos 3 segundos cancela a ida ao login", () => {

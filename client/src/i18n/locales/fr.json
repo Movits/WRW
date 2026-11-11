@@ -677,7 +677,7 @@
     "termsAnd": "et",
     "privacy": "Politique de confidentialité",
     "dataProtected": "Vos données sont protégées par chiffrement AES-256.",
-    "securityNote": "Connexion chiffrée · Session de 8 heures · Protection AES-256",
+    "securityNote": "Connexion chiffrée · Session mémorisée sur cet appareil · Protection AES-256",
     "registerSecurityNote": "Données chiffrées · Sans spam · Annulez quand vous voulez",
     "backToHome": "Retour à l'accueil",
     "forgotPasswordInfo": "Récupération de mot de passe bientôt disponible. Contactez le support.",
@@ -1732,18 +1732,6 @@
     "completeByText": "Compléter par texte",
     "completeHint": "Répondez à l'assistant ci-dessous : il n'enregistre que ce que vous confirmez. Le téléphone et l'e-mail peuvent aussi être saisis dans Modifier.",
     "contactNotFound": "Ce contact est introuvable dans votre réseau."
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ Session expirant dans {{count}} minute",
-    "warningTitle_other": "⏰ Session expirant dans {{count}} minutes",
-    "warningTitle_zero": "⏰ Session expirant dans {{count}} minutes",
-    "warningTitle_two": "⏰ Session expirant dans {{count}} minutes",
-    "warningTitle_few": "⏰ Session expirant dans {{count}} minutes",
-    "warningTitle_many": "⏰ Session expirant dans {{count}} minutes",
-    "warningDescription": "Bougez la souris ou appuyez sur une touche pour rester connecté.",
-    "continueButton": "Rester connecté",
-    "timeoutTitle": "🔒 Session terminée pour inactivité",
-    "timeoutDescription": "Pour votre sécurité, vous avez été déconnecté après 30 minutes d'inactivité. Reconnectez-vous pour continuer."
   },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",

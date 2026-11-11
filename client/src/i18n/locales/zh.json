@@ -677,7 +677,7 @@
     "termsAnd": "和",
     "privacy": "隐私政策",
     "dataProtected": "您的数据受AES-256加密保护。",
-    "securityNote": "加密连接 · 8小时会话 · AES-256保护",
+    "securityNote": "加密连接 · 在此设备上保持登录 · AES-256保护",
     "registerSecurityNote": "数据加密 · 无垃圾邮件 · 随时取消",
     "backToHome": "返回首页",
     "forgotPasswordInfo": "密码恢复即将推出。请联系支持。",
@@ -1732,18 +1732,6 @@
     "completeByText": "通过文字补全",
     "completeHint": "回答下方助手的问题：它只保存您确认的内容。电话和电子邮箱也可以通过「编辑」填写。",
     "contactNotFound": "在您的人脉中找不到这位联系人。"
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningTitle_other": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningTitle_zero": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningTitle_two": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningTitle_few": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningTitle_many": "⏰ 会话将在 {{count}} 分钟后过期",
-    "warningDescription": "移动鼠标或按任意键以保持登录状态。",
-    "continueButton": "继续保持登录",
-    "timeoutTitle": "🔒 会话因无操作已结束",
-    "timeoutDescription": "出于安全考虑，您在30分钟无操作后已被自动登出。请重新登录以继续。"
   },
   "errorBoundary": {
     "title": "发生了意外情况",

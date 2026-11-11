@@ -1,15 +1,19 @@
 import bcrypt from "bcryptjs";
 import * as jose from "jose";
+import { parse as parseCookieHeader } from "cookie";
 import { eq } from "drizzle-orm";
+import type { Request, Response } from "express";
+import { COOKIE_NAME } from "@shared/const";
 import { exigirDb } from "./db";
 import { users, sessions } from "../drizzle/schema";
 import { checkLoginRateLimit, recordLoginAttempt } from "./security";
 import { requireSecret } from "./_core/env";
+import { getSessionCookieOptions } from "./_core/cookies";
 import { filaDoBcrypt } from "./fila-do-bcrypt";
+import { DURACAO_DA_SESSAO_MS, RENOVAR_O_TOKEN_A_CADA_MS } from "./duracao-da-sessao";
 import crypto from "crypto";
 
 const JWT_SECRET = new TextEncoder().encode(requireSecret("JWT_SECRET"));
-const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
 // ─── Gerar openId único para usuários de email ───────────────
 function generateOpenId(): string {
@@ -179,7 +183,7 @@ export async function loginUser(params: {
 
   // Criar sessão no banco
   const sessionToken = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+  const expiresAt = new Date(Date.now() + DURACAO_DA_SESSAO_MS);
 
   // Truncar userAgent para caber no campo (text, mas por segurança limitamos a 500 chars)
   const safeUserAgent = params.userAgent ? params.userAgent.substring(0, 500) : null;
@@ -224,18 +228,75 @@ export async function loginUser(params: {
 
   const safeAppId = identificadorDoAplicativo();
 
-  const token = await new jose.SignJWT({
+  const token = await assinarTokenDaSessao({
     openId: user.openId,                          // campo esperado pelo sdk.verifySession
     appId: safeAppId,                             // NUNCA vazio — sdk exige isNonEmptyString
     name: safeName,                               // NUNCA vazio — sdk exige isNonEmptyString
     sessionToken,                                  // para validação no banco (validateSessionToken)
-  })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setIssuedAt()
-    .setExpirationTime("8h")
-    .sign(JWT_SECRET);
+  });
 
   return { token, user, expiresAt };
+}
+
+type DadosDoToken = { openId: string; appId: string; name: string; sessionToken: string };
+
+/**
+ * O token (JWT) da sessão, num lugar só: o login e a renovação assinam aqui.
+ * Ele leva o `sessionToken`, que o sdk confere no banco em toda requisição
+ * (é o que faz sair da conta, redefinir a senha e desativar a conta valerem na
+ * hora), e vence junto com a janela da sessão (server/duracao-da-sessao.ts).
+ */
+async function assinarTokenDaSessao(dados: DadosDoToken): Promise<string> {
+  return new jose.SignJWT({ ...dados })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor((Date.now() + DURACAO_DA_SESSAO_MS) / 1000))
+    .sign(JWT_SECRET);
+}
+
+/** Grava o cookie da sessão com a mesma validade do token e da linha no banco. */
+export function gravarCookieDaSessao(req: Request, res: Response, token: string) {
+  res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(req), maxAge: DURACAO_DA_SESSAO_MS });
+}
+
+/** Apaga o cookie da sessão neste navegador. */
+export function limparCookieDaSessao(req: Request, res: Response) {
+  res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(req), maxAge: -1 });
+}
+
+/** O valor do cookie da sessão que a requisição trouxe, se trouxe. */
+export function cookieDaSessao(req: Request): string | undefined {
+  return req.headers.cookie ? parseCookieHeader(req.headers.cookie)[COOKIE_NAME] : undefined;
+}
+
+/**
+ * Mantém a sessão de quem está usando o app: reemite o token e o cookie quando
+ * o token atual tem mais de um dia (RENOVAR_O_TOKEN_A_CADA_MS) ou vence antes
+ * da janela inteira — é o caso dos tokens de 8 h emitidos antes da sessão
+ * deslizante, que assim passam a durar sem novo login. O prazo no banco já foi
+ * empurrado pelo `validateSessionToken` na mesma requisição.
+ *
+ * Só para requisição que o sdk JÁ autenticou (o createContext chama depois do
+ * `authenticateRequest`), e só para token com `sessionToken`: o token sem ele
+ * (o do `sdk.signSession`) escapa da revogação no banco e não pode ganhar vida
+ * longa. Token inválido ou de outro formato: não faz nada, quem decide se a
+ * requisição entra é o sdk.
+ */
+export async function renovarCookieDaSessao(req: Request, res: Response): Promise<void> {
+  const atual = cookieDaSessao(req);
+  if (!atual) return;
+  let payload: jose.JWTPayload;
+  try {
+    ({ payload } = await jose.jwtVerify(atual, JWT_SECRET, { algorithms: ["HS256"] }));
+  } catch {
+    return;
+  }
+  const { openId, appId, name, sessionToken, exp } = payload as Record<string, unknown>;
+  const texto = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+  if (!texto(openId) || !texto(appId) || !texto(name) || !texto(sessionToken)) return;
+  const restaMs = typeof exp === "number" ? exp * 1000 - Date.now() : 0;
+  if (restaMs > DURACAO_DA_SESSAO_MS - RENOVAR_O_TOKEN_A_CADA_MS) return;
+  gravarCookieDaSessao(req, res, await assinarTokenDaSessao({ openId, appId, name, sessionToken }));
 }
 
 // ─── Invalidar sessão no banco ────────────────────────────────

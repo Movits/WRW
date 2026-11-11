@@ -2,8 +2,6 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import crypto from "crypto";
 import { eq, and, sql } from "drizzle-orm";
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "../_core/cookies";
 import { publicProcedure, router } from "../_core/trpc";
 import { exigirDb } from "../db";
 import {
@@ -13,7 +11,7 @@ import {
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
-import { registerUser, loginUser, toPublicUser } from "../auth";
+import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../auth";
 import {
   hashPasswordResetToken,
   PASSWORD_RESET_ACCOUNT_LIMIT,
@@ -150,8 +148,7 @@ export const authRouter = router({
       try {
         // O bloqueio do banco conta pela rede (/56); a sessão guarda o IP cru.
         const { token, user, expiresAt } = await loginUser({ email: input.email, password: input.password, ip, chaveDoBloqueio: rede, userAgent: ua });
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 8 * 60 * 60 * 1000 });
+        gravarCookieDaSessao(ctx.req, ctx.res, token);
         await createAuditLog({ userId: user.id, action: "LOGIN", resource: "auth", ipAddress: ip, userAgent: ua, status: "success", riskLevel: "low" });
         return { success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, onboardingCompleted: user.onboardingCompleted } };
       } catch (err: any) {
@@ -372,19 +369,32 @@ export const authRouter = router({
     if (ctx.user) {
       await createAuditLog({ userId: ctx.user.id, action: "LOGOUT", resource: "auth", ipAddress: ctx.req.headers["x-forwarded-for"] as string, userAgent: ctx.req.headers["user-agent"], status: "success", riskLevel: "low" });
     }
-    const cookies = ctx.req.headers.cookie;
-    if (cookies) {
-      const cookieMatch = cookies.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-      if (cookieMatch?.[1]) {
-        try {
-          const jwtPayload = JSON.parse(Buffer.from(cookieMatch[1].split(".")[1], "base64url").toString("utf8"));
-          if (jwtPayload?.sessionToken) await invalidateSession(jwtPayload.sessionToken).catch(() => {});
-          else await invalidateSession(cookieMatch[1]).catch(() => {});
-        } catch { await invalidateSession(cookieMatch[1]).catch(() => {}); }
+    const cookie = cookieDaSessao(ctx.req);
+    if (cookie) {
+      // O token do login leva o sessionToken; cookie em outro formato é
+      // revogado pelo próprio valor.
+      let sessionToken = cookie;
+      try {
+        const jwtPayload = JSON.parse(Buffer.from(cookie.split(".")[1] ?? "", "base64url").toString("utf8"));
+        if (typeof jwtPayload?.sessionToken === "string" && jwtPayload.sessionToken) sessionToken = jwtPayload.sessionToken;
+      } catch {
+        // Não é JWT: vale o valor cru.
       }
+      // Sem .catch: com a sessão de 90 dias, um "Sair" que não revogou a linha
+      // no banco e respondia sucesso deixava qualquer cópia do token valendo e
+      // se renovando por meses. Banco fora do ar é erro, e a resposta diz isso.
+      // Mas o cookie sai DESTE navegador mesmo assim (finally): num computador
+      // compartilhado, quem clicou em "Sair" não pode deixar a conta aberta
+      // para quem vier depois. O client também apaga a sessão do cache no
+      // finally (useAuth.logout).
+      try {
+        await invalidateSession(sessionToken);
+      } finally {
+        limparCookieDaSessao(ctx.req, ctx.res);
+      }
+      return { success: true } as const;
     }
-    const cookieOptions = getSessionCookieOptions(ctx.req);
-    ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    limparCookieDaSessao(ctx.req, ctx.res);
     return { success: true } as const;
   }),
 });

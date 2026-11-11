@@ -677,7 +677,7 @@
     "termsAnd": "und der",
     "privacy": "Datenschutzrichtlinie",
     "dataProtected": "zu. Deine Daten sind mit AES-256-Verschlüsselung geschützt.",
-    "securityNote": "Verschlüsselte Verbindung · 8-Stunden-Sitzung · AES-256-Schutz",
+    "securityNote": "Verschlüsselte Verbindung · Auf diesem Gerät angemeldet bleiben · AES-256-Schutz",
     "registerSecurityNote": "Verschlüsselte Daten · Kein Spam · Jederzeit kündigen",
     "backToHome": "Zurück zur Startseite",
     "forgotPasswordInfo": "Passwortwiederherstellung demnächst verfügbar. Support kontaktieren.",
@@ -1732,18 +1732,6 @@
     "completeByText": "Per Text ergänzen",
     "completeHint": "Antworten Sie dem Assistenten unten: Er speichert nur, was Sie bestätigen. Telefon und E-Mail können Sie auch unter Bearbeiten eingeben.",
     "contactNotFound": "Dieser Kontakt wurde in Ihrem Netzwerk nicht gefunden."
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ Sitzung läuft in {{count}} Minute ab",
-    "warningTitle_other": "⏰ Sitzung läuft in {{count}} Minuten ab",
-    "warningTitle_zero": "⏰ Sitzung läuft in {{count}} Minuten ab",
-    "warningTitle_two": "⏰ Sitzung läuft in {{count}} Minuten ab",
-    "warningTitle_few": "⏰ Sitzung läuft in {{count}} Minuten ab",
-    "warningTitle_many": "⏰ Sitzung läuft in {{count}} Minuten ab",
-    "warningDescription": "Bewegen Sie die Maus oder drücken Sie eine Taste, um verbunden zu bleiben.",
-    "continueButton": "Verbunden bleiben",
-    "timeoutTitle": "🔒 Sitzung wegen Inaktivität beendet",
-    "timeoutDescription": "Aus Sicherheitsgründen wurden Sie nach 30 Minuten Inaktivität abgemeldet. Melden Sie sich erneut an, um fortzufahren."
   },
   "errorBoundary": {
     "title": "Etwas Unerwartetes ist passiert",

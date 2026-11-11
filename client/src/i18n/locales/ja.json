@@ -677,7 +677,7 @@
     "termsAnd": "および",
     "privacy": "プライバシーポリシー",
     "dataProtected": "に同意します。データはAES-256暗号化で保護されています。",
-    "securityNote": "暗号化接続 · 8時間セッション · AES-256保護",
+    "securityNote": "暗号化接続 · この端末でログイン状態を保持 · AES-256保護",
     "registerSecurityNote": "暗号化データ · スパムなし · いつでもキャンセル",
     "backToHome": "ホームに戻る",
     "forgotPasswordInfo": "パスワード回復は近日公開予定。サポートにお問い合わせください。",
@@ -1732,18 +1732,6 @@
     "completeByText": "テキストで補う",
     "completeHint": "下のアシスタントに答えてください。確認した内容だけが保存されます。電話番号とメールアドレスは「編集」でも入力できます。",
     "contactNotFound": "この連絡先はあなたのネットワークに見つかりません。"
-  },
-  "inactivityGuard": {
-    "warningTitle_one": "⏰ セッションは{{count}}分後に終了します",
-    "warningTitle_other": "⏰ セッションは{{count}}分後に終了します",
-    "warningTitle_zero": "⏰ セッションは{{count}}分後に終了します",
-    "warningTitle_two": "⏰ セッションは{{count}}分後に終了します",
-    "warningTitle_few": "⏰ セッションは{{count}}分後に終了します",
-    "warningTitle_many": "⏰ セッションは{{count}}分後に終了します",
-    "warningDescription": "接続を維持するには、マウスを動かすかキーを押してください。",
-    "continueButton": "接続を続ける",
-    "timeoutTitle": "🔒 非アクティブによりセッションが終了しました",
-    "timeoutDescription": "セキュリティのため、30分間操作がなかったためログアウトされました。続けるには再度ログインしてください。"
   },
   "errorBoundary": {
     "title": "予期しないエラーが発生しました",
