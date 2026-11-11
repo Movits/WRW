@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
+import { z } from "zod";
 
 const AQUI_TESTE: string = (import.meta as { dirname?: string }).dirname ?? ".";
 
@@ -123,8 +124,28 @@ describe("as normalizações que decidem se a conexão acontece", () => {
     ["@exemplo.com", false],
     ["maria@exemplo.c", false],
     ["duas@vir,gulas.com", false],
+    // A regra antiga aceitava estes, e o login, o cadastro e o "esqueci a senha"
+    // (z.string().email() no servidor) recusam: a conta entrava sem saída.
+    ["contato&vendas@exemplo.com.br", false],
+    ["ana..costa@exemplo.com", false],
+    [".ana@exemplo.com", false],
+    ["ana.@exemplo.com", false],
+    ["ana@-exemplo.com", false],
+    ["joão@exemplo.com", false],
+    ["ana+eventos@exemplo.com", true],
   ])("emailValido(%s) = %s", (email, esperado) => {
     expect(emailValido(email)).toBe(esperado);
+  });
+
+  it("emailValido aceita e recusa o mesmo que o servidor (z.string().email())", () => {
+    const servidor = z.string().email();
+    for (const email of [
+      "maria@exemplo.com", "a.b-c_d+e@sub.exemplo.org", "o'neil@exemplo.com", "x@exemplo.io",
+      "contato&vendas@exemplo.com.br", "ana..costa@exemplo.com", "ana@exemplo..com",
+      "ana@exemplo.c0m", "ana@exemplo_um.com", "ana@[127.0.0.1]", "ação@exemplo.com",
+    ]) {
+      expect(emailValido(email), email).toBe(servidor.safeParse(email).success);
+    }
   });
 
   it("país aceita nome, sigla e acento; o que não conhece vira null (não palpite)", () => {

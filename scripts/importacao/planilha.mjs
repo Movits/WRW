@@ -32,6 +32,8 @@
 //    termo inteiro ("exportação de vinho") em vez de quebrar em palavras: quem
 //    quebra em palavras destrói o cruzamento.
 
+import { z } from "zod";
+
 /** Os separadores aceitos entre colunas, na ordem em que são testados. */
 const SEPARADORES = [";", ",", "\t"];
 
@@ -274,14 +276,19 @@ export function mapearCabecalho(cabecalho) {
   return { mapa, desconhecidas, faltando, proibidas };
 }
 
-const RE_EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i;
+// O mesmo validador do servidor: o login, o cadastro e o "esqueci a senha"
+// recebem o e-mail por z.string().email() (server/routers/auth.ts). Antes a
+// carga tinha regra própria, mais frouxa, e aceitava endereço que o servidor
+// recusa ("contato&vendas@exemplo.com.br", dois pontos seguidos, acento): a
+// conta entrava, mas a participante nunca conseguia pedir a senha.
+const ESQUEMA_DO_EMAIL = z.string().email();
 
 export function normalizarEmail(bruto) {
   return String(bruto ?? "").trim().toLowerCase();
 }
 
 export function emailValido(email) {
-  return RE_EMAIL.test(email) && email.length <= 320;
+  return email.length <= 320 && ESQUEMA_DO_EMAIL.safeParse(email).success;
 }
 
 /** Devolve o código de duas letras, ou null quando não reconhece. */
