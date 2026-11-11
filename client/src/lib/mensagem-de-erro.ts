@@ -1,5 +1,6 @@
 import {
   MENSAGEM_BANCO_INDISPONIVEL,
+  MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
   NOT_ADMIN_ERR_MSG,
   UNAUTHED_ERR_MSG,
@@ -18,8 +19,8 @@ import {
  * TRPCClientError montado no cliente, com texto técnico em inglês. Isso não é
  * para a usuária ler. O 429 do limite da API (responderLimite,
  * server/_core/limite-de-requisicoes.ts) vem no envelope, com data.code
- * TOO_MANY_REQUESTS e sem path, e passa com a frase do servidor; 429 em texto
- * puro só existe fora de /api/trpc.
+ * TOO_MANY_REQUESTS e sem path, e passa pela tabela abaixo, no idioma da tela;
+ * 429 em texto puro só existe fora de /api/trpc.
  *
  * O sinal é `data.code`: só um erro devolvido pelo servidor tem o `data` do
  * shape (TRPCClientError.from monta `data` a partir de `result.error.data`,
@@ -47,6 +48,7 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_ERRO_DE_CONSULTA]: "errors.queryFailed",
   [UNAUTHED_ERR_MSG]: "errors.notAuthenticated",
   [NOT_ADMIN_ERR_MSG]: "errors.notAuthorized",
+  [MENSAGEM_DO_LIMITE]: "errors.tooManyRequests",
 };
 
 /**

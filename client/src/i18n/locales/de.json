@@ -730,7 +730,8 @@
     "databaseUnavailable": "Datenbank nicht verfügbar; versuchen Sie es gleich noch einmal",
     "queryFailed": "Fehler bei der Datenbankabfrage",
     "notAuthenticated": "Bitte melden Sie sich an, um fortzufahren.",
-    "notAuthorized": "Sie haben keine Berechtigung für diese Aktion."
+    "notAuthorized": "Sie haben keine Berechtigung für diese Aktion.",
+    "tooManyRequests": "Zu viele Anfragen in kurzer Zeit. Warten Sie einige Sekunden und versuchen Sie es erneut."
   },
   "aiEngine": {
     "label": "KI-Motor",

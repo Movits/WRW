@@ -730,7 +730,8 @@
     "databaseUnavailable": "Banco de dados indisponível; tente de novo em instantes",
     "queryFailed": "Erro ao consultar o banco de dados",
     "notAuthenticated": "Faça login para continuar.",
-    "notAuthorized": "Você não tem permissão para esta ação."
+    "notAuthorized": "Você não tem permissão para esta ação.",
+    "tooManyRequests": "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo."
   },
   "aiEngine": {
     "label": "Inteligência artificial",

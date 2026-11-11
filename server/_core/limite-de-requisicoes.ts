@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import { parse as parseCookieHeader } from "cookie";
 import { jwtVerify } from "jose";
 import { TRPC_ERROR_CODES_BY_KEY } from "@trpc/server/rpc";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, MENSAGEM_DO_LIMITE } from "@shared/const";
 import { ENV } from "./env";
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 
@@ -35,7 +35,9 @@ export const LIMITES_DA_API: Limites = { usuaria: 300, ip: 1200 };
 /** Geral (index.html, /manus-storage, cron): os estáticos e a API ficam fora. */
 export const LIMITES_GERAIS: Limites = { usuaria: 600, ip: 600 };
 
-export const MENSAGEM_DO_LIMITE = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
+// A frase mora em shared/const.ts, para a tela traduzi-la; quem a importa
+// daqui segue valendo.
+export { MENSAGEM_DO_LIMITE };
 
 type TipoDeChave = "usuaria" | "ip";
 

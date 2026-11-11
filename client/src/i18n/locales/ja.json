@@ -730,7 +730,8 @@
     "databaseUnavailable": "データベースを利用できません。少し時間をおいて、もう一度お試しください",
     "queryFailed": "データベースの照会中にエラーが発生しました",
     "notAuthenticated": "続けるにはログインしてください。",
-    "notAuthorized": "この操作を行う権限がありません。"
+    "notAuthorized": "この操作を行う権限がありません。",
+    "tooManyRequests": "短時間にリクエストが集中しています。数秒待ってからもう一度お試しください。"
   },
   "aiEngine": {
     "label": "AIエンジン",
