@@ -1434,6 +1434,7 @@
     "processedSuccess": "Meeting processed. Review the transcript and the suggestions.",
     "processError": "Could not process the meeting.",
     "titleRequired": "Give the meeting a title.",
+    "titleLength": "The title must be {{min}} to {{max}} characters long.",
     "consentRequiredRecording": "Check the authorization box before starting the recording.",
     "recordingUnsupported": "Recording is not supported in this browser.",
     "noAudioGenerated": "The recording didn't generate any audio. Check the microphone and try again.",

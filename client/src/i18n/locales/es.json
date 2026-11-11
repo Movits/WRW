@@ -1434,6 +1434,7 @@
     "processedSuccess": "Reunión procesada. Revisa la transcripción y las sugerencias.",
     "processError": "No se pudo procesar la reunión.",
     "titleRequired": "Ponle un título a la reunión.",
+    "titleLength": "El título debe tener entre {{min}} y {{max}} caracteres.",
     "consentRequiredRecording": "Marca la casilla de autorización antes de iniciar la grabación.",
     "recordingUnsupported": "La grabación no es compatible con este navegador.",
     "noAudioGenerated": "La grabación no generó audio. Verifica el micrófono e inténtalo de nuevo.",
