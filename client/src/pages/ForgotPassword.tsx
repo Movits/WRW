@@ -127,12 +127,10 @@ export default function ForgotPassword() {
                 </div>
 
                 <div className="space-y-2">
-                  {/* Sem moldura de foco no título, que não é um controle: a regra
-                      global de :focus-visible (index.css) fica fora de camada e
-                      vence a classe outline-none do Tailwind, então o estilo vai
-                      inline. Com a moldura, quem enviava com Enter via o título
-                      dentro de uma caixa, como um campo. */}
-                  <h3 ref={tituloDoPedido} tabIndex={-1} style={{ outline: "none" }} className="text-lg font-semibold text-foreground">{t("auth.forgotPasswordCheckTitle")}</h3>
+                  {/* Sem moldura: o título só recebe foco por script e não é um
+                      controle. A regra global de :focus-visible pula tabindex -1
+                      (index.css), e a classe tira o anel padrão do navegador. */}
+                  <h3 ref={tituloDoPedido} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{t("auth.forgotPasswordCheckTitle")}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     {t("auth.forgotPasswordCheckDesc")}
                   </p>

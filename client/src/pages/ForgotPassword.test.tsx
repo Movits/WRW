@@ -217,8 +217,9 @@ describe("Esqueci a senha — depois do pedido", () => {
     pedirLink();
     const titulo = screen.getByRole("heading", { name: "Pedido recebido" });
     expect(document.activeElement).toBe(titulo);
-    // Inline, porque a regra global de :focus-visible vence a classe (ver o componente).
-    expect(titulo.style.outline).toBe("none");
+    // A regra global de :focus-visible pula tabindex -1 (index.css), e a classe
+    // tira o anel padrão do navegador.
+    expect(titulo).toHaveClass("outline-none");
     // Sem moldura só vale fora da ordem do Tab: com tabindex 0, o Tab pararia no
     // título sem indicador nenhum.
     expect(titulo).toHaveAttribute("tabindex", "-1");
