@@ -10,6 +10,10 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
+// Import estático, e não `await import()` dentro do procedimento: com o import
+// dinâmico, pedidos simultâneos nos testes pegavam o módulo real no lugar do
+// vi.mock e chamavam a Resend de verdade.
+import { buildPasswordResetEmail, sendEmail } from "../_core/email";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
 import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../auth";
 import {
@@ -266,7 +270,6 @@ export const authRouter = router({
       const resetUrl = `${siteOrigin}/reset-password?token=${encodeURIComponent(rawToken)}`;
       // Enviar e-mail via Resend
       try {
-        const { sendEmail, buildPasswordResetEmail } = await import("../_core/email");
         const { html, text } = buildPasswordResetEmail(user.name || "Membro", resetUrl);
         const emailSent = await sendEmail({
           to: user.email!,

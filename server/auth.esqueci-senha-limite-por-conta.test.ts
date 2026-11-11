@@ -1,11 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTableName, type SQL, type Table } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core";
 import { TRPCError } from "@trpc/server";
 
-vi.hoisted(() => {
+// Sem a chave da Resend no ambiente, nem o módulo de e-mail de verdade envia: o
+// vitest.config.ts carrega o .env, e com a chave ali um dublê que falhasse
+// mandaria centenas de e-mails reais por rodada (os testes abaixo disparam até
+// 320 pedidos). O server/_core/email.ts lê as duas ao carregar.
+const ambienteDoEmail = vi.hoisted(() => {
   process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
   process.env.FRONTEND_URL ??= "https://exemplo-de-teste.invalid";
+  const guardado = { RESEND_API_KEY: process.env.RESEND_API_KEY, EMAIL_FROM: process.env.EMAIL_FROM };
+  delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
+  return guardado;
+});
+
+afterAll(() => {
+  for (const [nome, valor] of Object.entries(ambienteDoEmail)) {
+    if (valor !== undefined) process.env[nome] = valor;
+  }
 });
 
 /**
@@ -199,15 +213,14 @@ describe("esqueci a senha — limite por conta e IP real", () => {
 
     const respostas = await Promise.all(Array.from({ length: 100 }, () => pedirRecuperacao()));
 
-    // Cada token gravado é um e-mail enviado logo em seguida. (O `sendEmail`
-    // não serve de contador aqui: com o `import("../_core/email")` dinâmico do
-    // procedimento carregado em paralelo, o Vitest entrega o dublê só a uma
-    // parte das chamadas.)
+    // Cada token gravado é um e-mail enviado logo em seguida, todos pelo dublê.
     expect(tokensEmitidos()).toHaveLength(PASSWORD_RESET_ACCOUNT_LIMIT);
+    expect(estado.sendEmail).toHaveBeenCalledTimes(PASSWORD_RESET_ACCOUNT_LIMIT);
     for (const resposta of respostas) expect(resposta).toEqual({ success: true, message: PASSWORD_RESET_GENERIC_MESSAGE });
     // Maiúsculas não abrem teto novo.
     await pedirRecuperacao("IMPORTADA@Exemplo.test");
     expect(tokensEmitidos()).toHaveLength(PASSWORD_RESET_ACCOUNT_LIMIT);
+    expect(estado.sendEmail).toHaveBeenCalledTimes(PASSWORD_RESET_ACCOUNT_LIMIT);
     // O aviso do teto por e-mail não leva e-mail nem IP.
     const registrado = aviso.mock.calls.map(c => String(c[0])).join("\n");
     expect(registrado).toContain("por e-mail");
@@ -237,5 +250,7 @@ describe("esqueci a senha — limite por conta e IP real", () => {
       success: true,
       message: PASSWORD_RESET_GENERIC_MESSAGE,
     });
+    // Todo e-mail de recuperação passou pelo dublê, nenhum pelo módulo real.
+    expect(estado.sendEmail).toHaveBeenCalledTimes(tokensEmitidos().length);
   });
 });
