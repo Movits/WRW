@@ -654,7 +654,16 @@ const LIMITE_CRITICO_DE_SESSOES = 20;
 export async function detectSessionAnomaly(
   userId: number,
   currentIp: string,
-  currentUserAgent: string
+  currentUserAgent: string,
+  /**
+   * O sessionToken desta requisição. Com ele, depois de alertar sobre IP novo,
+   * a sessão passa a guardar esse IP: o alerta sai UMA vez por troca de rede.
+   * Sem isso, como o IP da sessão só era gravado no login e a sessão agora
+   * dura 90 dias desde o último uso (server/duracao-da-sessao.ts), toda
+   * requisição depois de trocar de wi-fi para 4G gravava um SUSPICIOUS_ACCESS
+   * de risco alto, por meses.
+   */
+  sessionToken?: string | null
 ): Promise<void> {
   const db = await exigirDb();
 
@@ -754,6 +763,15 @@ export async function detectSessionAnomaly(
         knownIpsCount: knownIps.size,
       },
     }).catch(() => {});
+  }
+
+  // Alertado o IP novo, a sessão passa a conhecê-lo (ver `sessionToken` acima).
+  // A coluna tem 45 caracteres, como no insert do login.
+  if (isNewIp && sessionToken) {
+    await db
+      .update(sessions)
+      .set({ ipAddress: currentIp.slice(0, 45) })
+      .where(eq(sessions.sessionToken, sessionToken));
   }
 }
 

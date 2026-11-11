@@ -23,6 +23,8 @@ vi.hoisted(() => {
 const banco = vi.hoisted(() => ({
   sessao: null as null | { userId: number; isActive: boolean; expiresAt: Date | null },
   atualizacoes: [] as Record<string, unknown>[],
+  /** O próximo UPDATE falha como o banco fora do ar. */
+  falhar: false,
 }));
 
 vi.mock("./db", () => ({
@@ -35,6 +37,7 @@ vi.mock("./db", () => ({
     update: () => ({
       set: (valores: Record<string, unknown>) => ({
         where: async () => {
+          if (banco.falhar) throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
           banco.atualizacoes.push(valores);
         },
       }),
@@ -51,6 +54,9 @@ import { gravarCookieDaSessao, renovarCookieDaSessao } from "./auth";
 import { DURACAO_DA_SESSAO_MS, RENOVAR_O_TOKEN_A_CADA_MS } from "./duracao-da-sessao";
 import { validateSessionToken } from "./security";
 import { createContext } from "./_core/context";
+import { ForbiddenError } from "@shared/_core/errors";
+import { BancoIndisponivel } from "./banco-indisponivel";
+import { authRouter } from "./routers/auth";
 
 const SEGREDO = new TextEncoder().encode(process.env.JWT_SECRET);
 const HORA = 60 * 60 * 1000;
@@ -75,7 +81,7 @@ function requisicao(cookie?: string) {
 }
 
 function resposta() {
-  return { cookie: vi.fn() };
+  return { cookie: vi.fn(), clearCookie: vi.fn() };
 }
 
 /** O que foi gravado no cookie da sessão, já decodificado. */
@@ -89,6 +95,7 @@ async function cookieGravado(res: ReturnType<typeof resposta>) {
 beforeEach(() => {
   banco.sessao = null;
   banco.atualizacoes = [];
+  banco.falhar = false;
   autenticar.mockReset();
 });
 
@@ -201,5 +208,68 @@ describe("createContext: renova só quem o sdk autenticou", () => {
     const ctx = await createContext({ req: requisicao(await token({ emitidoHaMs: 2 * DIA })), res } as never);
     expect(ctx.user).toBeNull();
     expect(res.cookie).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Revisão da PR #179: com o cookie de 90 dias, um cookie que o sdk recusa
+ * (sessão revogada, conta desativada) ficava meses no navegador, gravando um
+ * REVOKED_SESSION_ACCESS_ATTEMPT de risco alto a cada requisição. Dois caminhos
+ * levavam a ele: a resposta atrasada de uma requisição em voo, que renovava o
+ * cookie DEPOIS do "Sair", e redefinir a senha logada no mesmo navegador.
+ */
+describe("createContext: cookie recusado sai do navegador", () => {
+  it("sessão revogada: apaga o cookie", async () => {
+    autenticar.mockRejectedValue(ForbiddenError("Session has been revoked"));
+    const res = resposta();
+    await createContext({ req: requisicao(await token()), res } as never);
+    expect(res.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.objectContaining({ maxAge: -1, httpOnly: true, path: "/" }));
+    expect(res.cookie).not.toHaveBeenCalled();
+  });
+
+  it("sem cookie da sessão: não manda Set-Cookie nenhum (visitante comum)", async () => {
+    autenticar.mockRejectedValue(ForbiddenError("Invalid session cookie"));
+    const res = resposta();
+    await createContext({ req: requisicao(), res } as never);
+    expect(res.clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("banco fora do ar não é 'sessão recusada': o cookie fica", async () => {
+    autenticar.mockRejectedValue(new BancoIndisponivel());
+    const res = resposta();
+    const ctx = await createContext({ req: requisicao(await token()), res } as never);
+    expect(ctx.bancoIndisponivel).toBe(true);
+    expect(res.clearCookie).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Revisão da PR #179: o logout engolia a falha do banco e respondia sucesso.
+ * Com a sessão de 90 dias, a linha que não foi revogada deixava qualquer cópia
+ * do token valendo e se renovando por meses.
+ */
+describe("auth.logout: só diz que saiu depois de revogar a linha no banco", () => {
+  const sair = (cookie: string | undefined, res: ReturnType<typeof resposta>) =>
+    authRouter.createCaller({ user: null, req: requisicao(cookie), res } as never).logout();
+
+  it("revoga pelo sessionToken do token e apaga o cookie", async () => {
+    banco.sessao = { userId: 7, isActive: true, expiresAt: new Date(Date.now() + DIA) };
+    const res = resposta();
+    await expect(sair(await token(), res)).resolves.toEqual({ success: true });
+    expect(banco.atualizacoes).toEqual([{ isActive: false }]);
+    expect(res.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.objectContaining({ maxAge: -1 }));
+  });
+
+  it("banco fora do ar: falha, e o cookie NÃO é apagado (a pessoa tenta de novo)", async () => {
+    banco.falhar = true;
+    const res = resposta();
+    await expect(sair(await token(), res)).rejects.toThrow();
+    expect(res.clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("sem cookie: só responde que saiu", async () => {
+    const res = resposta();
+    await expect(sair(undefined, res)).resolves.toEqual({ success: true });
+    expect(banco.atualizacoes).toEqual([]);
   });
 });

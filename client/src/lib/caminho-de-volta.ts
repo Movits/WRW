@@ -46,6 +46,19 @@ export function caminhoDeVoltaSeguro(valor: unknown): string | null {
   return url.pathname + url.search + url.hash;
 }
 
+/**
+ * `?entrar` no /login pede o formulário mesmo com uma sessão viva no aparelho
+ * (sem ele, quem já está logada segue direto para o app: pages/Login.tsx).
+ */
+export const PARAMETRO_ENTRAR = "entrar";
+
+/**
+ * O login com o formulário garantido: para onde o cadastro e a redefinição de
+ * senha mandam ("agora faça login"). Num aparelho com outra conta logada, o
+ * /login simples levaria a pessoa para dentro da conta alheia.
+ */
+export const LOGIN_COM_FORMULARIO = `/login?${PARAMETRO_ENTRAR}=1`;
+
 /** O endereço do login, levando o caminho de volta quando ele é seguro. */
 export function urlDoLogin(caminhoDeVolta?: string | null) {
   const caminho = caminhoDeVoltaSeguro(caminhoDeVolta);

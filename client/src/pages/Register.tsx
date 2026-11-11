@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Lock, Mail, User, ArrowRight, Shield, CheckCircle2, Sparkles } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { LOGIN_COM_FORMULARIO } from "@/lib/caminho-de-volta";
 
 function PasswordStrength({ password, t }: { password: string; t: (key: string) => string }) {
   const checks = [
@@ -72,7 +73,7 @@ export default function Register() {
       toast.success(t("auth.accountCreated"), {
         description: t("auth.nowLogin"),
       });
-      navigate("/login");
+      navigate(LOGIN_COM_FORMULARIO);
     },
     onError: (err) => {
       toast.error(t("auth.registerError"), {

@@ -259,6 +259,16 @@ export function gravarCookieDaSessao(req: Request, res: Response, token: string)
   res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(req), maxAge: DURACAO_DA_SESSAO_MS });
 }
 
+/** Apaga o cookie da sessão neste navegador. */
+export function limparCookieDaSessao(req: Request, res: Response) {
+  res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(req), maxAge: -1 });
+}
+
+/** O valor do cookie da sessão que a requisição trouxe, se trouxe. */
+export function cookieDaSessao(req: Request): string | undefined {
+  return req.headers.cookie ? parseCookieHeader(req.headers.cookie)[COOKIE_NAME] : undefined;
+}
+
 /**
  * Mantém a sessão de quem está usando o app: reemite o token e o cookie quando
  * o token atual tem mais de um dia (RENOVAR_O_TOKEN_A_CADA_MS) ou vence antes
@@ -273,7 +283,7 @@ export function gravarCookieDaSessao(req: Request, res: Response, token: string)
  * requisição entra é o sdk.
  */
 export async function renovarCookieDaSessao(req: Request, res: Response): Promise<void> {
-  const atual = req.headers.cookie ? parseCookieHeader(req.headers.cookie)[COOKIE_NAME] : undefined;
+  const atual = cookieDaSessao(req);
   if (!atual) return;
   let payload: jose.JWTPayload;
   try {

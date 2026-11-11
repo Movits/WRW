@@ -2,8 +2,6 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import crypto from "crypto";
 import { eq, and, sql } from "drizzle-orm";
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "../_core/cookies";
 import { publicProcedure, router } from "../_core/trpc";
 import { exigirDb } from "../db";
 import {
@@ -13,7 +11,7 @@ import {
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
-import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao } from "../auth";
+import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../auth";
 import {
   hashPasswordResetToken,
   PASSWORD_RESET_ACCOUNT_LIMIT,
@@ -371,19 +369,24 @@ export const authRouter = router({
     if (ctx.user) {
       await createAuditLog({ userId: ctx.user.id, action: "LOGOUT", resource: "auth", ipAddress: ctx.req.headers["x-forwarded-for"] as string, userAgent: ctx.req.headers["user-agent"], status: "success", riskLevel: "low" });
     }
-    const cookies = ctx.req.headers.cookie;
-    if (cookies) {
-      const cookieMatch = cookies.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-      if (cookieMatch?.[1]) {
-        try {
-          const jwtPayload = JSON.parse(Buffer.from(cookieMatch[1].split(".")[1], "base64url").toString("utf8"));
-          if (jwtPayload?.sessionToken) await invalidateSession(jwtPayload.sessionToken).catch(() => {});
-          else await invalidateSession(cookieMatch[1]).catch(() => {});
-        } catch { await invalidateSession(cookieMatch[1]).catch(() => {}); }
+    const cookie = cookieDaSessao(ctx.req);
+    if (cookie) {
+      // O token do login leva o sessionToken; cookie em outro formato é
+      // revogado pelo próprio valor.
+      let sessionToken = cookie;
+      try {
+        const jwtPayload = JSON.parse(Buffer.from(cookie.split(".")[1] ?? "", "base64url").toString("utf8"));
+        if (typeof jwtPayload?.sessionToken === "string" && jwtPayload.sessionToken) sessionToken = jwtPayload.sessionToken;
+      } catch {
+        // Não é JWT: vale o valor cru.
       }
+      // Sem .catch, e ANTES de limpar o cookie: com a sessão de 90 dias, um
+      // "Sair" que não revogou a linha no banco deixava qualquer cópia do token
+      // valendo e se renovando por meses. Banco fora do ar é erro: a resposta
+      // diz "banco indisponível", o cookie fica, e a pessoa tenta de novo.
+      await invalidateSession(sessionToken);
     }
-    const cookieOptions = getSessionCookieOptions(ctx.req);
-    ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    limparCookieDaSessao(ctx.req, ctx.res);
     return { success: true } as const;
   }),
 });

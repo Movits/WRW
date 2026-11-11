@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Lock, Mail, ArrowRight, Shield, Sparkles } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
-import { destinoDepoisDoLogin } from "@/lib/caminho-de-volta";
+import { destinoDepoisDoLogin, PARAMETRO_ENTRAR } from "@/lib/caminho-de-volta";
 
 export default function Login() {
   const { t } = useTranslation();
@@ -23,10 +23,16 @@ export default function Login() {
   // 10/11/2026): com a sessão viva, o /login segue direto para o destino que
   // o login daria. Sem sessão, ou sem dar para saber (banco fora do ar), o
   // formulário aparece como sempre.
+  //
+  // `?entrar` pede o formulário mesmo assim: é como o cadastro e a redefinição
+  // de senha mandam para cá ("agora faça login"). Num aparelho com OUTRA conta
+  // logada, seguir sozinho levaria quem acabou de criar a conta para dentro da
+  // conta alheia.
+  const pedeFormulario = new URLSearchParams(window.location.search).has(PARAMETRO_ENTRAR);
   useEffect(() => {
-    if (!user) return;
+    if (!user || pedeFormulario) return;
     navigate(destinoDepoisDoLogin(Boolean(user.onboardingCompleted), window.location.search), { replace: true });
-  }, [user, navigate]);
+  }, [user, navigate, pedeFormulario]);
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
@@ -67,7 +73,7 @@ export default function Login() {
 
   // Enquanto confere a sessão, e no instante antes de seguir adiante, não pisca
   // o formulário para quem não vai precisar dele.
-  if (loading || user) return null;
+  if (!pedeFormulario && (loading || user)) return null;
 
   return (
     <div className="min-h-screen bg-transparent flex items-center justify-center px-4 relative overflow-hidden">

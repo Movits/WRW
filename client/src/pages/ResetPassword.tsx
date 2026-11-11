@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { LOGIN_COM_FORMULARIO } from "@/lib/caminho-de-volta";
 import { CheckCircle2, KeyRound, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -28,7 +29,7 @@ export default function ResetPassword() {
   // cancela a ida: sem isso, o timer puxava a pessoa de volta de outra tela.
   useEffect(() => {
     if (!success) return;
-    const timer = window.setTimeout(() => setLocation("/login"), 3000);
+    const timer = window.setTimeout(() => setLocation(LOGIN_COM_FORMULARIO), 3000);
     return () => window.clearTimeout(timer);
   }, [success]);
 
@@ -141,7 +142,7 @@ export default function ResetPassword() {
                     {t("auth.resetPasswordSuccessDesc", "Sua senha foi atualizada com sucesso. Você será redirecionada para o login em instantes.")}
                   </p>
                 </div>
-                <Link href="/login">
+                <Link href={LOGIN_COM_FORMULARIO}>
                   <Button className="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold">
                     {t("auth.goToLogin", "Ir para o login")}
                   </Button>

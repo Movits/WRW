@@ -187,3 +187,33 @@ describe("Login — quem já está logada não vê o formulário", () => {
     expect(duble.navigate).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Revisão da PR #179: o cadastro e a redefinição de senha mandam ao login
+ * ("agora faça login"). Num aparelho com OUTRA conta logada, seguir sozinho
+ * levava quem acabou de criar a conta para dentro da conta alheia. Eles mandam
+ * a `LOGIN_COM_FORMULARIO` (`/login?entrar=1`), e aí o formulário aparece.
+ */
+describe("Login — ?entrar mostra o formulário mesmo com sessão viva", () => {
+  it("com outra conta logada e ?entrar=1: formulário, sem seguir adiante", () => {
+    vi.stubGlobal("location", { href: "", search: "?entrar=1" });
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    const { container } = render(<Login />);
+    expect(container.querySelector("input[type=email]")).not.toBeNull();
+    expect(duble.navigate).not.toHaveBeenCalled();
+  });
+
+  it("com ?entrar=1, o formulário não espera a sessão carregar", () => {
+    vi.stubGlobal("location", { href: "", search: "?entrar=1" });
+    duble.sessao = { user: null, loading: true };
+    const { container } = render(<Login />);
+    expect(container.querySelector("input[type=email]")).not.toBeNull();
+  });
+
+  it("o endereço que o cadastro e a redefinição usam é o /login com ?entrar", async () => {
+    const { LOGIN_COM_FORMULARIO } = await import("@/lib/caminho-de-volta");
+    const url = new URL(LOGIN_COM_FORMULARIO, "https://wrw.invalid");
+    expect(url.pathname).toBe("/login");
+    expect(url.searchParams.has("entrar")).toBe(true);
+  });
+});

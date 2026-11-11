@@ -152,9 +152,10 @@ class SDKServer {
 
     // HARDENING V-CRITICAL: Validar sessão no banco de dados (revogação real)
     // Extrai o sessionToken do payload JWT e verifica se ainda está ativo no banco
+    // Fora do if: a detecção de anomalia, lá embaixo, também usa o sessionToken.
+    let sessionTokenToValidate: string | null = null;
     if (sessionCookie) {
       // Tentar extrair sessionToken do payload JWT (presente no novo auth email+senha)
-      let sessionTokenToValidate: string | null = null;
       try {
         const secretKey = this.getSessionSecret();
         const { payload } = await jwtVerify(sessionCookie, secretKey, { algorithms: ["HS256"] });
@@ -195,7 +196,7 @@ class SDKServer {
     // `!user.isActive` acima recusa a requisição antes de chegar nesta linha.
 
     // Detectar anomalias de sessão (IP diferente, UA diferente) — não-bloqueante
-    await detectSessionAnomaly(user.id, ipAddress, userAgent).catch(() => {});
+    await detectSessionAnomaly(user.id, ipAddress, userAgent, sessionTokenToValidate).catch(() => {});
 
     await db.upsertUser({
       openId: user.openId,

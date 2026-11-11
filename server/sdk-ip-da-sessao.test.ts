@@ -56,6 +56,7 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
 
     await sdk.authenticateRequest(req as never);
 
-    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest");
+    // O quarto argumento é o sessionToken: o token do sdk.signSession não leva um.
+    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest", null);
   });
 });

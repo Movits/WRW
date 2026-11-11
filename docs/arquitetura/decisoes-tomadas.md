@@ -213,6 +213,12 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   mexer na tela saiu, e o `/login` com a sessão viva segue direto para o destino do login.
   Sair da conta, redefinir a senha, excluir a conta e a desativação continuam encerrando a
   sessão na hora, porque o sdk confere a linha no banco em toda requisição.
+- **Junto, porque a sessão longa os tornava graves** (revisão da PR #179): desativar a
+  conta pelo painel passou a revogar as sessões; o botão "Revogar" da aba Sessões mandava o
+  id da linha no lugar do id da conta; o "Sair" com o banco fora do ar responde erro em vez
+  de sucesso; o cookie que o servidor recusa sai do navegador; o IP da sessão acompanha a
+  usuária depois do primeiro alerta de IP novo; o cadastro e a redefinição de senha mandam a
+  `/login?entrar=1`, que mostra o formulário mesmo com outra conta logada no aparelho.
 - **Antes:** 8 horas fixas desde o login (no banco, no token e no cookie) e, no navegador,
   logout automático aos 30 minutos parada.
 - **Onde:** `server/duracao-da-sessao.ts`, `assinarTokenDaSessao` e
