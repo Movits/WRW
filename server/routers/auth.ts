@@ -85,10 +85,13 @@ export const tetoDeLoginPorEmail = criarTeto(
  * um erro ali contaria a quem pede quantos pedidos OUTRA pessoa fez para
  * aquele endereço.
  */
+/** A recusa por rede, a mesma no teto em memória e na contagem do banco (forgotPassword). */
+export const MENSAGEM_DO_LIMITE_POR_REDE =
+  "Muitos pedidos de recuperação de senha a partir desta rede. Aguarde alguns minutos e tente de novo.";
 export const tetoDeRecuperacaoPorRede = criarTeto(
   PASSWORD_RESET_RATE_LIMIT,
   PASSWORD_RESET_RATE_WINDOW_MS,
-  "Muitos pedidos de recuperação de senha a partir desta rede. Aguarde alguns minutos e tente de novo.",
+  MENSAGEM_DO_LIMITE_POR_REDE,
 );
 export const tetoDeRecuperacaoPorEmail = criarTeto(
   PASSWORD_RESET_ACCOUNT_LIMIT,
@@ -194,23 +197,21 @@ export const authRouter = router({
           eq(passwordResetRequests.ipAddress, ipAddress),
           sql`${passwordResetRequests.createdAt} >= ${windowStart}`,
         ));
-      // A mesma resposta é retornada ao exceder o limite para não revelar informações.
+      // A recusa por rede vem antes de buscar a conta: não revela se ela existe.
       if (Number(rateWindow?.count ?? 0) >= PASSWORD_RESET_RATE_LIMIT) {
-        // ...mas o limite não pode ser invisível para NÓS. Sem esta linha, o
-        // pedido recusado some sem deixar rastro: a tela mostra o mesmo "Pedido
-        // recebido" de qualquer outro pedido, nenhum e-mail sai, e não há nada
-        // no log do Render que explique o silêncio. Foi o relato "o esqueci a
-        // senha não chega" (Gabriel, reteste de 15/09), com este limite ainda
-        // em 3: a partir da quarta tentativa em 15 minutos nada mais saía, sem
-        // aviso. Hoje ele é 300, e o teto em memória (tetoDeRecuperacaoPorRede,
-        // acima) recusa antes, com TOO_MANY_REQUESTS e aviso na tela. Este ramo
-        // só dispara quando a memória não tem a contagem que o banco tem: deploy
-        // ou reinício dentro da janela; a chave desta rede tirada do teto quando
-        // ele passa de MAXIMO_DE_CHAVES_POR_TETO redes (criarTeto, em
-        // assistente-de-texto.ts); ou, por instantes, no fim da janela, porque a
-        // memória marca o pedido ao reservar e o banco só ao gravar, um pouco
-        // depois, e o mesmo pedido sai antes da conta da memória. Em todos os
-        // casos a recusa segue sem aviso na tela.
+        // O limite não pode ser invisível. Foi o relato "o esqueci a senha não
+        // chega" (Gabriel, reteste de 15/09), com este limite ainda em 3: a
+        // partir da quarta tentativa em 15 minutos nada mais saía, sem aviso.
+        // Hoje ele é 300, e o teto em memória (tetoDeRecuperacaoPorRede, acima)
+        // recusa antes. Este ramo só dispara quando a memória não tem a
+        // contagem que o banco tem: deploy ou reinício dentro da janela; a
+        // chave desta rede tirada do teto quando ele passa de
+        // MAXIMO_DE_CHAVES_POR_TETO redes (criarTeto, em assistente-de-texto.ts);
+        // ou, por instantes, no fim da janela, porque a memória marca o pedido
+        // ao reservar e o banco só ao gravar, um pouco depois. Nos três casos a
+        // recusa é a mesma do teto em memória, TOO_MANY_REQUESTS com a frase
+        // dele, e a tela a mostra: antes ela respondia "Pedido recebido" sem
+        // e-mail nenhum.
         //
         // O log NÃO leva o IP nem o e-mail: quem investiga precisa saber que o
         // limite disparou, não quem o disparou, e a tabela
@@ -218,7 +219,7 @@ export const authRouter = router({
         console.warn(
           `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_RATE_LIMIT} por IP em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min.`,
         );
-        return genericResponse;
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: MENSAGEM_DO_LIMITE_POR_REDE });
       }
       await db.insert(passwordResetRequests).values({ id: crypto.randomUUID(), ipAddress });
 
