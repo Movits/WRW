@@ -23,6 +23,8 @@ vi.hoisted(() => {
 const banco = vi.hoisted(() => ({
   sessao: null as null | { userId: number; isActive: boolean; expiresAt: Date | null },
   atualizacoes: [] as Record<string, unknown>[],
+  /** Os valores do WHERE de cada UPDATE, na ordem. */
+  filtros: [] as unknown[][],
   /** O próximo UPDATE falha como o banco fora do ar. */
   falhar: false,
 }));
@@ -36,9 +38,11 @@ vi.mock("./db", () => ({
     }),
     update: () => ({
       set: (valores: Record<string, unknown>) => ({
-        where: async () => {
+        where: async (condicao: unknown) => {
           if (banco.falhar) throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
           banco.atualizacoes.push(valores);
+          const { MySqlDialect } = await import("drizzle-orm/mysql-core");
+          banco.filtros.push(new MySqlDialect().sqlToQuery(condicao as never).params);
         },
       }),
     }),
@@ -96,6 +100,7 @@ beforeEach(() => {
   banco.sessao = null;
   banco.atualizacoes = [];
   banco.falhar = false;
+  banco.filtros = [];
   autenticar.mockReset();
 });
 
@@ -257,14 +262,21 @@ describe("auth.logout: só diz que saiu depois de revogar a linha no banco", () 
     const res = resposta();
     await expect(sair(await token(), res)).resolves.toEqual({ success: true });
     expect(banco.atualizacoes).toEqual([{ isActive: false }]);
+    expect(banco.filtros).toEqual([[DADOS.sessionToken]]);
     expect(res.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.objectContaining({ maxAge: -1 }));
   });
 
-  it("banco fora do ar: falha, e o cookie NÃO é apagado (a pessoa tenta de novo)", async () => {
+  it("cookie que não é JWT: revoga pelo próprio valor", async () => {
+    const res = resposta();
+    await expect(sair("valor-antigo", res)).resolves.toEqual({ success: true });
+    expect(banco.filtros).toEqual([["valor-antigo"]]);
+  });
+
+  it("banco fora do ar: responde erro (não diz que saiu), mas o cookie sai deste navegador", async () => {
     banco.falhar = true;
     const res = resposta();
     await expect(sair(await token(), res)).rejects.toThrow();
-    expect(res.clearCookie).not.toHaveBeenCalled();
+    expect(res.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.objectContaining({ maxAge: -1 }));
   });
 
   it("sem cookie: só responde que saiu", async () => {

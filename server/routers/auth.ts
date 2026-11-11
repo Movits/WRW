@@ -380,11 +380,19 @@ export const authRouter = router({
       } catch {
         // Não é JWT: vale o valor cru.
       }
-      // Sem .catch, e ANTES de limpar o cookie: com a sessão de 90 dias, um
-      // "Sair" que não revogou a linha no banco deixava qualquer cópia do token
-      // valendo e se renovando por meses. Banco fora do ar é erro: a resposta
-      // diz "banco indisponível", o cookie fica, e a pessoa tenta de novo.
-      await invalidateSession(sessionToken);
+      // Sem .catch: com a sessão de 90 dias, um "Sair" que não revogou a linha
+      // no banco e respondia sucesso deixava qualquer cópia do token valendo e
+      // se renovando por meses. Banco fora do ar é erro, e a resposta diz isso.
+      // Mas o cookie sai DESTE navegador mesmo assim (finally): num computador
+      // compartilhado, quem clicou em "Sair" não pode deixar a conta aberta
+      // para quem vier depois. O client também apaga a sessão do cache no
+      // finally (useAuth.logout).
+      try {
+        await invalidateSession(sessionToken);
+      } finally {
+        limparCookieDaSessao(ctx.req, ctx.res);
+      }
+      return { success: true } as const;
     }
     limparCookieDaSessao(ctx.req, ctx.res);
     return { success: true } as const;

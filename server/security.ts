@@ -343,8 +343,11 @@ export async function createSecurityEvent(
   ipAddress?: string,
   details?: Record<string, unknown>,
   opcoes?: { naoRepetirPorMs?: number }
-): Promise<void> {
+): Promise<boolean> {
   const db = await exigirDb();
+
+  // Devolve se o evento foi gravado: false quando a dedupe o barrou. Quem usa
+  // é detectSessionAnomaly, que só passa a conhecer um IP depois de alertar.
 
   // Repetição do MESMO alerta, para a MESMA conta, dentro da janela: não grava.
   // Só quem pede (`naoRepetirPorMs`) é dedupado — evento de tentativa de força
@@ -361,7 +364,7 @@ export async function createSecurityEvent(
       details ?? null,
       opcoes.naoRepetirPorMs
     );
-    if (!gravou) return;
+    if (!gravou) return false;
   } else {
     await db.insert(securityEvents).values({
       userId,
@@ -400,6 +403,7 @@ export async function createSecurityEvent(
   if (userId && severity === "critical" && !TIPOS_FORA_DO_BLOQUEIO_AUTOMATICO.includes(eventType)) {
     await checkAutoLockThreshold(userId, ipAddress).catch(() => false);
   }
+  return true;
 }
 
 // ============================================================
@@ -717,8 +721,9 @@ export async function detectSessionAnomaly(
   }
 
   // Alertar sobre novo IP (possível acesso de localização diferente)
+  let alertouIpNovo = false;
   if (isNewIp && recentSessions.length > 0) {
-    await createSecurityEvent(
+    alertouIpNovo = await createSecurityEvent(
       userId,
       "suspicious_ip",
       "warning",
@@ -729,7 +734,7 @@ export async function detectSessionAnomaly(
         message: "Acesso detectado de endereço IP diferente dos registros anteriores",
       },
       { naoRepetirPorMs: JANELA_DE_REPETICAO_MS }
-    ).catch(() => {});
+    ).catch(() => false);
   }
 
   // Alertar sobre múltiplas sessões simultâneas apenas em volume muito alto
@@ -766,8 +771,11 @@ export async function detectSessionAnomaly(
   }
 
   // Alertado o IP novo, a sessão passa a conhecê-lo (ver `sessionToken` acima).
-  // A coluna tem 45 caracteres, como no insert do login.
-  if (isNewIp && sessionToken) {
+  // SÓ se o alerta foi gravado: a dedupe de 30 min não olha o IP, então um
+  // terceiro IP dentro da janela (o de quem copiou o token, por exemplo) seria
+  // "conhecido" sem nunca ter virado evento. Barrado, ele segue novo e alerta
+  // quando a janela fechar. A coluna tem 45 caracteres, como no insert do login.
+  if (alertouIpNovo && sessionToken) {
     await db
       .update(sessions)
       .set({ ipAddress: currentIp.slice(0, 45) })

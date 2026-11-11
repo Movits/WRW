@@ -60,3 +60,31 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
     expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest", null);
   });
 });
+
+/**
+ * Revisão da PR #179: o sdk entrega à detecção de anomalia o sessionToken do
+ * token do login, e é com ele que a sessão passa a conhecer o IP novo depois
+ * do alerta (server/security.ts). Sem este fio, o alerta de IP novo voltaria
+ * a sair em toda requisição de quem trocou de rede, pelos 90 dias da sessão.
+ */
+describe("sdk.authenticateRequest: o sessionToken do login chega à detecção de anomalia", () => {
+  beforeEach(() => dubles.detectSessionAnomaly.mockClear());
+
+  it("token com sessionToken: o quarto argumento é ele", async () => {
+    const { SignJWT } = await import("jose");
+    const token = await new SignJWT({ openId: "email_x", appId: "mmm-os", name: "Membra", sessionToken: "s".repeat(64) })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode(process.env.JWT_SECRET));
+    const req = {
+      headers: { cookie: `${COOKIE_NAME}=${token}`, "user-agent": "vitest" },
+      ip: "203.0.113.9",
+      socket: { remoteAddress: "203.0.113.9" },
+    };
+
+    await sdk.authenticateRequest(req as never);
+
+    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, expect.any(String), "vitest", "s".repeat(64));
+  });
+});

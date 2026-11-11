@@ -462,6 +462,18 @@ describe("H) depois do alerta de IP novo, a sessão passa a conhecer o IP", () =
     expect(atualizacoesDeSessao()).toEqual([]);
   });
 
+  it("IP novo barrado pela dedupe (já houve suspicious_ip na janela): a sessão NÃO passa a conhecê-lo", async () => {
+    // Segunda revisão da #179: a dedupe de 30 min não olha o IP. Se o IP fosse
+    // gravado mesmo sem evento, um terceiro IP dentro da janela (o de quem
+    // copiou o token) viraria "conhecido" sem nunca ter alertado.
+    estado.sessoes = [sessao(1)];
+    estado.jaExisteEventoIgual = true;
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(eventosGravados()).toEqual([]);
+    expect(atualizacoesDeSessao()).toEqual([]);
+  });
+
   it("sem sessionToken (token do sdk.signSession): alerta como antes, sem tocar em sessão nenhuma", async () => {
     estado.sessoes = [sessao(1)];
     await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", null);

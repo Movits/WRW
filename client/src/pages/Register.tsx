@@ -143,7 +143,7 @@ export default function Register() {
             <h1 className="text-2xl font-bold text-white">{t("auth.registerTitle")}</h1>
             <p className="text-slate-400 mt-1 text-sm">
               {t("auth.hasAccount")}{" "}
-              <Link href="/login">
+              <Link href={LOGIN_COM_FORMULARIO}>
                 <span className="text-amber-400 hover:text-amber-300 cursor-pointer transition-colors font-medium">
                   {t("auth.loginLink")} →
                 </span>
