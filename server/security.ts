@@ -753,8 +753,13 @@ export async function detectSessionAnomaly(
     ).catch(() => {});
   }
 
-  // Alertar sobre novo dispositivo com IP diferente (alta suspeita)
-  if (isNewIp && isNewDevice && recentSessions.length > 0) {
+  // Novo dispositivo com IP diferente (alta suspeita), só junto com o alerta de
+  // IP novo que a dedupe deixou passar: no máximo um por conta a cada 30 min.
+  // Com a sessão de 90 dias, olhar só o IP gravava uma linha de risco alto por
+  // requisição de um IP ainda não aprendido (cada foto do storageProxy, inclusive)
+  // enquanto a dedupe barrava o suspicious_ip. "Novo dispositivo" hoje é sempre
+  // verdadeiro: o login não grava deviceFingerprint na sessão.
+  if (alertouIpNovo && isNewDevice) {
     await createAuditLog({
       userId,
       action: "SUSPICIOUS_ACCESS",
