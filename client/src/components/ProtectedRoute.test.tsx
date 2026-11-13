@@ -1,5 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { render, screen } from "@testing-library/react";
+import i18n from "@/i18n";
+import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProtectedRoute from "./ProtectedRoute";
@@ -230,5 +232,44 @@ describe("ProtectedRoute", () => {
       renderizar();
       esperaEntrar();
     });
+  });
+});
+
+// A tela de "não deu para verificar" mostrava error.message cru: um 502/503 em
+// HTML do Render chegava como o SyntaxError do navegador, em inglês, e a queda
+// do banco saía em português em qualquer idioma.
+describe("ProtectedRoute — a verificação que falhou", () => {
+  function simularFalha(erro: unknown) {
+    vi.mocked(useAuth).mockReturnValue({
+      user: null,
+      loading: false,
+      error: erro,
+      isAuthenticated: false,
+      refresh: vi.fn(),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+  }
+
+  afterEach(async () => {
+    cleanup();
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("um 502 em HTML (erro montado no cliente, sem data) mostra o texto genérico, e não o do navegador", () => {
+    simularFalha(new Error(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`));
+    renderizar();
+    const aviso = screen.getByRole("alert");
+    expect(aviso).toHaveTextContent("O servidor não respondeu. Tente de novo em instantes.");
+    expect(aviso).not.toHaveTextContent("Unexpected token");
+    expect(destino.href).toBe("");
+  });
+
+  it("a queda do banco, que vem no envelope do tRPC, sai no idioma da tela", async () => {
+    await i18n.changeLanguage("en");
+    simularFalha({ message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR" } });
+    renderizar();
+    const aviso = screen.getByRole("alert");
+    expect(aviso).toHaveTextContent("Database unavailable; please try again in a moment");
+    expect(aviso).not.toHaveTextContent(MENSAGEM_BANCO_INDISPONIVEL);
   });
 });
