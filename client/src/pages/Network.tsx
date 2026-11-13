@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next";
 import { EnrichmentChat } from "@/components/EnrichmentChat";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { trpc } from "@/lib/trpc";
+import {
+  prepararImagemParaEnvio,
+  LADO_MAXIMO_FOTO_DE_CONTATO,
+  LADO_MAXIMO_CARTAO_DE_VISITA,
+  type ImagemParaEnviar,
+} from "@/lib/reduzir-imagem";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,7 +107,10 @@ const emptyForm = () => ({
 function Avatar({ name, photoUrl, size = 48 }: { name: string; photoUrl?: string | null; size?: number }) {
   const initials = name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
   if (photoUrl) {
-    return <img src={photoUrl} alt={name} className="rounded-full object-cover" style={{ width: size, height: size }} />;
+    // A lista de contatos pode ter dezenas de avatares; `lazy` só baixa os que
+    // entram na tela e `async` tira a decodificação do caminho de desenho.
+    return <img src={photoUrl} alt={name} loading="lazy" decoding="async"
+      className="rounded-full object-cover" style={{ width: size, height: size }} />;
   }
   return (
     <div className="rounded-full flex items-center justify-center font-bold text-white bg-gradient-to-br from-amber-500 to-amber-700"
@@ -236,10 +245,20 @@ function ContactForm({ initial, onSave, onClose, loading }: {
   const TIPOS_DE_IMAGEM = ["image/jpeg", "image/png", "image/webp"] as const;
   const uploadPhotoMut = trpc.network.uploadPhoto.useMutation();
   const uploadCardMut = trpc.network.uploadCard.useMutation();
-  const enviarImagem = (
+  // A imagem é REDUZIDA no navegador antes de subir (ver lib/reduzir-imagem.ts):
+  // a foto para 512 px no lado maior, o cartão para 1600 px, porque no cartão o
+  // conteúdo é texto e precisa continuar legível. O teto de 10 MB abaixo segue
+  // valendo sobre o arquivo ESCOLHIDO — é o teto de abuso, e quem decide o
+  // tamanho do que sobe é a redução.
+  // Reduzir uma foto de celular leva alguns décimos de segundo, e nesse
+  // intervalo a mutação ainda não começou: sem este estado o campo continuaria
+  // dizendo "enviar foto" e aceitaria um segundo arquivo por cima do primeiro.
+  const [preparandoImagem, setPreparandoImagem] = useState<"photoUrl" | "cardImageUrl" | null>(null);
+  const enviarImagem = async (
     e: React.ChangeEvent<HTMLInputElement>,
     campo: "photoUrl" | "cardImageUrl",
     mut: typeof uploadPhotoMut,
+    ladoMaximo: number,
   ) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // permite escolher o mesmo arquivo de novo
@@ -252,20 +271,23 @@ function ContactForm({ initial, onSave, onClose, loading }: {
       toast.error(t("network.uploadArquivoMuitoGrande"));
       return;
     }
-    const reader = new FileReader();
-    reader.onerror = () => toast.error(t("network.uploadErroLerArquivo"));
-    reader.onload = () => {
-      const conteudo = String(reader.result ?? "");
-      if (!conteudo) { toast.error(t("network.uploadErroLerArquivo")); return; }
-      mut.mutate(
-        { fileName: file.name, mimeType: file.type as (typeof TIPOS_DE_IMAGEM)[number], dataBase64: conteudo },
-        {
-          onSuccess: res => set(campo, res.url),
-          onError: err => toast.error(err.message || t("network.uploadErroEnviarImagem")),
-        },
-      );
-    };
-    reader.readAsDataURL(file);
+    let imagem: ImagemParaEnviar;
+    setPreparandoImagem(campo);
+    try {
+      imagem = await prepararImagemParaEnvio(file, ladoMaximo);
+    } catch {
+      toast.error(t("network.uploadErroLerArquivo"));
+      return;
+    } finally {
+      setPreparandoImagem(null);
+    }
+    mut.mutate(
+      { fileName: file.name, mimeType: imagem.mimeType, dataBase64: imagem.dataBase64 },
+      {
+        onSuccess: res => set(campo, res.url),
+        onError: err => toast.error(err.message || t("network.uploadErroEnviarImagem")),
+      },
+    );
   };
   const toggleTag = (tag: string) => {
     set("profileTags", form.profileTags.includes(tag)
@@ -409,10 +431,10 @@ function ContactForm({ initial, onSave, onClose, loading }: {
                     </div>
                   ) : (
                     <label className="flex flex-col items-center justify-center h-24 rounded-xl border border-dashed border-white/15 bg-white/5 cursor-pointer hover:border-amber-500/40 text-white/40 text-xs gap-1">
-                      {uploadPhotoMut.isPending ? t("network.enviandoImagem") : t("network.enviarFoto")}
+                      {uploadPhotoMut.isPending || preparandoImagem === "photoUrl" ? t("network.enviandoImagem") : t("network.enviarFoto")}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-                        disabled={uploadPhotoMut.isPending}
-                        onChange={e => enviarImagem(e, "photoUrl", uploadPhotoMut)} />
+                        disabled={uploadPhotoMut.isPending || preparandoImagem === "photoUrl"}
+                        onChange={e => void enviarImagem(e, "photoUrl", uploadPhotoMut, LADO_MAXIMO_FOTO_DE_CONTATO)} />
                     </label>
                   )}
                 </div>
@@ -428,10 +450,10 @@ function ContactForm({ initial, onSave, onClose, loading }: {
                     </div>
                   ) : (
                     <label className="flex flex-col items-center justify-center h-24 rounded-xl border border-dashed border-white/15 bg-white/5 cursor-pointer hover:border-amber-500/40 text-white/40 text-xs gap-1">
-                      {uploadCardMut.isPending ? t("network.enviandoImagem") : t("network.enviarCartao")}
+                      {uploadCardMut.isPending || preparandoImagem === "cardImageUrl" ? t("network.enviandoImagem") : t("network.enviarCartao")}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-                        disabled={uploadCardMut.isPending}
-                        onChange={e => enviarImagem(e, "cardImageUrl", uploadCardMut)} />
+                        disabled={uploadCardMut.isPending || preparandoImagem === "cardImageUrl"}
+                        onChange={e => void enviarImagem(e, "cardImageUrl", uploadCardMut, LADO_MAXIMO_CARTAO_DE_VISITA)} />
                     </label>
                   )}
                 </div>

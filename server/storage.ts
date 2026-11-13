@@ -82,10 +82,26 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
+/**
+ * Cache-Control gravado NO OBJETO, para o bucket repeti-lo em toda resposta.
+ *
+ * É a metade que falta do reaproveitamento da URL assinada (storageProxy): a
+ * URL ser a mesma só evita o download novo se o navegador puder guardar os
+ * bytes. Sem este cabeçalho, o B2 responde com Last-Modified e ETag e o
+ * navegador cai na heurística — que num arquivo recém-enviado dá validade
+ * quase zero e revalida a cada abertura de tela.
+ *
+ * `private` é obrigatório: proxy ou CDN no meio do caminho NÃO pode guardar
+ * arquivo de uma usuária. Os 50 minutos casam com a janela de reaproveitamento
+ * da URL; passada ela, vem URL nova e o cache antigo deixa de ser consultado.
+ */
+export const CACHE_DE_ARQUIVO_PRIVADO = "private, max-age=3000";
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
+  opcoes: { cacheControl?: string } = {},
 ): Promise<{ key: string; url: string }> {
   const config = getStorageConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
@@ -96,6 +112,7 @@ export async function storagePut(
       Key: key,
       Body: typeof data === "string" ? Buffer.from(data) : data,
       ContentType: contentType,
+      ...(opcoes.cacheControl ? { CacheControl: opcoes.cacheControl } : {}),
     }),
   );
 

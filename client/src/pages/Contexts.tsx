@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import {
+  prepararImagemParaEnvio,
+  lerArquivoComoDataUrl,
+  LADO_MAXIMO_MIDIA_DE_CONTEXTO,
+} from "@/lib/reduzir-imagem";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { Button } from "@/components/ui/button";
@@ -416,7 +421,11 @@ function ContextDetail({ contextId, onEdit, onClose, onRefresh }: {
   });
 
   const TIPOS_DE_MIDIA = ["image/jpeg", "image/png", "image/webp", "application/pdf"] as const;
-  const handleUploadFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Imagem é reduzida no navegador antes de subir (lib/reduzir-imagem.ts); PDF
+  // sobe intacto — comprimir documento aqui não é o assunto, e recodificar
+  // páginas de texto perderia conteúdo.
+  const [preparandoArquivo, setPreparandoArquivo] = useState(false);
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // permite escolher o mesmo arquivo de novo
     if (!file) return;
@@ -428,22 +437,29 @@ function ContextDetail({ contextId, onEdit, onClose, onRefresh }: {
       toast.error(t("contexts.toastArquivoMuitoGrande"));
       return;
     }
-    const reader = new FileReader();
-    reader.onerror = () => toast.error(t("contexts.toastErroLerArquivo"));
-    reader.onload = () => {
-      const conteudo = String(reader.result ?? "");
-      if (!conteudo) {
-        toast.error(t("contexts.toastErroLerArquivo"));
-        return;
+    const ehImagem = file.type.startsWith("image/");
+    let conteudo: string;
+    let mimeType: (typeof TIPOS_DE_MIDIA)[number] = file.type as (typeof TIPOS_DE_MIDIA)[number];
+    setPreparandoArquivo(true);
+    try {
+      if (ehImagem) {
+        const imagem = await prepararImagemParaEnvio(file, LADO_MAXIMO_MIDIA_DE_CONTEXTO);
+        conteudo = imagem.dataBase64;
+        mimeType = imagem.mimeType;
+      } else {
+        conteudo = await lerArquivoComoDataUrl(file);
       }
-      uploadMut.mutate({
-        contextId,
-        fileName: file.name,
-        mimeType: file.type as (typeof TIPOS_DE_MIDIA)[number],
-        dataBase64: conteudo,
-      });
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      toast.error(t("contexts.toastErroLerArquivo"));
+      return;
+    } finally {
+      setPreparandoArquivo(false);
+    }
+    if (!conteudo) {
+      toast.error(t("contexts.toastErroLerArquivo"));
+      return;
+    }
+    uploadMut.mutate({ contextId, fileName: file.name, mimeType, dataBase64: conteudo });
   };
 
   if (isLoading) return (
@@ -603,10 +619,11 @@ function ContextDetail({ contextId, onEdit, onClose, onRefresh }: {
             <p className="text-xs text-white/35 uppercase tracking-wider flex items-center gap-1.5">
               <Image size={11} /> {t("contexts.tituloFotosDocumentos", { count: ctx.media.length })}
             </p>
-            <label className={`text-xs flex items-center gap-1 ${uploadMut.isPending ? "text-white/30" : "text-amber-400 hover:text-amber-300 cursor-pointer"}`}>
-              <Plus size={12} /> {uploadMut.isPending ? t("contexts.enviando") : t("contexts.botaoAnexar")}
+            <label className={`text-xs flex items-center gap-1 ${uploadMut.isPending || preparandoArquivo ? "text-white/30" : "text-amber-400 hover:text-amber-300 cursor-pointer"}`}>
+              <Plus size={12} /> {uploadMut.isPending || preparandoArquivo ? t("contexts.enviando") : t("contexts.botaoAnexar")}
               <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf"
-                className="hidden" disabled={uploadMut.isPending} onChange={handleUploadFile} />
+                className="hidden" disabled={uploadMut.isPending || preparandoArquivo}
+                onChange={e => void handleUploadFile(e)} />
             </label>
           </div>
           {ctx.media.length === 0 ? (
@@ -616,8 +633,11 @@ function ContextDetail({ contextId, onEdit, onClose, onRefresh }: {
               {ctx.media.map(m => (
                 <div key={m.id} className="relative rounded-xl overflow-hidden bg-white/5 border border-white/10">
                   <a href={m.storagePath} target="_blank" rel="noopener noreferrer" className="block" title={m.originalName}>
+                    {/* Miniatura de lista: `lazy` para não baixar o que está fora
+                        da tela, `async` para não travar o desenho. */}
                     {m.fileType.startsWith("image/") ? (
-                      <img src={m.storagePath} alt={m.originalName} className="w-full h-20 object-cover" />
+                      <img src={m.storagePath} alt={m.originalName} loading="lazy" decoding="async"
+                        className="w-full h-20 object-cover" />
                     ) : (
                       <div className="w-full h-20 flex flex-col items-center justify-center gap-1 text-white/50 px-1">
                         <FileText size={18} />

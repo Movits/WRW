@@ -10,7 +10,7 @@ import {
 import { recalculatePrivateMatches } from "../match-service";
 import { hasValidConsent } from "./consent";
 import { goldProcedure } from "./_procedures";
-import { storagePut, storageDelete, chaveDoStorageDaDona } from "../storage";
+import { storagePut, storageDelete, chaveDoStorageDaDona, CACHE_DE_ARQUIVO_PRIVADO } from "../storage";
 import {
   ALLOWED_CONTACT_IMAGE_TYPES, decodeContactImage, extensionForContactImage,
 } from "../contact-media";
@@ -143,7 +143,8 @@ export const networkRouter = router({
     .mutation(async ({ ctx, input }) => {
       const dados = decodeContactImage(input.dataBase64, input.mimeType);
       const extensao = extensionForContactImage(input.mimeType);
-      const uploaded = await storagePut(`contacts/${ctx.user.openId}/foto.${extensao}`, dados, input.mimeType);
+      const uploaded = await storagePut(`contacts/${ctx.user.openId}/foto.${extensao}`, dados, input.mimeType,
+        { cacheControl: CACHE_DE_ARQUIVO_PRIVADO });
       return { url: uploaded.url };
     }),
 
@@ -156,7 +157,8 @@ export const networkRouter = router({
     .mutation(async ({ ctx, input }) => {
       const dados = decodeContactImage(input.dataBase64, input.mimeType);
       const extensao = extensionForContactImage(input.mimeType);
-      const uploaded = await storagePut(`contacts/${ctx.user.openId}/cartao.${extensao}`, dados, input.mimeType);
+      const uploaded = await storagePut(`contacts/${ctx.user.openId}/cartao.${extensao}`, dados, input.mimeType,
+        { cacheControl: CACHE_DE_ARQUIVO_PRIVADO });
       return { url: uploaded.url };
     }),
 

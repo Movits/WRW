@@ -7,7 +7,7 @@ import {
   contextIsVisible, addContextMedia, getContextMediaById, deleteContextMedia,
   listContextMediaByContext, getPrivateContactById,
 } from "../db";
-import { storagePut, storageDelete, chaveDoStorageDaDona } from "../storage";
+import { storagePut, storageDelete, chaveDoStorageDaDona, CACHE_DE_ARQUIVO_PRIVADO } from "../storage";
 import {
   ALLOWED_CONTEXT_MEDIA_TYPES, decodeContextMedia,
   extensionForContextMedia, sanitizeMediaFileName,
@@ -192,6 +192,7 @@ export const contextsRouter = router({
         `contexts/${ctx.user.openId}/${input.contextId}/${nome}.${extensao}`,
         dados,
         input.mimeType,
+        { cacheControl: CACHE_DE_ARQUIVO_PRIVADO },
       );
       const id = await addContextMedia(ctx.user.openId, {
         contextId: input.contextId,
