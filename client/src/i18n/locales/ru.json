@@ -1609,7 +1609,7 @@
       "desktopStep2": "Если его нет, в Chrome выберите ⋮ > «Транслировать, сохранить, поделиться» > «Установить страницу как приложение».",
       "macSafari": "В Safari выберите «Файл» > «Добавить в Dock».",
       "inAppBrowser": "Отсюда установить нельзя: откройте эту страницу в Safari или Chrome.",
-      "unsupportedBrowser": "Этот браузер не устанавливает приложения. Откройте WRW в Chrome, Edge или Safari."
+      "unsupportedBrowser": "Чтобы установить WRW как приложение, откройте его в Chrome, Edge или Safari."
     }
   },
   "connections": {

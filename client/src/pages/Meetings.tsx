@@ -436,9 +436,11 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
       {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Pause size={19}/> {t("meetings.stopRecording")}</button> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.startRecording")}</button><button onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button></div>}
-      {/* Abaixo dos botões: some ao gravar sem deslocar o "Encerrar gravação",
-          que nasce no lugar do "Iniciar gravação". */}
-      {!locked && !props.capturedAudio && <DicaDeInstalacao/>}
+      {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
+          perder o lugar: no computador o cartão é centralizado na altura, e
+          tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
+          "Iniciar gravação". Na revisão do áudio ela sai. */}
+      {!props.capturedAudio && <DicaDeInstalacao oculta={locked}/>}
     </div>
   </main>;
 }

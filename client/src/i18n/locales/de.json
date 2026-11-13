@@ -1609,7 +1609,7 @@
       "desktopStep2": "Wenn es nicht erscheint, wählen Sie in Chrome ⋮ > „Streamen, speichern und teilen“ > „Seite als App installieren…“.",
       "macSafari": "Wählen Sie in Safari „Ablage“ > „Zum Dock hinzufügen“.",
       "inAppBrowser": "Von hier aus lässt sich nichts installieren: Öffnen Sie diese Seite in Safari oder Chrome.",
-      "unsupportedBrowser": "Dieser Browser installiert keine Apps. Öffnen Sie WRW in Chrome, Edge oder Safari."
+      "unsupportedBrowser": "Um WRW als App zu installieren, öffnen Sie es in Chrome, Edge oder Safari."
     }
   },
   "connections": {

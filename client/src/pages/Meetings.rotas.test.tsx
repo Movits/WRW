@@ -90,6 +90,9 @@ function abrirEm(caminho: string) {
 }
 
 beforeEach(() => {
+  // A marca da dica de instalação fica no localStorage, que o setup não limpa:
+  // um teste que a fecha a esconderia nos seguintes.
+  localStorage.removeItem("mmm:dica-de-instalacao");
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
   duble.list.mockReturnValue({ data: [reuniao(VINICOLA), reuniao(BIA)], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.get.mockImplementation(({ meetingId }: { meetingId: string }) => ({
@@ -116,6 +119,14 @@ describe("Reuniões — a URL escolhe a tela", () => {
     expect(screen.queryByRole("button", { name: /Nova reunião/ })).not.toBeInTheDocument();
     // O aviso de privacidade (retenção do áudio) aparece antes de gravar, sem passar pela lista.
     expect(screen.getByText(/expira após 30 dias/)).toBeInTheDocument();
+  });
+
+  it("fechar a dica de instalação no gravador devolve o foco ao 'Enviar arquivo de áudio'", () => {
+    abrirEm("/gravar");
+    fireEvent.click(screen.getByRole("button", { name: "Fechar a dica de instalação" }));
+    expect(screen.queryByRole("region", { name: "Instale o WRW como app" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toHaveFocus();
+    expect(localStorage.getItem("mmm:dica-de-instalacao")).toBe("fechada");
   });
 
   it("/meetings/<id> abre o detalhe daquela reunião", () => {
@@ -437,19 +448,21 @@ describe("Reuniões — gravação em curso", () => {
     })));
   });
 
-  it("a dica de instalação do app fica abaixo dos botões no gravador parado e some ao gravar e na revisão do áudio", async () => {
-    localStorage.removeItem("mmm:dica-de-instalacao-fechada");
+  it("a dica de instalação fica abaixo dos botões, invisível no mesmo lugar enquanto grava, e sai na revisão do áudio", async () => {
     abrirEm("/gravar");
     const dica = () => screen.queryByRole("region", { name: "Instale o WRW como app" });
+    const secaoDaDica = () => document.querySelector<HTMLElement>("section[aria-labelledby]");
     expect(dica()).toBeInTheDocument();
-    // Abaixo dos botões: ao sumir, não desloca o "Encerrar gravação", que nasce no lugar do "Iniciar".
     const enviar = screen.getByRole("button", { name: /Enviar arquivo de áudio/ });
     expect(enviar.compareDocumentPosition(dica()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await comecarAGravar();
+    // Gravando: fora do leitor de tela e do teclado, mas no mesmo lugar. No
+    // computador o cartão é centralizado, e tirá-la deslocaria o "Encerrar gravação".
     expect(dica()).not.toBeInTheDocument();
+    expect(secaoDaDica()).toHaveStyle({ visibility: "hidden" });
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
     expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
-    expect(dica()).not.toBeInTheDocument();
+    expect(secaoDaDica()).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Descartar e gravar novamente/ }));
     expect(await screen.findByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
     expect(dica()).toBeInTheDocument();
@@ -997,6 +1010,9 @@ describe("Reuniões — envio de arquivo", () => {
     // Enquanto o navegador lê o arquivo, nada do formulário muda.
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toBeDisabled();
+    // A dica de instalação também sai do alcance durante o envio, sem perder o lugar.
+    expect(screen.queryByRole("region", { name: "Instale o WRW como app" })).not.toBeInTheDocument();
+    expect(document.querySelector("section[aria-labelledby]")).toHaveStyle({ visibility: "hidden" });
     await act(async () => { entregarDuracao(30); });
     // Com a reunião sendo criada, também não: a autorização não se desmarca no meio.
     await waitFor(() => expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia", consentGranted: true })));
@@ -1009,6 +1025,7 @@ describe("Reuniões — envio de arquivo", () => {
     })));
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
+    expect(screen.getByRole("region", { name: "Instale o WRW como app" })).toBeInTheDocument();
   });
 
   it("o servidor recusa o envio: o aviso aparece e o formulário destrava", async () => {

@@ -1,8 +1,10 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, Smartphone, X } from "lucide-react";
 import {
   ambienteAtual,
+  dicaDispensadaNoAparelho,
+  marcarDicaNoAparelho,
   pedirInstalacao,
   plataformaDeInstalacao,
   useInstalacaoDoApp,
@@ -19,32 +21,30 @@ import {
  * com os rótulos que o sistema mostra em cada idioma. No iPhone e no iPad ela
  * avisa que o app instalado pede um login próprio, separado do do Safari.
  *
- * Fechada, não volta neste aparelho: a marca fica no navegador (sem dado de
- * usuária, e o logout não a apaga, porque a dica é do aparelho). Ela também
- * não aparece dentro do app instalado nem na casca das lojas.
+ * Fechada, ou com o app instalado, não volta neste aparelho (a marca de
+ * lib/instalacao-do-app.ts). Ela também não aparece dentro do app instalado
+ * nem na casca das lojas.
+ *
+ * `oculta` (durante a gravação e o envio) esconde a dica sem tirar o lugar
+ * dela: no computador o cartão do gravador é centralizado na altura, e a dica
+ * sumindo puxaria o "Encerrar gravação" para longe do "Iniciar gravação".
  */
-
-const CHAVE_DA_DICA_FECHADA = "mmm:dica-de-instalacao-fechada";
-
-function dicaFechadaNoAparelho(): boolean {
-  try {
-    return localStorage.getItem(CHAVE_DA_DICA_FECHADA) === "1";
-  } catch {
-    // Armazenamento bloqueado (modo privado): a dica aparece.
-    return false;
-  }
-}
-
-export function DicaDeInstalacao({ ambiente }: { ambiente?: AmbienteDoNavegador }) {
+export function DicaDeInstalacao({ ambiente, oculta = false }: { ambiente?: AmbienteDoNavegador; oculta?: boolean }) {
   const { t } = useTranslation();
   const { podePedir, instaladoNestaVisita } = useInstalacaoDoApp();
   const [plataforma] = useState<Plataforma>(() => plataformaDeInstalacao(ambiente ?? ambienteAtual()));
-  const [fechada, setFechada] = useState(dicaFechadaNoAparelho);
+  const [fechada, setFechada] = useState(dicaDispensadaNoAparelho);
   const [pedindo, setPedindo] = useState(false);
   const [instalou, setInstalou] = useState(false);
   const secao = useRef<HTMLElement>(null);
   const titulo = useRef<HTMLHeadingElement>(null);
   const idDoTitulo = useId();
+
+  // Aberta como app: o aparelho guarda que o app está instalado. No Chromium,
+  // a aba do navegador lê a mesma marca e para de oferecer a instalação.
+  useEffect(() => {
+    if (plataforma === "app-instalado") marcarDicaNoAparelho("instalado");
+  }, [plataforma]);
 
   if (fechada || instalou || instaladoNestaVisita || plataforma === "app-instalado") return null;
 
@@ -61,18 +61,16 @@ export function DicaDeInstalacao({ ambiente }: { ambiente?: AmbienteDoNavegador 
 
   function fechar() {
     focarAntesDaDica();
+    // Sem armazenamento, a marca não fica, e a dica volta só numa visita nova.
+    marcarDicaNoAparelho("fechada");
     setFechada(true);
-    try {
-      localStorage.setItem(CHAVE_DA_DICA_FECHADA, "1");
-    } catch {
-      // Sem armazenamento: a dica fica fechada só enquanto o gravador estiver aberto.
-    }
   }
 
   async function instalar() {
     setPedindo(true);
     try {
       if ((await pedirInstalacao()) === "aceitou") {
+        // O appinstalled do navegador grava a marca; a dica some já.
         focarAntesDaDica();
         setInstalou(true);
         return;
@@ -90,7 +88,12 @@ export function DicaDeInstalacao({ ambiente }: { ambiente?: AmbienteDoNavegador 
   const comBotao = (podePedir || pedindo) && plataforma !== "ios";
 
   return (
-    <section ref={secao} aria-labelledby={idDoTitulo} className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/65">
+    <section
+      ref={secao}
+      aria-labelledby={idDoTitulo}
+      style={oculta ? { visibility: "hidden" } : undefined}
+      className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/65"
+    >
       <div className="flex items-start justify-between gap-3">
         {/* text-base: o h2 global de index.css é text-4xl, para título de página. */}
         <h2 id={idDoTitulo} ref={titulo} tabIndex={-1} className="flex items-center gap-2 text-base font-semibold text-white/85 outline-none">
@@ -101,7 +104,7 @@ export function DicaDeInstalacao({ ambiente }: { ambiente?: AmbienteDoNavegador 
           type="button"
           onClick={fechar}
           aria-label={t("meetings.install.closeLabel")}
-          className="-m-1 shrink-0 rounded-lg p-1 text-white/45 hover:bg-white/5 hover:text-white"
+          className="-m-2 shrink-0 rounded-lg p-2 text-white/45 hover:bg-white/5 hover:text-white"
         >
           <X aria-hidden="true" size={16} />
         </button>

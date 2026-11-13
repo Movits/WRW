@@ -1,8 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ambienteAtual,
+  CHAVE_DA_DICA,
+  dicaDispensadaNoAparelho,
   escutarPedidoDeInstalacao,
+  marcarDicaNoAparelho,
   pedirInstalacao,
   plataformaDeInstalacao,
   useInstalacaoDoApp,
@@ -11,28 +14,35 @@ import {
 
 /**
  * A dica de instalação do /gravar (decisão 8 do plano do gravador): o caminho
- * de instalação de cada aparelho e o pedido de instalação do Chromium.
+ * de instalação de cada aparelho, o pedido de instalação do Chromium e a marca
+ * da dica no aparelho.
  */
 
 const UA = {
   iphoneSafari: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
   iphoneChrome: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.7444.77 Mobile/15E148 Safari/604.1",
+  // A WebView de um app no iPhone (WKWebView) não leva "Safari/".
+  iphoneWebView: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
   // O iPad no modo computador (o padrão desde o iPadOS 13) se apresenta como Mac.
   macSafari: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
   instagramIphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 400.0.0.0.0 (iPhone15,2; iOS 18_6; pt_BR)",
   facebookAndroid: "Mozilla/5.0 (Linux; Android 15; SM-S921B Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/500.0.0.0;]",
+  androidWebView: "Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36",
   wechat: "Mozilla/5.0 (Linux; Android 15; V2309A) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.50",
   androidChrome: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
   samsung: "Mozilla/5.0 (Linux; Android 15; SAMSUNG SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/28.0 Chrome/130.0.0.0 Mobile Safari/537.36",
   androidFirefox: "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/144.0",
+  // O Chrome de tablet Android no modo computador se apresenta como Linux.
+  linuxChrome: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+  chromebook: "Mozilla/5.0 (X11; CrOS x86_64 16267.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
   windowsChrome: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
   windowsEdge: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+  windowsOpera: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0",
   macChrome: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
-  linuxChrome: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
   macFirefox: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:144.0) Gecko/20100101 Firefox/144.0",
   windowsFirefox: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0",
   jsdom: "Mozilla/5.0 (linux) AppleWebKit/537.36 (KHTML, like Gecko) jsdom/29.1.1",
-  cascaDasLojas: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WRWApp/1.0",
+  cascaDasLojas: "Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36 WRWApp/1.0",
 };
 
 describe("plataformaDeInstalacao", () => {
@@ -40,21 +50,26 @@ describe("plataformaDeInstalacao", () => {
     ["iPhone no Safari", UA.iphoneSafari, 5, "ios"],
     ["iPhone no Chrome (o Compartilhar também adiciona à tela de início)", UA.iphoneChrome, 5, "ios"],
     ["iPad, que se apresenta como Mac mas tem tela de toque", UA.macSafari, 5, "ios"],
+    ["a WebView de um app no iPhone, sem Safari no userAgent", UA.iphoneWebView, 5, "navegador-embutido"],
     ["Mac no Safari", UA.macSafari, 0, "mac-safari"],
     ["Instagram no iPhone, antes do iPhone", UA.instagramIphone, 5, "navegador-embutido"],
     ["Facebook no Android, antes do Android", UA.facebookAndroid, 5, "navegador-embutido"],
+    ["a WebView do Android, sem token de app conhecido", UA.androidWebView, 5, "navegador-embutido"],
     ["WeChat", UA.wechat, 5, "navegador-embutido"],
     ["Android no Chrome", UA.androidChrome, 5, "android"],
     ["Android no Samsung Internet", UA.samsung, 5, "android"],
     ["Android no Firefox", UA.androidFirefox, 5, "android"],
+    ["tablet Android com o Chrome no modo computador", UA.linuxChrome, 10, "android"],
+    ["Linux no Chrome, sem tela de toque", UA.linuxChrome, 0, "computador"],
+    ["Chromebook com tela de toque", UA.chromebook, 10, "computador"],
     ["Windows no Chrome", UA.windowsChrome, 0, "computador"],
     ["Windows no Edge", UA.windowsEdge, 0, "computador"],
+    ["Windows no Opera, que não instala app da web", UA.windowsOpera, 0, "sem-instalacao"],
     ["Mac no Chrome", UA.macChrome, 0, "computador"],
-    ["Linux no Chrome", UA.linuxChrome, 0, "computador"],
     ["Mac no Firefox", UA.macFirefox, 0, "sem-instalacao"],
     ["Windows no Firefox", UA.windowsFirefox, 0, "sem-instalacao"],
     ["navegador desconhecido (o jsdom dos testes)", UA.jsdom, 0, "sem-instalacao"],
-    ["a casca das lojas (PR #180)", UA.cascaDasLojas, 5, "app-instalado"],
+    ["a casca das lojas (PR #180), uma WebView", UA.cascaDasLojas, 5, "app-instalado"],
   ])("%s", (_caso, userAgent, maxTouchPoints, esperada) => {
     expect(plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoApp: false })).toBe(esperada);
   });
@@ -69,13 +84,31 @@ describe("plataformaDeInstalacao", () => {
 describe("ambienteAtual", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    Reflect.deleteProperty(window.navigator, "standalone");
+    for (const propriedade of ["standalone", "userAgent", "maxTouchPoints"]) Reflect.deleteProperty(window.navigator, propriedade);
   });
 
   // Função comum, não vi.fn com retorno: o mockReset da suíte zeraria o retorno.
   function matchMediaQueAbre(modoAberto: string) {
     return (consulta: string) => ({ matches: consulta === `(display-mode: ${modoAberto})`, media: consulta });
   }
+
+  function navegadorCom(valores: { userAgent?: string; maxTouchPoints?: number; standalone?: boolean }) {
+    for (const [propriedade, value] of Object.entries(valores)) {
+      Object.defineProperty(window.navigator, propriedade, { value, configurable: true });
+    }
+  }
+
+  it("no iPad, lê o userAgent de Mac e a tela de toque, e a plataforma sai iPhone e iPad", () => {
+    vi.stubGlobal("matchMedia", matchMediaQueAbre("browser"));
+    navegadorCom({ userAgent: UA.macSafari, maxTouchPoints: 5, standalone: false });
+    expect(ambienteAtual()).toEqual({ userAgent: UA.macSafari, maxTouchPoints: 5, abertoComoApp: false });
+    expect(plataformaDeInstalacao(ambienteAtual())).toBe("ios");
+  });
+
+  it("sem maxTouchPoints, conta zero toques", () => {
+    navegadorCom({ maxTouchPoints: undefined });
+    expect(ambienteAtual().maxTouchPoints).toBe(0);
+  });
 
   it("sem matchMedia (o jsdom) não está aberta como app", () => {
     vi.stubGlobal("matchMedia", undefined);
@@ -99,19 +132,39 @@ describe("ambienteAtual", () => {
 
   it("no iPhone, o app da tela de início tem navigator.standalone", () => {
     vi.stubGlobal("matchMedia", matchMediaQueAbre("browser"));
-    Object.defineProperty(window.navigator, "standalone", { value: true, configurable: true });
+    navegadorCom({ standalone: true });
     expect(ambienteAtual().abertoComoApp).toBe(true);
   });
+});
 
-  it("lê o userAgent e o maxTouchPoints do navegador", () => {
-    const ambiente = ambienteAtual();
-    expect(ambiente.userAgent).toBe(window.navigator.userAgent);
-    expect(ambiente.maxTouchPoints).toBe(window.navigator.maxTouchPoints ?? 0);
+describe("a marca da dica no aparelho", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sem marca, a dica não foi dispensada; fechada ou instalado, foi", () => {
+    expect(dicaDispensadaNoAparelho()).toBe(false);
+    marcarDicaNoAparelho("fechada");
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("fechada");
+    expect(dicaDispensadaNoAparelho()).toBe(true);
+    marcarDicaNoAparelho("instalado");
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("instalado");
+    expect(dicaDispensadaNoAparelho()).toBe(true);
+  });
+
+  it("com o armazenamento bloqueado (modo privado), não lança: a dica conta como não dispensada", () => {
+    const bloqueado = () => {
+      throw new DOMException("O armazenamento está bloqueado.", "SecurityError");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(bloqueado);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(bloqueado);
+    expect(() => marcarDicaNoAparelho("fechada")).not.toThrow();
+    expect(dicaDispensadaNoAparelho()).toBe(false);
   });
 });
 
 describe("o pedido de instalação do Chromium", () => {
   let parar: (() => void) | undefined;
+  beforeEach(() => localStorage.clear());
   afterEach(() => {
     parar?.();
     parar = undefined;
@@ -128,7 +181,7 @@ describe("o pedido de instalação do Chromium", () => {
     return { evento, prompt };
   }
 
-  it("guarda o pedido, cancela a faixa do navegador e o usa uma vez só", async () => {
+  it("guarda o pedido sem cancelar a oferta do próprio navegador, e o usa uma vez só", async () => {
     const alvo = new EventTarget();
     parar = escutarPedidoDeInstalacao(alvo);
     const { result } = renderHook(() => useInstalacaoDoApp());
@@ -138,7 +191,8 @@ describe("o pedido de instalação do Chromium", () => {
     act(() => {
       alvo.dispatchEvent(evento);
     });
-    expect(evento.defaultPrevented).toBe(true);
+    // Sem preventDefault: o Chrome segue mostrando a oferta dele em qualquer página do site.
+    expect(evento.defaultPrevented).toBe(false);
     expect(result.current.podePedir).toBe(true);
 
     let resultado: string | undefined;
@@ -151,6 +205,22 @@ describe("o pedido de instalação do Chromium", () => {
     expect(result.current.podePedir).toBe(false);
     await expect(pedirInstalacao()).resolves.toBe("sem-pedido");
     expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("o pedido que chega antes de a tela montar fica guardado para ela (a razão da escuta na carga)", () => {
+    const alvo = new EventTarget();
+    parar = escutarPedidoDeInstalacao(alvo);
+    alvo.dispatchEvent(pedidoDoNavegador("accepted").evento);
+    const { result } = renderHook(() => useInstalacaoDoApp());
+    expect(result.current.podePedir).toBe(true);
+  });
+
+  it("o app instalado antes de a tela montar também fica sabido", () => {
+    const alvo = new EventTarget();
+    parar = escutarPedidoDeInstalacao(alvo);
+    alvo.dispatchEvent(new Event("appinstalled"));
+    const { result } = renderHook(() => useInstalacaoDoApp());
+    expect(result.current).toEqual({ podePedir: false, instaladoNestaVisita: true });
   });
 
   it("quem fecha o pedido do navegador sem instalar volta como recusou", async () => {
@@ -173,7 +243,7 @@ describe("o pedido de instalação do Chromium", () => {
     expect(result.current.podePedir).toBe(false);
   });
 
-  it("o app instalado nesta visita esquece o pedido e avisa a tela", () => {
+  it("o app instalado nesta visita esquece o pedido, avisa a tela e marca o aparelho", () => {
     const alvo = new EventTarget();
     parar = escutarPedidoDeInstalacao(alvo);
     const { result } = renderHook(() => useInstalacaoDoApp());
@@ -182,6 +252,8 @@ describe("o pedido de instalação do Chromium", () => {
       alvo.dispatchEvent(new Event("appinstalled"));
     });
     expect(result.current).toEqual({ podePedir: false, instaladoNestaVisita: true });
+    // Na próxima visita, numa aba do navegador, a dica lê a marca e não volta.
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("instalado");
   });
 
   it("sem pedido guardado, pedirInstalacao devolve sem-pedido", async () => {

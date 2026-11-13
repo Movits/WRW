@@ -1,13 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { LANGUAGES } from "@/i18n";
-import { escutarPedidoDeInstalacao, type AmbienteDoNavegador } from "@/lib/instalacao-do-app";
+import { CHAVE_DA_DICA, escutarPedidoDeInstalacao, type AmbienteDoNavegador } from "@/lib/instalacao-do-app";
 import { DicaDeInstalacao } from "./DicaDeInstalacao";
 
 /**
  * A dica de instalação do app no /gravar (decisão 8 do plano do gravador): o
  * caminho de cada aparelho, o botão do pedido do Chromium, o aviso do login
- * separado no iPhone, e a dica fechada que não volta neste aparelho.
+ * separado no iPhone, e a dica fechada (ou o app instalado) que não volta.
  */
 
 const UA = {
@@ -20,7 +20,6 @@ const UA = {
   cascaDasLojas: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WRWApp/1.0",
 };
 
-const CHAVE_DA_DICA_FECHADA = "mmm:dica-de-instalacao-fechada";
 const TITULO = "Instale o WRW como app";
 
 function ambiente(userAgent: string, extra: Partial<AmbienteDoNavegador> = {}): AmbienteDoNavegador {
@@ -28,14 +27,14 @@ function ambiente(userAgent: string, extra: Partial<AmbienteDoNavegador> = {}): 
 }
 
 /** Como no gravador: um bloco de botões e, logo depois, a dica. */
-function montar(amb: AmbienteDoNavegador) {
+function montar(amb: AmbienteDoNavegador, { oculta = false } = {}) {
   return render(
     <div>
       <div>
         <button type="button">Iniciar gravação</button>
         <button type="button">Enviar arquivo de áudio</button>
       </div>
-      <DicaDeInstalacao ambiente={amb} />
+      <DicaDeInstalacao ambiente={amb} oculta={oculta} />
     </div>
   );
 }
@@ -57,7 +56,7 @@ function pedidoDoNavegador(outcome: "accepted" | "dismissed", { falha = false } 
 let pararEscuta: () => void;
 
 beforeEach(() => {
-  // O setup limpa só o sessionStorage: a dica fechada num teste ficaria fechada nos seguintes.
+  // O setup limpa só o sessionStorage: a marca de um teste esconderia a dica nos seguintes.
   localStorage.clear();
   pararEscuta = escutarPedidoDeInstalacao(window);
 });
@@ -118,15 +117,18 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
     expect(screen.getByText("Daqui não dá para instalar: abra esta página no Safari ou no Chrome.")).toBeInTheDocument();
   });
 
-  it("no Firefox do computador, indica um navegador que instala", () => {
+  it("no Firefox do computador, indica um navegador que instala, sem dizer que ele não instala", () => {
     montar(ambiente(UA.windowsFirefox));
-    expect(screen.getByText("Este navegador não instala apps. Abra o WRW no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
+    expect(screen.getByText("Para instalar o WRW como app, abra-o no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
   });
 
-  it("aberta como app, ou dentro da casca das lojas, a dica não aparece", () => {
+  it("aberta como app, ou dentro da casca das lojas, a dica não aparece e o aparelho fica marcado", () => {
     const { container } = render(<DicaDeInstalacao ambiente={ambiente(UA.android, { abertoComoApp: true })} />);
     expect(container).toBeEmptyDOMElement();
+    // No Chromium, a aba do navegador lê a mesma marca e para de oferecer a instalação.
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("instalado");
     cleanup();
+    localStorage.clear();
     const casca = render(<DicaDeInstalacao ambiente={ambiente(UA.cascaDasLojas, { maxTouchPoints: 5 })} />);
     expect(casca.container).toBeEmptyDOMElement();
   });
@@ -136,6 +138,24 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     const titulo = screen.getByRole("heading", { level: 2, name: TITULO });
     expect(titulo.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("oculta (gravando ou enviando), fica fora do leitor de tela e do teclado, mas no mesmo lugar", () => {
+    const { rerender } = montar(ambiente(UA.android), { oculta: true });
+    expect(dica()).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fechar a dica de instalação" })).not.toBeInTheDocument();
+    const secao = document.querySelector("section[aria-labelledby]");
+    expect(secao).toHaveStyle({ visibility: "hidden" });
+    rerender(
+      <div>
+        <div>
+          <button type="button">Iniciar gravação</button>
+          <button type="button">Enviar arquivo de áudio</button>
+        </div>
+        <DicaDeInstalacao ambiente={ambiente(UA.android)} />
+      </div>
+    );
+    expect(dica()).toBeInTheDocument();
   });
 });
 
@@ -155,6 +175,15 @@ describe("Dica de instalação — o pedido do navegador (Chrome, Edge, Samsung 
     expect(prompt).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(dica()).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Enviar arquivo de áudio" })).toHaveFocus();
+  });
+
+  it("o pedido que chegou antes de a dica montar (na carga, pelo main.tsx) já mostra o botão", () => {
+    act(() => {
+      window.dispatchEvent(pedidoDoNavegador("accepted").evento);
+    });
+    montar(ambiente(UA.android, { maxTouchPoints: 5 }));
+    expect(screen.getByRole("button", { name: "Instalar o app" })).toBeInTheDocument();
+    expect(passos()).toEqual([]);
   });
 
   it("recusado o pedido, os passos tomam o lugar do botão e o foco vai ao título da dica", async () => {
@@ -185,12 +214,26 @@ describe("Dica de instalação — o pedido do navegador (Chrome, Edge, Samsung 
     expect(screen.getByRole("heading", { name: TITULO })).toHaveFocus();
   });
 
-  it("instalado nesta visita por outro caminho (o menu do navegador), a dica some", () => {
+  it("instalado nesta visita por outro caminho (o menu do navegador), a dica some e não volta na próxima visita", () => {
     montar(ambiente(UA.windowsEdge));
     expect(dica()).toBeInTheDocument();
     act(() => {
       window.dispatchEvent(new Event("appinstalled"));
     });
+    expect(dica()).not.toBeInTheDocument();
+    // Uma carga nova: a escuta recomeça do zero, e a marca no aparelho segura a dica.
+    cleanup();
+    pararEscuta();
+    pararEscuta = escutarPedidoDeInstalacao(window);
+    montar(ambiente(UA.windowsEdge));
+    expect(dica()).not.toBeInTheDocument();
+  });
+
+  it("o app instalado antes de a dica montar também a esconde", () => {
+    act(() => {
+      window.dispatchEvent(new Event("appinstalled"));
+    });
+    montar(ambiente(UA.windowsEdge));
     expect(dica()).not.toBeInTheDocument();
   });
 });
@@ -201,7 +244,7 @@ describe("Dica de instalação — fechar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fechar a dica de instalação" }));
     expect(dica()).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enviar arquivo de áudio" })).toHaveFocus();
-    expect(localStorage.getItem(CHAVE_DA_DICA_FECHADA)).toBe("1");
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("fechada");
     cleanup();
     montar(ambiente(UA.iphone, { maxTouchPoints: 5 }));
     expect(dica()).not.toBeInTheDocument();

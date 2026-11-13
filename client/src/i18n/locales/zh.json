@@ -1609,7 +1609,7 @@
       "desktopStep2": "如果没有出现，请在 Chrome 中依次选择 ⋮ >“投放、保存和分享”>“将网页安装为应用…”。",
       "macSafari": "在 Safari 浏览器中，选取“文件”>“添加到程序坞”。",
       "inAppBrowser": "无法在此处安装：请在 Safari 浏览器或 Chrome 中打开此页面。",
-      "unsupportedBrowser": "此浏览器无法安装 App。请在 Chrome、Edge 或 Safari 浏览器中打开 WRW。"
+      "unsupportedBrowser": "如需将 WRW 安装为 App，请在 Chrome、Edge 或 Safari 浏览器中打开它。"
     }
   },
   "connections": {
