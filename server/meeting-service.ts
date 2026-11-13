@@ -12,6 +12,7 @@ import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARD
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
@@ -334,7 +335,12 @@ export function nomeSustentadoPelaTranscricao(nome: string, transcricao: string)
 const TIMEOUT_DA_TRADUCAO_MS = 180_000;
 const ORCAMENTO_DA_TRADUCAO_MS = 200_000;
 
-export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string) {
+/**
+ * `antesDeChamarAIA` roda só quando a tradução não está guardada, logo antes
+ * do pedido à IA, e pode recusar lançando: é o teto do link aberto, que assim
+ * não gasta vaga com a tradução que já está no banco.
+ */
+export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string, antesDeChamarAIA?: () => void) {
   const normalizedLanguage = language === "pt" ? "pt-BR" : language;
   if (!(normalizedLanguage in MEETING_LANGUAGES)) throw new Error("Idioma de tradução não suportado.");
   const targetLanguage = MEETING_LANGUAGES[normalizedLanguage as keyof typeof MEETING_LANGUAGES];
@@ -353,6 +359,36 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     )).limit(1);
   if (cached) return { language: normalizedLanguage, text: cached.translatedText, cached: true };
 
+  // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
+  // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
+  // por ela, sem pagar outra chamada nem gastar vaga do teto.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  const emCurso = traducoesEmCurso.get(chave);
+  if (emCurso) return emCurso;
+  antesDeChamarAIA?.();
+  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript });
+  traducoesEmCurso.set(chave, trabalho);
+  try {
+    return await trabalho;
+  } finally {
+    traducoesEmCurso.delete(chave);
+  }
+}
+
+type TraducaoDaTranscricao = { language: string; text: string; cached: boolean };
+
+// As traduções que estão na IA agora, por dona, reunião, idioma e transcrição.
+// Em memória, como os tetos: basta à instância única do Render.
+const traducoesEmCurso = new Map<string, Promise<TraducaoDaTranscricao>>();
+
+async function traduzirEGuardar(db: Banco, alvo: {
+  ownerId: string;
+  meetingId: string;
+  normalizedLanguage: string;
+  targetLanguage: string;
+  transcript: { id: string; transcript: string };
+}): Promise<TraducaoDaTranscricao> {
+  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript } = alvo;
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
     orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
@@ -372,15 +408,22 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
   const timestamp = now();
-  await db.insert(meetingTranscriptTranslations).values({
-    id: crypto.randomUUID(),
-    meetingId,
-    ownerId,
-    language: normalizedLanguage,
-    translatedText,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
+  try {
+    await db.insert(meetingTranscriptTranslations).values({
+      id: crypto.randomUUID(),
+      meetingId,
+      ownerId,
+      language: normalizedLanguage,
+      translatedText,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (erro) {
+    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
+    if (!ehColisaoDeChave(erro)) throw erro;
+  }
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -992,7 +1035,7 @@ async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
  * caminho do proxy autenticado (/manus-storage/...), que confere sessão e
  * posse a cada requisição; não é endereço público do bucket.
  */
-async function gravacaoParaOuvir(
+export async function gravacaoParaOuvir(
   db: Awaited<ReturnType<typeof exigirDb>>,
   ownerId: string,
   meetingId: string,
@@ -1060,7 +1103,9 @@ export async function limparGravacoesVencidas(limite = 200) {
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  const [meeting] = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
+  // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
+  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));

@@ -99,6 +99,31 @@ ilimitado. Elas mudam o plano de 30/10 e valem sobre ele.
 - **Prazo da cliente:** o app ativo perto de 28/11/2026, cerca de 20 dias a partir de
   08/11. Reordenar as ondas para o prazo é com o Roberto (ver "As ondas").
 
+## Decisões de 12/11/2026
+
+Do Roberto. Valem sobre as de 10/11 nos dois pontos abaixo.
+
+- **Compartilhar por link aberto, por enquanto.** Troca o "sem link público e sem senha"
+  de 10/11. A dona liga o link de uma reunião pronta, e qualquer pessoa com o endereço
+  `/r/{token}` ouve a gravação, lê e traduz a transcrição e pede à IA o resumo e respostas,
+  sem conta na WRW. O que já entrou (em
+  [decisoes-tomadas.md](./decisoes-tomadas.md), 12/11):
+  - só leitura: excluir, reprocessar e a rede particular da dona (contatos e entidades)
+    continuam só com ela, e o nome dela não aparece;
+  - ligar pede de novo a confirmação de que as pessoas que falaram autorizaram
+    compartilhar, e fica na auditoria; desligar corta o acesso na hora (quem já tinha a
+    gravação carregada segue ouvindo até a URL assinada vencer, em até 1 hora), e o link
+    novo é outro;
+  - os pedidos à IA pelo link têm dois tetos pela reunião, um por visitante e um do
+    total, e a página fica fora dos buscadores.
+
+  A R1 (participantes e consulta auditada pela administração) fica para depois. Quando
+  voltar, o desenho dela parte do link aberto que já existe.
+- **Agenda: WhatsApp e e-mail no lugar do Outlook.** A H16 continua pondo a reunião na
+  Google Agenda por link de criação de evento, e o convite sai por WhatsApp e por e-mail.
+  O compartilhar do link aberto já usa os dois: o app da própria dona abre com a mensagem
+  pronta, e ela escolhe para quem mandar.
+
 Proposta do Claude, explicada ao Roberto em 10/11, que vale enquanto ele não a vetar:
 **a gravação é contínua para quem grava.** O pedido dele é que ninguém precise lembrar
 de gravar de novo no meio e que nenhum trecho fique cortado. Pela proposta, quem grava
@@ -189,7 +214,9 @@ Fixados antes da transcrição por fatia, para as PRs não se contradizerem:
     buscado) e `?item` (o combinado). A H1r faz o `/meetings/:id` repassá-los à tela, a
     D1 lê `?t` e `?q`, a H4 lê `?item`, e a H5, a H7 e a H15 montam os links.
 - **Um dono por tela:** a A3 é dona das rotas, e o detalhe da reunião é um componente
-  só, o da PR D1.
+  só, o da PR D1. Desde 12/11 há uma segunda tela de detalhe, a página do link aberto
+  (`client/src/pages/ReuniaoAberta.tsx`), que repete o player e a tradução; a D1 junta
+  as duas.
 - **Acesso à reunião compartilhada:** uma função só decide quem vê, na consulta, e não na
   tela. A lista, o detalhe, o player, as perguntas e o proxy de arquivos passam por ela.
   - A participante e a administração só leem. O que muda dado (editar, confirmar,
@@ -259,7 +286,7 @@ Tamanho: P é pequena, M é média e G é grande.
 | G3 (M, migração) | Tabela de fatias, estado "enviando", versão do aviso, `origem` e `audio_pipeline`, transcrição em MEDIUMTEXT. A lista e o detalhe passam a escolher as colunas e deixam de mandar as colunas de controle da fila. | decisão sobre a #134 |
 | G1b (M) | Seletor do idioma da reunião, que por padrão é o da tela de quem grava. A G1b traz a função `nomeDoIdioma` (ver os contratos), e o ditado e a voz do contato passam a usá-la também. Na tradução, o servidor e a tela deixam de tratar o pt-BR como o original fixo: sem isso, uma reunião em inglês "traduzida" para pt-BR voltaria em inglês. | G1a, G2 |
 | A6 (G, migração) | Servidor das passkeys com `@simplewebauthn/server`: a tabela das chaves e a do desafio de uso único, a entrada sem senha e a gestão pela dona, seguindo os contratos das passkeys. Sem `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS`, a função some. | A5 |
-| G4 (M) | Aviso de gravação em rascunho, versionado como dizem os contratos. Ele cita a IA do Google, a transferência internacional, a retenção e a separação de falantes, e diz quem terá acesso: as participantes adicionadas e, para consulta, a presidência e a admin, com registro. O rascunho completo fica em `docs/termos/` para a Cris. | G1b, G3 |
+| G4 (M) | Aviso de gravação em rascunho, versionado como dizem os contratos. Ele cita a IA do Google, a transferência internacional, a retenção e a separação de falantes, e diz quem terá acesso: as participantes adicionadas e, para consulta, a presidência e a admin, com registro, e quem receber o link aberto que a dona ligar (decisões de 12/11). O rascunho completo fica em `docs/termos/` para a Cris. | G1b, G3 |
 | G6 (M) | Transcrição de uma fatia no Gemini, com falantes e tempos, e o script da bancada A (ver "As duas bancadas de teste"). | G1b |
 | G8 (M) | Extração, tradução e Memória leem a reunião inteira, em janelas. A tradução de uma reunião longa sai da requisição e vira trabalho em segundo plano. | G1b, A3 |
 | A7 (G) | Tela das passkeys: login, convite depois da senha e gestão no Perfil. | A6 |
@@ -271,8 +298,8 @@ Tamanho: P é pequena, M é média e G é grande.
 | G5 (G) | Reunião criada no início e rota binária das fatias. | G4, G8, #149 |
 | H1r (P) | A Memória e o perfil do contato abrem a reunião certa. A abertura pela Memória, pelo `metadata.meetingId`, vem na A3; a H1r põe os links da reunião no perfil do contato e faz o `/meetings/:id` repassar à tela `?t` (o segundo da fala), `?q` (o termo buscado) e `?item` (o combinado). | G8 |
 | G7 (G) | Fila de transcrição no MySQL. | G5, G6 |
-| R1 (G, migração) | Reunião compartilhada com participantes e consulta auditada da administração, sem link público nem senha. | G3, A3, #149 |
-| D1 (G) | Detalhe único: transcrição por falante, player que renova a URL, andamento, busca e tempo de fala. | G7, S, R1 |
+| R1 (G, migração) | Reunião compartilhada com participantes e consulta auditada da administração. Adiada em 12/11: por ora, no lugar dela, entrou o link aberto (decisões de 12/11). | G3, A3, #149 |
+| D1 (G) | Detalhe único: transcrição por falante, player que renova a URL, andamento, busca e tempo de fala, também na página do link aberto (`ReuniaoAberta.tsx`). | G7, S, R1 (adiada em 12/11) |
 | G9 (G) | Gravador que envia em fatias por baixo, numa gravação contínua para quem grava, com cópia no aparelho até o servidor confirmar e retomada do envio. Uma trava do navegador (Web Locks) impede duas abas de enviarem a mesma gravação, e a cópia é apagada ao sair e ao excluir a conta. | D1, G4, G5, G7, S |
 | G10 (M) | Gravação longa no celular: tela acesa, aviso do iPhone, pausa e "continuar gravando". Em vez do aviso de limite, que não há mais, um aviso a cada hora completa de gravação ("1 hora de gravação", "2 horas"...), sem parar a gravação. | G9 |
 | H9 (G) | Importar M4A, MP3, MP4 e MOV pelas fatias, com o mesmo teto de tempo da gravação, que a G13 tira. O navegador corta o MP3 nas fronteiras de quadro e tira o áudio (AAC) de M4A, MP4 e MOV com o `mp4box`; do vídeo, só o áudio sai do aparelho. | G9 |
@@ -282,13 +309,13 @@ Tamanho: P é pequena, M é média e G é grande.
 
 | PR | O que faz | Depende de |
 |---|---|---|
-| H3 (M, migração) | Nomes dos falantes. | D1, R1 |
+| H3 (M, migração) | Nomes dos falantes. | D1, R1 (adiada em 12/11) |
 | H4 (G, migração) | Resumo com tópicos, decisões e combinados, no idioma da reunião, cada item pendente até a dona confirmar. Os modelos de resumo são Geral, Networking, Mentoria, Vendas e 1:1. A #171 já pôs na `main` uma primeira versão, gerada a pedido, sem modelos, sem guardar nada e só para a dona; a H4 parte dela. | H3, G7 |
 | H6 (M) | "Pergunte à reunião", só com o que foi dito e citando os tempos. Pelo plano, as perguntas e as respostas não ficam guardadas (ver o ponto sobre "o chat" nas decisões de 10/11). A #171 já pôs na `main` uma primeira versão, só para a dona e citando o trecho, ainda sem os tempos. | H4 |
 | H5 (M) | Combinados confirmados viram "Próximas ações". | H4 |
 | H8 (M) | Quem gravou exporta em TXT, Markdown, SRT, Word e PDF, com auditoria. | H4 |
 | H7 (M, migração) | Busca entre reuniões, etiquetas e "Onde foi". | H4 |
-| H16 (M, migração) | Agendar a reunião na WRW, com título, data, hora e participantes, e pô-la na Google Agenda e no Outlook por botões com link de criação de evento ou por um arquivo .ics. A agenda por API, com OAuth, fica para depois (ver as decisões de 10/11). A H16 ainda não tem desenho detalhado: ele vai ser feito com o Roberto antes de alguém pegá-la (ver "O que depende de quem"). | R1 |
+| H16 (M, migração) | Agendar a reunião na WRW, com título, data, hora e participantes, pô-la na Google Agenda por link de criação de evento ou por um arquivo .ics e mandar o convite por WhatsApp e por e-mail (o botão do Outlook saiu em 12/11; se o .ics fica, por servir também à agenda do iPhone, é do desenho detalhado). A agenda por API, com OAuth, fica para depois (ver as decisões de 10/11). A H16 ainda não tem desenho detalhado: ele vai ser feito com o Roberto antes de alguém pegá-la (ver "O que depende de quem"). | R1 (adiada em 12/11) |
 
 **Onda 5: depois, conforme a cliente.**
 
@@ -412,6 +439,8 @@ mescla, só por `gh pr merge`).
 
 - **Roberto:**
   - já:
+    - com a R1 adiada em 12/11, se a D1, a H3 e a H16 seguem esperando por ela ou
+      passam a partir do link aberto;
     - se a ordem das ondas muda para o prazo da cliente, perto de 28/11;
     - se veta a proposta da gravação contínua com o envio em partes interno (ver as
       decisões de 10/11); sem veto, ela fica;
@@ -479,6 +508,12 @@ mescla, só por `gh pr merge`).
   - o texto do acesso às reuniões compartilhadas (as participantes adicionadas e a
     consulta pela presidência e pela admin, com registro, para conferir o cumprimento do
     Termo Geral de Uso), no aviso e no termo de gravação;
+  - o link aberto (12/11): a caixa que a dona marca ao ligar o link ("todas as pessoas
+    que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem
+    receber o link"; a prova guarda a frase e o idioma que ela viu), o aviso de privacidade
+    do detalhe (`meetings.privacyNotice`) e o aviso do gravador
+    (`meetings.consentNotice`), que agora falam do link, e o que o aviso de gravação e o
+    termo de gravação dizem dele;
   - o texto das passkeys para a próxima versão do Termo Geral de Uso (cláusulas 7.3 e
     9.3). Ele espera a próxima versão porque republicar o Termo só por isso revogaria os
     aceites;
@@ -492,5 +527,6 @@ mescla, só por `gh pr merge`).
 - Transcrição ao vivo e app de relógio.
 - Integrações com Notion, Google Docs e OneNote.
 - Espaços de equipe: a reunião compartilhada cobre o caso.
-- Link público de reunião, com ou sem senha (descartado pelo Roberto em 10/11):
-  contraria a regra de servir arquivo só pelo proxy, com sessão e posse.
+- Link público com senha. O link aberto, sem senha, entrou em 12/11, por enquanto (ver
+  as decisões de 12/11): o áudio dele é a única exceção à regra de servir arquivo só pelo
+  proxy, com sessão e posse.

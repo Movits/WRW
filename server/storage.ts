@@ -201,8 +201,14 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
  * do bucket, deixando o player travado sem explicação. Uma hora cobre a
  * sessão de escuta inteira e continua muito abaixo de uma URL permanente.
  *
- * O prazo não é a proteção: quem protege é o proxy, que exige sessão e
- * confere posse ANTES de assinar qualquer coisa.
+ * O prazo não decide quem lê: cada caminho confere antes de assinar. O proxy
+ * /manus-storage/ (server/_core/storageProxy.ts) exige sessão e posse; a rota
+ * do link aberto, /reuniao-aberta/{token}/audio (server/link-aberto-da-reuniao.ts),
+ * confere só o token que a dona ligou, sem sessão. Mas o prazo É quanto tempo
+ * uma URL já entregue continua abrindo: depois de a dona desligar o link, quem
+ * já tinha a gravação carregada segue ouvindo até ela vencer. Quem mudar este
+ * valor atualiza o "até 1 hora" de docs/arquitetura/decisoes-tomadas.md, de
+ * docs/arquitetura/gravador-de-reunioes.md e do texto meetings.share.turnOffConfirm.
  */
 const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
 

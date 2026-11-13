@@ -106,6 +106,13 @@
       "when": 1794343191221,
       "tag": "0014_fatias-de-reuniao",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1794459959111,
+      "tag": "0015_link-aberto-da-reuniao",
+      "breakpoints": true
     }
   ]
 }
