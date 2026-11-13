@@ -209,7 +209,10 @@ com mensagem que nomeia as variáveis certas.
 A rota que serve os arquivos (`/manus-storage/*`) passou a exigir **sessão e
 posse**: gravação só para a dona, SIVC só para a dona, deal room para as partes
 (ou Ouro+, espelhando a política atual), e prefixo desconhecido é negado. Antes
-ela redirecionava qualquer requisição anônima para a URL assinada.
+ela redirecionava qualquer requisição anônima para a URL assinada. Exceção desde
+12/11/2026: o áudio da reunião com link aberto sai por
+`/reuniao-aberta/{token}/audio`, sem sessão, enquanto a dona mantém o link ligado
+(`server/link-aberto-da-reuniao.ts`).
 
 **Gravação de reunião.** `server/routers/meetings.ts` recebe o áudio como base64
 de até 15 MB em uma requisição e transcreve com LLM dentro dela. Um request pode

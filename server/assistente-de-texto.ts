@@ -53,6 +53,17 @@ export const MAXIMO_DE_CHAVES_POR_TETO = 5000;
 export function criarTeto(maximo: number, janelaMs: number, mensagem: string) {
   const pedidos = new Map<string, number[]>();
   return {
+    /**
+     * Recusa como `reservar`, sem gastar vaga: para quem precisa de vaga em
+     * dois tetos e não pode deixar uma gasta quando o outro recusa.
+     */
+    conferir(chave: string) {
+      const agora = Date.now();
+      const recentes = (pedidos.get(chave) ?? []).filter(momento => agora - momento < janelaMs);
+      if (recentes.length >= maximo) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: mensagem });
+      }
+    },
     reservar(chave: string) {
       const agora = Date.now();
       const recentes = (pedidos.get(chave) ?? []).filter(momento => agora - momento < janelaMs);

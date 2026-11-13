@@ -20,3 +20,16 @@ export const ROTA_DAS_REUNIOES = "/meetings";
 export function rotaDaReuniao(id: string) {
   return `${ROTA_DAS_REUNIOES}/${encodeURIComponent(id)}`;
 }
+
+/**
+ * O link aberto de uma reunião (pedido do Roberto em 12/11/2026, "por
+ * enquanto"): quem recebe o endereço ouve, lê e pergunta à IA sem conta na WRW.
+ * Curto porque viaja em mensagem de WhatsApp e de e-mail, e não muda: os links
+ * já enviados dependem dele. O servidor marca a página como fora dos buscadores
+ * (server/link-aberto-da-reuniao.ts).
+ */
+export const ROTA_DA_REUNIAO_ABERTA = "/r";
+
+export function rotaDaReuniaoAberta(token: string) {
+  return `${ROTA_DA_REUNIAO_ABERTA}/${encodeURIComponent(token)}`;
+}

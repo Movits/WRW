@@ -10,6 +10,7 @@ import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
+import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
@@ -372,7 +373,7 @@ export default function Meetings() {
           <button onClick={() => navigate(ROTA_GRAVAR)} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div><h2 className="text-base font-semibold">{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span></div></button>)}</div>}
       </div>
     </main>
   );
@@ -557,7 +558,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
   return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
-    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{t("meetings.privateMeetingEyebrow")}</p><h1 className="text-3xl font-bold mt-1">{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
+    {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que um
@@ -576,9 +579,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       )}
     </div>}
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
-    <div className="flex gap-2 border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} onClick={() => setTab(id)} className={`inline-flex items-center gap-2 px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
+    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4"><ResumoDaReuniaoPelaIA meetingId={meetingId}/><PergunteAReuniao meetingId={meetingId}/></div>}
-    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="font-semibold">{t("meetings.recordingHeading")}</h2>
+    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
         {/* Sem onError o player falha MUDO: sessão vencida, limite de
             requisições ou storage fora do ar desenham os controles e
@@ -590,7 +593,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         </audio>
         {falhaNoAudio
           ? <p className="text-xs text-amber-200/80 mt-2">{t("meetings.audioLoadError")}</p>
-          : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} · {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>}
+          : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>}
       </> : recordingExpired ? (
         // "A transcrição continua aqui" só é verdade com transcrição, e numa
         // reunião que falhou antes de guardar o áudio não houve gravação apagada.
@@ -600,7 +603,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       )}
       <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></section></div>}
     {tab === "transcript" && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <h2 className="font-semibold mb-4">{t("meetings.transcriptTab")}</h2>
+      <h2 className="text-base font-semibold mb-4">{t("meetings.transcriptTab")}</h2>
       {transcript ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{t("meetings.translateHeading")}</p>
@@ -617,10 +620,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
           </div>}
           {segmentos
-            ? <p className="whitespace-pre-wrap leading-7 text-white/75">{segmentos.map((s, i) => s.tipo
+            ? <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{segmentos.map((s, i) => s.tipo
                 ? <mark key={i} title={t(TIPOS_DE_ENTIDADE[s.tipo].chave)} className={`rounded-md px-1 py-0.5 font-medium ${TIPOS_DE_ENTIDADE[s.tipo].classes}`}>{s.texto}</mark>
                 : <span key={i}>{s.texto}</span>)}</p>
-            : <p className="whitespace-pre-wrap leading-7 text-white/75">{displayTranscript || transcript.transcript}</p>}
+            : <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{displayTranscript || transcript.transcript}</p>}
         </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>}

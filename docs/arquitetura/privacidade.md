@@ -372,4 +372,6 @@ dois perfis antes da entrega. Registrado em decisoes-em-aberto.md (D7).
       cofre das partes
 - [ ] Revogar autorização tira o acesso na consulta seguinte
 - [ ] Áudio de reunião e cartões de visita ficam em storage cifrado, com URL
-      temporária, não em link público permanente
+      temporária, não em link público permanente (exceção desde 12/11/2026: a reunião
+      que a dona compartilha por link aberto, enquanto o link estiver ligado; ver
+      decisoes-tomadas.md)
