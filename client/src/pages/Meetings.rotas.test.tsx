@@ -437,6 +437,24 @@ describe("Reuniões — gravação em curso", () => {
     })));
   });
 
+  it("a dica de instalação do app fica abaixo dos botões no gravador parado e some ao gravar e na revisão do áudio", async () => {
+    localStorage.removeItem("mmm:dica-de-instalacao-fechada");
+    abrirEm("/gravar");
+    const dica = () => screen.queryByRole("region", { name: "Instale o WRW como app" });
+    expect(dica()).toBeInTheDocument();
+    // Abaixo dos botões: ao sumir, não desloca o "Encerrar gravação", que nasce no lugar do "Iniciar".
+    const enviar = screen.getByRole("button", { name: /Enviar arquivo de áudio/ });
+    expect(enviar.compareDocumentPosition(dica()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await comecarAGravar();
+    expect(dica()).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
+    expect(dica()).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Descartar e gravar novamente/ }));
+    expect(await screen.findByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
+    expect(dica()).toBeInTheDocument();
+  });
+
   it("título de uma letra não abre o microfone: o aviso diz a regra do servidor, e o campo para em 200", async () => {
     abrirEm("/gravar");
     const campo = screen.getByPlaceholderText("Ex.: Conversa com investidor");
