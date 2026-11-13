@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
  * Uma conexão registrada pela plataforma — Meu Network Inteligente, spec da
  * Glenda de 14/09, itens 15 a 18. A tela mostra o que o servidor devolve para
  * quem participa: a origem, os itens que se encontraram, a etapa e o status
- * da comissão. O lado alheio chega só com o ID anônimo (ou como "membra da
+ * da comissão. O lado alheio chega só com o ID anônimo (ou como "membro da
  * plataforma"), e o lado da própria dona leva ao perfil do contato dela.
  *
  * As etapas seguem a ordem (apresentação → negociação → fechamento); o botão
