@@ -10,6 +10,10 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
+// Import estático, e não `await import()` dentro do procedimento: com o import
+// dinâmico, pedidos simultâneos nos testes pegavam o módulo real no lugar do
+// vi.mock e chamavam a Resend de verdade.
+import { buildPasswordResetEmail, sendEmail } from "../_core/email";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
 import { registerUser, loginUser, toPublicUser } from "../auth";
 import { gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../sessao";
@@ -82,10 +86,13 @@ export const tetoDeLoginPorEmail = criarTeto(
  * um erro ali contaria a quem pede quantos pedidos OUTRA pessoa fez para
  * aquele endereço.
  */
+/** A recusa por rede, a mesma no teto em memória e na contagem do banco (forgotPassword). */
+export const MENSAGEM_DO_LIMITE_POR_REDE =
+  "Muitos pedidos de recuperação de senha a partir desta rede. Aguarde alguns minutos e tente de novo.";
 export const tetoDeRecuperacaoPorRede = criarTeto(
   PASSWORD_RESET_RATE_LIMIT,
   PASSWORD_RESET_RATE_WINDOW_MS,
-  "Muitos pedidos de recuperação de senha a partir desta rede. Aguarde alguns minutos e tente de novo.",
+  MENSAGEM_DO_LIMITE_POR_REDE,
 );
 export const tetoDeRecuperacaoPorEmail = criarTeto(
   PASSWORD_RESET_ACCOUNT_LIMIT,
@@ -174,125 +181,133 @@ export const authRouter = router({
       // simultâneos (um HTTP em lote basta) liam todos "zero" e mandavam 100
       // e-mails para a mesma caixa.
       tetoDeRecuperacaoPorRede.reservar(ipAddress);
+      let liberarVagaDoEmail: () => void;
       try {
-        tetoDeRecuperacaoPorEmail.reservar(chaveDoEmail(input.email));
+        liberarVagaDoEmail = tetoDeRecuperacaoPorEmail.reservar(chaveDoEmail(input.email));
       } catch {
         console.warn(
           `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_ACCOUNT_LIMIT} por e-mail em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min.`,
         );
         return genericResponse;
       }
-      const db = await exigirDb();
-
-      const windowStart = new Date(Date.now() - PASSWORD_RESET_RATE_WINDOW_MS);
-      const [rateWindow] = await db.select({ count: sql<number>`COUNT(*)` })
-        .from(passwordResetRequests)
-        .where(and(
-          eq(passwordResetRequests.ipAddress, ipAddress),
-          sql`${passwordResetRequests.createdAt} >= ${windowStart}`,
-        ));
-      // A mesma resposta é retornada ao exceder o limite para não revelar informações.
-      if (Number(rateWindow?.count ?? 0) >= PASSWORD_RESET_RATE_LIMIT) {
-        // ...mas o limite não pode ser invisível para NÓS. Sem esta linha, o
-        // pedido recusado some sem deixar rastro: a tela mostra o mesmo "Pedido
-        // recebido" de qualquer outro pedido, nenhum e-mail sai, e não há nada
-        // no log do Render que explique o silêncio. Foi o relato "o esqueci a
-        // senha não chega" (Gabriel, reteste de 15/09), com este limite ainda
-        // em 3: a partir da quarta tentativa em 15 minutos nada mais saía, sem
-        // aviso. Hoje ele é 300, e o teto em memória (tetoDeRecuperacaoPorRede,
-        // acima) recusa antes, com TOO_MANY_REQUESTS e aviso na tela. Este ramo
-        // só dispara quando a memória não tem a contagem que o banco tem: deploy
-        // ou reinício dentro da janela; a chave desta rede tirada do teto quando
-        // ele passa de MAXIMO_DE_CHAVES_POR_TETO redes (criarTeto, em
-        // assistente-de-texto.ts); ou, por instantes, no fim da janela, porque a
-        // memória marca o pedido ao reservar e o banco só ao gravar, um pouco
-        // depois, e o mesmo pedido sai antes da conta da memória. Em todos os
-        // casos a recusa segue sem aviso na tela.
-        //
-        // O log NÃO leva o IP nem o e-mail: quem investiga precisa saber que o
-        // limite disparou, não quem o disparou, e a tabela
-        // `password_reset_requests` já guarda o IP para quem precisar auditar.
-        console.warn(
-          `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_RATE_LIMIT} por IP em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min.`,
-        );
-        return genericResponse;
-      }
-      await db.insert(passwordResetRequests).values({ id: crypto.randomUUID(), ipAddress });
-
-      const normalizedEmail = input.email.trim().toLowerCase();
-      // Buscar usuário pelo e-mail
-      const [user] = await db.select({ id: users.id, name: users.name, email: users.email })
-        .from(users)
-        .where(eq(users.email, normalizedEmail))
-        .limit(1);
-      // Sempre retornar sucesso para não revelar se o e-mail existe (segurança)
-      if (!user) return genericResponse;
-      // Limite por CONTA: com o IP afrouxado para o evento, é ele que impede
-      // encher de e-mails a caixa de uma pessoa. Conta só o que gera e-mail
-      // (conta que existe); a resposta é a mesma, então não vira oráculo, e o
-      // log não leva e-mail nem IP.
-      const [pedidosDaConta] = await db.select({ count: sql<number>`COUNT(*)` })
-        .from(passwordResetTokens)
-        .where(and(
-          eq(passwordResetTokens.userId, user.id),
-          sql`${passwordResetTokens.createdAt} >= ${windowStart}`,
-        ));
-      if (Number(pedidosDaConta?.count ?? 0) >= PASSWORD_RESET_ACCOUNT_LIMIT) {
-        console.warn(
-          `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_ACCOUNT_LIMIT} por conta em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min (userId ${user.id}).`,
-        );
-        return genericResponse;
-      }
-      // Invalidar tokens anteriores do mesmo usuário
-      await db.update(passwordResetTokens)
-        .set({ usedAt: new Date() })
-        .where(and(eq(passwordResetTokens.userId, user.id), sql`${passwordResetTokens.usedAt} IS NULL`));
-      // Token opaco de uso único; apenas seu hash é armazenado no banco.
-      const rawToken = crypto.randomBytes(48).toString("hex");
-      const tokenHash = hashPasswordResetToken(rawToken);
-      const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS); // 1 hora
-      await db.insert(passwordResetTokens).values({ userId: user.id, token: tokenHash, expiresAt });
-      // Não aceitar origem do cliente: evita que um link de reset aponte para domínio malicioso.
-      // E sem FRONTEND_URL não se inventa domínio: o fallback antigo apontava para o
-      // endereço morto do Manus, e o link chegaria quebrado na caixa de entrada.
-      const frontendUrl = process.env.FRONTEND_URL;
-      if (!frontendUrl) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            "Variável de ambiente FRONTEND_URL não definida: ela é a origem dos links de recuperação de senha e não tem valor padrão.",
-        });
-      }
-      const siteOrigin = frontendUrl.replace(/\/+$/, "");
-      const resetUrl = `${siteOrigin}/reset-password?token=${encodeURIComponent(rawToken)}`;
-      // Enviar e-mail via Resend
+      // Erro daqui em diante (banco fora do ar, consulta que falha, o limite por
+      // rede da contagem do banco) devolve a vaga do e-mail: três quedas seguidas
+      // gastavam o teto de 3, e o pedido seguinte, já com o banco de volta, saía
+      // "Pedido recebido" sem e-mail. Retorno sem erro (conta que não existe,
+      // limite da conta) segue gastando a vaga, como antes.
       try {
-        const { sendEmail, buildPasswordResetEmail } = await import("../_core/email");
-        const { html, text } = buildPasswordResetEmail(user.name || "Membro", resetUrl);
-        const emailSent = await sendEmail({
-          to: user.email!,
-          subject: "Redefina sua senha — WRW",
-          html,
-          text,
-        });
-        // A falha de envio NÃO pode virar erro para quem chamou. Este
-        // procedimento responde sempre a mesma coisa de propósito: e-mail que
-        // não existe já sai por `if (!user) return genericResponse` lá em cima.
-        // Se o e-mail cadastrado respondesse 500 quando a Resend falha, bastaria
-        // estourar a cota diária (o plano gratuito tem teto de 100 por dia) para
-        // transformar este endereço num oráculo: 500 = a conta existe, 200 = não
-        // existe. O problema de entrega é NOSSO e sai no log, não na resposta.
-        //
-        // O log também não leva o e-mail da usuária: `userId` identifica a linha
-        // para quem for investigar, sem espalhar dado pessoal pelos registros do
-        // Render.
-        if (!emailSent) {
-          console.error(`[PasswordReset] A Resend não aceitou a solicitação de envio (userId ${user.id}).`);
+        const db = await exigirDb();
+
+        const windowStart = new Date(Date.now() - PASSWORD_RESET_RATE_WINDOW_MS);
+        const [rateWindow] = await db.select({ count: sql<number>`COUNT(*)` })
+          .from(passwordResetRequests)
+          .where(and(
+            eq(passwordResetRequests.ipAddress, ipAddress),
+            sql`${passwordResetRequests.createdAt} >= ${windowStart}`,
+          ));
+        // A recusa por rede vem antes de buscar a conta: não revela se ela existe.
+        if (Number(rateWindow?.count ?? 0) >= PASSWORD_RESET_RATE_LIMIT) {
+          // O limite não pode ser invisível. Foi o relato "o esqueci a senha não
+          // chega" (Gabriel, reteste de 15/09), com este limite ainda em 3: a
+          // partir da quarta tentativa em 15 minutos nada mais saía, sem aviso.
+          // Hoje ele é 300, e o teto em memória (tetoDeRecuperacaoPorRede, acima)
+          // recusa antes. Este ramo só dispara quando a memória não tem a
+          // contagem que o banco tem: deploy ou reinício dentro da janela; a
+          // chave desta rede tirada do teto quando ele passa de
+          // MAXIMO_DE_CHAVES_POR_TETO redes (criarTeto, em assistente-de-texto.ts);
+          // ou, por instantes, no fim da janela, porque a memória marca o pedido
+          // ao reservar e o banco só ao gravar, um pouco depois. Nos três casos a
+          // recusa é a mesma do teto em memória, TOO_MANY_REQUESTS com a frase
+          // dele, e a tela a mostra: antes ela respondia "Pedido recebido" sem
+          // e-mail nenhum.
+          //
+          // O log NÃO leva o IP nem o e-mail: quem investiga precisa saber que o
+          // limite disparou, não quem o disparou, e a tabela
+          // `password_reset_requests` já guarda o IP para quem precisar auditar.
+          console.warn(
+            `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_RATE_LIMIT} por IP em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min.`,
+          );
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: MENSAGEM_DO_LIMITE_POR_REDE });
         }
-      } catch (error) {
-        console.error(`[PasswordReset] Falha ao enviar e-mail de recuperação (userId ${user.id}):`, error);
+        await db.insert(passwordResetRequests).values({ id: crypto.randomUUID(), ipAddress });
+
+        const normalizedEmail = input.email.trim().toLowerCase();
+        // Buscar usuário pelo e-mail
+        const [user] = await db.select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.email, normalizedEmail))
+          .limit(1);
+        // Sempre retornar sucesso para não revelar se o e-mail existe (segurança)
+        if (!user) return genericResponse;
+        // Limite por CONTA: com o IP afrouxado para o evento, é ele que impede
+        // encher de e-mails a caixa de uma pessoa. Conta só o que gera e-mail
+        // (conta que existe); a resposta é a mesma, então não vira oráculo, e o
+        // log não leva e-mail nem IP.
+        const [pedidosDaConta] = await db.select({ count: sql<number>`COUNT(*)` })
+          .from(passwordResetTokens)
+          .where(and(
+            eq(passwordResetTokens.userId, user.id),
+            sql`${passwordResetTokens.createdAt} >= ${windowStart}`,
+          ));
+        if (Number(pedidosDaConta?.count ?? 0) >= PASSWORD_RESET_ACCOUNT_LIMIT) {
+          console.warn(
+            `[PasswordReset] Pedido recusado pelo limite de ${PASSWORD_RESET_ACCOUNT_LIMIT} por conta em ${PASSWORD_RESET_RATE_WINDOW_MS / 60_000} min (userId ${user.id}).`,
+          );
+          return genericResponse;
+        }
+        // Invalidar tokens anteriores do mesmo usuário
+        await db.update(passwordResetTokens)
+          .set({ usedAt: new Date() })
+          .where(and(eq(passwordResetTokens.userId, user.id), sql`${passwordResetTokens.usedAt} IS NULL`));
+        // Token opaco de uso único; apenas seu hash é armazenado no banco.
+        const rawToken = crypto.randomBytes(48).toString("hex");
+        const tokenHash = hashPasswordResetToken(rawToken);
+        const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS); // 1 hora
+        await db.insert(passwordResetTokens).values({ userId: user.id, token: tokenHash, expiresAt });
+        // Não aceitar origem do cliente: evita que um link de reset aponte para domínio malicioso.
+        // E sem FRONTEND_URL não se inventa domínio: o fallback antigo apontava para o
+        // endereço morto do Manus, e o link chegaria quebrado na caixa de entrada.
+        const frontendUrl = process.env.FRONTEND_URL;
+        if (!frontendUrl) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Variável de ambiente FRONTEND_URL não definida: ela é a origem dos links de recuperação de senha e não tem valor padrão.",
+          });
+        }
+        const siteOrigin = frontendUrl.replace(/\/+$/, "");
+        const resetUrl = `${siteOrigin}/reset-password?token=${encodeURIComponent(rawToken)}`;
+        // Enviar e-mail via Resend
+        try {
+          const { html, text } = buildPasswordResetEmail(user.name || "Membro", resetUrl);
+          const emailSent = await sendEmail({
+            to: user.email!,
+            subject: "Redefina sua senha — WRW",
+            html,
+            text,
+          });
+          // A falha de envio NÃO pode virar erro para quem chamou. Este
+          // procedimento responde sempre a mesma coisa de propósito: e-mail que
+          // não existe já sai por `if (!user) return genericResponse` lá em cima.
+          // Se o e-mail cadastrado respondesse 500 quando a Resend falha, bastaria
+          // estourar a cota diária (o plano gratuito tem teto de 100 por dia) para
+          // transformar este endereço num oráculo: 500 = a conta existe, 200 = não
+          // existe. O problema de entrega é NOSSO e sai no log, não na resposta.
+          //
+          // O log também não leva o e-mail da usuária: `userId` identifica a linha
+          // para quem for investigar, sem espalhar dado pessoal pelos registros do
+          // Render.
+          if (!emailSent) {
+            console.error(`[PasswordReset] A Resend não aceitou a solicitação de envio (userId ${user.id}).`);
+          }
+        } catch (error) {
+          console.error(`[PasswordReset] Falha ao enviar e-mail de recuperação (userId ${user.id}):`, error);
+        }
+        return genericResponse;
+      } catch (erro) {
+        liberarVagaDoEmail();
+        throw erro;
       }
-      return genericResponse;
     }),
 
   // Redefinir a senha derruba TODAS as sessões da conta, inclusive a deste

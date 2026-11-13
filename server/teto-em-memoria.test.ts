@@ -53,4 +53,32 @@ describe("criarTeto", () => {
     teto.reservar("k-0");
     expect(codigo(() => teto.reservar("k-0"))).toBe("ok");
   });
+
+  // O pedido que falha antes de usar a vaga (banco fora do ar no "esqueci a
+  // senha") a devolve: sem isso, três quedas seguidas gastavam o teto de 3.
+  it("liberar devolve a vaga da reserva, uma vez só", () => {
+    const teto = criarTeto(2, 60_000, "chega");
+    const liberar = teto.reservar("a");
+    teto.reservar("a");
+    expect(codigo(() => teto.reservar("a"))).toBe("TOO_MANY_REQUESTS");
+
+    liberar();
+    expect(codigo(() => teto.reservar("a"))).toBe("ok");
+    // Chamar de novo não abre vaga a mais.
+    liberar();
+    expect(codigo(() => teto.reservar("a"))).toBe("TOO_MANY_REQUESTS");
+  });
+
+  it("liberar uma chave não mexe nas outras, e liberar depois que a chave saiu do Map não quebra", () => {
+    const teto = criarTeto(1, 60_000, "chega");
+    const liberarA = teto.reservar("a");
+    teto.reservar("b");
+    liberarA();
+    expect(codigo(() => teto.reservar("b"))).toBe("TOO_MANY_REQUESTS");
+    expect(codigo(() => teto.reservar("a"))).toBe("ok");
+
+    const liberarVelha = teto.reservar("velha");
+    for (let i = 0; i < MAXIMO_DE_CHAVES_POR_TETO; i++) teto.reservar(`giro-${i}`);
+    expect(() => liberarVelha()).not.toThrow();
+  });
 });
