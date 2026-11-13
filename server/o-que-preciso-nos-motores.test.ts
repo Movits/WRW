@@ -217,6 +217,92 @@ describe("a descrição que nomeia o serviço que o próprio perfil OFERECE não
     const semOServico = { ...comIdFixo, activityArea: "Indústria de alimentos" };
     expect(necessidadesEscritasDoPerfil(semOServico)).toEqual([DESCRICAO_DA_PROPRIA_OFERTA]);
   });
+
+  it("a guarda usa o mesmo critério do motor: trocar a redação não escapa dela (validação de 16/09)", () => {
+    // A guarda olhava só `necessidadeNomeiaOServico`, enquanto `satisfaz` (server/matching.ts) casa também pelo
+    // ASSUNTO declarado sem nomear o serviço. Bastava reescrever a mesma oferta para o texto voltar a ser lido
+    // como necessidade e o par valer 50 no motor de perfis.
+    const tributarista = (descricao: string) => ({
+      whatIHave: ["Advocacia tributária"],
+      whatINeed: ["expansao_internacionalizacao"],
+      whatINeedDetails: [{ id: "d1", category: "expansao_internacionalizacao", description: descricao }],
+    });
+    for (const descricao of [
+      "Planejamento tributário para investidores estrangeiros e sócios",
+      "Assessoria tributária para holdings familiares",
+    ]) {
+      expect(necessidadesEscritasDoPerfil(tributarista(descricao)), descricao).toEqual([]);
+      expect(calculateCompatibilityScore(perfil({ whatIHave: ["Advocacia tributária"] }), perfil(tributarista(descricao))).overall, descricao).toBe(0);
+    }
+    // Necessidade de verdade continua passando: ela pede OUTRO serviço.
+    const precisaDeContador = tributarista("Preciso de um contador para fechar o balanço");
+    expect(necessidadesEscritasDoPerfil(precisaDeContador)).toContain("Preciso de um contador para fechar o balanço");
+  });
+
+  it("palpite de família não apaga necessidade declarada — quando o texto PEDE o serviço (validação e revisão cética de 16/09)", () => {
+    // Quem declara a área como a FAMÍLIA pura e escreve que PRECISA daquela
+    // família com outra finalidade não está repetindo a própria oferta: pela
+    // regra da casa, oferecer a família não prova a especialidade — vale 60, um
+    // bom palpite, e o palpite não apaga necessidade declarada.
+    const comArea = (activityArea: string, seekingOtherNeed: string) => ({
+      whatIHave: [],
+      whatINeed: ["outra_necessidade"],
+      seekingTypes: ["outra_necessidade"],
+      seekingOtherNeed,
+      activityArea,
+    });
+
+    for (const texto of ["Preciso de advogado para causas do trabalho", "Preciso de advogado marítimo"]) {
+      for (const area of ["Advocacia", "Advocacia tributária"]) {
+        expect(necessidadesEscritasDoPerfil(comArea(area, texto)), `${area} :: ${texto}`).toContain(texto);
+      }
+    }
+    // Sem o pedido, a especializada não confunde a frase com a própria oferta.
+    expect(necessidadesEscritasDoPerfil(comArea("Advocacia tributária", "Advogado para causas do trabalho"))).toContain("Advogado para causas do trabalho");
+
+    // Sem o pedido, o texto da prestadora da FAMÍLIA é a oferta contada de novo, e a guarda continua apagando — como
+    // na main. O delta da validação mantinha estes quatro, e cada um valia 41 diante de outra prestadora da mesma
+    // família sem nenhuma das duas declarar precisar do serviço (revisão cética de 16/09).
+    for (const [area, texto] of [
+      ["Consultoria", "Consultoria para indústrias do Nordeste"], ["Advocacia", "Advocacia para empresas do agronegócio"],
+      ["Contabilidade", "Contabilidade para o agronegócio"], ["Logística", "Logística para exportação de café"],
+      ["Advocacia", "Advogado para causas do trabalho"],
+    ]) {
+      const prestadora = comArea(area, texto);
+      expect(necessidadesEscritasDoPerfil(prestadora), `${area} :: ${texto}`).toEqual([]);
+      const r = calculateCompatibilityScore(perfil({ activityArea: area }), perfil(prestadora));
+      expect(r.bloqueio, `${area} :: ${texto}`).toBe("servico-sem-demanda-expressa");
+      expect(r.overall, `${area} :: ${texto}`).toBe(0);
+    }
+
+    // E o que a guarda existe para pegar continua pego: a mesma especialidade escrita de novo.
+    const repetindoAOferta = comArea("Advocacia tributária", "Advocacia tributária para indústrias farmacêuticas");
+    expect(necessidadesEscritasDoPerfil(repetindoAOferta)).toEqual([]);
+  });
+
+  it("quem TEM a especialidade e escreve a FAMÍLIA dela está contando a própria oferta", () => {
+    // O outro sentido do palpite de família, e o caso que originou a #135: a
+    // consultora tributária que escreve "Consultoria" em texto livre não precisa
+    // de consultoria — ela presta. Sem isso, duas prestadoras do mesmo serviço
+    // eram conectadas sem nenhuma declarar precisar dele.
+    const comOferta = (whatIHave: string[], texto: string) => ({
+      whatIHave,
+      whatINeed: ["outra_necessidade"],
+      seekingTypes: ["outra_necessidade"],
+      seekingOtherNeed: texto,
+    });
+
+    for (const texto of ["Consultoria", "Preciso de consultoria", "Consultor"]) {
+      expect(necessidadesEscritasDoPerfil(comOferta(["Consultoria tributária"], texto)), texto).toEqual([]);
+    }
+    for (const texto of ["Advogado", "Preciso de um advogado"]) {
+      expect(necessidadesEscritasDoPerfil(comOferta(["Advocacia tributária"], texto)), texto).toEqual([]);
+    }
+
+    // E a oferta que é a família pura continua sem apagar a necessidade que PEDE o serviço.
+    expect(necessidadesEscritasDoPerfil(comOferta(["Advocacia"], "Preciso de advogado para causas do trabalho")))
+      .toContain("Preciso de advogado para causas do trabalho");
+  });
 });
 
 describe("categoria de serviço SEM descrição não casa", () => {

@@ -685,6 +685,87 @@ describe("Revisão de 15/09 dos consertos da #127 — motor privado", () => {
     }
   });
 
+  it("oferta genérica diante de finalidade ou outro público: a nota da família (decisão de 16/09)", () => {
+    // Validação de 16/09 na #135: a oferta genérica diante da necessidade que diz PARA QUÊ caía para 0 e a
+    // sugestão nem era gravada (corte de 50), enquanto na main valia 60 pela categoria em comum. Quem oferece a
+    // família não provou a finalidade, mas atende quem pede aquela família: 60, abaixo do corte de e-mail.
+    for (const [oferta, necessidade] of [
+      ["Logística", "Preciso de logística para exportar meu café"], ["Marketing", "Marketing para restaurantes"],
+      ["Advocacia", "Advogado para causas do trabalho"], ["Consultoria", "Consultoria para exportação"],
+      ["Contabilidade", "Contabilidade para o agronegócio"], ["Contabilidade", "Contador para pequenas empresas do agronegócio"],
+    ] as Array<[string, string]>) {
+      expect(scoreMatch(item(oferta), item(necessidade)), `${oferta} × ${necessidade}`).toEqual({ score: 60, type: "category" });
+    }
+  });
+
+  it("oferta genérica diante do DESTINATÁRIO comum: o mesmo serviço, 100, com qualquer preposição (D2 e D4 de 16/09)", () => {
+    // Decisão do Roberto de 16/09: o público de DESTINATARIOS_COMUNS vale 100 dos dois lados. Na main, "Contador para
+    // MEI" valia 60 e "Contador de MEI", "Contador MEI" e "Contador pra MEI" valiam 0 — a mesma necessidade
+    // decidida pela preposição; o delta da validação pôs as cinco em 60. Agora as cinco mandam e-mail (corte de 70).
+    for (const [oferta, necessidade] of [
+      ["Contabilidade", "Contador para MEI"], ["Contabilidade", "Contador de MEI"], ["Contabilidade", "Contador MEI"],
+      ["Contabilidade", "Contador pra MEI"], ["Contabilidade", "Contador para pequenas empresas"],
+      ["Contabilidade", "Contador de pequenas empresas"], ["Advocacia", "Advogado de startups"], ["Advocacia", "Advogado para empresas"],
+    ] as Array<[string, string]>) {
+      expect(scoreMatch(item(oferta), item(necessidade)), `${oferta} × ${necessidade}`).toEqual({ score: 100, type: "exact" });
+    }
+    // Do lado da oferta, a preposição também deixou de decidir: "Contabilidade DE MEI" é "Contabilidade PARA MEI".
+    for (const oferta of ["Contabilidade para MEI", "Contabilidade de MEI", "Contabilidade MEI"]) {
+      expect(scoreMatch(item(oferta), item("Contador")), oferta).toEqual({ score: 100, type: "exact" });
+    }
+    // O qualificador de quem presta continua sendo algo além da família, com ou sem destinatário.
+    expect(scoreMatch(item("Contabilidade"), item("Preciso de um bom contador para MEI"))).toEqual({ score: 60, type: "category" });
+    // "empresa" é destinatário na lista e também a especialidade curada "empresarial": sem "para", é o direito
+    // empresarial, e a oferta genérica continua não atendendo — como na main (o delta dava 60).
+    for (const necessidade of ["Advogado empresarial", "Advogado de empresas", "Preciso de advogado empresarial"]) {
+      expect(scoreMatch(item("Advocacia"), item(necessidade)), necessidade)
+        .toEqual({ score: 0, type: "semantic", bloqueio: "servico-sem-demanda-expressa" });
+    }
+    expect(scoreMatch(item("Contabilidade empresarial"), item("Contador"))).toEqual({ score: 60, type: "category" });
+    // Consultoria e assessoria só se atendem pela especialidade: a oferta genérica de uma não atende o destinatário
+    // da outra (o delta dava 60 a "Consultoria" × "Assessoria de MEI"; com o 100 do destinatário, mandaria e-mail).
+    expect(scoreMatch(item("Consultoria"), item("Assessoria de MEI")).score).toBe(0);
+  });
+
+  it("o pedido da família + complemento que as listas não conhecem: 60, salvo a contraparte (D1 de 16/09)", () => {
+    // Decisão do Roberto de 16/09: quem declarou precisar da família com um complemento desconhecido é atendido
+    // por quem oferece a família, com a nota do bom palpite. Na main os quatro davam 0.
+    for (const [oferta, necessidade] of [
+      ["Advocacia", "Preciso de advogado marítimo"], ["Contabilidade", "Procuro contador rural"],
+      ["Consultoria", "Preciso de consultoria de moda"], ["Logística", "Preciso de logística de exportação para meu café"],
+      ["Logística", "Procuramos logística de cabotagem"],
+    ] as Array<[string, string]>) {
+      expect(scoreMatch(item(oferta), item(necessidade)), `${oferta} × ${necessidade}`).toEqual({ score: 60, type: "category" });
+    }
+    // O complemento que nomeia CONTRAPARTE continua 0: serviço nenhum entrega o distribuidor, e é a mesma lista do
+    // portão (PAPEIS_DE_COMERCIO e SOCIOS). O delta da validação dava 60 a todos estes.
+    for (const [oferta, necessidade] of [
+      ["Consultoria", "Preciso de consultoria de distribuidor"], ["Advocacia", "Procuro advogado de investidor"],
+      ["Consultoria", "Preciso de consultoria de fornecedores"], ["Consultoria", "Busco consultoria de compradores"],
+      ["Advocacia", "Preciso de advogado de importador"], ["Consultoria", "Procuro consultoria de exportadores"],
+      ["Advocacia", "Procuro advogado de sócios"], ["Consultoria", "Preciso de consultoria de revendedores"],
+    ] as Array<[string, string]>) {
+      expect(scoreMatch(item(oferta), item(necessidade)), `${oferta} × ${necessidade}`)
+        .toEqual({ score: 0, type: "semantic", bloqueio: "servico-sem-demanda-expressa" });
+    }
+    // Especialidade curada continua fora, mesmo com verbo: "internacional" é especialidade de verdade.
+    expect(scoreMatch(item("Logística"), item("Preciso de logística internacional para meu café")).score).toBe(0);
+    expect(scoreMatch(item("Advocacia"), item("Preciso de advogado tributarista")).score).toBe(0);
+    // E o rótulo solto, sem verbo, segue como era: ninguém está pedindo.
+    expect(scoreMatch(item("Logística"), item("logística de exportação")).score).toBe(0);
+    expect(scoreMatch(item("Advocacia"), item("advogado marítimo")).score).toBe(0);
+    // A abertura é só da oferta GENÉRICA: quem tem outra especialidade não atende o complemento desconhecido.
+    expect(scoreMatch(item("Advocacia tributária"), item("Preciso de advogado marítimo")).score).toBe(0);
+    // O que a #124 fixou continua valendo: especialidade pedida não é atendida por quem só tem a família.
+    for (const [oferta, necessidade] of [
+      ["Advocacia", "Advogado tributarista"], ["Consultoria", "Consultoria trabalhista"],
+      ["Logística", "Preciso de um advogado"], ["Advocacia", "Juristische Person"],
+    ] as Array<[string, string]>) {
+      expect(scoreMatch(item(oferta), item(necessidade)), `${oferta} × ${necessidade}`)
+        .toEqual({ score: 0, type: "semantic", bloqueio: "servico-sem-demanda-expressa" });
+    }
+  });
+
   it("o que a classificação diz serviço, a leitura do serviço também lê: não é barrado diante do próprio profissional", () => {
     for (const [oferta, necessidade, categoria] of [
       ["Empresa de gestão contábil", "Contador", "Contabilidade"], ["Escritório de soluções jurídicas", "Advogado", "Jurídico"],

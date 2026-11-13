@@ -152,13 +152,26 @@ qualquer outro critério), slug exato → 100, mesmo objeto do termo → 100, me
 na mesma família, entre consultoria e assessoria, no apoio que nomeia a profissão, na
 assessoria sobre área da profissão — "Assessoria tributária" diante da advocacia ou da
 contabilidade tributária — ou os dois lados só com a família, "Contabilidade" × "Contador"
-e "Serviços contábeis" × "Contador", também com a oferta dirigida só a um destinatário
-comum, "Contabilidade para pequenas empresas" × "Contador", `mesmaFamiliaEEspecialidade`),
-necessidade que nomeia só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`,
-que inclui a oferta GENÉRICA diante da necessidade da mesma família com só público ou
-finalidade — "Contabilidade" × "Contador para pequenas empresas", "Logística" ×
-"logística para exportar meu café"; dar 100 quando o público está em
-`DESTINATARIOS_COMUNS` é decisão em aberto), necessidade que declara o ASSUNTO do serviço
+e "Serviços contábeis" × "Contador", também com o destinatário comum dos dois lados —
+decisão do Roberto de 16/09: "Contabilidade para pequenas empresas" × "Contador",
+"Contabilidade" × "Contador para MEI", "Contador de MEI" ou "Contador MEI", "Contabilidade
+para MEI" × "Contador de MEI"; depois de "para" vale a lista `DESTINATARIOS_COMUNS` (MEI,
+pequenas empresas, startups, negócios, clientes...), e sem "para" só o inequívoco
+(`destinatarioNosLemas`: MEI, EPP, startup, o porte com a empresa, pessoa física), porque
+ali "de" também é assunto: "Consultoria de negócios", "Advogado de empresas" e "Tradutor
+particular" não são destinatário —, `mesmaFamiliaEEspecialidade`), necessidade que nomeia
+só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`, que inclui a oferta
+GENÉRICA diante da necessidade da mesma família com finalidade ou público que não é
+destinatário comum — "Logística" × "logística para exportar meu café", "Marketing" ×
+"Marketing para restaurantes" — e, quando o texto PEDE o serviço (marca de pedido de
+pt/en/es antes dele, `pedidoPedeOServico`), com complemento que as listas não conhecem —
+"Advocacia" × "Preciso de advogado marítimo", "Contabilidade" × "Procuro contador rural" —,
+salvo o complemento que nomeia contraparte em qualquer alternativa (`PAPEIS_DE_COMERCIO`,
+`SOCIOS` e o que a decisão nomeia: representante e parceiro comerciais, atacadista,
+franqueado, cliente...), que dá 0: "Preciso de consultoria de distribuidor"; decisões do
+Roberto de 16/09; sem o pedido, "advogado marítimo" e "We are maritime lawyers" seguem 0; e
+a prestadora que PROCURA clientes — "Contador procura clientes", marca de pedido depois do
+serviço — não pede o serviço e dá 0, `servicoEhQuemPede`), necessidade que declara o ASSUNTO do serviço
 sem nomeá-lo → 60 com tipo `semantic` (`necessidadeDeclaraOAssuntoDoServico`: vocabulário
 curado de tributário, internacionalização e regulatório sanitário, e a necessidade tem de
 pedir ajuda ou uma ação, sem pedir no resto a contraparte, o capital ou o registro de
@@ -197,7 +210,9 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
   oportunidade que declara a necessidade; `server/portao-da-demanda-expressa.ts` confere a
   citação, e que ela pede um serviço que o perfil oferece, antes de exibir (citação de
   contraparte — distribuidor, investidor —, de autodescrição da empresa ou de assunto que
-  nenhum serviço do perfil presta é barrada). Oportunidade que OFERECE serviço só vai a
+  nenhum serviço do perfil presta é barrada quando não nomeia serviço; "Preciso de
+  consultoria de distribuidor" e "Contador procura clientes" ainda passam ali, limite em
+  `docs/arquitetura/README.md` §2c). Oportunidade que OFERECE serviço só vai a
   quem declarou algo que possa ser aquele serviço.
 - **"O que você busca?"** (12 opções, `shared/o-que-busca.ts`): nenhuma opção libera
   serviço sozinha ("Serviço Especializado" é genérica), e o texto de "Outra necessidade"

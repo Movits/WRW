@@ -242,11 +242,44 @@ Limites aceitos e decisões pendentes (revisão adversarial de 13/09/2026):
   "Консультация по логистике" é 0 diante de "Consultoria tributária". Num rótulo bilíngue o
   idioma se decide por trecho ("/", parênteses, travessão) e por palavra: a parte em pt, en
   ou es segue estrita;
-- na oferta, o público que leva a 100 diante da necessidade que só nomeia o serviço é o
-  destinatário (pequenas empresas, MEI, PMEs, startups, pessoa física: `DESTINATARIOS_COMUNS`);
-  setor, finalidade e grupo depois de "para" ("para restaurantes", "para exportação", "para
-  fundadoras") ficam em 60, como a mesma especialidade escrita com "em" — lista de destinatários
-  a confirmar com o Roberto (revisão de 15/09 na #127);
+- o destinatário comum diante de quem só nomeia a família vale 100 dos DOIS lados, e manda e-mail
+  (decisão do Roberto de 16/09, D2 e D4 da validação da #135): "Contabilidade para pequenas empresas"
+  × "Contador", "Contabilidade" × "Contador para MEI", "Contador de MEI", "Contador MEI", "Advocacia" ×
+  "Assessoria jurídica para MEI", e "Contabilidade para MEI" × "Contador de MEI". Depois de "para" vale
+  a lista inteira (`DESTINATARIOS_COMUNS`: pequenas empresas, MEI, PMEs, startups, pessoa física,
+  negócios, clientes...); sem "para" ("de", justaposto), só o inequívoco (`destinatarioNosLemas`: MEI,
+  ME, EPP, PME, microempresa, startup, pyme, SME, o porte com a empresa ou o negócio, pessoa física),
+  porque ali o "de" também é assunto e modalidade: "Consultoria de negócios", "Advogado de grandes
+  empresas", "Tradutor particular" e "Mentoria individual" seguem sem casar com a oferta genérica
+  (revisão cética de 16/09). Setor, finalidade e grupo depois de "para" ("para restaurantes", "para
+  exportação", "para fundadoras") ficam em 60, como a mesma especialidade escrita com "em". "Advogado
+  empresarial" e "Advogado de empresas" são a especialidade curada, não o destinatário;
+- a oferta genérica atende, com a nota da família (60), quem PEDE a família com complemento que as
+  listas não conhecem ("Preciso de advogado marítimo", "Procuro contador rural", "We need a maritime
+  lawyer"; decisão do Roberto de 16/09, D1). "Pede" é marca de pedido de pt, en ou es ANTES do serviço,
+  com o pedido caindo nele (`pedidoPedeOServico`): a autodescrição e a oferta ("We are maritime
+  lawyers", "Quero vender minha consultoria", "Consultoria de moda que se destaca") e o rótulo solto
+  ("advogado marítimo", "logística de exportação") seguem em 0 — a decisão cita "logística de exportação"
+  entre os pares de 60, e sem o verbo ele é 0 na main e aqui; nos idiomas novos a abertura não vale. O
+  complemento que nomeia contraparte segue em 0 em qualquer alternativa do pedido: `PAPEIS_DE_COMERCIO`
+  e `SOCIOS`, e o que a decisão nomeia e o portão não lista — representante, agente e parceiro
+  comerciais (só em par com "comercial"), atacadista, varejista, franqueado, patrocinador e cliente (só
+  nos motores determinísticos; "representante legal" e "parceiros" sozinhos continuam 60);
+- a prestadora que PROCURA clientes não pede o serviço que presta: com a marca de pedido depois do
+  serviço e pedindo outra coisa ("Contador procura clientes", "Consultoria busca startups", "Consulting
+  firm looking for clients"), o par é 0 nos motores determinísticos (`servicoEhQuemPede`). Na main
+  "Consulting" × "Consulting firm looking for clients" valia 60 e "Consultoria" × "Consultoria busca
+  empresas" valia 100;
+- no portão da IA a citação de contraparte ou de autodescrição que NOMEIA um serviço ("Preciso de
+  consultoria de distribuidor", "Contador procura clientes", "We are maritime lawyers") ainda passa, na
+  main e aqui: a trava do D1 e a da prestadora vivem só nos motores determinísticos, e o portão só barra
+  a contraparte em trecho sem serviço nomeado (`pedidoDeContraparteOuAutodescricao`);
+- "Direito" e "Jurídico" na área de atuação contam como serviço no portão da IA
+  (`nomeiaServicoNaArea`): quem só escreveu isso, sem necessidade declarada nem item que não seja
+  serviço, passa a exigir citação e para de receber sugestão de imóvel, capital, conexão e tecnologia
+  — consequência aceita pelo Roberto em 16/09 (D3). Uma necessidade declarada reabre; "Agronegócio"
+  continua sendo outra base. A leitura da área é só em português: "Derecho", "Law" e "Área jurídica"
+  não entram;
 - "avocat" só é o advogado com qualificador jurídico ("Avocat fiscaliste", "Avocat d'affaires",
   "Cabinet d'avocats"); sem ele é o abacate, e a categoria decide ("Avocats Hass export
   international" [Fruits] casa pela categoria). "Conseil" e "conseiller" de órgão ("Conseil
