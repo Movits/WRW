@@ -16,8 +16,9 @@ vi.hoisted(() => {
  *
  * O que encerra a sessão continua sendo a linha no banco: o token renovado leva
  * o mesmo `sessionToken`, então sair, redefinir a senha e desativar a conta
- * seguem valendo na hora. E o token sem `sessionToken` (o do sdk.signSession,
- * que escapa da revogação) nunca é renovado.
+ * seguem valendo na hora. E o token sem `sessionToken` (o antigo, da época do
+ * Manus, que escapa da revogação) nunca é renovado; o sdk já o recusa
+ * (server/sdk-sessao-sem-token.test.ts).
  */
 
 const banco = vi.hoisted(() => ({
@@ -54,7 +55,7 @@ vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest: autenticar } }));
 
 import * as jose from "jose";
 import { COOKIE_NAME } from "@shared/const";
-import { gravarCookieDaSessao, renovarCookieDaSessao } from "./auth";
+import { gravarCookieDaSessao, renovarCookieDaSessao } from "./sessao";
 import { DURACAO_DA_SESSAO_MS, RENOVAR_O_TOKEN_A_CADA_MS } from "./duracao-da-sessao";
 import { validateSessionToken } from "./security";
 import { createContext } from "./_core/context";
@@ -152,7 +153,7 @@ describe("renovarCookieDaSessao: token e cookie novos uma vez por dia", () => {
     expect(payload.exp! * 1000).toBeGreaterThan(Date.now() + DURACAO_DA_SESSAO_MS - 60_000);
   });
 
-  it("token sem sessionToken (o do sdk.signSession, que escapa da revogação): nunca renova", async () => {
+  it("token sem sessionToken (o antigo, da época do Manus, que escapa da revogação): nunca renova", async () => {
     const { sessionToken: _fora, ...semSessao } = DADOS;
     const res = resposta();
     await renovarCookieDaSessao(requisicao(await token({ emitidoHaMs: 2 * DIA, dados: semSessao })), res as never);

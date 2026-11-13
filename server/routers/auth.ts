@@ -11,7 +11,8 @@ import {
 } from "../banco-indisponivel";
 import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessions } from "../security";
 import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
-import { registerUser, loginUser, toPublicUser, gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../auth";
+import { registerUser, loginUser, toPublicUser } from "../auth";
+import { gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../sessao";
 import {
   hashPasswordResetToken,
   PASSWORD_RESET_ACCOUNT_LIMIT,

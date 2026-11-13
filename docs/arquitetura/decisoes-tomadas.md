@@ -222,8 +222,41 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Antes:** 8 horas fixas desde o login (no banco, no token e no cookie) e, no navegador,
   logout automático aos 30 minutos parada.
 - **Onde:** `server/duracao-da-sessao.ts`, `assinarTokenDaSessao` e
-  `renovarCookieDaSessao` em `server/auth.ts`, `validateSessionToken` em
-  `server/security.ts`, `server/_core/context.ts` e `client/src/pages/Login.tsx`.
+  `renovarCookieDaSessao` em `server/sessao.ts` (até a A5 do plano do gravador, em
+  `server/auth.ts`), `validateSessionToken` em `server/security.ts`,
+  `server/_core/context.ts` e `client/src/pages/Login.tsx`.
+
+## 12/11/2026 — a reunião se compartilha por link aberto, por enquanto
+
+- **Quem:** Roberto, na conversa com o Claude de 12/11: "quero que mude por enquanto para
+  qualquer pessoa que esse link for compartilhado possa acessar tudo das funcionalidades
+  [...], não só os participantes e admin".
+- **O quê:** a dona liga o link de uma reunião pronta, e quem tem o endereço
+  `/r/{token}` ouve a gravação, lê e traduz a transcrição e pede à IA o resumo e respostas,
+  sem conta na WRW. O link é só leitura: excluir, reprocessar e o que é da rede particular
+  da dona (contatos e entidades) continuam só com ela, e o nome dela não aparece. Ligar
+  pede de novo a confirmação de que as pessoas que falaram autorizaram compartilhar, porque
+  o consentimento da gravação foi para um áudio privado; a confirmação vai para
+  `audit_logs`, com IP, user-agent, a frase que a dona viu, o idioma dela e o hash da
+  frase, na mesma transação que liga o link. Desligar corta o
+  acesso na hora (a página e os pedidos novos; quem já tinha a gravação carregada segue
+  ouvindo até a URL assinada vencer, em até 1 hora), e o link novo sai com outro endereço.
+  Os pedidos à IA pelo link têm dois tetos, os dois pela reunião: 10 por visitante (rede do
+  IP) e 60 no total, a cada 10 minutos. O token é comparado com a caixa exata: a coluna
+  herda a collation do banco, que não distingue maiúsculas.
+- **Junto:** compartilhar é por WhatsApp e por e-mail (o app da própria dona abre com a
+  mensagem pronta), em vez do Outlook que a H16 previa para a agenda.
+- **Antes:** decisão de 10/11, "sem link público e sem senha": só as participantes
+  adicionadas e, para consulta, a presidência e a admin (R1). Ela fica para depois.
+- **Exceção a uma regra:** o áudio do link sai pela rota do token
+  (`/reuniao-aberta/{token}/audio`), sem sessão. Os outros arquivos seguem só pelo proxy
+  `/manus-storage/`, com sessão e posse. Como no proxy, a rota responde 307 para a URL
+  assinada do bucket, e o endereço dela traz o caminho do arquivo: o openId da dona
+  (aleatório, não o e-mail) e o id da reunião. Nenhum dos dois abre nada sem sessão.
+- **Onde:** `server/link-aberto-da-reuniao.ts`, `server/routers/reuniaoAberta.ts`,
+  `meetings.ligarLinkAberto` e `meetings.desligarLinkAberto` em `server/routers/meetings.ts`,
+  `client/src/components/CompartilharReuniao.tsx` e `client/src/pages/ReuniaoAberta.tsx`;
+  migração 0015 (`meetings.share_token`).
 
 ---
 

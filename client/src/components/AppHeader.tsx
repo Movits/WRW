@@ -13,6 +13,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 
@@ -84,6 +85,9 @@ export function GlobalMenu() {
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => { logout(); navigate("/"); },
   });
+  // Com gravação, envio ou áudio por enviar nesta aba, o Sair confirma antes
+  // (components/SairDaConta.tsx); sem nada disso, sai direto, como antes.
+  const sairDaConta = useSairDaConta(() => logoutMutation.mutate());
   const itens = getMenuItems(t);
 
   return (
@@ -138,7 +142,7 @@ export function GlobalMenu() {
         )}
         <DropdownMenuSeparator className="bg-white/[0.07] my-2" />
         <DropdownMenuItem
-          onClick={() => logoutMutation.mutate()}
+          onClick={sairDaConta.pedirSaida}
           className="rounded-xl px-3 py-2.5 cursor-pointer text-white/50 focus:bg-red-500/10 focus:text-red-300 data-[highlighted]:bg-red-500/10 data-[highlighted]:text-red-300">
           <span className="flex items-center gap-3 w-full">
             <span className="w-9 h-9 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0">
@@ -148,6 +152,8 @@ export function GlobalMenu() {
           </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
+      {/* Fora do DropdownMenuContent, que desmonta quando o menu fecha ao clicar em Sair. */}
+      {sairDaConta.dialogo}
     </DropdownMenu>
   );
 }

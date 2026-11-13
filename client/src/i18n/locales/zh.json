@@ -1449,7 +1449,7 @@
     "heroTitle": "会议助手",
     "heroSubtitle": "在征得同意的情况下录制简短会议，查看转录内容并确认建议的联系人。",
     "newMeetingButton": "新建会议",
-    "consentNotice": "请务必征得所有参与者的同意后再录制。音频为私密内容，将在30天后自动过期。",
+    "consentNotice": "请务必征得所有参与者的同意后再录制。音频仅保存在您的账户中，除非您开启这次会议的分享链接（这需要发言者重新授权），并将在30天后自动过期。",
     "loadingList": "正在加载会议……",
     "emptyTitle": "尚无会议记录",
     "emptySubtitle": "开始录制以生成转录内容和联系人建议。",
@@ -1496,7 +1496,7 @@
     "availableUntil": "· 有效期至",
     "recordingExpiredNotice": "此录音已超过30天，已按照本应用的承诺被删除。转录内容仍保留在此处。",
     "noRecordingStored": "此会议未保存任何音频。",
-    "privacyNotice": "音频仅限您的账户访问，并将在30天后自动过期。转录内容将在您的人脉网络中保持私密。",
+    "privacyNotice": "音频和转录内容仅保存在您的账户中，除非您开启分享链接。音频将在30天后自动过期。",
     "translateHeading": "翻译此次会议中的发言内容",
     "translateSubtext": "选择对方使用的语言，以生成转录内容的翻译版本。",
     "targetLanguageLabel": "目标语言",
@@ -1556,6 +1556,42 @@
       "asset": "提供",
       "need": "寻找",
       "opportunity": "机会"
+    },
+    "share": {
+      "button": "分享",
+      "title": "通过链接分享",
+      "intro": "收到链接的人无需 WRW 账户，即可收听录音、阅读转录内容，并请 AI 生成会议摘要和回答问题。删除和重新处理仍仅限您本人。",
+      "authorization": "我确认，在本次会议中发言的所有人都已同意将录音和转录内容分享给收到链接的人。",
+      "createButton": "创建链接",
+      "cancel": "取消",
+      "activeTitle": "已通过链接分享",
+      "activeIntro": "任何拥有此链接的人都可以打开这次会议，包括收到转发链接的人。要停止访问，请关闭链接。",
+      "linkLabel": "会议链接",
+      "copy": "复制链接",
+      "copied": "链接已复制。",
+      "copyFallback": "无法自动复制。链接已在输入框中选中：请从那里复制。",
+      "whatsapp": "WhatsApp",
+      "email": "电子邮件",
+      "message": "WRW 上的会议“{{title}}”：{{url}}",
+      "emailSubject": "WRW 上的会议“{{title}}”",
+      "turnOff": "关闭链接",
+      "turnOffConfirm": "要关闭链接吗？拥有此地址的人将立即无法再打开这次会议；已经在收听录音的人仍可听完（最长 1 小时）。如果您再次分享，链接将会不同。",
+      "turnOffYes": "关闭",
+      "turnOffCancel": "保留",
+      "turnedOff": "链接已关闭。",
+      "error": "无法更改分享设置，请重试。",
+      "onlyReady": "只能分享已就绪的会议。",
+      "sharedEyebrow": "已通过链接分享的会议",
+      "created": "链接已创建。"
+    },
+    "openLink": {
+      "eyebrow": "共享的会议",
+      "intro": "录制这次会议的人与您分享了此链接。您可以收听录音、阅读转录内容，或请 AI 就会议内容生成摘要并回答问题。",
+      "notFound": "此链接不存在或已不再可用。",
+      "goHome": "了解 WRW",
+      "audioLoadError": "暂时无法加载音频。请刷新页面后重试。",
+      "reviewNotice": "AI 给出的建议，请对照转录片段核实。以上内容均未保存。",
+      "translateSubtext": "选择您想用来阅读转录内容的语言。"
     }
   },
   "connections": {
@@ -1733,6 +1769,15 @@
     "completeByText": "通过文字补全",
     "completeHint": "回答下方助手的问题：它只保存您确认的内容。电话和电子邮箱也可以通过「编辑」填写。",
     "contactNotFound": "在您的人脉中找不到这位联系人。"
+  },
+  "sessaoOcupada": {
+    "sairTitulo": "现在退出登录？",
+    "sairGravando": "此标签页中有一段录音正在进行。",
+    "sairEnviando": "此标签页中的一段音频仍在发送中。",
+    "sairAudioNaoEnviado": "此标签页中有一段已录制但尚未发送的音频。",
+    "sairPerdeOAudio": "如果现在退出登录，这段音频将会丢失。",
+    "continuarAqui": "留在此页",
+    "sairMesmoAssim": "仍然退出登录"
   },
   "errorBoundary": {
     "title": "发生了意外情况",

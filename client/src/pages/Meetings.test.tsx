@@ -70,6 +70,12 @@ vi.mock("@/lib/trpc", () => ({
       reprocess: duble.registrar("reprocess"),
       resumir: duble.registrar("resumir"),
       perguntar: duble.registrar("perguntar"),
+      ligarLinkAberto: duble.registrar("ligarLinkAberto"),
+      desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+    },
+    reuniaoAberta: {
+      resumir: duble.registrar("resumirPeloLink"),
+      perguntar: duble.registrar("perguntarPeloLink"),
     },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {
@@ -641,5 +647,24 @@ describe("Detalhe da reunião — resumo e perguntas pela IA", () => {
     abrirDetalhe({ status }, { transcript });
     expect(screen.queryByRole("button", { name: /Gerar resumo/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Pergunte à reunião")).not.toBeInTheDocument();
+  });
+});
+
+describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
+  it("reunião pronta: o painel aparece, e a reunião segue marcada como privada enquanto não há link", () => {
+    abrirDetalhe({ status: "ready" });
+    expect(screen.getByRole("heading", { name: "Compartilhar por link" })).toBeInTheDocument();
+    expect(screen.getByText("REUNIÃO PRIVADA")).toBeInTheDocument();
+  });
+
+  it("com o link ligado, a reunião diz que está compartilhada e mostra o endereço", () => {
+    abrirDetalhe({ status: "ready", shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345" });
+    expect(screen.getByText("REUNIÃO COMPARTILHADA POR LINK")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveValue(`${window.location.origin}/r/AbCdEfGhIjKlMnOpQrStUvWxYz012345`);
+  });
+
+  it.each(["processing", "failed"])("reunião %s: não há o que compartilhar ainda", (status) => {
+    abrirDetalhe({ status });
+    expect(screen.queryByRole("heading", { name: /Compartilhar por link|Compartilhada por link/ })).not.toBeInTheDocument();
   });
 });

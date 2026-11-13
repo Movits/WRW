@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { escolherMimeDeGravacao, tipoParaOServidor, type TipoDeAudioGravado } from "@/lib/formato-de-audio";
+import { useOcupacao } from "@/lib/sessao-ocupada";
 
 /**
  * O gravador de áudio das três telas que gravam: a reunião (pages/Meetings.tsx),
@@ -83,6 +84,11 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     estadoAgora.current = novo;
     setEstado(novo);
   }
+
+  // Do pedido do microfone ao fim do arquivo, o áudio só existe nesta aba: a
+  // sessão fica ocupada (lib/sessao-ocupada.ts), e o Sair e o fechar da aba pedem
+  // confirmação. O fim do arquivo, descartar, a falha e sair da tela liberam.
+  useOcupacao("gravando", estado !== "parado");
 
   function parar() {
     const atual = gravador.current;

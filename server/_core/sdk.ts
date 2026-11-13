@@ -1,8 +1,8 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify, type JWTPayload } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { ENV } from "./env";
@@ -39,24 +39,11 @@ class SDKServer {
     return new TextEncoder().encode(secret);
   }
 
-  async signSession(
-    payload: SessionPayload,
-    options: { expiresInMs?: number } = {}
-  ): Promise<string> {
-    const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
-    const secretKey = this.getSessionSecret();
-
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name,
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secretKey);
-  }
+  // A sessão de usuária não nasce aqui: nasce em `abrirSessao`
+  // (server/sessao.ts), que grava a linha em `sessions` e põe o `sessionToken`
+  // dela no token. O assinador que este arquivo tinha, herdado do Manus, fazia
+  // token sem `sessionToken`, válido por 1 ano e fora do alcance da revogação;
+  // saiu, e a guarda server/sessao-guarda.test.ts impede que volte.
 
   async verifySession(
     cookieValue: string | undefined | null
@@ -110,6 +97,31 @@ class SDKServer {
     }
   }
 
+  /**
+   * O `sessionToken` que o token de usuária leva: a chave da linha em
+   * `sessions` (server/sessao.ts). Sem ele, `null`.
+   *
+   * É a segunda verificação do JWT na requisição; a primeira é a do
+   * verifySession, e entre as duas há a consulta da conta no banco. O token que
+   * deixa de conferir nesse meio-tempo (na prática, o que vence durante a
+   * consulta) é recusado como qualquer token vencido, e não como token sem
+   * sessionToken: aquela auditoria, de risco alto, acusaria um token antigo ou
+   * forjado onde a sessão só venceu.
+   */
+  private async readSessionToken(cookieValue: string): Promise<string | null> {
+    let payload: JWTPayload;
+    try {
+      ({ payload } = await jwtVerify(cookieValue, this.getSessionSecret(), {
+        algorithms: ["HS256"],
+      }));
+    } catch (error) {
+      console.warn("[Auth] Session verification failed", String(error));
+      throw ForbiddenError("Invalid session cookie");
+    }
+    const sessionToken = payload.sessionToken;
+    return isNonEmptyString(sessionToken) ? sessionToken : null;
+  }
+
   async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
     // Regular authentication flow
     const cookies = this.parseCookies(req.headers.cookie);
@@ -151,39 +163,45 @@ class SDKServer {
     const userAgent = req.headers["user-agent"] || "unknown";
 
     // HARDENING V-CRITICAL: Validar sessão no banco de dados (revogação real)
-    // Extrai o sessionToken do payload JWT e verifica se ainda está ativo no banco
-    // Fora do if: a detecção de anomalia, lá embaixo, também usa o sessionToken.
-    let sessionTokenToValidate: string | null = null;
-    if (sessionCookie) {
-      // Tentar extrair sessionToken do payload JWT (presente no novo auth email+senha)
-      try {
-        const secretKey = this.getSessionSecret();
-        const { payload } = await jwtVerify(sessionCookie, secretKey, { algorithms: ["HS256"] });
-        const rawToken = (payload as Record<string, unknown>).sessionToken;
-        if (typeof rawToken === "string" && rawToken.length > 0) {
-          sessionTokenToValidate = rawToken;
-        }
-      } catch {
-        // JWT inválido já foi rejeitado acima pelo verifySession
-      }
+    // Extrai o sessionToken do payload JWT e verifica se ainda está ativo no banco.
+    // A detecção de anomalia, lá embaixo, também usa o sessionToken.
+    const sessionToken = await this.readSessionToken(sessionCookie ?? "");
 
-      // Só validar no banco se tivermos um sessionToken embutido no JWT
-      if (sessionTokenToValidate) {
-        const sessionUserId = await validateSessionToken(sessionTokenToValidate);
-        if (sessionUserId === null) {
-          await createAuditLog({
-            userId: user.id,
-            action: "REVOKED_SESSION_ACCESS_ATTEMPT",
-            resource: "auth",
-            ipAddress,
-            userAgent,
-            status: "failure",
-            riskLevel: "high",
-            details: { reason: "Token JWT válido mas sessão revogada no banco" },
-          }).catch(() => {});
-          throw ForbiddenError("Session has been revoked");
-        }
-      }
+    // Token de usuária sem sessionToken é recusado. Sem ele não há linha em
+    // `sessions` para conferir, e sair, redefinir a senha, desativar ou excluir
+    // a conta não o alcançam — com a sessão de 90 dias, isso pesava ainda mais.
+    // Só o cron passa sem ele (pelo prefixo, lá em cima). Efeito: quem ainda
+    // guardar um token antigo sem sessionToken (da época do Manus) precisa
+    // entrar de novo; o createContext apaga do navegador o cookie recusado. A
+    // auditoria usa a ação da sessão revogada, que a exclusão de conta preserva
+    // (ACOES_DE_AUDITORIA_PRESERVADAS), com motivo próprio e sem o token.
+    if (!sessionToken) {
+      await createAuditLog({
+        userId: user.id,
+        action: "REVOKED_SESSION_ACCESS_ATTEMPT",
+        resource: "auth",
+        ipAddress,
+        userAgent,
+        status: "failure",
+        riskLevel: "high",
+        details: { reason: "Token JWT válido mas sem sessionToken: não há sessão no banco para conferir" },
+      }).catch(() => {});
+      throw ForbiddenError("Session missing sessionToken");
+    }
+
+    const userIdDaSessao = await validateSessionToken(sessionToken);
+    if (userIdDaSessao === null) {
+      await createAuditLog({
+        userId: user.id,
+        action: "REVOKED_SESSION_ACCESS_ATTEMPT",
+        resource: "auth",
+        ipAddress,
+        userAgent,
+        status: "failure",
+        riskLevel: "high",
+        details: { reason: "Token JWT válido mas sessão revogada no banco" },
+      }).catch(() => {});
+      throw ForbiddenError("Session has been revoked");
     }
 
     // O bloqueio automático NÃO é reavaliado aqui, de propósito.
@@ -196,7 +214,7 @@ class SDKServer {
     // `!user.isActive` acima recusa a requisição antes de chegar nesta linha.
 
     // Detectar anomalias de sessão (IP diferente, UA diferente) — não-bloqueante
-    await detectSessionAnomaly(user.id, ipAddress, userAgent, sessionTokenToValidate).catch(() => {});
+    await detectSessionAnomaly(user.id, ipAddress, userAgent, sessionToken).catch(() => {});
 
     await db.upsertUser({
       openId: user.openId,
