@@ -33,6 +33,7 @@ const Memory = lazy(() => import("./pages/Memory"));
 const IntelligentMatches = lazy(() => import("./pages/IntelligentMatches"));
 const MeuNetworkInteligente = lazy(() => import("./pages/MeuNetworkInteligente"));
 const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork"));
+const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -111,6 +112,10 @@ function Router() {
         <Route path={"/register"} component={Register} />
         <Route path={"/forgot-password"} component={ForgotPassword} />
         <Route path={"/reset-password"} component={ResetPassword} />
+
+        {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
+            caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
+        <Route path="/r/:token" component={ReuniaoAberta} />
 
         {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra

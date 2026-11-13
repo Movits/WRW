@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
+import { ROTA_DA_REUNIAO_ABERTA, ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
 import { destinoDepoisDoLogin } from "@/lib/caminho-de-volta";
 
 /**
@@ -132,6 +132,15 @@ describe("as rotas de Reuniões estão no App.tsx com os caminhos de shared/rota
     expect(blocos[0]).toContain("<Meetings");
     expect(new Set(blocos).size, "um invólucro diferente remonta a Meetings e descarta a gravação").toBe(1);
     expect(blocos[0]).not.toMatch(/\bkey=/);
+  });
+
+  it("o link aberto de uma reunião (12/11/2026) é rota PÚBLICA, no caminho de shared/rotas.ts", () => {
+    // Quem abre o link não tem conta: atrás do ProtectedRoute, o link mandaria
+    // ao login em vez de mostrar a reunião.
+    const rota = rotas().find((r) => r.caminho === `${ROTA_DA_REUNIAO_ABERTA}/:token`);
+    expect(rota).toBeDefined();
+    expect(rota!.autenticada).toBe(false);
+    expect(rota!.paginas).toEqual(["ReuniaoAberta"]);
   });
 
   it("o destino do login sem ?voltar= é uma rota registrada", () => {

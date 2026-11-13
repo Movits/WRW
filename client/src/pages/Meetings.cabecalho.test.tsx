@@ -47,7 +47,10 @@ vi.mock("@/lib/trpc", () => ({
       reprocess: duble.mutacao(),
       resumir: duble.mutacao(),
       perguntar: duble.mutacao(),
+      ligarLinkAberto: duble.mutacao(),
+      desligarLinkAberto: duble.mutacao(),
     },
+    reuniaoAberta: { resumir: duble.mutacao(), perguntar: duble.mutacao() },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
 }));

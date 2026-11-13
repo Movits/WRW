@@ -243,7 +243,10 @@ e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie H
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas
-  URLs do banco: não renomeie sem migração de dados.
+  URLs do banco: não renomeie sem migração de dados. A única exceção é o áudio da reunião
+  com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
+  `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
+  (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/auth.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
