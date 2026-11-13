@@ -1769,6 +1769,15 @@
     "completeHint": "Responde al asistente de abajo: solo guarda lo que confirmes. El teléfono y el correo también se pueden escribir en Editar.",
     "contactNotFound": "Este contacto no se encontró en tu red."
   },
+  "sessaoOcupada": {
+    "sairTitulo": "¿Cerrar sesión ahora?",
+    "sairGravando": "Hay una grabación en curso en esta pestaña.",
+    "sairEnviando": "Un audio de esta pestaña todavía se está enviando.",
+    "sairAudioNaoEnviado": "Hay un audio grabado en esta pestaña que todavía no se envió.",
+    "sairPerdeOAudio": "Si cierras sesión ahora, ese audio se perderá.",
+    "continuarAqui": "Seguir aquí",
+    "sairMesmoAssim": "Cerrar sesión de todos modos"
+  },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",
     "description": "Encontramos un problema técnico al cargar esta página. Nuestro equipo fue notificado automáticamente.",

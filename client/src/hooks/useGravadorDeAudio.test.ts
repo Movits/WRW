@@ -1,5 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import { useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador } from "./useGravadorDeAudio";
 
 /** O MediaRecorder do navegador, que grava só os formatos da lista. */
@@ -310,5 +311,80 @@ describe("useGravadorDeAudio — o relógio", () => {
     act(() => result.current.parar());
     expect(primeiro).not.toHaveBeenCalled();
     expect(segundo).toHaveBeenCalledTimes(1);
+  });
+});
+
+// PR S: até o envio, o áudio só existe nesta aba. Do pedido do microfone ao fim
+// do arquivo o gravador ocupa a sessão (lib/sessao-ocupada.ts), e o Sair e o
+// fechar da aba perguntam antes. Vale para os três gravadores, que usam este hook.
+describe("useGravadorDeAudio — a sessão ocupada", () => {
+  it("ocupa 'gravando' do pedido do microfone ao fim do arquivo, e só o fim libera", async () => {
+    navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+    const pedidos = microfoneQueDemora();
+    const { result } = montar();
+    expect(sessaoOcupada()).toBe(false);
+    act(() => { void result.current.comecar(); });
+    // O navegador ainda pergunta pelo microfone: o pedido já ocupa.
+    expect(result.current.estado).toBe("pedindoMicrofone");
+    expect(motivoDaOcupacao()).toBe("gravando");
+    await act(async () => { pedidos[0](microfone()); });
+    expect(result.current.estado).toBe("gravando");
+    expect(motivoDaOcupacao()).toBe("gravando");
+    act(() => result.current.parar());
+    // Parou, mas o navegador ainda fecha o arquivo: segue ocupada.
+    expect(result.current.estado).toBe("finalizando");
+    expect(motivoDaOcupacao()).toBe("gravando");
+    act(() => gravadores[0].terminar());
+    expect(result.current.estado).toBe("parado");
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("descartar no meio da gravação libera", async () => {
+    const { result } = montar();
+    await act(async () => { await result.current.comecar(); });
+    expect(motivoDaOcupacao()).toBe("gravando");
+    act(() => result.current.descartar());
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("o microfone negado libera", async () => {
+    let negar!: (erro: unknown) => void;
+    getUserMedia.mockImplementation(() => new Promise((_resolve, reject) => { negar = reject; }));
+    const { result, aoFalhar } = montar();
+    act(() => { void result.current.comecar(); });
+    expect(motivoDaOcupacao()).toBe("gravando");
+    await act(async () => { negar(new DOMException("negado", "NotAllowedError")); });
+    expect(aoFalhar).toHaveBeenCalledTimes(1);
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("sair da tela gravando, ou com o pedido do microfone aberto, libera, e o microfone que chega depois não volta a ocupar", async () => {
+    const gravando = montar();
+    await act(async () => { await gravando.result.current.comecar(); });
+    expect(motivoDaOcupacao()).toBe("gravando");
+    gravando.unmount();
+    expect(sessaoOcupada()).toBe(false);
+
+    const pedidos = microfoneQueDemora();
+    const pedindo = montar();
+    act(() => { void pedindo.result.current.comecar(); });
+    expect(motivoDaOcupacao()).toBe("gravando");
+    pedindo.unmount();
+    expect(sessaoOcupada()).toBe(false);
+    await act(async () => { pedidos[0](microfone()); });
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("parado o gravador não ocupa, e dois gravando (a reunião e o ditado) liberam cada um o seu", async () => {
+    const reuniao = montar();
+    const ditado = montar();
+    expect(sessaoOcupada()).toBe(false);
+    await act(async () => { await reuniao.result.current.comecar(); });
+    await act(async () => { await ditado.result.current.comecar(); });
+    act(() => reuniao.result.current.parar());
+    expect(reuniao.result.current.estado).toBe("parado");
+    expect(motivoDaOcupacao()).toBe("gravando");
+    act(() => ditado.result.current.parar());
+    expect(sessaoOcupada()).toBe(false);
   });
 });

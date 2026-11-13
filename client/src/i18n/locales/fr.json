@@ -1769,6 +1769,15 @@
     "completeHint": "Répondez à l'assistant ci-dessous : il n'enregistre que ce que vous confirmez. Le téléphone et l'e-mail peuvent aussi être saisis dans Modifier.",
     "contactNotFound": "Ce contact est introuvable dans votre réseau."
   },
+  "sessaoOcupada": {
+    "sairTitulo": "Se déconnecter maintenant ?",
+    "sairGravando": "Un enregistrement est en cours dans cet onglet.",
+    "sairEnviando": "Un audio de cet onglet est encore en cours d'envoi.",
+    "sairAudioNaoEnviado": "Cet onglet contient un audio enregistré qui n'a pas encore été envoyé.",
+    "sairPerdeOAudio": "Si vous vous déconnectez maintenant, cet audio sera perdu.",
+    "continuarAqui": "Rester ici",
+    "sairMesmoAssim": "Se déconnecter quand même"
+  },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",
     "description": "Nous avons rencontré un problème technique lors du chargement de cette page. Notre équipe a été automatiquement notifiée.",

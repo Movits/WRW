@@ -1769,6 +1769,15 @@
     "completeHint": "回答下方助手的问题：它只保存您确认的内容。电话和电子邮箱也可以通过「编辑」填写。",
     "contactNotFound": "在您的人脉中找不到这位联系人。"
   },
+  "sessaoOcupada": {
+    "sairTitulo": "现在退出登录？",
+    "sairGravando": "此标签页中有一段录音正在进行。",
+    "sairEnviando": "此标签页中的一段音频仍在发送中。",
+    "sairAudioNaoEnviado": "此标签页中有一段已录制但尚未发送的音频。",
+    "sairPerdeOAudio": "如果现在退出登录，这段音频将会丢失。",
+    "continuarAqui": "留在此页",
+    "sairMesmoAssim": "仍然退出登录"
+  },
   "errorBoundary": {
     "title": "发生了意外情况",
     "description": "加载此页面时遇到了技术问题。我们的团队已自动收到通知。",

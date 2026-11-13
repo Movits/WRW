@@ -1769,6 +1769,15 @@
     "completeHint": "Answer the assistant below: it only saves what you confirm. Phone and email can also be typed in Edit.",
     "contactNotFound": "This contact was not found in your network."
   },
+  "sessaoOcupada": {
+    "sairTitulo": "Sign out now?",
+    "sairGravando": "A recording is in progress in this tab.",
+    "sairEnviando": "Audio from this tab is still being sent.",
+    "sairAudioNaoEnviado": "This tab has recorded audio that hasn't been sent yet.",
+    "sairPerdeOAudio": "If you sign out now, that audio will be lost.",
+    "continuarAqui": "Stay here",
+    "sairMesmoAssim": "Sign out anyway"
+  },
   "errorBoundary": {
     "title": "Something unexpected happened",
     "description": "We ran into a technical issue loading this page. Our team has been automatically notified.",

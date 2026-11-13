@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { opportunitySectorLabel } from "@/lib/opportunity-sectors";
@@ -966,8 +966,7 @@ function DealRoomsTab() {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { t, i18n } = useTranslation();
-  const { user, isAuthenticated, loading, logout } = useAuth();
-  const [, navigate] = useLocation();
+  const { user, isAuthenticated, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<"matches" | "connections" | "dealrooms" | "profile">("matches");
   const [tabVisible, setTabVisible] = useState(true);
 
@@ -1084,9 +1083,6 @@ export default function Dashboard() {
       toast.success(data.count > 0 ? t("dashboard.newMatches", { count: data.count }) : t("dashboard.analysisDone"));
       matchesQuery.refetch();
     },
-  });
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => { logout(); navigate("/"); },
   });
 
   // Reteste v4 (item 6.4): "N novas conexões sugeridas esperando pela sua

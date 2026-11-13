@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import {
@@ -17,6 +18,9 @@ type TabType = "overview" | "users" | "audit" | "security" | "sessions" | "oppor
 export default function AdminPanel() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, navigate] = useLocation();
+  // O Sair confirma antes com gravação, envio ou áudio por enviar nesta aba
+  // (components/SairDaConta.tsx). O diálogo é traduzido; o painel segue em pt-BR.
+  const sairDaConta = useSairDaConta(() => { logout(); navigate("/"); });
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [lockReason, setLockReason] = useState<Record<number, string>>({});
   const utils = trpc.useUtils();
@@ -240,12 +244,13 @@ export default function AdminPanel() {
               Dashboard
             </button>
             <button
-              onClick={() => { logout(); navigate("/"); }}
+              onClick={sairDaConta.pedirSaida}
               className="flex flex-shrink-0 items-center gap-2 px-4 py-2 text-sm bg-red-900/30 text-red-400 border border-red-700/50 rounded-lg hover:bg-red-900/50 transition-colors"
             >
               <LogOut className="w-4 h-4" />
               Sair
             </button>
+            {sairDaConta.dialogo}
           </div>
         </div>
       </header>

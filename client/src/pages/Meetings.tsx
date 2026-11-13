@@ -15,6 +15,7 @@ import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/li
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
+import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 
@@ -189,6 +190,11 @@ export default function Meetings() {
   const recording = gravador.estado === "gravando";
   // Pedindo o microfone ou fechando o arquivo, o gravador fica travado como no envio.
   const gravadorOcupado = gravador.estado === "pedindoMicrofone" || gravador.estado === "finalizando";
+  // O áudio gravado e ainda não enviado só existe nesta aba: a sessão fica ocupada
+  // (lib/sessao-ocupada.ts) até ele ir ao servidor ou ser descartado, e o Sair e o
+  // fechar da aba pedem confirmação. A gravação, o hook do gravador já ocupa; o
+  // envio ocupa à parte (ver processCapturedAudio).
+  useOcupacao("audio-nao-enviado", capturedAudio !== null);
   // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
   // de /gravar (ver o efeito que devolve a URL, mais abaixo).
   const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
@@ -247,7 +253,8 @@ export default function Meetings() {
   // isto, a lista aparecia e o microfone seguia gravando escondido. Qualquer
   // outro destino (os outros itens do menu, o logo, a seta, o avatar, o sino, o
   // voltar que sai de Reuniões) desmonta a página e descarta a gravação, como
-  // antes; confirmar antes de sair é a PR da "sessão ocupada".
+  // antes, sem perguntar: a sessão ocupada (lib/sessao-ocupada.ts) confirma só o
+  // Sair da conta e o fechar ou recarregar da aba.
   useEffect(() => {
     if (!recording || naGravacao) return;
     navigate(ROTA_GRAVAR, { replace: true });
@@ -279,6 +286,8 @@ export default function Meetings() {
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
     if (file.size > 10 * 1024 * 1024) return toast.error(t("meetings.fileTooLarge"));
     let reuniaoCriada: string | undefined;
+    // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
+    const liberarEnvio = ocupar("enviando");
     try {
       // O formulário trava já aqui, como no envio da gravação: ler o arquivo leva
       // segundos, e desmarcar a autorização nesse meio não impedia o create, que
@@ -301,6 +310,7 @@ export default function Meetings() {
       else toast.error(mensagem);
     } finally {
       setFinalizing(false);
+      liberarEnvio();
     }
   }
 
@@ -310,6 +320,12 @@ export default function Meetings() {
     // depois de gravar, nada vai ao servidor (o create grava consentGranted).
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
     let reuniaoCriada: string | undefined;
+    // Até o fim do envio a sessão fica ocupada (lib/sessao-ocupada.ts), mesmo que a
+    // dona saia desta tela: o pedido segue no ar, e sair da conta ou fechar a aba
+    // no meio podem perder o áudio. Por isso é ocupação avulsa, e não presa à
+    // página montada; antes do fim, só o fim da sessão a solta (liberarTodas):
+    // o logout, depois que a dona confirma o Sair, e a exclusão da conta.
+    const liberarEnvio = ocupar("enviando");
     try {
       setFinalizing(true);
       const [created, audioBase64] = await Promise.all([
@@ -332,6 +348,7 @@ export default function Meetings() {
       else toast.error(mensagem);
     } finally {
       setFinalizing(false);
+      liberarEnvio();
     }
   }
 

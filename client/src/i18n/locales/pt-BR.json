@@ -1769,6 +1769,15 @@
     "completeHint": "Responda ao assistente logo abaixo: ele só grava o que você confirmar. Telefone e e-mail também podem ser digitados em Editar.",
     "contactNotFound": "Esse contato não foi encontrado na sua rede."
   },
+  "sessaoOcupada": {
+    "sairTitulo": "Sair agora?",
+    "sairGravando": "Há uma gravação em andamento nesta aba.",
+    "sairEnviando": "Um áudio desta aba ainda está sendo enviado.",
+    "sairAudioNaoEnviado": "Há um áudio gravado nesta aba que ainda não foi enviado.",
+    "sairPerdeOAudio": "Se sair agora, esse áudio se perde.",
+    "continuarAqui": "Continuar aqui",
+    "sairMesmoAssim": "Sair mesmo assim"
+  },
   "errorBoundary": {
     "title": "Algo inesperado aconteceu",
     "description": "Encontramos um problema técnico ao carregar esta página. Nossa equipe foi notificada automaticamente.",
