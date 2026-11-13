@@ -1,5 +1,6 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { liberarTodas } from "@/lib/sessao-ocupada";
 import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
@@ -73,6 +74,10 @@ export function useAuth(options?: UseAuthOptions) {
       // No `finally`, como o cache: a sessão do navegador acaba mesmo quando o
       // servidor não respondeu, e o rascunho do cadastro vai junto.
       apagarRascunhosDoCadastro();
+      // As ocupações da sessão que sobraram também (lib/sessao-ocupada.ts): no
+      // diálogo do Sair a dona já aceitou perder o áudio, e o envio ainda no ar
+      // faria o navegador perguntar no login seguinte desta aba.
+      liberarTodas();
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
     }

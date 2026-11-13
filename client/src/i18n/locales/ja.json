@@ -1733,6 +1733,15 @@
     "completeHint": "下のアシスタントに答えてください。確認した内容だけが保存されます。電話番号とメールアドレスは「編集」でも入力できます。",
     "contactNotFound": "この連絡先はあなたのネットワークに見つかりません。"
   },
+  "sessaoOcupada": {
+    "sairTitulo": "今すぐサインアウトしますか？",
+    "sairGravando": "このタブで録音が進行中です。",
+    "sairEnviando": "このタブの音声はまだ送信中です。",
+    "sairAudioNaoEnviado": "このタブには、まだ送信していない録音があります。",
+    "sairPerdeOAudio": "今サインアウトすると、この音声は失われます。",
+    "continuarAqui": "このまま続ける",
+    "sairMesmoAssim": "それでもサインアウト"
+  },
   "errorBoundary": {
     "title": "予期しないエラーが発生しました",
     "description": "このページの読み込み中に技術的な問題が発生しました。運営チームには自動的に通知されました。",
