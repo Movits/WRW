@@ -187,7 +187,7 @@ describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
     const alertas = screen.getAllByRole("alert");
     expect(alertas).toHaveLength(2);
-    for (const alerta of alertas) expect(alerta).toHaveTextContent("Este link não existe ou foi desligado por quem compartilhou a reunião.");
+    for (const alerta of alertas) expect(alerta).toHaveTextContent("Este link não existe ou não está mais disponível.");
   });
 
   it("pela dona, NOT_FOUND continua 'reunião não encontrada'", () => {
@@ -195,5 +195,29 @@ describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
     render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
     expect(screen.getByRole("alert")).toHaveTextContent("Reunião não encontrada. Ela pode ter sido excluída, ou o link é de outra conta.");
+  });
+});
+
+describe("O aviso de conferir fala com quem lê", () => {
+  it("pelo link: sem 'sua rede', que o visitante não tem", () => {
+    duble.respostas.resumirPeloLink = { topicos: [{ titulo: "T", resumo: "R", trecho: "t" }], decisoes: [], tarefas: [] };
+    render(<ResumoDaReuniaoPelaIA token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" />);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    expect(screen.getByText("Sugestões da IA para conferir com o trecho da transcrição. Nada disto foi gravado.")).toBeInTheDocument();
+    expect(screen.queryByText(/sua rede/)).not.toBeInTheDocument();
+  });
+
+  it("pela dona: o aviso dela continua", () => {
+    duble.respostas.resumir = { topicos: [{ titulo: "T", resumo: "R", trecho: "t" }], decisoes: [], tarefas: [] };
+    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    expect(screen.getByText(/entra na sua rede sozinho/)).toBeInTheDocument();
+  });
+
+  it("o texto da IA e o trecho seguem a direção deles mesmos", () => {
+    duble.respostas.resumir = { topicos: [{ titulo: "Título", resumo: "Resumo", trecho: "trecho citado" }], decisoes: [], tarefas: [] };
+    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    for (const texto of ["Título", "Resumo", "trecho citado"]) expect(screen.getByText(texto)).toHaveAttribute("dir", "auto");
   });
 });

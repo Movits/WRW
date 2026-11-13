@@ -2,7 +2,7 @@ import crypto from "crypto";
 import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
-import { meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { gravacaoParaOuvir } from "./meeting-service";
@@ -55,26 +55,51 @@ export function enderecoDoAudioDoLink(token: string): string {
   return `${ROTA_DO_AUDIO_DO_LINK}/${token}/audio`;
 }
 
+/** Ação gravada em `audit_logs` a cada vez que a dona liga o link, com a confirmação dela. */
+export const ACAO_LINK_LIGADO = "MEETING_OPEN_LINK_ON";
+
 /**
  * Liga o link da reunião e devolve o token, ou devolve o que já está ligado.
  * O UPDATE só grava sobre token nulo: dois pedidos ao mesmo tempo (duplo
  * clique, duas abas) ficam com o MESMO link, porque o segundo não acha mais
  * token nulo e a leitura de depois devolve o do primeiro.
+ *
+ * A confirmação da dona de que as pessoas que falaram autorizaram é a única
+ * prova de que a voz delas pode ficar aberta a quem tiver o link. Por isso ela
+ * entra em `audit_logs` na MESMA transação, com IP e user-agent, por insert
+ * direto que lança (o `createAuditLog` engole o erro): sem a linha, o link não
+ * liga. É o padrão da declaração de maioridade (server/maioridade.ts).
  */
-export async function ligarLinkAberto(ownerId: string, meetingId: string): Promise<string> {
+export async function ligarLinkAberto(
+  ownerId: string,
+  meetingId: string,
+  prova: { userId: number; ipAddress: string; userAgent: string | undefined },
+): Promise<string> {
   const db = await exigirDb();
-  await db.update(meetings).set({ shareToken: gerarTokenDoLink() }).where(and(
-    eq(meetings.id, meetingId),
-    eq(meetings.ownerId, ownerId),
-    eq(meetings.status, "ready"),
-    isNull(meetings.shareToken),
-  ));
-  const [reuniao] = await db.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
-  // Em gravação, processando ou com falha não há o que compartilhar ainda.
-  if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
-  return reuniao.shareToken;
+  return db.transaction(async tx => {
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
+    await tx.update(meetings).set({ shareToken: gerarTokenDoLink() })
+      .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken)));
+    const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
+      .where(daDona).limit(1);
+    // Lançar aqui desfaz o UPDATE.
+    if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    // Em gravação, processando ou com falha não há o que compartilhar ainda.
+    if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
+    await tx.insert(auditLogs).values({
+      userId: prova.userId,
+      action: ACAO_LINK_LIGADO,
+      resource: "meetings",
+      resourceId: meetingId,
+      details: { autorizacaoDasPessoas: true },
+      // Os mesmos cortes do createAuditLog (server/security.ts).
+      ipAddress: prova.ipAddress.substring(0, 45),
+      userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
+      status: "success",
+      riskLevel: "medium",
+    });
+    return reuniao.shareToken;
+  });
 }
 
 /** Desliga o link: quem tem o endereço perde o acesso na hora. Desligar duas vezes não é erro. */
@@ -100,12 +125,17 @@ async function reuniaoDoLink(token: string) {
     title: meetings.title,
     status: meetings.status,
     createdAt: meetings.createdAt,
+    shareToken: meetings.shareToken,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
     .where(eq(meetings.shareToken, token))
     .limit(1);
-  if (!reuniao || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
+  // A coluna herda a collation do banco, que não distingue maiúsculas (a
+  // ressalva de server/db.ts sobre os nomes de contexto): no SQL, "AbC..." e
+  // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
+  // variação de caixa não abrir o link nem virar outro balde do teto.
+  if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
   return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt };
 }
 
@@ -193,7 +223,9 @@ export function registrarRotasDoLinkAberto(
         res.status(503).send(MENSAGEM_BANCO_INDISPONIVEL);
         return;
       }
-      console.error("[LinkAberto] a busca do áudio falhou:", erro);
+      // Sem o objeto do erro: o do drizzle traz os parâmetros da consulta, e
+      // um deles é o token, que abre a reunião. A descrição tira os parâmetros.
+      console.error(`[LinkAberto] a busca do áudio falhou: ${descreverErroDeBanco(erro)}`);
       res.status(500).send("Erro ao buscar a gravação");
       return;
     }
@@ -204,7 +236,7 @@ export function registrarRotasDoLinkAberto(
     try {
       res.redirect(307, await assinar(chave));
     } catch (erro) {
-      console.error("[LinkAberto] a URL assinada do áudio falhou:", erro);
+      console.error(`[LinkAberto] a URL assinada do áudio falhou: ${descreverErroDeBanco(erro)}`);
       res.status(503).send("Storage não configurado ou indisponível");
     }
   });

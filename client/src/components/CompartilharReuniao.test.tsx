@@ -160,10 +160,10 @@ describe("com link: copiar, WhatsApp, e-mail e desligar", () => {
   it("desligar pede confirmação; Manter não chama o servidor", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
     fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
-    expect(screen.getByText(/perde o acesso na hora/)).toBeInTheDocument();
+    expect(screen.getByText(/deixa de abrir a reunião na hora/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Manter" }));
     expect(duble.mutacoes.desligar.mutate).not.toHaveBeenCalled();
-    expect(screen.queryByText(/perde o acesso na hora/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/deixa de abrir a reunião na hora/)).not.toBeInTheDocument();
   });
 
   it("confirmado, desliga a reunião certa, tira o token da tela e avisa", () => {

@@ -19,6 +19,10 @@ const banco = vi.hoisted(() => ({
   transcricaoTrocada: false,
   // id, meeting_id, owner_id, language, translated_text, created_at, updated_at
   traducaoGuardada: null as unknown[] | null,
+  // Outro pedido guardou a mesma tradução primeiro: o UNIQUE recusa o insert.
+  insertDuplicado: false,
+  // Qualquer outra recusa do banco ao guardar a tradução.
+  insertFalha: null as Error | null,
 }));
 vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
   const original = await importOriginal<typeof import("drizzle-orm/mysql2")>();
@@ -26,6 +30,10 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
     query: async (config: { sql: string }, params: unknown[] = []) => {
       banco.consultas.push({ sql: config.sql, params });
       const sql = config.sql;
+      if (sql.startsWith("insert") && banco.insertFalha) throw banco.insertFalha;
+      if (sql.startsWith("insert") && banco.insertDuplicado) {
+        throw Object.assign(new Error("Duplicate entry for key 'meeting_transcript_translations_owner_meeting_language_idx'"), { code: "ER_DUP_ENTRY", errno: 1062 });
+      }
       if (sql.startsWith("insert")) return [{ affectedRows: 1 }, []];
       if (sql.includes("from `meeting_transcripts`")) {
         banco.leiturasDaTranscricao += 1;
@@ -155,6 +163,58 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     banco.leiturasDaTranscricao = 0;
     banco.transcricaoTrocada = false;
     banco.traducaoGuardada = null;
+    banco.insertDuplicado = false;
+  });
+
+  it("dois pedidos da mesma tradução ao mesmo tempo: uma chamada à IA, uma vaga do teto, os dois recebem o texto", async () => {
+    let entregar!: (valor: unknown) => void;
+    invokeLLM.mockReturnValue(new Promise(pronto => { entregar = pronto; }));
+    const antes1 = vi.fn();
+    const antes2 = vi.fn();
+    const primeiro = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes1);
+    const segundo = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes2);
+    // Os dois passam pelo cache vazio antes de a IA responder.
+    await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(1));
+    await new Promise(pronto => setTimeout(pronto, 20));
+    entregar({ choices: [{ message: { content: "Long talk." } }] });
+    await expect(primeiro).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+    await expect(segundo).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+    expect(antes1.mock.calls.length + antes2.mock.calls.length).toBe(1);
+    expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
+  });
+
+  it("terminada a primeira, um pedido novo vai à IA de novo (a espera não vira cache em memória)", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+  });
+
+  it("idiomas diferentes não esperam um pelo outro", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Traduzido." } }] });
+    await Promise.all([
+      translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en"),
+      translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es"),
+    ]);
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+  });
+
+  it("chave duplicada no cache (outro pedido guardou antes): quem pediu recebe a tradução, sem erro", async () => {
+    banco.insertDuplicado = true;
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en")).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+  });
+
+  it("outra falha ao guardar continua sendo erro: só a chave duplicada é tolerada", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    banco.insertFalha = Object.assign(new Error("Data too long for column 'translated_text'"), { code: "ER_DATA_TOO_LONG", errno: 1406 });
+    try {
+      await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en"))
+        .rejects.toMatchObject({ cause: expect.objectContaining({ code: "ER_DATA_TOO_LONG" }) });
+    } finally {
+      banco.insertFalha = null;
+    }
   });
 
   it("tradução nova: roda uma vez, ANTES do pedido à IA", async () => {

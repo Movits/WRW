@@ -1574,7 +1574,7 @@
       "message": "Réunion « {{title}} » sur WRW : {{url}}",
       "emailSubject": "Réunion « {{title}} » sur WRW",
       "turnOff": "Désactiver le lien",
-      "turnOffConfirm": "Désactiver le lien ? Les personnes qui ont l'adresse perdent l'accès immédiatement. Si vous partagez à nouveau, le lien sera différent.",
+      "turnOffConfirm": "Désactiver le lien ? Les personnes qui ont l'adresse ne peuvent plus ouvrir la réunion, immédiatement ; une personne qui écoute déjà l'enregistrement peut encore le terminer (jusqu'à 1 heure). Si vous partagez à nouveau, le lien sera différent.",
       "turnOffYes": "Désactiver",
       "turnOffCancel": "Conserver",
       "turnedOff": "Lien désactivé.",
@@ -1585,9 +1585,11 @@
     "openLink": {
       "eyebrow": "RÉUNION PARTAGÉE",
       "intro": "La personne qui a enregistré cette réunion a partagé le lien avec vous. Écoutez l'enregistrement, lisez la transcription ou demandez à l'IA un résumé et des réponses sur ce qui a été dit.",
-      "notFound": "Ce lien n'existe pas ou a été désactivé par la personne qui a partagé la réunion.",
+      "notFound": "Ce lien n'existe pas ou n'est plus disponible.",
       "goHome": "Découvrir WRW",
-      "audioLoadError": "Impossible de charger l'audio pour le moment. Rechargez la page et réessayez."
+      "audioLoadError": "Impossible de charger l'audio pour le moment. Rechargez la page et réessayez.",
+      "reviewNotice": "Suggestions de l'IA à vérifier avec l'extrait de la transcription. Rien de tout cela n'a été enregistré.",
+      "translateSubtext": "Choisissez la langue dans laquelle vous voulez lire la transcription."
     }
   },
   "connections": {

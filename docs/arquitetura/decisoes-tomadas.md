@@ -235,17 +235,22 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   sem conta na WRW. O link é só leitura: excluir, reprocessar e o que é da rede particular
   da dona (contatos e entidades) continuam só com ela, e o nome dela não aparece. Ligar
   pede de novo a confirmação de que as pessoas que falaram autorizaram compartilhar, porque
-  o consentimento da gravação foi para um áudio privado. Desligar corta o acesso na hora (a
-  página e os pedidos novos; quem já tinha a gravação carregada segue ouvindo até a URL
-  assinada vencer, em até 1 hora), e o link novo sai com outro endereço. Os pedidos à IA
-  pelo link têm teto próprio, por link.
+  o consentimento da gravação foi para um áudio privado; a confirmação vai para
+  `audit_logs`, com IP e user-agent, na mesma transação que liga o link. Desligar corta o
+  acesso na hora (a página e os pedidos novos; quem já tinha a gravação carregada segue
+  ouvindo até a URL assinada vencer, em até 1 hora), e o link novo sai com outro endereço.
+  Os pedidos à IA pelo link têm dois tetos, os dois pela reunião: 10 por visitante (rede do
+  IP) e 60 no total, a cada 10 minutos. O token é comparado com a caixa exata: a coluna
+  herda a collation do banco, que não distingue maiúsculas.
 - **Junto:** compartilhar é por WhatsApp e por e-mail (o app da própria dona abre com a
   mensagem pronta), em vez do Outlook que a H16 previa para a agenda.
 - **Antes:** decisão de 10/11, "sem link público e sem senha": só as participantes
   adicionadas e, para consulta, a presidência e a admin (R1). Ela fica para depois.
 - **Exceção a uma regra:** o áudio do link sai pela rota do token
   (`/reuniao-aberta/{token}/audio`), sem sessão. Os outros arquivos seguem só pelo proxy
-  `/manus-storage/`, com sessão e posse.
+  `/manus-storage/`, com sessão e posse. Como no proxy, a rota responde 307 para a URL
+  assinada do bucket, e o endereço dela traz o caminho do arquivo: o openId da dona
+  (aleatório, não o e-mail) e o id da reunião. Nenhum dos dois abre nada sem sessão.
 - **Onde:** `server/link-aberto-da-reuniao.ts`, `server/routers/reuniaoAberta.ts`,
   `meetings.ligarLinkAberto` e `meetings.desligarLinkAberto` em `server/routers/meetings.ts`,
   `client/src/components/CompartilharReuniao.tsx` e `client/src/pages/ReuniaoAberta.tsx`;

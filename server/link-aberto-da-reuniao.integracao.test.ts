@@ -1,9 +1,10 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
-import { meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import {
+  ACAO_LINK_LIGADO,
   chaveDoAudioDoLink,
   desligarLinkAberto,
   ligarLinkAberto,
@@ -21,7 +22,10 @@ import {
  * - ligar dá o mesmo link a pedidos simultâneos e só liga reunião pronta e da dona;
  * - o link abre a reunião sem nada da dona, toca a gravação certa e para de
  *   abrir na hora em que é desligado, de vez (o link novo é outro);
- * - conta desativada e gravação vencida param de ser servidas.
+ * - conta desativada e gravação vencida param de ser servidas;
+ * - o token vale com a caixa exata, embora a coluna herde a collation que não
+ *   distingue maiúsculas;
+ * - a confirmação da dona entra na auditoria junto com o link.
  *
  * Donas e reuniões com id aleatório: a limpeza no fim só alcança o que este
  * arquivo criou.
@@ -33,6 +37,15 @@ const PRONTA = crypto.randomUUID();
 const COM_FALHA = crypto.randomUUID();
 const AGORA = Date.now();
 const CHAVE = `meetings/${DONA}/${PRONTA}/recording.mp4`;
+// userId fora de qualquer conta real: a limpeza das linhas de auditoria vai por ele.
+const PROVA = { userId: 2_000_000_000 + Math.floor(Math.random() * 100_000_000), ipAddress: "203.0.113.7", userAgent: "vitest-link-aberto" };
+
+/** A mesma letra com a outra caixa: o banco _ci acharia a mesma linha. */
+function trocarCaixa(token: string): string {
+  const i = token.search(/[A-Za-z]/);
+  const letra = token[i];
+  return token.slice(0, i) + (letra === letra.toUpperCase() ? letra.toLowerCase() : letra.toUpperCase()) + token.slice(i + 1);
+}
 
 const reuniao = (id: string, status: "ready" | "failed") => ({
   id, ownerId: DONA, title: `Reunião ${status} de teste`, status,
@@ -71,17 +84,18 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await db.delete(meetings).where(eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
+    await db.delete(auditLogs).where(eq(auditLogs.userId, PROVA.userId));
   });
 
   it("pedidos simultâneos de ligar ficam com o MESMO link, e ligar de novo devolve o mesmo", async () => {
-    const tokens = await Promise.all(Array.from({ length: 5 }, () => ligarLinkAberto(DONA, PRONTA)));
+    const tokens = await Promise.all(Array.from({ length: 5 }, () => ligarLinkAberto(DONA, PRONTA, PROVA)));
     expect(new Set(tokens).size).toBe(1);
     expect(tokens[0]).toMatch(/^[A-Za-z0-9_-]{32}$/);
-    expect(await ligarLinkAberto(DONA, PRONTA)).toBe(tokens[0]);
+    expect(await ligarLinkAberto(DONA, PRONTA, PROVA)).toBe(tokens[0]);
   });
 
   it("o link abre título, transcrição e gravação pela rota do link, sem nada da dona", async () => {
-    const token = await ligarLinkAberto(DONA, PRONTA);
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     const vista = await verReuniaoPeloLink(token);
     expect(vista).toMatchObject({
       titulo: "Reunião ready de teste",
@@ -99,13 +113,13 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   });
 
   it("desligado, o link para de abrir na hora, e o link novo é outro", async () => {
-    const antigo = await ligarLinkAberto(DONA, PRONTA);
-    await desligarLinkAberto(DONA, PRONTA);
+    const antigo = await ligarLinkAberto(DONA, PRONTA, PROVA);
+    await desligarLinkAberto(DONA, PRONTA, PROVA);
     expect((await recusaDe(verReuniaoPeloLink(antigo))).codigo).toBe("NOT_FOUND");
     expect(await chaveDoAudioDoLink(antigo)).toBeNull();
     // Desligar o que já está desligado não é erro.
-    await desligarLinkAberto(DONA, PRONTA);
-    const novo = await ligarLinkAberto(DONA, PRONTA);
+    await desligarLinkAberto(DONA, PRONTA, PROVA);
+    const novo = await ligarLinkAberto(DONA, PRONTA, PROVA);
     expect(novo).not.toBe(antigo);
     expect(await chaveDoAudioDoLink(antigo)).toBeNull();
     expect(await chaveDoAudioDoLink(novo)).toBe(CHAVE);
@@ -117,29 +131,29 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       (await db.select({ shareToken: meetings.shareToken }).from(meetings).where(eq(meetings.id, id)))[0].shareToken;
 
     // Outra conta não desliga o link da dona: o MESMO token continua abrindo.
-    const daDona = await ligarLinkAberto(DONA, PRONTA);
-    expect((await recusaDe(desligarLinkAberto(OUTRA, PRONTA))).codigo).toBe("NOT_FOUND");
+    const daDona = await ligarLinkAberto(DONA, PRONTA, PROVA);
+    expect((await recusaDe(desligarLinkAberto(OUTRA, PRONTA, PROVA))).codigo).toBe("NOT_FOUND");
     expect(await chaveDoAudioDoLink(daDona)).toBe(CHAVE);
 
     // Nem liga: com o link desligado, a tentativa da outra não grava token.
-    await desligarLinkAberto(DONA, PRONTA);
-    expect((await recusaDe(ligarLinkAberto(OUTRA, PRONTA))).codigo).toBe("NOT_FOUND");
+    await desligarLinkAberto(DONA, PRONTA, PROVA);
+    expect((await recusaDe(ligarLinkAberto(OUTRA, PRONTA, PROVA))).codigo).toBe("NOT_FOUND");
     expect(await tokenNoBanco(PRONTA)).toBeNull();
 
     // Reunião com falha não ganha link, nem pela dona.
-    expect((await recusaDe(ligarLinkAberto(DONA, COM_FALHA))).codigo).toBe("PRECONDITION_FAILED");
+    expect((await recusaDe(ligarLinkAberto(DONA, COM_FALHA, PROVA))).codigo).toBe("PRECONDITION_FAILED");
     expect(await tokenNoBanco(COM_FALHA)).toBeNull();
   });
 
   it("token fora do formato não abre nada", async () => {
-    const token = await ligarLinkAberto(DONA, PRONTA);
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     expect((await recusaDe(verReuniaoPeloLink(token.slice(0, 31)))).codigo).toBe("NOT_FOUND");
     expect((await recusaDe(verReuniaoPeloLink(`${token}x`))).codigo).toBe("NOT_FOUND");
     expect(await chaveDoAudioDoLink("")).toBeNull();
   });
 
   it("conta desativada deixa de servir o link; reativada, volta", async () => {
-    const token = await ligarLinkAberto(DONA, PRONTA);
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     const db = (await getDb())!;
     await db.update(users).set({ isActive: false }).where(eq(users.openId, DONA));
     try {
@@ -151,8 +165,39 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     expect((await verReuniaoPeloLink(token)).titulo).toBe("Reunião ready de teste");
   });
 
+  it("o token vale com a caixa exata: a mesma letra em outra caixa não abre a reunião nem o áudio", async () => {
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
+    const outraCaixa = trocarCaixa(token);
+    expect(outraCaixa).not.toBe(token);
+    expect((await recusaDe(verReuniaoPeloLink(outraCaixa))).codigo).toBe("NOT_FOUND");
+    expect(await chaveDoAudioDoLink(outraCaixa)).toBeNull();
+    expect(await chaveDoAudioDoLink(token)).toBe(CHAVE);
+  });
+
+  it("a confirmação da dona entra na auditoria, com IP e navegador, a cada vez que ela liga", async () => {
+    const db = (await getDb())!;
+    const linhas = () => db.select().from(auditLogs)
+      .where(and(eq(auditLogs.userId, PROVA.userId), eq(auditLogs.action, ACAO_LINK_LIGADO), eq(auditLogs.resourceId, PRONTA)));
+    const antes = (await linhas()).length;
+    await ligarLinkAberto(DONA, PRONTA, PROVA);
+    const depois = await linhas();
+    expect(depois.length).toBe(antes + 1);
+    expect(depois.at(-1)).toMatchObject({
+      resource: "meetings", ipAddress: PROVA.ipAddress, userAgent: PROVA.userAgent, status: "success", riskLevel: "medium",
+    });
+    expect(depois.at(-1)!.details).toEqual({ autorizacaoDasPessoas: true });
+  });
+
+  it("recusado, o link não liga e nada vai para a auditoria", async () => {
+    const db = (await getDb())!;
+    const naFalha = () => db.select({ id: auditLogs.id }).from(auditLogs)
+      .where(and(eq(auditLogs.userId, PROVA.userId), eq(auditLogs.resourceId, COM_FALHA)));
+    expect((await recusaDe(ligarLinkAberto(DONA, COM_FALHA, PROVA))).codigo).toBe("PRECONDITION_FAILED");
+    expect(await naFalha()).toHaveLength(0);
+  });
+
   it("reunião em exclusão ('deleted', antes de a linha sair) não abre pelo link", async () => {
-    const token = await ligarLinkAberto(DONA, PRONTA);
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     const db = (await getDb())!;
     await db.update(meetings).set({ status: "deleted" }).where(eq(meetings.id, PRONTA));
     try {
@@ -164,7 +209,7 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   });
 
   it("gravação vencida não é tocada pelo link, e a página diz que expirou", async () => {
-    const token = await ligarLinkAberto(DONA, PRONTA);
+    const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     const db = (await getDb())!;
     await db.update(meetingRecordings).set({ expiresAt: AGORA - 1 }).where(eq(meetingRecordings.ownerId, DONA));
     expect(await chaveDoAudioDoLink(token)).toBeNull();

@@ -12,6 +12,7 @@ import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARD
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
@@ -358,7 +359,36 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     )).limit(1);
   if (cached) return { language: normalizedLanguage, text: cached.translatedText, cached: true };
 
+  // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
+  // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
+  // por ela, sem pagar outra chamada nem gastar vaga do teto.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  const emCurso = traducoesEmCurso.get(chave);
+  if (emCurso) return emCurso;
   antesDeChamarAIA?.();
+  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript });
+  traducoesEmCurso.set(chave, trabalho);
+  try {
+    return await trabalho;
+  } finally {
+    traducoesEmCurso.delete(chave);
+  }
+}
+
+type TraducaoDaTranscricao = { language: string; text: string; cached: boolean };
+
+// As traduções que estão na IA agora, por dona, reunião, idioma e transcrição.
+// Em memória, como os tetos: basta à instância única do Render.
+const traducoesEmCurso = new Map<string, Promise<TraducaoDaTranscricao>>();
+
+async function traduzirEGuardar(db: Banco, alvo: {
+  ownerId: string;
+  meetingId: string;
+  normalizedLanguage: string;
+  targetLanguage: string;
+  transcript: { id: string; transcript: string };
+}): Promise<TraducaoDaTranscricao> {
+  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript } = alvo;
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
     orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
@@ -378,15 +408,22 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
   const timestamp = now();
-  await db.insert(meetingTranscriptTranslations).values({
-    id: crypto.randomUUID(),
-    meetingId,
-    ownerId,
-    language: normalizedLanguage,
-    translatedText,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
+  try {
+    await db.insert(meetingTranscriptTranslations).values({
+      id: crypto.randomUUID(),
+      meetingId,
+      ownerId,
+      language: normalizedLanguage,
+      translatedText,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (erro) {
+    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
+    if (!ehColisaoDeChave(erro)) throw erro;
+  }
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 

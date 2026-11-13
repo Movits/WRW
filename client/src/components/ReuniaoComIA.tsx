@@ -46,13 +46,14 @@ function Trecho({ texto }: { texto: string }) {
   const { t } = useTranslation();
   return <div className="mt-2 border-l-2 border-amber-300/40 pl-3">
     <p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.ai.excerptLabel")}</p>
-    <q className="text-xs italic text-white/55">{texto}</q>
+    <q dir="auto" className="text-xs italic text-white/55">{texto}</q>
   </div>;
 }
 
-function AvisoDeConferir() {
+// Pelo link aberto, quem lê não tem conta nem rede na WRW: o aviso da dona ("não entra na sua rede") não vale.
+function AvisoDeConferir({ peloLink }: { peloLink: boolean }) {
   const { t } = useTranslation();
-  return <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs text-amber-100/80"><CircleAlert size={14} className="mr-1.5 inline"/>{t("meetings.ai.reviewNotice")}</p>;
+  return <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs text-amber-100/80"><CircleAlert size={14} className="mr-1.5 inline"/>{t(peloLink ? "meetings.openLink.reviewNotice" : "meetings.ai.reviewNotice")}</p>;
 }
 
 function SecaoDoResumo({ titulo, vazia, children }: { titulo: string; vazia: boolean; children: ReactNode }) {
@@ -89,23 +90,23 @@ export function ResumoDaReuniaoPelaIA(fonte: FonteDaReuniao) {
     {resumir.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.ai.generatingSummary")}</p>}
     {resumir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, resumir.error, t("meetings.ai.summaryError"), peloLink)}</p>}
     {resumo && <div className="mt-4 space-y-5">
-      <AvisoDeConferir/>
+      <AvisoDeConferir peloLink={peloLink}/>
       <SecaoDoResumo titulo={t("meetings.ai.topicsHeading")} vazia={!resumo.topicos.length}>
         {resumo.topicos.map((topico, i) => <li key={i}>
-          <p className="font-medium text-white/90">{topico.titulo}</p>
-          <p className="mt-0.5 text-sm text-white/70">{topico.resumo}</p>
+          <p dir="auto" className="font-medium text-white/90">{topico.titulo}</p>
+          <p dir="auto" className="mt-0.5 text-sm text-white/70">{topico.resumo}</p>
           <Trecho texto={topico.trecho}/>
         </li>)}
       </SecaoDoResumo>
       <SecaoDoResumo titulo={t("meetings.ai.decisionsHeading")} vazia={!resumo.decisoes.length}>
         {resumo.decisoes.map((decisao, i) => <li key={i}>
-          <p className="text-sm text-white/85">{decisao.texto}</p>
+          <p dir="auto" className="text-sm text-white/85">{decisao.texto}</p>
           <Trecho texto={decisao.trecho}/>
         </li>)}
       </SecaoDoResumo>
       <SecaoDoResumo titulo={t("meetings.ai.tasksHeading")} vazia={!resumo.tarefas.length}>
         {resumo.tarefas.map((tarefa, i) => <li key={i}>
-          <p className="text-sm text-white/85">{tarefa.oQue}</p>
+          <p dir="auto" className="text-sm text-white/85">{tarefa.oQue}</p>
           {(tarefa.quem || tarefa.quando) && <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-100/70">
             {tarefa.quem && <span>{t("meetings.ai.taskWho", { who: tarefa.quem })}</span>}
             {tarefa.quando && <span>{t("meetings.ai.taskWhen", { when: tarefa.quando })}</span>}
@@ -156,9 +157,9 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
     {resposta && <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/10 p-4">
       {perguntaFeita && <p className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>
-        <p className="text-sm leading-6 text-white/85">{resposta.resposta}</p>
+        <p dir="auto" className="text-sm leading-6 text-white/85">{resposta.resposta}</p>
         <Trecho texto={resposta.trecho}/>
-        <AvisoDeConferir/>
+        <AvisoDeConferir peloLink={peloLink}/>
       </> : <p className="text-sm text-white/60">{t("meetings.ai.notAnswered")}</p>}
     </div>}
   </section>;

@@ -24,6 +24,7 @@ import {
 import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
+import { ipDaCliente } from "../ip-da-cliente";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -213,16 +214,17 @@ export const meetingsRouter = router({
   // endereço ouve, lê e pergunta à IA sem conta na WRW (routers/reuniaoAberta.ts).
   // Só a dona liga e desliga, e só reunião pronta tem link. Ligar exige de novo
   // a palavra dela de que as pessoas da reunião autorizaram compartilhar: o
-  // consentimento da gravação foi para um áudio privado. Ligar o que já está
-  // ligado devolve o mesmo link.
+  // consentimento da gravação foi para um áudio privado. Essa palavra vai para
+  // a auditoria na mesma transação que liga o link (ligarLinkAberto). Ligar o
+  // que já está ligado devolve o mesmo link.
   ligarLinkAberto: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), autorizacaoDasPessoas: z.literal(true) }))
     .mutation(async ({ ctx, input }) => {
-      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId));
-      await createAuditLog({
-        userId: ctx.user.id, action: "MEETING_OPEN_LINK_ON", resource: "meetings", resourceId: input.meetingId,
-        details: { autorizacaoDasPessoas: true }, status: "success", riskLevel: "medium",
-      });
+      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
+        userId: ctx.user.id,
+        ipAddress: ipDaCliente(ctx.req),
+        userAgent: ctx.req.headers["user-agent"],
+      }));
       return { token };
     }),
 

@@ -1574,7 +1574,7 @@
       "message": "Reunião “{{title}}” na WRW: {{url}}",
       "emailSubject": "Reunião “{{title}}” na WRW",
       "turnOff": "Desligar o link",
-      "turnOffConfirm": "Desligar o link? Quem tem o endereço perde o acesso na hora. Se você compartilhar de novo, o link será outro.",
+      "turnOffConfirm": "Desligar o link? Quem tem o endereço deixa de abrir a reunião na hora; quem já estava ouvindo a gravação ainda consegue terminar (por até 1 hora). Se você compartilhar de novo, o link será outro.",
       "turnOffYes": "Desligar",
       "turnOffCancel": "Manter",
       "turnedOff": "Link desligado.",
@@ -1585,9 +1585,11 @@
     "openLink": {
       "eyebrow": "REUNIÃO COMPARTILHADA",
       "intro": "Quem gravou esta reunião compartilhou o link com você. Ouça a gravação, leia a transcrição ou peça à IA um resumo e respostas sobre o que foi dito.",
-      "notFound": "Este link não existe ou foi desligado por quem compartilhou a reunião.",
+      "notFound": "Este link não existe ou não está mais disponível.",
       "goHome": "Conhecer a WRW",
-      "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página e tente de novo."
+      "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página e tente de novo.",
+      "reviewNotice": "Sugestões da IA para conferir com o trecho da transcrição. Nada disto foi gravado.",
+      "translateSubtext": "Escolha o idioma em que você quer ler a transcrição."
     }
   },
   "connections": {

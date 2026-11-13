@@ -1574,7 +1574,7 @@
       "message": "WRW 上的会议“{{title}}”：{{url}}",
       "emailSubject": "WRW 上的会议“{{title}}”",
       "turnOff": "关闭链接",
-      "turnOffConfirm": "要关闭链接吗？拥有此地址的人将立即失去访问权限。如果您再次分享，链接将会不同。",
+      "turnOffConfirm": "要关闭链接吗？拥有此地址的人将立即无法再打开这次会议；已经在收听录音的人仍可听完（最长 1 小时）。如果您再次分享，链接将会不同。",
       "turnOffYes": "关闭",
       "turnOffCancel": "保留",
       "turnedOff": "链接已关闭。",
@@ -1585,9 +1585,11 @@
     "openLink": {
       "eyebrow": "共享的会议",
       "intro": "录制这次会议的人与您分享了此链接。您可以收听录音、阅读转录内容，或请 AI 就会议内容生成摘要并回答问题。",
-      "notFound": "此链接不存在，或已被分享会议的人关闭。",
+      "notFound": "此链接不存在或已不再可用。",
       "goHome": "了解 WRW",
-      "audioLoadError": "暂时无法加载音频。请刷新页面后重试。"
+      "audioLoadError": "暂时无法加载音频。请刷新页面后重试。",
+      "reviewNotice": "AI 给出的建议，请对照转录片段核实。以上内容均未保存。",
+      "translateSubtext": "选择您想用来阅读转录内容的语言。"
     }
   },
   "connections": {

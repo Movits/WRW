@@ -1574,7 +1574,7 @@
       "message": "Meeting “{{title}}” on WRW: {{url}}",
       "emailSubject": "Meeting “{{title}}” on WRW",
       "turnOff": "Turn off link",
-      "turnOffConfirm": "Turn off the link? Anyone with the address loses access right away. If you share again, the link will be different.",
+      "turnOffConfirm": "Turn off the link? Anyone with the address can no longer open the meeting, starting right away; someone already listening to the recording can still finish it (for up to 1 hour). If you share again, the link will be different.",
       "turnOffYes": "Turn off",
       "turnOffCancel": "Keep",
       "turnedOff": "Link turned off.",
@@ -1585,9 +1585,11 @@
     "openLink": {
       "eyebrow": "SHARED MEETING",
       "intro": "The person who recorded this meeting shared the link with you. Listen to the recording, read the transcript or ask the AI for a summary and answers about what was said.",
-      "notFound": "This link doesn't exist or was turned off by the person who shared the meeting.",
+      "notFound": "This link doesn't exist or is no longer available.",
       "goHome": "Discover WRW",
-      "audioLoadError": "Couldn't load the audio right now. Reload the page and try again."
+      "audioLoadError": "Couldn't load the audio right now. Reload the page and try again.",
+      "reviewNotice": "AI suggestions to check against the transcript excerpt. None of this was saved.",
+      "translateSubtext": "Choose the language you want to read the transcript in."
     }
   },
   "connections": {

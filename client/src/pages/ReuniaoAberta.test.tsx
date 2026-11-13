@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "wouter";
 import i18n from "@/i18n";
+import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
 import ReuniaoAberta from "./ReuniaoAberta";
 
 /**
@@ -88,7 +89,7 @@ describe("Reunião aberta pelo link", () => {
   it("link que não existe ou foi desligado: aviso traduzido, sem tentar de novo", () => {
     duble.ver.mockReturnValue(emErro("NOT_FOUND"));
     abrir();
-    expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou foi desligado por quem compartilhou a reunião.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
     expect(screen.getByRole("link", { name: "Conhecer a WRW" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("button", { name: /Tentar/ })).not.toBeInTheDocument();
     expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
@@ -100,7 +101,7 @@ describe("Reunião aberta pelo link", () => {
     const refetch = vi.fn();
     duble.ver.mockReturnValue(emErro("INTERNAL_SERVER_ERROR", refetch));
     abrir();
-    expect(screen.queryByText(/foi desligado/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/não está mais disponível/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Tentar/ }));
     expect(refetch).toHaveBeenCalled();
     expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(true);
@@ -159,5 +160,58 @@ describe("Reunião aberta pelo link", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
     expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível traduzir a transcrição.");
     expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
+  });
+});
+
+describe("Reunião aberta pelo link — o erro da tradução diz o que houve e deixa tentar de novo", () => {
+  const comErro = (code: string, message = "frase do servidor") => {
+    duble.traduzir = { ...duble.traduzir, isError: true, error: { message, data: { code } } } as typeof duble.traduzir;
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
+    return screen.getByRole("alert");
+  };
+
+  it.each([
+    ["TOO_MANY_REQUESTS", "frase do servidor", "Muitos pedidos em sequência. Aguarde alguns minutos e tente de novo."],
+    ["NOT_FOUND", "frase do servidor", "Este link não existe ou não está mais disponível."],
+    ["INTERNAL_SERVER_ERROR", MENSAGEM_BANCO_INDISPONIVEL, "Banco de dados indisponível; tente de novo em instantes"],
+    ["SERVICE_UNAVAILABLE", "A tradução não respondeu agora.", "Não foi possível traduzir a transcrição."],
+  ])("%s: a frase certa, no idioma de quem lê", (code, message, frase) => {
+    expect(comErro(code, message)).toHaveTextContent(frase);
+  });
+
+  it("mensagem de servidor que a tela não conhece não aparece crua", () => {
+    const alerta = comErro("INTERNAL_SERVER_ERROR", "LLM invoke failed: 500 detalhe interno");
+    expect(alerta).not.toHaveTextContent(/LLM invoke failed/);
+    expect(alerta).toHaveTextContent("Não foi possível traduzir a transcrição.");
+  });
+
+  it("Tentar de novo pede a mesma tradução outra vez, pelo token", () => {
+    comErro("SERVICE_UNAVAILABLE");
+    duble.traduzir.mutate.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /Tentar/ }));
+    expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "fr" }, expect.anything());
+  });
+
+  it("o texto da transcrição segue a direção dele mesmo, e o idioma dele vai para o leitor de tela", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const original = screen.getByText("Combinamos a entrega na sexta.");
+    expect(original).toHaveAttribute("dir", "auto");
+    expect(original).toHaveAttribute("lang", "pt-BR");
+  });
+
+  it("o subtítulo da tradução fala com quem lê, não com a dona", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(screen.getByText("Escolha o idioma em que você quer ler a transcrição.")).toBeInTheDocument();
+  });
+
+  it("a linha da gravação tem um separador só", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const linha = screen.getByText(/01:35/);
+    expect(linha.textContent).not.toMatch(/·\s*·/);
   });
 });
