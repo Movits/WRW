@@ -17,6 +17,12 @@ const banco = vi.hoisted(() => ({
   leiturasDaTranscricao: 0,
   // Um reprocessamento trocou a transcrição enquanto o LLM traduzia: a releitura devolve outro id.
   transcricaoTrocada: false,
+  // id, meeting_id, owner_id, language, translated_text, created_at, updated_at
+  traducaoGuardada: null as unknown[] | null,
+  // Outro pedido guardou a mesma tradução primeiro: o UNIQUE recusa o insert.
+  insertDuplicado: false,
+  // Qualquer outra recusa do banco ao guardar a tradução.
+  insertFalha: null as Error | null,
 }));
 vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
   const original = await importOriginal<typeof import("drizzle-orm/mysql2")>();
@@ -24,13 +30,17 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
     query: async (config: { sql: string }, params: unknown[] = []) => {
       banco.consultas.push({ sql: config.sql, params });
       const sql = config.sql;
+      if (sql.startsWith("insert") && banco.insertFalha) throw banco.insertFalha;
+      if (sql.startsWith("insert") && banco.insertDuplicado) {
+        throw Object.assign(new Error("Duplicate entry for key 'meeting_transcript_translations_owner_meeting_language_idx'"), { code: "ER_DUP_ENTRY", errno: 1062 });
+      }
       if (sql.startsWith("insert")) return [{ affectedRows: 1 }, []];
       if (sql.includes("from `meeting_transcripts`")) {
         banco.leiturasDaTranscricao += 1;
         if (banco.transcricaoTrocada && banco.leiturasDaTranscricao > 1) return [[["tr-2"]], []];
         return [[banco.transcricao], []];
       }
-      if (sql.includes("from `meeting_transcript_translations`")) return [[], []];
+      if (sql.includes("from `meeting_transcript_translations`")) return [banco.traducaoGuardada ? [banco.traducaoGuardada] : [], []];
       return [[], []];
     },
   } as never;
@@ -91,6 +101,7 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     banco.consultas = [];
     banco.leiturasDaTranscricao = 0;
     banco.transcricaoTrocada = false;
+    banco.traducaoGuardada = null;
   });
 
   it("a extração roda dentro do submit síncrono: 45 s por tentativa e 60 s de orçamento", async () => {
@@ -140,5 +151,95 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     const releitura = banco.consultas.filter(c => c.sql.includes("from `meeting_transcripts`")).at(-1)!;
     expect(releitura.sql).toMatch(/`owner_id` = \?/);
     expect(releitura.params).toEqual(expect.arrayContaining(["dona-1", "reuniao-1"]));
+  });
+});
+
+// O teto do link aberto entra por `antesDeChamarAIA`: ele tem de rodar só no
+// caminho que vai à IA, e antes dela, para que a recusa não gaste o pedido.
+describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)", () => {
+  beforeEach(() => {
+    invokeLLM.mockReset();
+    banco.consultas = [];
+    banco.leiturasDaTranscricao = 0;
+    banco.transcricaoTrocada = false;
+    banco.traducaoGuardada = null;
+    banco.insertDuplicado = false;
+  });
+
+  it("dois pedidos da mesma tradução ao mesmo tempo: uma chamada à IA, uma vaga do teto, os dois recebem o texto", async () => {
+    let entregar!: (valor: unknown) => void;
+    invokeLLM.mockReturnValue(new Promise(pronto => { entregar = pronto; }));
+    const antes1 = vi.fn();
+    const antes2 = vi.fn();
+    const primeiro = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes1);
+    const segundo = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes2);
+    // Os dois passam pelo cache vazio antes de a IA responder.
+    await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(1));
+    await new Promise(pronto => setTimeout(pronto, 20));
+    entregar({ choices: [{ message: { content: "Long talk." } }] });
+    await expect(primeiro).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+    await expect(segundo).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+    expect(antes1.mock.calls.length + antes2.mock.calls.length).toBe(1);
+    expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
+  });
+
+  it("terminada a primeira, um pedido novo vai à IA de novo (a espera não vira cache em memória)", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+  });
+
+  it("idiomas diferentes não esperam um pelo outro", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Traduzido." } }] });
+    await Promise.all([
+      translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en"),
+      translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es"),
+    ]);
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+  });
+
+  it("chave duplicada no cache (outro pedido guardou antes): quem pediu recebe a tradução, sem erro", async () => {
+    banco.insertDuplicado = true;
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en")).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
+  });
+
+  it("outra falha ao guardar continua sendo erro: só a chave duplicada é tolerada", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    banco.insertFalha = Object.assign(new Error("Data too long for column 'translated_text'"), { code: "ER_DATA_TOO_LONG", errno: 1406 });
+    try {
+      await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en"))
+        .rejects.toMatchObject({ cause: expect.objectContaining({ code: "ER_DATA_TOO_LONG" }) });
+    } finally {
+      banco.insertFalha = null;
+    }
+  });
+
+  it("tradução nova: roda uma vez, ANTES do pedido à IA", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
+    const antes = vi.fn();
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes);
+    expect(antes).toHaveBeenCalledTimes(1);
+    expect(antes.mock.invocationCallOrder[0]).toBeLessThan(invokeLLM.mock.invocationCallOrder[0]);
+  });
+
+  it("a recusa dele para tudo: a IA não é chamada e nada é gravado", async () => {
+    const recusa = new Error("teto do link");
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", () => { throw recusa; })).rejects.toBe(recusa);
+    expect(invokeLLM).not.toHaveBeenCalled();
+    expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(false);
+  });
+
+  it("tradução guardada, idioma da transcrição e pt-BR não vão à IA, e ele não roda", async () => {
+    const antes = vi.fn();
+    banco.traducaoGuardada = ["tt-1", "reuniao-1", "dona-1", "en", "Saved talk.", 1000, 1000];
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes)).resolves.toEqual({ language: "en", text: "Saved talk.", cached: true });
+    banco.traducaoGuardada = null;
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt-BR", antes);
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt", antes);
+    expect(antes).not.toHaveBeenCalled();
+    expect(invokeLLM).not.toHaveBeenCalled();
   });
 });

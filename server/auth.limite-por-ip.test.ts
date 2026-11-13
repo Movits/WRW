@@ -27,6 +27,11 @@ vi.mock("./auth", () => ({
   registerUser: dubles.registerUser,
   loginUser: dubles.loginUser,
   toPublicUser: (u: unknown) => u,
+}));
+
+// O cookie da sessão mora em server/sessao.ts; aqui ele não é o assunto.
+vi.mock("./sessao", async importOriginal => ({
+  ...(await importOriginal<typeof import("./sessao")>()),
   gravarCookieDaSessao: vi.fn(),
 }));
 

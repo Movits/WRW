@@ -27,10 +27,13 @@ vi.mock("./security", () => ({
 vi.mock("./db", () => ({
   getUserByOpenId: vi.fn(async () => ({ id: 7, openId: "email_x", isActive: true })),
   upsertUser: vi.fn(async () => undefined),
+  // abrirSessao grava a linha da sessão; aqui o INSERT só é aceito.
+  exigirDb: async () => ({ insert: () => ({ values: async () => undefined }) }),
 }));
 
 import { COOKIE_NAME } from "@shared/const";
 import { sdk } from "./_core/sdk";
+import { abrirSessao } from "./sessao";
 
 describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava", () => {
   beforeEach(() => {
@@ -42,7 +45,14 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
   });
 
   it("no Render, usa o CF-Connecting-IP, não o primeiro item do X-Forwarded-For", async () => {
-    const cookie = await sdk.signSession({ openId: "email_x", appId: "mmm-os", name: "Membra" });
+    // O token que o login entrega (abrirSessao), com o sessionToken que o sdk
+    // confere no banco: token de usuária sem ele é recusado antes de chegar à
+    // detecção de anomalia.
+    const { token: cookie, sessionToken } = await abrirSessao({
+      usuaria: { id: 7, openId: "email_x", name: "Membra", email: null },
+      ip: "198.51.100.23",
+      userAgent: "vitest",
+    });
     const req = {
       headers: {
         cookie: `${COOKIE_NAME}=${cookie}`,
@@ -56,8 +66,8 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
 
     await sdk.authenticateRequest(req as never);
 
-    // O quarto argumento é o sessionToken: o token do sdk.signSession não leva um.
-    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest", null);
+    // O quarto argumento é o sessionToken da sessão aberta.
+    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest", sessionToken);
   });
 });
 

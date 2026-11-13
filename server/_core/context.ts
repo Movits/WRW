@@ -1,7 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { HttpError } from "@shared/_core/errors";
-import { cookieDaSessao, limparCookieDaSessao, renovarCookieDaSessao } from "../auth";
+import { cookieDaSessao, limparCookieDaSessao, renovarCookieDaSessao } from "../sessao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { sdk } from "./sdk";
 
