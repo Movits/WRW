@@ -100,3 +100,21 @@ describe("a página /r/{token}", () => {
     }
   });
 });
+
+describe("o log da rota do áudio não leva o token", () => {
+  it("o erro da consulta traz o token nos parâmetros e na mensagem; o log só a descrição, sem ele", async () => {
+    const token = "Tk".repeat(16);
+    // Como o DrizzleQueryError: a mensagem cita os parâmetros, e o SQL fica em `query`.
+    const consulta = Object.assign(new Error(`Failed query: select ... where share_token = ?\nparams: ${token}`), {
+      query: "select ... where share_token = ?",
+      params: [token],
+      cause: Object.assign(new Error("Table 'meetings' is marked as crashed"), { code: "ER_CRASHED_ON_USAGE" }),
+    });
+    acharChave.mockRejectedValue(consulta);
+    expect((await pedir(`/reuniao-aberta/${token}/audio`)).status).toBe(500);
+    const registrado = vi.mocked(console.error).mock.calls.map(c => c.map(String).join(" ")).join("\n");
+    expect(registrado).toContain("[LinkAberto]");
+    expect(registrado).toContain("ER_CRASHED_ON_USAGE");
+    expect(registrado).not.toContain(token);
+  });
+});

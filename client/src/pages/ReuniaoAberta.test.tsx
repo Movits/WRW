@@ -215,3 +215,19 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
     expect(linha.textContent).not.toMatch(/·\s*·/);
   });
 });
+
+describe("Reunião aberta pelo link — direção e anúncios", () => {
+  it("o título da dona segue a direção dele mesmo", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveAttribute("dir", "auto");
+  });
+
+  it("\"Traduzindo\" é anunciado ao leitor de tela", () => {
+    duble.traduzir = { ...duble.traduzir, isPending: true };
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
+    expect(screen.getByRole("status")).toHaveTextContent(/Traduzindo/);
+  });
+});

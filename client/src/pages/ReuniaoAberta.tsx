@@ -107,7 +107,7 @@ export default function ReuniaoAberta() {
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== "pt-BR" ? idiomaDaTraducao : idiomaDoOriginal;
   return <Moldura>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
-    <h1 className="text-3xl font-bold mt-1">{titulo}</h1>
+    <h1 dir="auto" className="text-3xl font-bold mt-1">{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
     <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
 
@@ -141,7 +141,7 @@ export default function ReuniaoAberta() {
           </label>
         </div>
         {traduzir.isPending
-          ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div>
+          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div>
           : <>
             {traduzir.isError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">
               <span>{mensagemDaTraducao(t, traduzir.error)}</span>

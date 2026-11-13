@@ -88,7 +88,13 @@ describe("sem link: ligar pede a confirmação de que as pessoas autorizaram", (
     fireEvent.click(screen.getByRole("checkbox", { name: /autorizaram compartilhar/ }));
     expect(criar).toBeEnabled();
     fireEvent.click(criar);
-    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith({ meetingId: ID, autorizacaoDasPessoas: true });
+    // A prova leva a frase que a dona viu e o idioma da tela dela.
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith({
+      meetingId: ID,
+      autorizacaoDasPessoas: true,
+      idioma: "pt-BR",
+      textoExibido: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem receber o link.",
+    });
   });
 
   it("Cancelar volta ao começo e desmarca a caixa", () => {
@@ -175,5 +181,42 @@ describe("com link: copiar, WhatsApp, e-mail e desligar", () => {
     const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
     expect(atualizar({ meeting: { id: ID, shareToken: TOKEN } })).toEqual({ meeting: { id: ID, shareToken: null } });
     expect(toast.success).toHaveBeenCalledWith("Link desligado.");
+  });
+});
+
+describe("o painel anuncia o que mudou e não perde o foco", () => {
+  it("Compartilhar: o foco vai para a caixa de autorização", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getByRole("checkbox")).toHaveFocus();
+  });
+
+  it("ligado: avisa \"Link criado\" e o foco vai para o campo do link", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    act(() => duble.mutacoes.ligar.opcoes.onSuccess?.({ token: TOKEN }));
+    expect(toast.success).toHaveBeenCalledWith("Link criado.");
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveFocus();
+  });
+
+  it("abrir a reunião que já tem link não rouba o foco", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).not.toHaveFocus();
+  });
+
+  it("desligar: a pergunta abre com o foco em Manter; desligado, o foco volta para Compartilhar", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    const manter = screen.getByRole("button", { name: "Manter" });
+    expect(manter).toHaveFocus();
+    expect(manter).toHaveAccessibleDescription(/deixa de abrir a reunião na hora/);
+    act(() => duble.mutacoes.desligar.opcoes.onSuccess?.(undefined));
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByRole("button", { name: /Compartilhar/ })).toHaveFocus();
+  });
+
+  it("o endereço fica da esquerda para a direita, também numa tela em árabe", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveAttribute("dir", "ltr");
   });
 });

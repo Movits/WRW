@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { criarTeto } from "../assistente-de-texto";
-import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "../banco-indisponivel";
+import { BancoIndisponivel, descreverErroDeBanco, ehErroDoDriverDeBanco } from "../banco-indisponivel";
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
@@ -44,11 +44,15 @@ export const tetoDaIADoLinkAberto = criarTeto(
 type Pedido = Parameters<typeof ipDaCliente>[0];
 
 /**
- * Uma vaga nos dois tetos. O do visitante vem primeiro: o teto não devolve
- * vaga, e quem já passou do próprio limite não pode gastar a vaga comum.
+ * Uma vaga nos dois tetos, ou nenhuma: os dois são conferidos antes de gravar
+ * em qualquer um, e a recusa de um não gasta a vaga do outro (o teto não
+ * devolve vaga). Tudo síncrono: nenhum pedido entra entre conferir e reservar.
  */
 function reservarVagaDaIA(reuniaoId: string, pedido: Pedido) {
-  tetoDaIADoVisitanteDoLink.reservar(`${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`);
+  const daVisitante = `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
+  tetoDaIADoVisitanteDoLink.conferir(daVisitante);
+  tetoDaIADoLinkAberto.conferir(reuniaoId);
+  tetoDaIADoVisitanteDoLink.reservar(daVisitante);
   tetoDaIADoLinkAberto.reservar(reuniaoId);
 }
 
@@ -67,10 +71,13 @@ export const reuniaoAbertaRouter = router({
         return await translatePrivateMeetingTranscript(reuniao.ownerId, reuniao.id, input.language,
           () => reservarVagaDaIA(reuniao.id, ctx.req));
       } catch (erro) {
-        // O teto sai como está, e o banco fora do ar segue para o middleware,
-        // que o traduz. O resto é falha da IA ou do provedor: a mensagem crua
-        // dele não vai a quem não tem conta, e o log não leva o token.
-        if (erro instanceof TRPCError || ehErroDeBancoIndisponivel(erro)) throw erro;
+        // O teto sai como está, e o erro do BANCO (queda ou não) segue para o
+        // middleware, que o traduz. Não basta olhar o código de conexão: a
+        // falha de rede com o provedor de IA traz o mesmo ECONNRESET na
+        // `cause`, e viraria "banco indisponível". O resto é falha da IA ou do
+        // provedor: a mensagem crua não vai a quem não tem conta, e o log não
+        // leva o token.
+        if (erro instanceof TRPCError || erro instanceof BancoIndisponivel || ehErroDoDriverDeBanco(erro)) throw erro;
         console.error(`[LinkAberto] a tradução da reunião ${reuniao.id} falhou: ${descreverErroDeBanco(erro)}`);
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_TRADUCAO_INDISPONIVEL });
       }

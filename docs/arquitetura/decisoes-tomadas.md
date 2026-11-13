@@ -236,7 +236,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   da dona (contatos e entidades) continuam só com ela, e o nome dela não aparece. Ligar
   pede de novo a confirmação de que as pessoas que falaram autorizaram compartilhar, porque
   o consentimento da gravação foi para um áudio privado; a confirmação vai para
-  `audit_logs`, com IP e user-agent, na mesma transação que liga o link. Desligar corta o
+  `audit_logs`, com IP, user-agent, a frase que a dona viu, o idioma dela e o hash da
+  frase, na mesma transação que liga o link. Desligar corta o
   acesso na hora (a página e os pedidos novos; quem já tinha a gravação carregada segue
   ouvindo até a URL assinada vencer, em até 1 hora), e o link novo sai com outro endereço.
   Os pedidos à IA pelo link têm dois tetos, os dois pela reunião: 10 por visitante (rede do

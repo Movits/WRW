@@ -62,6 +62,10 @@ const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const OUTRA_REUNIAO = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 const REUNIAO = { id: ID, ownerId: "dona-1", title: "Reunião de teste", createdAt: 1_700_000_000_000 };
 const RESUMO_VAZIO = { topicos: [], decisoes: [], tarefas: [] };
+const LIGAR = {
+  meetingId: ID, autorizacaoDasPessoas: true as const, idioma: "de" as const,
+  textoExibido: "Ich bestätige, dass alle Personen, die in diesem Meeting gesprochen haben, zugestimmt haben.",
+};
 
 // O IP da visitante sai de req.ip fora do Render (server/ip-da-cliente.ts).
 const semSessao = (ip = "203.0.113.10") => appRouter.createCaller({
@@ -150,7 +154,7 @@ describe("reuniaoAberta — público, sem sessão", () => {
   it("a dona não precisa de sessão para nada disso, mas ligar e desligar o link pedem sessão", async () => {
     verReuniaoPeloLink.mockResolvedValue({});
     await expect(semSessao().reuniaoAberta.ver({ token: TOKEN })).resolves.toEqual({});
-    await expect(semSessao().meetings.ligarLinkAberto({ meetingId: ID, autorizacaoDasPessoas: true })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(semSessao().meetings.ligarLinkAberto(LIGAR)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(semSessao().meetings.desligarLinkAberto({ meetingId: ID })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     expect(ligarLinkAberto).not.toHaveBeenCalled();
     expect(desligarLinkAberto).not.toHaveBeenCalled();
@@ -220,7 +224,13 @@ describe(`reuniaoAberta — teto da IA: ${PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA}
 
 describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com auditoria", () => {
   it("ligar exige a palavra da dona de que as pessoas da reunião autorizaram", async () => {
-    for (const entrada of [{ meetingId: ID }, { meetingId: ID, autorizacaoDasPessoas: false }]) {
+    for (const entrada of [
+      { ...LIGAR, autorizacaoDasPessoas: undefined },
+      { ...LIGAR, autorizacaoDasPessoas: false },
+      // Sem a frase que a dona viu (ou com idioma fora da lista), não há prova.
+      { ...LIGAR, textoExibido: "   " },
+      { ...LIGAR, idioma: "xx" },
+    ]) {
       await expect(daDona().meetings.ligarLinkAberto(entrada as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     }
     expect(ligarLinkAberto).not.toHaveBeenCalled();
@@ -228,15 +238,17 @@ describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com audi
 
   it("ligado, devolve o token; a prova (quem, IP, navegador) vai ao serviço, que a grava na mesma transação", async () => {
     ligarLinkAberto.mockResolvedValue(TOKEN);
-    await expect(daDona().meetings.ligarLinkAberto({ meetingId: ID, autorizacaoDasPessoas: true })).resolves.toEqual({ token: TOKEN });
-    expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, { userId: 7, ipAddress: "198.51.100.7", userAgent: "Navegador de teste" });
+    await expect(daDona().meetings.ligarLinkAberto(LIGAR)).resolves.toEqual({ token: TOKEN });
+    expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, {
+      userId: 7, ipAddress: "198.51.100.7", userAgent: "Navegador de teste", idioma: "de", textoExibido: LIGAR.textoExibido,
+    });
     // Não há um segundo registro, que pudesse sumir em silêncio depois de o link ligar.
     expect(createAuditLog).not.toHaveBeenCalled();
   });
 
   it("recusado pelo serviço, sai com o código que a tela traduz", async () => {
     ligarLinkAberto.mockRejectedValue(new LinkAbertoRecusado("PRECONDITION_FAILED", "Só dá para compartilhar uma reunião pronta."));
-    await expect(daDona().meetings.ligarLinkAberto({ meetingId: ID, autorizacaoDasPessoas: true })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(daDona().meetings.ligarLinkAberto(LIGAR)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     desligarLinkAberto.mockRejectedValue(new LinkAbertoRecusado("NOT_FOUND", "Reunião não encontrada."));
     await expect(daDona("outra").meetings.desligarLinkAberto({ meetingId: ID })).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(createAuditLog).not.toHaveBeenCalled();
@@ -247,5 +259,51 @@ describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com audi
     await expect(daDona().meetings.desligarLinkAberto({ meetingId: ID })).resolves.toEqual({ success: true });
     expect(desligarLinkAberto).toHaveBeenCalledWith("dona-1", ID);
     expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, action: "MEETING_OPEN_LINK_OFF", resourceId: ID }));
+  });
+});
+
+describe("reuniaoAberta — a recusa de um teto não gasta a vaga do outro", () => {
+  it("reunião cheia: a visitante nova é recusada sem perder vaga, e passa quando a reunião esvazia", async () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    const visitantes = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA;
+    for (let v = 0; v < visitantes; v++) {
+      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(TOKEN, `203.0.113.${100 + v}`);
+    }
+    // Aos 9 minutos, a visitante nova bate na reunião cheia, muitas vezes.
+    vi.setSystemTime(1_700_000_000_000 + 9 * 60_000);
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) {
+      await expect(resumir(TOKEN, "198.51.100.50")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    }
+    // Aos 10 minutos a reunião esvazia, e o balde dela continua inteiro.
+    vi.setSystemTime(1_700_000_000_000 + 10 * 60_000);
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await expect(resumir(TOKEN, "198.51.100.50")).resolves.toEqual(RESUMO_VAZIO);
+    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA + PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA);
+  });
+
+  it("visitante no limite: as recusas dela não gastam a vaga comum da reunião", async () => {
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(TOKEN, "203.0.113.1");
+    for (let i = 0; i < 100; i++) await expect(resumir(TOKEN, "203.0.113.1")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // Sobram as 50 vagas comuns para as outras visitantes.
+    const restantes = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA - PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA;
+    for (let i = 0; i < restantes; i++) await resumir(TOKEN, `198.51.100.${i % 50 + 1}`);
+    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
+  });
+});
+
+describe("reuniaoAberta.traduzir — banco é banco, rede da IA é IA", () => {
+  const comCausa = (erro: Error, causa: object) => Object.assign(erro, { cause: Object.assign(new Error("socket"), causa) });
+
+  it("falha de rede com o provedor de IA (fetch failed, ECONNREFUSED na causa) vira SERVICE_UNAVAILABLE, não 'banco indisponível'", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    translatePrivateMeetingTranscript.mockRejectedValue(comCausa(new TypeError("fetch failed"), { code: "ECONNREFUSED" }));
+    await expect(semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "en" }))
+      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_TRADUCAO_INDISPONIVEL });
+  });
+
+  it("a queda do banco numa consulta (DrizzleQueryError com ECONNREFUSED) segue como banco indisponível", async () => {
+    const consulta = Object.assign(new Error("Failed query: select `id` from `meeting_transcripts` where ..."), { query: "select `id` from `meeting_transcripts` where ..." });
+    translatePrivateMeetingTranscript.mockRejectedValue(comCausa(consulta, { code: "ECONNREFUSED" }));
+    await expect(semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "en" }))
+      .rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
   });
 });

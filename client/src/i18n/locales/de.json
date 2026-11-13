@@ -1448,7 +1448,7 @@
     "heroTitle": "Meeting-Assistent",
     "heroSubtitle": "Nehmen Sie kurze Meetings mit Zustimmung auf, überprüfen Sie die Transkription und bestätigen Sie die vorgeschlagenen Kontakte.",
     "newMeetingButton": "Neues Meeting",
-    "consentNotice": "Nehmen Sie nur mit Zustimmung aller Beteiligten auf. Das Audio ist privat und läuft nach 30 Tagen automatisch ab.",
+    "consentNotice": "Nehmen Sie nur mit Zustimmung aller Beteiligten auf. Das Audio bleibt nur in Ihrem Konto, es sei denn, Sie aktivieren den Freigabelink des Meetings (dafür ist eine neue Zustimmung der Personen nötig, die gesprochen haben), und es läuft nach 30 Tagen ab.",
     "loadingList": "Meetings werden geladen…",
     "emptyTitle": "Kein Meeting erfasst",
     "emptySubtitle": "Starten Sie eine Aufnahme, um Transkription und Kontaktvorschläge zu erhalten.",
@@ -1580,7 +1580,8 @@
       "turnedOff": "Link deaktiviert.",
       "error": "Die Freigabe konnte nicht geändert werden. Bitte versuchen Sie es erneut.",
       "onlyReady": "Nur ein fertiges Meeting kann geteilt werden.",
-      "sharedEyebrow": "PER LINK GETEILTES MEETING"
+      "sharedEyebrow": "PER LINK GETEILTES MEETING",
+      "created": "Link erstellt."
     },
     "openLink": {
       "eyebrow": "GETEILTES MEETING",

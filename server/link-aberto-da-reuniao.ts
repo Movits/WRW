@@ -68,12 +68,15 @@ export const ACAO_LINK_LIGADO = "MEETING_OPEN_LINK_ON";
  * prova de que a voz delas pode ficar aberta a quem tiver o link. Por isso ela
  * entra em `audit_logs` na MESMA transação, com IP e user-agent, por insert
  * direto que lança (o `createAuditLog` engole o erro): sem a linha, o link não
- * liga. É o padrão da declaração de maioridade (server/maioridade.ts).
+ * liga. É o padrão da declaração de maioridade (server/maioridade.ts). Como no
+ * aceite do NDA da Deal Room, a linha guarda também o texto que a dona viu e o
+ * idioma dele, com o hash: a frase da caixa vai mudar (a Cris revisa), e a
+ * prova de um link antigo tem de dizer o que foi confirmado naquele dia.
  */
 export async function ligarLinkAberto(
   ownerId: string,
   meetingId: string,
-  prova: { userId: number; ipAddress: string; userAgent: string | undefined },
+  prova: { userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string },
 ): Promise<string> {
   const db = await exigirDb();
   return db.transaction(async tx => {
@@ -91,7 +94,12 @@ export async function ligarLinkAberto(
       action: ACAO_LINK_LIGADO,
       resource: "meetings",
       resourceId: meetingId,
-      details: { autorizacaoDasPessoas: true },
+      details: {
+        autorizacaoDasPessoas: true,
+        idioma: prova.idioma,
+        textoExibido: prova.textoExibido,
+        textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
+      },
       // Os mesmos cortes do createAuditLog (server/security.ts).
       ipAddress: prova.ipAddress.substring(0, 45),
       userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,

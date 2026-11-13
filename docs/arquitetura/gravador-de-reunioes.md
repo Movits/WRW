@@ -510,8 +510,10 @@ mescla, só por `gh pr merge`).
     Termo Geral de Uso), no aviso e no termo de gravação;
   - o link aberto (12/11): a caixa que a dona marca ao ligar o link ("todas as pessoas
     que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem
-    receber o link"), o aviso de privacidade do detalhe, que agora fala do link, e o que o
-    aviso de gravação e o termo de gravação dizem dele;
+    receber o link"; a prova guarda a frase e o idioma que ela viu), o aviso de privacidade
+    do detalhe (`meetings.privacyNotice`) e o aviso do gravador
+    (`meetings.consentNotice`), que agora falam do link, e o que o aviso de gravação e o
+    termo de gravação dizem dele;
   - o texto das passkeys para a próxima versão do Termo Geral de Uso (cláusulas 7.3 e
     9.3). Ele espera a próxima versão porque republicar o Termo só por isso revogaria os
     aceites;

@@ -1448,7 +1448,7 @@
     "heroTitle": "会议助手",
     "heroSubtitle": "在征得同意的情况下录制简短会议，查看转录内容并确认建议的联系人。",
     "newMeetingButton": "新建会议",
-    "consentNotice": "请务必征得所有参与者的同意后再录制。音频为私密内容，将在30天后自动过期。",
+    "consentNotice": "请务必征得所有参与者的同意后再录制。音频仅保存在您的账户中，除非您开启这次会议的分享链接（这需要发言者重新授权），并将在30天后自动过期。",
     "loadingList": "正在加载会议……",
     "emptyTitle": "尚无会议记录",
     "emptySubtitle": "开始录制以生成转录内容和联系人建议。",
@@ -1580,7 +1580,8 @@
       "turnedOff": "链接已关闭。",
       "error": "无法更改分享设置，请重试。",
       "onlyReady": "只能分享已就绪的会议。",
-      "sharedEyebrow": "已通过链接分享的会议"
+      "sharedEyebrow": "已通过链接分享的会议",
+      "created": "链接已创建。"
     },
     "openLink": {
       "eyebrow": "共享的会议",

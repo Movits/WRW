@@ -1448,7 +1448,7 @@
     "heroTitle": "Meeting Assistant",
     "heroSubtitle": "Record short meetings with consent, review the transcript, and confirm the suggested contacts.",
     "newMeetingButton": "New meeting",
-    "consentNotice": "Only record with the consent of everyone involved. The audio is private and set to expire after 30 days.",
+    "consentNotice": "Only record with the consent of everyone involved. The audio stays in your account only, unless you turn on the meeting's sharing link (which needs new permission from the people who spoke), and it expires after 30 days.",
     "loadingList": "Loading meetings…",
     "emptyTitle": "No meetings recorded",
     "emptySubtitle": "Start a recording to generate a transcript and contact suggestions.",
@@ -1580,7 +1580,8 @@
       "turnedOff": "Link turned off.",
       "error": "Couldn't change sharing. Please try again.",
       "onlyReady": "Only a ready meeting can be shared.",
-      "sharedEyebrow": "MEETING SHARED BY LINK"
+      "sharedEyebrow": "MEETING SHARED BY LINK",
+      "created": "Link created."
     },
     "openLink": {
       "eyebrow": "SHARED MEETING",

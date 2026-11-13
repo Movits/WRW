@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
-import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { auditLogs, meetingContactSuggestions, meetingEntities, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import {
   ACAO_LINK_LIGADO,
   chaveDoAudioDoLink,
@@ -38,7 +38,16 @@ const COM_FALHA = crypto.randomUUID();
 const AGORA = Date.now();
 const CHAVE = `meetings/${DONA}/${PRONTA}/recording.mp4`;
 // userId fora de qualquer conta real: a limpeza das linhas de auditoria vai por ele.
-const PROVA = { userId: 2_000_000_000 + Math.floor(Math.random() * 100_000_000), ipAddress: "203.0.113.7", userAgent: "vitest-link-aberto" };
+const PROVA = {
+  userId: 2_000_000_000 + Math.floor(Math.random() * 100_000_000), ipAddress: "203.0.113.7", userAgent: "vitest-link-aberto",
+  idioma: "pt-BR", textoExibido: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram compartilhar.",
+};
+// O que é da dona e NÃO pode sair pelo link: o nome e o e-mail da conta, as
+// entidades e as sugestões de contato da reunião.
+const NOME_DA_DONA = `Dona Teste ${crypto.randomUUID().slice(0, 8)}`;
+const EMAIL_DA_DONA = `dona-${crypto.randomUUID().slice(0, 8)}@teste.invalid`;
+const ENTIDADE = `Empresa Secreta ${crypto.randomUUID().slice(0, 8)}`;
+const SUGERIDA = `Pessoa Sugerida ${crypto.randomUUID().slice(0, 8)}`;
 
 /** A mesma letra com a outra caixa: o banco _ci acharia a mesma linha. */
 function trocarCaixa(token: string): string {
@@ -65,11 +74,17 @@ async function recusaDe(promessa: Promise<unknown>): Promise<LinkAbertoRecusado>
 describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", () => {
   beforeAll(async () => {
     const db = (await getDb())!;
-    await db.insert(users).values([{ openId: DONA }, { openId: OUTRA }]);
+    await db.insert(users).values([{ openId: DONA, name: NOME_DA_DONA, email: EMAIL_DA_DONA }, { openId: OUTRA }]);
     await db.insert(meetings).values([reuniao(PRONTA, "ready"), reuniao(COM_FALHA, "failed")]);
     await db.insert(meetingTranscripts).values({
       id: crypto.randomUUID(), meetingId: PRONTA, ownerId: DONA, transcript: "Combinamos a entrega na sexta.",
       language: "pt-BR", createdAt: AGORA, updatedAt: AGORA,
+    });
+    await db.insert(meetingEntities).values({
+      id: crypto.randomUUID(), meetingId: PRONTA, ownerId: DONA, entityType: "company", value: ENTIDADE, createdAt: AGORA, updatedAt: AGORA,
+    });
+    await db.insert(meetingContactSuggestions).values({
+      id: crypto.randomUUID(), meetingId: PRONTA, ownerId: DONA, fullName: SUGERIDA, createdAt: AGORA, updatedAt: AGORA,
     });
     await db.insert(meetingRecordings).values({
       id: crypto.randomUUID(), meetingId: PRONTA, ownerId: DONA, storageKey: CHAVE, storageUrl: `/manus-storage/${CHAVE}`,
@@ -81,6 +96,8 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     const db = await getDb();
     if (!db) return;
     await db.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
+    await db.delete(meetingEntities).where(eq(meetingEntities.ownerId, DONA));
+    await db.delete(meetingContactSuggestions).where(eq(meetingContactSuggestions.ownerId, DONA));
     await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await db.delete(meetings).where(eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
@@ -104,8 +121,10 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       gravacao: { url: `/reuniao-aberta/${token}/audio`, mimeType: "audio/mp4", durationSeconds: 90 },
       gravacaoExpirada: false,
     });
-    // Nem o id da dona, nem a chave do bucket, nem o id da reunião.
+    // Nem o id da dona, nem a chave do bucket, nem o id da reunião; nem o nome
+    // e o e-mail dela, nem as entidades e as sugestões de contato da reunião.
     const texto = JSON.stringify(vista);
+    for (const daDona of [NOME_DA_DONA, EMAIL_DA_DONA, ENTIDADE, SUGERIDA]) expect(texto).not.toContain(daDona);
     expect(texto).not.toContain(DONA);
     expect(texto).not.toContain(CHAVE);
     expect(texto).not.toContain(PRONTA);
@@ -185,7 +204,13 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     expect(depois.at(-1)).toMatchObject({
       resource: "meetings", ipAddress: PROVA.ipAddress, userAgent: PROVA.userAgent, status: "success", riskLevel: "medium",
     });
-    expect(depois.at(-1)!.details).toEqual({ autorizacaoDasPessoas: true });
+    // A frase e o idioma que a dona viu, com o hash: a frase vai mudar com a revisão jurídica.
+    expect(depois.at(-1)!.details).toEqual({
+      autorizacaoDasPessoas: true,
+      idioma: PROVA.idioma,
+      textoExibido: PROVA.textoExibido,
+      textoHash: crypto.createHash("sha256").update(PROVA.textoExibido).digest("hex"),
+    });
   });
 
   it("recusado, o link não liga e nada vai para a auditoria", async () => {

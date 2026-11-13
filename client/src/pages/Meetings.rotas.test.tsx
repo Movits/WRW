@@ -115,7 +115,7 @@ describe("Reuniões — a URL escolhe a tela", () => {
     expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Nova reunião/ })).not.toBeInTheDocument();
     // O aviso de privacidade (retenção do áudio) aparece antes de gravar, sem passar pela lista.
-    expect(screen.getByText(/expirar após 30 dias/)).toBeInTheDocument();
+    expect(screen.getByText(/expira após 30 dias/)).toBeInTheDocument();
   });
 
   it("/meetings/<id> abre o detalhe daquela reunião", () => {

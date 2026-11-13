@@ -155,7 +155,7 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
     {perguntar.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.ai.asking")}</p>}
     {perguntar.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, perguntar.error, t("meetings.ai.askError"), peloLink)}</p>}
     {resposta && <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/10 p-4">
-      {perguntaFeita && <p className="text-xs text-white/45">{perguntaFeita}</p>}
+      {perguntaFeita && <p dir="auto" className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>
         <p dir="auto" className="text-sm leading-6 text-white/85">{resposta.resposta}</p>
         <Trecho texto={resposta.trecho}/>

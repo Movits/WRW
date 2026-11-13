@@ -1448,7 +1448,7 @@
     "heroTitle": "Assistente de Reuniões",
     "heroSubtitle": "Grave reuniões curtas com consentimento, revise a transcrição e confirme os contatos sugeridos.",
     "newMeetingButton": "Nova reunião",
-    "consentNotice": "Somente grave com consentimento de todas as pessoas. O áudio é privado e programado para expirar após 30 dias.",
+    "consentNotice": "Somente grave com consentimento de todas as pessoas. O áudio fica só na sua conta, a menos que você ligue o link de compartilhamento da reunião (o que pede nova autorização de quem falou), e expira após 30 dias.",
     "loadingList": "Carregando reuniões…",
     "emptyTitle": "Nenhuma reunião registrada",
     "emptySubtitle": "Inicie uma gravação para gerar transcrição e sugestões de contato.",
@@ -1580,7 +1580,8 @@
       "turnedOff": "Link desligado.",
       "error": "Não foi possível mudar o compartilhamento. Tente de novo.",
       "onlyReady": "Só dá para compartilhar uma reunião pronta.",
-      "sharedEyebrow": "REUNIÃO COMPARTILHADA POR LINK"
+      "sharedEyebrow": "REUNIÃO COMPARTILHADA POR LINK",
+      "created": "Link criado."
     },
     "openLink": {
       "eyebrow": "REUNIÃO COMPARTILHADA",

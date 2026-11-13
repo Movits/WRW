@@ -1448,7 +1448,7 @@
     "heroTitle": "Assistant de réunions",
     "heroSubtitle": "Enregistrez de courtes réunions avec consentement, vérifiez la transcription et confirmez les contacts suggérés.",
     "newMeetingButton": "Nouvelle réunion",
-    "consentNotice": "N'enregistrez qu'avec le consentement de toutes les personnes présentes. L'audio est privé et programmé pour expirer après 30 jours.",
+    "consentNotice": "N'enregistrez qu'avec le consentement de toutes les personnes présentes. L'audio reste uniquement dans votre compte, sauf si vous activez le lien de partage de la réunion (ce qui demande une nouvelle autorisation des personnes qui ont parlé), et il expire après 30 jours.",
     "loadingList": "Chargement des réunions…",
     "emptyTitle": "Aucune réunion enregistrée",
     "emptySubtitle": "Démarrez un enregistrement pour générer une transcription et des suggestions de contact.",
@@ -1580,7 +1580,8 @@
       "turnedOff": "Lien désactivé.",
       "error": "Impossible de modifier le partage. Réessayez.",
       "onlyReady": "Seule une réunion prête peut être partagée.",
-      "sharedEyebrow": "RÉUNION PARTAGÉE PAR LIEN"
+      "sharedEyebrow": "RÉUNION PARTAGÉE PAR LIEN",
+      "created": "Lien créé."
     },
     "openLink": {
       "eyebrow": "RÉUNION PARTAGÉE",

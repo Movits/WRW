@@ -218,12 +218,21 @@ export const meetingsRouter = router({
   // a auditoria na mesma transação que liga o link (ligarLinkAberto). Ligar o
   // que já está ligado devolve o mesmo link.
   ligarLinkAberto: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid(), autorizacaoDasPessoas: z.literal(true) }))
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      autorizacaoDasPessoas: z.literal(true),
+      // O texto da caixa que a dona viu, no idioma da tela dela: vai para a
+      // prova, porque a frase muda com a revisão jurídica.
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      textoExibido: z.string().trim().min(1).max(1000),
+    }))
     .mutation(async ({ ctx, input }) => {
       const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
         userId: ctx.user.id,
         ipAddress: ipDaCliente(ctx.req),
         userAgent: ctx.req.headers["user-agent"],
+        idioma: input.idioma,
+        textoExibido: input.textoExibido,
       }));
       return { token };
     }),
