@@ -507,7 +507,7 @@ describe("H) depois do alerta de IP novo, a sessão passa a conhecer o IP", () =
     expect(acessosSuspeitos()).toHaveLength(1);
   });
 
-  it("sem sessionToken (token do sdk.signSession): alerta como antes, sem tocar em sessão nenhuma", async () => {
+  it("sem sessionToken (o parâmetro segue opcional, embora o sdk já recuse token sem ele): alerta como antes, sem tocar em sessão nenhuma", async () => {
     estado.sessoes = [sessao(1)];
     await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", null);
 

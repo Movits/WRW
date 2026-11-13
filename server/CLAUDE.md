@@ -222,7 +222,11 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
 
 `server/_core/` é a infraestrutura herdada do Manus (o projeto nasceu na plataforma Manus
 e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie HttpOnly
-(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev.
+(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev. A sessão de
+usuária nasce só por `abrirSessao` (`server/sessao.ts`: a linha em `sessions` e o JWT com o
+`sessionToken` dela, 90 dias desde o último uso), e o `sdk.authenticateRequest` recusa JWT
+de usuária sem `sessionToken`, que escaparia da revogação (só o cron, openId `cron_`, passa
+sem ele).
 
 - **IA:** as chamadas de texto passam por `server/_core/llm.ts`, que aceita qualquer
   endpoint compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto),
@@ -248,7 +252,7 @@ e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie H
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
-  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/auth.ts`).
+  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
   `server/security.ts` e `server/matching.ts` derivam a chave do cofre do `JWT_SECRET`.
 
