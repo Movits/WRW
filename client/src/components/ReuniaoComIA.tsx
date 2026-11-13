@@ -10,10 +10,14 @@ import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
  * pronta com transcrição. A IA lê a transcrição no servidor e responde só para
  * a tela: nada é gravado, e cada item traz o trecho que o sustenta para a dona
  * conferir (nada extraído por IA entra sozinho).
+ *
+ * Servem também à página do link aberto (pages/ReuniaoAberta.tsx): a dona pede
+ * pelo id da reunião, e quem abriu o link, pelo token dele.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 type IdiomaDaTela = "pt-BR" | "en" | "es" | "fr" | "de" | "ar" | "zh" | "hi" | "ja" | "ru";
+type FonteDaReuniao = { meetingId: string; token?: undefined } | { token: string; meetingId?: undefined };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
 function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
@@ -24,13 +28,14 @@ function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): Id
 // O código tRPC decide a frase: as mensagens do servidor vêm em português.
 // Banco fora do ar chega como INTERNAL_SERVER_ERROR com a frase conhecida, que
 // mensagemDeErroParaTela traduz.
-function mensagemDoErroDaIA(t: TranslateFn, erro: unknown, padrao: string) {
+function mensagemDoErroDaIA(t: TranslateFn, erro: unknown, padrao: string, peloLink: boolean) {
   switch ((erro as { data?: { code?: string } } | null)?.data?.code) {
     case "SERVICE_UNAVAILABLE": return t("meetings.ai.unavailable");
     case "PRECONDITION_FAILED": return t("meetings.ai.needsTranscript");
     // Teto de pedidos à IA: a mesma frase do assistente de texto, já nos 10 idiomas.
     case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
-    case "NOT_FOUND": return t("meetings.meetingNotFound");
+    // Pelo link, NOT_FOUND é o link desligado no meio da visita.
+    case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
     case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
     default: return padrao;
   }
@@ -58,23 +63,31 @@ function SecaoDoResumo({ titulo, vazia, children }: { titulo: string; vazia: boo
   </div>;
 }
 
-export function ResumoDaReuniaoPelaIA({ meetingId }: { meetingId: string }) {
+export function ResumoDaReuniaoPelaIA(fonte: FonteDaReuniao) {
   const { t, i18n } = useTranslation();
-  const resumir = trpc.meetings.resumir.useMutation();
+  const resumirDaDona = trpc.meetings.resumir.useMutation();
+  const resumirPeloLink = trpc.reuniaoAberta.resumir.useMutation();
+  const peloLink = fonte.token !== undefined;
+  const resumir = peloLink ? resumirPeloLink : resumirDaDona;
   const resumo = resumir.isPending ? undefined : resumir.data;
+  const pedirResumo = () => {
+    const idioma = idiomaDaTela(i18n);
+    if (fonte.token !== undefined) resumirPeloLink.mutate({ token: fonte.token, idioma });
+    else resumirDaDona.mutate({ meetingId: fonte.meetingId, idioma });
+  };
   return <section aria-labelledby="resumo-da-reuniao" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <h2 id="resumo-da-reuniao" className="inline-flex items-center gap-2 font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.ai.summaryTitle")}</h2>
+        <h2 id="resumo-da-reuniao" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.ai.summaryTitle")}</h2>
         <p className="mt-1 text-sm text-white/55">{t("meetings.ai.summaryIntro")}</p>
       </div>
-      <button type="button" onClick={() => resumir.mutate({ meetingId, idioma: idiomaDaTela(i18n) })} disabled={resumir.isPending}
+      <button type="button" onClick={pedirResumo} disabled={resumir.isPending}
         className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
         {resumir.isPending ? <Loader2 size={15} className="animate-spin"/> : <Sparkles size={15}/>} {resumo ? t("meetings.ai.regenerateSummary") : t("meetings.ai.generateSummary")}
       </button>
     </div>
     {resumir.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.ai.generatingSummary")}</p>}
-    {resumir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, resumir.error, t("meetings.ai.summaryError"))}</p>}
+    {resumir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, resumir.error, t("meetings.ai.summaryError"), peloLink)}</p>}
     {resumo && <div className="mt-4 space-y-5">
       <AvisoDeConferir/>
       <SecaoDoResumo titulo={t("meetings.ai.topicsHeading")} vazia={!resumo.topicos.length}>
@@ -104,12 +117,15 @@ export function ResumoDaReuniaoPelaIA({ meetingId }: { meetingId: string }) {
   </section>;
 }
 
-export function PergunteAReuniao({ meetingId }: { meetingId: string }) {
+export function PergunteAReuniao(fonte: FonteDaReuniao) {
   const { t, i18n } = useTranslation();
   const [pergunta, setPergunta] = useState("");
   // A pergunta que gerou a resposta na tela: o campo pode já ter outra.
   const [perguntaFeita, setPerguntaFeita] = useState("");
-  const perguntar = trpc.meetings.perguntar.useMutation();
+  const perguntarDaDona = trpc.meetings.perguntar.useMutation();
+  const perguntarPeloLink = trpc.reuniaoAberta.perguntar.useMutation();
+  const peloLink = fonte.token !== undefined;
+  const perguntar = peloLink ? perguntarPeloLink : perguntarDaDona;
   const resposta = perguntar.isPending ? undefined : perguntar.data;
   const podePerguntar = pergunta.trim().length >= 2 && !perguntar.isPending;
 
@@ -118,11 +134,13 @@ export function PergunteAReuniao({ meetingId }: { meetingId: string }) {
     if (!podePerguntar) return;
     const texto = pergunta.trim();
     setPerguntaFeita(texto);
-    perguntar.mutate({ meetingId, idioma: idiomaDaTela(i18n), pergunta: texto });
+    const idioma = idiomaDaTela(i18n);
+    if (fonte.token !== undefined) perguntarPeloLink.mutate({ token: fonte.token, idioma, pergunta: texto });
+    else perguntarDaDona.mutate({ meetingId: fonte.meetingId, idioma, pergunta: texto });
   }
 
   return <section aria-labelledby="pergunte-a-reuniao" className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-    <h2 id="pergunte-a-reuniao" className="inline-flex items-center gap-2 font-semibold"><MessageCircleQuestion size={16} className="text-amber-300"/>{t("meetings.ai.askTitle")}</h2>
+    <h2 id="pergunte-a-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><MessageCircleQuestion size={16} className="text-amber-300"/>{t("meetings.ai.askTitle")}</h2>
     <p className="mt-1 text-sm text-white/55">{t("meetings.ai.askIntro")}</p>
     <form onSubmit={enviar} className="mt-4 flex flex-col gap-2 sm:flex-row">
       <input aria-label={t("meetings.ai.askLabel")} value={pergunta} onChange={evento => setPergunta(evento.target.value)} maxLength={500}
@@ -134,7 +152,7 @@ export function PergunteAReuniao({ meetingId }: { meetingId: string }) {
       </button>
     </form>
     {perguntar.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.ai.asking")}</p>}
-    {perguntar.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, perguntar.error, t("meetings.ai.askError"))}</p>}
+    {perguntar.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, perguntar.error, t("meetings.ai.askError"), peloLink)}</p>}
     {resposta && <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/10 p-4">
       {perguntaFeita && <p className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>

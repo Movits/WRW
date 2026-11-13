@@ -23,6 +23,7 @@ import {
 } from "../meeting-service";
 import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { criarTeto } from "../assistente-de-texto";
+import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -71,12 +72,17 @@ async function recusarSeReuniaoProcessando(db: Awaited<ReturnType<typeof exigirD
   if (reuniao?.status === "processing") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_REUNIAO_PROCESSANDO });
 }
 
-/** As recusas do resumo e da pergunta saem com o código que a tela traduz. */
-async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise<T> {
+/**
+ * As recusas do resumo, da pergunta e do link aberto saem com o código que a
+ * tela traduz. O router do link aberto (reuniaoAberta.ts) usa a mesma.
+ */
+export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise<T> {
   try {
     return await trabalho();
   } catch (erro) {
-    if (erro instanceof RecusaDaReuniaoComIA) throw new TRPCError({ code: erro.codigo, message: erro.message });
+    if (erro instanceof RecusaDaReuniaoComIA || erro instanceof LinkAbertoRecusado) {
+      throw new TRPCError({ code: erro.codigo, message: erro.message });
+    }
     throw erro;
   }
 }
@@ -201,6 +207,34 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma));
+    }),
+
+  // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
+  // endereço ouve, lê e pergunta à IA sem conta na WRW (routers/reuniaoAberta.ts).
+  // Só a dona liga e desliga, e só reunião pronta tem link. Ligar exige de novo
+  // a palavra dela de que as pessoas da reunião autorizaram compartilhar: o
+  // consentimento da gravação foi para um áudio privado. Ligar o que já está
+  // ligado devolve o mesmo link.
+  ligarLinkAberto: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), autorizacaoDasPessoas: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId));
+      await createAuditLog({
+        userId: ctx.user.id, action: "MEETING_OPEN_LINK_ON", resource: "meetings", resourceId: input.meetingId,
+        details: { autorizacaoDasPessoas: true }, status: "success", riskLevel: "medium",
+      });
+      return { token };
+    }),
+
+  desligarLinkAberto: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => desligarLinkAberto(ctx.user.openId, input.meetingId));
+      await createAuditLog({
+        userId: ctx.user.id, action: "MEETING_OPEN_LINK_OFF", resource: "meetings", resourceId: input.meetingId,
+        status: "success", riskLevel: "low",
+      });
+      return { success: true };
     }),
 
   decideEntity: protectedProcedure

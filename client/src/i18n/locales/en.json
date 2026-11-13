@@ -1495,7 +1495,7 @@
     "availableUntil": "· available until",
     "recordingExpiredNotice": "This recording passed the 30-day mark and was deleted, as promised. The transcript is still here.",
     "noRecordingStored": "No audio stored for this meeting.",
-    "privacyNotice": "The audio stays restricted to your account and automatically expires after 30 days. The transcript remains private within your network.",
+    "privacyNotice": "The audio and the transcript stay in your account only, unless you turn on a sharing link. The audio expires automatically after 30 days.",
     "translateHeading": "Translate what was said in this meeting",
     "translateSubtext": "Choose the language of the other person to generate a translated version of the transcript.",
     "targetLanguageLabel": "Target language",
@@ -1555,6 +1555,39 @@
       "asset": "Offers",
       "need": "Seeks",
       "opportunity": "Opportunity"
+    },
+    "share": {
+      "button": "Share",
+      "title": "Share by link",
+      "intro": "Anyone who gets the link can listen to the recording, read the transcript and ask the AI for a summary and answers about the meeting, without a WRW account. Deleting and reprocessing stay with you.",
+      "authorization": "I confirm that everyone who spoke in this meeting agreed to share the recording and the transcript with whoever receives the link.",
+      "createButton": "Create link",
+      "cancel": "Cancel",
+      "activeTitle": "Shared by link",
+      "activeIntro": "Anyone with this link can open the meeting, including people it gets forwarded to. To cut off access, turn the link off.",
+      "linkLabel": "Meeting link",
+      "copy": "Copy link",
+      "copied": "Link copied.",
+      "copyFallback": "Couldn't copy automatically. The link is selected in the field: copy it from there.",
+      "whatsapp": "WhatsApp",
+      "email": "Email",
+      "message": "Meeting “{{title}}” on WRW: {{url}}",
+      "emailSubject": "Meeting “{{title}}” on WRW",
+      "turnOff": "Turn off link",
+      "turnOffConfirm": "Turn off the link? Anyone with the address loses access right away. If you share again, the link will be different.",
+      "turnOffYes": "Turn off",
+      "turnOffCancel": "Keep",
+      "turnedOff": "Link turned off.",
+      "error": "Couldn't change sharing. Please try again.",
+      "onlyReady": "Only a ready meeting can be shared.",
+      "sharedEyebrow": "MEETING SHARED BY LINK"
+    },
+    "openLink": {
+      "eyebrow": "SHARED MEETING",
+      "intro": "The person who recorded this meeting shared the link with you. Listen to the recording, read the transcript or ask the AI for a summary and answers about what was said.",
+      "notFound": "This link doesn't exist or was turned off by the person who shared the meeting.",
+      "goHome": "Discover WRW",
+      "audioLoadError": "Couldn't load the audio right now. Reload the page and try again."
     }
   },
   "connections": {

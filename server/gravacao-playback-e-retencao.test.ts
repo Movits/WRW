@@ -259,13 +259,19 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
-  it("o detalhe também", async () => {
-    tabelas.set(schema.meetings, [linhaCompleta()]);
+  it("o detalhe também, mais o token do link aberto, que só a dona recebe", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA].sort());
-    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready" });
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken"].sort());
+    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto" });
+  });
+
+  it("a lista não leva o token do link aberto", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
+    const lista = await servico.listPrivateMeetings("dona-1");
+    expect(JSON.stringify(lista)).not.toContain("token-do-link-aberto");
   });
 });
 

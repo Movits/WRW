@@ -66,6 +66,12 @@ vi.mock("@/lib/trpc", () => ({
       reprocess: duble.registrar("reprocess"),
       resumir: duble.registrar("resumir"),
       perguntar: duble.registrar("perguntar"),
+      ligarLinkAberto: duble.registrar("ligarLinkAberto"),
+      desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+    },
+    reuniaoAberta: {
+      resumir: duble.registrar("resumirPeloLink"),
+      perguntar: duble.registrar("perguntarPeloLink"),
     },
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },

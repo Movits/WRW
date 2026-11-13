@@ -334,7 +334,12 @@ export function nomeSustentadoPelaTranscricao(nome: string, transcricao: string)
 const TIMEOUT_DA_TRADUCAO_MS = 180_000;
 const ORCAMENTO_DA_TRADUCAO_MS = 200_000;
 
-export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string) {
+/**
+ * `antesDeChamarAIA` roda só quando a tradução não está guardada, logo antes
+ * do pedido à IA, e pode recusar lançando: é o teto do link aberto, que assim
+ * não gasta vaga com a tradução que já está no banco.
+ */
+export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string, antesDeChamarAIA?: () => void) {
   const normalizedLanguage = language === "pt" ? "pt-BR" : language;
   if (!(normalizedLanguage in MEETING_LANGUAGES)) throw new Error("Idioma de tradução não suportado.");
   const targetLanguage = MEETING_LANGUAGES[normalizedLanguage as keyof typeof MEETING_LANGUAGES];
@@ -353,6 +358,7 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     )).limit(1);
   if (cached) return { language: normalizedLanguage, text: cached.translatedText, cached: true };
 
+  antesDeChamarAIA?.();
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
     orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
@@ -992,7 +998,7 @@ async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
  * caminho do proxy autenticado (/manus-storage/...), que confere sessão e
  * posse a cada requisição; não é endereço público do bucket.
  */
-async function gravacaoParaOuvir(
+export async function gravacaoParaOuvir(
   db: Awaited<ReturnType<typeof exigirDb>>,
   ownerId: string,
   meetingId: string,
@@ -1060,7 +1066,9 @@ export async function limparGravacoesVencidas(limite = 200) {
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  const [meeting] = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
+  // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
+  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));

@@ -1495,7 +1495,7 @@
     "availableUntil": "· verfügbar bis",
     "recordingExpiredNotice": "Diese Aufnahme ist älter als 30 Tage und wurde, wie von der App zugesichert, gelöscht. Die Transkription bleibt weiterhin hier verfügbar.",
     "noRecordingStored": "Für dieses Meeting ist kein Audio gespeichert.",
-    "privacyNotice": "Das Audio bleibt auf Ihr Konto beschränkt und läuft automatisch nach 30 Tagen ab. Die Transkription bleibt privat in Ihrem Netzwerk.",
+    "privacyNotice": "Audio und Transkription bleiben nur in Ihrem Konto, es sei denn, Sie aktivieren einen Freigabelink. Das Audio läuft automatisch nach 30 Tagen ab.",
     "translateHeading": "Übersetzen, was in diesem Meeting gesagt wurde",
     "translateSubtext": "Wählen Sie die Sprache der ausländischen Person, um eine übersetzte Version der Transkription zu erstellen.",
     "targetLanguageLabel": "Zielsprache",
@@ -1555,6 +1555,39 @@
       "asset": "Bietet",
       "need": "Sucht",
       "opportunity": "Möglichkeit"
+    },
+    "share": {
+      "button": "Teilen",
+      "title": "Per Link teilen",
+      "intro": "Wer den Link erhält, kann die Aufnahme anhören, die Transkription lesen und die KI um eine Zusammenfassung und Antworten zum Meeting bitten, ohne WRW-Konto. Löschen und erneutes Verarbeiten bleiben Ihnen vorbehalten.",
+      "authorization": "Ich bestätige, dass alle Personen, die in diesem Meeting gesprochen haben, zugestimmt haben, die Aufnahme und die Transkription mit allen zu teilen, die den Link erhalten.",
+      "createButton": "Link erstellen",
+      "cancel": "Abbrechen",
+      "activeTitle": "Per Link geteilt",
+      "activeIntro": "Jede Person mit diesem Link kann das Meeting öffnen, auch wenn der Link weitergeleitet wird. Um den Zugriff zu beenden, deaktivieren Sie den Link.",
+      "linkLabel": "Link zum Meeting",
+      "copy": "Link kopieren",
+      "copied": "Link kopiert.",
+      "copyFallback": "Automatisches Kopieren hat nicht funktioniert. Der Link ist im Feld markiert: Kopieren Sie ihn von dort.",
+      "whatsapp": "WhatsApp",
+      "email": "E-Mail",
+      "message": "Meeting „{{title}}“ auf WRW: {{url}}",
+      "emailSubject": "Meeting „{{title}}“ auf WRW",
+      "turnOff": "Link deaktivieren",
+      "turnOffConfirm": "Link deaktivieren? Wer die Adresse hat, verliert sofort den Zugriff. Wenn Sie erneut teilen, ist der Link ein anderer.",
+      "turnOffYes": "Deaktivieren",
+      "turnOffCancel": "Behalten",
+      "turnedOff": "Link deaktiviert.",
+      "error": "Die Freigabe konnte nicht geändert werden. Bitte versuchen Sie es erneut.",
+      "onlyReady": "Nur ein fertiges Meeting kann geteilt werden.",
+      "sharedEyebrow": "PER LINK GETEILTES MEETING"
+    },
+    "openLink": {
+      "eyebrow": "GETEILTES MEETING",
+      "intro": "Die Person, die dieses Meeting aufgenommen hat, hat den Link mit Ihnen geteilt. Hören Sie die Aufnahme an, lesen Sie die Transkription oder bitten Sie die KI um eine Zusammenfassung und Antworten zum Gesagten.",
+      "notFound": "Dieser Link existiert nicht oder wurde von der Person deaktiviert, die das Meeting geteilt hat.",
+      "goHome": "WRW kennenlernen",
+      "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu und versuchen Sie es erneut."
     }
   },
   "connections": {

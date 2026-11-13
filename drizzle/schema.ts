@@ -1021,11 +1021,20 @@ export const meetings = mysqlTable("meetings", {
   attempts: int("attempts").default(0).notNull(),
   lockedUntil: bigint("locked_until", { mode: "number" }),
   lockToken: varchar("lock_token", { length: 36 }),
+  // O link aberto da reunião (pedido do Roberto em 12/11/2026, "por enquanto"):
+  // quem tem o endereço /r/{shareToken} ouve a gravação, lê a transcrição e
+  // pergunta à IA sobre a reunião, sem conta na WRW. Nulo: a reunião não está
+  // compartilhada. Desligar o link volta a nulo, e um link novo tem outro valor.
+  // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
+  // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
+  shareToken: varchar("share_token", { length: 64 }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
   // A fila acha as reuniões em partes pelo estado, sem varrer as do envio único.
   pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
+  // O link aberto acha a reunião pelo token; o MySQL aceita vários nulos.
+  shareTokenUnique: uniqueIndex("meetings_share_token_unique").on(table.shareToken),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {

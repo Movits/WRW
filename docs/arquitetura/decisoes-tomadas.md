@@ -225,6 +225,32 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `renovarCookieDaSessao` em `server/auth.ts`, `validateSessionToken` em
   `server/security.ts`, `server/_core/context.ts` e `client/src/pages/Login.tsx`.
 
+## 12/11/2026 — a reunião se compartilha por link aberto, por enquanto
+
+- **Quem:** Roberto, na conversa com o Claude de 12/11: "quero que mude por enquanto para
+  qualquer pessoa que esse link for compartilhado possa acessar tudo das funcionalidades
+  [...], não só os participantes e admin".
+- **O quê:** a dona liga o link de uma reunião pronta, e quem tem o endereço
+  `/r/{token}` ouve a gravação, lê e traduz a transcrição e pede à IA o resumo e respostas,
+  sem conta na WRW. O link é só leitura: excluir, reprocessar e o que é da rede particular
+  da dona (contatos e entidades) continuam só com ela, e o nome dela não aparece. Ligar
+  pede de novo a confirmação de que as pessoas que falaram autorizaram compartilhar, porque
+  o consentimento da gravação foi para um áudio privado. Desligar corta o acesso na hora (a
+  página e os pedidos novos; quem já tinha a gravação carregada segue ouvindo até a URL
+  assinada vencer, em até 1 hora), e o link novo sai com outro endereço. Os pedidos à IA
+  pelo link têm teto próprio, por link.
+- **Junto:** compartilhar é por WhatsApp e por e-mail (o app da própria dona abre com a
+  mensagem pronta), em vez do Outlook que a H16 previa para a agenda.
+- **Antes:** decisão de 10/11, "sem link público e sem senha": só as participantes
+  adicionadas e, para consulta, a presidência e a admin (R1). Ela fica para depois.
+- **Exceção a uma regra:** o áudio do link sai pela rota do token
+  (`/reuniao-aberta/{token}/audio`), sem sessão. Os outros arquivos seguem só pelo proxy
+  `/manus-storage/`, com sessão e posse.
+- **Onde:** `server/link-aberto-da-reuniao.ts`, `server/routers/reuniaoAberta.ts`,
+  `meetings.ligarLinkAberto` e `meetings.desligarLinkAberto` em `server/routers/meetings.ts`,
+  `client/src/components/CompartilharReuniao.tsx` e `client/src/pages/ReuniaoAberta.tsx`;
+  migração 0015 (`meetings.share_token`).
+
 ---
 
 ## Lições sem data registrada

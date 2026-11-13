@@ -1495,7 +1495,7 @@
     "availableUntil": "· disponível até",
     "recordingExpiredNotice": "Esta gravação passou dos 30 dias e foi apagada, como o app promete. A transcrição continua aqui.",
     "noRecordingStored": "Nenhum áudio guardado para esta reunião.",
-    "privacyNotice": "O áudio fica restrito à sua conta e expira automaticamente após 30 dias. A transcrição permanece privada na sua rede.",
+    "privacyNotice": "O áudio e a transcrição ficam só na sua conta, a menos que você ligue um link de compartilhamento. O áudio expira automaticamente após 30 dias.",
     "translateHeading": "Traduzir o que foi dito nesta reunião",
     "translateSubtext": "Escolha o idioma da pessoa estrangeira para gerar uma versão traduzida da transcrição.",
     "targetLanguageLabel": "Idioma de destino",
@@ -1555,6 +1555,39 @@
       "asset": "Oferece",
       "need": "Procura",
       "opportunity": "Oportunidade"
+    },
+    "share": {
+      "button": "Compartilhar",
+      "title": "Compartilhar por link",
+      "intro": "Quem receber o link ouve a gravação, lê a transcrição e pede à IA o resumo e respostas sobre a reunião, sem precisar de conta na WRW. Excluir e reprocessar continuam só com você.",
+      "authorization": "Confirmo que todas as pessoas que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem receber o link.",
+      "createButton": "Criar link",
+      "cancel": "Cancelar",
+      "activeTitle": "Compartilhada por link",
+      "activeIntro": "Qualquer pessoa com este link abre a reunião, inclusive quem o receber encaminhado. Para cortar o acesso, desligue o link.",
+      "linkLabel": "Link da reunião",
+      "copy": "Copiar link",
+      "copied": "Link copiado.",
+      "copyFallback": "Não deu para copiar automaticamente. O link ficou selecionado no campo: copie por ali.",
+      "whatsapp": "WhatsApp",
+      "email": "E-mail",
+      "message": "Reunião “{{title}}” na WRW: {{url}}",
+      "emailSubject": "Reunião “{{title}}” na WRW",
+      "turnOff": "Desligar o link",
+      "turnOffConfirm": "Desligar o link? Quem tem o endereço perde o acesso na hora. Se você compartilhar de novo, o link será outro.",
+      "turnOffYes": "Desligar",
+      "turnOffCancel": "Manter",
+      "turnedOff": "Link desligado.",
+      "error": "Não foi possível mudar o compartilhamento. Tente de novo.",
+      "onlyReady": "Só dá para compartilhar uma reunião pronta.",
+      "sharedEyebrow": "REUNIÃO COMPARTILHADA POR LINK"
+    },
+    "openLink": {
+      "eyebrow": "REUNIÃO COMPARTILHADA",
+      "intro": "Quem gravou esta reunião compartilhou o link com você. Ouça a gravação, leia a transcrição ou peça à IA um resumo e respostas sobre o que foi dito.",
+      "notFound": "Este link não existe ou foi desligado por quem compartilhou a reunião.",
+      "goHome": "Conhecer a WRW",
+      "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página e tente de novo."
     }
   },
   "connections": {

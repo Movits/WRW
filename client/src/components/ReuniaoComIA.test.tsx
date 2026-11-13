@@ -34,7 +34,13 @@ vi.mock("@/lib/trpc", async () => {
       };
     },
   });
-  return { trpc: { meetings: { resumir: mutacao("resumir"), perguntar: mutacao("perguntar") } } };
+  return {
+    trpc: {
+      meetings: { resumir: mutacao("resumir"), perguntar: mutacao("perguntar") },
+      // A página do link aberto pede pelo token, num router público à parte.
+      reuniaoAberta: { resumir: mutacao("resumirPeloLink"), perguntar: mutacao("perguntarPeloLink") },
+    },
+  };
 });
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -147,5 +153,47 @@ describe("Pergunte à reunião", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Your question about the meeting" }), { target: { value: "Who attended?" } });
     fireEvent.click(screen.getByRole("button", { name: /^Ask$/ }));
     expect(screen.getByRole("alert")).toHaveTextContent("Too many requests in a row. Wait a few minutes and try again.");
+  });
+});
+
+describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+
+  it("o resumo vai pelo token, no router público, e nunca pelo da dona", () => {
+    duble.respostas.resumirPeloLink = { topicos: [], decisoes: [], tarefas: [] };
+    render(<ResumoDaReuniaoPelaIA token={TOKEN} />);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    expect(duble.chamadas.resumirPeloLink).toEqual([{ token: TOKEN, idioma: "pt-BR" }]);
+    expect(duble.chamadas.resumir).toBeUndefined();
+    expect(screen.getByText("Tópicos")).toBeInTheDocument();
+  });
+
+  it("a pergunta vai pelo token, aparada, e a resposta aparece com o trecho", () => {
+    duble.respostas.perguntarPeloLink = { respondida: true, resposta: "Na sexta.", trecho: "a entrega fica para sexta" };
+    render(<PergunteAReuniao token={TOKEN} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" }), { target: { value: "  Quando é a entrega?  " } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(duble.chamadas.perguntarPeloLink).toEqual([{ token: TOKEN, idioma: "pt-BR", pergunta: "Quando é a entrega?" }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+    expect(screen.getByText("Na sexta.")).toBeInTheDocument();
+  });
+
+  it("link desligado no meio da visita: a tela diz isso, e não 'reunião não encontrada'", () => {
+    duble.respostas.resumirPeloLink = erroDoServidor("NOT_FOUND", "Este link de reunião não existe ou foi desligado.");
+    duble.respostas.perguntarPeloLink = erroDoServidor("NOT_FOUND", "Este link de reunião não existe ou foi desligado.");
+    render(<><ResumoDaReuniaoPelaIA token={TOKEN} /><PergunteAReuniao token={TOKEN} /></>);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" }), { target: { value: "Quem falou?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    const alertas = screen.getAllByRole("alert");
+    expect(alertas).toHaveLength(2);
+    for (const alerta of alertas) expect(alerta).toHaveTextContent("Este link não existe ou foi desligado por quem compartilhou a reunião.");
+  });
+
+  it("pela dona, NOT_FOUND continua 'reunião não encontrada'", () => {
+    duble.respostas.resumir = erroDoServidor("NOT_FOUND", "Reunião não encontrada.");
+    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Reunião não encontrada. Ela pode ter sido excluída, ou o link é de outra conta.");
   });
 });

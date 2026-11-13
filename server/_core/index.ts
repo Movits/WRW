@@ -7,6 +7,7 @@ import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
+import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -226,6 +227,9 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
   registerStorageProxy(app);
+  // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
+  // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
+  registrarRotasDoLinkAberto(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
