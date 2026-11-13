@@ -437,6 +437,35 @@ describe("Reuniões — gravação em curso", () => {
     })));
   });
 
+  it("título de uma letra não abre o microfone: o aviso diz a regra do servidor, e o campo para em 200", async () => {
+    abrirEm("/gravar");
+    const campo = screen.getByPlaceholderText("Ex.: Conversa com investidor");
+    expect(campo).toHaveAttribute("maxLength", "200");
+    fireEvent.change(campo, { target: { value: "X" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(toast.error).toHaveBeenCalledWith("O título precisa ter de 2 a 200 caracteres.");
+    expect(screen.queryByRole("button", { name: /Encerrar gravação/ })).not.toBeInTheDocument();
+    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("o título trocado depois de encerrar a gravação é conferido no envio: 'X' não cria a reunião, e '  ab  ' cria com 'ab'", async () => {
+    abrirEm("/gravar");
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
+    await comecarAGravar();
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    const transcrever = await screen.findByRole("button", { name: /Transcrever áudio/ });
+    // O campo destrava ao encerrar a gravação: dá para trocar o título antes do envio.
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "X" } });
+    await act(async () => { fireEvent.click(transcrever); });
+    expect(toast.error).toHaveBeenCalledWith("O título precisa ter de 2 a 200 caracteres.");
+    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "  ab  " } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Transcrever áudio/ })); });
+    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "ab", consentGranted: true }));
+  });
+
   it("o navegador que grava mp4 (Safari do iPhone, Chrome novo) envia a reunião em mp4, e não no webm que o Gemini errava", async () => {
     const pedidos: Array<string | undefined> = [];
     vi.stubGlobal("MediaRecorder", class extends GravadorFalso {
@@ -1021,6 +1050,9 @@ describe("Reuniões — envio de arquivo", () => {
 
   it.each([
     { caso: "sem título", titulo: "", arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "Dê um título para a reunião." },
+    // A regra do servidor (meetings.create): de 2 a 200 caracteres depois do trim.
+    { caso: "com título de uma letra só", titulo: "X", arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
+    { caso: "com título de 201 caracteres", titulo: "a".repeat(201), arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
     { caso: "em formato que a tela não aceita", titulo: "Conversa com a Bia", arquivo: () => new File(["x"], "notas.txt", { type: "text/plain" }), aviso: "Envie um arquivo WebM, MP3, M4A, MP4, OGG ou WAV." },
     { caso: "acima de 10 MB", titulo: "Conversa com a Bia", arquivo: () => new File([new Uint8Array(11 * 1024 * 1024)], "longa.mp3", { type: "audio/mpeg" }), aviso: "O arquivo de áudio deve ter no máximo 10 MB." },
   ])("o arquivo $caso é recusado antes de travar o formulário", async ({ titulo, arquivo, aviso }) => {

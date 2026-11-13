@@ -1435,6 +1435,7 @@
     "processedSuccess": "ミーティングを処理しました。文字起こしと提案を確認してください。",
     "processError": "ミーティングを処理できませんでした。",
     "titleRequired": "ミーティングのタイトルを入力してください。",
+    "titleLength": "タイトルは{{min}}～{{max}}文字にしてください。",
     "consentRequiredRecording": "録音を開始する前に、同意のチェックボックスをオンにしてください。",
     "recordingUnsupported": "このブラウザでは録音がサポートされていません。",
     "noAudioGenerated": "録音から音声が生成されませんでした。マイクを確認してもう一度お試しください。",

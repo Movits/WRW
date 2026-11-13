@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -89,7 +90,7 @@ export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise
 }
 
 const createMeetingInput = z.object({
-  title: z.string().trim().min(2).max(200),
+  title: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX),
   contactId: z.number().int().positive().optional().nullable(),
   contextId: z.string().uuid().optional().nullable(),
   language: z.string().min(2).max(12).default("pt"),

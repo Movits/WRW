@@ -16,7 +16,7 @@ import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 
 const MAX_DURATION = 10 * 60;
@@ -271,8 +271,21 @@ export default function Meetings() {
     telaAnterior.current = screen;
   }, [screen]);
 
+  // A regra do servidor (meetings.create): de 2 a 200 caracteres depois do trim.
+  // Fora dela, o create voltava BAD_REQUEST do zod, em inglês; no envio de
+  // arquivo, depois de ler o áudio inteiro.
+  function avisoDoTitulo(): string | null {
+    const limpo = title.trim();
+    if (!limpo) return t("meetings.titleRequired");
+    if (limpo.length < TITULO_DA_REUNIAO_MIN || limpo.length > TITULO_DA_REUNIAO_MAX) {
+      return t("meetings.titleLength", { min: TITULO_DA_REUNIAO_MIN, max: TITULO_DA_REUNIAO_MAX });
+    }
+    return null;
+  }
+
   async function startRecording() {
-    if (!title.trim()) return toast.error(t("meetings.titleRequired"));
+    const avisoTitulo = avisoDoTitulo();
+    if (avisoTitulo) return toast.error(avisoTitulo);
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
@@ -280,7 +293,8 @@ export default function Meetings() {
   }
 
   async function uploadAudio(file: File) {
-    if (!title.trim()) return toast.error(t("meetings.titleRequired"));
+    const avisoTitulo = avisoDoTitulo();
+    if (avisoTitulo) return toast.error(avisoTitulo);
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
@@ -316,6 +330,9 @@ export default function Meetings() {
 
   async function processCapturedAudio() {
     if (!capturedAudio) return;
+    // O título segue editável depois de encerrar a gravação: confere de novo.
+    const avisoTitulo = avisoDoTitulo();
+    if (avisoTitulo) return toast.error(avisoTitulo);
     // O consentimento vale no envio, não só no início da gravação: desmarcado
     // depois de gravar, nada vai ao servidor (o create grava consentGranted).
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
@@ -407,7 +424,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <p className="text-amber-300 text-xs font-semibold tracking-wide mt-6">{t("meetings.newMeetingEyebrow")}</p>
       <h1 className="text-2xl font-bold mt-1">{t("meetings.recorderTitle")}</h1>
       <div className="mt-7 space-y-5">
-        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
+        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
         {/* O aviso de privacidade também aqui: o login, o Dashboard e o link
             /gravar chegam ao gravador direto, sem passar pela lista, que era o
             único lugar com ele antes de gravar. */}

@@ -1435,6 +1435,7 @@
     "processedSuccess": "Meeting verarbeitet. Überprüfen Sie die Transkription und die Vorschläge.",
     "processError": "Das Meeting konnte nicht verarbeitet werden.",
     "titleRequired": "Geben Sie dem Meeting einen Titel.",
+    "titleLength": "Der Titel muss {{min}} bis {{max}} Zeichen lang sein.",
     "consentRequiredRecording": "Aktivieren Sie das Zustimmungsfeld, bevor Sie die Aufnahme starten.",
     "recordingUnsupported": "Die Aufnahme wird in diesem Browser nicht unterstützt.",
     "noAudioGenerated": "Die Aufnahme hat kein Audio erzeugt. Überprüfen Sie das Mikrofon und versuchen Sie es erneut.",

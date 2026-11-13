@@ -1435,6 +1435,7 @@
     "processedSuccess": "Réunion traitée. Vérifiez la transcription et les suggestions.",
     "processError": "Impossible de traiter la réunion.",
     "titleRequired": "Donnez un titre à la réunion.",
+    "titleLength": "Le titre doit comporter entre {{min}} et {{max}} caractères.",
     "consentRequiredRecording": "Cochez la case d'autorisation avant de démarrer l'enregistrement.",
     "recordingUnsupported": "L'enregistrement n'est pas pris en charge par ce navigateur.",
     "noAudioGenerated": "L'enregistrement n'a généré aucun audio. Vérifiez le microphone et réessayez.",

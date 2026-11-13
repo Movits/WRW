@@ -54,3 +54,11 @@ export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
  * para traduzi-la e para não oferecer de novo um reprocessamento sem áudio.
  */
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
+
+/**
+ * O título da reunião, depois do trim: o servidor recusa fora disso
+ * (server/routers/meetings.ts), e o gravador confere o mesmo antes de enviar,
+ * para a dona ver o aviso no idioma dela, e não o BAD_REQUEST do zod.
+ */
+export const TITULO_DA_REUNIAO_MIN = 2;
+export const TITULO_DA_REUNIAO_MAX = 200;
