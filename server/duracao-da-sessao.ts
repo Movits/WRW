@@ -11,7 +11,7 @@
  *   `lastActivityAt` (`validateSessionToken`, em server/security.ts);
  * - o token (JWT) e o cookie vencem junto com a janela e são reemitidos no
  *   máximo uma vez a cada RENOVAR_O_TOKEN_A_CADA_MS (`renovarCookieDaSessao`,
- *   em server/auth.ts, chamado pelo createContext).
+ *   em server/sessao.ts, chamado pelo createContext).
  *
  * Quem usa o app pelo menos uma vez a cada 90 dias nunca mais vê o login.
  * O que encerra a sessão antes disso continua igual: sair da conta, redefinir

@@ -222,8 +222,9 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Antes:** 8 horas fixas desde o login (no banco, no token e no cookie) e, no navegador,
   logout automático aos 30 minutos parada.
 - **Onde:** `server/duracao-da-sessao.ts`, `assinarTokenDaSessao` e
-  `renovarCookieDaSessao` em `server/auth.ts`, `validateSessionToken` em
-  `server/security.ts`, `server/_core/context.ts` e `client/src/pages/Login.tsx`.
+  `renovarCookieDaSessao` em `server/sessao.ts` (até a A5 do plano do gravador, em
+  `server/auth.ts`), `validateSessionToken` em `server/security.ts`,
+  `server/_core/context.ts` e `client/src/pages/Login.tsx`.
 
 ---
 

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// server/auth.ts exige JWT_SECRET já na carga do módulo — vi.hoisted roda antes dos imports
+// server/sessao.ts exige JWT_SECRET já na carga do módulo — vi.hoisted roda antes dos imports
 vi.hoisted(() => {
   process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 });
 
-import { identificadorDoAplicativo } from "./auth";
+// A função saiu de server/auth.ts junto com a abertura da sessão (abrirSessao).
+import { identificadorDoAplicativo } from "./sessao";
 
 /**
  * O appId do JWT NUNCA pode sair vazio: `sdk.verifySession` derruba a sessão
