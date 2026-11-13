@@ -23,6 +23,13 @@ export const MENSAGEM_BANCO_INDISPONIVEL = "Banco de dados indisponível; tente 
 export const MENSAGEM_ERRO_DE_CONSULTA = "Erro ao consultar o banco de dados";
 
 /**
+ * O 429 do limite geral da API (server/_core/limite-de-requisicoes.ts, que a
+ * reexporta). Mora aqui pelo mesmo motivo das duas acima: chega à tela no
+ * envelope do tRPC, em português, e a tela a traduz (`errors.tooManyRequests`).
+ */
+export const MENSAGEM_DO_LIMITE = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
+
+/**
  * Código (não frase) que a varredura de reuniões presas grava em
  * `meetings.processing_error`. Mora em shared/ porque os dois lados o leem:
  * o servidor escreve sem saber o idioma da dona, e a tela de Reuniões traduz

@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import i18n from "@/i18n";
+import { MENSAGEM_DO_LIMITE } from "@shared/const";
 import { TRPCClientError } from "@trpc/client";
 import { mensagemDeErroParaTela } from "./mensagem-de-erro";
 
@@ -60,5 +62,26 @@ describe("mensagemDeErroParaTela — mensagem do servidor ou o genérico traduzi
     expect(mensagemDeErroParaTela(undefined, t)).toBe(GENERICO);
     expect(mensagemDeErroParaTela(null, t)).toBe(GENERICO);
     expect(mensagemDeErroParaTela("Failed to fetch", t)).toBe(GENERICO);
+  });
+});
+
+// O 429 do limite geral da API (responderLimite) chega no envelope, com a frase
+// do servidor em português. Antes ela saía em português nos dez idiomas.
+describe("mensagemDeErroParaTela — a frase do limite da API no idioma da tela", () => {
+  const limite = () =>
+    TRPCClientError.from({ error: { code: -32029, message: MENSAGEM_DO_LIMITE, data: { code: "TOO_MANY_REQUESTS", httpStatus: 429 } } });
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("em português é a frase do servidor, caractere a caractere", () => {
+    expect(i18n.t("errors.tooManyRequests")).toBe(MENSAGEM_DO_LIMITE);
+    expect(mensagemDeErroParaTela(limite(), chave => i18n.t(chave))).toBe(MENSAGEM_DO_LIMITE);
+  });
+
+  it("em inglês sai traduzida", async () => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(limite(), chave => i18n.t(chave))).toBe("Too many requests in a short time. Wait a few seconds and try again.");
   });
 });

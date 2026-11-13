@@ -730,7 +730,8 @@
     "databaseUnavailable": "Database unavailable; please try again in a moment",
     "queryFailed": "Error querying the database",
     "notAuthenticated": "Please sign in to continue.",
-    "notAuthorized": "You don't have permission for this action."
+    "notAuthorized": "You don't have permission for this action.",
+    "tooManyRequests": "Too many requests in a short time. Wait a few seconds and try again."
   },
   "aiEngine": {
     "label": "AI Engine",

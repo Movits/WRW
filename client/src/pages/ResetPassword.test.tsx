@@ -195,14 +195,15 @@ describe("Redefinir a senha — erros do servidor", () => {
     expect(aviso).not.toHaveTextContent("Muitas entradas");
   });
 
-  it("o limite geral da API (429 sem path, de antes do tRPC) mostra a frase dele, e não a fila de entradas", async () => {
+  it("o limite geral da API (429 sem path, de antes do tRPC) mostra a frase dele, traduzida, e não a fila de entradas", async () => {
     await i18n.changeLanguage("en");
     render(<ResetPassword />);
     // O envelope de responderLimite (server/_core/limite-de-requisicoes.ts).
     const doLimiteGeral = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
     act(() => duble.opcoes.onError({ message: doLimiteGeral, data: { code: "TOO_MANY_REQUESTS", httpStatus: 429 } }));
     const aviso = screen.getByRole("alert");
-    expect(aviso).toHaveTextContent(doLimiteGeral);
+    expect(aviso).toHaveTextContent(i18n.t("errors.tooManyRequests"));
+    expect(aviso).not.toHaveTextContent(doLimiteGeral);
     expect(aviso).not.toHaveTextContent(i18n.t("auth.tooManyRequests"));
     expect(aviso).not.toHaveTextContent(i18n.t("auth.invalidTokenDesc"));
   });

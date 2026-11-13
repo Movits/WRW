@@ -131,14 +131,15 @@ describe("Esqueci a senha — o formulário", () => {
     expect(campoDoEmail()).toBeInTheDocument();
   });
 
-  it("o limite geral da API (429 sem path, de antes do tRPC) mostra a frase dele, e não a dos pedidos de recuperação", async () => {
+  it("o limite geral da API (429 sem path, de antes do tRPC) mostra a frase dele, traduzida, e não a dos pedidos de recuperação", async () => {
     await i18n.changeLanguage("en");
     render(<ForgotPassword />);
     // O envelope de responderLimite (server/_core/limite-de-requisicoes.ts).
     const doLimiteGeral = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
     act(() => duble.opcoes.onError({ message: doLimiteGeral, data: { code: "TOO_MANY_REQUESTS", httpStatus: 429 } }));
     const aviso = screen.getByRole("alert");
-    expect(aviso).toHaveTextContent(doLimiteGeral);
+    expect(aviso).toHaveTextContent(i18n.t("errors.tooManyRequests"));
+    expect(aviso).not.toHaveTextContent(doLimiteGeral);
     expect(aviso).not.toHaveTextContent(i18n.t("auth.forgotPasswordTooManyRequests"));
   });
 

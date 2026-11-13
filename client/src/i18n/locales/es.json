@@ -730,7 +730,8 @@
     "databaseUnavailable": "Base de datos no disponible; inténtalo de nuevo en unos instantes",
     "queryFailed": "Error al consultar la base de datos",
     "notAuthenticated": "Inicia sesión para continuar.",
-    "notAuthorized": "No tienes permiso para esta acción."
+    "notAuthorized": "No tienes permiso para esta acción.",
+    "tooManyRequests": "Demasiadas solicitudes en poco tiempo. Espera unos segundos y vuelve a intentarlo."
   },
   "aiEngine": {
     "label": "Motor de IA",

@@ -730,7 +730,8 @@
     "databaseUnavailable": "数据库暂不可用；请稍后再试",
     "queryFailed": "查询数据库时出错",
     "notAuthenticated": "请登录后继续。",
-    "notAuthorized": "您没有执行此操作的权限。"
+    "notAuthorized": "您没有执行此操作的权限。",
+    "tooManyRequests": "短时间内请求过多。请等几秒钟后再试。"
   },
   "aiEngine": {
     "label": "AI引擎",
