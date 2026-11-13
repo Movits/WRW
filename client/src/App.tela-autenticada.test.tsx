@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { Suspense } from "react";
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { TelaAutenticada } from "./App";
 
@@ -20,6 +20,14 @@ vi.mock("@/lib/trpc", () => ({
 
 // O menu (Radix) mede o conteúdo com ResizeObserver, que o jsdom não tem.
 class ResizeObserverFalso { observe() {} unobserve() {} disconnect() {} }
+
+// O AppHeader chega por lazy() (App.tsx). Com a máquina carregada, a primeira
+// carga do módulo passava de 1 s, o prazo do findByRole, e a tela ficava no
+// fallback vazio do Suspense. Carregado aqui, com prazo próprio, o lazy()
+// resolve na hora.
+beforeAll(async () => {
+  await import("./components/AppHeader");
+}, 30_000);
 
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", ResizeObserverFalso);
