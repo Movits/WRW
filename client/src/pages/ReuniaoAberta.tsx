@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "wouter";
 import { Clock3, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { PlayerDasPartes, type ControleDoPlayer } from "@/components/PlayerDasPartes";
+import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -70,6 +72,7 @@ export default function ReuniaoAberta() {
     refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
   });
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
+  const player = useRef<ControleDoPlayer | null>(null);
   // Como no detalhe da dona: a tradução começa no idioma da tela, e o idioma
   // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
@@ -112,6 +115,9 @@ export default function ReuniaoAberta() {
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada } = data;
+  const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
+  const falas = segmentosValidos(transcricao?.segmentos);
+  const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
   const textoNaTela = idiomaDaTraducao === idiomaDoOriginal ? transcricao?.texto : textoTraduzido;
   // O idioma do texto que está na tela, para o leitor de tela e a hifenização;
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
@@ -128,10 +134,7 @@ export default function ReuniaoAberta() {
     <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {gravacao ? <>
-        <audio controls preload="metadata" src={gravacao.url} className="w-full mt-4"
-          onError={() => setFalhaNoAudio(true)} onLoadedData={() => setFalhaNoAudio(false)}>
-          {t("meetings.audioNotSupported")}
-        </audio>
+        <PlayerDasPartes ref={player} partes={partes} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
         {falhaNoAudio
           ? <p className="text-xs text-amber-200/80 mt-2">{t("meetings.openLink.audioLoadError")}</p>
           : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>}
@@ -163,7 +166,9 @@ export default function ReuniaoAberta() {
                 {t("errorBoundary.retryButton")}
               </button>
             </div>}
-            <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>
+            {mostraFalas
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
+              : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>

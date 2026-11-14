@@ -1615,7 +1615,17 @@
     "meetingLanguageLabel": "会议语言",
     "meetingLanguageHint": "会议中使用的语言。AI 将用此语言转写，转写稿之后可以翻译。",
     "originalLanguageSuffix": "（原文）",
-    "translatingLongStatus": "会议较长：翻译需要几分钟。您可以让此页面保持打开，译文完成后会显示。"
+    "translatingLongStatus": "会议较长：翻译需要几分钟。您可以让此页面保持打开，译文完成后会显示。",
+    "statusUploading": "正在接收音频",
+    "speakerLabel": "发言人 {{n}}",
+    "gapLabel": "未收到的片段",
+    "speakingTime": "发言时长",
+    "searchTranscriptPlaceholder": "在转写稿中搜索",
+    "searchNoResults": "没有找到该词。",
+    "playFrom": "从 {{tempo}} 开始收听",
+    "progressRecording": "正在录音：音频会陆续上传。",
+    "progressUploading": "正在接收音频：{{recebidas}}/{{esperadas}}",
+    "progressTranscribing": "正在转写：{{transcritas}}/{{total}}"
   },
   "connections": {
     "messageSent": "消息已发送",

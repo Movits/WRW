@@ -1615,7 +1615,17 @@
     "meetingLanguageLabel": "Idioma de la reunión",
     "meetingLanguageHint": "El idioma hablado. La IA transcribe en este idioma, y la transcripción se puede traducir después.",
     "originalLanguageSuffix": "(original)",
-    "translatingLongStatus": "La reunión es larga: la traducción tarda unos minutos. Puedes dejar esta pantalla abierta; el texto aparece cuando esté listo."
+    "translatingLongStatus": "La reunión es larga: la traducción tarda unos minutos. Puedes dejar esta pantalla abierta; el texto aparece cuando esté listo.",
+    "statusUploading": "Recibiendo el audio",
+    "speakerLabel": "Hablante {{n}}",
+    "gapLabel": "fragmento no recibido",
+    "speakingTime": "Tiempo de habla",
+    "searchTranscriptPlaceholder": "Buscar en la transcripción",
+    "searchNoResults": "No se encontró nada con ese término.",
+    "playFrom": "Escuchar desde {{tempo}}",
+    "progressRecording": "Grabación en curso: el audio llega poco a poco.",
+    "progressUploading": "Recibiendo el audio: {{recebidas}} de {{esperadas}}",
+    "progressTranscribing": "Transcribiendo: {{transcritas}} de {{total}}"
   },
   "connections": {
     "messageSent": "Mensaje enviado",

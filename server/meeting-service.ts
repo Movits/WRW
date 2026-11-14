@@ -1176,6 +1176,10 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   processingError: meetings.processingError,
   createdAt: meetings.createdAt,
   updatedAt: meetings.updatedAt,
+  // Como o áudio chegou (envio único ou partes) e quantas partes a gravação
+  // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
+  audioPipeline: meetings.audioPipeline,
+  expectedSlices: meetings.expectedSlices,
 };
 
 export async function listPrivateMeetings(ownerId: string) {
@@ -1218,12 +1222,60 @@ async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
  * caminho do proxy autenticado (/manus-storage/...), que confere sessão e
  * posse a cada requisição; não é endereço público do bucket.
  */
+/** Uma parte do áudio para o player: o contrato `recording.partes` do desenho. */
+export type ParteParaOuvir = { seq: number; url: string; mimeType: string; inicioSegundos: number; duracaoSegundos: number; expiresAt: number };
+
+/**
+ * As partes da reunião gravada em partes que dá para ouvir agora: recebidas ou
+ * transcritas, ainda no prazo. O início é o gravado pela fila (offset) ou, antes
+ * de ela transcrever, a soma das anteriores. A url é a do proxy autenticado.
+ */
+async function partesParaOuvir(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string): Promise<ParteParaOuvir[]> {
+  const linhas = await db.select({
+    seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, storageUrl: meetingAudioSlices.storageUrl,
+    mimeType: meetingAudioSlices.mimeType, durationMs: meetingAudioSlices.durationMs, offsetMs: meetingAudioSlices.offsetMs,
+    expiresAt: meetingAudioSlices.expiresAt,
+  }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)))
+    .orderBy(meetingAudioSlices.seq);
+  const agora = now();
+  let acumulado = 0;
+  const partes: ParteParaOuvir[] = [];
+  for (const linha of linhas) {
+    const inicio = linha.offsetMs !== null ? Number(linha.offsetMs) : acumulado;
+    acumulado = inicio + linha.durationMs;
+    if ((linha.status !== "received" && linha.status !== "transcribed") || linha.expiresAt <= agora) continue;
+    partes.push({
+      seq: linha.seq, url: linha.storageUrl, mimeType: linha.mimeType,
+      inicioSegundos: inicio / 1000, duracaoSegundos: linha.durationMs / 1000, expiresAt: linha.expiresAt,
+    });
+  }
+  return partes;
+}
+
 export async function gravacaoParaOuvir(
   db: Awaited<ReturnType<typeof exigirDb>>,
   ownerId: string,
   meetingId: string,
   criadaEm: number,
+  emPartes = false,
 ) {
+  // A reunião gravada em partes toca as partes em sequência; o resumo em
+  // `recording` (url da primeira, duração total, o prazo mais curto) mantém a
+  // tela de antes funcionando.
+  if (emPartes) {
+    const partes = await partesParaOuvir(db, ownerId, meetingId);
+    if (!partes.length) return { recording: null, recordingExpired: criadaEm + MEETING_AUDIO_TTL_MS <= now() };
+    const ultima = partes[partes.length - 1];
+    return {
+      recording: {
+        url: partes[0].url, mimeType: partes[0].mimeType,
+        durationSeconds: Math.round(ultima.inicioSegundos + ultima.duracaoSegundos),
+        sizeBytes: 0, expiresAt: Math.min(...partes.map(p => p.expiresAt)), partes,
+      },
+      recordingExpired: false,
+    };
+  }
   // Sem unicidade por reunião no banco: `orderBy` torna a escolha determinista
   // (a mais recente), em vez de depender da ordem que o MySQL devolver.
   const [gravacao] = await db.select().from(meetingRecordings)
@@ -1247,6 +1299,11 @@ export async function gravacaoParaOuvir(
     return { recording: null, recordingExpired: true };
   }
 
+  // O envio único é uma parte só, no mesmo contrato.
+  const partes: ParteParaOuvir[] = [{
+    seq: 0, url: gravacao.storageUrl, mimeType: gravacao.mimeType, inicioSegundos: 0,
+    duracaoSegundos: gravacao.durationSeconds, expiresAt: gravacao.expiresAt,
+  }];
   return {
     recording: {
       url: gravacao.storageUrl,
@@ -1254,8 +1311,24 @@ export async function gravacaoParaOuvir(
       durationSeconds: gravacao.durationSeconds,
       sizeBytes: gravacao.sizeBytes,
       expiresAt: gravacao.expiresAt,
+      partes,
     },
     recordingExpired: false,
+  };
+}
+
+/**
+ * O andamento da reunião gravada em partes, para a tela dizer o que está
+ * acontecendo: quantas partes chegaram, quantas a IA já transcreveu e quantas a
+ * gravação teve (nulo enquanto grava). Nulo no envio único.
+ */
+async function andamentoDaReuniao(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string, esperadas: number | null) {
+  const linhas = await db.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  return {
+    recebidas: linhas.filter(l => l.status !== "uploading").length,
+    transcritas: linhas.filter(l => l.status === "transcribed").length,
+    esperadas,
   };
 }
 
@@ -1304,10 +1377,12 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const suggestions = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
-  const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt);
+  const emPartes = meeting.audioPipeline === "slices";
+  const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt, emPartes);
+  const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
   return {
     meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError) },
-    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired,
+    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, andamento,
   };
 }
 

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
@@ -683,6 +683,79 @@ describe("Tradução de reunião longa em segundo plano (G8)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
+  const SEGMENTOS = [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ];
+  const PARTES = [
+    { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
+    { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
+  ];
+  const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
+
+  it("a transcrição em partes aparece por falante, e clicar no tempo leva o player à parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Vamos fechar o contrato. O frete fica para sexta.", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Falante 1")).toBeInTheDocument();
+    expect(within(falas).getByText("Falante 2")).toBeInTheDocument();
+    expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:20" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+  });
+
+  // O link para dentro da reunião chega direto ao endereço do detalhe, com ?t ou ?q.
+  function abrirPeloLink(busca: string) {
+    const meeting = { ...REUNIAO, status: "ready" };
+    duble.list.mockReturnValue({ data: [meeting], isLoading: false });
+    duble.get.mockReturnValue({
+      data: { meeting, transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
+      isLoading: false,
+    });
+    window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
+    render(<Meetings />);
+  }
+
+  it("o link com ?t abre a transcrição e já leva o player ao segundo pedido", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620");
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("o link com ?q abre a transcrição já filtrada pelo termo", () => {
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?q=frete");
+      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      expect(screen.getByRole("searchbox")).toHaveValue("frete");
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.getByText("Fala antiga.")).toBeInTheDocument();
+    expect(screen.queryByText("Falante 1")).not.toBeInTheDocument();
+  });
+
+  it("reunião em partes chegando: o andamento diz quantas chegaram e quantas foram transcritas", () => {
+    abrirDetalhe({ status: "uploading", audioPipeline: "slices", expectedSlices: 3 } as never, { andamento: { recebidas: 2, transcritas: 1, esperadas: 3 } } as never);
+    expect(screen.getByText(/Recebendo o áudio: 2 de 3/)).toBeInTheDocument();
+    expect(screen.getByText("Transcrevendo: 1 de 3")).toBeInTheDocument();
+    expect(screen.getAllByText("Recebendo o áudio").length).toBeGreaterThan(0);
   });
 });
 

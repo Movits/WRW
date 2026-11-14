@@ -12,6 +12,8 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
+import { PlayerDasPartes, type ControleDoPlayer } from "@/components/PlayerDasPartes";
+import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
@@ -32,7 +34,7 @@ function formatDuration(seconds: number) {
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
 function statusLabel(t: TranslateFn, status: string) {
-  return ({ draft: t("meetings.statusDraft"), recording: t("meetings.statusRecording"), processing: t("meetings.statusProcessing"), ready: t("meetings.statusReady"), failed: t("meetings.statusFailed"), deleted: t("meetings.statusDeleted") } as Record<string, string>)[status] ?? status;
+  return ({ draft: t("meetings.statusDraft"), recording: t("meetings.statusRecording"), processing: t("meetings.statusProcessing"), ready: t("meetings.statusReady"), failed: t("meetings.statusFailed"), deleted: t("meetings.statusDeleted"), uploading: t("meetings.statusUploading") } as Record<string, string>)[status] ?? status;
 }
 
 function statusClass(status: string) {
@@ -467,7 +469,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // QueryClient de main.tsx não o muda) relê a consulta vencida, e a consulta
   // sem dado está sempre vencida.
   const { data, isLoading, isError, error, refetch } = trpc.meetings.get.useQuery({ meetingId }, {
-    refetchInterval: consulta => consulta.state.data?.meeting.status === "processing" && !erroDefinitivoDaReuniao(consulta.state.error) ? 5_000 : false,
+    // A reunião em partes também anda sozinha (a fila do servidor): enquanto
+    // grava, recebe ou transcreve, o andamento se atualiza.
+    refetchInterval: consulta => {
+      const dado = consulta.state.data?.meeting;
+      const andando = dado?.status === "processing" || (dado?.audioPipeline === "slices" && (dado.status === "recording" || dado.status === "uploading"));
+      return andando && !erroDefinitivoDaReuniao(consulta.state.error) ? 5_000 : false;
+    },
     retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
     refetchOnWindowFocus: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
     refetchOnReconnect: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
@@ -481,7 +489,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     montado.current = true;
     return () => { montado.current = false; };
   }, []);
-  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">("summary");
+  // ?t (o segundo de uma fala) e ?q (o termo buscado) vêm dos links para dentro
+  // da reunião (Memória, busca, combinados): abrem a transcrição já no ponto.
+  const parametros = useRef(new URLSearchParams(typeof window === "undefined" ? "" : window.location.search));
+  const segundoPedido = Number(parametros.current.get("t"));
+  const termoPedido = parametros.current.get("q") ?? "";
+  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(Number.isFinite(segundoPedido) && segundoPedido > 0 || termoPedido ? "transcript" : "summary");
+  const player = useRef<ControleDoPlayer | null>(null);
+  const pulouParaOPedido = useRef(false);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
   // lista, mandando a tradução para pt-BR com a tela em inglês.
@@ -600,7 +615,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} />
   </div></main>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
-  const { meeting, transcript, entities, suggestions, recording, recordingExpired } = data;
+  const { meeting, transcript, entities, suggestions, recording, recordingExpired, andamento } = data;
+  const partesParaOuvir = recording?.partes ?? (recording ? [{ seq: 0, url: recording.url, mimeType: recording.mimeType, inicioSegundos: 0, duracaoSegundos: recording.durationSeconds }] : []);
+  // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
+  const falas = segmentosValidos(transcript?.segments);
+  const mostraFalas = falas.length > 0 && translationLanguage === idiomaOriginal;
   const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
   // Destaques valem só para o texto original: os valores extraídos pela IA não
   // batem com o texto traduzido.
@@ -643,6 +662,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         <p className="mt-2 text-sm text-red-100/75">{recording ? t("meetings.reprocessUnavailable") : t("meetings.reprocessNoAudio")}</p>
       )}
     </div>}
+    {andamento && (meeting.status === "recording" || meeting.status === "uploading") && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>
+      {andamento.esperadas ? t("meetings.progressUploading", { recebidas: andamento.recebidas, esperadas: andamento.esperadas }) : t("meetings.progressRecording")}
+      {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
+    </div>}
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4"><ResumoDaReuniaoPelaIA meetingId={meetingId}/><PergunteAReuniao meetingId={meetingId}/></div>}
@@ -651,11 +674,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         {/* Sem onError o player falha MUDO: sessão vencida, limite de
             requisições ou storage fora do ar desenham os controles e
             simplesmente não tocam, e a usuária não tem o que reportar. */}
-        <audio controls preload="metadata" src={recording.url} className="w-full mt-4"
-          onError={() => setFalhaNoAudio(true)}
-          onLoadedData={() => setFalhaNoAudio(false)}>
-          {t("meetings.audioNotSupported")}
-        </audio>
+        <PlayerDasPartes partes={partesParaOuvir} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
         {falhaNoAudio
           ? <p className="text-xs text-amber-200/80 mt-2">{t("meetings.audioLoadError")}</p>
           : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>}
@@ -684,7 +703,19 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
           </div>}
-          {segmentos
+          {mostraFalas
+            ? <>
+              {partesParaOuvir.length > 0 && <div className="mb-4"><PlayerDasPartes ref={controle => {
+                player.current = controle;
+                // O ?t do link: pula uma vez, quando o player existe.
+                if (controle && !pulouParaOPedido.current && Number.isFinite(segundoPedido) && segundoPedido > 0) {
+                  pulouParaOPedido.current = true;
+                  controle.irPara(segundoPedido);
+                }
+              }} partes={partesParaOuvir} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/></div>}
+              <TranscricaoPorFalante segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+            </>
+            : segmentos
             ? <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{segmentos.map((s, i) => s.tipo
                 ? <mark key={i} title={t(TIPOS_DE_ENTIDADE[s.tipo].chave)} className={`rounded-md px-1 py-0.5 font-medium ${TIPOS_DE_ENTIDADE[s.tipo].classes}`}>{s.texto}</mark>
                 : <span key={i}>{s.texto}</span>)}</p>

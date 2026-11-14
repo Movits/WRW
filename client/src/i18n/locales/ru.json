@@ -1615,7 +1615,17 @@
     "meetingLanguageLabel": "Язык встречи",
     "meetingLanguageHint": "Язык, на котором говорят. ИИ расшифровывает на этом языке, а расшифровку потом можно перевести.",
     "originalLanguageSuffix": "(оригинал)",
-    "translatingLongStatus": "Встреча длинная: перевод займёт несколько минут. Можно оставить этот экран открытым — текст появится, когда будет готов."
+    "translatingLongStatus": "Встреча длинная: перевод займёт несколько минут. Можно оставить этот экран открытым — текст появится, когда будет готов.",
+    "statusUploading": "Получаем аудио",
+    "speakerLabel": "Говорящий {{n}}",
+    "gapLabel": "фрагмент не получен",
+    "speakingTime": "Время выступления",
+    "searchTranscriptPlaceholder": "Поиск по расшифровке",
+    "searchNoResults": "По этому запросу ничего не найдено.",
+    "playFrom": "Слушать с {{tempo}}",
+    "progressRecording": "Идёт запись: аудио поступает постепенно.",
+    "progressUploading": "Получаем аудио: {{recebidas}} из {{esperadas}}",
+    "progressTranscribing": "Расшифровка: {{transcritas}} из {{total}}"
   },
   "connections": {
     "messageSent": "Сообщение отправлено",

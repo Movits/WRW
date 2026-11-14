@@ -235,6 +235,8 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
   const NA_TELA = [
     "id", "ownerId", "title", "contactId", "contextId", "status", "consentGranted",
     "consentAt", "language", "processingError", "createdAt", "updatedAt",
+    // Como o áudio chegou e quantas partes a gravação teve (D1): o andamento na tela.
+    "audioPipeline", "expectedSlices",
   ];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),

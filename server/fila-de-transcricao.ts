@@ -141,10 +141,18 @@ async function partesProntasParaTranscrever(db: Banco, agora: number, escopo: Es
       daDona(meetingAudioSlices.ownerId, escopo),
     ))
     .orderBy(asc(meetingAudioSlices.createdAt), asc(meetingAudioSlices.seq))
-    .limit(limite * 5);
+    // Janela larga: muitas partes de uma reunião longa esperam a anterior, e só
+    // a primeira de cada reunião está pronta; com uma janela curta, elas
+    // tomariam as vagas e as partes prontas de outras reuniões ficariam sem vez.
+    .limit(200);
   const prontas: typeof candidatas = [];
-  for (const parte of candidatas) {
+  // Só a primeira parte pendente de cada reunião pode estar pronta (as outras
+  // esperam a anterior): uma consulta por reunião, não por parte.
+  const vistas = new Set<string>();
+  for (const parte of [...candidatas].sort((a, b) => a.seq - b.seq)) {
     if (prontas.length >= limite) break;
+    if (vistas.has(parte.meetingId)) continue;
+    vistas.add(parte.meetingId);
     if (parte.seq === 0) { prontas.push(parte); continue; }
     const [anterior] = await db.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices)
       .where(and(eq(meetingAudioSlices.meetingId, parte.meetingId), eq(meetingAudioSlices.seq, parte.seq - 1))).limit(1);
@@ -398,7 +406,9 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   await retomarMontagensPresas(db, agora, escopo);
   await desistirDasEsgotadas(db, agora, escopo);
   const trabalhos: Promise<unknown>[] = [];
-  for (const parte of await partesProntasParaTranscrever(db, agora, escopo)) {
+  // Só tantas partes quantas vagas de IA: a reserva começa a contar na hora, e
+  // uma parte reservada esperando vaga no semáforo gastaria o prazo dela parada.
+  for (const parte of await partesProntasParaTranscrever(db, agora, escopo, CHAMADAS_DE_IA_AO_MESMO_TEMPO)) {
     if (parada) break;
     const token = await reservarParte(db, parte.id, agora);
     if (token) trabalhos.push(transcreverUmaParte(db, parte, token).finally(() => tokensVivos.delete(token)));

@@ -2,7 +2,7 @@ import crypto from "crypto";
 import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
-import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { gravacaoParaOuvir } from "./meeting-service";
@@ -134,6 +134,7 @@ async function reuniaoDoLink(token: string) {
     status: meetings.status,
     createdAt: meetings.createdAt,
     shareToken: meetings.shareToken,
+    audioPipeline: meetings.audioPipeline,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -144,7 +145,20 @@ async function reuniaoDoLink(token: string) {
   // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
   // variação de caixa não abrir o link nem virar outro balde do teto.
   if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
-  return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt };
+  return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices" };
+}
+
+/** Os segmentos no contrato do desenho ({inicio, fim, falante, texto, lacuna?}), sem outro campo. */
+export function segmentosDoContrato(bruto: unknown): Array<{ inicio: number; fim: number; falante: string; texto: string; lacuna?: true }> {
+  if (!Array.isArray(bruto)) return [];
+  const saida: Array<{ inicio: number; fim: number; falante: string; texto: string; lacuna?: true }> = [];
+  for (const s of bruto) {
+    if (!s || typeof s !== "object") continue;
+    const { inicio, fim, falante, texto, lacuna } = s as Record<string, unknown>;
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || typeof falante !== "string" || typeof texto !== "string") continue;
+    saida.push({ inicio: Number(inicio), fim: Number(fim), falante: falante.slice(0, 4), texto, ...(lacuna === true ? { lacuna: true as const } : {}) });
+  }
+  return saida;
 }
 
 /** A reunião do link, ou a recusa NOT_FOUND: link que não existe e link desligado parecem iguais. */
@@ -164,27 +178,47 @@ export async function exigirReuniaoDoLink(token: string) {
 export async function verReuniaoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
-  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
+  // As falas por falante (D1) vão junto: são o mesmo texto da transcrição,
+  // separado por voz e tempo, sem nome de ninguém (o rótulo é "Falante n").
+  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
-  const { recording, recordingExpired } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, reuniao.createdAt);
+  const { recording, recordingExpired } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, reuniao.createdAt, reuniao.emPartes);
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
-    transcricao: transcricao ?? null,
+    // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
+    // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
+    transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,
     gravacao: recording
-      ? { url: enderecoDoAudioDoLink(token), mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt }
+      ? {
+          url: enderecoDoAudioDoLink(token), mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt,
+          // Cada parte pela rota do link (nunca o proxy da dona), com ?parte.
+          partes: recording.partes.map(p => ({
+            seq: p.seq, url: reuniao.emPartes ? `${enderecoDoAudioDoLink(token)}?parte=${p.seq}` : enderecoDoAudioDoLink(token),
+            mimeType: p.mimeType, inicioSegundos: p.inicioSegundos, duracaoSegundos: p.duracaoSegundos,
+          })),
+        }
       : null,
     gravacaoExpirada: recordingExpired,
   };
 }
 
 /** A chave do áudio que o link toca agora, ou null (link desligado, sem áudio ou áudio vencido). */
-export async function chaveDoAudioDoLink(token: string): Promise<string | null> {
+export async function chaveDoAudioDoLink(token: string, parte?: number): Promise<string | null> {
   const reuniao = await reuniaoDoLink(token);
   if (!reuniao) return null;
   const db = await exigirDb();
+  // A reunião em partes toca cada parte pela posição (?parte); sem ela, a primeira.
+  if (reuniao.emPartes) {
+    const [linha] = await db.select({ storageKey: meetingAudioSlices.storageKey, expiresAt: meetingAudioSlices.expiresAt, status: meetingAudioSlices.status })
+      .from(meetingAudioSlices)
+      .where(and(eq(meetingAudioSlices.meetingId, reuniao.id), eq(meetingAudioSlices.ownerId, reuniao.ownerId), eq(meetingAudioSlices.seq, parte ?? 0)))
+      .limit(1);
+    if (!linha || linha.expiresAt <= Date.now() || (linha.status !== "received" && linha.status !== "transcribed")) return null;
+    return linha.storageKey;
+  }
   // A mais recente, como em gravacaoParaOuvir: é a que a página mostra.
   const [gravacao] = await db.select({ storageKey: meetingRecordings.storageKey, expiresAt: meetingRecordings.expiresAt })
     .from(meetingRecordings)
@@ -209,7 +243,7 @@ export async function chaveDoAudioDoLink(token: string): Promise<string | null> 
  */
 export function registrarRotasDoLinkAberto(
   app: Express,
-  { acharChave, assinar }: { acharChave: (token: string) => Promise<string | null>; assinar: (chave: string) => Promise<string> } =
+  { acharChave, assinar }: { acharChave: (token: string, parte?: number) => Promise<string | null>; assinar: (chave: string) => Promise<string> } =
     { acharChave: chaveDoAudioDoLink, assinar: storageGetSignedUrl },
 ) {
   app.use(ROTA_DA_REUNIAO_ABERTA, (_req, res, next) => {
@@ -222,7 +256,9 @@ export function registrarRotasDoLinkAberto(
     res.set("X-Robots-Tag", "noindex, nofollow");
     let chave: string | null;
     try {
-      chave = await acharChave(String(req.params.token ?? ""));
+      // ?parte só vale como número inteiro pequeno; qualquer outra coisa é a primeira.
+      const parte = /^\d{1,4}$/.test(String(req.query.parte ?? "")) ? Number(req.query.parte) : undefined;
+      chave = await acharChave(String(req.params.token ?? ""), parte);
     } catch (erro) {
       // Banco fora do ar não é "link desligado": 404 faria a página dizer que
       // a gravação sumiu. Fora do tRPC não há middleware que traduza.
