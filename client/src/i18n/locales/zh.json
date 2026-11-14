@@ -1450,7 +1450,7 @@
     "heroTitle": "会议助手",
     "heroSubtitle": "在征得同意的情况下录制简短会议，查看转录内容并确认建议的联系人。",
     "newMeetingButton": "新建会议",
-    "consentNotice": "请务必征得所有参与者的同意后再录制。音频仅保存在您的账户中，除非您开启这次会议的分享链接（这需要发言者重新授权），并将在30天后自动过期。",
+    "consentNotice": "仅在所有人同意的情况下录音。音频由 Google 的 AI（Gemini）转写，可能在巴西境外处理，并按人区分发言。音频在您的账户中保留 30 天，转写稿保留到您删除会议为止。只有您可以访问，除非您开启会议的分享链接（这需要发言者重新授权）。",
     "loadingList": "正在加载会议……",
     "emptyTitle": "尚无会议记录",
     "emptySubtitle": "开始录制以生成转录内容和联系人建议。",
@@ -1611,7 +1611,10 @@
       "inAppBrowser": "无法在此处安装：请在 Safari 浏览器或 Chrome 中打开此页面。",
       "unsupportedBrowser": "如需将 WRW 安装为 App，请在 Chrome、Edge 或 Safari 浏览器中打开它。",
       "androidOtherBrowser": "如需将 WRW 安装为 App，请在 Chrome 中打开此页面。"
-    }
+    },
+    "meetingLanguageLabel": "会议语言",
+    "meetingLanguageHint": "会议中使用的语言。AI 将用此语言转写，转写稿之后可以翻译。",
+    "originalLanguageSuffix": "（原文）"
   },
   "connections": {
     "messageSent": "消息已发送",

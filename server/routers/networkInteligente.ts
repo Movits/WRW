@@ -268,6 +268,9 @@ export const networkInteligenteRouter = router({
       audioBase64: z.string().min(20).max(3_000_000),
       mimeType: z.enum(ALLOWED_MEETING_AUDIO_TYPES),
       durationSeconds: z.number().positive().max(LIMITE_DA_VOZ_SEGUNDOS),
+      // O idioma da tela de quem grava, como no ditado. O transcribeWithGemini o
+      // normaliza (nomeDoIdioma); sem ele, ou fora dos 10, o prompt não pede idioma.
+      idioma: z.string().max(12).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { db, retrato } = await exigirContatoDaDona(ctx.user.openId, input.contactId);
@@ -282,7 +285,7 @@ export const networkInteligenteRouter = router({
 
       let transcricao: string;
       try {
-        transcricao = (await transcribeWithGemini({ audio, mimeType: input.mimeType, language: "pt" })).text;
+        transcricao = (await transcribeWithGemini({ audio, mimeType: input.mimeType, language: input.idioma })).text;
       } catch (erro) {
         if (erro instanceof GeminiIndisponivelError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: erro.message });
         console.error("[Network Inteligente] a transcrição da voz falhou:", erro instanceof Error ? erro.message : erro);

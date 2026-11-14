@@ -1450,7 +1450,7 @@
     "heroTitle": "Meeting-Assistent",
     "heroSubtitle": "Nehmen Sie kurze Meetings mit Zustimmung auf, überprüfen Sie die Transkription und bestätigen Sie die vorgeschlagenen Kontakte.",
     "newMeetingButton": "Neues Meeting",
-    "consentNotice": "Nehmen Sie nur mit Zustimmung aller Beteiligten auf. Das Audio bleibt nur in Ihrem Konto, es sei denn, Sie aktivieren den Freigabelink des Meetings (dafür ist eine neue Zustimmung der Personen nötig, die gesprochen haben), und es läuft nach 30 Tagen ab.",
+    "consentNotice": "Nehmen Sie nur mit Zustimmung aller Beteiligten auf. Das Audio wird von der KI von Google (Gemini) transkribiert, die es außerhalb Brasiliens verarbeiten und die Beiträge nach Person trennen kann. Das Audio bleibt 30 Tage in Ihrem Konto, das Transkript, bis Sie das Meeting löschen. Nur Sie haben Zugriff, es sei denn, Sie aktivieren den Freigabelink des Meetings (dafür ist eine neue Erlaubnis der Sprechenden nötig).",
     "loadingList": "Meetings werden geladen…",
     "emptyTitle": "Kein Meeting erfasst",
     "emptySubtitle": "Starten Sie eine Aufnahme, um Transkription und Kontaktvorschläge zu erhalten.",
@@ -1611,7 +1611,10 @@
       "inAppBrowser": "Von hier aus lässt sich nichts installieren: Öffnen Sie diese Seite in Safari oder Chrome.",
       "unsupportedBrowser": "Um WRW als App zu installieren, öffnen Sie es in Chrome, Edge oder Safari.",
       "androidOtherBrowser": "Um WRW als App zu installieren, öffnen Sie diese Seite in Chrome."
-    }
+    },
+    "meetingLanguageLabel": "Sprache des Meetings",
+    "meetingLanguageHint": "Die gesprochene Sprache. Die KI transkribiert in dieser Sprache, und das Transkript kann später übersetzt werden.",
+    "originalLanguageSuffix": "(Original)"
   },
   "connections": {
     "messageSent": "Nachricht gesendet",

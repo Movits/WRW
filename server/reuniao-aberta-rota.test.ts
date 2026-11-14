@@ -128,6 +128,13 @@ describe("reuniaoAberta — público, sem sessão", () => {
     expect(translatePrivateMeetingTranscript).toHaveBeenCalledWith("dona-1", ID, "en", expect.any(Function));
   });
 
+  it("o link aceita pedir pt-BR: a reunião pode ter sido gravada em outro idioma (G1b)", async () => {
+    translatePrivateMeetingTranscript.mockResolvedValue({ language: "pt-BR", text: "Fala.", cached: false });
+    await expect(semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "pt-BR" })).resolves.toEqual({ language: "pt-BR", text: "Fala.", cached: false });
+    expect(translatePrivateMeetingTranscript).toHaveBeenCalledWith("dona-1", ID, "pt-BR", expect.any(Function));
+    await expect(semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "it" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("falha da IA na tradução vira SERVICE_UNAVAILABLE com frase neutra: a mensagem do provedor não sai para quem não tem conta", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     translatePrivateMeetingTranscript.mockRejectedValue(new Error("LLM invoke failed: 401 chave-secreta-do-provedor"));

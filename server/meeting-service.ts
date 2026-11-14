@@ -10,6 +10,7 @@ import {
 } from "../drizzle/schema";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
@@ -114,20 +115,10 @@ export type MeetingExtraction = {
   }>;
 };
 
-export const MEETING_TRANSCRIPT_LANGUAGES = ["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"] as const;
-
-export const MEETING_LANGUAGES: Record<(typeof MEETING_TRANSCRIPT_LANGUAGES)[number], string> = {
-  "pt-BR": "português do Brasil",
-  en: "inglês",
-  es: "espanhol",
-  fr: "francês",
-  de: "alemão",
-  ar: "árabe",
-  zh: "chinês simplificado",
-  hi: "hindi",
-  ja: "japonês",
-  ru: "russo",
-};
+// Os idiomas da reunião e os nomes que vão no prompt moram em
+// shared/idioma-da-reuniao.ts (uma função só, nomeDoIdioma). Os nomes antigos
+// seguem exportados para quem já os importa.
+export const MEETING_TRANSCRIPT_LANGUAGES = IDIOMAS_DA_REUNIAO;
 
 function now() {
   return Date.now();
@@ -341,14 +332,19 @@ const ORCAMENTO_DA_TRADUCAO_MS = 200_000;
  * não gasta vaga com a tradução que já está no banco.
  */
 export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string, antesDeChamarAIA?: () => void) {
-  const normalizedLanguage = language === "pt" ? "pt-BR" : language;
-  if (!(normalizedLanguage in MEETING_LANGUAGES)) throw new Error("Idioma de tradução não suportado.");
-  const targetLanguage = MEETING_LANGUAGES[normalizedLanguage as keyof typeof MEETING_LANGUAGES];
+  const normalizedLanguage = idiomaDaReuniao(language);
+  if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
+  const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
   const [transcript] = await db.select().from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
-  if (normalizedLanguage === "pt-BR" || transcript.language === normalizedLanguage) {
+  // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
+  // reunião em inglês "traduzida" para pt-BR voltava em inglês. Reunião antiga
+  // guarda 'pt', e idioma gravado fora da lista conta como pt-BR, o padrão de
+  // quando ela foi gravada.
+  const idiomaOriginal = idiomaDaReuniao(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  if (normalizedLanguage === idiomaOriginal) {
     return { language: normalizedLanguage, text: transcript.transcript, cached: true };
   }
   const [cached] = await db.select().from(meetingTranscriptTranslations)

@@ -146,6 +146,17 @@ describe("Reunião aberta pelo link", () => {
     expect(duble.traduzir.reset).toHaveBeenCalled();
   });
 
+  it("reunião em inglês com a tela em pt-BR: traduz para o pt-BR, e o inglês é o original (G1b)", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "We agreed on Friday.", idioma: "en" } }));
+    abrir();
+    expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "pt-BR" }, expect.anything());
+    expect(screen.getByRole("option", { name: /English \(original\)/ })).toBeInTheDocument();
+    duble.traduzir.mutate.mockClear();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "en" } });
+    expect(duble.traduzir.mutate).not.toHaveBeenCalled();
+    expect(screen.getByText("We agreed on Friday.")).toBeInTheDocument();
+  });
+
   it("com a tela em inglês, já abre pedindo a tradução para o inglês", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
     duble.ver.mockReturnValue(pronta());

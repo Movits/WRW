@@ -1450,7 +1450,7 @@
     "heroTitle": "Asistente de Reuniones",
     "heroSubtitle": "Graba reuniones cortas con consentimiento, revisa la transcripción y confirma los contactos sugeridos.",
     "newMeetingButton": "Nueva reunión",
-    "consentNotice": "Graba solo con el consentimiento de todas las personas. El audio queda solo en tu cuenta, salvo que actives el enlace para compartir la reunión (lo que requiere una nueva autorización de quienes hablaron), y expira después de 30 días.",
+    "consentNotice": "Graba solo con el consentimiento de todas las personas. El audio lo transcribe la IA de Google (Gemini), que puede procesarlo fuera de Brasil y separar lo que dijo cada persona. El audio queda en tu cuenta durante 30 días, y la transcripción hasta que elimines la reunión. Solo tú tienes acceso, salvo que actives el enlace para compartir la reunión (lo que requiere una nueva autorización de quienes hablaron).",
     "loadingList": "Cargando reuniones…",
     "emptyTitle": "No hay reuniones registradas",
     "emptySubtitle": "Inicia una grabación para generar transcripción y sugerencias de contacto.",
@@ -1611,7 +1611,10 @@
       "inAppBrowser": "Desde aquí no se puede instalar: abre esta página en Safari o en Chrome.",
       "unsupportedBrowser": "Para instalar WRW como app, ábrelo en Chrome, Edge o Safari.",
       "androidOtherBrowser": "Para instalar WRW como app, abre esta página en Chrome."
-    }
+    },
+    "meetingLanguageLabel": "Idioma de la reunión",
+    "meetingLanguageHint": "El idioma hablado. La IA transcribe en este idioma, y la transcripción se puede traducir después.",
+    "originalLanguageSuffix": "(original)"
   },
   "connections": {
     "messageSent": "Mensaje enviado",

@@ -118,7 +118,7 @@ describe("Reuniões — a URL escolhe a tela", () => {
     expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Nova reunião/ })).not.toBeInTheDocument();
     // O aviso de privacidade (retenção do áudio) aparece antes de gravar, sem passar pela lista.
-    expect(screen.getByText(/expira após 30 dias/)).toBeInTheDocument();
+    expect(screen.getByText(/O áudio fica na sua conta por 30 dias/)).toBeInTheDocument();
   });
 
   it("fechar a dica de instalação no gravador devolve o foco ao 'Enviar arquivo de áudio'", () => {

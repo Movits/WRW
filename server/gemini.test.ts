@@ -72,6 +72,30 @@ describe("Gemini — o pedido que montamos e a resposta que lemos", () => {
     expect(urlPedida).toContain("models/gemini-3.5-flash:generateContent");
   });
 
+  it("o prompt leva o NOME do idioma, e a resposta devolve o código normalizado", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: "Talk" }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "en-US" });
+    expect(JSON.stringify(corpoPedido)).toContain("O idioma predominante esperado é inglês.");
+    expect(JSON.stringify(corpoPedido)).not.toContain("en-US");
+    expect(resultado.language).toBe("en");
+  });
+
+  it("sem idioma, ou fora dos 10, o prompt não pede idioma e o código é o padrão pt-BR", async () => {
+    for (const language of [undefined, "it"]) {
+      responderCom({ candidates: [{ content: { parts: [{ text: "Fala" }] } }] });
+      const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language });
+      expect(JSON.stringify(corpoPedido)).not.toContain("idioma predominante");
+      expect(resultado.language).toBe("pt-BR");
+    }
+  });
+
+  it("a reunião antiga, gravada como 'pt', pede português do Brasil", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: "Fala" }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "pt" });
+    expect(JSON.stringify(corpoPedido)).toContain("O idioma predominante esperado é português do Brasil.");
+    expect(resultado.language).toBe("pt-BR");
+  });
+
   it("recusa antes de sair de casa quando não há chave", async () => {
     // Falhar cedo e com mensagem clara evita a chamada sair pela metade e voltar
     // como erro genérico do provedor, que é muito mais difícil de diagnosticar.

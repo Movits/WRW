@@ -3,6 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -89,12 +91,30 @@ export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise
   }
 }
 
+// O idioma falado na reunião, normalizado pela função única ('pt' e 'pt-PT'
+// viram 'pt-BR', 'en-US' vira 'en'). A tela antiga, ainda aberta depois do
+// deploy, manda 'pt'; sem idioma vale o padrão. Fora dos 10, recusa: o código
+// é gravado e decide o original da tradução.
+export const idiomaDaReuniaoNaEntrada = z.string().max(12).optional().transform((valor, ctx) => {
+  if (valor === undefined) return IDIOMA_DA_REUNIAO_PADRAO;
+  const idioma = idiomaDaReuniao(valor);
+  if (!idioma) {
+    ctx.addIssue({ code: "custom", message: "Idioma da reunião não suportado." });
+    return z.NEVER;
+  }
+  return idioma;
+});
+
 const createMeetingInput = z.object({
   title: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX),
   contactId: z.number().int().positive().optional().nullable(),
   contextId: z.string().uuid().optional().nullable(),
-  language: z.string().min(2).max(12).default("pt"),
+  language: idiomaDaReuniaoNaEntrada,
   consentGranted: z.literal(true),
+  // A versão do aviso de gravação que a tela mostrou (shared/aviso-de-gravacao.ts).
+  // Opcional: a aba aberta antes do aviso versionado não manda nenhuma, e a
+  // reunião dela fica com a coluna nula, como as anteriores.
+  consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DE_GRAVACAO).optional(),
 });
 
 export const meetingsRouter = router({
@@ -119,6 +139,7 @@ export const meetingsRouter = router({
       status: "recording",
       consentGranted: true,
       consentAt: timestamp,
+      consentNoticeVersion: input.consentNoticeVersion ?? null,
       language: input.language,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -132,7 +153,7 @@ export const meetingsRouter = router({
       audioBase64: z.string().min(20).max(14_000_000),
       mimeType: z.enum(ALLOWED_MEETING_AUDIO_TYPES),
       durationSeconds: z.number().positive().max(MAX_MEETING_DURATION_SECONDS),
-      language: z.string().min(2).max(12).default("pt"),
+      language: idiomaDaReuniaoNaEntrada,
     }))
     .mutation(async ({ ctx, input }) => {
       let result: Awaited<ReturnType<typeof processMeetingRecording>>;
@@ -184,7 +205,7 @@ export const meetingsRouter = router({
     }),
 
   translateTranscript: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid(), language: z.enum(["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"]) }))
+    .input(z.object({ meetingId: z.string().uuid(), language: z.enum(IDIOMAS_DA_REUNIAO) }))
     .mutation(async ({ ctx, input }) => {
       return translatePrivateMeetingTranscript(ctx.user.openId, input.meetingId, input.language);
     }),

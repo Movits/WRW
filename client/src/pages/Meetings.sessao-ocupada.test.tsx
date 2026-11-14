@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import Meetings from "./Meetings";
@@ -207,6 +208,10 @@ describe("Reuniões — o que ocupa a sessão", () => {
     expect(motivoDaOcupacao()).toBe("enviando");
     await act(async () => { envio.criar(); });
     await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+    // A gravação ao vivo leva o idioma escolhido (o da tela, por padrão) e a
+    // versão do aviso de gravação, como o envio de arquivo (G1b e G4).
+    expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "pt-BR", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }));
+    expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "pt-BR" }));
     // O envio vem antes do áudio por enviar, que continua na memória até o fim.
     expect(motivoDaOcupacao()).toBe("enviando");
     await act(async () => {

@@ -8,6 +8,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/const";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
 
 /**
@@ -22,7 +23,6 @@ import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoCom
  * (docs/arquitetura/gravador-de-reunioes.md) junta as duas telas.
  */
 
-type IdiomaDaTraducao = "en" | "es" | "fr" | "de" | "ar" | "zh" | "hi" | "ja" | "ru";
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -69,25 +69,27 @@ export default function ReuniaoAberta() {
     refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
   });
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
-  // Como no detalhe da dona: a tradução começa no idioma da tela, e pt-BR é o
-  // texto original.
+  // Como no detalhe da dona: a tradução começa no idioma da tela, e o idioma
+  // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
   const [idiomaDaTraducao, setIdiomaDaTraducao] = useState(LANGUAGES.some(idioma => idioma.code === idiomaAtual) ? idiomaAtual : "pt-BR");
   const [textoTraduzido, setTextoTraduzido] = useState<string | null>(null);
   const traduzir = trpc.reuniaoAberta.traduzir.useMutation();
   const temTranscricao = !!data?.transcricao;
+  // Reunião antiga guarda 'pt'.
+  const idiomaDoOriginal = idiomaDaReuniao(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O callback do próprio mutate só dispara para o ÚLTIMO pedido: a tradução
   // de um idioma trocado no meio do caminho não sobrescreve a do atual.
   const pedirTraducao = () => traduzir.mutate(
-    { token, language: idiomaDaTraducao as IdiomaDaTraducao },
+    { token, language: idiomaDaTraducao as IdiomaDaReuniao },
     { onSuccess: resultado => setTextoTraduzido(resultado.text) },
   );
   useEffect(() => {
     setTextoTraduzido(null);
     // De volta ao original, o erro da tradução anterior sai junto.
-    if (!temTranscricao || idiomaDaTraducao === "pt-BR") { traduzir.reset(); return; }
+    if (!temTranscricao || idiomaDaTraducao === idiomaDoOriginal) { traduzir.reset(); return; }
     pedirTraducao();
-  }, [temTranscricao, token, idiomaDaTraducao]);
+  }, [temTranscricao, token, idiomaDaTraducao, idiomaDoOriginal]);
 
   if (isError && linkNaoAbre(error)) return <Moldura>
     <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
@@ -99,12 +101,11 @@ export default function ReuniaoAberta() {
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada } = data;
-  const textoNaTela = idiomaDaTraducao === "pt-BR" ? transcricao?.texto : textoTraduzido;
+  const textoNaTela = idiomaDaTraducao === idiomaDoOriginal ? transcricao?.texto : textoTraduzido;
   // O idioma do texto que está na tela, para o leitor de tela e a hifenização;
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
   // tela em árabe continua da esquerda para a direita.
-  const idiomaDoOriginal = transcricao?.idioma === "pt" ? "pt-BR" : transcricao?.idioma ?? undefined;
-  const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== "pt-BR" ? idiomaDaTraducao : idiomaDoOriginal;
+  const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
   return <Moldura>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
     <h1 dir="auto" className="text-3xl font-bold mt-1">{titulo}</h1>
@@ -136,7 +137,7 @@ export default function ReuniaoAberta() {
           <p className="mt-1 text-sm text-amber-100/70">{t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
-              {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}</option>)}
+              {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === idiomaDoOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
         </div>

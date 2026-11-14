@@ -164,6 +164,7 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     banco.transcricaoTrocada = false;
     banco.traducaoGuardada = null;
     banco.insertDuplicado = false;
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", "Fala longa da reunião.", null, "pt-BR", 120, 1000, 1000];
   });
 
   it("dois pedidos da mesma tradução ao mesmo tempo: uma chamada à IA, uma vaga do teto, os dois recebem o texto", async () => {
@@ -230,6 +231,31 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", () => { throw recusa; })).rejects.toBe(recusa);
     expect(invokeLLM).not.toHaveBeenCalled();
     expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(false);
+  });
+
+  it("reunião em inglês: pedir pt-BR TRADUZ (não devolve o inglês), e pedir inglês devolve o original", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", "Long talk from the meeting.", null, "en", 120, 1000, 1000];
+    invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "Fala longa da reunião." } }] });
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt-BR"))
+      .resolves.toEqual({ language: "pt-BR", text: "Fala longa da reunião.", cached: false });
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+    expect(invokeLLM.mock.calls[0][0].messages[0].content).toContain("para português do Brasil");
+    invokeLLM.mockClear();
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en"))
+      .resolves.toEqual({ language: "en", text: "Long talk from the meeting.", cached: true });
+    expect(invokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("reunião antiga gravada como 'pt': pedir pt-BR devolve o original, sem IA", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", "Fala antiga.", null, "pt", 120, 1000, 1000];
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt-BR"))
+      .resolves.toEqual({ language: "pt-BR", text: "Fala antiga.", cached: true });
+    expect(invokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("idioma fora dos 10 é recusado antes de ler o banco", async () => {
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "it")).rejects.toThrow("Idioma de tradução não suportado.");
+    expect(banco.consultas).toHaveLength(0);
   });
 
   it("tradução guardada, idioma da transcrição e pt-BR não vão à IA, e ele não roda", async () => {
