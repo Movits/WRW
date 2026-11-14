@@ -26,6 +26,11 @@ beforeAll(async () => {
   const app = express();
   registrarRotaDasPartes(app, { autenticar, receber });
   app.use(tratarCorpoGrandeDasPartes);
+  // Outra rota com o mesmo tipo de erro: o tratador das partes não a toma para si.
+  app.post("/outra-rota", express.raw({ type: () => true, limit: 10 }), (_req, res) => { res.json({ ok: true }); });
+  app.use((erro: { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(erro.status ?? 500).type("text/plain").send("tratador padrão");
+  });
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
   await new Promise<void>(pronto => { servidor = app.listen(0, "127.0.0.1", () => pronto()); });
@@ -76,6 +81,18 @@ describe("POST /api/reunioes/{id}/partes/{seq}", () => {
     expect(receber).not.toHaveBeenCalled();
   });
 
+  it("sem sessão, o corpo grande nem é lido: 401, e não 413", async () => {
+    autenticar.mockRejectedValue(new Error("Invalid session cookie"));
+    const resposta = await enviar(Buffer.alloc(TAMANHO_MAXIMO_DA_PARTE + 2048));
+    expect(resposta.status).toBe(401);
+  });
+
+  it("falha passageira devolve a vaga do teto: 70 reenvios com o bucket fora nunca viram 429", async () => {
+    receber.mockRejectedValue(new FalhaPassageiraDaParte("bucket"));
+    for (let i = 0; i < 70; i++) expect((await enviar(Buffer.from("x"))).status).toBe(503);
+    expect(receber).toHaveBeenCalledTimes(70);
+  });
+
   it("cadastro não concluído e sessão de cron: 403", async () => {
     autenticar.mockResolvedValue({ openId: "x", onboardingCompleted: false });
     expect(await (await enviar(Buffer.from("x"))).json()).toEqual({ codigo: "CADASTRO_INCOMPLETO" });
@@ -117,6 +134,12 @@ describe("POST /api/reunioes/{id}/partes/{seq}", () => {
     expect(resposta.status).toBe(413);
     expect(await resposta.json()).toEqual({ codigo: "GRANDE_DEMAIS" });
     expect(receber).not.toHaveBeenCalled();
+  });
+
+  it("corpo grande em OUTRA rota segue para o tratador padrão, não vira o JSON das partes", async () => {
+    const resposta = await fetch(`${base}/outra-rota`, { method: "POST", body: Buffer.alloc(100) });
+    expect(resposta.status).toBe(413);
+    expect(await resposta.text()).toBe("tratador padrão");
   });
 
   it("teto de pedidos por dona: o 61º em 10 min é 429 e não recebe", async () => {

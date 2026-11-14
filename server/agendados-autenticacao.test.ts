@@ -38,8 +38,9 @@ const jarra = vi.hoisted(() => {
   const app = {
     set: () => app,
     use: (...args: unknown[]) => {
-      const leitor = (args.at(-1) as { leitor?: string } | undefined)?.leitor;
-      if (leitor) ordem.push(`${leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
+      const ultimo = args.at(-1) as { leitor?: string; name?: string } | undefined;
+      if (ultimo?.leitor) ordem.push(`${ultimo.leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
+      else if (ultimo?.name === "tratarCorpoGrandeDasPartes") ordem.push("tratador das partes");
       return app;
     },
     get: () => app,
@@ -136,6 +137,9 @@ describe("ordem no index.ts real", () => {
     const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
     expect(leitores.length).toBeGreaterThan(5);
     for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
+    // O 413 em JSON da rota: o tratador vem logo depois dela (sem ele, o
+    // Express responderia HTML ao corpo grande).
+    expect(jarra.ordem.indexOf("tratador das partes")).toBe(rota + 1);
   });
 });
 

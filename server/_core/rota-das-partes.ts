@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response } from "express";
 import { ehErroDeBancoIndisponivel, descreverErroDeBanco } from "../banco-indisponivel";
 import { FalhaPassageiraDaParte, RecusaDaParte, receberParte, TAMANHO_MAXIMO_DA_PARTE, type CodigoDaRecusa } from "../fatias-de-reuniao";
 import { criarTeto } from "../assistente-de-texto";
+import { TRPCError } from "@trpc/server";
 import { sdk } from "./sdk";
 
 /**
@@ -45,29 +46,37 @@ type Dependencias = {
 export function registrarRotaDasPartes(app: Express, deps: Dependencias = { autenticar: req => sdk.authenticateRequest(req), receber: receberParte }) {
   app.post(
     ROTA_DAS_PARTES,
-    express.raw({ type: () => true, limit: TAMANHO_MAXIMO_DA_PARTE + 1024 }),
-    async (req: Request, res: Response) => {
+    // Autentica ANTES de ler o corpo: quem não tem sessão recebe 401 sem que o
+    // servidor guarde 16 MB na memória por pedido. A usuária segue em res.locals.
+    async (req: Request, res: Response, next: () => void) => {
       res.setHeader("Cache-Control", "no-store");
-      const responder = (status: number, corpo: Record<string, unknown>) => res.status(status).json(corpo);
-
       let usuaria: Awaited<ReturnType<Dependencias["autenticar"]>>;
       try {
         usuaria = await deps.autenticar(req);
       } catch (erro) {
-        if (ehErroDeBancoIndisponivel(erro)) return responder(503, { codigo: "BANCO_INDISPONIVEL" });
-        return responder(401, { codigo: "SEM_SESSAO" });
+        if (ehErroDeBancoIndisponivel(erro)) return res.status(503).json({ codigo: "BANCO_INDISPONIVEL" });
+        return res.status(401).json({ codigo: "SEM_SESSAO" });
       }
-      if (usuaria.isCron) return responder(403, { codigo: "SEM_SESSAO" });
-      if (!usuaria.onboardingCompleted) return responder(403, { codigo: "CADASTRO_INCOMPLETO" });
+      if (usuaria.isCron) return res.status(403).json({ codigo: "SEM_SESSAO" });
+      if (!usuaria.onboardingCompleted) return res.status(403).json({ codigo: "CADASTRO_INCOMPLETO" });
+      res.locals.usuaria = usuaria;
+      next();
+    },
+    express.raw({ type: () => true, limit: TAMANHO_MAXIMO_DA_PARTE + 1024 }),
+    async (req: Request, res: Response) => {
+      const responder = (status: number, corpo: Record<string, unknown>) => res.status(status).json(corpo);
+      const usuaria = res.locals.usuaria as Awaited<ReturnType<Dependencias["autenticar"]>>;
 
       const meetingId = String(req.params.meetingId ?? "");
       const seq = Number(req.params.seq);
       if (!ID_DA_REUNIAO.test(meetingId) || !/^\d{1,4}$/.test(String(req.params.seq ?? ""))) return responder(400, { codigo: "POSICAO" });
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
 
+      let liberarVaga: () => void;
       try {
-        tetoDasPartes.reservar(usuaria.openId);
-      } catch {
+        liberarVaga = tetoDasPartes.reservar(usuaria.openId);
+      } catch (erro) {
+        if (!(erro instanceof TRPCError) || erro.code !== "TOO_MANY_REQUESTS") throw erro;
         return responder(429, { codigo: "MUITOS_PEDIDOS" });
       }
 
@@ -76,8 +85,10 @@ export function registrarRotaDasPartes(app: Express, deps: Dependencias = { aute
         return responder(resultado.repetida ? 200 : 201, { codigo: "RECEBIDA", seq: resultado.seq, repetida: resultado.repetida });
       } catch (erro) {
         if (erro instanceof RecusaDaParte) return responder(STATUS_DA_RECUSA[erro.codigo], { codigo: erro.codigo });
-        if (erro instanceof FalhaPassageiraDaParte) return responder(503, { codigo: "TENTE_DE_NOVO" });
-        if (ehErroDeBancoIndisponivel(erro)) return responder(503, { codigo: "BANCO_INDISPONIVEL" });
+        // Falha passageira devolve a vaga: o reenvio da mesma parte não pode
+        // gastar o teto enquanto o bucket ou o banco estão fora.
+        if (erro instanceof FalhaPassageiraDaParte) { liberarVaga(); return responder(503, { codigo: "TENTE_DE_NOVO" }); }
+        if (ehErroDeBancoIndisponivel(erro)) { liberarVaga(); return responder(503, { codigo: "BANCO_INDISPONIVEL" }); }
         console.error("[Reuniões] a parte não foi recebida:", descreverErroDeBanco(erro));
         return responder(500, { codigo: "ERRO" });
       }

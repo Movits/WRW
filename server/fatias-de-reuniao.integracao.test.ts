@@ -7,11 +7,19 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 // O bucket é um dublê: o que se prova aqui é o banco (a linha antes do upload,
 // o UNIQUE da posição, os estados) e a chave exata que vai ao bucket.
 const storagePut = vi.hoisted(() => vi.fn());
-vi.mock("./storage", async (original) => ({ ...(await original<typeof import("./storage")>()), storagePut: (...args: unknown[]) => storagePut(...args) }));
+const storageDelete = vi.hoisted(() => vi.fn());
+vi.mock("./storage", async (original) => ({
+  ...(await original<typeof import("./storage")>()),
+  storagePut: (...args: unknown[]) => storagePut(...args),
+  storageDelete: (...args: unknown[]) => storageDelete(...args),
+}));
 
 const { getDb } = await import("./db");
 const { meetingAudioSlices, meetings, users } = await import("../drizzle/schema");
 const { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, RecusaDaParte, receberParte, FalhaPassageiraDaParte } = await import("./fatias-de-reuniao");
+const { deletePrivateMeeting, limparGravacoesVencidas, MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
+const { appRouter } = await import("./routers");
+const { TRPCError } = await import("@trpc/server");
 
 /**
  * A reunião gravada em partes (G5) contra um banco real DE TESTE: sem
@@ -59,6 +67,8 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
   beforeEach(() => {
     storagePut.mockReset();
     storagePut.mockImplementation(async (chave: string) => ({ key: chave, url: `/manus-storage/${chave}` }));
+    storageDelete.mockReset();
+    storageDelete.mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -136,8 +146,9 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
 
   it("até a G13, a soma das partes segue o teto de 10 min da reunião", async () => {
     const { id } = await iniciar();
-    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(400) });
-    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(300) }))).toBe("LONGA_DEMAIS");
+    const primeira = Math.round(MAX_MEETING_DURATION_SECONDS * 0.6);
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(primeira) });
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(MAX_MEETING_DURATION_SECONDS - primeira + 10) }))).toBe("LONGA_DEMAIS");
   });
 
   it("encerrar guarda o total e fecha a reunião para partes novas; repetir o mesmo fim é aceito", async () => {
@@ -157,6 +168,66 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     await receberParte({ ownerId: DONA, meetingId: id, seq: 2, mimeType: "audio/wav", bytes: wav(1) });
     expect(await recusa(encerrarGravacaoEmPartes(DONA, id, 2))).toBe("POSICAO");
     expect(await recusa(encerrarGravacaoEmPartes(OUTRA, id, 3))).toBe("SEM_REUNIAO");
+  });
+
+  it("depois de encerrar, parte além do total é recusada (e a que faltava ainda entra)", async () => {
+    const { id } = await iniciar();
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
+    await encerrarGravacaoEmPartes(DONA, id, 2);
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 2, mimeType: "audio/wav", bytes: wav(1) }))).toBe("POSICAO");
+    expect((await partes(id)).map(p => p.seq)).toEqual([0]);
+  });
+
+  it("excluir a reunião leva as partes: o objeto de cada uma sai do bucket e as linhas saem do banco", async () => {
+    const { id } = await iniciar();
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(1) });
+    const chaves = (await partes(id)).map(p => p.storageKey).sort();
+    expect(await deletePrivateMeeting(DONA, id)).toBe(true);
+    expect(await partes(id)).toHaveLength(0);
+    expect(storageDelete.mock.calls.map(c => c[0]).sort()).toEqual(chaves);
+  });
+
+  it("reunião excluída durante o upload: o objeto que acabou de subir sai também, e a parte é recusada", async () => {
+    const { id } = await iniciar();
+    storagePut.mockImplementation(async (chave: string) => {
+      await deletePrivateMeeting(DONA, id);
+      storageDelete.mockClear();
+      return { key: chave, url: `/manus-storage/${chave}` };
+    });
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) }))).toBe("SEM_REUNIAO");
+    expect(storageDelete).toHaveBeenCalledTimes(1);
+    expect(storageDelete.mock.calls[0][0]).toBe(storagePut.mock.calls[0][0]);
+    expect(await partes(id)).toHaveLength(0);
+  });
+
+  it("a limpeza dos vencidos apaga a parte vencida (objeto e linha) e deixa a que vale", async () => {
+    const { id } = await iniciar();
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(1) });
+    const [vencida] = (await partes(id)).filter(p => p.seq === 0);
+    await (await getDb())!.update(meetingAudioSlices).set({ expiresAt: Date.now() - 1000 }).where(eq(meetingAudioSlices.id, vencida.id));
+    await limparGravacoesVencidas();
+    expect((await partes(id)).map(p => p.seq)).toEqual([1]);
+    expect(storageDelete.mock.calls.map(c => c[0])).toContain(vencida.storageKey);
+  });
+
+  it("os procedimentos: iniciarGravacao cria em partes; encerrarGravacao traduz as recusas em códigos do tRPC", async () => {
+    const caller = appRouter.createCaller({
+      user: { id: 2_000_000_001, openId: DONA, role: "user", onboardingCompleted: true },
+      req: { headers: {}, ip: "203.0.113.9", socket: { remoteAddress: "203.0.113.9" } },
+      res: { status: () => undefined, cookie: () => undefined, clearCookie: () => undefined },
+    } as never);
+    const { id } = await caller.meetings.iniciarGravacao({ title: "Pelo tRPC", consentGranted: true, language: "en-US", consentNoticeVersion: "2026-11-14" });
+    const [linha] = await (await getDb())!.select().from(meetings).where(eq(meetings.id, id));
+    expect(linha).toMatchObject({ audioPipeline: "slices", status: "recording", origem: "gravacao", language: "en" });
+    const codigo = (e: unknown) => (e instanceof TRPCError ? e.code : String(e));
+    expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: crypto.randomUUID(), partes: 1 }).catch(e => e))).toBe("NOT_FOUND");
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 3, mimeType: "audio/wav", bytes: wav(1) });
+    expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 2 }).catch(e => e))).toBe("BAD_REQUEST");
+    expect(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 4 })).toEqual({ partes: 4 });
+    expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 5 }).catch(e => e))).toBe("CONFLICT");
+    expect(codigo(await caller.meetings.iniciarGravacao({ title: "Sem aviso", consentGranted: false as never }).catch(e => e))).toBe("BAD_REQUEST");
   });
 
   it("reunião do envio único não recebe partes", async () => {

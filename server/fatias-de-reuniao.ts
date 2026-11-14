@@ -2,8 +2,7 @@ import crypto from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
-import { ehColisaoDeChave } from "./network-codigo-anonimo";
-import { storagePut } from "./storage";
+import { storageDelete, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { ALLOWED_MEETING_AUDIO_TYPES, MAX_MEETING_DURATION_SECONDS, MEETING_AUDIO_TTL_MS } from "./meeting-service";
 
@@ -51,23 +50,32 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
   if (duracao > DURACAO_MAXIMA_DA_PARTE_SEGUNDOS) throw new RecusaDaParte("LONGA_DEMAIS", "Parte de áudio longa demais.");
 
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status, pipeline: meetings.audioPipeline, consentimento: meetings.consentGranted })
-    .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  // Reunião de outra dona e reunião que não existe respondem igual.
-  if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
-  if (reuniao.pipeline !== "slices" || !reuniao.consentimento || !["recording", "uploading"].includes(reuniao.status)) {
-    throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
-  }
-
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
   const agora = Date.now();
-  let linha = await lerParte(db, meetingId, seq);
-  if (linha && linha.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
-  if (linha && linha.status !== "uploading") return { seq, repetida: true };
 
-  if (!linha) {
+  // A decisão (a reunião aceita esta parte? cabe no teto? a posição é nova?) e o
+  // INSERT correm numa transação com a linha da reunião TRAVADA (FOR UPDATE):
+  // o encerrar trava a mesma linha, então uma parte além do total não entra
+  // entre a conferência e o fim, e duas partes ao mesmo tempo não passam juntas
+  // pelo teto de tempo.
+  const decisao = await db.transaction(async tx => {
+    const [reuniao] = await tx.select({
+      status: meetings.status, pipeline: meetings.audioPipeline, consentimento: meetings.consentGranted, esperadas: meetings.expectedSlices,
+    }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
+    // Reunião de outra dona e reunião que não existe respondem igual.
+    if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
+    if (reuniao.pipeline !== "slices" || !reuniao.consentimento || !["recording", "uploading"].includes(reuniao.status)) {
+      throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
+    }
+    // Depois do fim, só as partes que faltavam até o total declarado.
+    if (reuniao.esperadas !== null && seq >= reuniao.esperadas) throw new RecusaDaParte("POSICAO", "Parte além do total da gravação.");
+
+    const existente = await lerParte(tx, meetingId, seq);
+    if (existente && existente.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
+    if (existente) return existente.status === "uploading" ? { linha: existente } : { repetida: true as const };
+
     // O teto de tempo da reunião em partes segue o do envio único até a G13.
-    const [soma] = await db.select({ ms: sql<number>`coalesce(sum(${meetingAudioSlices.durationMs}), 0)` })
+    const [soma] = await tx.select({ ms: sql<number>`coalesce(sum(${meetingAudioSlices.durationMs}), 0)` })
       .from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId));
     if (Number(soma?.ms ?? 0) / 1000 + duracao > MAX_MEETING_DURATION_SECONDS + 5) {
       throw new RecusaDaParte("LONGA_DEMAIS", "A gravação passou do limite de tempo por reunião.");
@@ -82,18 +90,13 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
       storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType, sizeBytes: bytes.length, sha256,
       durationMs: Math.round(duracao * 1000), expiresAt: agora + MEETING_AUDIO_TTL_MS, createdAt: agora, updatedAt: agora,
     };
-    try {
-      await db.insert(meetingAudioSlices).values(nova);
-      linha = nova;
-    } catch (erro) {
-      // Dois envios da mesma parte ao mesmo tempo: o UNIQUE (reunião, posição)
-      // decide quem cria; o outro segue pela linha que já existe.
-      if (!ehColisaoDeChave(erro)) throw erro;
-      linha = await lerParte(db, meetingId, seq);
-      if (!linha || linha.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
-      if (linha.status !== "uploading") return { seq, repetida: true };
-    }
-  }
+    // Com a reunião travada, dois envios da mesma parte se enfileiram aqui: o
+    // segundo já acha a linha acima. O UNIQUE (reunião, posição) segue de guarda.
+    await tx.insert(meetingAudioSlices).values(nova);
+    return { linha: nova };
+  });
+  if ("repetida" in decisao) return { seq, repetida: true };
+  const linha = decisao.linha;
 
   try {
     await storagePut(linha.storageKey, bytes, mimeType, { chaveExata: true });
@@ -101,12 +104,25 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     console.error("[Reuniões] o bucket recusou uma parte do áudio:", erro instanceof Error ? erro.message : erro);
     throw new FalhaPassageiraDaParte("Não foi possível guardar esta parte do áudio agora.", { cause: erro });
   }
-  await db.update(meetingAudioSlices).set({ status: "received", updatedAt: Date.now() })
+  const recebida = await db.update(meetingAudioSlices).set({ status: "received", updatedAt: Date.now() })
     .where(and(eq(meetingAudioSlices.id, linha.id), eq(meetingAudioSlices.status, "uploading")));
+  if (!linhasAlcancadas(recebida)) {
+    // A linha sumiu (a reunião foi excluída durante o upload) ou outro envio
+    // simultâneo já a marcou. Sumiu: o objeto que acabou de subir sai também,
+    // para nenhuma voz ficar no bucket sem ponteiro.
+    const ainda = await lerParte(db, meetingId, seq);
+    if (!ainda) {
+      await storageDelete(linha.storageKey).catch(erro => console.warn("[Reuniões] a parte de uma reunião excluída ficou no bucket:", erro instanceof Error ? erro.message : erro));
+      throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
+    }
+    return { seq, repetida: true };
+  }
   return { seq, repetida: false };
 }
 
-async function lerParte(db: Awaited<ReturnType<typeof exigirDb>>, meetingId: string, seq: number) {
+type LeitorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "select">;
+
+async function lerParte(db: LeitorDoBanco, meetingId: string, seq: number) {
   const [linha] = await db.select({
     id: meetingAudioSlices.id, sha256: meetingAudioSlices.sha256, status: meetingAudioSlices.status, storageKey: meetingAudioSlices.storageKey,
   }).from(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.seq, seq))).limit(1);
@@ -141,22 +157,26 @@ export async function iniciarReuniaoEmPartes(ownerId: string, entrada: {
 export async function encerrarGravacaoEmPartes(ownerId: string, meetingId: string, partes: number) {
   if (!Number.isInteger(partes) || partes < 1 || partes > PARTES_NO_MAXIMO) throw new RecusaDaParte("POSICAO", "Número de partes inválido.");
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status, pipeline: meetings.audioPipeline, esperadas: meetings.expectedSlices })
-    .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
-  if (reuniao.pipeline !== "slices") throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
-  if (reuniao.status === "uploading" && reuniao.esperadas === partes) return { partes };
-  // Uma parte que já chegou além do total declarado seria descartada pela
-  // montagem: o total não pode ser menor que a maior posição recebida.
-  const [maior] = await db.select({ seq: sql<number | null>`max(${meetingAudioSlices.seq})` })
-    .from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId));
-  if (maior?.seq !== null && maior?.seq !== undefined && Number(maior.seq) >= partes) {
-    throw new RecusaDaParte("POSICAO", "Chegaram mais partes do que a gravação diz ter.");
-  }
-  const resultado = await db.update(meetings).set({ status: "uploading", expectedSlices: partes, updatedAt: Date.now() })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"), eq(meetings.status, "recording")));
-  if (!linhasAlcancadas(resultado)) throw new RecusaDaParte("FORA_DO_ESTADO", "Esta gravação já foi encerrada.");
-  return { partes };
+  // Trava a linha da reunião, como receberParte: nenhuma parte entra entre a
+  // conferência da maior posição e o fim.
+  return db.transaction(async tx => {
+    const [reuniao] = await tx.select({ status: meetings.status, pipeline: meetings.audioPipeline, esperadas: meetings.expectedSlices })
+      .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
+    if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
+    if (reuniao.pipeline !== "slices") throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
+    if (reuniao.status === "uploading" && reuniao.esperadas === partes) return { partes };
+    if (reuniao.status !== "recording") throw new RecusaDaParte("FORA_DO_ESTADO", "Esta gravação já foi encerrada.");
+    // Uma parte que já chegou além do total declarado seria descartada pela
+    // montagem: o total não pode ser menor que a maior posição recebida.
+    const [maior] = await tx.select({ seq: sql<number | null>`max(${meetingAudioSlices.seq})` })
+      .from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId));
+    if (maior?.seq !== null && maior?.seq !== undefined && Number(maior.seq) >= partes) {
+      throw new RecusaDaParte("POSICAO", "Chegaram mais partes do que a gravação diz ter.");
+    }
+    await tx.update(meetings).set({ status: "uploading", expectedSlices: partes, updatedAt: Date.now() })
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
+    return { partes };
+  });
 }
 
 function linhasAlcancadas(resultado: unknown): number {

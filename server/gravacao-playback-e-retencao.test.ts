@@ -379,6 +379,8 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       [schema.meetingTranscripts, derivadaDaReuniaoDaDona("meeting_transcripts")],
       [schema.meetingTranscriptTranslations, derivadaDaReuniaoDaDona("meeting_transcript_translations")],
       [schema.meetingRecordings, derivadaDaReuniaoDaDona("meeting_recordings")],
+      // As partes da reunião gravada em partes (G5) são áudio também.
+      [schema.meetingAudioSlices, derivadaDaReuniaoDaDona("meeting_audio_slices")],
       [schema.meetings, REUNIAO_DA_DONA],
     ]);
     expect(delecoes).toHaveLength(esperado.size);
@@ -418,7 +420,7 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
     // e a linha da reunião só sai por último, depois dos derivados
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(7);
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(8);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 
