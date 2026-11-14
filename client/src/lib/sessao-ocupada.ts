@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { apagarTodasAsPartes } from "./partes-no-aparelho";
 
 /**
  * Sessão ocupada (PR S do gravador, docs/arquitetura/gravador-de-reunioes.md).
@@ -63,6 +64,10 @@ export function ocupar(motivo: MotivoDaOcupacao): () => void {
  * components/SairDaConta.test.tsx.
  */
 export function liberarTodas() {
+  // A cópia das partes da gravação no aparelho (G9) é voz de quem participou:
+  // o fim da sessão nesta aba (Sair, excluir a conta) a apaga, mesmo sem nada
+  // ocupado agora.
+  void apagarTodasAsPartes().catch(() => {});
   if (abertas.size === 0) return;
   abertas.clear();
   liberandoPeloFimDaSessao = true;

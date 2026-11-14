@@ -36,6 +36,14 @@ export type OpcoesDoGravador = {
    */
   podeGravar?: () => boolean;
   aoTerminar: (audio: AudioGravado) => void;
+  /**
+   * Gravação em partes (G9): a cada `fatiaSegundos` o gravador fecha a parte e
+   * abre a seguinte no MESMO microfone, sem parar a gravação, e cada parte (um
+   * arquivo válido por si) sai por `aoFecharParte`, a última com `ultima`. A
+   * última também sai por `aoTerminar`, como antes.
+   */
+  fatiaSegundos?: number;
+  aoFecharParte?: (parte: AudioGravado & { seq: number; ultima: boolean }) => void;
   /** Microfone negado, ausente ou ocupado, ou o gravador recusado. Não chega a quem já saiu da tela. */
   aoFalhar?: (erro: unknown) => void;
 };
@@ -75,6 +83,10 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // Só o microfone que o hook abriu: o MediaStream de fora é de quem o entregou.
   const microfone = useRef<MediaStream | null>(null);
   const inicio = useRef(0);
+  // Na gravação em partes: quando a parte atual começou, e se o stop em curso é
+  // a troca de parte (e não o fim da gravação).
+  const inicioDaParte = useRef(0);
+  const trocandoDeParte = useRef(false);
   // Cada pedido de microfone leva um número. Sair da tela ou descartar troca o
   // número, e o microfone que o navegador entregar depois, para um pedido
   // velho, é solto na hora.
@@ -93,6 +105,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   function parar() {
     const atual = gravador.current;
     if (atual?.state !== "recording") return;
+    trocandoDeParte.current = false;
     mudarEstado("finalizando");
     atual.stop();
   }
@@ -129,22 +142,39 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       }
       const mimeType = escolherMimeDeGravacao(tipo => MediaRecorder.isTypeSupported(tipo));
       const audioBitsPerSecond = atuais.current.bitsPorSegundo;
-      const novo = mimeType ? new MediaRecorder(fluxo, { mimeType, audioBitsPerSecond }) : new MediaRecorder(fluxo, { audioBitsPerSecond });
-      // Os pedaços são DESTA gravação: nenhum gravador empurra para a lista de outro.
-      const pedacos: Blob[] = [];
       const comecouEm = Date.now();
-      novo.ondataavailable = evento => { if (evento.data.size) pedacos.push(evento.data); };
-      novo.onstop = () => {
-        pararTrilhas(aberto);
-        if (microfone.current === aberto) microfone.current = null;
-        if (gravador.current === novo) gravador.current = null;
-        const blob = new Blob(pedacos, { type: novo.mimeType || "audio/webm" });
-        mudarEstado("parado");
-        setSegundos(0);
-        atuais.current.aoTerminar({ blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - comecouEm });
+      // Uma parte: um MediaRecorder novo no mesmo fluxo, com os pedaços SÓ dela
+      // (nenhum gravador empurra para a lista de outro). Na gravação de uma
+      // parte só (o ditado, a voz), é o gravador de sempre.
+      const abrirParte = (seq: number) => {
+        const novo = mimeType ? new MediaRecorder(fluxo, { mimeType, audioBitsPerSecond }) : new MediaRecorder(fluxo, { audioBitsPerSecond });
+        const pedacos: Blob[] = [];
+        const parteComecouEm = Date.now();
+        novo.ondataavailable = evento => { if (evento.data.size) pedacos.push(evento.data); };
+        novo.onstop = () => {
+          const blob = new Blob(pedacos, { type: novo.mimeType || "audio/webm" });
+          const audio = { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - parteComecouEm };
+          // Troca de parte: a gravação continua, já na parte seguinte.
+          if (trocandoDeParte.current && gravador.current === novo) {
+            trocandoDeParte.current = false;
+            abrirParte(seq + 1);
+            atuais.current.aoFecharParte?.({ ...audio, seq, ultima: false });
+            return;
+          }
+          pararTrilhas(aberto);
+          if (microfone.current === aberto) microfone.current = null;
+          if (gravador.current === novo) gravador.current = null;
+          mudarEstado("parado");
+          setSegundos(0);
+          atuais.current.aoFecharParte?.({ ...audio, seq, ultima: true });
+          // Fora do modo em partes, a duração é a da gravação inteira, como antes.
+          atuais.current.aoTerminar(atuais.current.fatiaSegundos ? audio : { ...audio, duracaoMs: Date.now() - comecouEm });
+        };
+        novo.start(FATIA_MS);
+        gravador.current = novo;
+        inicioDaParte.current = parteComecouEm;
       };
-      novo.start(FATIA_MS);
-      gravador.current = novo;
+      abrirParte(0);
       microfone.current = aberto;
       inicio.current = comecouEm;
       setSegundos(0);
@@ -171,7 +201,13 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       const limite = atuais.current.limiteSegundos;
       const decorridos = Math.floor((Date.now() - inicio.current) / 1000);
       setSegundos(Math.min(limite, decorridos));
-      if (decorridos >= limite) parar();
+      if (decorridos >= limite) return parar();
+      const fatia = atuais.current.fatiaSegundos;
+      const atual = gravador.current;
+      if (fatia && atual?.state === "recording" && !trocandoDeParte.current && Date.now() - inicioDaParte.current >= fatia * 1000) {
+        trocandoDeParte.current = true;
+        atual.stop();
+      }
     }, RELOGIO_MS);
     return () => window.clearInterval(relogio);
   }, [estado]);

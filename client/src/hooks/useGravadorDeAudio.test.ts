@@ -388,3 +388,41 @@ describe("useGravadorDeAudio — a sessão ocupada", () => {
     expect(sessaoOcupada()).toBe(false);
   });
 });
+
+describe("useGravadorDeAudio — gravação em partes (G9)", () => {
+  it("a cada fatiaSegundos fecha a parte e abre a seguinte no MESMO microfone, sem parar a gravação", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_500); });
+      expect(gravadores).toHaveLength(2);
+      expect(gravadores[1].fluxo).toBe(gravadores[0].fluxo);
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, mimeType: "audio/mp4" });
+      expect(result.current.estado).toBe("gravando");
+      expect(trilha.stop).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(100_000); });
+      act(() => result.current.parar());
+      expect(aoFecharParte).toHaveBeenCalledTimes(2);
+      expect(aoFecharParte.mock.calls[1][0]).toMatchObject({ seq: 1, ultima: true });
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(trilha.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sem fatiaSegundos, é a gravação de sempre: uma parte só, com a duração inteira", async () => {
+    navegadorQueGrava(["audio/mp4"]);
+    const aoFecharParte = vi.fn();
+    const { result, aoTerminar } = montar({ aoFecharParte });
+    await act(async () => { await result.current.comecar(); });
+    act(() => result.current.parar());
+    expect(gravadores).toHaveLength(1);
+    expect(aoFecharParte).toHaveBeenCalledWith(expect.objectContaining({ seq: 0, ultima: true }));
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+  });
+});
