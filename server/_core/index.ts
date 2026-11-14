@@ -15,6 +15,7 @@ import { montarDiretivasCsp } from "./csp";
 import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
+import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
 
@@ -193,6 +194,13 @@ async function startServer() {
   // diz se o CF-Connecting-IP chega (ver ip-da-cliente.ts).
   if (process.env.RENDER === "true") app.use("/api/trpc", criarDiagnosticoDoIp());
   app.use("/api/trpc", apiLimiter);
+
+  // As partes da reunião gravada em partes chegam em binário (G5): a rota tem o
+  // próprio leitor de corpo (express.raw, até 16 MB) e PRECISA vir antes do
+  // express.json e do urlencoded, que senão leriam o corpo primeiro. Guarda:
+  // server/agendados-autenticacao.test.ts confere a ordem no index.ts real.
+  registrarRotaDasPartes(app);
+  app.use(tratarCorpoGrandeDasPartes);
 
   // Uploads dentro de um LOTE do tRPC ("/api/trpc/a,b"): os recortes por
   // caminho abaixo não casam com a lista; este middleware reconhece cada
