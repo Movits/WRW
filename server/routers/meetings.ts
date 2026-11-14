@@ -28,6 +28,7 @@ import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO
 import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
+import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -146,6 +147,29 @@ export const meetingsRouter = router({
     });
     return { id };
   }),
+
+  // A reunião gravada em partes (G5): nasce no início da gravação, cada parte
+  // chega pela rota binária (server/_core/rota-das-partes.ts) e o fim diz
+  // quantas partes houve. A tela que grava em partes é a G9.
+  iniciarGravacao: protectedProcedure.input(createMeetingInput.extend({
+    origem: z.enum(["gravacao", "arquivo", "aba"]).default("gravacao"),
+  })).mutation(({ ctx, input }) => iniciarReuniaoEmPartes(ctx.user.openId, {
+    title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
+    origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+  })),
+
+  encerrarGravacao: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), partes: z.number().int().min(1).max(PARTES_NO_MAXIMO) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await encerrarGravacaoEmPartes(ctx.user.openId, input.meetingId, input.partes);
+      } catch (erro) {
+        if (erro instanceof RecusaDaParte) {
+          throw new TRPCError({ code: erro.codigo === "SEM_REUNIAO" ? "NOT_FOUND" : erro.codigo === "POSICAO" ? "BAD_REQUEST" : "CONFLICT", message: erro.message });
+        }
+        throw erro;
+      }
+    }),
 
   submitRecording: protectedProcedure
     .input(z.object({

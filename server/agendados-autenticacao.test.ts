@@ -26,17 +26,28 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const jarra = vi.hoisted(() => {
   type Handler = (req: unknown, res: unknown) => Promise<unknown>;
   const rotas = new Map<string, Handler>();
+  // A ordem do que o index.ts monta: a rota das partes (G5) tem de vir antes
+  // do express.json e do urlencoded, que leriam o corpo binário primeiro.
+  const ordem: string[] = [];
+  const leitorJson = Object.assign((_req: unknown, _res: unknown, next?: () => void) => next?.(), { leitor: "json" });
+  const leitorUrlencoded = Object.assign((_req: unknown, _res: unknown, next?: () => void) => next?.(), { leitor: "urlencoded" });
   let servidorNoAr: () => void = () => {};
   let subidaFalhou: (erro: unknown) => void = () => {};
   const noAr = new Promise<void>((resolve, reject) => { servidorNoAr = resolve; subidaFalhou = reject; });
   const passa = (_req: unknown, _res: unknown, next?: () => void) => next?.();
   const app = {
     set: () => app,
-    use: () => app,
+    use: (...args: unknown[]) => {
+      const ultimo = args.at(-1) as { leitor?: string; name?: string } | undefined;
+      if (ultimo?.leitor) ordem.push(`${ultimo.leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
+      else if (ultimo?.name === "tratarCorpoGrandeDasPartes") ordem.push("tratador das partes");
+      return app;
+    },
     get: () => app,
-    post: (caminho: string, handler: Handler) => { rotas.set(caminho, handler); return app; },
+    // O último argumento é o handler: a rota das partes passa o leitor de corpo antes dele.
+    post: (caminho: string, ...handlers: Handler[]) => { rotas.set(caminho, handlers[handlers.length - 1]); ordem.push(`post ${caminho}`); return app; },
   };
-  return { rotas, noAr, servidorNoAr: () => servidorNoAr(), subidaFalhou: (erro: unknown) => subidaFalhou(erro), passa, app };
+  return { rotas, ordem, leitorJson, leitorUrlencoded, noAr, servidorNoAr: () => servidorNoAr(), subidaFalhou: (erro: unknown) => subidaFalhou(erro), passa, app };
 });
 
 const authenticateRequest = vi.fn();
@@ -44,7 +55,7 @@ vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest: (...args: unknown[])
 
 // --- a jarra: o que startServer toca e não é o que está em teste ---
 vi.mock("express", () => {
-  const fabrica = Object.assign(() => jarra.app, { json: () => jarra.passa, urlencoded: () => jarra.passa, static: () => jarra.passa });
+  const fabrica = Object.assign(() => jarra.app, { json: () => jarra.leitorJson, urlencoded: () => jarra.leitorUrlencoded, raw: () => jarra.passa, static: () => jarra.passa });
   return { default: fabrica, ...fabrica };
 });
 vi.mock("http", () => {
@@ -71,6 +82,10 @@ vi.mock("./security", () => ({
 }));
 const limparGravacoesVencidas = vi.fn(async () => ({ encontradas: 0, apagadas: 0 }));
 const marcarReunioesInterrompidas = vi.fn(async () => ({ encontradas: 0, marcadas: 0 }));
+// A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
+vi.mock("./fatias-de-reuniao", () => ({
+  receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
+}));
 vi.mock("./meeting-service", () => ({
   limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...(args as [])),
   marcarReunioesInterrompidas: (...args: unknown[]) => marcarReunioesInterrompidas(...(args as [])),
@@ -114,6 +129,19 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => { vi.restoreAllMocks(); });
+
+describe("ordem no index.ts real", () => {
+  it("a rota binária das partes (G5) é montada ANTES de todo express.json e do urlencoded", () => {
+    const rota = jarra.ordem.indexOf("post /api/reunioes/:meetingId/partes/:seq");
+    expect(rota).toBeGreaterThanOrEqual(0);
+    const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
+    expect(leitores.length).toBeGreaterThan(5);
+    for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
+    // O 413 em JSON da rota: o tratador vem logo depois dela (sem ele, o
+    // Express responderia HTML ao corpo grande).
+    expect(jarra.ordem.indexOf("tratador das partes")).toBe(rota + 1);
+  });
+});
 
 describe("autenticarCron — sem sessão é 401, usuária comum é 403, cron passa", () => {
   it("cookie ausente ou inválido: 401 (não 500) e o endpoint não segue", async () => {
