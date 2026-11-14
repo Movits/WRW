@@ -1800,7 +1800,8 @@
     "sairAudioNaoEnviado": "Hay un audio grabado en esta pestaña que todavía no se envió.",
     "sairPerdeOAudio": "Si cierras sesión ahora, ese audio se perderá.",
     "continuarAqui": "Seguir aquí",
-    "sairMesmoAssim": "Cerrar sesión de todos modos"
+    "sairMesmoAssim": "Cerrar sesión de todos modos",
+    "versaoNovaDepoisDoEnvio": "Hay una versión nueva de WRW. Esta página se actualizará sola cuando se haya enviado el audio."
   },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",

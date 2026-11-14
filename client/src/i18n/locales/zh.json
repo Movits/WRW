@@ -1800,7 +1800,8 @@
     "sairAudioNaoEnviado": "此标签页中有一段已录制但尚未发送的音频。",
     "sairPerdeOAudio": "如果现在退出登录，这段音频将会丢失。",
     "continuarAqui": "留在此页",
-    "sairMesmoAssim": "仍然退出登录"
+    "sairMesmoAssim": "仍然退出登录",
+    "versaoNovaDepoisDoEnvio": "WRW 有新版本。音频发送完成后，此页面会自动刷新。"
   },
   "errorBoundary": {
     "title": "发生了意外情况",

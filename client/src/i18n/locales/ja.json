@@ -1800,7 +1800,8 @@
     "sairAudioNaoEnviado": "このタブには、まだ送信していない録音があります。",
     "sairPerdeOAudio": "今サインアウトすると、この音声は失われます。",
     "continuarAqui": "このまま続ける",
-    "sairMesmoAssim": "それでもサインアウト"
+    "sairMesmoAssim": "それでもサインアウト",
+    "versaoNovaDepoisDoEnvio": "WRW の新しいバージョンがあります。音声の送信が終わると、このページは自動で更新されます。"
   },
   "errorBoundary": {
     "title": "予期しないエラーが発生しました",

@@ -1800,7 +1800,8 @@
     "sairAudioNaoEnviado": "في علامة التبويب هذه مقطع صوتي مسجّل لم يُرسَل بعد.",
     "sairPerdeOAudio": "إذا سجّلت الخروج الآن، فسيضيع هذا المقطع الصوتي.",
     "continuarAqui": "البقاء هنا",
-    "sairMesmoAssim": "تسجيل الخروج على أي حال"
+    "sairMesmoAssim": "تسجيل الخروج على أي حال",
+    "versaoNovaDepoisDoEnvio": "يتوفر إصدار جديد من WRW. ستتحدّث هذه الصفحة تلقائيًا بعد إرسال التسجيل الصوتي."
   },
   "errorBoundary": {
     "title": "حدث خطأ غير متوقع",
