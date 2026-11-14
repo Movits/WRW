@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "Wenn Sie sich jetzt abmelden, geht diese Aufnahme verloren.",
     "continuarAqui": "Hier bleiben",
     "sairMesmoAssim": "Trotzdem abmelden",
-    "versaoNovaDepoisDoEnvio": "Es gibt eine neue Version von WRW. Diese Seite aktualisiert sich von selbst, sobald die Audioaufnahme gesendet wurde."
+    "versaoNovaDepoisDoEnvio": "Es gibt eine neue Version von WRW. Diese Seite aktualisiert sich von selbst, sobald die Audioaufnahme gesendet wurde.",
+    "sairFalhou": "Der Server hat das Ende der Sitzung nicht bestätigt. Wenn Ihr Konto noch angemeldet erscheint, melden Sie sich erneut ab, sobald die Verbindung wieder steht."
   },
   "errorBoundary": {
     "title": "Etwas Unerwartetes ist passiert",

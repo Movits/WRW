@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "Si cierras sesión ahora, ese audio se perderá.",
     "continuarAqui": "Seguir aquí",
     "sairMesmoAssim": "Cerrar sesión de todos modos",
-    "versaoNovaDepoisDoEnvio": "Hay una versión nueva de WRW. Esta página se actualizará sola cuando se haya enviado el audio."
+    "versaoNovaDepoisDoEnvio": "Hay una versión nueva de WRW. Esta página se actualizará sola cuando se haya enviado el audio.",
+    "sairFalhou": "El servidor no confirmó el cierre de la sesión. Si tu cuenta sigue apareciendo abierta, vuelve a cerrar sesión cuando vuelva la conexión."
   },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",

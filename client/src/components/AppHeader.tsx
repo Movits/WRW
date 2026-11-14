@@ -13,8 +13,9 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useSairDaConta } from "@/components/SairDaConta";
+import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
+import { TRPCClientError } from "@trpc/client";
 import { LANGUAGES } from "@/i18n";
 
 // Header único da área logada. Antes, cada página montava o seu: eram 16
@@ -82,8 +83,26 @@ export function GlobalMenu() {
   const { user, logout } = useAuth();
   const [, navigate] = useLocation();
   const { t } = useTranslation();
+  const avisarQueSairFalhou = useAvisoDeSairFalhou();
+  // Depois do auth.logout do menu, o logout do useAuth limpa a sessão desta aba
+  // (no finally dele, de propósito: computador compartilhado). Ele chama o
+  // servidor de novo, já sem cookie; a falha dessa segunda chamada não diz nada
+  // sobre a revogação e não vira aviso.
+  //
+  // Se a revogação falhou (banco fora do ar, servidor sem resposta), a dona vê
+  // o aviso, e a aba sai assim mesmo. Com o banco fora, o servidor já apagou o
+  // cookie e a sessão desta aba acabou; sem resposta do servidor, o cookie
+  // fica, a conta volta a aparecer aberta, e o aviso pede para sair de novo.
+  // "Não autenticada" não é falha: não havia sessão para revogar (o useAuth
+  // também a deixa passar).
   const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => { logout(); navigate("/"); },
+    onSuccess: () => { logout().catch(() => undefined); navigate("/"); },
+    onError: erro => {
+      const semSessao = erro instanceof TRPCClientError && erro.data?.code === "UNAUTHORIZED";
+      if (!semSessao) avisarQueSairFalhou();
+      logout().catch(() => undefined);
+      navigate("/");
+    },
   });
   // Com gravação, envio ou áudio por enviar nesta aba, o Sair confirma antes
   // (components/SairDaConta.tsx); sem nada disso, sai direto, como antes.

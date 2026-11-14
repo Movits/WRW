@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "If you sign out now, that audio will be lost.",
     "continuarAqui": "Stay here",
     "sairMesmoAssim": "Sign out anyway",
-    "versaoNovaDepoisDoEnvio": "A new version of WRW is available. This page will refresh on its own once the audio has been sent."
+    "versaoNovaDepoisDoEnvio": "A new version of WRW is available. This page will refresh on its own once the audio has been sent.",
+    "sairFalhou": "The server didn't confirm that your session ended. If your account still shows as signed in, sign out again once the connection is back."
   },
   "errorBoundary": {
     "title": "Something unexpected happened",

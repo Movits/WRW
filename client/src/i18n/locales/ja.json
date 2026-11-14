@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "今サインアウトすると、この音声は失われます。",
     "continuarAqui": "このまま続ける",
     "sairMesmoAssim": "それでもサインアウト",
-    "versaoNovaDepoisDoEnvio": "WRW の新しいバージョンがあります。音声の送信が終わると、このページは自動で更新されます。"
+    "versaoNovaDepoisDoEnvio": "WRW の新しいバージョンがあります。音声の送信が終わると、このページは自動で更新されます。",
+    "sairFalhou": "サーバーでセッションの終了を確認できませんでした。アカウントがまだサインイン中と表示される場合は、接続が戻ってからもう一度サインアウトしてください。"
   },
   "errorBoundary": {
     "title": "予期しないエラーが発生しました",

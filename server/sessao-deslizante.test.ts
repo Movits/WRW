@@ -26,6 +26,8 @@ const banco = vi.hoisted(() => ({
   atualizacoes: [] as Record<string, unknown>[],
   /** Os valores do WHERE de cada UPDATE, na ordem. */
   filtros: [] as unknown[][],
+  /** O WHERE inteiro (SQL e valores) de cada UPDATE, na ordem. */
+  condicoes: [] as { sql: string; params: unknown[] }[],
   /** O próximo UPDATE falha como o banco fora do ar. */
   falhar: false,
 }));
@@ -43,7 +45,9 @@ vi.mock("./db", () => ({
           if (banco.falhar) throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
           banco.atualizacoes.push(valores);
           const { MySqlDialect } = await import("drizzle-orm/mysql-core");
-          banco.filtros.push(new MySqlDialect().sqlToQuery(condicao as never).params);
+          const consulta = new MySqlDialect().sqlToQuery(condicao as never);
+          banco.filtros.push(consulta.params);
+          banco.condicoes.push({ sql: consulta.sql, params: consulta.params });
         },
       }),
     }),
@@ -62,6 +66,15 @@ import { createContext } from "./_core/context";
 import { ForbiddenError } from "@shared/_core/errors";
 import { BancoIndisponivel } from "./banco-indisponivel";
 import { authRouter } from "./routers/auth";
+import { eq } from "drizzle-orm";
+import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { sessions } from "../drizzle/schema";
+
+/** O WHERE que só toca a linha da sessão deste token: `session_token = ?` com o valor dele. */
+function soEstaSessao(sessionToken: string) {
+  const { sql, params } = new MySqlDialect().sqlToQuery(eq(sessions.sessionToken, sessionToken));
+  return { sql, params };
+}
 
 const SEGREDO = new TextEncoder().encode(process.env.JWT_SECRET);
 const HORA = 60 * 60 * 1000;
@@ -102,6 +115,7 @@ beforeEach(() => {
   banco.atualizacoes = [];
   banco.falhar = false;
   banco.filtros = [];
+  banco.condicoes = [];
   autenticar.mockReset();
 });
 
@@ -145,6 +159,39 @@ describe("renovarCookieDaSessao: token e cookie novos uma vez por dia", () => {
     expect(opcoes).toMatchObject({ httpOnly: true, maxAge: DURACAO_DA_SESSAO_MS });
   });
 
+  /**
+   * O limiar de um dia, nos dois lados e em cima dele. Renova quando o que
+   * resta do token é de no máximo 90 - 1 dias (`restaMs > DURACAO - RENOVAR`
+   * devolve sem renovar). Em cima do limite renova: o caso que separa o `>` de
+   * um `>=`. O relógio fica parado num segundo cheio, porque o exp do JWT é em
+   * segundos e o teste precisa do resto exato.
+   */
+  describe("o limiar de um dia", () => {
+    const AGORA = Date.parse("2026-11-14T12:00:00Z");
+    beforeEach(() => {
+      vi.useFakeTimers({ now: AGORA, toFake: ["Date"] });
+    });
+
+    it("um segundo antes de completar um dia: não reemite", async () => {
+      const res = resposta();
+      await renovarCookieDaSessao(requisicao(await token({ emitidoHaMs: DIA - 1000 })), res as never);
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it("exatamente um dia: reemite (o limite conta como vencido para a renovação)", async () => {
+      const res = resposta();
+      await renovarCookieDaSessao(requisicao(await token({ emitidoHaMs: DIA })), res as never);
+      const { payload } = await cookieGravado(res);
+      expect(payload.exp! * 1000).toBe(AGORA + DURACAO_DA_SESSAO_MS);
+    });
+
+    it("um segundo depois de completar um dia: reemite", async () => {
+      const res = resposta();
+      await renovarCookieDaSessao(requisicao(await token({ emitidoHaMs: DIA + 1000 })), res as never);
+      await cookieGravado(res);
+    });
+  });
+
   it("token de 8 h emitido antes desta mudança: renova na hora, e quem já estava logada fica", async () => {
     const res = resposta();
     await renovarCookieDaSessao(requisicao(await token({ emitidoHaMs: HORA, duraMs: 8 * HORA })), res as never);
@@ -184,12 +231,16 @@ describe("validateSessionToken: o uso empurra o prazo da sessão no banco", () =
         expiresAt: new Date(Date.parse("2026-11-10T12:00:00Z") + DURACAO_DA_SESSAO_MS),
       },
     ]);
+    // Empurra o prazo só da linha deste token, e não de toda sessão.
+    expect(banco.condicoes).toEqual([soEstaSessao(DADOS.sessionToken)]);
   });
 
   it("sessão vencida não ressuscita: recusa e só a marca como inativa", async () => {
     banco.sessao = { userId: 7, isActive: true, expiresAt: new Date(Date.now() - 1000) };
     await expect(validateSessionToken(DADOS.sessionToken)).resolves.toBeNull();
     expect(banco.atualizacoes).toEqual([{ isActive: false }]);
+    // Desativa só a linha deste token: um WHERE errado derrubaria as outras sessões.
+    expect(banco.condicoes).toEqual([soEstaSessao(DADOS.sessionToken)]);
   });
 
   it("sessão revogada (saiu, redefiniu a senha, conta desativada): recusa sem tocar no prazo", async () => {
