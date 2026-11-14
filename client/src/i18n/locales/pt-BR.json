@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "Se sair agora, esse áudio se perde.",
     "continuarAqui": "Continuar aqui",
     "sairMesmoAssim": "Sair mesmo assim",
-    "versaoNovaDepoisDoEnvio": "Há uma versão nova do WRW. Esta página vai atualizar sozinha depois que o áudio for enviado."
+    "versaoNovaDepoisDoEnvio": "Há uma versão nova do WRW. Esta página vai atualizar sozinha depois que o áudio for enviado.",
+    "sairFalhou": "O servidor não confirmou o fim da sessão. Se a sua conta ainda aparecer aberta, saia de novo quando a conexão voltar."
   },
   "errorBoundary": {
     "title": "Algo inesperado aconteceu",

@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "如果现在退出登录，这段音频将会丢失。",
     "continuarAqui": "留在此页",
     "sairMesmoAssim": "仍然退出登录",
-    "versaoNovaDepoisDoEnvio": "WRW 有新版本。音频发送完成后，此页面会自动刷新。"
+    "versaoNovaDepoisDoEnvio": "WRW 有新版本。音频发送完成后，此页面会自动刷新。",
+    "sairFalhou": "服务器未确认会话已结束。如果你的账户仍显示为已登录，请在连接恢复后再次退出登录。"
   },
   "errorBoundary": {
     "title": "发生了意外情况",

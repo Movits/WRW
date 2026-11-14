@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useSairDaConta } from "@/components/SairDaConta";
+import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import {
@@ -20,7 +20,10 @@ export default function AdminPanel() {
   const [, navigate] = useLocation();
   // O Sair confirma antes com gravação, envio ou áudio por enviar nesta aba
   // (components/SairDaConta.tsx). O diálogo é traduzido; o painel segue em pt-BR.
-  const sairDaConta = useSairDaConta(() => { logout(); navigate("/"); });
+  // Se a revogação no servidor falhar, o aviso traduzido diz (o logout do
+  // useAuth relança o erro); a aba sai assim mesmo, como no menu global.
+  const avisarQueSairFalhou = useAvisoDeSairFalhou();
+  const sairDaConta = useSairDaConta(() => { logout().catch(avisarQueSairFalhou); navigate("/"); });
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [lockReason, setLockReason] = useState<Record<number, string>>({});
   const utils = trpc.useUtils();

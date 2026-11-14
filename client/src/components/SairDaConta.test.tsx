@@ -8,6 +8,7 @@ import { ocupar, sessaoOcupada, type MotivoDaOcupacao } from "@/lib/sessao-ocupa
 import AdminPanel from "@/pages/AdminPanel";
 import { GlobalMenu } from "./AppHeader";
 import { useSairDaConta } from "./SairDaConta";
+import { toast } from "sonner";
 
 /**
  * Sair da conta com a sessão ocupada (PR S do gravador). Até o envio, a
@@ -56,7 +57,8 @@ class ResizeObserverFalso { observe() {} unobserve() {} disconnect() {} }
 // O logout do useAuth, que o painel administrativo chama.
 let sairDoUseAuth: ReturnType<typeof vi.fn>;
 function sessaoDe(role: string) {
-  sairDoUseAuth = vi.fn();
+  // Async como o de verdade: quem chama trata a rejeição (o aviso de falha).
+  sairDoUseAuth = vi.fn(async () => undefined);
   vi.mocked(useAuth).mockReturnValue({
     user: { id: 1, name: "Glenda", role },
     loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: sairDoUseAuth,
@@ -277,6 +279,16 @@ describe("o Sair do painel administrativo (pt-BR fixo, diálogo traduzido)", () 
     fireEvent.click(sairMesmoAssim());
     expect(sairDoUseAuth).toHaveBeenCalledTimes(1);
     expect(window.location.pathname).toBe("/");
+  });
+
+  it("a revogação falha: o aviso traduzido aparece, e a aba sai assim mesmo", async () => {
+    sairDoUseAuth.mockRejectedValueOnce(new Error("Banco de dados indisponível"));
+    render(<AdminPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Sair" }));
+    expect(window.location.pathname).toBe("/");
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "O servidor não confirmou o fim da sessão. Se a sua conta ainda aparecer aberta, saia de novo quando a conexão voltar.",
+    ));
   });
 
   it("em inglês, o painel segue em pt-BR e o diálogo sai traduzido", async () => {

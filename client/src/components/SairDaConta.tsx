@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -16,6 +17,20 @@ function textoDoMotivo(t: Traduzir, motivo: MotivoDaOcupacao) {
     case "enviando": return t("sessaoOcupada.sairEnviando");
     case "audio-nao-enviado": return t("sessaoOcupada.sairAudioNaoEnviado");
   }
+}
+
+/**
+ * O aviso de que o Sair não conseguiu revogar a sessão no servidor (banco fora
+ * do ar, servidor sem resposta). Com a sessão de 90 dias (#179), um Sair que
+ * falha calado deixaria a dona achar que saiu enquanto a sessão segue valendo
+ * no servidor. O logout do useAuth relança esse erro; quem chama o Sair mostra
+ * este aviso. Traduzido, como o diálogo, também no painel administrativo.
+ */
+export function useAvisoDeSairFalhou(): () => void {
+  const { t } = useTranslation();
+  return useCallback(() => {
+    toast.error(t("sessaoOcupada.sairFalhou"));
+  }, [t]);
 }
 
 /**

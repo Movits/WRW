@@ -1801,7 +1801,8 @@
     "sairPerdeOAudio": "Si vous vous déconnectez maintenant, cet audio sera perdu.",
     "continuarAqui": "Rester ici",
     "sairMesmoAssim": "Se déconnecter quand même",
-    "versaoNovaDepoisDoEnvio": "Une nouvelle version de WRW est disponible. Cette page s'actualisera d'elle-même une fois l'audio envoyé."
+    "versaoNovaDepoisDoEnvio": "Une nouvelle version de WRW est disponible. Cette page s'actualisera d'elle-même une fois l'audio envoyé.",
+    "sairFalhou": "Le serveur n'a pas confirmé la fin de la session. Si votre compte apparaît encore connecté, déconnectez-vous à nouveau quand la connexion sera rétablie."
   },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",
