@@ -86,9 +86,14 @@ export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
+  // A parte da reunião gravada em partes (server/fatias-de-reuniao.ts) grava a
+  // linha que aponta para o objeto ANTES do upload: a chave tem de ser a que ela
+  // já guardou, sem o sufixo aleatório. Quem pede a chave exata garante que ela
+  // é única (a da parte leva o id da linha).
+  opcoes: { chaveExata?: boolean } = {},
 ): Promise<{ key: string; url: string }> {
   const config = getStorageConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+  const key = opcoes.chaveExata ? normalizeKey(relKey) : appendHashSuffix(normalizeKey(relKey));
 
   await getClient(config).send(
     new PutObjectCommand({

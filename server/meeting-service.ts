@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { and, desc, eq, inArray, lt, lte, ne } from "drizzle-orm";
 import {
+  meetingAudioSlices,
   meetingContactSuggestions,
   meetingEntities,
   meetingRecordings,
@@ -1221,7 +1222,18 @@ export async function limparGravacoesVencidas(limite = 200) {
     await db.delete(meetingRecordings).where(eq(meetingRecordings.id, gravacao.id));
     apagadas += 1;
   }
-  return { encontradas: vencidas.length, apagadas };
+  // As partes da reunião gravada em partes (G5) seguem o mesmo prazo: o objeto
+  // sai do bucket e a linha sai do banco. A transcrição montada fica.
+  const partesVencidas = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey })
+    .from(meetingAudioSlices)
+    .where(lte(meetingAudioSlices.expiresAt, now()))
+    .limit(limite);
+  for (const parte of partesVencidas) {
+    if (!(await apagarArquivoDaGravacao(parte.storageKey))) continue;
+    await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, parte.id));
+    apagadas += 1;
+  }
+  return { encontradas: vencidas.length + partesVencidas.length, apagadas };
 }
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
@@ -1258,9 +1270,18 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .from(meetingRecordings)
     .where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
   for (const gravacao of gravacoes) await apagarArquivoDaGravacao(gravacao.storageKey);
+  // As partes da reunião gravada em partes (G5) são áudio também: objeto e linha
+  // saem junto. A linha 'uploading' cujo objeto ainda não subiu sai igual (o
+  // delete de chave inexistente não é erro no S3), e receberParte confere a
+  // reunião de novo depois do upload, para não deixar objeto de reunião apagada.
+  const partes = await db.select({ storageKey: meetingAudioSlices.storageKey })
+    .from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  for (const parte of partes) await apagarArquivoDaGravacao(parte.storageKey);
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId);
   await db.delete(meetingRecordings).where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
+  await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 }
 
 /**

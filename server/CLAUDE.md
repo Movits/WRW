@@ -23,6 +23,12 @@ Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
 nenhum recorte por caminho). Upload novo entra nos dois lugares.
 
+A exceção é binária: as partes da reunião gravada em partes chegam por
+`POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
+cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por
+`server/agendados-autenticacao.test.ts`. A linha da parte é gravada antes do upload, com a
+chave exata do objeto (`storagePut(..., { chaveExata: true })`).
+
 ## tRPC, procedures e papéis
 
 Cada área de negócio tem um router em `server/routers/`, agregados em `server/routers.ts`
