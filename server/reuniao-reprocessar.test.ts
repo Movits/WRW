@@ -441,7 +441,7 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     });
     await reprocessar();
     expect(de("insert")).toEqual([]);
-    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
+    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings, schema.meetingAudioSlices]);
     expect(storageDelete).toHaveBeenCalledWith(CHAVE);
     expect(falhasGravadas()).toEqual([]);
   });
