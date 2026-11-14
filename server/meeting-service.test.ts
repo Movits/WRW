@@ -329,6 +329,26 @@ describe("Reunião longa em janelas (G8)", () => {
     expect(r.contacts[1]).toMatchObject({ fullName: "Bia", phone: "(11) 9000-0000" });
   });
 
+  it("homônimos com e-mail ou telefone diferentes ficam separados; o mesmo item dito duas vezes vira uma pendência", () => {
+    const r = juntarExtracoes([
+      { entities: [], contacts: [pessoa("João Lima", { email: "joao1@exemplo.invalid", oQueTenho: [{ texto: "Frete", trecho: "faço frete", confianca: 0.9 }] })] },
+      { entities: [], contacts: [
+        pessoa("João Lima", { email: "joao2@exemplo.invalid" }),
+        pessoa("joão lima", { phone: null, email: "JOAO1@exemplo.invalid", oQueTenho: [{ texto: "frete ", trecho: "faço frete", confianca: 0.8 }] }),
+      ] },
+    ]);
+    expect(r.contacts.map(c => c.email)).toEqual(["joao1@exemplo.invalid", "joao2@exemplo.invalid"]);
+    expect(r.contacts[0].oQueTenho).toHaveLength(1);
+  });
+
+  it("acima do teto, ficam as de maior confiança, não as do começo da reunião", () => {
+    const comeco = Array.from({ length: 200 }, (_, i) => ({ type: "need" as const, value: `comeco-${i}`, normalizedValue: null, confidence: 0.5 }));
+    const fim = [{ type: "need" as const, value: "fim-importante", normalizedValue: null, confidence: 0.95 }];
+    const r = juntarExtracoes([{ entities: comeco, contacts: [] }, { entities: fim, contacts: [] }]);
+    expect(r.entities).toHaveLength(200);
+    expect(r.entities[0].value).toBe("fim-importante");
+  });
+
   it("a junção respeita os tetos da reunião inteira (200 entidades, 40 pessoas)", () => {
     const partes = Array.from({ length: 4 }, (_, p) => ({
       entities: Array.from({ length: 80 }, (_, i) => ({ type: "need" as const, value: `n${p}-${i}`, normalizedValue: null, confidence: 0.7 })),
@@ -368,10 +388,40 @@ describe("Reunião longa em janelas (G8)", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     invokeLLM.mockRejectedValue(new Error("cota"));
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).resolves.toMatchObject({ emAndamento: true });
-    await vi.waitFor(() => expect(console.error).toHaveBeenCalledWith("[Reuniões] a tradução longa falhou:", "cota"));
+    await vi.waitFor(() => expect(console.error).toHaveBeenCalledWith("[Reuniões] a tradução longa falhou:", expect.stringContaining("cota")));
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).rejects.toThrow("cota");
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).resolves.toMatchObject({ emAndamento: true });
+    // Espera o segundo plano terminar: o insert dele não pode cair no teste seguinte.
+    await vi.waitFor(() => expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(true));
+  });
+
+  it("a falha da tradução longa vale só por 2 min: quem volta depois recomeça, sem erro velho", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", longa(JANELA_DA_TRADUCAO * 2), null, "pt-BR", 3600, 1000, 1000];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeLLM.mockRejectedValue(new Error("cota"));
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "de");
+    await vi.waitFor(() => expect(console.error).toHaveBeenCalled());
+    const agora = Date.now();
+    const relogio = vi.spyOn(Date, "now").mockReturnValue(agora + 3 * 60_000);
+    try {
+      invokeLLM.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
+      await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "de")).resolves.toMatchObject({ emAndamento: true });
+    } finally {
+      relogio.mockRestore();
+    }
+    await vi.waitFor(() => expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(true));
+  });
+
+  it("o log da falha não leva a mensagem crua do driver (o SQL traria o texto da reunião)", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", longa(JANELA_DA_TRADUCAO * 2), null, "pt-BR", 3600, 1000, 1000];
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const erroDoDriver = Object.assign(new Error("Failed query: insert ... TEXTO SIGILOSO DA REUNIÃO"), { query: "insert into `meeting_transcript_translations` values (?)" });
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
+    banco.insertFalha = erroDoDriver;
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "ja");
+    await vi.waitFor(() => expect(log).toHaveBeenCalled());
+    expect(JSON.stringify(log.mock.calls)).not.toContain("TEXTO SIGILOSO");
   });
 
   it("janela que volta vazia derruba a tradução inteira, em vez de guardar um buraco", async () => {

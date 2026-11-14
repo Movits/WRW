@@ -78,7 +78,7 @@ export default function ReuniaoAberta() {
   const traduzir = trpc.reuniaoAberta.traduzir.useMutation();
   // Reunião longa: a tradução segue em segundo plano no servidor, que responde
   // "em andamento"; a página pergunta de novo a cada 5 s, sem gastar vaga do teto.
-  const traducaoLonga = useNovaTentativa();
+  const traducaoLonga = useNovaTentativa(`${token}|${idiomaDaTraducao}`);
   const temTranscricao = !!data?.transcricao;
   // Reunião antiga guarda 'pt'.
   const idiomaDoOriginal = idiomaDaReuniao(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;

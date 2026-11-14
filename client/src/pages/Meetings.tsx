@@ -491,7 +491,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   // Reunião longa: o servidor traduz em segundo plano e responde "em andamento";
   // a tela pergunta de novo a cada 5 s até a tradução chegar.
-  const traducaoLonga = useNovaTentativa();
+  const traducaoLonga = useNovaTentativa(`${meetingId}|${translationLanguage}`);
   // Excluir apaga áudio, transcrição, traduções e sugestões de uma vez, sem
   // volta — e o botão fica ao lado do selo de status, onde um clique por
   // engano é fácil. O mutate só sai do botão do modal.

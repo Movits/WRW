@@ -19,9 +19,13 @@ import { embedManyWithGemini, embedWithGemini } from "./gemini";
 import { invokeLLM } from "./_core/llm";
 
 const MAX_DOCUMENTS_PER_OWNER = 800;
-// Uma janela por documento da reunião longa: abaixo dos 20 mil caracteres que o
-// embedding lê (gemini.ts), com folga para o título que vai na frente.
-const JANELA_DA_MEMORIA = 18_000;
+// Uma janela por documento da reunião longa. É o que a resposta da IA lê de cada
+// fonte de reunião (JANELA_POR_FONTE.meeting, abaixo): uma janela maior entraria
+// inteira na busca (o embedding lê até 20 mil) e só pela metade na resposta.
+const JANELA_DA_MEMORIA = 12_000;
+// Na busca, no máximo duas janelas da mesma reunião: uma reunião longa não pode
+// ocupar todos os lugares e empurrar os contatos e as outras reuniões.
+const JANELAS_DA_MESMA_REUNIAO_NA_BUSCA = 2;
 const MAX_QUERY_LENGTH = 1000;
 
 // Ritmo da indexação: o limite do Gemini conta requisições por minuto, então os
@@ -575,9 +579,16 @@ export async function semanticSearch(ownerId: string, query: string, limit = 6):
       metadata: (document.metadata ?? {}) as Record<string, unknown>,
       score: cosineSimilarity(queryEmbedding, document.embedding as number[]),
     }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, Math.max(1, Math.min(limit, 12)));
-  return { hits, pending, truncated };
+    .sort((left, right) => right.score - left.score);
+  const porReuniao = new Map<string, number>();
+  const escolhidos = hits.filter(hit => {
+    const reuniao = hit.sourceType === "meeting" && typeof hit.metadata.meetingId === "string" ? hit.metadata.meetingId : null;
+    if (!reuniao) return true;
+    const vistas = porReuniao.get(reuniao) ?? 0;
+    porReuniao.set(reuniao, vistas + 1);
+    return vistas < JANELAS_DA_MESMA_REUNIAO_NA_BUSCA;
+  }).slice(0, Math.max(1, Math.min(limit, 12)));
+  return { hits: escolhidos, pending, truncated };
 }
 
 // Sem afirmar a causa: pode ser pico ou cota, mas também configuração — e
