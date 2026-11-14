@@ -157,6 +157,23 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText("We agreed on Friday.")).toBeInTheDocument();
   });
 
+  it("reunião longa: 'em andamento' mostra o aviso e pergunta de novo em 5 s (G8)", async () => {
+    vi.useFakeTimers();
+    try {
+      duble.ver.mockReturnValue(pronta());
+      abrir();
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
+      const pedidos = duble.traduzir.mutate.mock.calls;
+      act(() => (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "es", text: null, cached: false, emAndamento: true }));
+      expect(screen.getByRole("status")).toHaveTextContent("A reunião é longa");
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(pedidos).toHaveLength(2);
+      expect(pedidos[1][0]).toEqual({ token: TOKEN, language: "es" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("com a tela em inglês, já abre pedindo a tradução para o inglês", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
     duble.ver.mockReturnValue(pronta());

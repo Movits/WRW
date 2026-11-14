@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "Sprache des Meetings",
     "meetingLanguageHint": "Die gesprochene Sprache. Die KI transkribiert in dieser Sprache, und das Transkript kann später übersetzt werden.",
-    "originalLanguageSuffix": "(Original)"
+    "originalLanguageSuffix": "(Original)",
+    "translatingLongStatus": "Das Meeting ist lang: Die Übersetzung dauert einige Minuten. Sie können diese Ansicht geöffnet lassen; der Text erscheint, sobald er fertig ist."
   },
   "connections": {
     "messageSent": "Nachricht gesendet",

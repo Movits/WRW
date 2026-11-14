@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "Idioma de la reunión",
     "meetingLanguageHint": "El idioma hablado. La IA transcribe en este idioma, y la transcripción se puede traducir después.",
-    "originalLanguageSuffix": "(original)"
+    "originalLanguageSuffix": "(original)",
+    "translatingLongStatus": "La reunión es larga: la traducción tarda unos minutos. Puedes dejar esta pantalla abierta; el texto aparece cuando esté listo."
   },
   "connections": {
     "messageSent": "Mensaje enviado",

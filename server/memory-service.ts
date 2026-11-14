@@ -13,11 +13,15 @@ import {
 } from "../drizzle/schema";
 import { sql } from "drizzle-orm";
 import { rotaDaReuniao } from "@shared/rotas";
+import { dividirEmJanelas } from "./janelas-de-texto";
 import { exigirDb } from "./db";
 import { embedManyWithGemini, embedWithGemini } from "./gemini";
 import { invokeLLM } from "./_core/llm";
 
 const MAX_DOCUMENTS_PER_OWNER = 800;
+// Uma janela por documento da reunião longa: abaixo dos 20 mil caracteres que o
+// embedding lê (gemini.ts), com folga para o título que vai na frente.
+const JANELA_DA_MEMORIA = 18_000;
 const MAX_QUERY_LENGTH = 1000;
 
 // Ritmo da indexação: o limite do Gemini conta requisições por minuto, então os
@@ -245,22 +249,39 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
   const reunioesVivas = reunioes.filter(reuniao => reuniao.status !== "deleted");
   const tituloDaReuniao = new Map(reunioesVivas.map(reuniao => [reuniao.id, reuniao.title]));
 
-  const transcriptSources: MemorySource[] = transcripts
-    .filter(transcript => tituloDaReuniao.has(transcript.meetingId))
-    .map(transcript => ({
-      sourceType: "meeting",
-      sourceId: transcript.meetingId,
-      title: tituloDaReuniao.get(transcript.meetingId) ?? "Transcrição de reunião",
-      content: [
-        `Reunião: ${tituloDaReuniao.get(transcript.meetingId)}`,
-        transcript.transcript,
-      ].filter(Boolean).join("\n"),
-      // O "Abrir fonte" leva ao detalhe da reunião. Documento já indexado guarda
-      // "/meetings" até a reunião mudar; a tela abre pelo meetingId mesmo assim.
-      metadata: { href: rotaDaReuniao(transcript.meetingId), meetingId: transcript.meetingId, kind: "Reunião", language: transcript.language },
-    }));
+  // A reunião longa é lida INTEIRA, em janelas (G8): o embedding só lê os
+  // primeiros 20 mil caracteres de cada documento, e o resto da reunião ficava
+  // fora da busca. A primeira janela mantém a chave de sempre (o meetingId),
+  // para a reunião curta não ser reindexada; as seguintes ganham "#2", "#3"...
+  // Todas levam o mesmo meetingId no metadata, que é por onde a tela abre a
+  // reunião (o sourceId com "#" seria recusado como id de reunião).
+  const primeirasJanelas: MemorySource[] = [];
+  const janelasExtras: MemorySource[] = [];
+  for (const transcript of transcripts) {
+    if (!tituloDaReuniao.has(transcript.meetingId)) continue;
+    const titulo = tituloDaReuniao.get(transcript.meetingId) ?? "Transcrição de reunião";
+    const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_MEMORIA);
+    janelas.forEach((janela, indice) => {
+      const fonte: MemorySource = {
+        sourceType: "meeting",
+        sourceId: indice === 0 ? transcript.meetingId : `${transcript.meetingId}#${indice + 1}`,
+        title: titulo,
+        content: [`Reunião: ${titulo}`, janela].filter(Boolean).join("\n"),
+        // O "Abrir fonte" leva ao detalhe da reunião. Documento já indexado guarda
+        // "/meetings" até a reunião mudar; a tela abre pelo meetingId mesmo assim.
+        metadata: {
+          href: rotaDaReuniao(transcript.meetingId), meetingId: transcript.meetingId, kind: "Reunião", language: transcript.language,
+          ...(janelas.length > 1 ? { janela: indice + 1, janelas: janelas.length } : {}),
+        },
+      };
+      (indice === 0 ? primeirasJanelas : janelasExtras).push(fonte);
+    });
+  }
 
-  return [...contactSources, ...contextSources, ...catalogSources, ...transcriptSources].filter(source => source.content.trim().length > 2);
+  // As janelas extras vão para o FIM: o teto de documentos por dona corta pelo
+  // fim da lista, e uma reunião longa não pode empurrar contatos, contextos ou
+  // a primeira janela de outras reuniões para fora do índice.
+  return [...contactSources, ...contextSources, ...catalogSources, ...primeirasJanelas, ...janelasExtras].filter(source => source.content.trim().length > 2);
 }
 
 export type ResultadoDaIndexacao = {

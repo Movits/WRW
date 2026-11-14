@@ -54,6 +54,9 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
 const {
   decodeMeetingAudio,
   extractMeetingData,
+  JANELA_DA_EXTRACAO,
+  JANELA_DA_TRADUCAO,
+  juntarExtracoes,
   MAX_MEETING_AUDIO_BYTES,
   MAX_MEETING_DURATION_SECONDS,
   MEETING_TRANSCRIPT_LANGUAGES,
@@ -267,5 +270,117 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt", antes);
     expect(antes).not.toHaveBeenCalled();
     expect(invokeLLM).not.toHaveBeenCalled();
+  });
+});
+
+// G8: a reunião longa é lida INTEIRA, em janelas, em vez de cortada em silêncio.
+describe("Reunião longa em janelas (G8)", () => {
+  const TRANSCRICAO_PADRAO = ["tr-1", "reuniao-1", "dona-1", "Fala longa da reunião.", null, "pt-BR", 120, 1000, 1000];
+  const longa = (tamanho: number) => Array.from({ length: Math.ceil(tamanho / 30) }, (_, i) => `Fala ${String(i).padStart(5, "0")} da reunião longa, sem corte.`).join("\n").slice(0, tamanho);
+  const extracao = (entities: unknown[], contacts: unknown[] = []) => ({ choices: [{ message: { content: JSON.stringify({ entities, contacts }) } }] });
+  const pessoa = (fullName: string, extra: Record<string, unknown> = {}) => ({
+    fullName, jobTitle: null, company: null, phone: null, email: null, confidence: 0.8, tipoPessoa: "nao_informado", oQueTenho: [], oQuePreciso: [], ...extra,
+  });
+
+  beforeEach(() => {
+    invokeLLM.mockReset();
+    banco.consultas = [];
+    banco.leiturasDaTranscricao = 0;
+    banco.transcricaoTrocada = false;
+    banco.traducaoGuardada = null;
+    banco.insertDuplicado = false;
+    banco.insertFalha = null;
+    banco.transcricao = [...TRANSCRICAO_PADRAO];
+  });
+
+  it("a extração lê todas as janelas, na ordem, e o fim da reunião chega à IA", async () => {
+    const texto = longa(JANELA_DA_EXTRACAO * 2 + 500);
+    invokeLLM.mockResolvedValue(extracao([]));
+    await extractMeetingData(texto);
+    expect(invokeLLM).toHaveBeenCalledTimes(3);
+    const enviados = invokeLLM.mock.calls.map(c => (c[0] as { messages: Array<{ content: string }> }).messages[1].content);
+    for (const enviado of enviados) expect(enviado.length).toBeLessThan(JANELA_DA_EXTRACAO + 200);
+    expect(enviados[2]).toContain(texto.slice(-40));
+  });
+
+  it("uma janela que falha derruba a extração inteira (meia reunião não passa por inteira)", async () => {
+    invokeLLM.mockResolvedValueOnce(extracao([])).mockRejectedValueOnce(new Error("IA fora"));
+    await expect(extractMeetingData(longa(JANELA_DA_EXTRACAO * 2))).rejects.toThrow("IA fora");
+  });
+
+  it("a junção tira as repetidas: entidade com a maior confiança, pessoa por e-mail, telefone ou nome", () => {
+    const r = juntarExtracoes([
+      { entities: [{ type: "company", value: "ACME", normalizedValue: "acme", confidence: 0.6 }], contacts: [
+        pessoa("Ana Lima", { email: "ana@exemplo.invalid", oQueTenho: [{ texto: "vinho", trecho: "tenho vinho", confianca: 0.9 }] }),
+        pessoa("Bia", { phone: "(11) 9000-0000" }),
+      ] },
+      { entities: [{ type: "company", value: "Acme ", normalizedValue: null, confidence: 0.9 }, { type: "person", value: "ACME", normalizedValue: null, confidence: 0.5 }], contacts: [
+        pessoa("Ana", { email: "ANA@exemplo.invalid", company: "Vinícola", oQuePreciso: [{ texto: "frete", trecho: "preciso de frete", confianca: 0.8 }] }),
+        pessoa("Beatriz", { phone: "11 90000000" }),
+        pessoa("ana lima"),
+      ] },
+    ]);
+    expect(r.entities).toEqual([
+      { type: "company", value: "Acme ", normalizedValue: null, confidence: 0.9 },
+      { type: "person", value: "ACME", normalizedValue: null, confidence: 0.5 },
+    ]);
+    expect(r.contacts).toHaveLength(2);
+    expect(r.contacts[0]).toMatchObject({ fullName: "Ana Lima", company: "Vinícola", oQueTenho: [{ texto: "vinho" }], oQuePreciso: [{ texto: "frete" }] });
+    expect(r.contacts[1]).toMatchObject({ fullName: "Bia", phone: "(11) 9000-0000" });
+  });
+
+  it("a junção respeita os tetos da reunião inteira (200 entidades, 40 pessoas)", () => {
+    const partes = Array.from({ length: 4 }, (_, p) => ({
+      entities: Array.from({ length: 80 }, (_, i) => ({ type: "need" as const, value: `n${p}-${i}`, normalizedValue: null, confidence: 0.7 })),
+      contacts: Array.from({ length: 20 }, (_, i) => pessoa(`Pessoa ${p}-${i}`)),
+    }));
+    const r = juntarExtracoes(partes as never);
+    expect(r.entities).toHaveLength(200);
+    expect(r.contacts).toHaveLength(40);
+  });
+
+  it("tradução longa: responde 'em andamento' na hora, traduz janela por janela em segundo plano e guarda a junção", async () => {
+    const texto = longa(JANELA_DA_TRADUCAO * 2 + 100);
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", texto, null, "pt-BR", 3600, 1000, 1000];
+    let soltar!: () => void;
+    const portao = new Promise<void>(resolve => { soltar = resolve; });
+    let n = 0;
+    invokeLLM.mockImplementation(async () => { await portao; n += 1; return { choices: [{ message: { content: `janela ${n}` } }] }; });
+    const antes = vi.fn();
+
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes))
+      .resolves.toEqual({ language: "en", text: null, cached: false, emAndamento: true });
+    // Pedir de novo enquanto traduz: "em andamento", sem nova vaga do teto nem nova chamada.
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en", antes)).resolves.toMatchObject({ emAndamento: true });
+    expect(antes).toHaveBeenCalledTimes(1);
+
+    soltar();
+    await vi.waitFor(() => expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(true));
+    expect(invokeLLM).toHaveBeenCalledTimes(3);
+    const insert = banco.consultas.find(c => c.sql.startsWith("insert"))!;
+    expect(insert.params).toContain("janela 1\njanela 2\njanela 3");
+    const ultimaJanela = (invokeLLM.mock.calls[2][0] as { messages: Array<{ content: string }> }).messages[1].content;
+    expect(ultimaJanela).toContain(texto.slice(-40));
+  });
+
+  it("tradução longa que falha: o próximo pedido recebe o erro uma vez, e o seguinte recomeça", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", longa(JANELA_DA_TRADUCAO * 2), null, "pt-BR", 3600, 1000, 1000];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeLLM.mockRejectedValue(new Error("cota"));
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).resolves.toMatchObject({ emAndamento: true });
+    await vi.waitFor(() => expect(console.error).toHaveBeenCalledWith("[Reuniões] a tradução longa falhou:", "cota"));
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).rejects.toThrow("cota");
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "es")).resolves.toMatchObject({ emAndamento: true });
+  });
+
+  it("janela que volta vazia derruba a tradução inteira, em vez de guardar um buraco", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", longa(JANELA_DA_TRADUCAO * 2), null, "pt-BR", 3600, 1000, 1000];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "primeira" } }] }).mockResolvedValueOnce({ choices: [{ message: { content: "  " } }] });
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "fr");
+    await vi.waitFor(() => expect(console.error).toHaveBeenCalled());
+    expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(false);
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "fr")).rejects.toThrow("Não foi possível traduzir a transcrição.");
   });
 });

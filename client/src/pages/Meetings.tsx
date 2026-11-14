@@ -16,6 +16,7 @@ import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/li
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
+import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
@@ -488,6 +489,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const initialLanguage = LANGUAGES.some(language => language.code === idiomaAtual) ? idiomaAtual : "pt-BR";
   const [translationLanguage, setTranslationLanguage] = useState(initialLanguage);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
+  // Reunião longa: o servidor traduz em segundo plano e responde "em andamento";
+  // a tela pergunta de novo a cada 5 s até a tradução chegar.
+  const traducaoLonga = useNovaTentativa();
   // Excluir apaga áudio, transcrição, traduções e sugestões de uma vez, sem
   // volta — e o botão fica ao lado do selo de status, onde um clique por
   // engano é fácil. O mutate só sai do botão do modal.
@@ -560,15 +564,22 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
   const idiomaOriginal = idiomaDaReuniao(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   useEffect(() => {
-    if (!data?.transcript || translationLanguage === idiomaOriginal || processandoAgora) { setTranslatedText(null); return; }
+    if (!data?.transcript || translationLanguage === idiomaOriginal || processandoAgora) { traducaoLonga.parar(); setTranslatedText(null); return; }
     // A tradução anterior sai antes do pedido novo: se ele falhar (cota, prazo),
     // a tela mostra a transcrição original, não a tradução de outro texto.
     setTranslatedText(null);
     translateTranscript.mutate(
       { meetingId, language: translationLanguage as IdiomaDaReuniao },
-      { onSuccess: result => setTranslatedText(result.text) },
+      {
+        onSuccess: result => {
+          if (result.emAndamento) return traducaoLonga.agendar();
+          traducaoLonga.parar();
+          setTranslatedText(result.text);
+        },
+        onError: () => traducaoLonga.parar(),
+      },
     );
-  }, [data?.transcript?.id, meetingId, translationLanguage, processandoAgora, idiomaOriginal]);
+  }, [data?.transcript?.id, meetingId, translationLanguage, processandoAgora, idiomaOriginal, traducaoLonga.tentativa]);
 
   // Erro antes do spinner: com isLoading false e data undefined a consulta
   // falhada caía no ramo abaixo e a usuária via um círculo girando para
@@ -668,7 +679,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             </select>
           </label>
         </div>
-        {translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div> : <>
+        {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
