@@ -15,6 +15,7 @@ import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco,
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
+import { dividirEmJanelas } from "./janelas-de-texto";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
@@ -171,7 +172,84 @@ const ITEM_DO_PERFIL = {
 } as const;
 const ORCAMENTO_DA_EXTRACAO_MS = 60_000;
 
+// O que uma chamada de extração lê. Uma reunião longa (em partes) passa disso e
+// é lida inteira, em janelas (G8), em vez de cortada aos 24 mil caracteres.
+export const JANELA_DA_EXTRACAO = 24_000;
+// Tetos da reunião inteira, depois de juntar as janelas: os de uma janela só
+// (80 e 20) multiplicados por elas encheriam a tela de pendências repetidas.
+const TETO_DE_ENTIDADES = 200;
+const TETO_DE_PESSOAS = 40;
+
+/**
+ * Extrai da transcrição INTEIRA: uma chamada por janela (dividirEmJanelas), uma
+ * depois da outra, e a junção tira as repetidas. Entidade repetida (mesmo tipo e
+ * mesmo valor normalizado) fica com a maior confiança; pessoa repetida (mesmo
+ * e-mail, telefone ou nome) junta o que tem e o que precisa das duas janelas.
+ * Uma janela que falha derruba a extração inteira: meia reunião extraída
+ * passaria por inteira.
+ */
 export async function extractMeetingData(transcript: string): Promise<MeetingExtraction> {
+  const janelas = dividirEmJanelas(transcript, JANELA_DA_EXTRACAO);
+  if (janelas.length <= 1) return extrairDeUmaJanela(transcript);
+  const partes: MeetingExtraction[] = [];
+  for (const janela of janelas) partes.push(await extrairDeUmaJanela(janela));
+  return juntarExtracoes(partes);
+}
+
+export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction {
+  const entidades = new Map<string, MeetingExtraction["entities"][number]>();
+  for (const entidade of partes.flatMap(p => p.entities)) {
+    const chave = `${entidade.type}|${(entidade.normalizedValue || entidade.value).trim().toLocaleLowerCase()}`;
+    const atual = entidades.get(chave);
+    if (!atual || entidade.confidence > atual.confidence) entidades.set(chave, entidade);
+  }
+  const pessoas: MeetingExtraction["contacts"] = [];
+  for (const pessoa of partes.flatMap(p => p.contacts)) {
+    const mesma = pessoas.find(outra => mesmaPessoa(outra, pessoa));
+    if (!mesma) {
+      pessoas.push({ ...pessoa });
+      continue;
+    }
+    mesma.jobTitle ??= pessoa.jobTitle;
+    mesma.company ??= pessoa.company;
+    mesma.phone ??= pessoa.phone;
+    mesma.email ??= pessoa.email;
+    mesma.confidence = Math.max(mesma.confidence, pessoa.confidence);
+    if (!mesma.tipoPessoa || mesma.tipoPessoa === "nao_informado") mesma.tipoPessoa = pessoa.tipoPessoa;
+    mesma.oQueTenho = semItensRepetidos([...(mesma.oQueTenho ?? []), ...(pessoa.oQueTenho ?? [])]);
+    mesma.oQuePreciso = semItensRepetidos([...(mesma.oQuePreciso ?? []), ...(pessoa.oQuePreciso ?? [])]);
+  }
+  // Acima do teto, ficam as de maior confiança (e não as do começo da reunião).
+  const porConfianca = <T extends { confidence: number }>(lista: T[]) => [...lista].sort((a, b) => b.confidence - a.confidence);
+  return {
+    entities: porConfianca(Array.from(entidades.values())).slice(0, TETO_DE_ENTIDADES),
+    contacts: porConfianca(pessoas).slice(0, TETO_DE_PESSOAS),
+  };
+}
+
+function semItensRepetidos<T extends { texto: string }>(itens: T[]): T[] {
+  const vistos = new Set<string>();
+  return itens.filter(item => {
+    const chave = item.texto.trim().toLocaleLowerCase();
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
+
+function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtraction["contacts"][number]) {
+  const igual = (x: string | null | undefined, y: string | null | undefined) => !!x && !!y && x.trim().toLocaleLowerCase() === y.trim().toLocaleLowerCase();
+  const soDigitos = (x: string | null | undefined) => (x ?? "").replace(/\D/g, "");
+  if (igual(a.email, b.email)) return true;
+  if (soDigitos(a.phone).length >= 8 && soDigitos(a.phone) === soDigitos(b.phone)) return true;
+  // Pelo nome, só quando nada as distingue: o mesmo nome com e-mail ou telefone
+  // diferente são duas pessoas (homônimas), e juntar perderia o contato de uma.
+  const conflita = (x: string | null | undefined, y: string | null | undefined, norm: (v: string | null | undefined) => string) => !!norm(x) && !!norm(y) && norm(x) !== norm(y);
+  const email = (v: string | null | undefined) => (v ?? "").trim().toLocaleLowerCase();
+  return igual(a.fullName, b.fullName) && !conflita(a.email, b.email, email) && !conflita(a.phone, b.phone, soDigitos);
+}
+
+async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
@@ -182,7 +260,7 @@ export async function extractMeetingData(transcript: string): Promise<MeetingExt
       },
       {
         role: "user",
-        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, 24000)}`,
+        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, JANELA_DA_EXTRACAO)}`,
       },
     ],
     response_format: {
@@ -359,11 +437,39 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
   // por ela, sem pagar outra chamada nem gastar vaga do teto.
   const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
+  const longa = janelas.length > 1;
+  const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
   const emCurso = traducoesEmCurso.get(chave);
-  if (emCurso) return emCurso;
+  if (emCurso) return longa ? emAndamento : emCurso;
+  // A tradução longa que falhou em segundo plano: o próximo pedido recebe o
+  // erro (uma vez), em vez de recomeçar a tradução em silêncio a cada 5 s.
+  const falha = falhasDaTraducaoLonga.get(chave);
+  if (falha) {
+    falhasDaTraducaoLonga.delete(chave);
+    if (Date.now() - falha.quando < VALIDADE_DA_FALHA_MS) throw falha.erro;
+  }
   antesDeChamarAIA?.();
-  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript });
+  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas });
   traducoesEmCurso.set(chave, trabalho);
+  if (longa) {
+    // Reunião longa: uma chamada por janela leva minutos, mais que o proxy do
+    // Render aguenta. A tradução segue em segundo plano, e a tela pergunta de
+    // novo até ela estar guardada. O trabalho nunca rejeita solto (derrubaria o
+    // processo): a falha fica guardada para o próximo pedido.
+    trabalho.then(
+      () => traducoesEmCurso.delete(chave),
+      erro => {
+        traducoesEmCurso.delete(chave);
+        // descreverErroDeBanco: a mensagem crua do driver traz o SQL com os
+        // valores, e o valor aqui é a tradução da reunião.
+        console.error("[Reuniões] a tradução longa falhou:", descreverErroDeBanco(erro));
+        if (falhasDaTraducaoLonga.size >= TETO_DE_FALHAS_GUARDADAS) falhasDaTraducaoLonga.clear();
+        falhasDaTraducaoLonga.set(chave, { erro: erro instanceof Error ? erro : new Error("Não foi possível traduzir a transcrição."), quando: Date.now() });
+      },
+    );
+    return emAndamento;
+  }
   try {
     return await trabalho;
   } finally {
@@ -371,11 +477,24 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   }
 }
 
-type TraducaoDaTranscricao = { language: string; text: string; cached: boolean };
+// O que uma chamada de tradução lê e devolve. Mais que isso não cabe com folga
+// na saída do modelo: a reunião longa é traduzida em janelas, uma por chamada.
+export const JANELA_DA_TRADUCAO = 20_000;
+
+type TraducaoPronta = { language: string; text: string; cached: boolean; emAndamento?: false };
+type TraducaoEmAndamento = { language: string; text: null; cached: false; emAndamento: true };
+export type TraducaoDaTranscricao = TraducaoPronta | TraducaoEmAndamento;
 
 // As traduções que estão na IA agora, por dona, reunião, idioma e transcrição.
-// Em memória, como os tetos: basta à instância única do Render.
-const traducoesEmCurso = new Map<string, Promise<TraducaoDaTranscricao>>();
+// Em memória, como os tetos: basta à instância única do Render. Um deploy no
+// meio perde a tradução longa em curso, e o próximo pedido a recomeça.
+const traducoesEmCurso = new Map<string, Promise<TraducaoPronta>>();
+// A falha da tradução longa vale para o próximo pedido por pouco tempo: quem
+// volta horas depois recomeça, sem receber um erro velho. O teto protege a
+// memória do processo de falhas que ninguém veio buscar.
+const falhasDaTraducaoLonga = new Map<string, { erro: Error; quando: number }>();
+const VALIDADE_DA_FALHA_MS = 2 * 60_000;
+const TETO_DE_FALHAS_GUARDADAS = 200;
 
 async function traduzirEGuardar(db: Banco, alvo: {
   ownerId: string;
@@ -383,18 +502,26 @@ async function traduzirEGuardar(db: Banco, alvo: {
   normalizedLanguage: string;
   targetLanguage: string;
   transcript: { id: string; transcript: string };
-}): Promise<TraducaoDaTranscricao> {
-  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript } = alvo;
-  const response = await invokeLLM({
-    timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
-    orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
-    messages: [
-      { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.` },
-      { role: "user", content: transcript.transcript.slice(0, 48_000) },
-    ],
-  });
-  const translatedText = String(response.choices?.[0]?.message?.content ?? "").trim();
-  if (!translatedText) throw new Error("Não foi possível traduzir a transcrição.");
+  janelas: string[];
+}): Promise<TraducaoPronta> {
+  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
+  // Uma janela por vez, na ordem: o texto traduzido é a junção delas. Janela
+  // que volta vazia derruba a tradução inteira, em vez de guardar um buraco.
+  const traduzidas: string[] = [];
+  for (const janela of janelas) {
+    const response = await invokeLLM({
+      timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
+      orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
+      messages: [
+        { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.${janelas.length > 1 ? " O texto é um trecho de uma reunião maior: traduza só ele, sem introdução nem fecho." : ""}` },
+        { role: "user", content: janela },
+      ],
+    });
+    const traduzida = String(response.choices?.[0]?.message?.content ?? "").trim();
+    if (!traduzida) throw new Error("Não foi possível traduzir a transcrição.");
+    traduzidas.push(traduzida);
+  }
+  const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
   // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE

@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "لغة الاجتماع",
     "meetingLanguageHint": "اللغة المنطوقة. يُفرّغ الذكاء الاصطناعي النص بهذه اللغة، ويمكن ترجمة النص لاحقًا.",
-    "originalLanguageSuffix": "(الأصل)"
+    "originalLanguageSuffix": "(الأصل)",
+    "translatingLongStatus": "الاجتماع طويل: تستغرق الترجمة بضع دقائق. يمكنكِ ترك هذه الشاشة مفتوحة، وسيظهر النص عندما يصبح جاهزًا."
   },
   "connections": {
     "messageSent": "تم إرسال الرسالة",

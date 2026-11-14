@@ -630,6 +630,62 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
   });
 });
 
+describe("Tradução de reunião longa em segundo plano (G8)", () => {
+  it("'em andamento': mostra o aviso da reunião longa e pergunta de novo a cada 5 s, até a tradução chegar", async () => {
+    vi.useFakeTimers();
+    try {
+      abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala longa.", language: "en" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      const pedidos = duble.mutacoes.translateTranscript.mutate.mock.calls;
+      expect(pedidos).toHaveLength(1);
+      act(() => { (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "pt-BR", text: null, cached: false, emAndamento: true }); });
+      expect(screen.getByRole("status")).toHaveTextContent("A reunião é longa");
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(pedidos).toHaveLength(2);
+      act(() => { (pedidos[1][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "pt-BR", text: "Fala longa traduzida.", cached: true }); });
+      expect(screen.getByText("Fala longa traduzida.")).toBeInTheDocument();
+      expect(screen.queryByText(/A reunião é longa/)).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(pedidos).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("erro depois de um 'em andamento' desliga o aviso: ele não gira para sempre", async () => {
+    vi.useFakeTimers();
+    try {
+      abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Long talk.", language: "en" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      const pedidos = duble.mutacoes.translateTranscript.mutate.mock.calls;
+      act(() => { (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "pt-BR", text: null, cached: false, emAndamento: true }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      act(() => { (pedidos[1][1] as { onError: (e: unknown) => void }).onError(new Error("cota")); });
+      expect(screen.queryByText(/A reunião é longa/)).not.toBeInTheDocument();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("voltar ao original cancela a pergunta agendada", async () => {
+    vi.useFakeTimers();
+    try {
+      abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Long talk.", language: "en" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      const pedidos = duble.mutacoes.translateTranscript.mutate.mock.calls;
+      act(() => { (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "pt-BR", text: null, cached: false, emAndamento: true }); });
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "en" } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(pedidos).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(screen.getByText("Long talk.")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("Detalhe da reunião — pendências de Tenho/Preciso na aba Contatos", () => {
   const abaContatos = () => screen.getByRole("button", { name: /Contatos/ });
   // Quem Sou completo: todo FALTANDO na tela vem de Tenho/Preciso.

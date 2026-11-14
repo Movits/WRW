@@ -383,6 +383,45 @@ describe("Memória — órfão não sobrevive à fonte", () => {
     expect(doc?.metadata).toMatchObject({ href: "/meetings/m-1", meetingId: "m-1" });
   });
 
+  it("reunião longa vira um documento por janela, todos abrindo a mesma reunião, e o fim dela entra na busca (G8)", async () => {
+    const linhas = Array.from({ length: 1_500 }, (_, i) => `Fala ${i} da reunião longa sobre exportação de café.`);
+    const transcricao = linhas.join("\n");
+    semear(schema.meetings, [{ id: "m-longa", title: "Reunião longa" }]);
+    semear(schema.meetingTranscripts, [{ meetingId: "m-longa", transcript: transcricao, language: "pt-BR" }]);
+
+    await servico.indexOwnerMemory("dona");
+
+    const docs = escritas.inseridos.filter(item => item.sourceType === "meeting");
+    expect(docs.length).toBeGreaterThan(2);
+    // A primeira janela mantém a chave de sempre; as outras ganham "#n".
+    expect(docs.map(d => d.sourceId)).toEqual(["m-longa", ...docs.slice(1).map((_, i) => `m-longa#${i + 2}`)]);
+    for (const doc of docs) {
+      expect(String(doc.content).length).toBeLessThanOrEqual(servico.JANELA_POR_FONTE.meeting + "Reunião: Reunião longa\n".length);
+      expect(doc.metadata).toMatchObject({ meetingId: "m-longa", href: "/meetings/m-longa", janelas: docs.length });
+    }
+    expect(String(docs.at(-1)!.content)).toContain(linhas.at(-1));
+  });
+
+  it("as janelas extras vão para o fim do teto de 800: uma reunião longa não empurra contatos nem outras reuniões para fora", async () => {
+    const longa = Array.from({ length: 1_500 }, (_, i) => `Fala ${i} da reunião longa sobre exportação de café.`).join("\n");
+    semear(schema.privateContacts, Array.from({ length: 797 }, (_, i) => ({ id: i + 1, ownerId: "dona", fullName: `Contato ${i + 1}` })));
+    semear(schema.meetings, [{ id: "m-longa", title: "Reunião longa" }, { id: "m-curta", title: "Reunião curta" }]);
+    semear(schema.meetingTranscripts, [
+      { meetingId: "m-longa", transcript: longa, language: "pt-BR" },
+      { meetingId: "m-curta", transcript: "Fala curta.", language: "pt-BR" },
+    ]);
+
+    const resultado = await servico.indexOwnerMemory("dona");
+
+    const ids = escritas.inseridos.map(item => `${item.sourceType}:${item.sourceId}`);
+    expect(ids).toContain("meeting:m-longa");
+    expect(ids).toContain("meeting:m-curta");
+    expect(ids.filter(id => id.startsWith("contact:"))).toHaveLength(797);
+    expect(ids.some(id => id.startsWith("meeting:m-longa#"))).toBe(true);
+    expect(resultado.truncated).toBeGreaterThan(0);
+    // O dublê avalia o WHERE linha a linha: 800 documentos levam alguns segundos.
+  }, 60_000);
+
   it("transcrição sem reunião VIVA não vira documento: nem a de reunião sumida, nem a de reunião 'deleted'", async () => {
     // Reverificação de 04/09 (etapa 3): a exclusão durante o processamento
     // deixava a transcrição órfã, e a memória a indexava com o título de
@@ -557,6 +596,21 @@ describe("Memória — busca e resposta resilientes", () => {
     expect(hits[0].score).toBeCloseTo(1);
     // e a pendência não é segredo: a busca conta o que ficou por indexar
     expect(pending).toBe(1);
+  });
+
+  it("no máximo duas janelas da mesma reunião na busca: os outros lugares ficam para contatos e outras reuniões (G8)", async () => {
+    tabelas.set(schema.privateContacts, TABELA_FORA_DO_AR as never);
+    const janela = (n: number) => ({
+      ...docDeContato(100 + n, `Reunião longa ${n}`), sourceType: "meeting", sourceId: n === 1 ? "m-longa" : `m-longa#${n}`,
+      metadata: { meetingId: "m-longa", janela: n },
+    });
+    semear(schema.memoryDocuments, [janela(1), janela(2), janela(3), janela(4), docDeContato(1, "Ana")]);
+    embedWithGemini.mockResolvedValue(vetor768());
+
+    const { hits } = await servico.semanticSearch("dona", "o que combinamos?", 12);
+
+    expect(hits.filter(h => h.sourceType === "meeting")).toHaveLength(2);
+    expect(hits.some(h => h.title === "Ana")).toBe(true);
   });
 
   it("até um erro inesperado na reindexação não mata a busca", async () => {

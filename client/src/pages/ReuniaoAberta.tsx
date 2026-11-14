@@ -4,6 +4,7 @@ import { useParams } from "wouter";
 import { Clock3, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
+import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -75,6 +76,9 @@ export default function ReuniaoAberta() {
   const [idiomaDaTraducao, setIdiomaDaTraducao] = useState(LANGUAGES.some(idioma => idioma.code === idiomaAtual) ? idiomaAtual : "pt-BR");
   const [textoTraduzido, setTextoTraduzido] = useState<string | null>(null);
   const traduzir = trpc.reuniaoAberta.traduzir.useMutation();
+  // Reunião longa: a tradução segue em segundo plano no servidor, que responde
+  // "em andamento"; a página pergunta de novo a cada 5 s, sem gastar vaga do teto.
+  const traducaoLonga = useNovaTentativa(`${token}|${idiomaDaTraducao}`);
   const temTranscricao = !!data?.transcricao;
   // Reunião antiga guarda 'pt'.
   const idiomaDoOriginal = idiomaDaReuniao(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
@@ -82,14 +86,21 @@ export default function ReuniaoAberta() {
   // de um idioma trocado no meio do caminho não sobrescreve a do atual.
   const pedirTraducao = () => traduzir.mutate(
     { token, language: idiomaDaTraducao as IdiomaDaReuniao },
-    { onSuccess: resultado => setTextoTraduzido(resultado.text) },
+    {
+      onSuccess: resultado => {
+        if (resultado.emAndamento) return traducaoLonga.agendar();
+        traducaoLonga.parar();
+        setTextoTraduzido(resultado.text);
+      },
+      onError: () => traducaoLonga.parar(),
+    },
   );
   useEffect(() => {
     setTextoTraduzido(null);
     // De volta ao original, o erro da tradução anterior sai junto.
-    if (!temTranscricao || idiomaDaTraducao === idiomaDoOriginal) { traduzir.reset(); return; }
+    if (!temTranscricao || idiomaDaTraducao === idiomaDoOriginal) { traducaoLonga.parar(); traduzir.reset(); return; }
     pedirTraducao();
-  }, [temTranscricao, token, idiomaDaTraducao, idiomaDoOriginal]);
+  }, [temTranscricao, token, idiomaDaTraducao, idiomaDoOriginal, traducaoLonga.tentativa]);
 
   if (isError && linkNaoAbre(error)) return <Moldura>
     <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
@@ -141,7 +152,9 @@ export default function ReuniaoAberta() {
             </select>
           </label>
         </div>
-        {traduzir.isPending
+        {traducaoLonga.aguardando
+          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
+          : traduzir.isPending
           ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div>
           : <>
             {traduzir.isError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">

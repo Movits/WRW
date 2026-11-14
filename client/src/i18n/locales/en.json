@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "Meeting language",
     "meetingLanguageHint": "The language spoken. The AI transcribes in this language, and the transcript can be translated later.",
-    "originalLanguageSuffix": "(original)"
+    "originalLanguageSuffix": "(original)",
+    "translatingLongStatus": "This is a long meeting: the translation takes a few minutes. You can leave this screen open; the text appears when it is ready."
   },
   "connections": {
     "messageSent": "Message sent",

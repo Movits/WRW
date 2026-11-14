@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "मीटिंग की भाषा",
     "meetingLanguageHint": "बोली जाने वाली भाषा। AI इसी भाषा में ट्रांसक्राइब करता है, और ट्रांसक्रिप्ट का बाद में अनुवाद किया जा सकता है।",
-    "originalLanguageSuffix": "(मूल)"
+    "originalLanguageSuffix": "(मूल)",
+    "translatingLongStatus": "मीटिंग लंबी है: अनुवाद में कुछ मिनट लगते हैं। आप यह स्क्रीन खुली छोड़ सकती हैं; तैयार होते ही टेक्स्ट दिखेगा।"
   },
   "connections": {
     "messageSent": "संदेश भेजा गया",

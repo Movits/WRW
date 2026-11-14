@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "会議の言語",
     "meetingLanguageHint": "話されている言語です。AI はこの言語で文字起こしし、文字起こしは後で翻訳できます。",
-    "originalLanguageSuffix": "（原文）"
+    "originalLanguageSuffix": "（原文）",
+    "translatingLongStatus": "会議が長いため、翻訳には数分かかります。この画面は開いたままで大丈夫です。準備ができると本文が表示されます。"
   },
   "connections": {
     "messageSent": "メッセージを送信しました",

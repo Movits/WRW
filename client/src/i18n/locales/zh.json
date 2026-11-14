@@ -1614,7 +1614,8 @@
     },
     "meetingLanguageLabel": "会议语言",
     "meetingLanguageHint": "会议中使用的语言。AI 将用此语言转写，转写稿之后可以翻译。",
-    "originalLanguageSuffix": "（原文）"
+    "originalLanguageSuffix": "（原文）",
+    "translatingLongStatus": "会议较长：翻译需要几分钟。您可以让此页面保持打开，译文完成后会显示。"
   },
   "connections": {
     "messageSent": "消息已发送",
