@@ -1599,7 +1599,7 @@
       "intro": "Installiert öffnet sich die App direkt bei der Aufnahme, in einem eigenen Fenster.",
       "installButton": "App installieren",
       "closeLabel": "Installationshinweis schließen",
-      "iosStep1": "Tippen Sie auf „Teilen“. Wenn Sie es nicht sehen, tippen Sie zuerst auf •••.",
+      "iosStep1": "Tippen Sie auf „Teilen“. Wenn Sie es nicht sehen, tippen Sie zuerst auf ≡ („Seitenmenü“, in der Adressleiste) oder auf •••.",
       "iosStep2": "Scrollen Sie in der Liste nach unten und tippen Sie auf „Zum Home-Bildschirm hinzufügen“.",
       "iosStep3": "Wenn „Als Web-App öffnen“ erscheint, lassen Sie es aktiviert. Tippen Sie auf „Hinzufügen“.",
       "iosLoginNote": "Auf iPhone und iPad speichert die App die Anmeldung getrennt von Safari: Melden Sie sich einmal in der App mit Ihrer E-Mail-Adresse und Ihrem Passwort an.",

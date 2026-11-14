@@ -73,7 +73,8 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
     montar(ambiente(UA.iphone, { maxTouchPoints: 5 }));
     expect(dica()).toBeInTheDocument();
     expect(passos()).toEqual([
-      "Toque em “Compartilhar”. Se ele não estiver à vista, toque antes em •••.",
+      // iOS 27: o ≡ (Menu da Página) na barra de endereço; iOS 26 e Chrome do iPhone: o •••.
+      "Toque em “Compartilhar”. Se ele não estiver à vista, toque antes em ≡ (Menu da Página, na barra de endereço) ou em •••.",
       "Role a lista e toque em “Adicionar à Tela de Início”.",
       "Se aparecer “Abrir como App da Web”, deixe ligado. Toque em “Adicionar”.",
     ]);
@@ -204,6 +205,16 @@ describe("Dica de instalação — o pedido do navegador (Chrome, Edge, Samsung 
     });
     await waitFor(() => expect(passos()).toHaveLength(2));
     expect(screen.getByRole("heading", { name: TITULO })).toHaveFocus();
+  });
+
+  it("no computador (Chrome ou Edge), com o pedido guardado, o botão também toma o lugar dos passos", () => {
+    montar(ambiente(UA.windowsEdge));
+    expect(passos()).toHaveLength(2);
+    act(() => {
+      window.dispatchEvent(pedidoDoNavegador("accepted").evento);
+    });
+    expect(screen.getByRole("button", { name: "Instalar o app" })).toBeInTheDocument();
+    expect(passos()).toEqual([]);
   });
 
   it("o pedido que chegou antes de a dica montar (na carga, pelo main.tsx) já mostra o botão", () => {

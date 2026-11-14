@@ -1599,7 +1599,7 @@
       "intro": "Once installed, it opens straight to the recorder, in its own window.",
       "installButton": "Install the app",
       "closeLabel": "Close the install tip",
-      "iosStep1": "Tap “Share”. If you don't see it, tap ••• first.",
+      "iosStep1": "Tap “Share”. If you don't see it, first tap ≡ (Page Menu, in the address bar) or •••.",
       "iosStep2": "Scroll down the list and tap “Add to Home Screen”.",
       "iosStep3": "If “Open as Web App” appears, leave it on. Tap “Add”.",
       "iosLoginNote": "On iPhone and iPad, the app keeps its sign-in separate from Safari: sign in to it once with your email and password.",

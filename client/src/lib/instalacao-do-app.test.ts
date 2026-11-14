@@ -30,6 +30,12 @@ const UA = {
   snapchatIphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Snapchat/13.60.0.43 (like Safari/8621.3.11.10.3, panda)",
   googleAppIphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) GSA/392.0.833133432 Mobile/15E148 Safari/604.1",
   linuxFirefox: "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0",
+  // O iPad no site para celular leva "iPad" no userAgent.
+  ipadCelular: "Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+  // A WebView de um app no Mac: sem Version/ nem Safari/.
+  macWebView: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  // O GNOME Web (WebKit) no Linux leva Version/ e Safari/, mas não é o Safari do Mac.
+  gnomeWeb: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
   facebookAndroid: "Mozilla/5.0 (Linux; Android 15; SM-S921B Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/500.0.0.0;]",
   androidWebView: "Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36",
   wechat: "Mozilla/5.0 (Linux; Android 15; V2309A) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.50",
@@ -54,8 +60,11 @@ describe("plataformaDeInstalacao", () => {
     ["iPhone no Safari", UA.iphoneSafari, 5, "ios"],
     ["iPhone no Chrome (o Compartilhar também adiciona à tela de início)", UA.iphoneChrome, 5, "ios"],
     ["iPad, que se apresenta como Mac mas tem tela de toque", UA.macSafari, 5, "ios"],
+    ["iPad no site para celular, com iPad no userAgent", UA.ipadCelular, 5, "ios"],
     ["a WebView de um app no iPhone, sem Safari no userAgent", UA.iphoneWebView, 5, "navegador-embutido"],
     ["Mac no Safari", UA.macSafari, 0, "mac-safari"],
+    ["a WebView de um app no Mac, sem Version/ nem Safari/, não é o Safari", UA.macWebView, 0, "sem-instalacao"],
+    ["o GNOME Web no Linux, com Version/ e Safari/, não é o Safari do Mac", UA.gnomeWeb, 0, "sem-instalacao"],
     ["Instagram no iPhone", UA.instagramIphone, 5, "navegador-embutido"],
     ["Snapchat no iPhone, que leva Safari/: só o token o pega, antes da regra do iPhone", UA.snapchatIphone, 5, "navegador-embutido"],
     ["app Google no iPhone (GSA), que leva Safari/ e não adiciona à tela de início", UA.googleAppIphone, 5, "navegador-embutido"],

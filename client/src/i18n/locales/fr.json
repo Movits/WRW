@@ -1599,7 +1599,7 @@
       "intro": "Une fois installée, elle s'ouvre directement sur l'écran d'enregistrement, dans sa propre fenêtre.",
       "installButton": "Installer l'app",
       "closeLabel": "Fermer l'astuce d'installation",
-      "iosStep1": "Touchez « Partager ». S'il n'est pas visible, touchez d'abord •••.",
+      "iosStep1": "Touchez « Partager ». S'il n'est pas visible, touchez d'abord ≡ (Menu de la page, dans la barre d'adresse) ou •••.",
       "iosStep2": "Faites défiler la liste et touchez « Sur l'écran d'accueil ».",
       "iosStep3": "Si « Ouvrir comme app web » apparaît, laissez-le activé. Touchez « Ajouter ».",
       "iosLoginNote": "Sur l'iPhone et l'iPad, l'app garde sa connexion à part de Safari : connectez-vous une fois dans l'app, avec votre e-mail et votre mot de passe.",

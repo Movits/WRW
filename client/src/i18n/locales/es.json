@@ -1599,7 +1599,7 @@
       "intro": "Una vez instalada, abre directo en la pantalla de grabación, en su propia ventana.",
       "installButton": "Instalar la app",
       "closeLabel": "Cerrar el consejo de instalación",
-      "iosStep1": "Toca “Compartir”. Si no lo ves, toca primero •••.",
+      "iosStep1": "Toca “Compartir”. Si no lo ves, toca primero ≡ (Menú de página, en la barra de direcciones) o •••.",
       "iosStep2": "Desplázate por la lista y toca “Agregar a Inicio”.",
       "iosStep3": "Si aparece “Abrir como app web”, déjalo activado. Toca “Agregar”.",
       "iosLoginNote": "En el iPhone y el iPad, la app guarda el inicio de sesión aparte de Safari: inicia sesión en ella una vez, con tu correo y tu contraseña.",

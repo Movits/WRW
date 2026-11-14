@@ -1599,7 +1599,7 @@
       "intro": "Instalado, o app abre direto no gravador, em janela própria.",
       "installButton": "Instalar o app",
       "closeLabel": "Fechar a dica de instalação",
-      "iosStep1": "Toque em “Compartilhar”. Se ele não estiver à vista, toque antes em •••.",
+      "iosStep1": "Toque em “Compartilhar”. Se ele não estiver à vista, toque antes em ≡ (Menu da Página, na barra de endereço) ou em •••.",
       "iosStep2": "Role a lista e toque em “Adicionar à Tela de Início”.",
       "iosStep3": "Se aparecer “Abrir como App da Web”, deixe ligado. Toque em “Adicionar”.",
       "iosLoginNote": "No iPhone e no iPad, o app guarda o login à parte do Safari: entre nele uma vez, com o seu e-mail e a sua senha.",
