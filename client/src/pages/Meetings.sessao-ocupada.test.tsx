@@ -98,10 +98,12 @@ const VINICOLA = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 class GravadorFalso {
   static isTypeSupported = () => true;
   mimeType = "audio/webm";
-  state: "inactive" | "recording" = "inactive";
+  state: "inactive" | "recording" | "paused" = "inactive";
   ondataavailable: ((evento: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   start() { this.state = "recording"; }
+  pause() { this.state = "paused"; }
+  resume() { this.state = "recording"; }
   stop() {
     this.state = "inactive";
     this.ondataavailable?.({ data: new Blob(["som"], { type: "audio/webm" }) });
@@ -479,5 +481,72 @@ describe("Reuniões — gravação em partes (G9, /gravar?emPartes=1)", () => {
     await gravarEEncerrar();
     expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
     expect(duble.enviarParte).not.toHaveBeenCalled();
+  });
+});
+
+describe("Reuniões — gravação longa no celular (G10)", () => {
+  it("Pausar e Continuar gravando; pausada, a sessão segue ocupada e o Encerrar continua lá", async () => {
+    abrirOGravador();
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    fireEvent.click(await screen.findByRole("button", { name: "Pausar" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Gravação pausada");
+    expect(motivoDaOcupacao()).toBe("gravando");
+    expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continuar gravando" }));
+    expect(screen.getByRole("button", { name: "Pausar" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
+  });
+
+  async function iniciar() {
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+  }
+  // Com a tela acesa garantida (Wake Lock aceito): só o aparelho decide o aviso.
+  function comTelaAcesa() {
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: async () => ({ released: false, release: async () => {} }) } });
+  }
+  afterEach(() => { delete (navigator as { wakeLock?: unknown }).wakeLock; });
+
+  it("no computador com a tela acesa garantida, nenhum aviso", async () => {
+    comTelaAcesa();
+    abrirOGravador();
+    await iniciar();
+    await screen.findByRole("button", { name: "Pausar" });
+    await act(async () => {});
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("sem a tela acesa (navegador sem Wake Lock ou que recusou), avisa", async () => {
+    abrirOGravador();
+    await iniciar();
+    expect(await screen.findByRole("note")).toHaveTextContent(/Mantenha esta tela aberta/);
+  });
+
+  it("navegador sem pause(): o Pausar não aparece", async () => {
+    const pausar = GravadorFalso.prototype.pause;
+    (GravadorFalso.prototype as { pause?: unknown }).pause = undefined;
+    try {
+      abrirOGravador();
+      await iniciar();
+      expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Pausar" })).not.toBeInTheDocument();
+    } finally {
+      GravadorFalso.prototype.pause = pausar;
+    }
+  });
+
+  it("no iPhone, avisa para manter a tela aberta mesmo com a tela acesa garantida", async () => {
+    comTelaAcesa();
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)");
+    abrirOGravador();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("note")).toHaveTextContent(/Mantenha esta tela aberta/);
   });
 });

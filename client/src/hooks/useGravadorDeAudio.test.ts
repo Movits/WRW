@@ -1,14 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
-import { useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador } from "./useGravadorDeAudio";
+import { PAUSA_MAXIMA_MS, useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador } from "./useGravadorDeAudio";
 
 /** O MediaRecorder do navegador, que grava só os formatos da lista. */
 type GravadorFalso = {
   fluxo: unknown;
   opcoes: MediaRecorderOptions | undefined;
   mimeType: string;
-  state: "inactive" | "recording";
+  state: "inactive" | "recording" | "paused";
   ondataavailable: ((evento: { data: Blob }) => void) | null;
   onstop: (() => void) | null;
   /** Com o fim atrasado: entrega os pedaços e o fim, como o navegador faz depois do stop(). */
@@ -22,7 +22,7 @@ function navegadorQueGrava(formatos: string[], { fimAtrasado = false } = {}) {
     fluxo: unknown;
     opcoes: MediaRecorderOptions | undefined;
     mimeType: string;
-    state: "inactive" | "recording" = "inactive";
+    state: "inactive" | "recording" | "paused" = "inactive";
     ondataavailable: ((evento: { data: Blob }) => void) | null = null;
     onstop: (() => void) | null = null;
     constructor(fluxo: unknown, opcoes?: MediaRecorderOptions) {
@@ -33,6 +33,8 @@ function navegadorQueGrava(formatos: string[], { fimAtrasado = false } = {}) {
       gravadores.push(this);
     }
     start() { this.state = "recording"; }
+    pause() { this.state = "paused"; }
+    resume() { this.state = "recording"; }
     stop() {
       this.state = "inactive";
       if (!fimAtrasado) this.terminar();
@@ -468,5 +470,109 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     expect(gravadores).toHaveLength(1);
     expect(aoFecharParte).toHaveBeenCalledWith(expect.objectContaining({ seq: 0, ultima: true }));
     expect(aoTerminar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useGravadorDeAudio — pausa (G10)", () => {
+  it("pausar congela o relógio; continuar retoma; a duração entregue desconta a pausa", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600 });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => result.current.pausar());
+      expect(result.current.estado).toBe("pausado");
+      expect(gravadores[0].state).toBe("paused");
+      const congelado = result.current.segundos;
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(result.current.segundos).toBe(congelado);
+      act(() => result.current.continuar());
+      expect(result.current.estado).toBe("gravando");
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(result.current.segundos).toBe(15);
+      act(() => result.current.parar());
+      expect(aoTerminar.mock.calls[0][0].duracaoMs).toBe(15_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("parar com a gravação pausada entrega o áudio sem o tempo pausado", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600 });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(8_000); });
+      act(() => result.current.pausar());
+      act(() => { vi.advanceTimersByTime(30_000); });
+      act(() => result.current.parar());
+      expect(result.current.estado).toBe("parado");
+      expect(aoTerminar.mock.calls[0][0].duracaoMs).toBe(8_000);
+      expect(trilha.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("em partes, a pausa não conta para a troca de parte", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      const aoFecharParte = vi.fn();
+      const { result } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(500_000); });
+      act(() => result.current.pausar());
+      act(() => { vi.advanceTimersByTime(300_000); });
+      act(() => result.current.continuar());
+      act(() => { vi.advanceTimersByTime(50_000); });
+      expect(aoFecharParte).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(51_000); });
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBeGreaterThanOrEqual(600_000);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBeLessThanOrEqual(601_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pausa além do teto (1 h): encerra e entrega o que gravou, sem a pausa", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const { result, aoTerminar } = montar({ limiteSegundos: 7200 });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(20_000); });
+      act(() => result.current.pausar());
+      act(() => { vi.advanceTimersByTime(PAUSA_MAXIMA_MS + 1_000); });
+      expect(result.current.estado).toBe("parado");
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(aoTerminar.mock.calls[0][0].duracaoMs).toBe(20_000);
+      expect(trilha.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("continuar com a trilha do microfone encerrada (iPhone bloqueado na pausa): encerra e entrega", async () => {
+    const { result, aoTerminar } = montar({ limiteSegundos: 3600 });
+    await act(async () => { await result.current.comecar(); });
+    act(() => result.current.pausar());
+    (gravadores[0] as unknown as { stream: unknown }).stream = { getAudioTracks: () => [{ readyState: "ended" }] };
+    act(() => result.current.continuar());
+    expect(result.current.estado).toBe("parado");
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+  });
+
+  it("pausar e continuar duplos, e continuar sem pausa, não fazem nada", async () => {
+    const { result } = montar({ limiteSegundos: 3600 });
+    await act(async () => { await result.current.comecar(); });
+    act(() => result.current.continuar());
+    expect(result.current.estado).toBe("gravando");
+    act(() => result.current.pausar());
+    act(() => result.current.pausar());
+    expect(result.current.estado).toBe("pausado");
+    act(() => result.current.continuar());
+    act(() => result.current.continuar());
+    expect(result.current.estado).toBe("gravando");
   });
 });

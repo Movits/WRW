@@ -15,7 +15,7 @@ import { useOcupacao } from "@/lib/sessao-ocupada";
  * ficam com quem chama, porque cada tela tem os seus textos.
  */
 
-export type EstadoDoGravador = "parado" | "pedindoMicrofone" | "gravando" | "finalizando";
+export type EstadoDoGravador = "parado" | "pedindoMicrofone" | "gravando" | "pausado" | "finalizando";
 
 export type AudioGravado = {
   /** Só os pedaços desta gravação, com o tipo que o navegador gravou. */
@@ -52,6 +52,23 @@ export type OpcoesDoGravador = {
 // duração medida no servidor, em server/meeting-service.ts, conta com os 500 ms).
 const FATIA_MS = 250;
 const RELOGIO_MS = 500;
+/**
+ * A pausa mais longa (G10): passou disso, a gravação encerra e entrega o que
+ * gravou. Sem teto, uma pausa esquecida deixaria o microfone aceso e a sessão
+ * ocupada (o Sair perguntando, o recarregar depois do deploy adiado) sem fim.
+ */
+export const PAUSA_MAXIMA_MS = 60 * 60 * 1000;
+
+/** O navegador pausa o MediaRecorder? (o Safari antigo não). */
+export function pausaSuportada() {
+  return typeof MediaRecorder !== "undefined" && typeof MediaRecorder.prototype?.pause === "function";
+}
+
+/** A trilha de áudio que o gravador grava ainda está viva? Sem como saber, sim. */
+function microfoneVivo(gravador: MediaRecorder) {
+  const trilhas = gravador.stream?.getAudioTracks?.();
+  return !trilhas?.length || trilhas.some(trilha => trilha.readyState !== "ended");
+}
 
 const RESTRICOES_DO_MICROFONE: MediaStreamConstraints = {
   audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } },
@@ -90,6 +107,12 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // O Parar que chega DURANTE a troca (o gravador da parte já parou e o da
   // seguinte ainda não abriu): vale como o fim, e a parte seguinte não abre.
   const pararNaTroca = useRef(false);
+  // A pausa (G10): quando a atual começou (0 sem pausa), o tempo pausado da
+  // gravação inteira e o da parte atual. O áudio pausado não existe no arquivo:
+  // a duração entregue, o relógio e a troca de parte descontam a pausa.
+  const pausaComecou = useRef(0);
+  const pausadoNaGravacao = useRef(0);
+  const pausadoNaParte = useRef(0);
   // Cada pedido de microfone leva um número. Sair da tela ou descartar troca o
   // número, e o microfone que o navegador entregar depois, para um pedido
   // velho, é solto na hora.
@@ -105,6 +128,35 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // confirmação. O fim do arquivo, descartar, a falha e sair da tela liberam.
   useOcupacao("gravando", estado !== "parado");
 
+  /** Fecha a pausa em curso, somando-a ao tempo pausado. */
+  function fecharPausa() {
+    if (!pausaComecou.current) return;
+    const pausa = Date.now() - pausaComecou.current;
+    pausaComecou.current = 0;
+    pausadoNaGravacao.current += pausa;
+    pausadoNaParte.current += pausa;
+  }
+
+  /** Pausa a gravação (G10): o microfone segue aberto, nada é gravado. */
+  function pausar() {
+    const atual = gravador.current;
+    if (atual?.state !== "recording" || trocandoDeParte.current || typeof atual.pause !== "function") return;
+    atual.pause();
+    pausaComecou.current = Date.now();
+    mudarEstado("pausado");
+  }
+
+  function continuar() {
+    const atual = gravador.current;
+    if (atual?.state !== "paused") return;
+    // No iPhone, bloquear a tela durante a pausa encerra a trilha do microfone:
+    // retomar gravaria silêncio. Encerra e entrega o que já foi gravado.
+    if (!microfoneVivo(atual)) return parar();
+    fecharPausa();
+    atual.resume();
+    mudarEstado("gravando");
+  }
+
   function parar() {
     const atual = gravador.current;
     if (trocandoDeParte.current && atual) {
@@ -112,7 +164,8 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       mudarEstado("finalizando");
       return;
     }
-    if (atual?.state !== "recording") return;
+    if (atual?.state !== "recording" && atual?.state !== "paused") return;
+    fecharPausa();
     mudarEstado("finalizando");
     atual.stop();
   }
@@ -120,6 +173,9 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   /** Para sem entregar nada e solta o microfone. */
   function descartar() {
     pedidoAtual.current++;
+    pausaComecou.current = 0;
+    pausadoNaGravacao.current = 0;
+    pausadoNaParte.current = 0;
     trocandoDeParte.current = false;
     pararNaTroca.current = false;
     const atual = gravador.current;
@@ -162,7 +218,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
         novo.ondataavailable = evento => { if (evento.data.size) pedacos.push(evento.data); };
         novo.onstop = () => {
           const blob = new Blob(pedacos, { type: novo.mimeType || "audio/webm" });
-          const audio = { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - parteComecouEm };
+          const audio = { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - parteComecouEm - pausadoNaParte.current };
           // Troca de parte: a gravação continua, já na parte seguinte.
           if (trocandoDeParte.current && gravador.current === novo && !pararNaTroca.current) {
             trocandoDeParte.current = false;
@@ -179,12 +235,15 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
           setSegundos(0);
           atuais.current.aoFecharParte?.({ ...audio, seq, ultima: true });
           // Fora do modo em partes, a duração é a da gravação inteira, como antes.
-          atuais.current.aoTerminar(atuais.current.fatiaSegundos ? audio : { ...audio, duracaoMs: Date.now() - comecouEm });
+          atuais.current.aoTerminar(atuais.current.fatiaSegundos ? audio : { ...audio, duracaoMs: Date.now() - comecouEm - pausadoNaGravacao.current });
         };
         novo.start(FATIA_MS);
         gravador.current = novo;
         inicioDaParte.current = parteComecouEm;
+        pausadoNaParte.current = 0;
       };
+      pausaComecou.current = 0;
+      pausadoNaGravacao.current = 0;
       abrirParte(0);
       microfone.current = aberto;
       inicio.current = comecouEm;
@@ -207,15 +266,21 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   useEffect(() => () => descartar(), []);
 
   useEffect(() => {
+    if (estado === "pausado") {
+      const vigia = window.setInterval(() => {
+        if (pausaComecou.current && Date.now() - pausaComecou.current >= PAUSA_MAXIMA_MS) parar();
+      }, RELOGIO_MS);
+      return () => window.clearInterval(vigia);
+    }
     if (estado !== "gravando") return;
     const relogio = window.setInterval(() => {
       const limite = atuais.current.limiteSegundos;
-      const decorridos = Math.floor((Date.now() - inicio.current) / 1000);
+      const decorridos = Math.floor((Date.now() - inicio.current - pausadoNaGravacao.current) / 1000);
       setSegundos(Math.min(limite, decorridos));
       if (decorridos >= limite) return parar();
       const fatia = atuais.current.fatiaSegundos;
       const atual = gravador.current;
-      if (fatia && atual?.state === "recording" && !trocandoDeParte.current && Date.now() - inicioDaParte.current >= fatia * 1000) {
+      if (fatia && atual?.state === "recording" && !trocandoDeParte.current && Date.now() - inicioDaParte.current - pausadoNaParte.current >= fatia * 1000) {
         trocandoDeParte.current = true;
         atual.stop();
       }
@@ -223,5 +288,5 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     return () => window.clearInterval(relogio);
   }, [estado]);
 
-  return { estado, segundos, comecar, parar, descartar };
+  return { estado, segundos, comecar, parar, descartar, pausar, continuar };
 }
