@@ -60,7 +60,11 @@ function getGeminiKey() {
   return key;
 }
 
-async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1): Promise<T> {
+type OpcoesDaChamada = { timeoutMs?: number; orcamentoMs?: number };
+
+async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
+  const timeoutMs = opcoes.timeoutMs ?? TIMEOUT_POR_CHAMADA_MS;
+  const orcamentoMs = opcoes.orcamentoMs ?? ORCAMENTO_RETENTATIVAS_MS;
   // Falta de chave é erro de configuração, não de rede: sai antes do laço —
   // retentar não faria a chave aparecer.
   const chave = getGeminiKey();
@@ -68,7 +72,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
   let ultimoStatus = 503;
   for (let tentativa = 0; tentativa < tentativas; tentativa++) {
     if (tentativa > 0) {
-      if (Date.now() - inicio > ORCAMENTO_RETENTATIVAS_MS) break;
+      if (Date.now() - inicio > orcamentoMs) break;
       await espera(ESPERAS_MS[Math.min(tentativa - 1, ESPERAS_MS.length - 1)]);
     }
     let response: Response;
@@ -77,7 +81,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": chave },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(TIMEOUT_POR_CHAMADA_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (erro) {
       // Chamada que estourou o teto ou caiu na rede conta como passageira —
@@ -187,4 +191,87 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
   const text = payload.candidates?.flatMap(candidate => candidate.content?.parts ?? []).map(part => part.text ?? "").join("\n").trim();
   if (!text) throw new Error("O Gemini não retornou uma transcrição válida.");
   return { text, language: idioma ?? IDIOMA_DA_REUNIAO_PADRAO, segments: [] as Array<unknown> };
+}
+
+/**
+ * A resposta do modelo parou antes do fim (MAX_TOKENS, SAFETY, RECITATION...).
+ * Na transcrição, texto cortado gravado como se fosse inteiro seria perda
+ * silenciosa: quem chama trata como falha e tenta de novo. O motivo vai no log;
+ * a mensagem é para a tela da dona.
+ */
+export class GeminiRespostaCortadaError extends Error {
+  constructor(readonly motivo: string) {
+    super("A transcrição de uma parte do áudio saiu incompleta. Tente de novo em instantes.");
+  }
+}
+
+type RespostaComFim = {
+  candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+};
+
+// O raciocínio conta DENTRO do teto de saída: num áudio de 38 min o
+// gemini-3.5-flash gastou 62,9 mil tokens pensando, só 2,6 mil escrevendo, e
+// parou em MAX_TOKENS (14/11/2026). Transcrever não pede raciocínio: o
+// orçamento é fixo e baixo. A família 3 usa o nível; a 2.x, o orçamento em
+// tokens (que a 3 ainda aceita, mas o nível é o caminho documentado).
+export function raciocinioBaixo(modelo: string): Record<string, string | number> {
+  return /^gemini-[3-9]/.test(modelo) ? { thinkingLevel: "low" } : { thinkingBudget: 512 };
+}
+
+// Uma parte de ~10 min sai em segundo plano (a fila da reunião em partes), sem
+// o proxy de 100 s do Render na frente: cada chamada tem até 5 min, e as
+// retentativas até 8.
+const TIMEOUT_DA_PARTE_MS = 5 * 60_000;
+const ORCAMENTO_DA_PARTE_MS = 8 * 60_000;
+const SAIDA_MAXIMA_DA_PARTE = 32_768;
+
+/**
+ * Uma chamada com áudio inline e resposta (opcionalmente) em JSON, no modelo de
+ * áudio e, se ele estiver lotado, no reserva — a mesma cartada do
+ * transcribeWithGemini. Devolve o texto das partes que não são raciocínio.
+ * Resposta que não terminou em STOP lança GeminiRespostaCortadaError.
+ */
+export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
+  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+  const corpo = (modelo: string) => ({
+    contents: [{ parts: [
+      { text: input.prompt },
+      { inline_data: { mime_type: geminiMimeType, data: input.audio.toString("base64") } },
+    ] }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: SAIDA_MAXIMA_DA_PARTE,
+      thinkingConfig: raciocinioBaixo(modelo),
+      ...(input.esquemaJson ? { responseMimeType: "application/json", responseSchema: input.esquemaJson } : {}),
+    },
+  });
+  const opcoes = { timeoutMs: TIMEOUT_DA_PARTE_MS, orcamentoMs: ORCAMENTO_DA_PARTE_MS };
+  let modelo = modeloDeAudio();
+  let payload: RespostaComFim;
+  try {
+    payload = await geminiPost<RespostaComFim>(`/models/${modelo}:generateContent`, corpo(modelo), undefined, opcoes);
+  } catch (erro) {
+    if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
+    const reserva = modeloDeAudioReserva();
+    if (reserva === modelo) throw erro;
+    console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
+    try {
+      payload = await geminiPost<RespostaComFim>(`/models/${reserva}:generateContent`, corpo(reserva), 1, opcoes);
+      modelo = reserva;
+    } catch (erroDaReserva) {
+      console.warn(`[Gemini] a reserva ${reserva} também falhou:`, erroDaReserva instanceof Error ? erroDaReserva.message : erroDaReserva);
+      throw erro;
+    }
+  }
+  const candidato = payload.candidates?.[0];
+  const motivo = candidato?.finishReason ?? "SEM_MOTIVO";
+  const uso = payload.usageMetadata ?? {};
+  if (motivo !== "STOP") {
+    console.error(`[Gemini] ${modelo} parou em ${motivo} (saída ${uso.candidatesTokenCount ?? "?"}, raciocínio ${uso.thoughtsTokenCount ?? 0})`);
+    throw new GeminiRespostaCortadaError(motivo);
+  }
+  const texto = (candidato?.content?.parts ?? []).filter(parte => !parte.thought).map(parte => parte.text ?? "").join("").trim();
+  if (!texto) throw new Error("O Gemini não retornou uma transcrição válida.");
+  return { texto, modelo };
 }
