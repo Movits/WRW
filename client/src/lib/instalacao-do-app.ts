@@ -7,8 +7,8 @@ import { useSyncExternalStore } from "react";
  *
  * - plataformaDeInstalacao: o caminho de instalação deste aparelho, ou se a
  *   página já está aberta como app. Só lê o navegador; nada sai da página.
- * - o pedido de instalação do Chromium (Chrome, Edge, Samsung Internet), que
- *   deixa a dica oferecer o botão "Instalar o app". Ele chega uma vez por
+ * - o pedido de instalação do Chromium (o Chrome e o Edge; outros Chromium
+ *   podem mandá-lo também), que deixa a dica oferecer o botão "Instalar o app". Ele chega uma vez por
  *   carga e às vezes antes de o gravador montar (a página de Reuniões é
  *   carregada sob demanda): por isso o main.tsx liga a escuta na carga e o
  *   pedido fica guardado aqui.
@@ -34,7 +34,10 @@ export type Plataforma =
   | "ios"
   /** Navegador de dentro de outro app (Instagram, Facebook, WebView...): não instala. */
   | "navegador-embutido"
+  /** Chrome no Android: ⋮ > Instalar e criar atalho. */
   | "android"
+  /** Outro navegador no Android (Samsung Internet, Firefox, Opera, Edge...): o caminho é abrir no Chrome. */
+  | "android-outro-navegador"
   /** Safari no Mac: Arquivo > Adicionar ao Dock. */
   | "mac-safari"
   /** Chrome, Edge e os outros Chromium que instalam, no computador. */
@@ -58,6 +61,7 @@ const NAVEGADOR_EMBUTIDO = /FBAN|FBAV|FB_IAB|Instagram|LinkedInApp|\bLine\/|Snap
 // A casca das lojas (PR #180) se identifica assim, e é uma WebView: vem antes.
 const CASCA_DAS_LOJAS = /\bWRWApp\//;
 const CHROMIUM = /Chrome\/|Chromium\/|Edg\//;
+const NAVEGADOR_DO_ANDROID_SEM_OS_PASSOS_DO_CHROME = /SamsungBrowser\/|Firefox\/|\bOPR\/|EdgA\/|YaBrowser\/|MiuiBrowser\/|HeyTapBrowser\/|VivoBrowser\/|UCBrowser\//;
 
 export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoApp }: AmbienteDoNavegador): Plataforma {
   if (abertoComoApp || CASCA_DAS_LOJAS.test(userAgent)) return "app-instalado";
@@ -69,7 +73,11 @@ export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoAp
     // userAgent; a WebView de um app (WKWebView) não leva, nem instala.
     return /Safari\//.test(userAgent) ? "ios" : "navegador-embutido";
   }
-  if (/Android/i.test(userAgent)) return "android";
+  if (/Android/i.test(userAgent)) {
+    // Os passos são os do Chrome (⋮ > Instalar e criar atalho): os outros
+    // navegadores do Android têm outro menu, e o Chrome vem nos aparelhos.
+    return NAVEGADOR_DO_ANDROID_SEM_OS_PASSOS_DO_CHROME.test(userAgent) ? "android-outro-navegador" : "android";
+  }
   // Tablet Android com o Chrome no modo computador (o padrão nos tablets
   // grandes) se apresenta como Linux: a tela de toque o denuncia, como no iPad.
   // O custo é um notebook Linux com tela de toque receber os passos do Android.

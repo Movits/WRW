@@ -1609,7 +1609,8 @@
       "desktopStep2": "अगर यह न दिखे, तो Chrome में ⋮ > “कास्ट, सेव, और शेयर करें” > “पेज को ऐप्लिकेशन के तौर पर इंस्टॉल करें...” चुनें।",
       "macSafari": "Safari में “फ़ाइल” > “Dock में जोड़ें” चुनें।",
       "inAppBrowser": "यहाँ से इंस्टॉल नहीं हो सकता: यह पेज Safari या Chrome में खोलें।",
-      "unsupportedBrowser": "WRW को ऐप के रूप में इंस्टॉल करने के लिए, इसे Chrome, Edge या Safari में खोलें।"
+      "unsupportedBrowser": "WRW को ऐप के रूप में इंस्टॉल करने के लिए, इसे Chrome, Edge या Safari में खोलें।",
+      "androidOtherBrowser": "WRW को ऐप के रूप में इंस्टॉल करने के लिए, यह पेज Chrome में खोलें।"
     }
   },
   "connections": {

@@ -1609,7 +1609,8 @@
       "desktopStep2": "إذا لم يظهر، فاختر في Chrome ⋮ > «بثّ وحفظ ومشاركة» > «تثبيت الصفحة كتطبيق...».",
       "macSafari": "في سفاري، اختر «ملف» > «الإضافة إلى شريط الأيقونات».",
       "inAppBrowser": "لا يمكن التثبيت من هنا: افتح هذه الصفحة في سفاري أو Chrome.",
-      "unsupportedBrowser": "لتثبيت WRW كتطبيق، افتحه في Chrome أو Edge أو سفاري."
+      "unsupportedBrowser": "لتثبيت WRW كتطبيق، افتحه في Chrome أو Edge أو سفاري.",
+      "androidOtherBrowser": "لتثبيت WRW كتطبيق، افتح هذه الصفحة في Chrome."
     }
   },
   "connections": {

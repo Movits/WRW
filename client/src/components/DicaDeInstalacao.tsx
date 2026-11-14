@@ -16,8 +16,8 @@ import {
  * A dica de instalação do app, no gravador do /gravar (decisão 8 do plano do
  * gravador): instalado, o WRW abre direto no gravador, em janela própria.
  *
- * No Chrome, no Edge e no Samsung Internet, com o pedido do navegador guardado,
- * ela oferece o botão "Instalar o app"; nos outros casos, os passos do aparelho,
+ * Com o pedido do navegador guardado (Chrome e Edge; outros Chromium podem
+ * mandá-lo também), ela oferece o botão "Instalar o app"; sem ele, os passos do aparelho,
  * com os rótulos que o sistema mostra em cada idioma. No iPhone e no iPad ela
  * avisa que o app instalado pede um login próprio, separado do do Safari.
  *
@@ -155,6 +155,8 @@ function PassosDaInstalacao({ plataforma }: { plataforma: Plataforma }) {
           <li>{t("meetings.install.desktopStep2")}</li>
         </ol>
       );
+    case "android-outro-navegador":
+      return <p className="mt-3">{t("meetings.install.androidOtherBrowser")}</p>;
     case "mac-safari":
       return <p className="mt-3">{t("meetings.install.macSafari")}</p>;
     case "navegador-embutido":

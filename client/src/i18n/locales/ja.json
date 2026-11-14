@@ -1609,7 +1609,8 @@
       "desktopStep2": "表示されない場合は、Chromeで⋮ >「キャスト、保存、共有」>「ページをアプリとしてインストール」を選択します。",
       "macSafari": "Safariで「ファイル」>「Dockに追加」を選択します。",
       "inAppBrowser": "ここからはインストールできません。このページをSafariまたはChromeで開いてください。",
-      "unsupportedBrowser": "WRWをアプリとしてインストールするには、Chrome、Edge、またはSafariで開いてください。"
+      "unsupportedBrowser": "WRWをアプリとしてインストールするには、Chrome、Edge、またはSafariで開いてください。",
+      "androidOtherBrowser": "WRWをアプリとしてインストールするには、このページをChromeで開いてください。"
     }
   },
   "connections": {
