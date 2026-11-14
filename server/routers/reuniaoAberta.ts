@@ -64,7 +64,7 @@ export const reuniaoAbertaRouter = router({
     .query(({ input }) => comRecusaTraduzida(() => verReuniaoPeloLink(input.token))),
 
   traduzir: publicProcedure
-    .input(z.object({ token: tokenDoLink, language: z.enum(["en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"]) }))
+    .input(z.object({ token: tokenDoLink, language: z.enum(MEETING_TRANSCRIPT_LANGUAGES) }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
       const reuniao = await exigirReuniaoDoLink(input.token);
       try {

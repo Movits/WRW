@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import Meetings from "./Meetings";
+import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
 /**
  * Etapa 3 — a tela de Reuniões (reverificação de 04/09), em duas frentes.
@@ -571,6 +572,61 @@ describe("Envio de arquivo — a duração não é inventada", () => {
       expect.objectContaining({ meetingId: "reuniao-nova", mimeType: "audio/webm", durationSeconds: 301 }),
     ));
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
+  const TRANSCRICAO_ABA = /^Transcrição$/;
+  it("o gravador começa no idioma da tela e manda o idioma escolhido e a versão do aviso", async () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    duble.duracao.mockResolvedValue(120);
+    render(<Meetings />);
+    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
+    expect(seletor.value).toBe("pt-BR");
+    fireEvent.change(seletor, { target: { value: "en" } });
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Call with Ana" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "en" })));
+    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }));
+  });
+
+  it("com a tela em inglês, o gravador já começa em inglês", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      duble.list.mockReturnValue({ data: [], isLoading: false });
+      render(<Meetings />);
+      fireEvent.click(screen.getByRole("button", { name: /New meeting/ }));
+      expect((screen.getByLabelText("Meeting language") as HTMLSelectElement).value).toBe("en");
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
+  });
+
+  it("reunião em inglês com a tela em pt-BR: o original é o inglês, e o pt-BR é TRADUZIDO", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Long talk.", language: "en" } });
+    expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    expect(screen.getByRole("option", { name: /English \(original\)/ })).toBeInTheDocument();
+  });
+
+  it("reunião em inglês com a tela em inglês: mostra o original, sem pedir tradução", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Long talk.", language: "en" } });
+      expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
+  });
+
+  it("reunião antiga gravada como 'pt' com a tela em pt-BR: o original, sem pedir tradução", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt" } });
+    expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    expect(screen.getByRole("option", { name: /Português \(original\)/ })).toBeInTheDocument();
   });
 });
 

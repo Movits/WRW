@@ -154,9 +154,11 @@ describe("completar por voz — gravar, transcrever, interpretar, sugerir", () =
       oQuePreciso: [{ texto: "Fornecedores na Índia", categoria: null, trecho: "procura fornecedores na Índia", confianca: 0.9 }],
     }) } }] });
 
-    const r = await chamar().complementarPorVoz({ contactId: 5, audioBase64: audio, mimeType: "audio/webm", durationSeconds: 42 });
+    const r = await chamar().complementarPorVoz({ contactId: 5, audioBase64: audio, mimeType: "audio/webm", durationSeconds: 42, idioma: "es-MX" });
 
     expect(r).toEqual({ transcricao: "A Maria tem uma distribuidora de medicamentos e procura fornecedores na Índia.", pendenciasCriadas: 2 });
+    // O idioma da tela de quem grava vai à transcrição, que o normaliza (G1b).
+    expect(transcribeWithGemini).toHaveBeenCalledWith(expect.objectContaining({ language: "es-MX" }));
     expect(storagePut).not.toHaveBeenCalled();
     const consumo = estado.consultas.find(c => /^insert into `consumo_de_minutos`/.test(c.sql))!;
     expect(consumo.params).toEqual(expect.arrayContaining(["dona-9", "voz", 42]));

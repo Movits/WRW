@@ -19,6 +19,8 @@ import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravado
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
 const MAX_DURATION = 10 * 60;
 
@@ -136,6 +138,9 @@ export default function Meetings() {
   });
   const [title, setTitle] = useState("");
   const [consent, setConsent] = useState(false);
+  // O idioma falado na reunião: a IA transcreve nele, e ele é o original da
+  // tradução. Começa no idioma da tela de quem grava.
+  const [idiomaFalado, setIdiomaFalado] = useState<IdiomaDaReuniao>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: TipoDeAudioGravado; durationSeconds: number } | null>(null);
@@ -313,9 +318,9 @@ export default function Meetings() {
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
       if (durationSeconds > MAX_DURATION) return toast.error(t("meetings.audioTooLong"));
-      const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: "pt" });
+      const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
-      await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: "pt" });
+      await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado });
     } catch (error) {
       // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
       // troca aquele aviso em vez de pôr outro igual ao lado.
@@ -347,7 +352,7 @@ export default function Meetings() {
     try {
       setFinalizing(true);
       const [created, audioBase64] = await Promise.all([
-        createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: "pt" }),
+        createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }),
         readAsDataUrl(t, capturedAudio.blob),
       ]);
       reuniaoCriada = created.id;
@@ -356,7 +361,7 @@ export default function Meetings() {
         audioBase64,
         mimeType: capturedAudio.mimeType,
         durationSeconds: capturedAudio.durationSeconds,
-        language: "pt",
+        language: idiomaFalado,
       });
     } catch (error) {
       // Como no envio de arquivo: depois de criada, o aviso é o mesmo do onError.
@@ -391,6 +396,7 @@ export default function Meetings() {
   const conteudo = screen === "new" ? (
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
+      idioma={idiomaFalado} setIdioma={setIdiomaFalado}
       recording={recording} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
@@ -416,7 +422,7 @@ export default function Meetings() {
   return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}</>;
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
   const { t } = useTranslation();
   const locked = props.recording || props.processing;
   return <main className="min-h-screen flex items-center justify-center p-4 bg-transparent text-white">
@@ -426,6 +432,11 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <h1 className="text-2xl font-bold mt-1">{t("meetings.recorderTitle")}</h1>
       <div className="mt-7 space-y-5">
         <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
+        <div><label htmlFor="idioma-da-reuniao" className="text-sm text-white/70">{t("meetings.meetingLanguageLabel")}</label>
+          <select id="idioma-da-reuniao" disabled={locked} value={props.idioma} onChange={e => props.setIdioma(idiomaDaReuniao(e.target.value) ?? IDIOMA_DA_REUNIAO_PADRAO)} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300">
+            {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}
+          </select>
+          <p className="text-xs text-white/40 mt-2">{t("meetings.meetingLanguageHint")}</p></div>
         {/* O aviso de privacidade também aqui: o login, o Dashboard e o link
             /gravar chegam ao gravador direto, sem passar pela lista, que era o
             único lugar com ele antes de gravar. */}
@@ -545,16 +556,19 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // Em processamento, a transcrição na tela é da tentativa anterior e está para
   // ser trocada: traduzir agora gastaria IA com um texto que vai sumir.
   const processandoAgora = data?.meeting.status === "processing";
+  // O idioma em que a reunião foi transcrita é o original: escolhê-lo mostra a
+  // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
+  const idiomaOriginal = idiomaDaReuniao(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   useEffect(() => {
-    if (!data?.transcript || translationLanguage === "pt-BR" || processandoAgora) { setTranslatedText(null); return; }
+    if (!data?.transcript || translationLanguage === idiomaOriginal || processandoAgora) { setTranslatedText(null); return; }
     // A tradução anterior sai antes do pedido novo: se ele falhar (cota, prazo),
     // a tela mostra a transcrição original, não a tradução de outro texto.
     setTranslatedText(null);
     translateTranscript.mutate(
-      { meetingId, language: translationLanguage as "en" | "es" | "fr" | "de" | "ar" | "zh" | "hi" | "ja" | "ru" },
+      { meetingId, language: translationLanguage as IdiomaDaReuniao },
       { onSuccess: result => setTranslatedText(result.text) },
     );
-  }, [data?.transcript?.id, meetingId, translationLanguage, processandoAgora]);
+  }, [data?.transcript?.id, meetingId, translationLanguage, processandoAgora, idiomaOriginal]);
 
   // Erro antes do spinner: com isLoading false e data undefined a consulta
   // falhada caía no ramo abaixo e a usuária via um círculo girando para
@@ -576,10 +590,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   </div></main>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
   const { meeting, transcript, entities, suggestions, recording, recordingExpired } = data;
-  const displayTranscript = translationLanguage === "pt-BR" ? transcript?.transcript : translatedText;
+  const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
   // Destaques valem só para o texto original: os valores extraídos pela IA não
   // batem com o texto traduzido.
-  const segmentos = transcript && translationLanguage === "pt-BR"
+  const segmentos = transcript && translationLanguage === idiomaOriginal
     ? segmentarTranscricao(transcript.transcript, entities)
     : null;
   const tiposPresentes = segmentos
@@ -650,7 +664,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
           <p className="mt-1 text-sm text-amber-100/70">{t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
-              {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}
+              {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}{language.code === idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
         </div>

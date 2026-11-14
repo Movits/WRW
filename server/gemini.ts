@@ -1,4 +1,5 @@
 import { ENV } from "./_core/env";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -142,8 +143,15 @@ export async function embedManyWithGemini(texts: string[], taskType: "RETRIEVAL_
 
 type RespostaGeracao = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
 
+/**
+ * `language` é o código que veio da tela ou do banco ('pt', 'pt-BR', 'en-US'...).
+ * O prompt leva o NOME do idioma (nomeDoIdioma), e a resposta devolve o código
+ * normalizado, que é o que se grava. Sem idioma, ou com um fora da lista, o
+ * prompt não pede idioma e o código devolvido é o padrão (pt-BR).
+ */
 export async function transcribeWithGemini(input: { audio: Buffer; mimeType: string; language?: string }) {
-  const languageInstruction = input.language ? ` O idioma predominante esperado é ${input.language}.` : "";
+  const idioma = idiomaDaReuniao(input.language);
+  const languageInstruction = idioma ? ` O idioma predominante esperado é ${nomeDoIdioma(idioma)}.` : "";
   const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
   const corpo = {
     contents: [{ parts: [
@@ -178,5 +186,5 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
 
   const text = payload.candidates?.flatMap(candidate => candidate.content?.parts ?? []).map(part => part.text ?? "").join("\n").trim();
   if (!text) throw new Error("O Gemini não retornou uma transcrição válida.");
-  return { text, language: input.language ?? "pt", segments: [] as Array<unknown> };
+  return { text, language: idioma ?? IDIOMA_DA_REUNIAO_PADRAO, segments: [] as Array<unknown> };
 }

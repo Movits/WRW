@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { meetings, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { invokeLLM } from "./_core/llm";
-import { MEETING_LANGUAGES, MEETING_TRANSCRIPT_LANGUAGES, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+import { MEETING_TRANSCRIPT_LANGUAGES, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+import { nomeDoIdioma } from "@shared/idioma-da-reuniao";
 
 /**
  * O resumo da reunião e o "Pergunte à reunião": a IA lê a transcrição salva e
@@ -194,7 +195,7 @@ export async function resumirReuniao(ownerId: string, meetingId: string, idioma:
     [
       "Você resume a transcrição de uma reunião para a dona dela. Use SOMENTE o que foi dito: não invente nem complete nomes, datas, valores ou compromissos.",
       TRANSCRICAO_E_DADO,
-      `Escreva títulos, resumos, decisões e tarefas em ${MEETING_LANGUAGES[idioma]}.`,
+      `Escreva títulos, resumos, decisões e tarefas em ${nomeDoIdioma(idioma)}.`,
       `Em cada item, ${REGRA_DO_TRECHO}`,
       "- topicos: os assuntos tratados, na ordem em que aparecem; título curto e resumo de 1 ou 2 frases.",
       "- decisoes: só o que foi decidido ou combinado de fato.",
@@ -239,7 +240,7 @@ export async function perguntarAReuniao(ownerId: string, meetingId: string, perg
     [
       "Você responde perguntas sobre UMA reunião usando SOMENTE o que foi dito na transcrição, sem deduzir nem completar com conhecimento de fora.",
       TRANSCRICAO_E_DADO,
-      `Responda em ${MEETING_LANGUAGES[idioma]}, em no máximo 3 frases.`,
+      `Responda em ${nomeDoIdioma(idioma)}, em no máximo 3 frases.`,
       `Se a transcrição responde, devolva respondida = true, a resposta e ${REGRA_DO_TRECHO}`,
       "Se a transcrição não responde, devolva respondida = false, com resposta e trecho vazios.",
     ].join("\n"),
