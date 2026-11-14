@@ -1593,6 +1593,24 @@
       "audioLoadError": "Couldn't load the audio right now. Reload the page and try again.",
       "reviewNotice": "AI suggestions to check against the transcript excerpt. None of this was saved.",
       "translateSubtext": "Choose the language you want to read the transcript in."
+    },
+    "install": {
+      "title": "Install WRW as an app",
+      "intro": "Once installed, it opens straight to the recorder, in its own window.",
+      "installButton": "Install the app",
+      "closeLabel": "Close the install tip",
+      "iosStep1": "Tap “Share”. If you don't see it, first tap ≡ (Page Menu, in the address bar) or •••.",
+      "iosStep2": "Scroll down the list and tap “Add to Home Screen”.",
+      "iosStep3": "If “Open as Web App” appears, leave it on. Tap “Add”.",
+      "iosLoginNote": "On iPhone and iPad, the app keeps its sign-in separate from Safari: sign in to it once with your email and password.",
+      "androidStep1": "In Chrome, tap ⋮ (More), to the right of the address bar.",
+      "androidStep2": "Tap “Install and create shortcut”, then “Install”.",
+      "desktopStep1": "Click “Install”, on the right side of the address bar.",
+      "desktopStep2": "If it isn't there, in Chrome go to ⋮ > “Cast, save, and share” > “Install page as app…”.",
+      "macSafari": "In Safari on macOS Sonoma (14) or later, choose File > “Add to Dock”. On earlier versions of macOS, open this page in Chrome or Edge.",
+      "inAppBrowser": "You can't install from here: open this page in Safari or Chrome.",
+      "unsupportedBrowser": "To install WRW as an app, open it in Chrome, Edge, or Safari.",
+      "androidOtherBrowser": "To install WRW as an app, open this page in Chrome."
     }
   },
   "connections": {

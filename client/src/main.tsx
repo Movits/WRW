@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { escutarPedidoDeInstalacao } from "@/lib/instalacao-do-app";
 import { destinoPorSessaoVencida } from "@/lib/sessao-vencida";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
@@ -26,6 +27,11 @@ window.addEventListener("vite:preloadError", event => {
   event.preventDefault();
   window.location.reload();
 });
+
+// O Chromium oferece a instalação do app uma vez por carga, às vezes antes de
+// o gravador (carregado sob demanda) montar: a escuta começa aqui, e o pedido
+// fica guardado para a dica do /gravar (lib/instalacao-do-app.ts).
+escutarPedidoDeInstalacao();
 
 // A sessão que vence no meio do uso volta à mesma tela depois do login; as
 // regras (só o "não autenticada" do tRPC, nunca nas páginas públicas) estão em

@@ -1593,6 +1593,24 @@
       "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
       "reviewNotice": "Vorschläge der KI zum Abgleich mit dem Auszug aus der Transkription. Nichts davon wurde gespeichert.",
       "translateSubtext": "Wählen Sie die Sprache, in der Sie die Transkription lesen möchten."
+    },
+    "install": {
+      "title": "WRW als App installieren",
+      "intro": "Installiert öffnet sich die App direkt bei der Aufnahme, in einem eigenen Fenster.",
+      "installButton": "App installieren",
+      "closeLabel": "Installationshinweis schließen",
+      "iosStep1": "Tippen Sie auf „Teilen“. Wenn Sie es nicht sehen, tippen Sie zuerst auf ≡ („Seitenmenü“, in der Adressleiste) oder auf •••.",
+      "iosStep2": "Scrollen Sie in der Liste nach unten und tippen Sie auf „Zum Home-Bildschirm hinzufügen“.",
+      "iosStep3": "Wenn „Als Web-App öffnen“ erscheint, lassen Sie es aktiviert. Tippen Sie auf „Hinzufügen“.",
+      "iosLoginNote": "Auf iPhone und iPad speichert die App die Anmeldung getrennt von Safari: Melden Sie sich einmal in der App mit Ihrer E-Mail-Adresse und Ihrem Passwort an.",
+      "androidStep1": "Tippen Sie in Chrome rechts neben der Adressleiste auf ⋮ (Dreipunkt-Menü).",
+      "androidStep2": "Tippen Sie auf „Installieren und Verknüpfung erstellen“ und dann auf „Installieren“.",
+      "desktopStep1": "Klicken Sie rechts in der Adressleiste auf „Installieren“.",
+      "desktopStep2": "Wenn es nicht erscheint, wählen Sie in Chrome ⋮ > „Streamen, speichern und teilen“ > „Seite als App installieren…“.",
+      "macSafari": "Wählen Sie in Safari unter macOS Sonoma (14) oder neuer „Ablage“ > „Zum Dock hinzufügen“. Unter älteren macOS-Versionen öffnen Sie diese Seite in Chrome oder Edge.",
+      "inAppBrowser": "Von hier aus lässt sich nichts installieren: Öffnen Sie diese Seite in Safari oder Chrome.",
+      "unsupportedBrowser": "Um WRW als App zu installieren, öffnen Sie es in Chrome, Edge oder Safari.",
+      "androidOtherBrowser": "Um WRW als App zu installieren, öffnen Sie diese Seite in Chrome."
     }
   },
   "connections": {

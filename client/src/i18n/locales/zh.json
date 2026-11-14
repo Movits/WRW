@@ -1593,6 +1593,24 @@
       "audioLoadError": "暂时无法加载音频。请刷新页面后重试。",
       "reviewNotice": "AI 给出的建议，请对照转录片段核实。以上内容均未保存。",
       "translateSubtext": "选择您想用来阅读转录内容的语言。"
+    },
+    "install": {
+      "title": "将 WRW 安装为 App",
+      "intro": "安装后，它会直接打开录音页面，并在独立窗口中运行。",
+      "installButton": "安装 App",
+      "closeLabel": "关闭安装提示",
+      "iosStep1": "轻点“共享”。如果看不到，请先轻点地址栏中的 ≡（“页面菜单”）或 •••。",
+      "iosStep2": "向下滚动列表，然后轻点“添加到主屏幕”。",
+      "iosStep3": "如果出现“作为网页 App 打开”，请保持打开，然后轻点“添加”。",
+      "iosLoginNote": "在 iPhone 和 iPad 上，App 的登录信息与 Safari 浏览器分开保存：请用您的电子邮件和密码在 App 中登录一次。",
+      "androidStep1": "在 Chrome 中，点按地址栏右侧的 ⋮（“更多”图标）。",
+      "androidStep2": "依次点按“安装并创建快捷方式”和“安装”。",
+      "desktopStep1": "点击地址栏右侧的“安装”。",
+      "desktopStep2": "如果没有出现，请在 Chrome 中依次选择 ⋮ >“投放、保存和分享”>“将网页安装为应用…”。",
+      "macSafari": "在 macOS Sonoma（14）或更高版本的 Safari 浏览器中，选取“文件”>“添加到程序坞”。在更早版本的 macOS 上，请在 Chrome 或 Edge 中打开此页面。",
+      "inAppBrowser": "无法在此处安装：请在 Safari 浏览器或 Chrome 中打开此页面。",
+      "unsupportedBrowser": "如需将 WRW 安装为 App，请在 Chrome、Edge 或 Safari 浏览器中打开它。",
+      "androidOtherBrowser": "如需将 WRW 安装为 App，请在 Chrome 中打开此页面。"
     }
   },
   "connections": {

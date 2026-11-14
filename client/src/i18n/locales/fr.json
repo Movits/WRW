@@ -1593,6 +1593,24 @@
       "audioLoadError": "Impossible de charger l'audio pour le moment. Rechargez la page et réessayez.",
       "reviewNotice": "Suggestions de l'IA à vérifier avec l'extrait de la transcription. Rien de tout cela n'a été enregistré.",
       "translateSubtext": "Choisissez la langue dans laquelle vous voulez lire la transcription."
+    },
+    "install": {
+      "title": "Installez WRW comme une app",
+      "intro": "Une fois installée, elle s'ouvre directement sur l'écran d'enregistrement, dans sa propre fenêtre.",
+      "installButton": "Installer l'app",
+      "closeLabel": "Fermer l'astuce d'installation",
+      "iosStep1": "Touchez « Partager ». S'il n'est pas visible, touchez d'abord ≡ (Menu de la page, dans la barre d'adresse) ou •••.",
+      "iosStep2": "Faites défiler la liste et touchez « Sur l'écran d'accueil ».",
+      "iosStep3": "Si « Ouvrir comme app web » apparaît, laissez-le activé. Touchez « Ajouter ».",
+      "iosLoginNote": "Sur l'iPhone et l'iPad, l'app garde sa connexion à part de Safari : connectez-vous une fois dans l'app, avec votre e-mail et votre mot de passe.",
+      "androidStep1": "Dans Chrome, appuyez sur ⋮ (Plus), à droite de la barre d'adresse.",
+      "androidStep2": "Appuyez sur « Installer et créer un raccourci », puis sur « Installer ».",
+      "desktopStep1": "Cliquez sur « Installer », à droite de la barre d'adresse.",
+      "desktopStep2": "S'il n'apparaît pas, dans Chrome, allez dans ⋮ > « Caster, enregistrer et partager » > « Installer la page en tant qu'appli ».",
+      "macSafari": "Dans Safari, sous macOS Sonoma (14) ou version ultérieure, choisissez Fichier > « Ajouter au Dock ». Avec une version antérieure de macOS, ouvrez cette page dans Chrome ou Edge.",
+      "inAppBrowser": "Impossible d'installer d'ici : ouvrez cette page dans Safari ou dans Chrome.",
+      "unsupportedBrowser": "Pour installer WRW comme une app, ouvrez-le dans Chrome, Edge ou Safari.",
+      "androidOtherBrowser": "Pour installer WRW comme une app, ouvrez cette page dans Chrome."
     }
   },
   "connections": {
