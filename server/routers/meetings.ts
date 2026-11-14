@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
@@ -23,6 +23,7 @@ import {
   ReuniaoForaDoEstado,
   ReuniaoTomadaPorOutraExecucao,
   translatePrivateMeetingTranscript,
+  nomearFalante,
 } from "../meeting-service";
 import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { criarTeto } from "../assistente-de-texto";
@@ -377,6 +378,14 @@ export const meetingsRouter = router({
       return { success: true, contactId: linkedContactId };
     }),
 
+  /** H3: o nome de uma voz da transcrição por falante; nome vazio tira o nome. */
+  nomearFalante: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), falante: z.string().regex(FORMATO_DO_FALANTE), nome: z.string().max(NOME_DO_FALANTE_MAX * 2) }))
+    .mutation(async ({ ctx, input }) => {
+      const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome);
+      if (!nomes) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+      return { nomes };
+    }),
   delete: protectedProcedure.input(z.object({ meetingId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const deleted = await deletePrivateMeeting(ctx.user.openId, input.meetingId);
     if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });

@@ -9,7 +9,7 @@ import {
   meetingTranscripts,
   meetingTranscriptTranslations,
 } from "../drizzle/schema";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
@@ -968,7 +968,9 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // o banco arbitrar. Zero linhas: relê para saber quem venceu. Excluída, o
   // que acabou de ser gravado sai. Viva com outra ficha, nada é apagado aqui —
   // a execução dona da reunião limpa antes de gravar o resultado dela.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt })
+  // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
+  // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
+  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(execucao.limparAntes ? { speakerNames: null } : {}) })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
@@ -1180,7 +1182,31 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
   audioPipeline: meetings.audioPipeline,
   expectedSlices: meetings.expectedSlices,
+  // Os nomes das vozes (H3): só a dona lê esta lista e este detalhe.
+  speakerNames: meetings.speakerNames,
 };
+
+/**
+ * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
+ * Só a dona: a reunião de outra conta é "não encontrada". Devolve os nomes
+ * como ficaram, ou null sem a reunião. A leitura e a gravação vão na mesma
+ * transação com a linha travada: dois nomes salvos juntos não se apagam.
+ */
+export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
+  if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
+  const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
+  const db = await exigirDb();
+  return db.transaction(async tx => {
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
+    if (!reuniao) return null;
+    const nomes = nomesDosFalantes(reuniao.speakerNames);
+    if (limpo) nomes[falante] = limpo;
+    else delete nomes[falante];
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: Date.now() }).where(daDona);
+    return nomes;
+  });
+}
 
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();

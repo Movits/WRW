@@ -22,7 +22,7 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
@@ -765,7 +765,16 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
                   controle.irPara(segundoPedido);
                 }
               }} partes={partesParaOuvir} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/></div>}
-              <TranscricaoPorFalante segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+              <TranscricaoPorFalante segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
+                nomes={nomesDosFalantes(meeting.speakerNames)} aoNomear={async (falante, nome) => {
+                  try {
+                    await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
+                    await utils.meetings.get.invalidate({ meetingId });
+                  } catch (erro) {
+                    toast.error(traduzirMensagemDoServidor(erro instanceof Error ? erro.message : "", t) || t("meetings.speakerNameError"));
+                    throw erro;
+                  }
+                }}/>
             </>
             : segmentos
             ? <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{segmentos.map((s, i) => s.tipo

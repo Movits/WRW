@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { mmss, segmentosValidos, tempoDeFala, TranscricaoPorFalante, type SegmentoDaTela } from "./TranscricaoPorFalante";
 
@@ -52,5 +52,40 @@ describe("TranscricaoPorFalante (D1)", () => {
     expect(segmentosValidos(null)).toEqual([]);
     expect(segmentosValidos([{ texto: "sem tempo" }, ...FALAS])).toHaveLength(4);
     expect(mmss(3725)).toBe("1:02:05");
+  });
+});
+
+describe("TranscricaoPorFalante — nomes das vozes (H3)", () => {
+  it("com nomes, cada fala e o tempo de fala mostram o nome; sem nome, 'Falante n'", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} nomes={{ F1: "Ana" }} />);
+    const lista = document.querySelector("ol")!;
+    expect(within(lista).getAllByText("Ana")).toHaveLength(2);
+    expect(within(lista).getByText("Falante 2")).toBeInTheDocument();
+  });
+
+  it("sem aoNomear (o link aberto), não há como renomear", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} nomes={{ F1: "Ana" }} />);
+    expect(screen.queryByTitle("Dar nome a esta voz")).not.toBeInTheDocument();
+  });
+
+  it("a dona dá nome a uma voz: o campo abre com o nome atual e salvar chama aoNomear", async () => {
+    const aoNomear = vi.fn(async () => undefined);
+    render(<TranscricaoPorFalante segmentos={FALAS} nomes={{ F1: "Ana" }} aoNomear={aoNomear} />);
+    fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[1]);
+    const campo = screen.getByRole("textbox", { name: "Nome do falante 2" });
+    expect(campo).toHaveValue("");
+    fireEvent.change(campo, { target: { value: "Bia" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
+    expect(aoNomear).toHaveBeenCalledWith("F2", "Bia");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Nome do falante 2" })).not.toBeInTheDocument());
+  });
+
+  it("salvar que falha deixa o campo aberto para tentar de novo", async () => {
+    const aoNomear = vi.fn(async () => { throw new Error("rede"); });
+    render(<TranscricaoPorFalante segmentos={FALAS} aoNomear={aoNomear} />);
+    fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[0]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do falante 1" }), { target: { value: "Ana" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
+    expect(screen.getByRole("textbox", { name: "Nome do falante 1" })).toHaveValue("Ana");
   });
 });
