@@ -127,6 +127,7 @@ describe("plataformaDeInstalacao", () => {
     ["navegador Huawei no HarmonyOS NEXT, só com ArkWeb", UA.navegadorHuawei, 5, "sem-instalacao"],
     ["Mac no Chrome", UA.macChrome, 0, "computador"],
     ["Mac no Edge", UA.macEdge, 0, "computador"],
+    ["Chromium com outro nome depois do Edg/ não é o Edge", `${UA.windowsEdge} OutroApp/1.0`, 0, "sem-instalacao"],
     ["Mac no Firefox", UA.macFirefox, 0, "sem-instalacao"],
     ["Mac no Safari 17, que pode ser o do Ventura: o texto avisa do Sonoma", UA.macSafari17, 0, "mac-safari"],
     ["Mac no DuckDuckGo, que leva o userAgent do Safari mais Ddg/ e não tem o Adicionar ao Dock", UA.macDuckDuckGo, 0, "sem-instalacao"],
@@ -336,17 +337,21 @@ describe("o pedido de instalação do Chromium", () => {
     expect(result.current.podePedir).toBe(false);
   });
 
-  it("o app instalado nesta visita esquece o pedido, avisa a tela e marca o aparelho", () => {
+  it("o app instalado nesta visita esquece o pedido, avisa a tela e marca o aparelho", async () => {
     const alvo = new EventTarget();
     parar = escutarPedidoDeInstalacao(alvo);
     const { result } = renderHook(() => useInstalacaoDoApp());
+    const { evento, prompt } = pedidoDoNavegador("accepted");
     act(() => {
-      alvo.dispatchEvent(pedidoDoNavegador("accepted").evento);
+      alvo.dispatchEvent(evento);
       alvo.dispatchEvent(new Event("appinstalled"));
     });
     expect(result.current).toEqual({ podePedir: false, instaladoNestaVisita: true });
     // Na próxima visita, numa aba do navegador, a dica lê a marca e não volta.
     expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("instalado");
+    // O pedido velho não fica guardado.
+    await expect(pedirInstalacao()).resolves.toBe("sem-pedido");
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it("sem pedido guardado, pedirInstalacao devolve sem-pedido", async () => {
@@ -354,7 +359,7 @@ describe("o pedido de instalação do Chromium", () => {
     await expect(pedirInstalacao()).resolves.toBe("sem-pedido");
   });
 
-  it("ligar a escuta de novo não liga outra; a função devolvida desliga e esquece", () => {
+  it("ligar a escuta de novo não liga outra; a função devolvida desliga e esquece", async () => {
     const alvo = new EventTarget();
     const adicionar = vi.spyOn(alvo, "addEventListener");
     parar = escutarPedidoDeInstalacao(alvo);
@@ -370,6 +375,8 @@ describe("o pedido de instalação do Chromium", () => {
     act(() => parar!());
     parar = undefined;
     expect(result.current).toEqual({ podePedir: false, instaladoNestaVisita: false });
+    // Desligar também esquece o pedido guardado.
+    await expect(pedirInstalacao()).resolves.toBe("sem-pedido");
     act(() => {
       alvo.dispatchEvent(pedidoDoNavegador("accepted").evento);
     });
