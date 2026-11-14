@@ -1,6 +1,9 @@
 import { trpc } from "@/lib/trpc";
 import { escutarPedidoDeInstalacao } from "@/lib/instalacao-do-app";
 import { destinoPorSessaoVencida } from "@/lib/sessao-vencida";
+import { tratarChunkAntigo } from "@/lib/versao-nova";
+import { toast } from "sonner";
+import i18n from "./i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -11,21 +14,17 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
-// Depois de um deploy, uma aba aberta antes dele ainda pede os chunks antigos
-// (nomes com hash) e o servidor responde 404 de propósito (fallthrough:false
-// em server/_core/vite.ts); o Vite avisa por este evento antes de a tela cair
-// no ErrorBoundary. Recarregar uma vez traz o index.html novo (que sai com
-// no-cache). A marca no sessionStorage evita laço se a causa for outra.
+// Chunk antigo depois de um deploy: recarrega uma vez, menos com a sessão
+// ocupada (gravando, enviando ou com áudio por enviar), quando avisa e espera a
+// sessão desocupar. As regras e o porquê estão em lib/versao-nova.ts, com teste.
 window.addEventListener("vite:preloadError", event => {
-  const marca = "mmm:recarregado-por-chunk-antigo";
-  try {
-    if (sessionStorage.getItem(marca) === window.location.href) return;
-    sessionStorage.setItem(marca, window.location.href);
-  } catch {
-    // sessionStorage bloqueado: recarrega assim mesmo, uma vez por aba nova.
-  }
-  event.preventDefault();
-  window.location.reload();
+  tratarChunkAntigo(event, {
+    recarregar: () => window.location.reload(),
+    enderecoAtual: () => window.location.href,
+    armazenamento: () => window.sessionStorage,
+    avisar: () => toast.info(i18n.t("sessaoOcupada.versaoNovaDepoisDoEnvio"), { id: "versao-nova", duration: Infinity }),
+    dispensarAviso: () => toast.dismiss("versao-nova"),
+  });
 });
 
 // O Chromium oferece a instalação do app uma vez por carga, às vezes antes de

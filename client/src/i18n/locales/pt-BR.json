@@ -1799,7 +1799,8 @@
     "sairAudioNaoEnviado": "Há um áudio gravado nesta aba que ainda não foi enviado.",
     "sairPerdeOAudio": "Se sair agora, esse áudio se perde.",
     "continuarAqui": "Continuar aqui",
-    "sairMesmoAssim": "Sair mesmo assim"
+    "sairMesmoAssim": "Sair mesmo assim",
+    "versaoNovaDepoisDoEnvio": "Há uma versão nova do WRW. Esta página vai atualizar sozinha depois que o áudio for enviado."
   },
   "errorBoundary": {
     "title": "Algo inesperado aconteceu",

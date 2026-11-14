@@ -1799,7 +1799,8 @@
     "sairAudioNaoEnviado": "Cet onglet contient un audio enregistré qui n'a pas encore été envoyé.",
     "sairPerdeOAudio": "Si vous vous déconnectez maintenant, cet audio sera perdu.",
     "continuarAqui": "Rester ici",
-    "sairMesmoAssim": "Se déconnecter quand même"
+    "sairMesmoAssim": "Se déconnecter quand même",
+    "versaoNovaDepoisDoEnvio": "Une nouvelle version de WRW est disponible. Cette page s'actualisera d'elle-même une fois l'audio envoyé."
   },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",

@@ -65,7 +65,23 @@ export function ocupar(motivo: MotivoDaOcupacao): () => void {
 export function liberarTodas() {
   if (abertas.size === 0) return;
   abertas.clear();
-  recalcular();
+  liberandoPeloFimDaSessao = true;
+  try {
+    recalcular();
+  } finally {
+    liberandoPeloFimDaSessao = false;
+  }
+}
+
+let liberandoPeloFimDaSessao = false;
+
+/**
+ * True só durante o aviso aos ouvintes disparado pelo liberarTodas (o fim da
+ * sessão nesta aba). O recarregamento adiado de lib/versao-nova.ts usa isto
+ * para não atropelar a ida ao login nem a saída da exclusão da conta.
+ */
+export function desocupadaPeloFimDaSessao(): boolean {
+  return liberandoPeloFimDaSessao;
 }
 
 export function sessaoOcupada(): boolean {
@@ -86,6 +102,15 @@ function assinar(ouvinte: () => void) {
   return () => {
     ouvintes.delete(ouvinte);
   };
+}
+
+/**
+ * Chama `ouvinte` sempre que o motivo principal muda (inclusive ao desocupar)
+ * e devolve a função que para de ouvir. Quem usa fora da tela é o
+ * recarregamento adiado depois de um deploy (lib/versao-nova.ts).
+ */
+export function aoMudarAOcupacao(ouvinte: () => void): () => void {
+  return assinar(ouvinte);
 }
 
 /** O estado da sessão ocupada, para a tela redesenhar quando ele muda. */
@@ -120,18 +145,13 @@ export function useOcupacao(motivo: MotivoDaOcupacao, ativo: boolean) {
  *   saem no desmonte, antes do redirecionamento: só um envio em curso pergunta,
  *   e quem fica vê a tela vazia até recarregar. Para a ida ao login passar sem
  *   pergunta, ela teria de desligar este ouvinte antes de navegar.
- * - No recarregar automático depois de um deploy (o vite:preloadError do
- *   main.tsx). Ele vem quando a aba pede um pedaço do app que ainda não
- *   baixou, como na primeira ida a uma tela: o Suspense segura a tela de antes
- *   montada enquanto a nova carrega, e as ocupações dela continuam abertas.
- *   Ali, ficar NÃO salva o áudio: o main.tsx já cancelou o erro do Vite (o
- *   preventDefault no vite:preloadError), o helper de preload entrega
- *   undefined ao lazy da tela nova, e o ErrorBoundary do App troca o app
- *   inteiro, o Toaster junto, pela tela de erro. A tela de antes desmonta: a
- *   gravação e o áudio por enviar se perdem com qualquer resposta (a mesma
- *   ida, sem deploy, já os perdia), e só um envio já no ar segue até o fim,
- *   sem o aviso do resultado. Tirar essa pergunta exige mudar o main.tsx; só
- *   deixar de recarregar não basta, porque a tela pedida continua sem código.
+ * O recarregar automático depois de um deploy (o vite:preloadError do main.tsx)
+ * não entra nesta lista: com a sessão ocupada ele não recarrega, avisa e espera
+ * a sessão desocupar (lib/versao-nova.ts). O pedaço do app que falhou continua
+ * sem código: se era a tela pedida, o ErrorBoundary do App troca o app inteiro
+ * pela tela de erro, a tela de antes desmonta e as ocupações presas a ela saem
+ * (a mesma ida, sem deploy, já perdia a gravação); o recarregar vem então sem
+ * pergunta, ou depois de um envio que ainda estava no ar.
  *
  * Conte com a pergunta só no computador: no iPhone e no iPad o WebKit não
  * dispara o beforeunload (webkit.org/b/219102), e no celular fechar o app pelo
