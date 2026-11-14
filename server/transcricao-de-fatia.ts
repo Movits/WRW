@@ -55,11 +55,6 @@ const ESQUEMA_DA_RESPOSTA = {
   required: ["segmentos"],
 } as const;
 
-function mmss(segundos: number) {
-  const s = Math.max(0, Math.floor(segundos));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
 export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
   const linhas = [
     "Transcreva integralmente a fala deste trecho de áudio de uma reunião.",
@@ -69,15 +64,23 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
     `2) "inicio" e "fim" são os segundos dentro DESTE trecho, de 0 a ${Math.round(input.duracaoSegundos)}.`,
     '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo. Nunca use nomes de pessoas no rótulo.',
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
-    "5) Trecho que não dá para entender: [inaudível]. Música ou ruído longo: [música] ou [ruído]. Silêncio não vira item.",
+    "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
   ];
   if (input.anterior && (input.anterior.falantes.length || input.anterior.ultimasFalas.length)) {
     linhas.push(`6) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
+    // Sem o tempo: o da fala anterior é absoluto (passa dos 600 s), e a regra 2
+    // pede o tempo DENTRO do trecho; um exemplo com [10:23] ensinaria o modelo
+    // a devolver tempos que o teto da parte achataria.
     let letras = 0;
     const falas: string[] = [];
     for (const fala of input.anterior.ultimasFalas.slice(-FALAS_DE_CONTEXTO).reverse()) {
-      const linha = `[${mmss(fala.inicio)}] ${fala.falante}: ${fala.texto}`;
-      if (letras + linha.length > LETRAS_DE_CONTEXTO) break;
+      const linha = `${fala.falante}: ${fala.texto}`;
+      if (letras + linha.length > LETRAS_DE_CONTEXTO) {
+        // A fala mais recente é a que mais ajuda a reconhecer a voz: longa
+        // demais, vai cortada, e não some.
+        if (!falas.length) falas.unshift(`${linha.slice(0, LETRAS_DE_CONTEXTO)}…`);
+        break;
+      }
       letras += linha.length;
       falas.unshift(linha);
     }
@@ -98,12 +101,15 @@ export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, dura
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
   const segmentos: Segmento[] = [];
   let ultimoFalante = "F1";
+  let rotulosTrocados = 0;
   for (const item of itens) {
     const { inicio, fim, falante, texto } = (item ?? {}) as Record<string, unknown>;
     if (typeof texto !== "string" || !texto.trim()) continue;
     const de = Math.min(Math.max(Number.isFinite(inicio) ? Number(inicio) : 0, 0), teto);
     const ate = Math.min(Math.max(Number.isFinite(fim) ? Number(fim) : de, de), teto);
-    const rotulo = typeof falante === "string" && FALANTE_VALIDO.test(falante.trim()) ? falante.trim() : ultimoFalante;
+    const valido = typeof falante === "string" && FALANTE_VALIDO.test(falante.trim());
+    if (!valido) rotulosTrocados++;
+    const rotulo = valido ? (falante as string).trim() : ultimoFalante;
     ultimoFalante = rotulo;
     segmentos.push({
       inicio: arredondar(inicioSegundos + de),
@@ -112,6 +118,10 @@ export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, dura
       texto: texto.trim(),
     });
   }
+  // Avisos para quem acompanha a bancada e o log: o rótulo trocado funde vozes,
+  // e uma parte longa sem fala nenhuma pode ser falha do modelo, não silêncio.
+  if (rotulosTrocados) console.warn(`[Transcrição] ${rotulosTrocados} de ${segmentos.length} falas vieram sem rótulo F<n> e ficaram com o falante anterior`);
+  if (!segmentos.length && duracaoSegundos > 30) console.warn(`[Transcrição] parte de ${Math.round(duracaoSegundos)} s sem nenhuma fala`);
   return segmentos.sort((a, b) => a.inicio - b.inicio);
 }
 
@@ -165,23 +175,36 @@ export function montarTranscricao(
   fatias: Array<{ seq: number; inicioSegundos: number; duracaoSegundos: number; segmentos: Segmento[] }>,
   partesEsperadas: number,
 ): { segmentos: Segmento[]; texto: string } {
-  const porSeq = new Map(fatias.map(f => [f.seq, f]));
+  // Parte repetida ou fora da contagem é erro de quem chama (a fila), não algo
+  // a resolver em silêncio: descartar uma delas perderia fala.
+  const porSeq = new Map<number, (typeof fatias)[number]>();
+  for (const f of fatias) {
+    if (!Number.isInteger(f.seq) || f.seq < 0 || f.seq >= partesEsperadas) throw new Error(`Parte ${f.seq} fora das ${partesEsperadas} esperadas.`);
+    if (porSeq.has(f.seq)) throw new Error(`Parte ${f.seq} repetida.`);
+    porSeq.set(f.seq, f);
+  }
   const segmentos: Segmento[] = [];
   let cursor = 0;
+  // Só emenda na lacuna que acabou de ser aberta: uma parte que chegou sem fala
+  // (silêncio) fica entre as duas, e o trecho dela não vira "não recebido".
+  let lacunaAberta: Segmento | null = null;
   for (let seq = 0; seq < partesEsperadas; seq++) {
     const fatia = porSeq.get(seq);
     if (fatia) {
       segmentos.push(...fatia.segmentos);
       cursor = fatia.inicioSegundos + fatia.duracaoSegundos;
+      lacunaAberta = null;
       continue;
     }
     // A parte não chegou: o buraco vai do fim da anterior ao início da próxima
     // que chegou (ou fica com a duração padrão, se não há próxima).
     const proxima = Array.from(porSeq.values()).filter(f => f.seq > seq).sort((a, b) => a.seq - b.seq)[0];
-    const fim = proxima ? proxima.inicioSegundos : cursor + DURACAO_DA_FATIA_SEGUNDOS;
-    const anterior = segmentos[segmentos.length - 1];
-    if (anterior?.lacuna) anterior.fim = fim;
-    else segmentos.push({ inicio: cursor, fim, falante: "", texto: "", lacuna: true });
+    const fim = Math.max(cursor, proxima ? proxima.inicioSegundos : cursor + DURACAO_DA_FATIA_SEGUNDOS);
+    if (lacunaAberta) lacunaAberta.fim = fim;
+    else {
+      lacunaAberta = { inicio: cursor, fim, falante: "", texto: "", lacuna: true };
+      segmentos.push(lacunaAberta);
+    }
     cursor = fim;
   }
   const texto = segmentos.filter(s => !s.lacuna).map(s => s.texto).join("\n");

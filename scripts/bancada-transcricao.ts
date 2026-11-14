@@ -58,13 +58,17 @@ for (const [seq, arquivo] of partes.entries()) {
   const mimeType = TIPOS[path.extname(arquivo).toLowerCase()];
   if (!mimeType) throw new Error(`Formato não reconhecido: ${arquivo}`);
   const audio = fs.readFileSync(arquivo);
-  const duracao = medirDuracaoDoAudio(audio) ?? 600;
+  const medida = medirDuracaoDoAudio(audio);
+  // Sem a duração, os tempos das partes seguintes sairiam deslocados: a bancada
+  // segue com 600 s, mas avisa, e a medida registra que foi chute.
+  if (medida === null) console.warn(`parte ${seq + 1}: duração ilegível em ${path.basename(arquivo)}; contando 600 s, e os tempos das partes seguintes podem sair deslocados`);
+  const duracao = medida ?? 600;
   const comeco = Date.now();
   try {
     const { segmentos, modelo } = await transcreverFatia({ audio, mimeType, idioma, inicioSegundos: inicio, duracaoSegundos: duracao, anterior });
     const vozes = [...new Set(segmentos.map(s => s.falante))];
     console.log(`parte ${seq + 1}: ${modelo} · ${Math.round((Date.now() - comeco) / 1000)} s · ${segmentos.length} falas · vozes ${vozes.join(", ") || "nenhuma"}`);
-    resultado.push({ parte: seq + 1, modelo, segundos: (Date.now() - comeco) / 1000, falas: segmentos.length, vozes });
+    resultado.push({ parte: seq + 1, modelo, segundos: (Date.now() - comeco) / 1000, falas: segmentos.length, vozes, duracaoChutada: medida === null });
     fatias.push({ seq, inicioSegundos: inicio, duracaoSegundos: duracao, segmentos });
     anterior = contextoParaAProxima(segmentos, anterior);
   } catch (erro) {
