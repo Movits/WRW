@@ -51,9 +51,10 @@ export interface AmbienteDoNavegador {
 }
 
 // Navegadores de dentro de outros apps (Facebook, Instagram, LinkedIn, Line,
-// Snapchat, TikTok e WeChat) e a WebView do Android ("; wv)"): não instalam,
-// e o caminho é abrir a página no navegador.
-const NAVEGADOR_EMBUTIDO = /FBAN|FBAV|FB_IAB|Instagram|LinkedInApp|\bLine\/|Snapchat|TikTok|musical_ly|Bytedance|MicroMessenger|; wv\)/i;
+// Snapchat, TikTok, WeChat e o app Google no iPhone, que leva "Safari/" no
+// userAgent mas não oferece "Adicionar à Tela de Início") e a WebView do
+// Android ("; wv)"): não instalam, e o caminho é abrir a página no navegador.
+const NAVEGADOR_EMBUTIDO = /FBAN|FBAV|FB_IAB|Instagram|LinkedInApp|\bLine\/|Snapchat|TikTok|musical_ly|Bytedance|MicroMessenger|\bGSA\/|; wv\)/i;
 // A casca das lojas (PR #180) se identifica assim, e é uma WebView: vem antes.
 const CASCA_DAS_LOJAS = /\bWRWApp\//;
 const CHROMIUM = /Chrome\/|Chromium\/|Edg\//;
@@ -72,7 +73,8 @@ export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoAp
   // Tablet Android com o Chrome no modo computador (o padrão nos tablets
   // grandes) se apresenta como Linux: a tela de toque o denuncia, como no iPad.
   // O custo é um notebook Linux com tela de toque receber os passos do Android.
-  if (/X11; Linux/.test(userAgent) && !/CrOS/.test(userAgent) && maxTouchPoints > 1 && CHROMIUM.test(userAgent)) return "android";
+  // (O Chromebook se apresenta como "X11; CrOS" e não cai aqui.)
+  if (/X11; Linux/.test(userAgent) && maxTouchPoints > 1 && CHROMIUM.test(userAgent)) return "android";
   // O Firefox (no Windows, a partir do 143, ele fixa o site na barra de
   // tarefas, com outro caminho) e o Opera no computador ficam com o conselho
   // de abrir num navegador que instala.

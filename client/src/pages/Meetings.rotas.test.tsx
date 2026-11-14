@@ -124,7 +124,7 @@ describe("Reuniões — a URL escolhe a tela", () => {
   it("fechar a dica de instalação no gravador devolve o foco ao 'Enviar arquivo de áudio'", () => {
     abrirEm("/gravar");
     fireEvent.click(screen.getByRole("button", { name: "Fechar a dica de instalação" }));
-    expect(screen.queryByRole("region", { name: "Instale o WRW como app" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Instale a WRW como app" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toHaveFocus();
     expect(localStorage.getItem("mmm:dica-de-instalacao")).toBe("fechada");
   });
@@ -450,7 +450,7 @@ describe("Reuniões — gravação em curso", () => {
 
   it("a dica de instalação fica abaixo dos botões, invisível no mesmo lugar enquanto grava, e sai na revisão do áudio", async () => {
     abrirEm("/gravar");
-    const dica = () => screen.queryByRole("region", { name: "Instale o WRW como app" });
+    const dica = () => screen.queryByRole("region", { name: "Instale a WRW como app" });
     const secaoDaDica = () => document.querySelector<HTMLElement>("section[aria-labelledby]");
     expect(dica()).toBeInTheDocument();
     const enviar = screen.getByRole("button", { name: /Enviar arquivo de áudio/ });
@@ -1011,7 +1011,7 @@ describe("Reuniões — envio de arquivo", () => {
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toBeDisabled();
     // A dica de instalação também sai do alcance durante o envio, sem perder o lugar.
-    expect(screen.queryByRole("region", { name: "Instale o WRW como app" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Instale a WRW como app" })).not.toBeInTheDocument();
     expect(document.querySelector("section[aria-labelledby]")).toHaveStyle({ visibility: "hidden" });
     await act(async () => { entregarDuracao(30); });
     // Com a reunião sendo criada, também não: a autorização não se desmarca no meio.
@@ -1025,7 +1025,7 @@ describe("Reuniões — envio de arquivo", () => {
     })));
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
-    expect(screen.getByRole("region", { name: "Instale o WRW como app" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Instale a WRW como app" })).toBeInTheDocument();
   });
 
   it("o servidor recusa o envio: o aviso aparece e o formulário destrava", async () => {

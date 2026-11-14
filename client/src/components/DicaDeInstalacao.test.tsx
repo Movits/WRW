@@ -20,7 +20,7 @@ const UA = {
   cascaDasLojas: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WRWApp/1.0",
 };
 
-const TITULO = "Instale o WRW como app";
+const TITULO = "Instale a WRW como app";
 
 function ambiente(userAgent: string, extra: Partial<AmbienteDoNavegador> = {}): AmbienteDoNavegador {
   return { userAgent, maxTouchPoints: 0, abertoComoApp: false, ...extra };
@@ -119,7 +119,7 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
 
   it("no Firefox do computador, indica um navegador que instala, sem dizer que ele não instala", () => {
     montar(ambiente(UA.windowsFirefox));
-    expect(screen.getByText("Para instalar o WRW como app, abra-o no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
+    expect(screen.getByText("Para instalar a WRW como app, abra esta página no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
   });
 
   it("aberta como app, ou dentro da casca das lojas, a dica não aparece e o aparelho fica marcado", () => {
@@ -175,6 +175,35 @@ describe("Dica de instalação — o pedido do navegador (Chrome, Edge, Samsung 
     expect(prompt).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(dica()).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Enviar arquivo de áudio" })).toHaveFocus();
+  });
+
+  it("enquanto o pedido do navegador está aberto, o botão fica, desabilitado, sem voltar aos passos", async () => {
+    let responder: (escolha: { outcome: "accepted" | "dismissed"; platform: string }) => void = () => undefined;
+    const prompt = vi.fn(async () => undefined);
+    const evento = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+      prompt,
+      userChoice: new Promise<{ outcome: "accepted" | "dismissed"; platform: string }>(resolver => {
+        responder = resolver;
+      }),
+    });
+    montar(ambiente(UA.android, { maxTouchPoints: 5 }));
+    act(() => {
+      window.dispatchEvent(evento);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Instalar o app" }));
+    });
+    // O pedido saiu da guarda, mas a escolha ainda não veio: o botão segue, sem abrir outro pedido.
+    const botao = screen.getByRole("button", { name: "Instalar o app" });
+    expect(botao).toBeDisabled();
+    expect(passos()).toEqual([]);
+    fireEvent.click(botao);
+    expect(prompt).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      responder({ outcome: "dismissed", platform: "web" });
+    });
+    await waitFor(() => expect(passos()).toHaveLength(2));
+    expect(screen.getByRole("heading", { name: TITULO })).toHaveFocus();
   });
 
   it("o pedido que chegou antes de a dica montar (na carga, pelo main.tsx) já mostra o botão", () => {

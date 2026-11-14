@@ -1595,8 +1595,8 @@
       "translateSubtext": "Escolha o idioma em que você quer ler a transcrição."
     },
     "install": {
-      "title": "Instale o WRW como app",
-      "intro": "Instalado, ele abre direto no gravador, em janela própria.",
+      "title": "Instale a WRW como app",
+      "intro": "Instalado, o app abre direto no gravador, em janela própria.",
       "installButton": "Instalar o app",
       "closeLabel": "Fechar a dica de instalação",
       "iosStep1": "Toque em “Compartilhar”. Se ele não estiver à vista, toque antes em •••.",
@@ -1609,7 +1609,7 @@
       "desktopStep2": "Se ele não aparecer, no Chrome vá em ⋮ > “Transmitir, salvar e compartilhar” > “Instalar esta página como um app…”.",
       "macSafari": "No Safari, escolha Arquivo > “Adicionar ao Dock”.",
       "inAppBrowser": "Daqui não dá para instalar: abra esta página no Safari ou no Chrome.",
-      "unsupportedBrowser": "Para instalar o WRW como app, abra-o no Chrome, no Edge ou no Safari."
+      "unsupportedBrowser": "Para instalar a WRW como app, abra esta página no Chrome, no Edge ou no Safari."
     }
   },
   "connections": {
