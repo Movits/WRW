@@ -87,6 +87,9 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // a troca de parte (e não o fim da gravação).
   const inicioDaParte = useRef(0);
   const trocandoDeParte = useRef(false);
+  // O Parar que chega DURANTE a troca (o gravador da parte já parou e o da
+  // seguinte ainda não abriu): vale como o fim, e a parte seguinte não abre.
+  const pararNaTroca = useRef(false);
   // Cada pedido de microfone leva um número. Sair da tela ou descartar troca o
   // número, e o microfone que o navegador entregar depois, para um pedido
   // velho, é solto na hora.
@@ -104,8 +107,12 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
 
   function parar() {
     const atual = gravador.current;
+    if (trocandoDeParte.current && atual) {
+      pararNaTroca.current = true;
+      mudarEstado("finalizando");
+      return;
+    }
     if (atual?.state !== "recording") return;
-    trocandoDeParte.current = false;
     mudarEstado("finalizando");
     atual.stop();
   }
@@ -113,6 +120,8 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   /** Para sem entregar nada e solta o microfone. */
   function descartar() {
     pedidoAtual.current++;
+    trocandoDeParte.current = false;
+    pararNaTroca.current = false;
     const atual = gravador.current;
     gravador.current = null;
     if (atual) {
@@ -155,12 +164,14 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
           const blob = new Blob(pedacos, { type: novo.mimeType || "audio/webm" });
           const audio = { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - parteComecouEm };
           // Troca de parte: a gravação continua, já na parte seguinte.
-          if (trocandoDeParte.current && gravador.current === novo) {
+          if (trocandoDeParte.current && gravador.current === novo && !pararNaTroca.current) {
             trocandoDeParte.current = false;
             abrirParte(seq + 1);
             atuais.current.aoFecharParte?.({ ...audio, seq, ultima: false });
             return;
           }
+          trocandoDeParte.current = false;
+          pararNaTroca.current = false;
           pararTrilhas(aberto);
           if (microfone.current === aberto) microfone.current = null;
           if (gravador.current === novo) gravador.current = null;

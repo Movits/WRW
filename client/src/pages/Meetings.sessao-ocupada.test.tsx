@@ -48,13 +48,27 @@ const duble = vi.hoisted(() => {
     utils: {
       meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
+      // A gravação em partes (G9, /gravar?emPartes=1) chama o servidor por aqui.
+      auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
+      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
     },
+    enviarParte: vi.fn(),
   };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 vi.mock("@/components/NotificationBell", () => ({ NotificationBell: () => null }));
+vi.mock("@/lib/envio-das-partes", () => ({
+  enviarParte: (...a: unknown[]) => duble.enviarParte(...a),
+  enviarPendentes: async () => ({ restantes: 0, semSessao: false }),
+  travaDoNavegador: async (_nome: string, trabalho: () => Promise<unknown>) => trabalho(),
+}));
+vi.mock("@/lib/partes-no-aparelho", () => ({
+  guardarParte: async () => undefined,
+  apagarParte: async () => undefined,
+  apagarTodasAsPartes: async () => undefined,
+}));
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (arquivo: Blob) => duble.duracao(arquivo) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -410,5 +424,60 @@ describe("Reuniões — fora do gravador, o áudio por enviar segue ocupando a s
     expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`);
     expect(motivoDaOcupacao()).toBe("audio-nao-enviado");
     expect(fecharAba()).toBe(true);
+  });
+});
+
+describe("Reuniões — gravação em partes (G9, /gravar?emPartes=1)", () => {
+  const { iniciarGravacao, encerrarGravacao, delete: excluir } = duble.utils.client.meetings;
+
+  beforeEach(() => {
+    iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
+    encerrarGravacao.mutate.mockReset().mockResolvedValue({ partes: 1 });
+    excluir.mutate.mockReset().mockResolvedValue({ success: true });
+    duble.enviarParte.mockReset().mockResolvedValue({ tipo: "recebida" });
+  });
+
+  function abrirEmPartes() {
+    window.history.replaceState(null, "", "/gravar?emPartes=1");
+    return render(<Meetings />);
+  }
+
+  function preencher() {
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+  }
+
+  it("a reunião nasce no Iniciar, a parte vai ao servidor no Encerrar, e a tela abre a reunião sem o Transcrever", async () => {
+    abrirEmPartes();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Conversa com a Bia", consentGranted: true, origem: "gravacao", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO,
+    }));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+    await waitFor(() => expect(window.location.pathname).toContain(VINICOLA));
+    expect(screen.queryByRole("button", { name: /Transcrever áudio/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("o microfone negado depois de a reunião nascer: a reunião vazia é excluída", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: async () => { throw new DOMException("negado", "NotAllowedError"); } },
+    });
+    abrirEmPartes();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    await waitFor(() => expect(excluir.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+  });
+
+  it("sem ?emPartes=1, o gravador de sempre: nada de reunião no Iniciar", async () => {
+    abrirOGravador();
+    await gravarEEncerrar();
+    expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
+    expect(duble.enviarParte).not.toHaveBeenCalled();
   });
 });

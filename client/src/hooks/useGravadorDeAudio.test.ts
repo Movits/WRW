@@ -415,6 +415,50 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     }
   });
 
+  it("o Parar que chega DURANTE a troca de parte encerra a gravação (não abre a parte seguinte)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_500); });
+      // O gravador da parte 0 parou, o navegador ainda não entregou o fim: a troca está no meio.
+      expect(gravadores[0].state).toBe("inactive");
+      act(() => result.current.parar());
+      expect(result.current.estado).toBe("finalizando");
+      act(() => gravadores[0].terminar());
+      expect(gravadores).toHaveLength(1);
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: true });
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(result.current.estado).toBe("parado");
+      expect(trilha.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("descartar no meio da troca não deixa a próxima gravação presa sem trocar de parte", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const { result } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_500); });
+      act(() => result.current.descartar());
+      navegadorQueGrava(["audio/mp4"]);
+      gravadores = [];
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_500); });
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte).toHaveBeenLastCalledWith(expect.objectContaining({ seq: 0, ultima: false }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sem fatiaSegundos, é a gravação de sempre: uma parte só, com a duração inteira", async () => {
     navegadorQueGrava(["audio/mp4"]);
     const aoFecharParte = vi.fn();

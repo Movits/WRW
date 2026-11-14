@@ -7,7 +7,8 @@ import { apagarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-
  *
  * O servidor responde JSON com um `codigo`. 200/201: recebida. 429, 503, 5xx,
  * resposta sem JSON e falha de rede: passageira, e a parte fica para depois.
- * 401: a sessão acabou; a parte fica guardada e vai depois do novo login. Os
+ * 401 e 403: a sessão acabou ou o cadastro está incompleto; a parte fica
+ * guardada e vai depois do novo login. Os
  * outros 4xx são recusa definitiva (reunião excluída, parte além do total...):
  * reenviar não muda nada, e a parte sai do aparelho.
  */
@@ -34,7 +35,9 @@ export async function enviarParte(meetingId: string, seq: number, blob: Blob, mi
   }
   if (resposta.status === 200 || resposta.status === 201) return { tipo: "recebida" };
   const codigo = await resposta.json().then((c: { codigo?: unknown }) => (typeof c?.codigo === "string" ? c.codigo : undefined), () => undefined);
-  if (resposta.status === 401) return { tipo: "sem-sessao" };
+  // 401 e 403 (sessão vencida, cadastro ainda incompleto) se resolvem depois de
+  // entrar de novo: a parte fica guardada, nunca é tratada como recusa.
+  if (resposta.status === 401 || resposta.status === 403) return { tipo: "sem-sessao" };
   if (resposta.status === 429 || resposta.status >= 500 || codigo === undefined) return { tipo: "passageira", codigo };
   return { tipo: "recusada", codigo };
 }

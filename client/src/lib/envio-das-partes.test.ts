@@ -31,6 +31,7 @@ describe("enviarParte (G9)", () => {
     [500, { codigo: "ERRO" }, "passageira"],
     [502, undefined, "passageira"],
     [401, { codigo: "SEM_SESSAO" }, "sem-sessao"],
+    [403, { codigo: "CADASTRO_INCOMPLETO" }, "sem-sessao"],
     [404, { codigo: "SEM_REUNIAO" }, "recusada"],
     [409, { codigo: "CONTEUDO_DIFERENTE" }, "recusada"],
     [413, undefined, "passageira"],

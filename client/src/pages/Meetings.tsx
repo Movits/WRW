@@ -324,7 +324,9 @@ export default function Meetings() {
         return toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
       }
     }
-    await gravador.comecar();
+    const comecou = await gravador.comecar();
+    // O microfone não abriu (negado, ocupado): a reunião em partes vazia sai.
+    if (emPartes && !comecou) await gravacaoEmPartes.cancelar();
   }
 
   async function uploadAudio(file: File) {

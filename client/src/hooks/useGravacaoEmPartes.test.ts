@@ -5,19 +5,21 @@ const d = vi.hoisted(() => ({
   iniciar: vi.fn(),
   encerrar: vi.fn(),
   getData: vi.fn(),
+  fetch: vi.fn(),
+  excluir: vi.fn(),
   enviarParte: vi.fn(),
   enviarPendentes: vi.fn(),
   guardarParte: vi.fn(),
   apagarParte: vi.fn(),
 }));
-vi.mock("@/lib/trpc", () => ({
-  trpc: {
-    useUtils: () => ({
-      auth: { me: { getData: d.getData } },
-      client: { meetings: { iniciarGravacao: { mutate: d.iniciar }, encerrarGravacao: { mutate: d.encerrar } } },
-    }),
-  },
-}));
+vi.mock("@/lib/trpc", () => {
+  // O MESMO objeto a cada render, como o useUtils do tRPC.
+  const utils = {
+    auth: { me: { getData: d.getData, fetch: d.fetch } },
+    client: { meetings: { iniciarGravacao: { mutate: d.iniciar }, encerrarGravacao: { mutate: d.encerrar }, delete: { mutate: d.excluir } } },
+  };
+  return { trpc: { useUtils: () => utils } };
+});
 vi.mock("@/lib/envio-das-partes", () => ({
   enviarParte: (...a: unknown[]) => d.enviarParte(...a),
   enviarPendentes: (...a: unknown[]) => d.enviarPendentes(...a),
@@ -29,12 +31,14 @@ vi.mock("@/lib/partes-no-aparelho", () => ({
 }));
 
 const { useGravacaoEmPartes } = await import("./useGravacaoEmPartes");
-const { sessaoOcupada } = await import("@/lib/sessao-ocupada");
+const { sessaoOcupada, motivoDaOcupacao } = await import("@/lib/sessao-ocupada");
 
 const parte = (seq: number, ultima: boolean) => ({ blob: new Blob(["som"], { type: "audio/mp4" }), mimeType: "audio/mp4" as const, duracaoMs: 600_000, seq, ultima });
 
 beforeEach(() => {
+  localStorage.clear();
   Object.values(d).forEach(f => f.mockReset());
+  d.excluir.mockResolvedValue({ success: true });
   d.getData.mockReturnValue({ openId: "dona-1" });
   d.iniciar.mockResolvedValue({ id: "r-1" });
   d.encerrar.mockResolvedValue({ partes: 2 });
@@ -90,6 +94,75 @@ describe("useGravacaoEmPartes (G9)", () => {
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, true)));
     await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
+  });
+
+  it("o fim que falhou fica guardado e a retomada o declara de novo", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    d.encerrar.mockRejectedValueOnce(new Error("rede"));
+    const aoFalhar = vi.fn();
+    const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    // A retomada da montagem termina antes (senão ela mesma declara o fim já na primeira volta).
+    await waitFor(() => expect(d.enviarPendentes).toHaveBeenCalled());
+    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await act(async () => { await primeira.result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    act(() => primeira.result.current.receberParte(parte(0, false)));
+    act(() => primeira.result.current.receberParte(parte(1, true)));
+    await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
+    expect(JSON.parse(localStorage.getItem("wrw:fins-de-gravacao-pendentes")!)).toEqual({ "r-1": 2 });
+    primeira.unmount();
+    // A tela aberta de novo (ou a próxima volta da retomada) declara o fim.
+    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await waitFor(() => expect(localStorage.getItem("wrw:fins-de-gravacao-pendentes")).toBeNull());
+    expect(d.encerrar).toHaveBeenLastCalledWith({ meetingId: "r-1", partes: 2 });
+  });
+
+  it("a última parte vazia (Parar logo depois de uma troca) não vai, e o fim conta só as partes com áudio", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    act(() => result.current.receberParte(parte(0, false)));
+    act(() => result.current.receberParte({ ...parte(1, true), blob: new Blob([]) }));
+    await waitFor(() => expect(aoEncerrar).toHaveBeenCalled());
+    expect(d.enviarParte).toHaveBeenCalledTimes(1);
+    expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 1 });
+  });
+
+  it("nenhuma parte com áudio: a reunião vazia é excluída, não encerrada", async () => {
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    act(() => result.current.receberParte({ ...parte(0, true), blob: new Blob([]) }));
+    await waitFor(() => expect(aoEncerrar).toHaveBeenCalled());
+    expect(d.encerrar).not.toHaveBeenCalled();
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+  });
+
+  it("cancelar (o microfone não abriu) exclui a reunião que nasceu", async () => {
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    await act(async () => { await result.current.cancelar(); });
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+  });
+
+  it("a conta fora do cache: busca no servidor antes de guardar a parte", async () => {
+    d.getData.mockReturnValue(undefined);
+    d.fetch.mockResolvedValue({ openId: "dona-2" });
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    act(() => result.current.receberParte(parte(0, false)));
+    await waitFor(() => expect(d.guardarParte).toHaveBeenCalledWith(expect.objectContaining({ dona: "dona-2" })));
+  });
+
+  it("parte que não foi ao servidor ocupa a sessão até sair do aparelho", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "passageira" });
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await waitFor(() => expect(d.enviarPendentes).toHaveBeenCalled());
+    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    act(() => result.current.receberParte(parte(0, false)));
+    await waitFor(() => expect(motivoDaOcupacao()).toBe("audio-nao-enviado"));
   });
 
   it("ativo: retoma o que ficou no aparelho ao montar; inativo: não toca o servidor", async () => {
