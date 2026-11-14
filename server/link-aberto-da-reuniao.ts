@@ -148,6 +148,19 @@ async function reuniaoDoLink(token: string) {
   return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices" };
 }
 
+/** Os segmentos no contrato do desenho ({inicio, fim, falante, texto, lacuna?}), sem outro campo. */
+export function segmentosDoContrato(bruto: unknown): Array<{ inicio: number; fim: number; falante: string; texto: string; lacuna?: true }> {
+  if (!Array.isArray(bruto)) return [];
+  const saida: Array<{ inicio: number; fim: number; falante: string; texto: string; lacuna?: true }> = [];
+  for (const s of bruto) {
+    if (!s || typeof s !== "object") continue;
+    const { inicio, fim, falante, texto, lacuna } = s as Record<string, unknown>;
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || typeof falante !== "string" || typeof texto !== "string") continue;
+    saida.push({ inicio: Number(inicio), fim: Number(fim), falante: falante.slice(0, 4), texto, ...(lacuna === true ? { lacuna: true as const } : {}) });
+  }
+  return saida;
+}
+
 /** A reunião do link, ou a recusa NOT_FOUND: link que não existe e link desligado parecem iguais. */
 export async function exigirReuniaoDoLink(token: string) {
   const reuniao = await reuniaoDoLink(token);
@@ -175,7 +188,9 @@ export async function verReuniaoPeloLink(token: string) {
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
-    transcricao: transcricao ?? null,
+    // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
+    // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
+    transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,
     gravacao: recording
       ? {
           url: enderecoDoAudioDoLink(token), mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt,

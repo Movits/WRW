@@ -141,10 +141,18 @@ async function partesProntasParaTranscrever(db: Banco, agora: number, escopo: Es
       daDona(meetingAudioSlices.ownerId, escopo),
     ))
     .orderBy(asc(meetingAudioSlices.createdAt), asc(meetingAudioSlices.seq))
-    .limit(limite * 5);
+    // Janela larga: muitas partes de uma reunião longa esperam a anterior, e só
+    // a primeira de cada reunião está pronta; com uma janela curta, elas
+    // tomariam as vagas e as partes prontas de outras reuniões ficariam sem vez.
+    .limit(200);
   const prontas: typeof candidatas = [];
-  for (const parte of candidatas) {
+  // Só a primeira parte pendente de cada reunião pode estar pronta (as outras
+  // esperam a anterior): uma consulta por reunião, não por parte.
+  const vistas = new Set<string>();
+  for (const parte of [...candidatas].sort((a, b) => a.seq - b.seq)) {
     if (prontas.length >= limite) break;
+    if (vistas.has(parte.meetingId)) continue;
+    vistas.add(parte.meetingId);
     if (parte.seq === 0) { prontas.push(parte); continue; }
     const [anterior] = await db.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices)
       .where(and(eq(meetingAudioSlices.meetingId, parte.meetingId), eq(meetingAudioSlices.seq, parte.seq - 1))).limit(1);

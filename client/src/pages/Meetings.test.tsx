@@ -709,6 +709,41 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
   });
 
+  // O link para dentro da reunião chega direto ao endereço do detalhe, com ?t ou ?q.
+  function abrirPeloLink(busca: string) {
+    const meeting = { ...REUNIAO, status: "ready" };
+    duble.list.mockReturnValue({ data: [meeting], isLoading: false });
+    duble.get.mockReturnValue({
+      data: { meeting, transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
+      isLoading: false,
+    });
+    window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
+    render(<Meetings />);
+  }
+
+  it("o link com ?t abre a transcrição e já leva o player ao segundo pedido", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620");
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("o link com ?q abre a transcrição já filtrada pelo termo", () => {
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?q=frete");
+      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      expect(screen.getByRole("searchbox")).toHaveValue("frete");
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));

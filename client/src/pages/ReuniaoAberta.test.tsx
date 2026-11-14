@@ -174,6 +174,25 @@ describe("Reunião aberta pelo link", () => {
     }
   });
 
+  it("reunião em partes (D1): falas por falante, e clicar no tempo leva o player à parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      transcricao: { texto: "Oi. Tchau.", idioma: "pt-BR", segmentos: [
+        { inicio: 1, fim: 2, falante: "F1", texto: "Oi." },
+        { inicio: 610, fim: 612, falante: "F2", texto: "Tchau." },
+      ] },
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    expect(screen.getAllByText("Falante 2").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:10" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+  });
+
   it("com a tela em inglês, já abre pedindo a tradução para o inglês", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
     duble.ver.mockReturnValue(pronta());

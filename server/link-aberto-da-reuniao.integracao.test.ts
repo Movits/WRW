@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
-import { auditLogs, meetingContactSuggestions, meetingEntities, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { auditLogs, meetingAudioSlices, meetingContactSuggestions, meetingEntities, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import {
   ACAO_LINK_LIGADO,
   chaveDoAudioDoLink,
@@ -117,8 +117,12 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     expect(vista).toMatchObject({
       titulo: "Reunião ready de teste",
       criadaEm: AGORA,
-      transcricao: { texto: "Combinamos a entrega na sexta.", idioma: "pt-BR" },
-      gravacao: { url: `/reuniao-aberta/${token}/audio`, mimeType: "audio/mp4", durationSeconds: 90 },
+      transcricao: { texto: "Combinamos a entrega na sexta.", idioma: "pt-BR", segmentos: [] },
+      // O envio único é uma parte só, pela rota do link (D1).
+      gravacao: {
+        url: `/reuniao-aberta/${token}/audio`, mimeType: "audio/mp4", durationSeconds: 90,
+        partes: [{ seq: 0, url: `/reuniao-aberta/${token}/audio`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 90 }],
+      },
       gravacaoExpirada: false,
     });
     // Nem o id da dona, nem a chave do bucket, nem o id da reunião; nem o nome
@@ -129,6 +133,45 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     expect(texto).not.toContain(CHAVE);
     expect(texto).not.toContain(PRONTA);
     expect(await chaveDoAudioDoLink(token)).toBe(CHAVE);
+  });
+
+  it("reunião em partes pelo link (D1): falas no contrato (sem campo extra), cada parte por ?parte, e só as da reunião do token", async () => {
+    const db = (await getDb())!;
+    const EM_PARTES = crypto.randomUUID();
+    await db.insert(meetings).values({ ...reuniao(EM_PARTES, "ready"), audioPipeline: "slices", expectedSlices: 3 });
+    await db.insert(meetingTranscripts).values({
+      id: crypto.randomUUID(), meetingId: EM_PARTES, ownerId: DONA, transcript: "Oi. Tchau.", language: "pt-BR", createdAt: AGORA, updatedAt: AGORA,
+      segments: [
+        { inicio: 1, fim: 2, falante: "F1", texto: "Oi.", palavras: ["campo", "fora", "do", "contrato"] },
+        { inicio: 600, fim: 1200, falante: "", texto: "", lacuna: true },
+        { texto: "malformado" },
+      ],
+    });
+    const parte = (seq: number, extra: Record<string, unknown> = {}) => ({
+      id: crypto.randomUUID(), meetingId: EM_PARTES, ownerId: DONA, seq, status: "transcribed" as const,
+      storageKey: `meetings/${DONA}/${EM_PARTES}/partes/${seq}.m4a`, storageUrl: `/manus-storage/meetings/${DONA}/${EM_PARTES}/partes/${seq}.m4a`,
+      mimeType: "audio/mp4", sizeBytes: 10, sha256: "0".repeat(64), durationMs: 600_000, offsetMs: seq * 600_000,
+      expiresAt: AGORA + 86_400_000, createdAt: AGORA, updatedAt: AGORA, ...extra,
+    });
+    await db.insert(meetingAudioSlices).values([parte(0), parte(1, { expiresAt: AGORA - 1 }), parte(2, { status: "uploading" })]);
+    try {
+      const token = await ligarLinkAberto(DONA, EM_PARTES, PROVA);
+      const vista = await verReuniaoPeloLink(token);
+      expect(vista.transcricao?.segmentos).toEqual([
+        { inicio: 1, fim: 2, falante: "F1", texto: "Oi." },
+        { inicio: 600, fim: 1200, falante: "", texto: "", lacuna: true },
+      ]);
+      // Só a parte que vale (a 1 venceu, a 2 não subiu), pela rota do link.
+      expect(vista.gravacao?.partes).toEqual([{ seq: 0, url: `/reuniao-aberta/${token}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 }]);
+      expect(JSON.stringify(vista)).not.toContain("manus-storage");
+      expect(await chaveDoAudioDoLink(token, 0)).toBe(`meetings/${DONA}/${EM_PARTES}/partes/0.m4a`);
+      expect(await chaveDoAudioDoLink(token)).toBe(`meetings/${DONA}/${EM_PARTES}/partes/0.m4a`);
+      expect(await chaveDoAudioDoLink(token, 1)).toBeNull();
+      expect(await chaveDoAudioDoLink(token, 2)).toBeNull();
+      expect(await chaveDoAudioDoLink(token, 9)).toBeNull();
+    } finally {
+      await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, EM_PARTES));
+    }
   });
 
   it("desligado, o link para de abrir na hora, e o link novo é outro", async () => {

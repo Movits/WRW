@@ -29,7 +29,12 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
       irPara(segundo: number) {
         if (!partes.length) return;
         let alvo = partes.findIndex(p => segundo >= p.inicioSegundos && segundo < p.inicioSegundos + p.duracaoSegundos);
-        if (alvo < 0) alvo = segundo < partes[0].inicioSegundos ? 0 : partes.length - 1;
+        // Num buraco entre partes (uma que não chegou ou venceu), começa na
+        // primeira que vem depois dele; depois da última, na última.
+        if (alvo < 0) {
+          const seguinte = partes.findIndex(p => p.inicioSegundos > segundo);
+          alvo = seguinte >= 0 ? seguinte : partes.length - 1;
+        }
         const dentro = Math.max(0, segundo - partes[alvo].inicioSegundos);
         if (alvo === indice && audio.current) {
           audio.current.currentTime = dentro;
@@ -52,7 +57,15 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
         src={atual.url}
         className="w-full mt-4"
         data-parte={atual.seq}
-        onError={() => aoFalhar?.()}
+        onError={() => {
+          aoFalhar?.();
+          // Parte do meio que não carrega: segue para a próxima, em vez de travar
+          // a gravação inteira ali (o aviso da tela diz que algo não carregou).
+          if (pendente.current?.tocar && indice + 1 < partes.length) {
+            pendente.current = { dentro: 0, tocar: true };
+            setIndice(indice + 1);
+          }
+        }}
         onLoadedMetadata={() => {
           const p = pendente.current;
           pendente.current = null;
