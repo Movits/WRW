@@ -1607,7 +1607,7 @@
       "androidStep2": "「インストールしてショートカットを作成」、続けて「インストール」をタップします。",
       "desktopStep1": "アドレスバーの右にある「インストール」をクリックします。",
       "desktopStep2": "表示されない場合は、Chromeで⋮ >「キャスト、保存、共有」>「ページをアプリとしてインストール」を選択します。",
-      "macSafari": "Safariで「ファイル」>「Dockに追加」を選択します。",
+      "macSafari": "macOS Sonoma（14）以降のSafariで「ファイル」>「Dockに追加」を選択します。それより前のmacOSでは、このページをChromeまたはEdgeで開いてください。",
       "inAppBrowser": "ここからはインストールできません。このページをSafariまたはChromeで開いてください。",
       "unsupportedBrowser": "WRWをアプリとしてインストールするには、Chrome、Edge、またはSafariで開いてください。",
       "androidOtherBrowser": "WRWをアプリとしてインストールするには、このページをChromeで開いてください。"

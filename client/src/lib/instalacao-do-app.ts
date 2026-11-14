@@ -34,15 +34,15 @@ export type Plataforma =
   | "ios"
   /** Navegador de dentro de outro app (Instagram, Facebook, WebView...): não instala. */
   | "navegador-embutido"
-  /** Chrome no Android: ⋮ > Instalar e criar atalho. */
+  /** O Chrome no Android, também no modo computador do tablet: ⋮ > Instalar e criar atalho. */
   | "android"
-  /** Outro navegador no Android (Samsung Internet, Firefox, Opera, Edge...): o caminho é abrir no Chrome. */
+  /** Qualquer outro navegador no Android (Samsung Internet, Silk, Firefox, Opera, Edge...): o caminho é abrir no Chrome. */
   | "android-outro-navegador"
-  /** Safari no Mac: Arquivo > Adicionar ao Dock. */
+  /** Safari no Mac: Arquivo > Adicionar ao Dock, do macOS Sonoma (14) em diante. */
   | "mac-safari"
-  /** Chrome, Edge e os outros Chromium que instalam, no computador. */
+  /** O Chrome e o Edge no computador: Instalar, na barra de endereço. */
   | "computador"
-  /** Firefox e Opera no computador e o que mais a dica não sabe instalar. */
+  /** Qualquer outro navegador (Firefox, Opera, HarmonyOS...): o conselho de abrir num que instala. */
   | "sem-instalacao";
 
 export interface AmbienteDoNavegador {
@@ -61,7 +61,18 @@ const NAVEGADOR_EMBUTIDO = /FBAN|FBAV|FB_IAB|Instagram|LinkedInApp|\bLine\/|Snap
 // A casca das lojas (PR #180) se identifica assim, e é uma WebView: vem antes.
 const CASCA_DAS_LOJAS = /\bWRWApp\//;
 const CHROMIUM = /Chrome\/|Chromium\/|Edg\//;
-const NAVEGADOR_DO_ANDROID_SEM_OS_PASSOS_DO_CHROME = /SamsungBrowser\/|Firefox\/|\bOPR\/|EdgA\/|YaBrowser\/|MiuiBrowser\/|HeyTapBrowser\/|VivoBrowser\/|UCBrowser\//;
+// Lista branca: os passos de um menu só para o navegador que tem esse menu. No
+// Chrome, logo depois de "(KHTML, like Gecko)" vem o próprio "Chrome/x", seguido
+// só de "Safari/y" ("Mobile Safari/y" no celular); o Safari do Mac termina em
+// "Version/x Safari/y". Os outros põem o nome deles antes do Chrome (Samsung
+// Internet, Silk dos tablets Fire, WebView com "Version/4.0"), no meio (Yandex,
+// UC, DuckDuckGo do Android) ou no fim (Opera, Edge, Mi, DuckDuckGo do Mac), e a
+// regra não casa. O Brave e o Vivaldi se apresentam como o Chrome, e o caminho
+// deles é parecido. Navegador que a lista não conhece recebe o conselho de abrir
+// num que instala, em vez de passos de um menu que talvez não exista.
+const CHROME = /\(KHTML, like Gecko\) Chrome\/[\d.]+ (?:Mobile )?Safari\/[\d.]+$/;
+const SAFARI_DO_MAC = /Version\/[\d.]+ Safari\/[\d.]+$/;
+const EDGE_NO_COMPUTADOR = /\bEdg\/[\d.]+$/;
 
 export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoApp }: AmbienteDoNavegador): Plataforma {
   if (abertoComoApp || CASCA_DAS_LOJAS.test(userAgent)) return "app-instalado";
@@ -73,24 +84,23 @@ export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoAp
     // userAgent; a WebView de um app (WKWebView) não leva, nem instala.
     return /Safari\//.test(userAgent) ? "ios" : "navegador-embutido";
   }
-  if (/Android/i.test(userAgent)) {
-    // Os passos são os do Chrome (⋮ > Instalar e criar atalho): os outros
-    // navegadores do Android têm outro menu, e o Chrome vem nos aparelhos.
-    return NAVEGADOR_DO_ANDROID_SEM_OS_PASSOS_DO_CHROME.test(userAgent) ? "android-outro-navegador" : "android";
-  }
-  // Tablet Android com o Chrome no modo computador (o padrão nos tablets
-  // grandes) se apresenta como Linux: a tela de toque o denuncia, como no iPad.
-  // O custo é um notebook Linux com tela de toque receber os passos do Android.
-  // (O Chromebook se apresenta como "X11; CrOS" e não cai aqui.)
-  if (/X11; Linux/.test(userAgent) && maxTouchPoints > 1 && CHROMIUM.test(userAgent)) return "android";
-  // O Firefox (no Windows, a partir do 143, ele fixa o site na barra de
-  // tarefas, com outro caminho) e o Opera no computador ficam com o conselho
-  // de abrir num navegador que instala.
-  // O HarmonyOS NEXT (sem Android, com "OpenHarmony" ou "ArkWeb" no
-  // userAgent) leva "Chrome/", mas não tem o Chrome nem os menus dele.
-  if (/Firefox\/|\bOPR\/|OpenHarmony|ArkWeb/.test(userAgent)) return "sem-instalacao";
-  if (CHROMIUM.test(userAgent)) return "computador";
-  if (mac && /Version\/[\d.]+.*Safari\//.test(userAgent)) return "mac-safari";
+  // O Android: o celular e o tablet, também no modo computador, em que o
+  // tablet se apresenta como Linux e a tela de toque o denuncia, como no iPad
+  // (o custo é um notebook Linux com tela de toque contar como Android; o
+  // Chromebook se apresenta como "X11; CrOS" e não cai aqui). O Samsung
+  // Internet só existe no Android, inclusive no DeX, sem tela de toque.
+  const android =
+    /Android/i.test(userAgent) ||
+    /SamsungBrowser\//.test(userAgent) ||
+    (/X11; Linux/.test(userAgent) && maxTouchPoints > 1 && CHROMIUM.test(userAgent));
+  if (android) return CHROME.test(userAgent) ? "android" : "android-outro-navegador";
+  if (CHROME.test(userAgent) || EDGE_NO_COMPUTADOR.test(userAgent)) return "computador";
+  // O "Adicionar ao Dock" só existe do macOS Sonoma (14) em diante, e o
+  // userAgent do Safari fixa o sistema em 10_15_7: o texto da dica avisa isso
+  // e diz o que fazer nos anteriores.
+  if (mac && SAFARI_DO_MAC.test(userAgent)) return "mac-safari";
+  // Firefox (que no Windows, desde o 143, fixa o site na barra de tarefas, por
+  // outro caminho), Opera, HarmonyOS NEXT e o resto: abrir num que instala.
   return "sem-instalacao";
 }
 

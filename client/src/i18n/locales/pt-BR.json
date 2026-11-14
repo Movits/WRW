@@ -1607,7 +1607,7 @@
       "androidStep2": "Toque em “Instalar e criar atalho” e depois em “Instalar”.",
       "desktopStep1": "Clique em “Instalar”, à direita da barra de endereço.",
       "desktopStep2": "Se ele não aparecer, no Chrome vá em ⋮ > “Transmitir, salvar e compartilhar” > “Instalar esta página como um app…”.",
-      "macSafari": "No Safari, escolha Arquivo > “Adicionar ao Dock”.",
+      "macSafari": "No Safari do macOS Sonoma (14) ou mais novo, escolha Arquivo > “Adicionar ao Dock”. Nas versões anteriores do macOS, abra esta página no Chrome ou no Edge.",
       "inAppBrowser": "Daqui não dá para instalar: abra esta página no Safari ou no Chrome.",
       "unsupportedBrowser": "Para instalar a WRW como app, abra esta página no Chrome, no Edge ou no Safari.",
       "androidOtherBrowser": "Para instalar a WRW como app, abra esta página no Chrome."

@@ -111,7 +111,9 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
 
   it("no Safari do Mac, Arquivo > Adicionar ao Dock", () => {
     montar(ambiente(UA.macSafari));
-    expect(screen.getByText("No Safari, escolha Arquivo > “Adicionar ao Dock”.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No Safari do macOS Sonoma (14) ou mais novo, escolha Arquivo > “Adicionar ao Dock”. Nas versões anteriores do macOS, abra esta página no Chrome ou no Edge."),
+    ).toBeInTheDocument();
     expect(passos()).toEqual([]);
   });
 
@@ -347,6 +349,16 @@ describe("Dica de instalação — os 10 idiomas", () => {
       expect(textos.iosStep1, code).toContain("•••");
       expect(textos.androidStep1, code).toContain("⋮");
       expect(textos.desktopStep2, code).toContain("⋮");
+      // Cada conselho aponta os navegadores do caminho dele, para uma troca de
+      // textos entre chaves não passar despercebida (o árabe escreve Safari como سفاري).
+      expect(textos.androidOtherBrowser, code).toContain("Chrome");
+      expect(textos.androidOtherBrowser, code).not.toMatch(/Edge|Safari|سفاري/);
+      expect(textos.unsupportedBrowser, code).toContain("Edge");
+      expect(textos.inAppBrowser, code).not.toContain("Edge");
+      // O "Adicionar ao Dock" só existe do macOS Sonoma (14) em diante; antes, Chrome ou Edge.
+      expect(textos.macSafari, code).toMatch(/Sonoma[ （(]+14/);
+      expect(textos.macSafari, code).toContain("Chrome");
+      expect(textos.macSafari, code).toContain("Edge");
     }
   });
 
