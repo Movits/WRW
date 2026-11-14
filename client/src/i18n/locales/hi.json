@@ -1615,7 +1615,17 @@
     "meetingLanguageLabel": "मीटिंग की भाषा",
     "meetingLanguageHint": "बोली जाने वाली भाषा। AI इसी भाषा में ट्रांसक्राइब करता है, और ट्रांसक्रिप्ट का बाद में अनुवाद किया जा सकता है।",
     "originalLanguageSuffix": "(मूल)",
-    "translatingLongStatus": "मीटिंग लंबी है: अनुवाद में कुछ मिनट लगते हैं। आप यह स्क्रीन खुली छोड़ सकती हैं; तैयार होते ही टेक्स्ट दिखेगा।"
+    "translatingLongStatus": "मीटिंग लंबी है: अनुवाद में कुछ मिनट लगते हैं। आप यह स्क्रीन खुली छोड़ सकती हैं; तैयार होते ही टेक्स्ट दिखेगा।",
+    "statusUploading": "ऑडियो मिल रहा है",
+    "speakerLabel": "वक्ता {{n}}",
+    "gapLabel": "यह हिस्सा नहीं मिला",
+    "speakingTime": "बोलने का समय",
+    "searchTranscriptPlaceholder": "ट्रांसक्रिप्ट में खोजें",
+    "searchNoResults": "इस शब्द से कुछ नहीं मिला।",
+    "playFrom": "{{tempo}} से सुनें",
+    "progressRecording": "रिकॉर्डिंग जारी है: ऑडियो धीरे-धीरे आ रहा है।",
+    "progressUploading": "ऑडियो मिल रहा है: {{esperadas}} में से {{recebidas}}",
+    "progressTranscribing": "ट्रांसक्राइब हो रहा है: {{total}} में से {{transcritas}}"
   },
   "connections": {
     "messageSent": "संदेश भेजा गया",

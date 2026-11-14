@@ -1615,7 +1615,17 @@
     "meetingLanguageLabel": "会議の言語",
     "meetingLanguageHint": "話されている言語です。AI はこの言語で文字起こしし、文字起こしは後で翻訳できます。",
     "originalLanguageSuffix": "（原文）",
-    "translatingLongStatus": "会議が長いため、翻訳には数分かかります。この画面は開いたままで大丈夫です。準備ができると本文が表示されます。"
+    "translatingLongStatus": "会議が長いため、翻訳には数分かかります。この画面は開いたままで大丈夫です。準備ができると本文が表示されます。",
+    "statusUploading": "音声を受信中",
+    "speakerLabel": "話者 {{n}}",
+    "gapLabel": "受信できなかった部分",
+    "speakingTime": "発言時間",
+    "searchTranscriptPlaceholder": "文字起こしを検索",
+    "searchNoResults": "この語句は見つかりませんでした。",
+    "playFrom": "{{tempo}} から再生",
+    "progressRecording": "録音中：音声は少しずつ届きます。",
+    "progressUploading": "音声を受信中：{{esperadas}} 中 {{recebidas}}",
+    "progressTranscribing": "文字起こし中：{{total}} 中 {{transcritas}}"
   },
   "connections": {
     "messageSent": "メッセージを送信しました",

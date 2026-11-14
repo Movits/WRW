@@ -17,7 +17,7 @@ vi.mock("./storage", async (original) => ({
 const { getDb } = await import("./db");
 const { meetingAudioSlices, meetings, users } = await import("../drizzle/schema");
 const { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, RecusaDaParte, receberParte, FalhaPassageiraDaParte } = await import("./fatias-de-reuniao");
-const { deletePrivateMeeting, limparGravacoesVencidas, MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
+const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas, MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 const { TRPCError } = await import("@trpc/server");
 
@@ -228,6 +228,21 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     expect(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 4 })).toEqual({ partes: 4 });
     expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 5 }).catch(e => e))).toBe("CONFLICT");
     expect(codigo(await caller.meetings.iniciarGravacao({ title: "Sem aviso", consentGranted: false as never }).catch(e => e))).toBe("BAD_REQUEST");
+  });
+
+  it("o detalhe (D1) traz as partes para ouvir, na ordem e com o início de cada uma, e o andamento", async () => {
+    const { id } = await iniciar();
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(3) });
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(2) });
+    await encerrarGravacaoEmPartes(DONA, id, 3);
+    const detalhe = await getPrivateMeeting(DONA, id);
+    expect(detalhe?.meeting).toMatchObject({ audioPipeline: "slices", expectedSlices: 3, status: "uploading" });
+    expect(detalhe?.andamento).toEqual({ recebidas: 2, transcritas: 0, esperadas: 3 });
+    expect(detalhe?.recording?.partes.map(p => [p.seq, p.inicioSegundos, p.duracaoSegundos])).toEqual([[0, 0, 3], [1, 3, 2]]);
+    expect(detalhe?.recording?.durationSeconds).toBe(5);
+    expect(detalhe?.recording?.partes[0].url).toMatch(new RegExp(`^/manus-storage/meetings/${DONA}/${id}/partes/0000-`));
+    // De outra dona: nada.
+    expect(await getPrivateMeeting(OUTRA, id)).toBeNull();
   });
 
   it("reunião do envio único não recebe partes", async () => {

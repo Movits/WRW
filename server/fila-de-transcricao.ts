@@ -398,7 +398,9 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   await retomarMontagensPresas(db, agora, escopo);
   await desistirDasEsgotadas(db, agora, escopo);
   const trabalhos: Promise<unknown>[] = [];
-  for (const parte of await partesProntasParaTranscrever(db, agora, escopo)) {
+  // Só tantas partes quantas vagas de IA: a reserva começa a contar na hora, e
+  // uma parte reservada esperando vaga no semáforo gastaria o prazo dela parada.
+  for (const parte of await partesProntasParaTranscrever(db, agora, escopo, CHAMADAS_DE_IA_AO_MESMO_TEMPO)) {
     if (parada) break;
     const token = await reservarParte(db, parte.id, agora);
     if (token) trabalhos.push(transcreverUmaParte(db, parte, token).finally(() => tokensVivos.delete(token)));

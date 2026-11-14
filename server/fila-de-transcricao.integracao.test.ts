@@ -240,6 +240,9 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
       simultaneas -= 1;
       return { segmentos: [], idioma: "pt-BR", modelo: "m" };
     });
+    // Duas por rodada (as vagas de IA), e nunca mais de duas ao mesmo tempo.
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
     await rodar();
     expect(transcreverFatia).toHaveBeenCalledTimes(4);
     expect(pico).toBe(2);

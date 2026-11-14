@@ -47,8 +47,18 @@ describe("GET /reuniao-aberta/{token}/audio", () => {
     expect(resposta.headers.get("location")).toBe("https://bucket.exemplo/assinada?x=1");
     expect(resposta.headers.get("cache-control")).toBe("no-store");
     expect(resposta.headers.get("x-robots-tag")).toBe("noindex, nofollow");
-    expect(acharChave).toHaveBeenCalledWith("A".repeat(32));
+    expect(acharChave).toHaveBeenCalledWith("A".repeat(32), undefined);
     expect(assinar).toHaveBeenCalledWith("meetings/dona/m-1/recording.mp4");
+  });
+
+  it("a reunião em partes toca cada parte por ?parte; valor estranho vale a primeira (D1)", async () => {
+    acharChave.mockResolvedValue("meetings/dona/m-1/partes/0002-abc.m4a");
+    assinar.mockResolvedValue("https://bucket.exemplo/p2");
+    const resposta = await pedir(`/reuniao-aberta/${"A".repeat(32)}/audio?parte=2`);
+    expect(resposta.status).toBe(307);
+    expect(acharChave).toHaveBeenCalledWith("A".repeat(32), 2);
+    await pedir(`/reuniao-aberta/${"A".repeat(32)}/audio?parte=../../x`);
+    expect(acharChave).toHaveBeenLastCalledWith("A".repeat(32), undefined);
   });
 
   it("link desligado, sem gravação ou vencido: 404, sem assinar nada", async () => {
