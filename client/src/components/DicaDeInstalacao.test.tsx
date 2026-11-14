@@ -58,7 +58,7 @@ let pararEscuta: () => void;
 beforeEach(() => {
   // O setup limpa só o sessionStorage: a marca de um teste esconderia a dica nos seguintes.
   localStorage.clear();
-  pararEscuta = escutarPedidoDeInstalacao(window);
+  pararEscuta = escutarPedidoDeInstalacao();
 });
 
 afterEach(async () => {
@@ -264,7 +264,7 @@ describe("Dica de instalação — o pedido do navegador (Chrome, Edge, Samsung 
     // Uma carga nova: a escuta recomeça do zero, e a marca no aparelho segura a dica.
     cleanup();
     pararEscuta();
-    pararEscuta = escutarPedidoDeInstalacao(window);
+    pararEscuta = escutarPedidoDeInstalacao();
     montar(ambiente(UA.windowsEdge));
     expect(dica()).not.toBeInTheDocument();
   });
@@ -304,6 +304,27 @@ describe("Dica de instalação — fechar", () => {
 });
 
 describe("Dica de instalação — os 10 idiomas", () => {
+  it("as 15 chaves estão traduzidas em cada idioma, com os símbolos dos botões do sistema", async () => {
+    const pt = i18n.getResource("pt-BR", "translation", "meetings.install") as Record<string, string>;
+    expect(Object.keys(pt)).toHaveLength(15);
+    for (const { code } of LANGUAGES) {
+      await act(async () => {
+        await i18n.changeLanguage(code);
+      });
+      const textos = i18n.getResource(code, "translation", "meetings.install") as Record<string, string>;
+      expect(Object.keys(textos).sort(), code).toEqual(Object.keys(pt).sort());
+      for (const [chave, texto] of Object.entries(textos)) {
+        expect(texto.trim().length, `${code}.${chave}`).toBeGreaterThan(3);
+        if (code !== "pt-BR") expect(texto, `${code}.${chave} ficou em português`).not.toBe(pt[chave]);
+      }
+      // iOS 27 (≡, Menu da Página) e iOS 26 (•••); o menu do Chrome é o ⋮.
+      expect(textos.iosStep1, code).toContain("≡");
+      expect(textos.iosStep1, code).toContain("•••");
+      expect(textos.androidStep1, code).toContain("⋮");
+      expect(textos.desktopStep2, code).toContain("⋮");
+    }
+  });
+
   it("cada idioma tem o título e os passos traduzidos, e o árabe vira a página da direita para a esquerda", async () => {
     for (const { code } of LANGUAGES) {
       await act(async () => {

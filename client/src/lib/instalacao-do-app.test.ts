@@ -34,6 +34,10 @@ const UA = {
   ipadCelular: "Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
   // A WebView de um app no Mac: sem Version/ nem Safari/.
   macWebView: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  // HarmonyOS NEXT: sem Android, com "Chrome/" no userAgent, mas sem o Chrome.
+  harmonyCelular: "Mozilla/5.0 (Phone; OpenHarmony 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 ArkWeb/4.1.6.1 Mobile",
+  harmonyTablet: "Mozilla/5.0 (Tablet; OpenHarmony 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 ArkWeb/4.1.6.1 Mobile",
+  navegadorHuawei: "Mozilla/5.0 (Phone; HarmonyOS 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 ArkWeb/4.1.6.1 Mobile HuaweiBrowser/5.0.4.300",
   // O GNOME Web (WebKit) no Linux leva Version/ e Safari/, mas não é o Safari do Mac.
   gnomeWeb: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
   facebookAndroid: "Mozilla/5.0 (Linux; Android 15; SM-S921B Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/500.0.0.0;]",
@@ -81,6 +85,9 @@ describe("plataformaDeInstalacao", () => {
     ["Windows no Chrome", UA.windowsChrome, 0, "computador"],
     ["Windows no Edge", UA.windowsEdge, 0, "computador"],
     ["Windows no Opera, que não instala app da web", UA.windowsOpera, 0, "sem-instalacao"],
+    ["celular com HarmonyOS NEXT, sem o Chrome nem os menus dele", UA.harmonyCelular, 5, "sem-instalacao"],
+    ["tablet com HarmonyOS NEXT", UA.harmonyTablet, 10, "sem-instalacao"],
+    ["navegador Huawei no HarmonyOS NEXT, só com ArkWeb", UA.navegadorHuawei, 5, "sem-instalacao"],
     ["Mac no Chrome", UA.macChrome, 0, "computador"],
     ["Mac no Firefox", UA.macFirefox, 0, "sem-instalacao"],
     ["Windows no Firefox", UA.windowsFirefox, 0, "sem-instalacao"],
@@ -184,6 +191,30 @@ describe("o pedido de instalação do Chromium", () => {
   afterEach(() => {
     parar?.();
     parar = undefined;
+    vi.unstubAllGlobals();
+  });
+
+  it("a aba levada para a janela do app (o 'Abrir no app'), sem appinstalled, também conta como instalado", () => {
+    const ouvintes = new Map<string, (evento: { matches: boolean }) => void>();
+    const removidos: string[] = [];
+    // Função comum, não vi.fn com retorno: o mockReset da suíte zeraria o retorno.
+    vi.stubGlobal("matchMedia", (consulta: string) => ({
+      matches: false,
+      media: consulta,
+      addEventListener: (_tipo: string, ouvinte: (evento: { matches: boolean }) => void) => ouvintes.set(consulta, ouvinte),
+      removeEventListener: () => removidos.push(consulta),
+    }));
+    parar = escutarPedidoDeInstalacao(new EventTarget());
+    const { result } = renderHook(() => useInstalacaoDoApp());
+    expect([...ouvintes.keys()]).toEqual(["(display-mode: standalone)", "(display-mode: window-controls-overlay)"]);
+    act(() => ouvintes.get("(display-mode: standalone)")!({ matches: false }));
+    expect(result.current.instaladoNestaVisita).toBe(false);
+    act(() => ouvintes.get("(display-mode: standalone)")!({ matches: true }));
+    expect(result.current.instaladoNestaVisita).toBe(true);
+    expect(localStorage.getItem(CHAVE_DA_DICA)).toBe("instalado");
+    act(() => parar!());
+    parar = undefined;
+    expect(removidos).toEqual(["(display-mode: standalone)", "(display-mode: window-controls-overlay)"]);
   });
 
   function pedidoDoNavegador(outcome: "accepted" | "dismissed", { falha = false } = {}) {

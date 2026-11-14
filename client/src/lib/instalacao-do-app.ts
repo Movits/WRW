@@ -78,7 +78,9 @@ export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoAp
   // O Firefox (no Windows, a partir do 143, ele fixa o site na barra de
   // tarefas, com outro caminho) e o Opera no computador ficam com o conselho
   // de abrir num navegador que instala.
-  if (/Firefox\/|\bOPR\//.test(userAgent)) return "sem-instalacao";
+  // O HarmonyOS NEXT (sem Android, com "OpenHarmony" ou "ArkWeb" no
+  // userAgent) leva "Chrome/", mas não tem o Chrome nem os menus dele.
+  if (/Firefox\/|\bOPR\/|OpenHarmony|ArkWeb/.test(userAgent)) return "sem-instalacao";
   if (CHROMIUM.test(userAgent)) return "computador";
   if (mac && /Version\/[\d.]+.*Safari\//.test(userAgent)) return "mac-safari";
   return "sem-instalacao";
@@ -176,9 +178,20 @@ export function escutarPedidoDeInstalacao(alvo: AlvoDeEventos = window): () => v
   };
   alvo.addEventListener("beforeinstallprompt", aoPedir);
   alvo.addEventListener("appinstalled", aoInstalar);
+  // O "Abrir no app" do Chrome e do Edge leva a aba para a janela do app já
+  // instalado, sem recarregar e sem appinstalled: a página só vê o display-mode
+  // mudar. Sem matchMedia (o jsdom), não há o que ouvir.
+  const consultas = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? MODOS_DE_APP.map(modo => window.matchMedia(`(display-mode: ${modo})`))
+    : [];
+  const aoMudarDeModo = (evento: MediaQueryListEvent) => {
+    if (evento.matches) aoInstalar();
+  };
+  for (const consulta of consultas) consulta.addEventListener?.("change", aoMudarDeModo);
   return () => {
     alvo.removeEventListener("beforeinstallprompt", aoPedir);
     alvo.removeEventListener("appinstalled", aoInstalar);
+    for (const consulta of consultas) consulta.removeEventListener?.("change", aoMudarDeModo);
     escutando = false;
     pedidoGuardado = null;
     atualizar(INICIAL);
