@@ -19,6 +19,7 @@ import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
@@ -163,8 +164,24 @@ export default function Meetings() {
 
   // O microfone, o formato (mp4 antes de webm) e o teto de duração ficam no hook.
   // Sair da página fecha o microfone que estava gravando: o hook cuida disso ao desmontar.
+  // A gravação em partes (G9): enviada ao servidor por baixo, parte a parte, com
+  // cópia no aparelho. Por ora atrás do interruptor ?emPartes=1 no /gravar: a
+  // G13 a liga para todas, depois da bancada B (reuniões reais longas).
+  const emPartes = useRef(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("emPartes") === "1").current;
+  const gravacaoEmPartes = useGravacaoEmPartes({
+    ativo: emPartes,
+    aoEncerrar: meetingId => {
+      void utils.meetings.list.invalidate();
+      setTitle("");
+      setConsent(false);
+      if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
+    },
+    aoFalhar: () => toast.error(t("meetings.sendRecordingError")),
+  });
   const gravador = useGravadorDeAudio({
     limiteSegundos: MAX_DURATION,
+    fatiaSegundos: emPartes ? PARTE_SEGUNDOS : undefined,
+    aoFecharParte: emPartes ? gravacaoEmPartes.receberParte : undefined,
     bitsPorSegundo: 64_000,
     // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
     // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
@@ -172,6 +189,8 @@ export default function Meetings() {
     // a limpeza do efeito do noGravadorAgora o zera nos dois casos.
     podeGravar: () => noGravadorAgora.current,
     aoTerminar: ({ blob, mimeType, duracaoMs }) => {
+      // Em partes, a última já foi ao servidor por aoFecharParte: não há revisão.
+      if (emPartes) return;
       if (!blob.size) {
         toast.error(t("meetings.noAudioGenerated"));
         return;
@@ -298,7 +317,16 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
-    await gravador.comecar();
+    if (emPartes) {
+      try {
+        await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+      } catch (error) {
+        return toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
+      }
+    }
+    const comecou = await gravador.comecar();
+    // O microfone não abriu (negado, ocupado): a reunião em partes vazia sai.
+    if (emPartes && !comecou) await gravacaoEmPartes.cancelar();
   }
 
   async function uploadAudio(file: File) {
