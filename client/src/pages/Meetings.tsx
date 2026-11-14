@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -17,8 +17,9 @@ import { segmentosValidos, TranscricaoPorFalante } from "@/components/Transcrica
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
-import { gravacaoDeAudioSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
+import { gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
@@ -215,7 +216,20 @@ export default function Meetings() {
       toast.error(issue);
     },
   });
-  const recording = gravador.estado === "gravando";
+  // Em gravação: gravando ou pausada (G10). A tela fica travada nos dois.
+  const pausado = gravador.estado === "pausado";
+  const recording = gravador.estado === "gravando" || pausado;
+  // G10: a tela acesa enquanto grava (no celular, a tela que apaga bloqueia o
+  // aparelho, e no iPhone o bloqueio corta o microfone).
+  const telaAcesa = useTelaAcesa(recording);
+  // G10: um aviso a cada hora cheia de gravação, sem parar nada (no lugar do
+  // aviso de limite, quando a G13 tirar o teto).
+  const horasAvisadas = useRef(0);
+  const horasGravadas = recording ? Math.floor(gravador.segundos / 3600) : 0;
+  useEffect(() => {
+    if (horasGravadas > horasAvisadas.current) toast.info(t("meetings.hoursOfRecording", { count: horasGravadas }), { id: `horas-de-gravacao-${horasGravadas}` });
+    horasAvisadas.current = horasGravadas;
+  }, [horasGravadas, t]);
   // Pedindo o microfone ou fechando o arquivo, o gravador fica travado como no envio.
   const gravadorOcupado = gravador.estado === "pedindoMicrofone" || gravador.estado === "finalizando";
   // O áudio gravado e ainda não enviado só existe nesta aba: a sessão fica ocupada
@@ -428,7 +442,7 @@ export default function Meetings() {
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
       idioma={idiomaFalado} setIdioma={setIdiomaFalado}
-      recording={recording} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
+      recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
@@ -453,9 +467,18 @@ export default function Meetings() {
   return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}</>;
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+/** iPhone, iPod e iPad (o iPad se diz Mac, mas tem toque). */
+function ehAparelhoDaApple() {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+}
+
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
   const { t } = useTranslation();
   const locked = props.recording || props.processing;
+  // G10: sem a tela acesa garantida (iPhone, ou navegador sem Wake Lock), a
+  // dona precisa saber que bloquear o aparelho pode cortar a gravação.
+  const avisarTelaAberta = props.recording && (ehAparelhoDaApple() || props.telaPodeApagar);
   return <main className="min-h-screen flex items-center justify-center p-4 bg-transparent text-white">
     <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#211e1b]/90 p-6 md:p-8 shadow-2xl">
       <button disabled={locked} onClick={props.onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white disabled:opacity-40"><ArrowLeft size={16}/> {t("meetings.back")}</button>
@@ -474,10 +497,11 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
         <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
       </div>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? "border-red-400 bg-red-500/15 animate-pulse" : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p><p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimit")}</p></div>
+      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimit")}</p>}</div>
+      {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Pause size={19}/> {t("meetings.stopRecording")}</button> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.startRecording")}</button><button onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button></div>}
+      {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button></div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.startRecording")}</button><button onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button></div>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
