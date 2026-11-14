@@ -62,3 +62,18 @@ export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião
  */
 export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
+
+/** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
+export const NOME_DO_FALANTE_MAX = 60;
+/** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */
+export const FORMATO_DO_FALANTE = /^F[1-9][0-9]?$/;
+
+/** Os nomes guardados, só os pares válidos (a coluna é JSON livre). */
+export function nomesDosFalantes(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const saida: Record<string, string> = {};
+  for (const [falante, nome] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(falante) && typeof nome === "string" && nome.trim()) saida[falante] = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
+  }
+  return saida;
+}

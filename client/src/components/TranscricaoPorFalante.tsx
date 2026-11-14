@@ -1,3 +1,4 @@
+import { NOME_DO_FALANTE_MAX } from "@shared/const";
 import { useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
@@ -57,7 +58,15 @@ function comDestaque(texto: string, termo: string) {
  * começou (clicar pula o player para ali), a busca com destaque e o tempo de
  * fala de cada voz. O trecho que não chegou aparece como tal.
  */
-export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "" }: { segmentos: SegmentoDaTela[]; aoIrPara?: (segundo: number) => void; termoInicial?: string }) {
+export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", nomes = {}, aoNomear }: {
+  segmentos: SegmentoDaTela[];
+  aoIrPara?: (segundo: number) => void;
+  termoInicial?: string;
+  /** H3: os nomes que a dona deu às vozes ({ F1: "Ana" }). */
+  nomes?: Record<string, string>;
+  /** Só na tela da dona: dar ou tirar (nome vazio) o nome de uma voz. */
+  aoNomear?: (falante: string, nome: string) => Promise<unknown>;
+}) {
   const { t } = useTranslation();
   const [termo, setTermo] = useState(termoInicial);
   const busca = termo.trim();
@@ -66,7 +75,23 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "" }
     [segmentos, busca],
   );
   const vozes = useMemo(() => tempoDeFala(segmentos), [segmentos]);
-  const rotulo = (falante: string) => t("meetings.speakerLabel", { n: numeroDoFalante(falante) });
+  const rotulo = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: numeroDoFalante(falante) });
+  // A voz cujo nome está sendo editado, e o texto do campo.
+  const [editando, setEditando] = useState<string | null>(null);
+  const [rascunho, setRascunho] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  async function salvarNome(falante: string) {
+    if (!aoNomear) return;
+    setSalvando(true);
+    try {
+      await aoNomear(falante, rascunho);
+      setEditando(null);
+    } catch {
+      // Quem chama avisa a falha (toast); o campo fica aberto para tentar de novo.
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   return (
     <div>
@@ -76,7 +101,14 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "" }
           <ul className="mt-2 space-y-1.5">
             {vozes.map(v => (
               <li key={v.falante} className="flex items-center gap-3 text-sm text-white/75">
-                <span className="w-24 shrink-0">{rotulo(v.falante)}</span>
+                {editando === v.falante
+                  ? <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void salvarNome(v.falante); }} onKeyDown={e => { if (e.key === "Escape") setEditando(null); }}>
+                      <input autoFocus value={rascunho} onChange={e => setRascunho(e.target.value)} maxLength={NOME_DO_FALANTE_MAX} aria-label={t("meetings.speakerNameLabel", { n: numeroDoFalante(v.falante) })} placeholder={t("meetings.speakerNamePlaceholder")} className="w-36 rounded-lg bg-white/5 border border-white/15 px-2 py-1 text-sm outline-none focus:border-amber-300"/>
+                      <button type="submit" disabled={salvando} className="text-xs font-semibold text-amber-200 disabled:opacity-50">{t("meetings.saveSpeakerName")}</button>
+                    </form>
+                  : aoNomear
+                    ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="w-24 shrink-0 truncate text-left underline decoration-dotted underline-offset-4 hover:text-white">{rotulo(v.falante)}</button>
+                    : <span className="w-24 shrink-0 truncate">{rotulo(v.falante)}</span>}
                 <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
                   <span className="block h-full rounded-full bg-amber-300/70" style={{ width: `${Math.round(v.fracao * 100)}%` }} />
                 </span>

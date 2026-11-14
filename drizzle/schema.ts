@@ -1011,6 +1011,10 @@ export const meetings = mysqlTable("meetings", {
   // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
   // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
   consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
+  // Os nomes que a dona deu às vozes da transcrição por falante (H3 do desenho
+  // do gravador): { "F1": "Ana", "F2": "Bia" }. Nulo: nenhuma voz nomeada, e a
+  // tela mostra "Falante n". Só a dona vê: o link aberto não leva os nomes.
+  speakerNames: jsonCompat("speaker_names").$type<Record<string, string>>(),
   // Quantas partes a gravação teve, informado quando ela termina. Nulo
   // enquanto grava e no envio único.
   expectedSlices: int("expected_slices"),

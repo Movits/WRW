@@ -237,6 +237,8 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "consentAt", "language", "processingError", "createdAt", "updatedAt",
     // Como o áudio chegou e quantas partes a gravação teve (D1): o andamento na tela.
     "audioPipeline", "expectedSlices",
+    // Os nomes das vozes (H3): só a dona lê a lista e o detalhe.
+    "speakerNames",
   ];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),
