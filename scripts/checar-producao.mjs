@@ -32,8 +32,8 @@
 //   aprovada (não nasce rejeitada pelo compliance) E há ao menos uma conta Ouro/
 //   presidente/admin REAL com perfil, e o prompt dele leva setor/possui/procura
 //   dessas contas ao Gemini. O exame imprime esse número como INFO antes de criar.
-// - O Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega
-//   não é verificada.
+// - O Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o
+//   manda à Resend (TLD reservado, nunca entrega), então não há envio nem devolução.
 // - O contato QA fica marcado 'ouro' por poucos segundos; a oportunidade QA
 //   (confidencial, ativa) fica visível para contas Ouro reais até o fim da
 //   execução: dezenas de segundos, mais de dois minutos com --com-ia ou quando a
@@ -524,7 +524,7 @@ async function blocoMatch() {
     const itens = lista(d);
     return itens.length >= 1 && itens.every(m => estado.contatos.S.includes(m.contactAId) && estado.contatos.S.includes(m.contactBId));
   });
-  rel.info("o Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega não é verificada pelo exame");
+  rel.info("o Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o manda à Resend (TLD reservado), e o notified_at fica vazio");
   const notificadas = await contar("SELECT COUNT(*) n FROM `ai_match_suggestions` WHERE `owner_id` = ? AND `notified_at` IS NOT NULL", [QA.P.openId]);
   rel.info(`sugestões da presidente QA com notified_at preenchido: ${notificadas}`);
 }
