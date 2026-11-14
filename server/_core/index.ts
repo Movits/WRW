@@ -384,6 +384,35 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // A fila da reunião gravada em partes (G7): transcreve as partes e monta as
+  // reuniões no próprio processo, a cada poucos segundos. Sem banco (dev sem
+  // DATABASE_URL), não liga.
+  if (process.env.DATABASE_URL) {
+    const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
+    const { descreverErroDeBanco } = await import("../banco-indisponivel");
+    iniciarFila();
+    // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
+    // SIGINT. A fila para de reservar e devolve as reservas desta instância
+    // ANTES de o processo sair, para o próximo retomar na hora (e não depois
+    // de a reserva vencer). Depois, o servidor fecha e o processo sai.
+    let saindo = false;
+    const desligar = (sinal: string) => {
+      if (saindo) return;
+      saindo = true;
+      console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
+      pararFila()
+        .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))
+        .catch(erro => console.error("[Fila] não foi possível devolver as reservas:", descreverErroDeBanco(erro)))
+        .finally(() => {
+          server.close(() => process.exit(0));
+          // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.
+          setTimeout(() => process.exit(0), 10_000).unref();
+        });
+    };
+    process.once("SIGTERM", () => desligar("SIGTERM"));
+    process.once("SIGINT", () => desligar("SIGINT"));
+  }
 }
 
 startServer().catch(console.error);

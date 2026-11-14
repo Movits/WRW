@@ -59,7 +59,7 @@ vi.mock("express", () => {
   return { default: fabrica, ...fabrica };
 });
 vi.mock("http", () => {
-  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { aoSubir?.(); jarra.servidorNoAr(); } });
+  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { aoSubir?.(); jarra.servidorNoAr(); }, close: (aoFechar?: () => void) => aoFechar?.() });
   return { default: { createServer }, createServer };
 });
 vi.mock("net", () => {
@@ -82,6 +82,9 @@ vi.mock("./security", () => ({
 }));
 const limparGravacoesVencidas = vi.fn(async () => ({ encontradas: 0, apagadas: 0 }));
 const marcarReunioesInterrompidas = vi.fn(async () => ({ encontradas: 0, marcadas: 0 }));
+// A fila da reunião em partes (G7) liga no boot com banco; aqui é dublê.
+const fila = vi.hoisted(() => ({ iniciarFila: vi.fn(), pararFila: vi.fn(async () => ({ partes: 2, reunioes: 1 })) }));
+vi.mock("./fila-de-transcricao", () => fila);
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -129,6 +132,24 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => { vi.restoreAllMocks(); });
+
+describe("a fila da reunião em partes no index.ts real (G7)", () => {
+  it("liga no boot com banco, e o SIGTERM devolve as reservas ANTES de o processo sair", async () => {
+    expect(fila.iniciarFila).toHaveBeenCalledTimes(1);
+    const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const ordem: string[] = [];
+    fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
+    sair.mockImplementation(((codigo?: number) => { ordem.push(`exit ${codigo}`); }) as never);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    process.emit("SIGTERM");
+    // Só microtarefas: o setInterval deste arquivo é falso, e o vi.waitFor o
+    // avançaria, disparando a varredura que o teste seguinte conta.
+    for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve));
+    expect(ordem).toEqual(["pararFila", "exit 0"]);
+    // O SIGINT do dev também está ligado (process.once: um por sinal).
+    expect(process.listenerCount("SIGINT")).toBeGreaterThanOrEqual(1);
+  });
+});
 
 describe("ordem no index.ts real", () => {
   it("a rota binária das partes (G5) é montada ANTES de todo express.json e do urlencoded", () => {

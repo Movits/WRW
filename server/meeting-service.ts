@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, desc, eq, inArray, lt, lte, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   meetingAudioSlices,
   meetingContactSuggestions,
@@ -598,7 +598,7 @@ export function processingErrorSeguro(processingError: string | null): string | 
 }
 
 /** A dona excluiu a reunião no meio: não é falha a registrar, é trabalho a descartar. */
-class ReuniaoExcluidaDuranteProcessamento extends Error {
+export class ReuniaoExcluidaDuranteProcessamento extends Error {
   constructor() {
     super(MENSAGEM_EXCLUIDA_DURANTE_PROCESSAMENTO);
     this.name = "ReuniaoExcluidaDuranteProcessamento";
@@ -835,13 +835,43 @@ async function processarAudioGuardado(db: Banco, execucao: {
     throw new Error("Não foi possível transcrever o áudio.", { cause: erro });
   }
 
-  let extraction: MeetingExtraction;
+  const extraction = await extrairDadosDaReuniao(transcription.text);
+  return gravarResultadoDaReuniao(db, {
+    meetingId, ownerId, ficha,
+    limparAntes: execucao.limparAntes,
+    durationSeconds: execucao.durationSeconds,
+    transcription,
+    extraction,
+  });
+}
+
+/** A extração da transcrição, com frase neutra na falha (o original vai ao log e a `cause`). */
+export async function extrairDadosDaReuniao(texto: string): Promise<MeetingExtraction> {
   try {
-    extraction = await extractMeetingData(transcription.text);
+    return await extractMeetingData(texto);
   } catch (erro) {
     console.error("[Reuniões] a extração falhou:", erro instanceof Error ? erro.message : erro);
     throw new Error("O serviço de IA não conseguiu extrair os dados da transcrição.", { cause: erro });
   }
+}
+
+/**
+ * O fim do processamento, com a transcrição e a extração prontas: releitura,
+ * escritas e promoção a 'ready', tudo arbitrado pela FICHA (o updated_at que a
+ * execução gravou ao tomar a reunião para 'processing'). Serve ao envio único
+ * (processarAudioGuardado, logo depois da IA) e à fila da reunião em partes
+ * (server/fila-de-transcricao.ts, depois de montar a transcrição das partes).
+ */
+export async function gravarResultadoDaReuniao(db: Banco, execucao: {
+  meetingId: string;
+  ownerId: string;
+  ficha: number;
+  limparAntes: boolean;
+  durationSeconds: number;
+  transcription: { text: string; segments: unknown; language: string };
+  extraction: MeetingExtraction;
+}) {
+  const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
 
   // Entre a tomada e aqui passaram 1–2 minutos de Gemini e LLM: tempo de sobra
   // para a dona ter clicado em Excluir, para um reprocessamento novo ou para a
@@ -989,6 +1019,34 @@ function chaveReprocessavel(gravacao: Gravacao | undefined, ownerId: string, mee
 }
 
 /**
+ * O reprocessar da reunião gravada em partes: quem refaz é a fila
+ * (server/fila-de-transcricao.ts). A reunião volta a 'uploading' com as
+ * tentativas zeradas, e as partes que falharam por causa passageira (IA, banco,
+ * tentativas esgotadas) voltam a 'received'. As que não têm áudio (sumiu do
+ * bucket ou nunca subiu) seguem como lacuna. Sem parte nenhuma, não há o que
+ * reprocessar. Responde na hora: a tela acompanha pelo status.
+ */
+async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string): Promise<{ trabalho: Promise<void> }> {
+  const [partes] = await db.select({ quantas: sql<number>`count(*)`, maiorSeq: sql<number | null>`max(${meetingAudioSlices.seq})` })
+    .from(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  if (!Number(partes?.quantas ?? 0)) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
+  const tomada = await db.update(meetings).set({
+    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(),
+    expectedSlices: sql`coalesce(${meetings.expectedSlices}, ${Number(partes!.maiorSeq) + 1})`,
+  }).where(and(
+    eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"),
+    eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+  ));
+  if (!linhasAfetadas(tomada)) throw new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
+  await db.update(meetingAudioSlices).set({ status: "received", attempts: 0, lastError: null, lockToken: null, lockedUntil: null, updatedAt: now() })
+    .where(and(
+      eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), eq(meetingAudioSlices.status, "failed"),
+      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, ["AUDIO_AUSENTE", "NAO_RECEBIDA"])),
+    ));
+  return { trabalho: Promise.resolve() };
+}
+
+/**
  * Pede o reprocessamento de uma reunião com falha, a partir do áudio que ficou
  * guardado. Só LÊ até tomar a reunião ('failed' → 'processing', com a ficha) e
  * devolve logo: o trabalho — ler os bytes do bucket, IA, escritas — segue em
@@ -1008,6 +1066,7 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
+  if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
   // unicidade por reunião no banco.
@@ -1334,8 +1393,12 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   const db = await exigirDb();
   const agora = now();
   const corte = agora - limiteMs;
+  // Só o envio único: a reunião em partes em 'processing' é da fila
+  // (server/fila-de-transcricao.ts), que tem a própria reserva com prazo e a
+  // retoma quando ela vence — marcá-la como falha aqui perderia uma montagem
+  // longa que ainda está em curso.
   const presas = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.status, "processing"), lt(meetings.updatedAt, corte)))
+    .where(and(eq(meetings.status, "processing"), eq(meetings.audioPipeline, "single"), lt(meetings.updatedAt, corte)))
     .limit(limite);
   if (!presas.length) return { encontradas: 0, marcadas: 0 };
 
@@ -1348,6 +1411,7 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   }).where(and(
     inArray(meetings.id, presas.map(reuniao => reuniao.id)),
     eq(meetings.status, "processing"),
+    eq(meetings.audioPipeline, "single"),
     lt(meetings.updatedAt, corte),
   ));
   return { encontradas: presas.length, marcadas: linhasAfetadas(resultado) };
