@@ -375,6 +375,19 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     expect(opcoes.retry(0, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(true);
   });
 
+  it("o erro que persiste (500, banco fora do ar, rede) também para a repetição: nenhum visitante fica perguntando para sempre", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const { refetchInterval } = duble.opcoesDoResumo!;
+    const com = (estado: string, error: unknown) => refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente", { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    expect(com("gerando", { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    // O erro da rede chega sem código.
+    expect(com("pendente", new Error("Failed to fetch"))).toBe(false);
+    // A releitura que dá certo limpa o erro, e a repetição volta.
+    expect(com("pendente", null)).toBe(5_000);
+  });
+
   it("o emoji do resumo vai antes do título, sem mudar o nome do título", () => {
     duble.ver.mockReturnValue(pronta());
     duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🚢", itens: [] }, isError: false, error: null, refetch: vi.fn() });

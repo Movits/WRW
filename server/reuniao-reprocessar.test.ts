@@ -1,5 +1,5 @@
-import type { SQL } from "drizzle-orm";
-import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { mapUpdateSet, type SQL } from "drizzle-orm";
+import { MySqlDialect, type MySqlTable } from "drizzle-orm/mysql-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -39,6 +39,9 @@ type Operacao = Predicado & {
   tabela: unknown;
   valores?: Record<string, unknown>;
   linhas?: Record<string, unknown>[];
+  // O set do onDuplicateKeyUpdate, como o Drizzle o monta para o banco; ausente
+  // no insert que não o usa.
+  noDuplicado?: Predicado;
   ordenada?: boolean;
   ordem?: string;
 };
@@ -105,15 +108,21 @@ vi.mock("./db", () => ({
       return [{ affectedRows: 1 }];
     } }) }),
     // Preguiçoso como o builder do Drizzle: grava ao ser aguardado, ou pelo
-    // onDuplicateKeyUpdate (o contador de minutos e o resumo guardado).
+    // onDuplicateKeyUpdate (o contador de minutos e o resumo guardado). O set
+    // do conflito fica registrado, para o teste ver o que ele faria com a linha
+    // que já existe.
     insert: (tabela: unknown) => ({ values: (valores: Record<string, unknown> | Record<string, unknown>[]) => {
+      const operacao: Operacao = { tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] };
       const gravar = async () => {
-        estado.operacoes.push({ tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] });
+        estado.operacoes.push(operacao);
         estado.aoInserir?.(tabela);
       };
       return {
         then: (ok: (valor: unknown) => unknown, falha: (erro: unknown) => unknown) => gravar().then(ok, falha),
-        onDuplicateKeyUpdate: () => gravar(),
+        onDuplicateKeyUpdate: ({ set }: { set: Record<string, unknown> }) => {
+          operacao.noDuplicado = renderizar(dialeto.buildUpdateSet(tabela as MySqlTable, mapUpdateSet(tabela as MySqlTable, set)));
+          return gravar();
+        },
       };
     } }),
     delete: (tabela: unknown) => ({ where: async (condicao?: SQL) => {
@@ -389,6 +398,9 @@ describe("reprocessar — com o áudio guardado", () => {
     const [pedido, ...outros] = de("insert", schema.meetingSummaries);
     expect(outros).toEqual([]);
     expect(pedido.linhas).toEqual([expect.objectContaining({ meetingId: REUNIAO, ownerId: DONA, status: "pending", transcriptId: transcricao.id })]);
+    // Idempotente: no conflito com a linha que já existir (índice único da
+    // reunião), o banco executa meeting_id = meeting_id, e a linha fica como está.
+    expect(pedido.noDuplicado).toEqual({ sql: "`meeting_id` = `meeting_summaries`.`meeting_id`", params: [] });
     const posicaoDoPedido = estado.operacoes.indexOf(pedido);
     const posicaoDoReady = estado.operacoes.findIndex(o => o.tipo === "update" && o.tabela === schema.meetings && o.valores?.status === "ready");
     expect(posicaoDoPedido).toBeGreaterThan(apagouOResumo);
@@ -509,5 +521,33 @@ describe("envio original — a mesma trava da ficha", () => {
     expect(linhasInseridas(schema.meetingRecordings)).toHaveLength(1);
     expect(de("delete")).toEqual([]);
     expect(estado.reuniao!.status).toBe("ready");
+  });
+
+  it("a exclusão vence entre o pedido do resumo e o 'ready': o UPDATE não acha a linha, a releitura a vê excluída, o pedido recém-gravado sai com os itens e a execução lança a exclusão", async () => {
+    estado.reuniao = reuniaoComFalha({ status: "recording", processingError: null });
+    estado.gravacoes = [];
+    // A dona exclui a reunião logo depois do insert do pedido do resumo.
+    estado.aoInserir = tabela => {
+      if (tabela === schema.meetingSummaries) Object.assign(estado.reuniao!, { status: "deleted" });
+    };
+
+    await expect(servico.processMeetingRecording(envio())).rejects.toBeInstanceOf(servico.ReuniaoExcluidaDuranteProcessamento);
+
+    const pedido = primeira(o => o.tipo === "insert" && o.tabela === schema.meetingSummaries);
+    const pronta = primeira(o => o.tipo === "update" && o.tabela === schema.meetings && o.valores?.status === "ready");
+    const releitura = ultima(o => o.tipo === "select" && o.tabela === schema.meetings);
+    expect(pedido).toBeGreaterThanOrEqual(0);
+    expect(pronta).toBeGreaterThan(pedido);
+    // O 'ready' não pegou a linha (0 linhas), e a releitura depois dele a viu excluída.
+    expect(estado.reuniao!.status).toBe("deleted");
+    expect(releitura).toBeGreaterThan(pronta);
+    // A limpeza vem depois do pedido: os itens, e então a linha do resumo, da reunião da dona.
+    const apagouItens = ultima(o => o.tipo === "delete" && o.tabela === schema.meetingSummaryItems);
+    const apagouResumo = ultima(o => o.tipo === "delete" && o.tabela === schema.meetingSummaries);
+    expect(apagouItens).toBeGreaterThan(releitura);
+    expect(apagouResumo).toBeGreaterThan(apagouItens);
+    expect(soPredicado(estado.operacoes[apagouItens])).toEqual(daReuniaoDaDona("meeting_summary_items"));
+    expect(soPredicado(estado.operacoes[apagouResumo])).toEqual(daReuniaoDaDona("meeting_summaries"));
+    expect(falhasGravadas()).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
-import { DrizzleQueryError, type SQL } from "drizzle-orm";
-import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { DrizzleQueryError, mapUpdateSet, type SQL } from "drizzle-orm";
+import { MySqlDialect, type MySqlTable } from "drizzle-orm/mysql-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -47,7 +47,9 @@ const renderizar = (condicao?: SQL): Predicado => {
 };
 const escopos: Predicado[] = [];
 const leituras: Array<{ tabela: unknown } & Predicado> = [];
-const insercoes: Array<{ tabela: unknown; valores: Record<string, unknown>[] }> = [];
+// `noDuplicado`: o set do onDuplicateKeyUpdate, como o Drizzle o monta para o
+// banco; ausente no insert que não o usa.
+const insercoes: Array<{ tabela: unknown; valores: Record<string, unknown>[]; noDuplicado?: Predicado }> = [];
 const delecoes: Array<{ tabela: unknown } & Predicado> = [];
 const REUNIAO_DA_DONA = { sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ?)", params: ["reuniao-1", "dona-1"] };
 // A falha da decodificação e a tomada só valem para a reunião que ainda espera áudio.
@@ -91,16 +93,22 @@ vi.mock("./db", () => ({
       return [{ affectedRows: afetadas }];
     } }) }),
     // Preguiçoso como o builder do Drizzle: grava ao ser aguardado, ou pelo
-    // onDuplicateKeyUpdate do contador de minutos (registrarConsumoDeMinutos).
+    // onDuplicateKeyUpdate do contador de minutos (registrarConsumoDeMinutos) e
+    // do pedido do resumo guardado. O set do conflito fica registrado, para o
+    // teste ver o que ele faria com a linha que já existe.
     insert: (tabela: unknown) => ({ values: (valores: Record<string, unknown> | Record<string, unknown>[]) => {
+      const insercao: (typeof insercoes)[number] = { tabela, valores: Array.isArray(valores) ? valores : [valores] };
       const gravar = async () => {
         const erro = recusarInsert?.(tabela);
         if (erro) throw erro;
-        insercoes.push({ tabela, valores: Array.isArray(valores) ? valores : [valores] });
+        insercoes.push(insercao);
       };
       return {
         then: (ok: (valor: unknown) => unknown, falha: (erro: unknown) => unknown) => gravar().then(ok, falha),
-        onDuplicateKeyUpdate: () => gravar(),
+        onDuplicateKeyUpdate: ({ set }: { set: Record<string, unknown> }) => {
+          insercao.noDuplicado = renderizar(dialeto.buildUpdateSet(tabela as MySqlTable, mapUpdateSet(tabela as MySqlTable, set)));
+          return gravar();
+        },
       };
     } }),
     delete: (tabela: unknown) => ({ where: async (condicao?: SQL) => { delecoes.push({ tabela, ...renderizar(condicao) }); } }),
@@ -269,6 +277,10 @@ describe("processMeetingRecording — áudio recusado vira reunião com falha, n
       meetingId: "reuniao-1", ownerId: "dona-1", status: "pending", transcriptId: transcricao.id,
     })]);
     expect(String(transcricao.id)).toMatch(/^[0-9a-f-]{36}$/);
+    // Idempotente: no conflito com a linha que já existir (índice único da
+    // reunião), o banco executa meeting_id = meeting_id, e a linha fica como está.
+    const [pedido] = insercoes.filter(operacao => operacao.tabela === schema.meetingSummaries);
+    expect(pedido.noDuplicado).toEqual({ sql: "`meeting_id` = `meeting_summaries`.`meeting_id`", params: [] });
   });
 
   it("o pedido do resumo é escrita da ficha, antes do 'ready': banco fora do ar nele vira falha, e a reunião não fica pronta sem o resumo", async () => {

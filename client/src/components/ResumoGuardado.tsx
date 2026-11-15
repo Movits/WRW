@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucide-react";
@@ -136,6 +136,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const ignorados = itens.filter(item => item.status === "ignored");
   const pendentes = visiveis.filter(item => item.status === "pending");
   const [verIgnorados, setVerIgnorados] = useState(false);
+  // O Desfazer se repete em todo ignorado: o texto do item o descreve.
+  const prefixoDosIgnorados = useId();
 
   // ?item=<id>: rola até o item e o destaca. Cada link diferente rola uma vez;
   // o item ignorado mora na lista recolhida, que abre antes.
@@ -159,15 +161,28 @@ export function ResumoGuardado(props: DaDona | DoLink) {
 
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
 
+  // Erro de consulta é erro, nunca "sem resumo" nem "gerando". Pelo link,
+  // NOT_FOUND ou BAD_REQUEST é o link desligado (ou cortado) no meio da visita:
+  // definitivo, como em pages/ReuniaoAberta.tsx, sem tentar de novo.
+  const codigoDaConsulta = codigoDoErro(props.consulta.error);
+  const naoAchou = codigoDaConsulta === "NOT_FOUND" || (peloLink && codigoDaConsulta === "BAD_REQUEST");
+  const erroDaConsulta = !props.consulta.isError ? null
+    : naoAchou
+      ? <p role="alert" className="mt-4 text-sm text-white/70">{peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound")}</p>
+      : <div className="mt-4"><ErroDeConsulta erro={props.consulta.error} aoTentarDeNovo={() => void props.consulta.refetch()}/></div>;
+  // A releitura que falha deixa o dado velho no cache. Sem dado, ou com o
+  // resumo ainda na fila, o erro toma o lugar do aviso, que senão giraria para
+  // sempre; com o resumo pronto, falho ou ausente, ele vai acima do conteúdo.
+  const esperando = !dados || dados.estado === "pendente" || dados.estado === "gerando";
+  // O erro do pedido é do botão de pedir: quando o resumo anda por outro
+  // caminho (a fila, outro pedido pelo link), ele sai da tela com o botão.
+  const comBotaoDePedir = dados?.estado === "sem_resumo" || dados?.estado === "falhou";
+
   let corpo: ReactNode;
-  if (!dados) {
-    // Erro de consulta é erro, nunca "sem resumo". Pelo link, NOT_FOUND é o
-    // link desligado no meio da visita.
-    corpo = props.consulta.isError
-      ? codigoDoErro(props.consulta.error) === "NOT_FOUND"
-        ? <p role="alert" className="mt-4 text-sm text-white/70">{peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound")}</p>
-        : <div className="mt-4"><ErroDeConsulta erro={props.consulta.error} aoTentarDeNovo={() => void props.consulta.refetch()}/></div>
-      : <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.loading")}</p>;
+  if (esperando && erroDaConsulta) {
+    corpo = erroDaConsulta;
+  } else if (!dados) {
+    corpo = <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.loading")}</p>;
   } else if (dados.estado === "sem_resumo") {
     corpo = <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-white/60">{t("meetings.summary.noSummary")}</p>
@@ -213,8 +228,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           {ignorados.map((item, i) => <li key={item.id ?? i} id={item.id ? idDoItem(item.id) : undefined} tabIndex={item.id === itemDestacado ? -1 : undefined}
             data-destacado={item.id === itemDestacado ? "true" : undefined}
             className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm text-white/45 ${item.id === itemDestacado ? "ring-2 ring-amber-300/70" : ""}`}>
-            <span dir="auto" className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
-            <button type="button" disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
+            <span id={`${prefixoDosIgnorados}-${i}`} dir="auto" className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
+            <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
               className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50">
               <RotateCcw size={13}/> {t("meetings.summary.undo")}
             </button>
@@ -226,8 +241,9 @@ export function ResumoGuardado(props: DaDona | DoLink) {
 
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
+    {!esperando && erroDaConsulta}
     {corpo}
-    {pedir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, pedir.error, t("meetings.summary.requestError"), peloLink)}</p>}
+    {comBotaoDePedir && pedir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, pedir.error, t("meetings.summary.requestError"), peloLink)}</p>}
   </section>;
 }
 
@@ -252,25 +268,31 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
   const pendente = item.status === "pending";
   // A caixa é só da dona: o link não recebe o feito, e não decide nada.
   const comCaixa = item.section === "action" && !peloLink;
+  // Confirmar e Ignorar se repetem em todo item: o texto do item os descreve.
+  const idDoTexto = useId();
   const texto = <>{item.subject && <strong className="font-semibold text-white/90">{comVozes(item.subject)}: </strong>}{comVozes(item.text)}</>;
   return <li id={item.id ? idDoItem(item.id) : undefined} tabIndex={destacado ? -1 : undefined} data-destacado={destacado ? "true" : undefined}
     className={`rounded-xl border p-3 outline-none ${destacado ? "border-amber-300/70 ring-2 ring-amber-300/60" : pendente ? "border-amber-300/20 bg-black/10" : "border-white/10 bg-black/5"}`}>
     {comCaixa
       ? <label className="flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={!!item.done} disabled={decidindo} onChange={evento => aoMarcar(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-          <span dir="auto" className={`text-sm text-white/85 ${item.done ? "line-through text-white/50" : ""}`}>{texto}</span>
+          <span id={idDoTexto} dir="auto" className={`text-sm text-white/85 ${item.done ? "line-through text-white/50" : ""}`}>{texto}</span>
         </label>
-      : <p dir="auto" className="text-sm leading-6 text-white/85">{texto}</p>}
+      : <p id={idDoTexto} dir="auto" className="text-sm leading-6 text-white/85">{texto}</p>}
     {(item.assignee || item.due) && <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-100/70">
       {item.assignee && <span dir="auto">{t("meetings.summary.assignee", { nome: comVozes(item.assignee) })}</span>}
       {item.due && <span dir="auto">{t("meetings.summary.due", { prazo: item.due })}</span>}
     </p>}
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      {item.startSeconds !== null && <button type="button" onClick={() => aoIrPara?.(item.startSeconds as number)} disabled={!aoIrPara}
-        aria-label={t("meetings.playFrom", { tempo: mmss(item.startSeconds) })}
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10 disabled:text-white/40">
-        <Play size={11} aria-hidden/>{mmss(item.startSeconds)}
-      </button>}
+      {/* Sem player (a gravação venceu ou não existe), o tempo é só
+          informação: nada de botão desligado anunciando "Ouvir". */}
+      {item.startSeconds !== null && (aoIrPara
+        ? <button type="button" onClick={() => aoIrPara(item.startSeconds as number)}
+            aria-label={t("meetings.playFrom", { tempo: mmss(item.startSeconds) })}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10">
+            <Play size={11} aria-hidden/>{mmss(item.startSeconds)}
+          </button>
+        : <span className="px-1.5 py-0.5 font-mono text-xs text-white/40">{mmss(item.startSeconds)}</span>)}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
     </div>
     {/* O trecho fica aberto enquanto o item espera a conferência; depois, recolhido. */}
@@ -282,9 +304,9 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
         </details>}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
     {pendente && !peloLink && <div className="mt-3 flex flex-wrap gap-2">
-      <button type="button" disabled={decidindo} onClick={() => aoDecidir("confirmed")}
+      <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("confirmed")}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50"><Check size={14}/> {t("meetings.summary.confirm")}</button>
-      <button type="button" disabled={decidindo} onClick={() => aoDecidir("ignored")}
+      <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("ignored")}
         className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/65 disabled:opacity-50"><X size={14}/> {t("meetings.summary.ignore")}</button>
     </div>}
   </li>;

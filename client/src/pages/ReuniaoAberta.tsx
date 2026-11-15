@@ -77,7 +77,11 @@ export default function ReuniaoAberta() {
   });
   // O resumo guardado (H4), só leitura: sem ids, sem os ignorados e com as
   // vozes como "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
-  // fila ou sendo gerado; o link desligado no meio para a consulta.
+  // fila ou sendo gerado, e para em qualquer erro, não só no link desligado: a
+  // página não pede conta, e um 500 que persiste deixaria cada visitante
+  // perguntando ao servidor para sempre. O erro só chega ao estado depois das
+  // novas tentativas do retry; a releitura que dá certo (o tentar de novo, a
+  // reconexão) o limpa e religa a repetição.
   const temTextoParaResumir = !!data?.transcricao?.texto?.trim();
   const resumoGuardado = trpc.reuniaoAberta.resumoGuardado.useQuery({ token }, {
     enabled: temTextoParaResumir,
@@ -85,7 +89,7 @@ export default function ReuniaoAberta() {
     refetchOnWindowFocus: false,
     refetchInterval: consulta => {
       const estado = consulta.state.data?.estado;
-      return (estado === "pendente" || estado === "gerando") && !linkNaoAbre(consulta.state.error) ? 5_000 : false;
+      return (estado === "pendente" || estado === "gerando") && !consulta.state.error ? 5_000 : false;
     },
   });
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);

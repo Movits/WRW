@@ -403,17 +403,21 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       expect(await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id))).toHaveLength(1);
     });
 
-    it("a linha que já existir fica como está: o insert é idempotente, uma linha por reunião, e a reunião fica pronta", async () => {
+    it("a linha que já existir fica como está, inteira: o insert é idempotente, uma linha por reunião, e a reunião fica pronta", async () => {
       const banco = await db();
       const ficha = AGORA();
       const id = await reuniaoProcessando(ficha);
-      const existente = crypto.randomUUID();
-      await banco.insert(meetingSummaries).values({ id: existente, meetingId: id, ownerId: DONA, status: "pending", createdAt: ficha, updatedAt: ficha });
+      // Diferente em tudo do que o pedido gravaria (status, tentativas, erro,
+      // transcrição e datas): qualquer coluna que o conflito mudasse apareceria.
+      await banco.insert(meetingSummaries).values({
+        id: crypto.randomUUID(), meetingId: id, ownerId: DONA, transcriptId: crypto.randomUUID(), status: "failed",
+        attempts: 3, lastError: "IA_INDISPONIVEL", createdAt: ficha - 60_000, updatedAt: ficha - 30_000,
+      });
+      const antes = await linhaDoResumo(id);
 
       await gravarResultadoDaReuniao(banco, { meetingId: id, ownerId: DONA, ficha, limparAntes: false, durationSeconds: 12, transcription: TRANSCRICAO, extraction: SEM_EXTRACAO });
 
-      const linhas = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id));
-      expect(linhas).toEqual([expect.objectContaining({ id: existente, status: "pending" })]);
+      expect(await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id))).toEqual([antes]);
       const [reuniao] = await banco.select({ status: meetings.status }).from(meetings).where(eq(meetings.id, id));
       expect(reuniao.status).toBe("ready");
     });

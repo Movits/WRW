@@ -540,9 +540,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // dele vai antes do título da reunião. As decisões (ResumoGuardado) relêem.
   const resumoGuardado = trpc.meetings.resumoGuardado.useQuery({ meetingId }, {
     enabled: data?.meeting.status === "ready",
+    // Para em qualquer erro, não só no definitivo: o estado da consulta só
+    // guarda o erro que sobreviveu às novas tentativas do retry (um 500, o
+    // banco fora do ar), e perguntar a cada 5 s não o cura. A releitura que dá
+    // certo (o tentar de novo, a volta à aba, a reconexão) limpa o erro e
+    // religa a repetição.
     refetchInterval: consulta => {
       const estado = consulta.state.data?.estado;
-      return (estado === "pendente" || estado === "gerando") && !erroDefinitivoDaReuniao(consulta.state.error) ? 5_000 : false;
+      return (estado === "pendente" || estado === "gerando") && !consulta.state.error ? 5_000 : false;
     },
     retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
   });

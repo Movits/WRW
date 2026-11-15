@@ -66,9 +66,12 @@ const ITENS = [
 // Pelo link: sem ids, sem a caixa de feito e sem os ignorados.
 const ITENS_DO_LINK = ITENS.filter(item => item.status !== "ignored").map(({ id: _id, position: _p, done: _d, ...item }) => item);
 
-const consulta = (data: unknown) => ({ data, isError: false, error: null, refetch: vi.fn() });
+const consulta = (data: unknown) => ({ data, isError: false, error: null as unknown, refetch: vi.fn() });
 const pronto = (itens: readonly unknown[] = ITENS) => consulta({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null, itens });
 const comEstado = (estado: string) => consulta({ estado, emoji: null, idioma: null, erro: null, itens: [] });
+// A releitura que falhou: o React Query liga o isError e guarda o dado velho.
+const comErro = (c: ReturnType<typeof consulta>, error: unknown) => ({ ...c, isError: true, error });
+const ERRO_DO_BANCO = { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } };
 
 type PropsDaDona = Partial<{ nomes: Record<string, string>; aoIrPara: (segundo: number) => void; itemDestacado: string | null }>;
 const daDona = (c: ReturnType<typeof consulta>, props: PropsDaDona = {}) =>
@@ -139,6 +142,20 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(within(foco).queryByRole("button", { name: /Confirmar|Ignorar/ })).not.toBeInTheDocument();
   });
 
+  it("Confirmar, Ignorar e Desfazer se repetem em todo item: o texto do item descreve cada botão (leitor de tela)", () => {
+    daDona(pronto(), { nomes: { F2: "Carla" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar", description: "Não renovar com a transportadora antiga." }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-decisao", status: "confirmed" });
+    fireEvent.click(screen.getByRole("button", { name: "Ignorar", description: "Quem paga o seguro da carga?" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-questao", status: "ignored" });
+    // Na ação, o texto mora no rótulo da caixa, e é ele que descreve.
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar", description: "Carla envia a proposta revisada" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao", status: "confirmed" });
+    fireEvent.click(screen.getByRole("button", { name: "Ignorados (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer", description: "Abrir um escritório em Berlim." }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-ignorado", status: "pending" });
+  });
+
   it("'Confirmar todos (n)' conta os pendentes e confirma pela reunião", () => {
     daDona(pronto());
     fireEvent.click(screen.getByRole("button", { name: "Confirmar todos (4)" }));
@@ -163,17 +180,26 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-ignorado", status: "pending" });
   });
 
-  it("o '▶ mm:ss' leva o player ao segundo do trecho; sem tempo não há botão, e sem player ele fica desligado", () => {
+  it("o '▶ mm:ss' leva o player ao segundo do trecho; sem tempo não há botão", () => {
     const aoIrPara = vi.fn();
-    const { unmount } = daDona(pronto(), { aoIrPara });
+    daDona(pronto(), { aoIrPara });
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 01:15" }));
     expect(aoIrPara).toHaveBeenCalledWith(75);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 05:20" }));
     expect(aoIrPara).toHaveBeenLastCalledWith(320);
     expect(within(itemDoTexto("A licença de exportação ainda não saiu.")).queryByRole("button", { name: /Ouvir/ })).not.toBeInTheDocument();
+  });
+
+  it("sem player, o tempo é só texto: nem botão, nem rótulo de 'Ouvir'", () => {
+    const { unmount } = daDona(pronto());
+    const tempo = within(itemDoTexto("Não renovar com a transportadora antiga.")).getByText("05:20");
+    expect(tempo.closest("button")).toBeNull();
+    expect(screen.queryByLabelText(/Ouvir a partir de/)).not.toBeInTheDocument();
     unmount();
-    daDona(pronto());
-    expect(screen.getByRole("button", { name: "Ouvir a partir de 01:15" })).toBeDisabled();
+    // Pelo link sem gravação não sobra botão nenhum: nem de decidir, nem de ouvir.
+    doLink(pronto(ITENS_DO_LINK));
+    expect(screen.getByText("03:20")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("o trecho fica aberto nos pendentes e recolhível nos outros", () => {
@@ -187,9 +213,13 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(within(recolhivel).getByText("Trecho da transcrição")).toBeInTheDocument();
   });
 
-  it("as mutações relêem o resumo da reunião", () => {
+  it("as mutações relêem o resumo da reunião, e o onSettled devolve a própria releitura", () => {
+    // A promessa sentinela prova que o onSettled devolve a releitura, e não só
+    // a dispara: é a espera por ela que segura o botão até o estado novo.
+    const releitura = Promise.resolve();
+    duble.utils.meetings.resumoGuardado.invalidate.mockReturnValue(releitura);
     daDona(pronto());
-    for (const nome of ["pedirResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "marcarAcaoFeita"]) mutacao(nome).opcoes.onSettled?.();
+    for (const nome of ["pedirResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "marcarAcaoFeita"]) expect(mutacao(nome).opcoes.onSettled?.()).toBe(releitura);
     expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledTimes(4);
     expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
     expect(duble.utils.reuniaoAberta.resumoGuardado.invalidate).not.toHaveBeenCalled();
@@ -257,6 +287,47 @@ describe("Resumo guardado — os estados", () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["pendente", "gerando"])("%s com a releitura falhando (banco fora do ar): o erro no lugar do aviso de que a IA escreve, com tentar de novo", estado => {
+    const c = comErro(comEstado(estado), ERRO_DO_BANCO);
+    daDona(c);
+    expect(screen.getByRole("alert")).toHaveTextContent("Banco de dados indisponível; tente de novo em instantes");
+    expect(screen.queryByText(/A IA está escrevendo/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "↻ Tentar novamente" }));
+    expect(c.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("pronto com a releitura falhando: os itens ficam, e o erro vai acima deles, com tentar de novo", () => {
+    const c = comErro(pronto(), ERRO_DO_BANCO);
+    daDona(c);
+    const alerta = screen.getByRole("alert");
+    expect(alerta).toHaveTextContent("Banco de dados indisponível; tente de novo em instantes");
+    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(6);
+    expect(within(itemDoTexto("Não renovar com a transportadora antiga.")).getByRole("button", { name: "Confirmar" })).toBeInTheDocument();
+    expect(alerta.compareDocumentPosition(screen.getByRole("heading", { name: "Ações" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(alerta).getByRole("button", { name: "↻ Tentar novamente" }));
+    expect(c.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["sem_resumo", "Esta reunião ainda não tem resumo.", /Gerar resumo/],
+    ["falhou", "Não foi possível gerar o resumo desta reunião.", /Tentar de novo/],
+  ])("%s com a releitura falhando: o aviso e o botão de pedir ficam, com o erro junto", (estado, texto, botao) => {
+    daDona(comErro(comEstado(estado), ERRO_DO_BANCO));
+    expect(screen.getByText(texto)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: botao })).toBeInTheDocument();
+    expect(screen.getByText("Banco de dados indisponível; tente de novo em instantes")).toBeInTheDocument();
+  });
+
+  it("o erro do pedido fica só onde está o botão de pedir: o resumo que anda por outro caminho o tira da tela", () => {
+    preparar("pedirResumo", { isError: true, error: { message: "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.", data: { code: "TOO_MANY_REQUESTS" } } });
+    const { rerender } = daDona(comEstado("falhou"));
+    expect(screen.getByText("Muitos pedidos em sequência. Aguarde alguns minutos e tente de novo.")).toBeInTheDocument();
+    for (const c of [comEstado("pendente"), comEstado("gerando"), pronto()]) {
+      rerender(<ResumoGuardado meetingId={REUNIAO} consulta={c as never}/>);
+      expect(screen.queryByText(/Muitos pedidos em sequência/)).not.toBeInTheDocument();
+    }
+  });
+
   it("o pedido que o servidor recusa mostra o motivo traduzido (o teto de pedidos à IA)", () => {
     preparar("pedirResumo", { isError: true, error: { message: "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.", data: { code: "TOO_MANY_REQUESTS" } } });
     daDona(comEstado("sem_resumo"));
@@ -300,13 +371,26 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     fireEvent.click(screen.getByRole("button", { name: /Pedir resumo/ }));
     expect(mutacao("pedirResumoPeloLink").mutate).toHaveBeenCalledWith({ token: TOKEN });
     expect(mutacao("pedirResumo").mutate).not.toHaveBeenCalled();
-    mutacao("pedirResumoPeloLink").opcoes.onSettled?.();
+    const releitura = Promise.resolve();
+    duble.utils.reuniaoAberta.resumoGuardado.invalidate.mockReturnValue(releitura);
+    expect(mutacao("pedirResumoPeloLink").opcoes.onSettled?.()).toBe(releitura);
     expect(duble.utils.reuniaoAberta.resumoGuardado.invalidate).toHaveBeenCalledWith({ token: TOKEN });
   });
 
   it("o link desligado no meio da visita diz isso, e não 'reunião não encontrada'", () => {
     doLink({ data: undefined, isError: true, error: { message: "Este link de reunião não existe ou foi desligado.", data: { code: "NOT_FOUND" } }, refetch: vi.fn() } as never);
     expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
+  });
+
+  it.each(["NOT_FOUND", "BAD_REQUEST"])("o link desligado ou cortado (%s), com ou sem o resumo velho no cache: o aviso do link, nunca o 'gerando' nem o tentar de novo", codigo => {
+    const erro = { message: "Este link de reunião não existe ou foi desligado.", data: { code: codigo } };
+    for (const c of [consulta(undefined), comEstado("gerando")]) {
+      const { unmount } = doLink(comErro(c, erro));
+      expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });
 

@@ -5,7 +5,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 /**
  * O link aberto da reunião nos routers: reuniaoAberta.* (público, sem sessão)
  * e meetings.ligarLinkAberto / desligarLinkAberto (da dona). O módulo do link,
- * a IA, o pedido do resumo guardado e a tradução são dublados; as consultas de verdade estão em
+ * a IA, o resumo guardado (a leitura e o pedido) e a tradução são dublados; as consultas de verdade estão em
  * link-aberto-da-reuniao.integracao.test.ts, e o caminho da tradução até a IA
  * em meeting-service.test.ts.
  */
@@ -15,6 +15,7 @@ const verReuniaoPeloLink = vi.fn();
 const ligarLinkAberto = vi.fn();
 const desligarLinkAberto = vi.fn();
 const pedirResumoPeloLink = vi.fn();
+const resumoGuardadoPeloLink = vi.fn();
 const perguntarAReuniao = vi.fn();
 const translatePrivateMeetingTranscript = vi.fn();
 const createAuditLog = vi.fn();
@@ -37,6 +38,7 @@ vi.mock("./reuniao-com-ia", async importOriginal => ({
 vi.mock("./resumo-guardado", async importOriginal => ({
   ...await importOriginal<typeof import("./resumo-guardado")>(),
   pedirResumoPeloLink: (...args: unknown[]) => pedirResumoPeloLink(...args),
+  resumoGuardadoPeloLink: (...args: unknown[]) => resumoGuardadoPeloLink(...args),
 }));
 vi.mock("./meeting-service", async importOriginal => ({
   ...await importOriginal<typeof import("./meeting-service")>(),
@@ -88,7 +90,7 @@ const perguntar = (token = TOKEN, ip?: string) => semSessao(ip).reuniaoAberta.pe
 beforeEach(() => {
   tetoDaIADoLinkAberto.esquecer();
   tetoDaIADoVisitanteDoLink.esquecer();
-  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAberto, desligarLinkAberto, pedirResumoPeloLink, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
+  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAberto, desligarLinkAberto, pedirResumoPeloLink, resumoGuardadoPeloLink, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
     duble.mockReset();
   }
   // TOKEN e OUTRO_TOKEN abrem a MESMA reunião: é o caso da variação de caixa
@@ -133,9 +135,20 @@ describe("reuniaoAberta — público, sem sessão", () => {
     expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Qual o prazo?", "ja");
   });
 
-  it("o resumo a pedido de antes saiu: pelo link, o resumo é o guardado", async () => {
-    await expect(semSessao().reuniaoAberta.resumoGuardado({ token: "x".repeat(200) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect("reuniaoAberta.resumir" in appRouter._def.procedures).toBe(false);
+  it("o resumo a pedido de antes (reuniaoAberta.resumir) saiu do router: pelo link, o resumo é o guardado", () => {
+    const procedimentos = appRouter._def.procedures;
+    // Os vizinhos estão no mesmo registro: a ausência é do procedimento, não da forma da chave.
+    expect("reuniaoAberta.resumoGuardado" in procedimentos).toBe(true);
+    expect("reuniaoAberta.pedirResumo" in procedimentos).toBe(true);
+    expect("reuniaoAberta.resumir" in procedimentos).toBe(false);
+  });
+
+  it("resumoGuardado aceita o token até 128 caracteres; acima disso é BAD_REQUEST, sem chegar ao serviço", async () => {
+    resumoGuardadoPeloLink.mockResolvedValue(PENDENTE);
+    await expect(semSessao().reuniaoAberta.resumoGuardado({ token: "x".repeat(129) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(resumoGuardadoPeloLink).not.toHaveBeenCalled();
+    await expect(semSessao().reuniaoAberta.resumoGuardado({ token: "x".repeat(128) })).resolves.toEqual(PENDENTE);
+    expect(resumoGuardadoPeloLink).toHaveBeenCalledWith("x".repeat(128));
   });
 
   it("a tradução vai com a dona e a reunião do link e leva o teto como antesDeChamarAIA", async () => {

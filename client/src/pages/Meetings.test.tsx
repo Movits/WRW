@@ -905,6 +905,7 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
   const opcoesDaConsulta = () => duble.resumoGuardado.mock.calls.at(-1)![1] as {
     enabled: boolean;
     refetchInterval: (consulta: { state: { data?: { estado: string }; error: unknown } }) => number | false;
+    retry: (tentativas: number, erro: unknown) => boolean;
   };
 
   // O link para dentro da reunião chega direto ao endereço do detalhe.
@@ -955,6 +956,28 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     // A reunião excluída em outro lugar no meio da espera: para de perguntar.
     expect(com("pendente", { data: { code: "NOT_FOUND" } })).toBe(false);
     expect(refetchInterval({ state: { error: null } })).toBe(false);
+  });
+
+  it("o erro que persiste (500, banco fora do ar, rede) também para a repetição; a releitura que dá certo a religa", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const { refetchInterval } = opcoesDaConsulta();
+    const com = (estado: string, error: unknown) => refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente", { message: MENSAGEM, data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    expect(com("gerando", { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    // O erro da rede chega sem código.
+    expect(com("pendente", new Error("Failed to fetch"))).toBe(false);
+    expect(com("pendente", null)).toBe(5_000);
+  });
+
+  it("a consulta não tenta de novo o erro definitivo (reunião que não existe, link cortado); o 500 tenta até a terceira vez", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const { retry } = opcoesDaConsulta();
+    expect(retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
+    expect(retry(0, { data: { code: "BAD_REQUEST" } })).toBe(false);
+    const erro500 = { message: MENSAGEM, data: { code: "INTERNAL_SERVER_ERROR" } };
+    expect(retry(0, erro500)).toBe(true);
+    expect(retry(2, erro500)).toBe(true);
+    expect(retry(3, erro500)).toBe(false);
   });
 
   it("o emoji do resumo vai antes do título da reunião, sem mudar o nome do título", () => {
