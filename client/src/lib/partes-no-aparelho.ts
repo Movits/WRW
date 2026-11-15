@@ -66,6 +66,18 @@ export async function partesGuardadas(dona: string): Promise<ParteNoAparelho[]> 
   return todas.filter(p => p.dona === dona).sort((a, b) => a.meetingId.localeCompare(b.meetingId) || a.seq - b.seq);
 }
 
+/**
+ * A gravação descartada (G13b): as cópias dela saem do aparelho, para a
+ * retomada não reenviá-las nem contá-las como áudio por enviar. Sem IndexedDB
+ * neste navegador nada foi guardado, e não há o que apagar; as outras falhas
+ * (outra aba bloqueando, por exemplo) chegam a quem chama, que tenta de novo.
+ */
+export async function apagarPartesDaReuniao(meetingId: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const todas = await comTabela<ParteNoAparelho[]>("readonly", tabela => tabela.getAll() as IDBRequest<ParteNoAparelho[]>);
+  for (const parte of todas.filter(p => p.meetingId === meetingId)) await apagarParte(meetingId, parte.seq);
+}
+
 /** Sair da conta ou excluí-la: nenhuma voz fica no aparelho. */
 export async function apagarTodasAsPartes(): Promise<void> {
   await comTabela("readwrite", tabela => tabela.clear());

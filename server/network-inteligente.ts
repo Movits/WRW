@@ -4,7 +4,7 @@ import {
 } from "../drizzle/schema";
 import { camposFaltantes, type CampoDaCompletude } from "../shared/completude-do-contato";
 import { exigirDb } from "./db";
-import { MAX_MEETING_DURATION_SECONDS } from "./meeting-service";
+import { LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS } from "./minutos-de-reuniao";
 
 /**
  * Meu Network Inteligente — o resumo do painel (pedido do Nicolas, 13/09/2026,
@@ -30,7 +30,11 @@ export type ResumoDoNetworkInteligente = {
   minutos: {
     /** Soma da duração das reuniões transcritas que continuam na conta (não é consumo mensal). */
     segundosEmReunioesGuardadas: number;
-    /** O mesmo teto que o servidor aplica ao receber a gravação. */
+    /**
+     * O teto da reunião gravada (12 h desde a G13b, o da gravação em partes), o
+     * mesmo do plano gratuito em networkInteligente.minutos. O arquivo enviado
+     * inteiro segue com os 10 minutos do envio único, e a tela diz isso à parte.
+     */
     limitePorReuniaoSegundos: number;
   };
   /** `disponibilizados`: contatos com SIM em "Disponibilizar este contato para oportunidades da rede" (spec de 14/09, item 14). */
@@ -132,7 +136,7 @@ export async function resumoDoNetworkInteligente(
     reunioes,
     minutos: {
       segundosEmReunioesGuardadas: numero(duracao?.segundos),
-      limitePorReuniaoSegundos: MAX_MEETING_DURATION_SECONDS,
+      limitePorReuniaoSegundos: LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS,
     },
     contatos: {
       total: contatos.length,

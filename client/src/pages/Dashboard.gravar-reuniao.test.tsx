@@ -75,3 +75,17 @@ describe("Dashboard — botão do gravador", () => {
     expect(screen.getByRole("link", { name: /Record a meeting/ })).toHaveAttribute("href", "/gravar");
   });
 });
+
+describe("Dashboard — a linha de minutos do Meu Network Inteligente (G13b)", () => {
+  it("o limite por reunião é o da gravação em partes, em horas: 12 h, e não 720 min", () => {
+    duble.respostas["networkInteligente.minutos"] = {
+      data: {
+        plano: "gratuito", limitePorReuniaoSegundos: 12 * 3600, limiteMensalSegundos: null, usadosNoMesSegundos: 840, inicioDoMes: 0,
+        ampliacao: { disponivel: false, dependeDe: "integracao_de_pagamento" },
+      },
+    };
+    render(<Dashboard />);
+    expect(screen.getByText("14 min usados neste mês · até 12 h por reunião · ampliação depende de integração futura")).toBeInTheDocument();
+    expect(screen.queryByText(/720 min/)).not.toBeInTheDocument();
+  });
+});

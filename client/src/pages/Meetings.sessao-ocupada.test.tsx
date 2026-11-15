@@ -51,15 +51,19 @@ const duble = vi.hoisted(() => {
       meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
-      // A gravação em partes (G9, /gravar?emPartes=1) chama o servidor por aqui.
+      // A gravação em partes (G9; o padrão do /gravar desde a G13b) chama o servidor por aqui.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
       client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
     },
     enviarParte: vi.fn(),
+    // A cópia no aparelho (G9): o teste da cópia que falta (G13b) a faz falhar,
+    // e o do Descartar confere que a da gravação descartada sai.
+    guardarParte: vi.fn(),
+    apagarPartesDaReuniao: vi.fn(),
   };
 });
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 vi.mock("@/components/NotificationBell", () => ({ NotificationBell: () => null }));
 vi.mock("@/lib/envio-das-partes", () => ({
@@ -68,8 +72,9 @@ vi.mock("@/lib/envio-das-partes", () => ({
   travaDoNavegador: async (_nome: string, trabalho: () => Promise<unknown>) => trabalho(),
 }));
 vi.mock("@/lib/partes-no-aparelho", () => ({
-  guardarParte: async () => undefined,
+  guardarParte: (...a: unknown[]) => duble.guardarParte(...a),
   apagarParte: async () => undefined,
+  apagarPartesDaReuniao: (...a: unknown[]) => duble.apagarPartesDaReuniao(...a),
   apagarTodasAsPartes: async () => undefined,
 }));
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (arquivo: Blob) => duble.duracao(arquivo) }));
@@ -134,6 +139,9 @@ beforeEach(() => {
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // A cópia no aparelho dá certo, salvo no teste que diz outro.
+  duble.guardarParte.mockResolvedValue(undefined);
+  duble.apagarPartesDaReuniao.mockResolvedValue(undefined);
   vi.mocked(useAuth).mockReturnValue({
     user: { id: 1, name: "Glenda", role: "silver" },
     loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
@@ -162,8 +170,14 @@ afterEach(async () => {
   else delete (navigator as { mediaDevices?: unknown }).mediaDevices;
 });
 
+/**
+ * O gravador no envio único de antes (o áudio inteiro num pedido só, com a
+ * revisão antes de enviar), que desde a G13b só abre por ?envioUnico=1, a
+ * saída de suporte até a G14. Os blocos que gravam, revisam e enviam são dele;
+ * a gravação em partes, o padrão, tem os blocos dela no fim deste arquivo.
+ */
 function abrirOGravador() {
-  window.history.replaceState(null, "", "/gravar");
+  window.history.replaceState(null, "", "/gravar?envioUnico=1");
   return render(<Meetings />);
 }
 
@@ -439,7 +453,7 @@ describe("Reuniões — fora do gravador, o áudio por enviar segue ocupando a s
   });
 });
 
-describe("Reuniões — gravação em partes (G9, /gravar?emPartes=1)", () => {
+describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G13b)", () => {
   const { iniciarGravacao, encerrarGravacao, delete: excluir } = duble.utils.client.meetings;
 
   beforeEach(() => {
@@ -450,7 +464,7 @@ describe("Reuniões — gravação em partes (G9, /gravar?emPartes=1)", () => {
   });
 
   function abrirEmPartes() {
-    window.history.replaceState(null, "", "/gravar?emPartes=1");
+    window.history.replaceState(null, "", "/gravar");
     return render(<Meetings />);
   }
 
@@ -486,7 +500,7 @@ describe("Reuniões — gravação em partes (G9, /gravar?emPartes=1)", () => {
     expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
   });
 
-  it("sem ?emPartes=1, o gravador de sempre: nada de reunião no Iniciar", async () => {
+  it("com ?envioUnico=1, o envio único de antes: nada de reunião no Iniciar", async () => {
     abrirOGravador();
     await gravarEEncerrar();
     expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
@@ -602,7 +616,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   }
 
   it("na hora cheia o aviso aparece, sem o toast antigo e com o relógio em 1:00:00; Continuar retoma a pausada, e a 2ª hora reabre", async () => {
-    await iniciar("/gravar?emPartes=1");
+    await iniciar("/gravar");
     // Sem o teto de 10 min: o texto sob o relógio fala do aviso e das 12 h.
     expect(screen.getByText("A cada hora de gravação, confirme que ela continua. Limite: 12 horas.")).toBeInTheDocument();
     await passar(UMA_HORA_MS);
@@ -632,7 +646,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("com o aviso aberto, o Encerrar da dona fecha o aviso e entrega uma vez só; o prazo que vence depois não para nem avisa", async () => {
-    await iniciar("/gravar?emPartes=1");
+    await iniciar("/gravar");
     await passar(UMA_HORA_MS);
     expect(screen.getByRole("alertdialog", { name: /1 h de gravação/ })).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
@@ -653,7 +667,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("sem o OK em 10 min (o tique atrasado da aba oculta), para sozinha, entrega pelo caminho do Encerrar uma vez só e avisa até ser fechado", async () => {
-    await iniciar("/gravar?emPartes=1");
+    await iniciar("/gravar");
     await passar(UMA_HORA_MS);
     expect(screen.getByRole("alertdialog", { name: /1 h de gravação/ })).toBeInTheDocument();
     vi.setSystemTime(Date.now() + PRAZO_DO_AVISO_DE_HORA_MS);
@@ -672,7 +686,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("pausada com o aviso na tela, o prazo vence do mesmo jeito e a gravação é entregue: pausar não vale como o OK", async () => {
-    await iniciar("/gravar?emPartes=1");
+    await iniciar("/gravar");
     await passar(UMA_HORA_MS);
     fireEvent.click(screen.getByRole("button", { name: "Pausar" }));
     expect(screen.getByRole("status")).toHaveTextContent("Gravação pausada");
@@ -691,7 +705,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("nas 12 h, a gravação em partes para e entrega uma vez só, com um aviso que fica até ser fechado pelo botão", async () => {
-    await iniciar("/gravar?emPartes=1");
+    await iniciar("/gravar");
     await passar(12 * UMA_HORA_MS);
     expect(toast.info).toHaveBeenCalledWith("A gravação chegou ao limite de 12 horas e foi encerrada. O que foi gravado segue para a transcrição.", { id: AVISO_DO_LIMITE, duration: Infinity, closeButton: true });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -704,7 +718,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("a gravação nova tira da tela os avisos que ficam até ser fechados (o das 12 h e o da hora sem OK); o Iniciar recusado, não", async () => {
-    window.history.replaceState(null, "", "/gravar?emPartes=1");
+    window.history.replaceState(null, "", "/gravar");
     render(<Meetings />);
     // Sem título nada começa: os avisos da gravação anterior seguem na tela.
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
@@ -719,7 +733,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   });
 
   it("no envio único nada muda: para nos 10 min, com a revisão do áudio, sem aviso de hora", async () => {
-    await iniciar("/gravar");
+    await iniciar("/gravar?envioUnico=1");
     expect(screen.getByText("Limite por gravação: 10 minutos ou 10 MB")).toBeInTheDocument();
     await passar(10 * 60_000);
     expect(screen.getByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
@@ -729,5 +743,219 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
     expect(toast.info).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Descartar e gravar novamente/ }));
     expect(sessaoOcupada()).toBe(false);
+  });
+});
+
+/**
+ * G13b: a gravação em partes vira o padrão para todas. O /gravar grava em
+ * partes, o ?emPartes=1 da G9 continua aceito e ?envioUnico=1 é a saída de
+ * suporte até a G14. Os avisos que eram silenciosos passam a aparecer (a parte
+ * recusada, a cópia no aparelho que faltou), o Descartar apaga a gravação em
+ * curso depois da confirmação na página, e o duplo clique no Iniciar cria uma
+ * reunião só.
+ */
+describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", () => {
+  const { iniciarGravacao, encerrarGravacao, delete: excluir } = duble.utils.client.meetings;
+  const DESCARTES = "wrw:descartes-de-gravacao-pendentes";
+  const DESCARTADA = "Gravação descartada. Nada dela vai para a transcrição.";
+  const DESCARTE_PENDENTE = "Não foi possível apagar a gravação agora. A tela tenta de novo sozinha enquanto estiver aberta; se a reunião aparecer na lista, exclua-a por lá.";
+
+  beforeEach(() => {
+    iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
+    encerrarGravacao.mutate.mockReset().mockResolvedValue({ partes: 1 });
+    excluir.mutate.mockReset().mockResolvedValue({ success: true });
+    duble.enviarParte.mockReset().mockResolvedValue({ tipo: "recebida" });
+    localStorage.removeItem(DESCARTES);
+  });
+  afterEach(() => { localStorage.removeItem(DESCARTES); });
+
+  function preencher() {
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+  }
+
+  async function iniciarEm(caminho: string) {
+    window.history.replaceState(null, "", caminho);
+    render(<Meetings />);
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+  }
+
+  async function descartarPelaConfirmacao() {
+    fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
+    await act(async () => { fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Descartar gravação" })); });
+  }
+
+  it.each(["/gravar", "/gravar?emPartes=1"])("%s grava em partes: sob o relógio, o aviso de hora e as 12 h, e o arquivo com os 10 min dele; a reunião nasce no Iniciar", async caminho => {
+    window.history.replaceState(null, "", caminho);
+    render(<Meetings />);
+    expect(screen.getByText("A cada hora de gravação, confirme que ela continua. Limite: 12 horas.")).toBeInTheDocument();
+    expect(screen.queryByText("Limite por gravação: 10 minutos ou 10 MB")).not.toBeInTheDocument();
+    // O arquivo enviado segue no envio único até a H9a: a dica diz o teto dele.
+    expect(screen.getByText("Arquivo de áudio: até 10 minutos ou 10 MB")).toBeInTheDocument();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+    expect(screen.queryByRole("button", { name: /Transcrever áudio/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("o padrão grava em partes, e ?envioUnico=1 volta ao envio único de antes, sem reunião no Iniciar nem Descartar no meio", async () => {
+    window.history.replaceState(null, "", "/gravar");
+    const padrao = render(<Meetings />);
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Descartar gravação" })).toBeInTheDocument();
+    padrao.unmount();
+    iniciarGravacao.mutate.mockClear();
+
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
+    render(<Meetings />);
+    expect(screen.getByText("Limite por gravação: 10 minutos ou 10 MB")).toBeInTheDocument();
+    expect(screen.queryByText("Arquivo de áudio: até 10 minutos ou 10 MB")).not.toBeInTheDocument();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Descartar gravação" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
+    expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
+    expect(duble.enviarParte).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Descartar e gravar novamente/ }));
+  });
+
+  it("duplo clique no Iniciar: uma reunião só, o botão travado enquanto o servidor cria, e a gravação mantém as partes", async () => {
+    let criar: (reuniao: { id: string }) => void = () => {};
+    iniciarGravacao.mutate.mockImplementation(() => new Promise(resolver => { criar = resolver; }));
+    window.history.replaceState(null, "", "/gravar");
+    render(<Meetings />);
+    preencher();
+    const iniciar = screen.getByRole("button", { name: /Iniciar gravação/ });
+    fireEvent.click(iniciar);
+    fireEvent.click(iniciar);
+    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    // Enquanto o servidor cria a reunião, o botão e o formulário ficam travados.
+    await waitFor(() => expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeDisabled());
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    await act(async () => { criar({ id: VINICOLA }); });
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+    // Nenhuma reunião apagada, nenhuma parte perdida "sem reunião".
+    expect(excluir.mutate).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("a parte recusada pelo servidor avisa no idioma da tela, até ser fechada, e nunca com o código cru", async () => {
+    duble.enviarParte.mockResolvedValue({ tipo: "recusada", codigo: "LONGA_DEMAIS" });
+    await iniciarEm("/gravar");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição.",
+      { id: "gravacao-parte-recusada", duration: Infinity, closeButton: true },
+    ));
+    expect(vi.mocked(toast.error).mock.calls.some(([texto]) => String(texto).includes("LONGA_DEMAIS"))).toBe(false);
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("sem a cópia no aparelho, avisa uma vez só na gravação, até ser fechado, e as partes seguem subindo", async () => {
+    duble.guardarParte.mockRejectedValue(new Error("Sem IndexedDB neste navegador."));
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      await iniciarEm("/gravar");
+      // Duas trocas de parte (10 min cada) e o Encerrar: três partes sem cópia.
+      for (let i = 0; i < 2; i++) {
+        vi.setSystemTime(Date.now() + 10 * 60_000);
+        await act(async () => { vi.advanceTimersByTime(500); });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(3);
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.",
+      { id: "gravacao-sem-copia-no-aparelho", duration: Infinity, closeButton: true },
+    );
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("Descartar pede a confirmação na própria página; 'Voltar à gravação' segue gravando, e confirmar apaga a reunião e a cópia, sem nada para a transcrição", async () => {
+    const confirmarDoNavegador = vi.spyOn(window, "confirm");
+    try {
+      await iniciarEm("/gravar");
+      fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
+      const confirmacao = screen.getByRole("alertdialog", { name: "Descartar esta gravação?" });
+      expect(confirmacao).toHaveAccessibleDescription("Tudo o que foi gravado até agora será apagado, inclusive o que já foi enviado, e nada vai para a transcrição. Não dá para desfazer.");
+      // O foco começa no botão que não perde o áudio.
+      expect(within(confirmacao).getByRole("button", { name: "Voltar à gravação" })).toHaveFocus();
+      fireEvent.click(within(confirmacao).getByRole("button", { name: "Voltar à gravação" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Descartar gravação" })).toHaveFocus();
+      expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+      expect(motivoDaOcupacao()).toBe("gravando");
+      // O Esc também fecha sem descartar.
+      fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
+      fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+      expect(excluir.mutate).not.toHaveBeenCalled();
+
+      await descartarPelaConfirmacao();
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith(DESCARTADA));
+      // O caminho de exclusão de sempre (a reunião, as partes que subiram e os
+      // objetos delas) e a cópia no aparelho.
+      expect(excluir.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA });
+      expect(duble.apagarPartesDaReuniao).toHaveBeenCalledWith(VINICOLA);
+      // Nada vai para a transcrição: a última parte não saiu do gravador e nenhum fim foi declarado.
+      expect(duble.enviarParte).not.toHaveBeenCalled();
+      expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+      expect(confirmarDoNavegador).not.toHaveBeenCalled();
+      expect(localStorage.getItem(DESCARTES)).toBeNull();
+      // O gravador volta ao começo, com o título e a autorização para gravar de novo.
+      expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toHaveValue("Conversa com a Bia");
+      expect(screen.getByRole("checkbox")).toBeChecked();
+      await waitFor(() => expect(sessaoOcupada()).toBe(false));
+    } finally {
+      confirmarDoNavegador.mockRestore();
+    }
+  });
+
+  it("o descarte que não conseguiu apagar agora avisa até ser fechado e fica guardado para a retomada", async () => {
+    excluir.mutate.mockRejectedValue(new Error("rede"));
+    await iniciarEm("/gravar");
+    await descartarPelaConfirmacao();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DESCARTE_PENDENTE, { id: "gravacao-descarte-pendente", duration: Infinity, closeButton: true }));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([VINICOLA]);
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("a confirmação aberta quando a gravação termina não volta na gravação seguinte", async () => {
+    // O fim que falha deixa a dona no gravador, para gravar de novo.
+    encerrarGravacao.mutate.mockRejectedValue(new Error("rede"));
+    iniciarGravacao.mutate.mockResolvedValueOnce({ id: VINICOLA }).mockResolvedValueOnce({ id: "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f" });
+    await iniciarEm("/gravar");
+    fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
+    expect(screen.getByRole("alertdialog", { name: "Descartar esta gravação?" })).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível enviar a gravação."));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(excluir.mutate).not.toHaveBeenCalled();
   });
 });

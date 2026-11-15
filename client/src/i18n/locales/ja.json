@@ -145,7 +145,7 @@
     "impact": "あなたは、思い出せる以上の機会を知っています。",
     "record": {
       "title": "録音して、忘れない",
-      "desc": "10分までの会議を無料で録音・文字起こしし、会話を戦略的な記憶に変えましょう。"
+      "desc": "{{horas}}時間までの会議を無料で録音・文字起こしし、会話を戦略的な記憶に変えましょう。"
     },
     "organize": {
       "title": "AIが整理します",
@@ -1448,7 +1448,7 @@
     "pageTitle": "ミーティング",
     "privateSecureBadge": "非公開・安全",
     "heroTitle": "ミーティングアシスタント",
-    "heroSubtitle": "同意を得た上で短いミーティングを録音し、文字起こしを確認して、提案された連絡先を承認しましょう。",
+    "heroSubtitle": "同意を得た上でミーティングを録音し、文字起こしを確認して、提案された連絡先を承認しましょう。",
     "newMeetingButton": "新しいミーティング",
     "consentNotice": "必ず参加者全員の同意を得て録音してください。音声は Google の AI（Gemini）が文字起こしし、ブラジル国外で処理されることや、話者ごとに発言を分けることがあります。音声はアカウントに 30 日間、文字起こしは会議を削除するまで保存されます。会議の共有リンクをオンにしない限り（話した人の新たな許可が必要です）、アクセスできるのはあなただけです。",
     "loadingList": "ミーティングを読み込み中…",
@@ -1473,6 +1473,18 @@
     "hourCheckStopped": "録音は自動で停止しました：{{minutos}}分以内に1時間ごとの確認がありませんでした。録音済みの内容は文字起こしに回されます。",
     "recordingLimitInParts": "録音1時間ごとに、続けるかどうかを確認してください。上限：{{horas}}時間。",
     "recordingMaxReached": "録音が{{horas}}時間の上限に達したため終了しました。録音済みの内容は文字起こしに回されます。",
+    "uploadLimit": "音声ファイル：最大{{minutos}}分または{{mb}}MB",
+    "discardRecording": "録音を破棄",
+    "discardRecordingConfirmTitle": "この録音を破棄しますか？",
+    "discardRecordingConfirmText": "これまでに録音した内容は、すでに送信した分も含めてすべて削除され、文字起こしには回されません。元に戻すことはできません。",
+    "discardRecordingCancel": "録音に戻る",
+    "recordingDiscarded": "録音を破棄しました。文字起こしには何も回されません。",
+    "discardRecordingError": "今は録音を削除できませんでした。この画面を開いている間は自動で再試行します。ミーティングが一覧に表示された場合は、一覧から削除してください。",
+    "partRejectedMeetingGone": "録音の一部を保存できませんでした：ミーティングが削除されたか、音声を受け付けなくなっています。",
+    "partRejectedTooLarge": "録音の一部がサーバーで受け付けられるサイズまたは長さを超えたため、文字起こしから除外されました。",
+    "partRejectedUnreadable": "サーバーが録音の一部を読み取れなかったため、その部分は文字起こしから除外されました。",
+    "partRejected": "サーバーが録音の一部を受け付けなかったため、その部分は文字起こしから除外されました。",
+    "deviceCopyUnavailable": "この端末に録音のコピーを保存できませんでした。送信は続いていますが、インターネットが切れると一部が失われる可能性があります。",
     "stopRecording": "録音を終了",
     "reviewBeforeTranscribe": "文字起こしの前に録音を再生して確認",
     "durationLabel": "長さ：",
@@ -1801,13 +1813,14 @@
     "minutesUsed": "保存中のミーティング",
     "minutesUsedHelp": "アカウントに残っている文字起こし済みミーティングの合計時間です。",
     "minutesLimit": "1回あたりの無料上限",
-    "minutesLimitHelp": "録音とアップロードした音声ファイルのそれぞれに適用されます。",
+    "minutesLimitHelp": "録音に適用され、1時間ごとに確認が求められます。送信する音声ファイルは最大{{minutos}}分です。",
     "minutesValue": "{{minutos}}分",
+    "hoursValue": "{{horas}}時間",
     "moreTime": "もっと時間が必要ですか？ミーティングの分数を増やしましょう。",
-    "moreTimeUnavailable": "月額プランで分数を増やす機能はまだ利用できません。現在、各ミーティングは最大{{minutos}}分です。",
+    "moreTimeUnavailable": "月額プランで分数を増やす機能はまだ利用できません。現在、録音する各ミーティングは最大{{horas}}時間です。",
     "actionsTitle": "ここから始める",
     "actionRecord": "ミーティングを録音・アップロード",
-    "actionRecordDesc": "1回あたり最大{{minutos}}分。文字起こしと、話に出た連絡先の提案付き。",
+    "actionRecordDesc": "1回あたり最大{{horas}}時間の録音。文字起こしと、話に出た連絡先の提案付き。",
     "consentNotice": "録音の前に、参加者全員の同意を得て、適用されるプライバシー規則を守る責任はあなたにあります。",
     "actionContacts": "連絡先を整理する",
     "actionContactsDesc": "あなたの非公開の連絡先です。連絡先がメンバーになったり、プラットフォーム上にプロフィールが作られたりすることはありません。",
@@ -2221,7 +2234,7 @@
       "review": "マイ・スマートネットワークで確認"
     },
     "dashboard": {
-      "minutesLine": "今月 {{usados}} 分使用 · 会議ごとに最大 {{limite}} 分",
+      "minutesLine": "今月 {{usados}} 分使用 · 会議ごとに最大 {{horas}} 時間",
       "expandSoon": "拡張は今後の連携次第"
     }
   },

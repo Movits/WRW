@@ -92,6 +92,16 @@ export const AVISO_DE_HORA_SEGUNDOS = 60 * 60;
 export const PRAZO_DO_AVISO_DE_HORA_MS = 10 * 60 * 1000;
 
 /**
+ * Os códigos da recusa DEFINITIVA de uma parte da gravação em partes
+ * (RecusaDaParte, em server/fatias-de-reuniao.ts): a rota das partes devolve
+ * só o código, em JSON, e não frase. Moram aqui porque a tela os traduz
+ * (client/src/lib/mensagem-de-erro.ts) para avisar a dona no idioma dela: o
+ * servidor não sabe o idioma de quem grava. Código novo no servidor obriga a
+ * tela a ter o aviso dele (o Record da tela é por este tipo).
+ */
+export type CodigoDaRecusaDaParte = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "FORMATO" | "SEM_DURACAO" | "LONGA_DEMAIS" | "POSICAO";
+
+/**
  * As recusas do resumo guardado da reunião (H4), nas palavras que chegam ao
  * navegador. Moram aqui pelo mesmo motivo de MENSAGEM_BANCO_INDISPONIVEL: o
  * servidor (server/resumo-guardado.ts, que as reexporta) escreve sem saber o

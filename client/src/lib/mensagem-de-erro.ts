@@ -7,6 +7,7 @@ import {
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
   UNAUTHED_ERR_MSG,
+  type CodigoDaRecusaDaParte,
 } from "@shared/const";
 
 /**
@@ -77,4 +78,36 @@ export function mensagemDeErroParaTela(erro: unknown, t: (chave: string) => stri
     }
   }
   return t("errorBoundary.serverUnavailable");
+}
+
+/**
+ * O aviso de uma parte da gravação em partes que o servidor recusou de vez
+ * (G13b). A rota das partes (server/_core/rota-das-partes.ts) responde só o
+ * CÓDIGO da recusa, nunca frase, porque não sabe o idioma de quem grava; aqui
+ * ele vira o aviso no idioma da tela. Para a dona a gravação é contínua: o
+ * aviso fala de "um trecho", e diz que ele fica de fora da transcrição.
+ *
+ * O Record é pelo tipo do servidor (shared/const.ts): código novo lá não
+ * compila aqui sem o aviso dele. Cada valor chama t() com a chave literal, para
+ * o teste de chaves usadas (server/i18n-chaves-usadas.test.ts) conferir que
+ * todas existem. Código desconhecido (uma recusa 4xx que não é da tabela) cai
+ * no aviso genérico, nunca no código cru.
+ */
+const AVISO_POR_RECUSA_DA_PARTE: Record<CodigoDaRecusaDaParte, (t: (chave: string) => string) => string> = {
+  // A reunião foi excluída (em outra aba, por exemplo) ou já não recebe áudio.
+  SEM_REUNIAO: t => t("meetings.partRejectedMeetingGone"),
+  FORA_DO_ESTADO: t => t("meetings.partRejectedMeetingGone"),
+  GRANDE_DEMAIS: t => t("meetings.partRejectedTooLarge"),
+  LONGA_DEMAIS: t => t("meetings.partRejectedTooLarge"),
+  FORMATO: t => t("meetings.partRejectedUnreadable"),
+  SEM_DURACAO: t => t("meetings.partRejectedUnreadable"),
+  CONTEUDO_DIFERENTE: t => t("meetings.partRejected"),
+  POSICAO: t => t("meetings.partRejected"),
+};
+
+export function mensagemDaRecusaDaParte(codigo: string | undefined, t: (chave: string) => string): string {
+  const aviso = codigo && Object.prototype.hasOwnProperty.call(AVISO_POR_RECUSA_DA_PARTE, codigo)
+    ? AVISO_POR_RECUSA_DA_PARTE[codigo as CodigoDaRecusaDaParte]
+    : null;
+  return aviso ? aviso(t) : t("meetings.partRejected");
 }

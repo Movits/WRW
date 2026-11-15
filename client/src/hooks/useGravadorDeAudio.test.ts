@@ -481,6 +481,49 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     }
   });
 
+  it("no limite com o gravador que o navegador já deu como inativo (o parar sai cedo), avisa uma vez só, e não a cada volta do relógio (G13b)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const aoChegarAoLimite = vi.fn();
+      const { result } = montar({ limiteSegundos: 120, aoChegarAoLimite });
+      await act(async () => { await result.current.comecar(); });
+      // O navegador encerrou o MediaRecorder por conta própria, sem o fim chegar:
+      // o parar() não tem o que parar e sai sem trocar o estado.
+      gravadores[0].state = "inactive";
+      act(() => { vi.advanceTimersByTime(120_000); });
+      expect(aoChegarAoLimite).toHaveBeenCalledTimes(1);
+      expect(result.current.estado).toBe("gravando");
+      // O relógio segue batendo no limite a cada 500 ms, e o aviso não se repete.
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(aoChegarAoLimite).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("no limite, para primeiro e avisa depois; e a gravação seguinte que chega ao limite avisa de novo (um aviso por gravação)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      // Quantas gravações já tinham sido entregues quando cada aviso chegou.
+      const entreguesNoAviso: number[] = [];
+      let entregues = () => 0;
+      const aoChegarAoLimite = vi.fn(() => { entreguesNoAviso.push(entregues()); });
+      const { result, aoTerminar } = montar({ limiteSegundos: 120, aoChegarAoLimite });
+      entregues = () => aoTerminar.mock.calls.length;
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(120_000); });
+      expect(result.current.estado).toBe("parado");
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(120_000); });
+      expect(aoChegarAoLimite).toHaveBeenCalledTimes(2);
+      expect(aoTerminar).toHaveBeenCalledTimes(2);
+      // O gravador falso entrega já no stop(): cada aviso chega depois da entrega da própria gravação.
+      expect(entreguesNoAviso).toEqual([1, 2]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("o Parar de quem grava não é o limite: aoChegarAoLimite não é chamado", async () => {
     const aoChegarAoLimite = vi.fn();
     const { result, aoTerminar } = montar({ aoChegarAoLimite });

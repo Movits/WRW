@@ -12,7 +12,9 @@ import MeuNetworkInteligente from "./MeuNetworkInteligente";
  * - sem o termo do Smart Match, matches internos E os indicadores do registro
  *   (rede global, intermediações, negócios, comissões) mostram traço e
  *   convite, nunca número; com o termo, os números do registro;
- * - minutos: usados no mês, guardados, limite por reunião e limite mensal;
+ * - minutos: usados no mês, guardados, limite por reunião (o da gravação em
+ *   partes, 12 h, desde a G13b; o arquivo enviado segue nos 10 minutos) e
+ *   limite mensal;
  * - "Precisa de mais tempo? Amplie seus minutos de reunião." não é botão, link
  *   nem preço, e diz que a mensalidade depende de integração de pagamento;
  * - a conexão interna identificada dispara o alerta do pedido;
@@ -73,7 +75,7 @@ const AMOSTRA = [
 function dados(parcial: Partial<Resumo> = {}): Resumo {
   return {
     reunioes: { total: 6, transcritas: 3, emAndamento: 1, comFalha: 2 },
-    minutos: { segundosEmReunioesGuardadas: 1530, limitePorReuniaoSegundos: 600 },
+    minutos: { segundosEmReunioesGuardadas: 1530, limitePorReuniaoSegundos: 12 * 3600 },
     contatos: { total: 9, incompletos: 7, disponibilizados: 3, amostraIncompletos: AMOSTRA },
     matchesInternos: { termoAceito: true, novos: 2, total: 4 },
     ...parcial,
@@ -81,7 +83,7 @@ function dados(parcial: Partial<Resumo> = {}): Resumo {
 }
 
 const MINUTOS = {
-  plano: "gratuito", limitePorReuniaoSegundos: 600, limiteMensalSegundos: null, usadosNoMesSegundos: 840, inicioDoMes: 0,
+  plano: "gratuito", limitePorReuniaoSegundos: 12 * 3600, limiteMensalSegundos: null, usadosNoMesSegundos: 840, inicioDoMes: 0,
   ampliacao: { disponivel: false, dependeDe: "integracao_de_pagamento" },
 };
 
@@ -165,8 +167,11 @@ describe("Meu Network Inteligente — os números do servidor", () => {
     expect(within(screen.getByText("Utilizados neste mês").parentElement!).getByText("14 min")).toBeInTheDocument();
     // 1530 s = 25,5 min
     expect(screen.getByText("26 min")).toBeInTheDocument();
-    expect(screen.getByText("10 min")).toBeInTheDocument();
-    expect(screen.getByText("Limite gratuito por reunião")).toBeInTheDocument();
+    // O limite por reunião é o da gravação em partes (G13b): em horas, não "720 min".
+    expect(within(screen.getByText("Limite gratuito por reunião").parentElement!).getByText("12 h")).toBeInTheDocument();
+    expect(screen.queryByText("720 min")).not.toBeInTheDocument();
+    // O arquivo enviado segue no envio único, com os 10 minutos dele.
+    expect(screen.getByText("Na gravação, que pede confirmação a cada hora. O arquivo de áudio enviado vai até 10 minutos.")).toBeInTheDocument();
     expect(screen.getByText("Sem limite mensal")).toBeInTheDocument();
   });
 
@@ -197,7 +202,7 @@ describe("Meu Network Inteligente — nada é simulado", () => {
     const caixa = chamada.parentElement!;
     expect(within(caixa).queryAllByRole("button")).toEqual([]);
     expect(within(caixa).queryAllByRole("link")).toEqual([]);
-    expect(screen.getByText("A ampliação de minutos por mensalidade ainda não está disponível. Por enquanto, cada reunião pode ter até 10 minutos.")).toBeInTheDocument();
+    expect(screen.getByText("A ampliação de minutos por mensalidade ainda não está disponível. Por enquanto, cada reunião gravada pode ter até 12 horas.")).toBeInTheDocument();
     expect(screen.getByText("A mensalidade depende de uma integração de pagamento que ainda não existe na plataforma. Nenhum valor é cobrado.")).toBeInTheDocument();
     expect(screen.queryByText(/R\$|US\$|€|por mês|\/mês/i)).not.toBeInTheDocument();
   });
@@ -217,7 +222,7 @@ describe("Meu Network Inteligente — nada é simulado", () => {
     const atalho = aviso.closest("a")!;
     // O atalho de gravar abre o gravador direto; o indicador de reuniões segue na lista.
     expect(atalho).toHaveAttribute("href", "/gravar");
-    expect(within(atalho).getByText("Até 10 minutos por reunião, com transcrição e sugestão dos contatos citados.")).toBeInTheDocument();
+    expect(within(atalho).getByText("Gravação de até 12 horas por reunião, com transcrição e sugestão dos contatos citados.")).toBeInTheDocument();
     expect(screen.getByText("Pesquisar meu network").closest("a")).toHaveAttribute("href", "/memory");
   });
 });

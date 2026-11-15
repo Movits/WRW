@@ -47,9 +47,9 @@ export type OpcoesDoGravador = {
   /** Microfone negado, ausente ou ocupado, ou o gravador recusado. Não chega a quem já saiu da tela. */
   aoFalhar?: (erro: unknown) => void;
   /**
-   * A gravação chegou a `limiteSegundos` e o gravador vai parar sozinho (e
+   * A gravação chegou a `limiteSegundos`, e o gravador já mandou parar (e
    * entregar, como sempre). Só para a tela avisar o porquê: a gravação em partes
-   * diz que bateu nas 12 h (G13a).
+   * diz que bateu nas 12 h (G13a). Chamado uma vez por gravação (G13b).
    */
   aoChegarAoLimite?: () => void;
 };
@@ -123,6 +123,11 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // número, e o microfone que o navegador entregar depois, para um pedido
   // velho, é solto na hora.
   const pedidoAtual = useRef(0);
+  // O aviso do limite (aoChegarAoLimite) já saiu nesta gravação. Se o parar()
+  // sair cedo sem trocar de estado (o MediaRecorder que o navegador já deu como
+  // inativo), o relógio segue batendo no limite a cada volta, e o aviso se
+  // repetiria a cada 500 ms (G13b).
+  const limiteAvisado = useRef(false);
 
   function mudarEstado(novo: EstadoDoGravador) {
     estadoAgora.current = novo;
@@ -250,6 +255,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       };
       pausaComecou.current = 0;
       pausadoNaGravacao.current = 0;
+      limiteAvisado.current = false;
       abrirParte(0);
       microfone.current = aberto;
       inicio.current = comecouEm;
@@ -284,8 +290,14 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       const decorridos = Math.floor((Date.now() - inicio.current - pausadoNaGravacao.current) / 1000);
       setSegundos(Math.min(limite, decorridos));
       if (decorridos >= limite) {
-        atuais.current.aoChegarAoLimite?.();
-        return parar();
+        // Para primeiro e avisa uma vez só por gravação: o parar() que sai cedo
+        // deixa o estado em "gravando", e este relógio volta aqui na próxima volta.
+        parar();
+        if (!limiteAvisado.current) {
+          limiteAvisado.current = true;
+          atuais.current.aoChegarAoLimite?.();
+        }
+        return;
       }
       const fatia = atuais.current.fatiaSegundos;
       const atual = gravador.current;

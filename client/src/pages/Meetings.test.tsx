@@ -56,6 +56,16 @@ const duble = vi.hoisted(() => {
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+// A gravação em partes (o padrão desde a G13b) retoma, a cada 30 s, o que
+// ficou no aparelho, com a página aberta em qualquer das três rotas: o relógio
+// dela entraria na contagem dos testes da tradução longa (G8), que provam que
+// nenhuma pergunta fica agendada. Esta suíte é da lista e do detalhe; a
+// gravação em partes está em hooks/useGravacaoEmPartes.test.ts e em
+// Meetings.sessao-ocupada.test.tsx.
+vi.mock("@/hooks/useGravacaoEmPartes", () => ({
+  PARTE_SEGUNDOS: 600,
+  useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
+}));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("@/lib/trpc", () => ({

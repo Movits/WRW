@@ -31,9 +31,10 @@ import { medirDuracaoDoAudio } from "./duracao-do-audio";
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
  * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
- * mudarem; quem os usa é o envio único, o reprocesso dele e o painel de
- * minutos. A gravação em partes não passa por eles: tem o teto próprio
- * (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, em server/fatias-de-reuniao.ts).
+ * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
+ * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
+ * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
+ * reunião do painel de minutos (server/minutos-de-reuniao.ts).
  */
 export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
 export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;

@@ -46,11 +46,15 @@ const duble = vi.hoisted(() => {
       meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
+      // A gravação em partes, o padrão desde a G13b: ao montar, a página retoma
+      // o que ficou no aparelho, e para isso lê a conta e fala com o servidor.
+      auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
+      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
     },
   };
 });
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (arquivo: Blob) => duble.duracao(arquivo) }));
 vi.mock("@/lib/trpc", () => ({
@@ -89,6 +93,14 @@ const VINICOLA = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const BIA = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const TITULOS: Record<string, string> = { [VINICOLA]: "Reunião com a vinícola", [BIA]: "Reunião com a Bia" };
 const reuniao = (id: string) => ({ id, title: TITULOS[id], status: "ready", processingError: null, createdAt: Date.UTC(2026, 8, 4, 12), updatedAt: Date.UTC(2026, 8, 4, 12) });
+
+// O envio único de antes (o áudio inteiro num pedido só, 10 min e 10 MB), que
+// desde a G13b só abre por ?envioUnico=1, a saída de suporte até a G14. Os
+// testes que gravam e revisam o áudio antes de enviar (Transcrever, Descartar e
+// gravar novamente) são dele; a gravação em partes, o padrão, está em
+// Meetings.sessao-ocupada.test.tsx. O envio de arquivo segue no envio único nos
+// dois modos e é testado no /gravar de sempre.
+const GRAVAR_ENVIO_UNICO = "/gravar?envioUnico=1";
 
 function abrirEm(caminho: string) {
   window.history.replaceState(null, "", caminho);
@@ -135,6 +147,12 @@ describe("Reuniões — a URL escolhe a tela", () => {
     expect(screen.queryByRole("region", { name: "Instale a WRW como app" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toHaveFocus();
     expect(localStorage.getItem("mmm:dica-de-instalacao")).toBe("fechada");
+  });
+
+  it("a lista não fala mais em reuniões curtas: a gravação em partes vai até 12 h (G13b)", () => {
+    abrirEm("/meetings");
+    expect(screen.getByText("Grave reuniões com consentimento, revise a transcrição e confirme os contatos sugeridos.")).toBeInTheDocument();
+    expect(screen.queryByText(/reuniões curtas/)).not.toBeInTheDocument();
   });
 
   it("/meetings/<id> abre o detalhe daquela reunião", () => {
@@ -375,7 +393,7 @@ describe("Reuniões — gravação em curso", () => {
   }
 
   it("sair de /gravar gravando pelo menu devolve a URL ao gravador, avisa e não deixa o véu preto preso", async () => {
-    abrirComTransicao("/gravar");
+    abrirComTransicao(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     // Nada avisou antes da saída: o aviso conferido abaixo é o da volta.
     expect(toast.info).not.toHaveBeenCalled();
@@ -405,7 +423,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("ir a uma reunião (/meetings/:id) gravando também devolve a URL ao gravador, com o microfone aberto", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     act(() => window.history.pushState(null, "", `/meetings/${VINICOLA}`));
     await waitFor(() => expect(window.location.pathname).toBe("/gravar"));
@@ -419,7 +437,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("sair de Reuniões gravando, para outra tela, desmonta a página e fecha o microfone", async () => {
-    const { unmount } = abrirEm("/gravar");
+    const { unmount } = abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     expect(trilha.stop).not.toHaveBeenCalled();
     unmount();
@@ -427,7 +445,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("o voltar do navegador durante a gravação também volta ao gravador, sem véu preso", async () => {
-    abrirComTransicao("/meetings");
+    abrirComTransicao("/meetings?envioUnico=1");
     fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument());
     // A troca de /meetings para /gravar termina antes do voltar, como no uso real.
@@ -445,7 +463,7 @@ describe("Reuniões — gravação em curso", () => {
 
   it("com a autorização marcada, 'Transcrever áudio' cria a reunião e envia o áudio gravado com o id dela", async () => {
     duble.mutacoes.create?.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
@@ -457,7 +475,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("a dica de instalação fica abaixo dos botões, invisível no mesmo lugar enquanto grava, e sai na revisão do áudio", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     const dica = () => screen.queryByRole("region", { name: "Instale a WRW como app" });
     const secaoDaDica = () => document.querySelector<HTMLElement>("section[aria-labelledby]");
     expect(dica()).toBeInTheDocument();
@@ -477,7 +495,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("título de uma letra não abre o microfone: o aviso diz a regra do servidor, e o campo para em 200", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     const campo = screen.getByPlaceholderText("Ex.: Conversa com investidor");
     expect(campo).toHaveAttribute("maxLength", "200");
     fireEvent.change(campo, { target: { value: "X" } });
@@ -489,7 +507,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("o título trocado depois de encerrar a gravação é conferido no envio: 'X' não cria a reunião, e '  ab  ' cria com 'ab'", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
@@ -515,7 +533,7 @@ describe("Reuniões — gravação em curso", () => {
         this.mimeType = opcoes?.mimeType ?? "audio/webm";
       }
     });
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     expect(pedidos).toEqual(["audio/mp4;codecs=mp4a.40.2"]);
@@ -535,7 +553,7 @@ describe("Reuniões — gravação em curso", () => {
       value: { getUserMedia: () => new Promise(resolver => { entregar = resolver; }) },
     });
     const criar = vi.spyOn(GravadorFalso.prototype, "start");
-    const { unmount } = abrirEm("/gravar");
+    const { unmount } = abrirEm(GRAVAR_ENVIO_UNICO);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
@@ -553,7 +571,7 @@ describe("Reuniões — gravação em curso", () => {
       value: { getUserMedia: () => new Promise(resolver => { entregar = resolver; }) },
     });
     const iniciar = vi.spyOn(GravadorFalso.prototype, "start");
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
@@ -572,7 +590,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("o servidor recusa o envio da gravação: o aviso leva o id da reunião e o formulário destrava", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     duble.mutacoes.submitRecording.mutateAsync.mockRejectedValue(new Error("A IA não respondeu."));
     await comecarAGravar();
@@ -587,7 +605,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("o envio da gravação recusado com um erro sem mensagem avisa com a frase genérica, e não com um aviso em branco", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     // O TRPCError sem mensagem chega com a string vazia. O onError já avisou com
     // a frase genérica, e o catch vem depois, com o mesmo id: troca aquele aviso.
@@ -600,7 +618,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("a reunião não chega a ser criada (banco fora do ar): o aviso sai sem id, nada é enviado e o áudio continua para tentar de novo", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error("Banco de dados indisponível. Tente de novo em instantes."));
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
@@ -614,7 +632,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("a reunião não chega a ser criada e o erro vem sem mensagem: o aviso da gravação sai com a frase genérica do envio, sem id", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(""));
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
@@ -630,7 +648,7 @@ describe("Reuniões — gravação em curso", () => {
     { caminho: "o menu (Reuniões)", irALista: () => act(() => window.history.pushState(null, "", "/meetings")) },
     { caminho: "o Voltar do gravador", irALista: () => fireEvent.click(screen.getByRole("button", { name: /Voltar/ })) },
   ])("o áudio gravado e ainda não enviado sobrevive à ida à lista por $caminho e à volta ao gravador", async ({ irALista }) => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
@@ -652,7 +670,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("quem volta ao gravador durante o envio encontra a trava, e o fim do envio a leva ao detalhe", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: VINICOLA });
     let entregarEnvio: () => void = () => {};
     duble.mutacoes.submitRecording.mutateAsync.mockImplementation(() => new Promise<void>(resolver => { entregarEnvio = () => resolver(); }));
@@ -684,7 +702,7 @@ describe("Reuniões — gravação em curso", () => {
 
   it("o fim automático que chega depois do teto (aba em segundo plano) declara no máximo os 600 s que o servidor aceita", async () => {
     const agora = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     // O relógio pula para 601,05 s: o próximo tique do cronômetro encerra a gravação sozinho.
@@ -697,7 +715,7 @@ describe("Reuniões — gravação em curso", () => {
 
   it("a gravação comum declara o tempo que durou, e não o teto", async () => {
     const agora = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-gravada" });
     await comecarAGravar();
     agora.mockReturnValue(1_000_000 + 95_400);
@@ -708,7 +726,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("vários toques no menu durante a gravação dão um aviso só, com o mesmo id", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     for (let i = 0; i < 3; i++) act(() => window.history.pushState(null, "", "/meetings"));
     expect(window.location.pathname).toBe("/gravar");
@@ -723,7 +741,7 @@ describe("Reuniões — gravação em curso", () => {
       configurable: true,
       value: { getUserMedia: () => new Promise((_resolver, rejeitar) => { negar = rejeitar; }) },
     });
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
@@ -742,7 +760,7 @@ describe("Reuniões — gravação em curso", () => {
       configurable: true,
       value: { getUserMedia: () => Promise.reject(new DOMException("negado", "NotAllowedError")) },
     });
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
@@ -752,7 +770,7 @@ describe("Reuniões — gravação em curso", () => {
 
   it("com o banco fora do ar, o aviso do envio da gravação sai no idioma da tela, e não na frase do servidor em português", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
     fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
@@ -764,7 +782,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("desmarcar o consentimento depois de gravar impede o envio", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
     const transcrever = await screen.findByRole("button", { name: /Transcrever áudio/ });
@@ -775,7 +793,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("o envio que termina com a dona fora do gravador também o zera: voltar a ele não reabre o áudio enviado", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
     expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
@@ -792,7 +810,7 @@ describe("Reuniões — gravação em curso", () => {
   });
 
   it("depois do envio, 'Nova reunião' não reabre o áudio já enviado (era o que duplicava a reunião)", async () => {
-    abrirEm("/gravar");
+    abrirEm(GRAVAR_ENVIO_UNICO);
     await comecarAGravar();
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
     expect(await screen.findByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
@@ -983,7 +1001,7 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
       value: { getUserMedia: () => new Promise(resolver => { entregarMicrofone = resolver; }) },
     });
     try {
-      const { entregarTela } = abrirNoApp("/gravar");
+      const { entregarTela } = abrirNoApp(GRAVAR_ENVIO_UNICO);
       fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
       fireEvent.click(screen.getByRole("checkbox"));
       fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));

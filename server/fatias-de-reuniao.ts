@@ -5,7 +5,7 @@ import { exigirDb } from "./db";
 import { storageDelete, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS } from "./meeting-service";
-import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
  * A reunião gravada em partes (G5 do desenho do gravador,
@@ -36,7 +36,9 @@ export const PARTES_NO_MAXIMO = 200;
  */
 export const FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS = 10 * 60;
 
-export type CodigoDaRecusa = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "FORMATO" | "SEM_DURACAO" | "LONGA_DEMAIS" | "POSICAO";
+// Os códigos moram em shared/const.ts porque a tela os traduz (G13b); o nome de
+// sempre fica aqui para os imports do servidor não mudarem.
+export type CodigoDaRecusa = CodigoDaRecusaDaParte;
 
 /** Recusa definitiva da parte: reenviar a mesma coisa não muda a resposta. */
 export class RecusaDaParte extends Error {

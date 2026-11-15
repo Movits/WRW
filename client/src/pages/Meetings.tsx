@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
-import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
@@ -37,6 +37,25 @@ const formatDuration = mmss;
 const HORAS_DA_GRAVACAO_EM_PARTES = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
 /** O id fixo do aviso das 12 h: a gravação seguinte o fecha por ele (toast.dismiss). */
 const ID_DO_AVISO_DO_LIMITE = "gravacao-chegou-ao-limite";
+/**
+ * Os ids fixos dos avisos da gravação em partes que ficam até ser fechados
+ * (G13b): a parte recusada (a recusa seguinte troca o texto, sem empilhar), a
+ * cópia no aparelho que faltou e o descarte que não terminou. A gravação
+ * seguinte fecha os dois primeiros, que falam da anterior.
+ */
+const ID_DO_AVISO_DA_PARTE_RECUSADA = "gravacao-parte-recusada";
+const ID_DO_AVISO_SEM_COPIA = "gravacao-sem-copia-no-aparelho";
+const ID_DO_AVISO_DO_DESCARTE = "gravacao-descarte-pendente";
+
+/**
+ * O modo do gravador, pela busca da URL do /gravar (G13b). A gravação em partes
+ * é o padrão para todas; `?envioUnico=1` é a saída de suporte até a G14: o
+ * envio único de antes, inteiro num pedido só, com 10 minutos e 10 MB.
+ * `?emPartes=1`, o interruptor da G9, continua aceito e não muda nada.
+ */
+function gravaEmPartes(busca: string) {
+  return new URLSearchParams(busca).get("envioUnico") !== "1";
+}
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -153,6 +172,10 @@ export default function Meetings() {
   const [idiomaFalado, setIdiomaFalado] = useState<IdiomaDaReuniao>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  // O Iniciar em curso (G13b, ver startRecording): o ref vale já no clique, e o
+  // estado trava o botão e o formulário na tela.
+  const iniciandoAgora = useRef(false);
+  const [iniciando, setIniciando] = useState(false);
   const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: TipoDeAudioGravado; durationSeconds: number } | null>(null);
   const audioInput = useRef<HTMLInputElement | null>(null);
   // true só enquanto ESTA instância está montada, visível e no gravador. O
@@ -171,9 +194,10 @@ export default function Meetings() {
   // O microfone, o formato (mp4 antes de webm) e o teto de duração ficam no hook.
   // Sair da página fecha o microfone que estava gravando: o hook cuida disso ao desmontar.
   // A gravação em partes (G9): enviada ao servidor por baixo, parte a parte, com
-  // cópia no aparelho. Por ora atrás do interruptor ?emPartes=1 no /gravar: a
-  // G13 a liga para todas, depois da bancada B (reuniões reais longas).
-  const emPartes = useRef(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("emPartes") === "1").current;
+  // cópia no aparelho. Desde a G13b é o padrão para todas (gravaEmPartes, acima).
+  // O modo é lido uma vez, na montagem: as três rotas são a mesma instância, e
+  // trocar de modo no meio deixaria o gravador e o envio em modos diferentes.
+  const emPartes = useRef(typeof window === "undefined" || gravaEmPartes(window.location.search)).current;
   const gravacaoEmPartes = useGravacaoEmPartes({
     ativo: emPartes,
     aoEncerrar: meetingId => {
@@ -183,6 +207,13 @@ export default function Meetings() {
       if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
     },
     aoFalhar: () => toast.error(t("meetings.sendRecordingError")),
+    // O trecho que o servidor recusou de vez fica de fora da transcrição (G13b).
+    // O servidor manda só o código; a frase sai no idioma da tela. O aviso fica
+    // até ser fechado, porque quem grava pode não estar olhando.
+    aoRecusarParte: codigo => toast.error(mensagemDaRecusaDaParte(codigo, t), { id: ID_DO_AVISO_DA_PARTE_RECUSADA, duration: Infinity, closeButton: true }),
+    // Sem a cópia no aparelho, uma queda de rede perde o trecho que estava
+    // subindo (G13b). O hook chama uma vez por gravação.
+    aoFicarSemCopia: () => toast.warning(t("meetings.deviceCopyUnavailable"), { id: ID_DO_AVISO_SEM_COPIA, duration: Infinity, closeButton: true }),
   });
   const gravador = useGravadorDeAudio({
     // Em partes (G13a), sem o teto de 10 min: o aviso de hora pede o OK a cada
@@ -329,26 +360,64 @@ export default function Meetings() {
   }
 
   async function startRecording() {
+    // Um início por vez (G13b): em partes, o Iniciar espera o servidor criar a
+    // reunião, e o duplo clique criava duas; o segundo começo falhava e apagava
+    // a reunião da gravação em curso, que perdia as partes. O ref barra o
+    // segundo clique no mesmo instante; o estado trava o botão na tela.
+    if (iniciandoAgora.current) return;
     const avisoTitulo = avisoDoTitulo();
     if (avisoTitulo) return toast.error(avisoTitulo);
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
-    if (emPartes) {
-      // Os avisos das 12 h e da hora sem OK ficam até ser fechados e falam da
-      // gravação anterior: na nova, pareceriam ser dela. Só a gravação em
-      // partes os cria.
-      toast.dismiss(ID_DO_AVISO_DO_LIMITE);
-      toast.dismiss(ID_DO_AVISO_PAROU_SOZINHA);
-      try {
-        await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
-      } catch (error) {
-        return toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
+    iniciandoAgora.current = true;
+    setIniciando(true);
+    try {
+      let reuniao: string | null = null;
+      if (emPartes) {
+        // Os avisos que ficam até ser fechados falam da gravação anterior: na
+        // nova, pareceriam ser dela. Só a gravação em partes os cria: os das 12 h
+        // e da hora sem OK (G13a), e os da parte recusada e da cópia que faltou (G13b).
+        toast.dismiss(ID_DO_AVISO_DO_LIMITE);
+        toast.dismiss(ID_DO_AVISO_PAROU_SOZINHA);
+        toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
+        toast.dismiss(ID_DO_AVISO_SEM_COPIA);
+        try {
+          reuniao = await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+        } catch (error) {
+          toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
+          return;
+        }
       }
+      const comecou = await gravador.comecar();
+      // O microfone não abriu (negado, ocupado): a reunião em partes vazia DESTA
+      // tentativa sai, e só ela. Se a exclusão falhar agora, ela fica guardada e
+      // a retomada a repete; a dona já viu o aviso do microfone.
+      if (reuniao && !comecou) await gravacaoEmPartes.cancelar(reuniao);
+    } finally {
+      iniciandoAgora.current = false;
+      setIniciando(false);
     }
-    const comecou = await gravador.comecar();
-    // O microfone não abriu (negado, ocupado): a reunião em partes vazia sai.
-    if (emPartes && !comecou) await gravacaoEmPartes.cancelar();
+  }
+
+  // Descartar a gravação em partes, depois da confirmação na tela (G13b): no
+  // envio único a revisão antes de enviar deixa descartar, mas aqui as partes
+  // sobem enquanto grava. O gravador para sem entregar a última parte, e a
+  // reunião, o que já subiu e a cópia no aparelho saem pelo caminho de exclusão
+  // de sempre: nada vai para a transcrição. O título e a autorização ficam, para
+  // gravar de novo.
+  async function discardRecording() {
+    gravador.descartar();
+    // Os avisos da parte recusada e da cópia que faltou falavam desta gravação,
+    // que deixou de existir.
+    toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
+    toast.dismiss(ID_DO_AVISO_SEM_COPIA);
+    const apagada = await gravacaoEmPartes.descartar();
+    void utils.meetings.list.invalidate();
+    if (apagada) toast.success(t("meetings.recordingDiscarded"));
+    // A exclusão que não terminou fica guardada e a retomada a repete; o aviso
+    // fica até ser fechado e diz como excluir pela lista, se for preciso.
+    else toast.error(t("meetings.discardRecordingError"), { id: ID_DO_AVISO_DO_DESCARTE, duration: Infinity, closeButton: true });
   }
 
   async function uploadAudio(file: File) {
@@ -451,8 +520,10 @@ export default function Meetings() {
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
       idioma={idiomaFalado} setIdioma={setIdiomaFalado} emPartes={emPartes}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
+      starting={iniciando}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
+      onDiscardRecording={emPartes ? discardRecording : undefined}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
     />
   ) : screen === "detail" && reuniaoAberta ? (
@@ -484,9 +555,24 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
   const { t } = useTranslation();
-  const locked = props.recording || props.processing;
+  // Iniciando (G13b), o formulário trava como gravando: a autorização desmarcada
+  // ou o título trocado no meio não mudariam a reunião que o servidor já cria.
+  const locked = props.recording || props.processing || props.starting;
+  // A confirmação do Descartar da gravação em partes (G13b), dentro da página:
+  // o window.confirm pararia a página inteira, e no celular some com a troca de
+  // app. A gravação segue enquanto ela está aberta.
+  const [confirmarDescarte, setConfirmarDescarte] = useState(false);
+  const botaoDescartar = useRef<HTMLButtonElement | null>(null);
+  // A gravação que termina com a confirmação aberta (o Encerrar, as 12 h, o aviso
+  // de hora sem OK) já foi entregue: não há mais o que descartar.
+  useEffect(() => { if (!props.recording) setConfirmarDescarte(false); }, [props.recording]);
+  function fecharConfirmacaoDoDescarte() {
+    setConfirmarDescarte(false);
+    // O foco volta ao Descartar, que continua na tela com a gravação.
+    botaoDescartar.current?.focus();
+  }
   // G10: sem a tela acesa garantida (iPhone, ou navegador sem Wake Lock), a
   // dona precisa saber que bloquear o aparelho pode cortar a gravação.
   const avisarTelaAberta = props.recording && (ehAparelhoDaApple() || props.telaPodeApagar);
@@ -512,13 +598,33 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button></div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.startRecording")}</button><button onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button></div>}
+      {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <button ref={botaoDescartar} type="button" onClick={() => setConfirmarDescarte(true)} className="w-full rounded-xl py-2 text-sm text-white/55 hover:text-red-300 inline-flex justify-center gap-2"><Trash2 size={16}/> {t("meetings.discardRecording")}</button>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): o arquivo
+          enviado segue no envio único, com os 10 minutos e 10 MB dele, até a H9a. */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60, mb: ENVIO_UNICO_BYTES_MAX / (1024 * 1024) })}</p>}</div>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
           "Iniciar gravação". Na revisão do áudio ela sai. */}
       {!props.capturedAudio && <DicaDeInstalacao oculta={locked}/>}
     </div>
+    {/* Confirmação do Descartar (G13b), no molde da de excluir reunião: o texto
+        diz que tudo some, inclusive o que já subiu, e que nada vai para a
+        transcrição. O foco começa no botão que NÃO perde o áudio. */}
+    {confirmarDescarte && props.recording && (
+      <div role="alertdialog" aria-modal="true" aria-labelledby="confirmar-descarte-da-gravacao" aria-describedby="confirmar-descarte-da-gravacao-texto" onKeyDown={evento => { if (evento.key === "Escape") fecharConfirmacaoDoDescarte(); }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="bg-[#211e1b] border border-white/15 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+          <h3 id="confirmar-descarte-da-gravacao" className="font-bold text-white mb-2">{t("meetings.discardRecordingConfirmTitle")}</h3>
+          <p id="confirmar-descarte-da-gravacao-texto" className="text-sm text-white/50 mb-6">{t("meetings.discardRecordingConfirmText")}</p>
+          <div className="flex gap-3">
+            <button type="button" autoFocus onClick={fecharConfirmacaoDoDescarte} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8">
+              {t("meetings.discardRecordingCancel")}
+            </button>
+            <button type="button" onClick={() => { setConfirmarDescarte(false); props.onDiscardRecording?.(); }} className="flex-1 rounded-xl bg-red-500 hover:bg-red-400 py-2.5 text-sm font-bold text-white">
+              {t("meetings.discardRecording")}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </main>;
 }
 

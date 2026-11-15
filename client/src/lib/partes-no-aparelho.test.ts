@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apagarParte, apagarTodasAsPartes, guardarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
+import { apagarParte, apagarPartesDaReuniao, apagarTodasAsPartes, guardarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
 
 /**
  * Um IndexedDB mínimo em memória (o jsdom não traz um): só o que o módulo usa
@@ -93,5 +93,20 @@ describe("partes-no-aparelho (G9)", () => {
   it("sem IndexedDB, falha (quem chama segue da memória)", async () => {
     vi.stubGlobal("indexedDB", undefined);
     await expect(guardarParte(parte("r-1", 0))).rejects.toThrow("Sem IndexedDB");
+  });
+
+  it("a gravação descartada (G13b): saem do aparelho só as partes dela, de qualquer conta, e as outras ficam", async () => {
+    await guardarParte(parte("r-1", 0));
+    await guardarParte(parte("r-1", 1));
+    await guardarParte(parte("r-2", 0));
+    await guardarParte(parte("r-9", 0, "outra-conta"));
+    await apagarPartesDaReuniao("r-1");
+    expect((await partesGuardadas("dona-1")).map(p => `${p.meetingId}#${p.seq}`)).toEqual(["r-2#0"]);
+    expect(await partesGuardadas("outra-conta")).toHaveLength(1);
+  });
+
+  it("sem IndexedDB nada foi guardado: apagar a gravação descartada não tem o que apagar e não falha", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(apagarPartesDaReuniao("r-1")).resolves.toBeUndefined();
   });
 });
