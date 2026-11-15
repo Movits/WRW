@@ -1,8 +1,9 @@
 # Decisões tomadas
 
-Registro datado das decisões que já valem no código: quando, quem decidiu, o que mudou e
-onde está. É o par de [decisoes-em-aberto.md](./decisoes-em-aberto.md), que lista o que
-ainda trava por decisão de produto.
+Registro datado das decisões que já valem no código, ou nas PRs já planejadas: quando,
+quem decidiu, o que mudou e onde está. É o par de
+[decisoes-em-aberto.md](./decisoes-em-aberto.md), que lista o que ainda trava por decisão
+de produto.
 
 As regras em si moram nos CLAUDE.md (o da raiz e os de `server/`, `client/`, `drizzle/`,
 `scripts/` e `shared/`), que dizem o que fazer hoje. Este arquivo guarda a história: de
@@ -257,6 +258,178 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `meetings.ligarLinkAberto` e `meetings.desligarLinkAberto` em `server/routers/meetings.ts`,
   `client/src/components/CompartilharReuniao.tsx` e `client/src/pages/ReuniaoAberta.tsx`;
   migração 0015 (`meetings.share_token`).
+
+## 14/11/2026 — a gravação em partes fica atrás de um interruptor até a G13
+
+- **Quem:** a #202, que trouxe o gravador em partes (G9), mesclada em 14/11. O plano do
+  gravador aprovado pelo Roberto em 15/11 mantém o interruptor até a G13b.
+- **O quê:** o gravador em partes só liga com `/gravar?emPartes=1`. Sem o parâmetro, o
+  gravador é o de sempre, com o envio único (`meetings.submitRecording`). O motivo, na
+  #202: com o teto de 600 s por reunião ainda valendo, a gravação em partes teria uma
+  parte só, e trocar o padrão mexeria em cerca de 80 testes de tela sem ganho para quem
+  grava. A G13a (#209) ainda fica atrás do interruptor; a G13b faz das partes o padrão
+  (ver 15/11, abaixo).
+- **Onde:** `client/src/pages/Meetings.tsx` e `client/src/hooks/useGravacaoEmPartes.ts`.
+
+## 14/11/2026 — os nomes das vozes ficam fora do link aberto
+
+- **Quem:** a #204, em que a dona dá nome às vozes da transcrição (H3), mesclada em 14/11.
+  O plano aprovado pelo Roberto em 15/11 estende a regra ao texto que a IA escreve.
+- **O quê:** a dona troca "Falante 1" por um nome, e só ela vê os nomes. O link aberto
+  continua com "Falante n". Reprocessar a reunião apaga os nomes, porque a transcrição nova
+  renumera as vozes.
+- **No texto que a IA escreve** (o resumo, desde a #205): cada voz vai como `{F1}`, `{F2}`,
+  e os nomes nunca vão ao prompt. O servidor não troca o token pelo nome; a tela troca,
+  pelo nome para a dona e por "Falante n" no link aberto. Pelo plano, as duas exceções são
+  as próximas ações (H5a), que gravam o nome quando a reunião é excluída ou reprocessada,
+  e o lembrete no sino (H15), que troca o token na hora do aviso. O mapa mental (H10) não
+  aceita token nos rótulos.
+- **Em aberto:** mostrar os nomes no link é decisão de produto, a confirmar com a Glenda
+  (#204).
+- **Onde:** a coluna `meetings.speaker_names` (migração 0016) e `nomearFalante` em
+  `server/meeting-service.ts`. A troca do token na tela vem com `shared/vozes-no-texto.ts`,
+  na #208 (aberta).
+
+## 15/11/2026 — Face ID e digital voltam ao plano, com as chaves presas a `wrwglobal.org`
+
+- **Quem:** Roberto, na conversa com o Claude de 15/11 que montou o plano do gravador da
+  H4 em diante.
+- **O quê:** a sessão continua durando 90 dias desde o último uso (#179). Quando ela vence,
+  ou num aparelho novo, a pessoa entra com Face ID ou digital, em vez de e-mail e senha, no
+  site e no app. As chaves de acesso (WebAuthn) voltam ao plano logo depois da G13: a A6
+  (servidor) e a A7 (tela).
+  - **Domínio:** o RP ID é `wrwglobal.org`, e `WEBAUTHN_ORIGENS` leva
+    `https://wrwglobal.org` e `https://www.wrwglobal.org`. A chave presa a `wrwglobal.org`
+    vale com e sem www. No endereço `.onrender.com` ela não vale, e lá o botão não aparece.
+  - **Biblioteca:** `@simplewebauthn/server` e `@simplewebauthn/browser` (MIT), pelo aval
+    às bibliotecas seguras (abaixo).
+  - **App:** o app das lojas (M1) vem depois da #180, a casca Expo do app, ainda aberta.
+    Ele usa a mesma A6, com as chaves ligadas na WebView.
+- **Antes:** o desenho deixava o RP ID para depois, a decidir pelo `FRONTEND_URL` de
+  produção e pela existência do www.
+- **Depende do Roberto:** pôr `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS` no Render. Até lá, a
+  função fica invisível em produção.
+- **Onde:** ainda não está no código. Entra na A6 e na A7.
+
+## 15/11/2026 — bibliotecas aprovadas
+
+- **Quem:** Roberto, em 15/11.
+- **O quê:** a `mp4box` (importar M4A, MP4 e MOV, na H9c) e a `docx` (exportar em Word, na
+  H8) estão aprovadas. Também está aprovada qualquer outra biblioteca segura: licença
+  aberta, mantida e com a versão publicada há pelo menos duas semanas. Só entra
+  dependência quando a plataforma não resolve bem.
+- **Antes:** pelo desenho do gravador, nenhuma dependência nova entrava sem o aval do
+  Roberto.
+- **Onde:** nenhuma delas está no `package.json` ainda. Cada uma entra com a sua PR.
+
+## 15/11/2026 — a gravação sem o teto de 10 minutos, com um OK a cada hora (G13)
+
+- **Quem:** Roberto, em 15/11. O teto técnico de 12 h veio do plano aprovado por ele no
+  mesmo dia.
+- **O quê:**
+  - sai o teto de 10 minutos da gravação;
+  - a cada hora cheia de gravação, um aviso pequeno pede OK e fica ativo por 10 minutos;
+  - sem o "Continuar gravando", a gravação para sozinha e o que foi gravado é entregue;
+  - fora isso, só o "Encerrar" para a gravação. Ela não para ao fechar a aba compartilhada
+    (H14) nem no horário de término de uma reunião agendada (H16);
+  - um teto técnico de 12 h por reunião, no servidor, contra gasto: quem confirma a cada
+    hora grava até 12 h;
+  - a G13 vem logo depois da H4.
+- **Antes:** pelo desenho de 10/11, a G10 avisava a cada hora completa de gravação, sem
+  parar a gravação. A G13 só entrava com a bancada B aprovada (ver os testes, abaixo).
+- **Em duas PRs:**
+  - a G13a (#209, aberta) traz o aviso de hora e o teto de 12 h, ainda só no
+    `/gravar?emPartes=1`. O envio único segue em 10 minutos e 10 MB até a G14;
+  - a G13b, ainda sem PR em 15/11, faz das partes o padrão para todas, com o
+    `?envioUnico=1` como saída de suporte até a G14. Junto vêm o "Descartar gravação",
+    com confirmação, porque some a revisão antes de enviar, os avisos de parte recusada e
+    de cópia no aparelho indisponível, o painel de minutos com o limite de 12 h por
+    reunião, os textos que ainda falam em 10
+    minutos e o conserto do duplo clique em "Iniciar gravação". Esse defeito veio com a
+    G9 e foi achado na revisão da #209: no modo em partes, o duplo clique cria duas
+    reuniões, e a gravação em curso perde as partes.
+- **Em aberto:** o faturamento do Gemini, com alerta de orçamento, sem resposta do Roberto
+  em 15/11. A G13b libera gravações de horas para todas, e a H4c gera o resumo de toda
+  reunião (abaixo). Sem faturamento, a cota grátis pode travar também a transcrição.
+- **Onde:** na #209, `shared/const.ts` (os tetos e o prazo do aviso),
+  `server/fatias-de-reuniao.ts` (a parte até 720 s, até 200 partes e a soma até 12 h, com
+  10 min de folga) e os novos `useAvisoDeHora` e `AvisoDeHoraDeGravacao`.
+
+## 15/11/2026 — o teste que dá para automatizar entra na PR; o resto vira cartão
+
+- **Quem:** Roberto, em 15/11.
+- **O quê:** o teste que dá para automatizar entra na PR. O que exige mão humana vira
+  cartão no Notion para o Gabriel e o Nicolas, um por PR que precise.
+- **Na G13:** isso troca a bancada B do desenho, que pedia reuniões reais de 45 minutos ou
+  mais antes da G13. No lugar dela entram os testes automatizados e o cartão "Gravação real
+  de mais de 1 hora", em produção com `?emPartes=1`. O roteiro está no desenho, em "As
+  duas bancadas de teste".
+- **Antes:** a G13 só entrava com a bancada B aprovada, e as reuniões reais para ela
+  estavam entre as pendências do Roberto.
+- **Onde:** fora do código: os cartões ficam no quadro do Notion.
+
+## 15/11/2026 — o resumo guardado, também no link aberto (H4, H6 e H8)
+
+- **Quem:** o plano do gravador aprovado pelo Roberto em 15/11. O formato vem do app de
+  referência que a Glenda mandou no grupo em 10/11.
+- **O quê:**
+  - o resumo fica guardado e é gerado sozinho, em segundo plano, quando a reunião fica
+    pronta. Ele sai no idioma da reunião e no formato que a cliente pediu: ações com caixa
+    de marcar, foco do trabalho, tarefas por assunto, decisões, bloqueios e questões
+    pendentes. Cada item fica pendente até a dona confirmar;
+  - reunião antiga, já pronta, não ganha resumo em lote: a dona toca em "Gerar resumo";
+  - o link aberto mostra o resumo guardado: os itens confirmados e os pendentes, estes com
+    um aviso de que foram gerados pela IA e a dona ainda não os conferiu. Os ignorados
+    nunca aparecem;
+  - na exportação (H8), só saem os itens confirmados;
+  - o "Pergunte à reunião" (H6) lê até 400 mil caracteres da transcrição, cerca de 7 h, e
+    recusa acima disso, com aviso. O resumo lê a transcrição inteira até o mesmo limite e,
+    acima dele, em janelas (#205).
+- **Antes:** o resumo da #171 era gerado a pedido, não ficava guardado e lia só os
+  primeiros 24 mil caracteres. Pelo link, o visitante também pedia esse resumo à IA
+  (12/11).
+- **Em cinco PRs:** H4a1 (#205), a base, com as tabelas, o prompt e a conferência de cada
+  item; H4a2 (#206), a fila que gera o resumo e as rotas para ler e decidir; H4b (#207), o
+  player fixo no rodapé, um só para todas as abas; H4c (#208, aberta), o resumo na tela e
+  no link aberto, com o disparo automático e o fim do resumo a pedido; e H4d, os modelos
+  de resumo, que esperam a Glenda. As três primeiras estão no ar desde 15/11.
+- **Em aberto:** o faturamento do Gemini (ver a G13, acima). O merge da #208 espera essa
+  resposta.
+- **Onde:** `server/resumo-da-reuniao.ts` e a migração 0017 (#205),
+  `server/fila-do-resumo.ts` e `server/resumo-guardado.ts` (#206) e
+  `client/src/components/BarraDoPlayer.tsx` (#207). O `ResumoGuardado.tsx` vem na #208. A
+  H6 e a H8 ainda não estão no código.
+
+## 15/11/2026 — a agenda fala com a Google Agenda pela API (H16)
+
+- **Quem:** o plano do gravador aprovado pelo Roberto em 15/11.
+- **O quê:** a H16 vira três PRs.
+  - **H16a:** a agenda na WRW (título, início, duração, fuso, local ou link, participantes
+    e lembrete), o .ics gerado no navegador, o link de criação de evento da Google Agenda e
+    o convite por WhatsApp e por e-mail, abertos no app da própria dona.
+  - **H16b:** a dona conecta a própria conta Google, por OAuth. O refresh token fica
+    cifrado; desconectar revoga o token, e a exclusão de conta também. Sem as variáveis, a
+    função some.
+  - **H16c:** a WRW cria, atualiza e exclui o evento na Google Agenda, com convidados e
+    lembrete. O convite enviado pela conta Google da dona fica desmarcado por padrão.
+  - A reunião agendada só ganha a gravação quando a dona toca em "Gravar agora", que abre o
+    gravador com o título preenchido e liga a reunião. A agenda guarda só o ponteiro.
+- **Antes:** em 10/11, pôr o evento na agenda pela API, com OAuth, ficava para depois,
+  porque pede a verificação do app pela Google. Em 12/11, WhatsApp e e-mail entraram no
+  lugar do Outlook.
+- **Depende do Roberto, antes da H16b:**
+  - no Google Cloud: ativar a Calendar API; o branding (nome WRW, e-mail de suporte e
+    domínio verificado); o público "Externo", em modo Teste, com as contas da Glenda e do
+    time como usuárias de teste; os escopos `openid`, `email` e `calendar.events`; e um
+    cliente "Aplicativo da Web" com o retorno
+    `https://wrwglobal.org/api/google-agenda/retorno`, mais outro para o localhost;
+  - no Render: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` e
+    `VAULT_ENCRYPTION_KEY` (só os nomes vão ao código). Se a `VAULT_ENCRYPTION_KEY` ainda
+    não existir lá, criá-la torna ilegível o `encryptedSensitiveData` antigo de
+    `server/matching.ts`, que hoje ninguém lê;
+  - no modo Teste, o token vence em 7 dias. Para sair dele, a Google exige uma Política de
+    Privacidade real (Cris) e um vídeo.
+- **Onde:** ainda não está no código.
 
 ---
 

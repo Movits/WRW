@@ -32,7 +32,7 @@ diverge do código, vale o código.
 - [arquitetura/gravador-de-reunioes.md](./arquitetura/gravador-de-reunioes.md): o
   gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
   agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
-  em 10/11).
+  em 10/11, 12/11 e 15/11).
 
 ## Operação
 
@@ -172,8 +172,10 @@ uma faixa no topo que diz isso.
   longas); H1r, H3 a H16 e H9b (resumo, perguntas, agenda e as outras funções em volta
   da reunião); R1 (reunião compartilhada); D1 (detalhe da reunião); S (sessão ocupada);
   e DOC-0 (o próprio desenho). A numeração tem lacunas: a G1 virou G1a e G1b, da H1
-  sobrou a H1r, a H2 e a G11 foram absorvidas pela D1, e a G12 saiu do plano. Valem só
-  dentro desse plano e não são os ajustes A1 a A14 nem as decisões D1, D2… acima.
+  sobrou a H1r, a H2 e a G11 foram absorvidas pela D1, e a G12 saiu do plano. Em 15/11,
+  algumas foram divididas em PRs menores, como a H4 (H4a1, H4a2, H4b, H4c e H4d) e a G13
+  (G13a e G13b). Valem só dentro desse plano e não são os ajustes A1 a A14 nem as
+  decisões D1, D2… acima.
 
 **Processo e operação**
 
