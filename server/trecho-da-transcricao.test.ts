@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { limparRotulos, localizarTrecho, trechoApareceNaTranscricao, vizinhanca } from "./trecho-da-transcricao";
+import { limparRotulos, localizarTrecho, ocorrenciasDoTrecho, trechoApareceNaTranscricao, vizinhanca } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
 /**
@@ -60,14 +60,23 @@ describe("localizarTrecho", () => {
 });
 
 describe("vizinhanca", () => {
-  it("as falas do trecho e até 3 de cada lado, com quem falou nelas; a lacuna não conta", () => {
-    const emVolta = vizinhanca("Decidimos não renovar o contrato", TEXTO, FALAS)!;
-    // A fala do trecho é a 5ª com texto (índice 4): vão da 2ª à 8ª.
-    expect(emVolta.texto).toContain("contêiner");
+  it("as falas do trecho e as de até 3 turnos de cada lado, com quem falou nelas", () => {
+    // Turnos: F1 | F2 | F1 (2 falas) | F3 | F2 | F3 | F1 | F2. A planilha é o
+    // último turno: vão os 3 anteriores, e a decisão (F3) fica de fora.
+    const emVolta = vizinhanca("Eu preparo a planilha de custos do frete", TEXTO, FALAS)!;
+    expect(emVolta.texto).toContain("seguro da carga");
     expect(emVolta.texto).toContain("feira de Colônia");
-    expect(emVolta.texto).not.toContain("Roberto");
-    expect(emVolta.texto).not.toContain("planilha");
+    expect(emVolta.texto).not.toContain("Decidimos");
     expect([...emVolta.falantes].sort()).toEqual(["F1", "F2", "F3"]);
+  });
+
+  it("falas seguidas da mesma voz são um turno só, como a IA as lê; a lacuna não conta", () => {
+    // A decisão é o 4º turno: as duas falas seguidas da F1 contam como um, e o
+    // 1º turno (o Roberto) entra nos 3 anteriores.
+    const emVolta = vizinhanca("Decidimos não renovar o contrato", TEXTO, FALAS)!;
+    expect(emVolta.texto).toContain("Roberto");
+    expect(emVolta.texto).toContain("feira de Colônia");
+    expect(emVolta.texto).not.toContain("planilha");
   });
 
   it("no envio único, sem falas, 400 letras de cada lado no texto corrido", () => {
@@ -82,5 +91,31 @@ describe("vizinhanca", () => {
   it("null quando o trecho não está na transcrição", () => {
     expect(vizinhanca("o navio chega amanhã cedo", TEXTO, FALAS)).toBeNull();
     expect(vizinhanca("o navio chega amanhã cedo", TEXTO, [])).toBeNull();
+  });
+});
+
+describe("ocorrenciasDoTrecho", () => {
+  it("a frase dita mais de uma vez dá uma ocorrência por vez, cada uma com o seu tempo e o seu entorno", () => {
+    const repetida: Segmento[] = [
+      { inicio: 0, fim: 5, falante: "F1", texto: "Eu vou mandar a proposta amanhã cedo." },
+      { inicio: 5, fim: 9, falante: "F3", texto: "Combinado." },
+      { inicio: 300, fim: 306, falante: "F2", texto: "Eu vou mandar a proposta amanhã cedo, sem falta." },
+    ];
+    const ocorrencias = ocorrenciasDoTrecho("vou mandar a proposta amanhã cedo", "", repetida);
+    expect(ocorrencias.map(o => o.inicio)).toEqual([0, 300]);
+    expect(ocorrencias[1].falantes.has("F2")).toBe(true);
+  });
+
+  it("fala só com pontuação no meio não impede achar o trecho que a atravessa", () => {
+    const comPausa: Segmento[] = [
+      { inicio: 0, fim: 4, falante: "F1", texto: "Então a gente fecha o contrato" },
+      { inicio: 4, fim: 5, falante: "F2", texto: "..." },
+      { inicio: 5, fim: 9, falante: "F1", texto: "até sexta-feira." },
+    ];
+    expect(ocorrenciasDoTrecho("fecha o contrato até sexta-feira", "", comPausa).map(o => o.inicio)).toEqual([0]);
+  });
+
+  it("no envio único, sem falas, sem tempo", () => {
+    expect(ocorrenciasDoTrecho("Decidimos não renovar o contrato", TEXTO, []).map(o => o.inicio)).toEqual([null]);
   });
 });

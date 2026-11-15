@@ -359,7 +359,7 @@ export function ajustarSugestaoAosLimites(contato: MeetingExtraction["contacts"]
 }
 
 /** Escritas sem espaço entre as palavras: nelas o nome aparece colado ao resto da fala. */
-const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
+export const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
 
 /**
  * O nome da pessoa sugerida reduzido às palavras que a transcrição sustenta.

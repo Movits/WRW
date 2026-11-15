@@ -2,9 +2,9 @@ import { nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import type { meetingSummaryItems } from "../drizzle/schema";
 import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
-import { nomeSustentadoPelaTranscricao } from "./meeting-service";
+import { ESCRITA_SEM_ESPACO, nomeSustentadoPelaTranscricao } from "./meeting-service";
 import { REGRA_DO_TRECHO, TRANSCRICAO_E_DADO } from "./reuniao-com-ia";
-import { limparRotulos, localizarTrecho, normalizarParaComparar, trechoApareceNaTranscricao, vizinhanca } from "./trecho-da-transcricao";
+import { limparRotulos, normalizarParaComparar, ocorrenciasDoTrecho, trechoApareceNaTranscricao, type OcorrenciaDoTrecho } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
 /**
@@ -34,7 +34,8 @@ export type ItemDoResumo = {
   confidence: number;
 };
 
-export type ResumoGerado = { emoji: string | null; modelo: string | null; itens: ItemDoResumo[] };
+/** Os itens que ficaram e quantos a IA devolveu: a fila sabe quando a conferência tirou tudo. */
+export type ResumoGerado = { emoji: string | null; modelo: string | null; itens: ItemDoResumo[]; recebidos: number };
 
 // Cerca de 7 horas de fala rotulada (~110 mil tokens): o modelo de texto lê
 // bem mais que isso, e a reunião inteira de uma vez dá um resumo melhor que o
@@ -58,7 +59,13 @@ const FALANTE_VALIDO = /^F[1-9]\d?$/;
 const ROTULO_DE_VOZ = /\{(F[1-9]\d?)\}/g;
 const SO_O_ROTULO = /^\{(F[1-9]\d?)\}$/;
 // Pelo construtor: o alvo do tsconfig não aceita a flag u num literal.
-const UM_EMOJI = new RegExp("^\\p{Extended_Pictographic}(?:\\uFE0F|\\p{Emoji_Modifier}|\\u200D\\p{Extended_Pictographic}\\uFE0F?)*$", "u");
+// Um emoji: bandeira (dois indicadores regionais), tecla (1️⃣) ou pictograma com
+// variação, tom de pele e junções (👨‍👩‍👧). "📱📱" e "📱 x" não passam.
+const UM_EMOJI = new RegExp("^(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic}(?:\\uFE0F|\\p{Emoji_Modifier}|\\u200D\\p{Extended_Pictographic}\\uFE0F?)*)$", "u");
+// A linha de uma voz que fala muito tempo seguido é quebrada, com o rótulo de
+// novo: assim a janela da reunião longa nunca começa no meio de uma fala sem
+// saber de quem ela é.
+const LETRAS_POR_LINHA = 2_000;
 
 /**
  * O que vai à IA: as falas com o rótulo da voz, uma linha por vez que a voz
@@ -72,7 +79,7 @@ export function entradaDoResumo(transcricao: string, segmentos: readonly Segment
   let anterior = "";
   for (const fala of falas) {
     const texto = fala.texto.trim().replace(/\s+/g, " ");
-    if (fala.falante === anterior) linhas[linhas.length - 1] += ` ${texto}`;
+    if (fala.falante === anterior && linhas[linhas.length - 1].length + texto.length < LETRAS_POR_LINHA) linhas[linhas.length - 1] += ` ${texto}`;
     else linhas.push(`{${fala.falante}}: ${texto}`);
     anterior = fala.falante;
   }
@@ -127,10 +134,17 @@ const SCHEMA_DO_RESUMO_GUARDADO = {
   additionalProperties: false,
 };
 
+/**
+ * Texto aparado e, se passar do limite, cortado por caractere (nunca no meio de
+ * um emoji) e sem um rótulo de voz pela metade no fim ("{F" ou "{F2").
+ */
 function texto(valor: unknown, limite: number): string | null {
   if (typeof valor !== "string") return null;
   const aparado = valor.trim().replace(/\s+/g, " ");
-  return aparado ? aparado.slice(0, limite) : null;
+  if (!aparado) return null;
+  const letras = Array.from(aparado);
+  if (letras.length <= limite) return aparado;
+  return letras.slice(0, limite).join("").replace(/\{F?\d*$/, "").trimEnd() || null;
 }
 
 function emojiValido(valor: unknown): string | null {
@@ -143,15 +157,34 @@ function itensDe(valor: unknown): Array<Record<string, unknown>> {
   return lista.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x));
 }
 
-/** O prazo fica se as palavras dele (as com número ou com 4+ letras) foram ditas perto do trecho. */
+/**
+ * O prazo fica se foi dito perto do trecho: as palavras dele com número ou com
+ * 4+ letras precisam estar lá. Em chinês, japonês e tailandês, que não separam
+ * as palavras, o prazo inteiro precisa aparecer no texto em volta.
+ */
 function prazoSustentado(prazo: string, emVolta: string): boolean {
-  const palavras = normalizarParaComparar(prazo).split(" ").filter(p => /\d/.test(p) || p.length >= 4);
+  const normalizado = normalizarParaComparar(prazo);
+  if (ESCRITA_SEM_ESPACO.test(normalizado)) {
+    const corrido = (t: string) => t.replace(/ /g, "");
+    return corrido(normalizado).length >= 2 && corrido(normalizarParaComparar(emVolta)).includes(corrido(normalizado));
+  }
+  const palavras = normalizado.split(" ").filter(p => /\d/.test(p) || p.length >= 4);
   if (!palavras.length) return false;
   const ditas = new Set(normalizarParaComparar(emVolta).split(" "));
   return palavras.every(p => ditas.has(p));
 }
 
 type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada: boolean; vozes: Set<string> };
+
+/**
+ * O responsável fica se foi dito perto do trecho: o rótulo de uma voz que fala
+ * ali, ou as palavras do nome que a transcrição sustenta ali.
+ */
+function responsavelSustentado(dito: string, ocorrencia: OcorrenciaDoTrecho, contexto: Contexto): string | null {
+  const rotulo = dito.match(SO_O_ROTULO);
+  if (rotulo) return contexto.rotulada && ocorrencia.falantes.has(rotulo[1]) ? `{${rotulo[1]}}` : null;
+  return dito.includes("{") ? null : nomeSustentadoPelaTranscricao(dito, ocorrencia.texto) || null;
+}
 
 /** Os rótulos de voz citados num texto; null se algum não é uma voz desta reunião. */
 function vozesCitadas(valor: string | null, contexto: Contexto): string[] | null {
@@ -183,18 +216,29 @@ export function conferirResumo(dados: Record<string, unknown>, contexto: Context
       const chave = normalizarParaComparar(textoDoItem);
       if (vistos.has(chave)) continue;
 
-      const emVolta = vizinhanca(trecho, contexto.transcricao, contexto.segmentos);
-      let responsavel = secao === "action" || secao === "task" ? texto(bruto.responsavel, 120) : null;
-      if (responsavel && emVolta) {
-        const rotulo = responsavel.match(SO_O_ROTULO);
-        if (rotulo) responsavel = contexto.rotulada && emVolta.falantes.has(rotulo[1]) ? `{${rotulo[1]}}` : null;
-        else responsavel = responsavel.includes("{") ? null : nomeSustentadoPelaTranscricao(responsavel, emVolta.texto) || null;
-      } else responsavel = null;
+      // A mesma frase pode ter sido dita mais de uma vez: vale a ocorrência em
+      // volta da qual o responsável (ou, sem ele, o prazo) foi dito, e o "▶"
+      // aponta para ela. Sem nenhuma que os sustente, a primeira.
+      const ocorrencias = ocorrenciasDoTrecho(trecho, contexto.transcricao, contexto.segmentos);
+      const responsavelDito = secao === "action" || secao === "task" ? texto(bruto.responsavel, 120) : null;
       const prazoDito = secao === "action" || secao === "task" ? texto(bruto.prazo, 120) : null;
-      const prazo = prazoDito && emVolta && prazoSustentado(prazoDito, emVolta.texto) ? prazoDito : null;
-      const confianca = typeof bruto.confianca === "number" && Number.isFinite(bruto.confianca)
-        ? Math.round(Math.min(1, Math.max(0, bruto.confianca)) * 1000) / 1000
-        : 0;
+      let escolhida: OcorrenciaDoTrecho | undefined;
+      let responsavel: string | null = null;
+      for (const ocorrencia of responsavelDito ? ocorrencias : []) {
+        responsavel = responsavelSustentado(responsavelDito as string, ocorrencia, contexto);
+        if (responsavel) { escolhida = ocorrencia; break; }
+      }
+      let prazo: string | null = null;
+      if (prazoDito) {
+        const onde = escolhida ? [escolhida] : ocorrencias;
+        const comPrazo = onde.find(ocorrencia => prazoSustentado(prazoDito, ocorrencia.texto));
+        if (comPrazo) { prazo = prazoDito; escolhida ??= comPrazo; }
+      }
+      escolhida ??= ocorrencias[0];
+      // Confiança fora do esperado vira 0 (não confia), nunca derruba o item:
+      // o trecho literal é que o sustenta.
+      const bruta = typeof bruto.confianca === "number" ? bruto.confianca : typeof bruto.confianca === "string" ? Number(bruto.confianca) : Number.NaN;
+      const confianca = Number.isFinite(bruta) ? Math.round(Math.min(1, Math.max(0, bruta)) * 1000) / 1000 : 0;
 
       vistos.add(chave);
       guardados++;
@@ -205,7 +249,7 @@ export function conferirResumo(dados: Record<string, unknown>, contexto: Context
         assignee: responsavel,
         due: prazo,
         excerpt: trecho,
-        startSeconds: localizarTrecho(trecho, contexto.segmentos),
+        startSeconds: escolhida?.inicio ?? null,
         confidence: confianca,
       });
     }
@@ -228,7 +272,7 @@ export async function gerarResumoDaReuniao(
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<ResumoGerado> {
   const { texto: paraAIA, rotulada } = entradaDoResumo(entrada.transcricao, entrada.segmentos);
-  if (!paraAIA) return { emoji: null, modelo: null, itens: [] };
+  if (!paraAIA) return { emoji: null, modelo: null, itens: [], recebidos: 0 };
   const limite = opcoes.limiteDaEntrada ?? LIMITE_DA_ENTRADA_DO_RESUMO;
   const sistema = instrucoes(entrada.idioma, rotulada);
 
@@ -253,9 +297,9 @@ export async function gerarResumoDaReuniao(
   }
 
   const vozes = new Set(entrada.segmentos.filter(s => !s.lacuna && FALANTE_VALIDO.test(s.falante)).map(s => s.falante));
-  return {
-    emoji: emojiValido(resposta.dados.emoji),
-    modelo: resposta.modelo,
-    itens: conferirResumo(resposta.dados, { transcricao: entrada.transcricao, segmentos: entrada.segmentos, rotulada, vozes }),
-  };
+  const itens = conferirResumo(resposta.dados, { transcricao: entrada.transcricao, segmentos: entrada.segmentos, rotulada, vozes });
+  const recebidos = SECOES.reduce((soma, { campo }) => soma + itensDe(resposta.dados[campo]).filter(item => texto(item.texto, 900)).length, 0);
+  // Só números no log: o conteúdo é a fala das pessoas.
+  if (recebidos > itens.length) console.warn(`[Resumo] a conferência tirou ${recebidos - itens.length} de ${recebidos} itens`);
+  return { emoji: emojiValido(resposta.dados.emoji), modelo: resposta.modelo, itens, recebidos };
 }

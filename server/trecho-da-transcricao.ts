@@ -12,10 +12,14 @@ const TAMANHO_MINIMO_DO_TRECHO = 8;
 // Cada pedaço entre reticências: sem esse mínimo, "a ... e ... i" juntaria
 // letras soltas de qualquer ponto da transcrição.
 const TAMANHO_MINIMO_DO_PEDACO = 4;
-// Em volta do trecho, as falas (ou letras, no envio único sem falas) em que
-// responsável e prazo precisam aparecer para ficar no item.
-const FALAS_EM_VOLTA = 3;
+// Em volta do trecho, os turnos (falas seguidas da mesma voz contam como um
+// turno, como a IA as lê) ou, no envio único sem falas, as letras em que
+// responsável e prazo de um item precisam aparecer para ficar nele.
+const TURNOS_EM_VOLTA = 3;
 const LETRAS_EM_VOLTA = 400;
+// Uma frase comum ("vou mandar a proposta") pode se repetir na reunião: cada
+// vez é uma ocorrência, até este teto.
+const OCORRENCIAS_NO_MAXIMO = 20;
 
 // Pelo construtor, como ESCRITA_SEM_ESPACO em meeting-service.ts: o alvo do
 // tsconfig não aceita a flag u num literal.
@@ -50,18 +54,34 @@ function pedacosDoTrecho(trecho: unknown): string[] | null {
   return pedacos;
 }
 
-/** Onde os pedaços aparecem em `fonte` (já normalizada), na ordem: [início, fim) ou null. */
-function ondeNaFonte(pedacos: string[], fonte: string): [number, number] | null {
+/**
+ * Onde os pedaços aparecem em `fonte` (já normalizada), na ordem, com o
+ * primeiro a partir de `desde`: [início, fim) ou null.
+ */
+function ondeNaFonte(pedacos: string[], fonte: string, desde = 0): [number, number] | null {
   // Cada pedaço é procurado depois do fim do anterior: fora de ordem não vale.
-  let desde = 0;
+  let cursor = desde;
   let comeco = -1;
   for (const pedaco of pedacos) {
-    const onde = fonte.indexOf(pedaco, desde);
+    const onde = fonte.indexOf(pedaco, cursor);
     if (onde < 0) return null;
     if (comeco < 0) comeco = onde;
-    desde = onde + pedaco.length;
+    cursor = onde + pedaco.length;
   }
-  return [comeco, desde];
+  return [comeco, cursor];
+}
+
+/** Todas as vezes em que o trecho aparece, até o teto. */
+function todasAsOcorrencias(pedacos: string[], fonte: string): Array<[number, number]> {
+  const achadas: Array<[number, number]> = [];
+  let desde = 0;
+  while (achadas.length < OCORRENCIAS_NO_MAXIMO) {
+    const onde = ondeNaFonte(pedacos, fonte, desde);
+    if (!onde) break;
+    achadas.push(onde);
+    desde = onde[0] + 1;
+  }
+  return achadas;
 }
 
 /**
@@ -76,25 +96,34 @@ export function trechoApareceNaTranscricao(trecho: unknown, transcricao: string)
   return !!pedacos && ondeNaFonte(pedacos, normalizarParaComparar(transcricao)) !== null;
 }
 
-/** As falas válidas, sem as lacunas (o trecho que não chegou não tem texto). */
+/**
+ * As falas com o que comparar: sem as lacunas (o trecho que não chegou) e sem
+ * as que só têm pontuação ("...", "?"), que não têm letra para casar e
+ * deixariam um espaço a mais entre as vizinhas.
+ */
 function falasComTexto(segmentos: readonly Segmento[]): Segmento[] {
-  return segmentos.filter(segmento => !segmento.lacuna && typeof segmento.texto === "string" && segmento.texto.trim());
+  return segmentos.filter(segmento => !segmento.lacuna && typeof segmento.texto === "string" && normalizarParaComparar(segmento.texto));
 }
 
 /**
  * As falas emendadas num texto só, normalizado, com a posição em que cada
- * fala começa: um trecho que cruza duas falas também é achado.
+ * fala começa (um trecho que cruza duas falas também é achado) e o turno de
+ * cada uma (falas seguidas da mesma voz são um turno).
  */
 function falasEmendadas(segmentos: readonly Segmento[]) {
   const falas = falasComTexto(segmentos);
   const inicios: number[] = [];
+  const turnos: number[] = [];
   let fonte = "";
-  for (const fala of falas) {
+  let turno = -1;
+  falas.forEach((fala, i) => {
     if (fonte) fonte += " ";
     inicios.push(fonte.length);
     fonte += normalizarParaComparar(fala.texto);
-  }
-  return { falas, inicios, fonte };
+    if (i === 0 || fala.falante !== falas[i - 1].falante) turno++;
+    turnos.push(turno);
+  });
+  return { falas, inicios, turnos, fonte };
 }
 
 /** O índice da fala que contém a posição `pos` do texto emendado. */
@@ -104,45 +133,59 @@ function falaNaPosicao(inicios: number[], pos: number): number {
   return i;
 }
 
-/** As falas cobertas pelo trecho: [primeira, última] ou null. */
-function falasDoTrecho(trecho: unknown, segmentos: readonly Segmento[]) {
+export type OcorrenciaDoTrecho = {
+  /** O segundo da reunião em que o trecho começa; null sem falas (envio único). */
+  inicio: number | null;
+  /** O que foi dito em volta do trecho, com ele. */
+  texto: string;
+  /** Quem falou em volta (rótulos F1, F2...); vazio no envio único. */
+  falantes: Set<string>;
+};
+
+/**
+ * Cada vez em que o trecho aparece na reunião, com o segundo em que começa e o
+ * que foi dito em volta: as falas dele e as de até 3 turnos de cada lado (no
+ * envio único, sem falas, 400 letras de cada lado no texto corrido). Vazio
+ * quando o trecho não está na transcrição.
+ */
+export function ocorrenciasDoTrecho(trecho: unknown, transcricao: string, segmentos: readonly Segmento[]): OcorrenciaDoTrecho[] {
   const pedacos = pedacosDoTrecho(trecho);
-  if (!pedacos) return null;
+  if (!pedacos) return [];
   const emendadas = falasEmendadas(segmentos);
-  const onde = ondeNaFonte(pedacos, emendadas.fonte);
-  if (!onde) return null;
-  return { ...emendadas, primeira: falaNaPosicao(emendadas.inicios, onde[0]), ultima: falaNaPosicao(emendadas.inicios, Math.max(onde[0], onde[1] - 1)) };
+  if (emendadas.falas.length) {
+    const { falas, inicios, turnos, fonte } = emendadas;
+    return todasAsOcorrencias(pedacos, fonte).map(([comeco, fim]) => {
+      const primeira = falaNaPosicao(inicios, comeco);
+      const ultima = falaNaPosicao(inicios, Math.max(comeco, fim - 1));
+      const emVolta = falas.filter((_, i) => turnos[i] >= turnos[primeira] - TURNOS_EM_VOLTA && turnos[i] <= turnos[ultima] + TURNOS_EM_VOLTA);
+      const inicio = falas[primeira].inicio;
+      return {
+        inicio: Number.isFinite(inicio) && inicio >= 0 ? Math.floor(inicio) : null,
+        texto: emVolta.map(fala => fala.texto).join("\n"),
+        falantes: new Set(emVolta.map(fala => fala.falante)),
+      };
+    });
+  }
+  const fonte = normalizarParaComparar(transcricao);
+  return todasAsOcorrencias(pedacos, fonte).map(([comeco, fim]) => ({
+    inicio: null,
+    texto: fonte.slice(Math.max(0, comeco - LETRAS_EM_VOLTA), fim + LETRAS_EM_VOLTA),
+    falantes: new Set<string>(),
+  }));
 }
 
 /**
  * O segundo da reunião em que o trecho começa (o início da fala em que ele
- * começa), para o "▶ mm:ss" da tela. Null quando a transcrição não tem falas
- * (envio único) ou o trecho não está nelas.
+ * começa, na primeira vez em que aparece), para o "▶ mm:ss" da tela. Null
+ * quando a transcrição não tem falas (envio único) ou o trecho não está nelas.
  */
 export function localizarTrecho(trecho: unknown, segmentos: readonly Segmento[]): number | null {
-  const achado = falasDoTrecho(trecho, segmentos);
-  if (!achado) return null;
-  const inicio = achado.falas[achado.primeira].inicio;
-  return Number.isFinite(inicio) && inicio >= 0 ? Math.floor(inicio) : null;
+  if (!falasComTexto(segmentos).length) return null;
+  return ocorrenciasDoTrecho(trecho, "", segmentos)[0]?.inicio ?? null;
 }
 
-/**
- * O que foi dito em volta do trecho: as falas dele e até 3 de cada lado, com
- * os rótulos de quem falou nelas; sem falas (envio único), 400 letras de cada
- * lado no texto corrido. Null se o trecho não está na transcrição. É onde o
- * responsável e o prazo de um item precisam aparecer para ficar nele.
- */
+/** O que foi dito em volta da primeira vez em que o trecho aparece; null se ele não está na transcrição. */
 export function vizinhanca(trecho: unknown, transcricao: string, segmentos: readonly Segmento[]): { texto: string; falantes: Set<string> } | null {
-  if (falasComTexto(segmentos).length) {
-    const achado = falasDoTrecho(trecho, segmentos);
-    if (!achado) return null;
-    const em = achado.falas.slice(Math.max(0, achado.primeira - FALAS_EM_VOLTA), achado.ultima + FALAS_EM_VOLTA + 1);
-    return { texto: em.map(fala => fala.texto).join("\n"), falantes: new Set(em.map(fala => fala.falante)) };
-  }
-  const pedacos = pedacosDoTrecho(trecho);
-  if (!pedacos) return null;
-  const fonte = normalizarParaComparar(transcricao);
-  const onde = ondeNaFonte(pedacos, fonte);
-  if (!onde) return null;
-  return { texto: fonte.slice(Math.max(0, onde[0] - LETRAS_EM_VOLTA), onde[1] + LETRAS_EM_VOLTA), falantes: new Set() };
+  const [primeira] = ocorrenciasDoTrecho(trecho, transcricao, segmentos);
+  return primeira ? { texto: primeira.texto, falantes: primeira.falantes } : null;
 }

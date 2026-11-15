@@ -75,7 +75,7 @@ describe("o que vai à IA", () => {
   });
 
   it("transcrição vazia não chama a IA", async () => {
-    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, modelo: null, itens: [] });
+    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, modelo: null, itens: [], recebidos: 0 });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 });
@@ -199,5 +199,123 @@ describe("falhas da IA viram código", () => {
     const erro = await gerarResumoDaReuniao(ENTRADA).catch(e => e);
     expect(erro).toBeInstanceOf(FalhaDaIA);
     expect(erro.codigo).toBe("IA_INDISPONIVEL");
+  });
+});
+
+describe("o que a revisão da H4a1 pediu", () => {
+  it("prazo em chinês ou japonês, sem espaço entre as palavras, fica se foi dito perto do trecho", async () => {
+    const falas: Segmento[] = [
+      { inicio: 0, fim: 6, falante: "F1", texto: "我们下周五之前完成报告。" },
+      { inicio: 6, fim: 9, falante: "F2", texto: "好的,我来负责。" },
+    ];
+    const transcricao = falas.map(f => f.texto).join("\n");
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [{ texto: "完成报告", responsavel: "{F1}", prazo: "下周五", trecho: "我们下周五之前完成报告", confianca: 0.9 }] }));
+    const { itens } = await gerarResumoDaReuniao({ transcricao, segmentos: falas, idioma: "zh" });
+    expect(itens).toEqual([expect.objectContaining({ due: "下周五", assignee: "{F1}", startSeconds: 0 })]);
+  });
+
+  it("frase dita duas vezes: vale a vez em volta da qual o responsável fala, e o tempo é o dela", async () => {
+    const falas: Segmento[] = [
+      { inicio: 0, fim: 5, falante: "F1", texto: "Eu vou mandar a proposta amanhã cedo." },
+      { inicio: 5, fim: 9, falante: "F3", texto: "Ótimo, combinado." },
+      { inicio: 9, fim: 15, falante: "F1", texto: "Depois falamos do frete." },
+      { inicio: 15, fim: 20, falante: "F3", texto: "Certo." },
+      { inicio: 20, fim: 26, falante: "F1", texto: "E do seguro também." },
+      { inicio: 26, fim: 30, falante: "F3", texto: "Pode ser." },
+      { inicio: 30, fim: 36, falante: "F1", texto: "Então está bem." },
+      { inicio: 300, fim: 306, falante: "F2", texto: "Eu vou mandar a proposta amanhã cedo, sem falta." },
+    ];
+    const transcricao = falas.map(f => f.texto).join("\n");
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [{ texto: "Mandar a proposta", responsavel: "{F2}", prazo: null, trecho: "vou mandar a proposta amanhã cedo", confianca: 0.8 }] }));
+    const { itens } = await gerarResumoDaReuniao({ transcricao, segmentos: falas, idioma: "pt-BR" });
+    expect(itens).toEqual([expect.objectContaining({ assignee: "{F2}", startSeconds: 300 })]);
+  });
+
+  it("prazo com número fica só se o número foi dito perto do trecho", async () => {
+    invokeLLM.mockResolvedValue(resposta({
+      ...VAZIO,
+      acoes: [
+        { texto: "Embarcar o contêiner", responsavel: null, prazo: "dia 12 de março", trecho: "O contêiner sai do porto de Santos no dia 12 de março", confianca: 0.9 },
+        { texto: "Confirmar o embarque", responsavel: null, prazo: "dia 13 de março", trecho: "O contêiner sai do porto de Santos", confianca: 0.9 },
+      ],
+    }));
+    const [embarcar, confirmar] = (await gerarResumoDaReuniao(ENTRADA)).itens;
+    expect(embarcar.due).toBe("dia 12 de março");
+    expect(confirmar.due).toBeNull();
+  });
+
+  it("devolve quantos itens a IA mandou, e o log diz só os números quando a conferência tira algum", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, decisoes: ["a", "b", "c"].map(x => ({ texto: "Decisão " + x, trecho: "isto nunca foi dito na reunião " + x, confianca: 0.9 })) }));
+    const resumo = await gerarResumoDaReuniao(ENTRADA);
+    expect(resumo.itens).toEqual([]);
+    expect(resumo.recebidos).toBe(3);
+    expect(aviso).toHaveBeenCalledWith("[Resumo] a conferência tirou 3 de 3 itens");
+  });
+
+  it("aceita bandeira, tecla, tom de pele e família; recusa dois emojis ou emoji com texto", async () => {
+    for (const emoji of ["🇧🇷", "1️⃣", "👍🏽", "👨‍👩‍👧", "⚠️"]) {
+      invokeLLM.mockResolvedValueOnce(resposta({ ...VAZIO, emoji }));
+      expect((await gerarResumoDaReuniao(ENTRADA)).emoji).toBe(emoji);
+    }
+    for (const emoji of ["📱📱", "📱 x"]) {
+      invokeLLM.mockResolvedValueOnce(resposta({ ...VAZIO, emoji }));
+      expect((await gerarResumoDaReuniao(ENTRADA)).emoji).toBeNull();
+    }
+  });
+
+  it("texto acima do teto é cortado por caractere, sem partir emoji nem deixar um rótulo de voz pela metade", async () => {
+    invokeLLM.mockResolvedValue(resposta({
+      ...VAZIO,
+      acoes: [
+        { texto: "😀".repeat(170), responsavel: null, prazo: null, trecho: "O contêiner sai do porto de Santos", confianca: 0.5 },
+        { texto: "A".repeat(157) + " {F2} confirma", responsavel: null, prazo: null, trecho: "Falta ver o seguro da carga com a corretora", confianca: 0.5 },
+      ],
+    }));
+    const [emojis, rotulo] = (await gerarResumoDaReuniao(ENTRADA)).itens;
+    expect(Array.from(emojis.text)).toHaveLength(160);
+    expect(emojis.text).toBe("😀".repeat(160));
+    expect(rotulo.text).toBe("A".repeat(157));
+  });
+
+  it("confiança em texto vira número; o que não é número vira 0", async () => {
+    invokeLLM.mockResolvedValue(resposta({
+      ...VAZIO,
+      decisoes: [
+        { texto: "Não renovar", trecho: "Decidimos não renovar o contrato", confianca: "0.9" },
+        { texto: "Ver o seguro", trecho: "Falta ver o seguro da carga", confianca: "muita" },
+      ],
+    }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).itens.map(i => i.confidence)).toEqual([0.9, 0]);
+  });
+
+  it("reunião longa: a janela que falha derruba o resumo inteiro, sem a junção", async () => {
+    invokeLLM
+      .mockResolvedValueOnce(resposta(VAZIO))
+      .mockRejectedValueOnce(new Error("LLM sem resposta em 180s"));
+    await expect(gerarResumoDaReuniao(ENTRADA, { limiteDaEntrada: 300 })).rejects.toMatchObject({ codigo: "IA_INDISPONIVEL" });
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+  });
+
+  it("reunião longa: o trecho que a junção mudou é conferido contra a transcrição inteira e sai", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    invokeLLM
+      .mockResolvedValueOnce(resposta(VAZIO))
+      .mockResolvedValueOnce(resposta(VAZIO))
+      .mockResolvedValueOnce(resposta({ ...VAZIO, acoes: [{ texto: "Preparar a planilha", responsavel: null, prazo: null, trecho: "Eu preparo a planilha de custos do navio", confianca: 0.8 }] }));
+    const resumo = await gerarResumoDaReuniao(ENTRADA, { limiteDaEntrada: 300 });
+    expect(resumo.itens).toEqual([]);
+    expect(resumo.recebidos).toBe(1);
+  });
+
+  it("voz que fala muito tempo seguido vira várias linhas, todas com o rótulo", () => {
+    const longa = Array.from({ length: 60 }, (_, i) => ({ inicio: i, fim: i + 1, falante: "F1", texto: "uma frase de umas cinquenta letras para encher a linha " + i }));
+    const { texto } = entradaDoResumo("", longa);
+    const linhas = texto.split("\n");
+    expect(linhas.length).toBeGreaterThan(1);
+    for (const linha of linhas) {
+      expect(linha.startsWith("{F1}: ")).toBe(true);
+      expect(linha.length).toBeLessThan(2_100);
+    }
   });
 });
