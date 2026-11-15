@@ -46,6 +46,12 @@ export type OpcoesDoGravador = {
   aoFecharParte?: (parte: AudioGravado & { seq: number; ultima: boolean }) => void;
   /** Microfone negado, ausente ou ocupado, ou o gravador recusado. Não chega a quem já saiu da tela. */
   aoFalhar?: (erro: unknown) => void;
+  /**
+   * A gravação chegou a `limiteSegundos` e o gravador vai parar sozinho (e
+   * entregar, como sempre). Só para a tela avisar o porquê: a gravação em partes
+   * diz que bateu nas 12 h (G13a).
+   */
+  aoChegarAoLimite?: () => void;
 };
 
 // Pedaços de 250 ms e o relógio a cada 500 ms, como os três faziam (a folga da
@@ -277,7 +283,10 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       const limite = atuais.current.limiteSegundos;
       const decorridos = Math.floor((Date.now() - inicio.current - pausadoNaGravacao.current) / 1000);
       setSegundos(Math.min(limite, decorridos));
-      if (decorridos >= limite) return parar();
+      if (decorridos >= limite) {
+        atuais.current.aoChegarAoLimite?.();
+        return parar();
+      }
       const fatia = atuais.current.fatiaSegundos;
       const atual = gravador.current;
       if (fatia && atual?.state === "recording" && !trocandoDeParte.current && Date.now() - inicioDaParte.current - pausadoNaParte.current >= fatia * 1000) {

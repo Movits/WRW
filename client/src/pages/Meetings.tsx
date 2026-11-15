@@ -15,7 +15,8 @@ import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
-import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeHoraDeGravacao } from "@/components/AvisoDeHoraDeGravacao";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
@@ -24,16 +25,16 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
-const MAX_DURATION = 10 * 60;
-
-function formatDuration(seconds: number) {
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
+// O relógio do gravador e a duração da reunião no formato da transcrição: a
+// gravação em partes passa de uma hora, e 1 h é 1:00:00, não 60:00.
+const formatDuration = mmss;
+/** As horas do teto técnico da gravação em partes (12), para os textos. */
+const HORAS_DA_GRAVACAO_EM_PARTES = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -182,7 +183,12 @@ export default function Meetings() {
     aoFalhar: () => toast.error(t("meetings.sendRecordingError")),
   });
   const gravador = useGravadorDeAudio({
-    limiteSegundos: MAX_DURATION,
+    // Em partes (G13a), sem o teto de 10 min: o aviso de hora pede o OK a cada
+    // hora cheia, e as 12 h são só o teto técnico. O envio único segue nos 10 min.
+    limiteSegundos: emPartes ? GRAVACAO_EM_PARTES_SEGUNDOS_MAX : ENVIO_UNICO_SEGUNDOS_MAX,
+    // A gravação em partes que bate nas 12 h para e entrega como no Encerrar; o
+    // aviso fica até ser fechado, porque quem gravou pode não estar olhando.
+    aoChegarAoLimite: emPartes ? () => toast.info(t("meetings.recordingMaxReached", { horas: HORAS_DA_GRAVACAO_EM_PARTES }), { id: "gravacao-chegou-ao-limite", duration: Infinity }) : undefined,
     fatiaSegundos: emPartes ? PARTE_SEGUNDOS : undefined,
     aoFecharParte: emPartes ? gravacaoEmPartes.receberParte : undefined,
     bitsPorSegundo: 64_000,
@@ -206,7 +212,7 @@ export default function Meetings() {
         // lento), e o relógio passa do teto, que o servidor confere sem folga
         // na duração declarada: 601 s eram recusados. A duração medida nos
         // bytes, que é a que vale, tem a folga de 5 s.
-        durationSeconds: Math.min(MAX_DURATION, Math.max(1, Math.floor(duracaoMs / 1000))),
+        durationSeconds: Math.min(ENVIO_UNICO_SEGUNDOS_MAX, Math.max(1, Math.floor(duracaoMs / 1000))),
       });
     },
     // O pedido do microfone falhou (permissão negada, por exemplo). Se a dona
@@ -224,14 +230,6 @@ export default function Meetings() {
   // G10: a tela acesa enquanto grava (no celular, a tela que apaga bloqueia o
   // aparelho, e no iPhone o bloqueio corta o microfone).
   const telaAcesa = useTelaAcesa(recording);
-  // G10: um aviso a cada hora cheia de gravação, sem parar nada (no lugar do
-  // aviso de limite, quando a G13 tirar o teto).
-  const horasAvisadas = useRef(0);
-  const horasGravadas = recording ? Math.floor(gravador.segundos / 3600) : 0;
-  useEffect(() => {
-    if (horasGravadas > horasAvisadas.current) toast.info(t("meetings.hoursOfRecording", { count: horasGravadas }), { id: `horas-de-gravacao-${horasGravadas}` });
-    horasAvisadas.current = horasGravadas;
-  }, [horasGravadas, t]);
   // Pedindo o microfone ou fechando o arquivo, o gravador fica travado como no envio.
   const gravadorOcupado = gravador.estado === "pedindoMicrofone" || gravador.estado === "finalizando";
   // O áudio gravado e ainda não enviado só existe nesta aba: a sessão fica ocupada
@@ -351,7 +349,7 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
-    if (file.size > 10 * 1024 * 1024) return toast.error(t("meetings.fileTooLarge"));
+    if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
     let reuniaoCriada: string | undefined;
     // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
     const liberarEnvio = ocupar("enviando");
@@ -364,7 +362,7 @@ export default function Meetings() {
       // Sem duração legível, recusa: assumir um valor (eram 60 s) deixava um
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
-      if (durationSeconds > MAX_DURATION) return toast.error(t("meetings.audioTooLong"));
+      if (durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) return toast.error(t("meetings.audioTooLong"));
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
       await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado });
@@ -443,7 +441,7 @@ export default function Meetings() {
   const conteudo = screen === "new" ? (
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
-      idioma={idiomaFalado} setIdioma={setIdiomaFalado}
+      idioma={idiomaFalado} setIdioma={setIdiomaFalado} emPartes={emPartes}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
@@ -466,7 +464,10 @@ export default function Meetings() {
     </main>
   );
 
-  return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}</>;
+  // O aviso de cada hora cheia de gravação (G13a) pede o OK e, sem ele em 10
+  // min, encerra pelo mesmo caminho do botão Encerrar. Só na gravação em
+  // partes: o envio único para nos 10 min e nunca chega a uma hora.
+  return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}{emPartes && <AvisoDeHoraDeGravacao estado={gravador.estado} segundos={gravador.segundos} retomar={gravador.continuar} encerrar={stopRecording}/>}</>;
 }
 
 /** iPhone, iPod e iPad (o iPad se diz Mac, mas tem toque). */
@@ -475,7 +476,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
   const { t } = useTranslation();
   const locked = props.recording || props.processing;
   // G10: sem a tela acesa garantida (iPhone, ou navegador sem Wake Lock), a
@@ -499,7 +500,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
         <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
       </div>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimit")}</p>}</div>
+      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>

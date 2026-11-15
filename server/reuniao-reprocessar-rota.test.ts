@@ -216,6 +216,22 @@ describe("meetings.submitRecording — reunião que já recebeu áudio", () => {
   });
 });
 
+// A G13a tira o teto de 10 min só da gravação em partes: o envio único (o
+// áudio inteiro num pedido) segue recusando a duração declarada acima de 600 s.
+describe("meetings.submitRecording — o teto de 10 min do envio único continua", () => {
+  const envio = (durationSeconds: number) => rota().submitRecording({
+    meetingId: ID, audioBase64: "A".repeat(40), mimeType: "audio/webm", durationSeconds, language: "pt",
+  });
+
+  it("600 s chega ao serviço; 601 s é BAD_REQUEST sem chegar a ele", async () => {
+    processMeetingRecording.mockResolvedValue({ transcript: "texto", extraction: { entities: [], contacts: [] } });
+    await expect(envio(600)).resolves.toMatchObject({ success: true });
+    expect(processMeetingRecording).toHaveBeenCalledTimes(1);
+    await expect(envio(601)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(processMeetingRecording).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("decisões durante o reprocessamento", () => {
   it("criar contato de uma sugestão com a reunião em 'processing': CONFLICT, nenhum contato criado, nada atualizado", async () => {
     banco.statusDaReuniao = "processing";

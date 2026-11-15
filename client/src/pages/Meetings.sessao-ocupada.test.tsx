@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { PRAZO_DO_AVISO_DE_HORA_MS } from "@shared/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import Meetings from "./Meetings";
@@ -557,5 +558,104 @@ describe("Reuniões — gravação longa no celular (G10)", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("note")).toHaveTextContent(/Mantenha esta tela aberta/);
+  });
+});
+
+describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes (G13a)", () => {
+  const { iniciarGravacao, encerrarGravacao, delete: excluir } = duble.utils.client.meetings;
+  const UMA_HORA_MS = 3_600_000;
+  const PAROU_SOZINHA = "A gravação parou sozinha: ninguém confirmou o aviso de hora em 10 minutos. O que foi gravado segue para a transcrição.";
+
+  beforeEach(() => {
+    iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
+    encerrarGravacao.mutate.mockReset().mockResolvedValue({ partes: 1 });
+    excluir.mutate.mockReset().mockResolvedValue({ success: true });
+    duble.enviarParte.mockReset().mockResolvedValue({ tipo: "recebida" });
+    // O relógio do gravador (a cada 500 ms) e o do prazo do aviso são falsos:
+    // as horas passam sem esperar. O setTimeout fica real, para o waitFor.
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  async function iniciar(caminho: string) {
+    window.history.replaceState(null, "", caminho);
+    render(<Meetings />);
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+  }
+
+  /** O relógio de parede anda `ms` de uma vez, e o gravador dá o tique seguinte (500 ms). */
+  async function passar(ms: number) {
+    vi.setSystemTime(Date.now() + ms);
+    await act(async () => { vi.advanceTimersByTime(500); });
+  }
+
+  it("na hora cheia o aviso aparece, sem o toast antigo e com o relógio em 1:00:00; Continuar retoma a pausada, e a 2ª hora reabre", async () => {
+    await iniciar("/gravar?emPartes=1");
+    // Sem o teto de 10 min: o texto sob o relógio fala do aviso e das 12 h.
+    expect(screen.getByText("A cada hora de gravação, confirme que ela continua. Limite: 12 horas.")).toBeInTheDocument();
+    await passar(UMA_HORA_MS);
+    const aviso = screen.getByRole("alertdialog", { name: "1 h de gravação" });
+    expect(screen.getByText("1:00:00")).toBeInTheDocument();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    // Pausada com o aviso na tela: o Continuar do aviso fecha e retoma.
+    fireEvent.click(screen.getByRole("button", { name: "Pausar" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Gravação pausada");
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar gravando" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pausar" })).toBeInTheDocument();
+    await passar(UMA_HORA_MS);
+    expect(screen.getByRole("alertdialog", { name: "2 h de gravação" })).toBeInTheDocument();
+    // Os dois tiques de 500 ms somam um segundo além das 2 h.
+    expect(screen.getByText("2:00:01")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Continuar gravando" }));
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    // A dona encerra: as partes vão e a sessão fica livre.
+    vi.useRealTimers();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(toast.info).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("sem o OK em 10 min (o tique atrasado da aba oculta), para sozinha, entrega pelo caminho do Encerrar e avisa até ser fechado", async () => {
+    await iniciar("/gravar?emPartes=1");
+    await passar(UMA_HORA_MS);
+    expect(screen.getByRole("alertdialog", { name: "1 h de gravação" })).toBeInTheDocument();
+    vi.setSystemTime(Date.now() + PRAZO_DO_AVISO_DE_HORA_MS);
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    expect(toast.info).toHaveBeenCalledWith(PAROU_SOZINHA, { id: "gravacao-parou-sem-confirmacao", duration: Infinity });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    vi.useRealTimers();
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ meetingId: VINICOLA })));
+    expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+    await waitFor(() => expect(window.location.pathname).toContain(VINICOLA));
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("nas 12 h, a gravação em partes para e entrega, com um aviso que fica até ser fechado", async () => {
+    await iniciar("/gravar?emPartes=1");
+    await passar(12 * UMA_HORA_MS);
+    expect(toast.info).toHaveBeenCalledWith("A gravação chegou ao limite de 12 horas e foi encerrada. O que foi gravado segue para a transcrição.", { id: "gravacao-chegou-ao-limite", duration: Infinity });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    vi.useRealTimers();
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("no envio único nada muda: para nos 10 min, com a revisão do áudio, sem aviso de hora", async () => {
+    await iniciar("/gravar");
+    expect(screen.getByText("Limite por gravação: 10 minutos ou 10 MB")).toBeInTheDocument();
+    await passar(10 * 60_000);
+    expect(screen.getByRole("button", { name: /Transcrever áudio/ })).toBeInTheDocument();
+    expect(screen.getByText("Duração: 10:00")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Descartar e gravar novamente/ }));
+    expect(sessaoOcupada()).toBe(false);
   });
 });

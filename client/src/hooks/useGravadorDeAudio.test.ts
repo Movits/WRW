@@ -461,6 +461,35 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     }
   });
 
+  it("no limite, avisa uma vez por aoChegarAoLimite e para entregando o que gravou (as 12 h da G13a)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const aoChegarAoLimite = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 120, aoChegarAoLimite });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(119_500); });
+      expect(aoChegarAoLimite).not.toHaveBeenCalled();
+      expect(result.current.estado).toBe("gravando");
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(aoChegarAoLimite).toHaveBeenCalledTimes(1);
+      expect(result.current.estado).toBe("parado");
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(aoChegarAoLimite).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o Parar de quem grava não é o limite: aoChegarAoLimite não é chamado", async () => {
+    const aoChegarAoLimite = vi.fn();
+    const { result, aoTerminar } = montar({ aoChegarAoLimite });
+    await act(async () => { await result.current.comecar(); });
+    act(() => result.current.parar());
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+    expect(aoChegarAoLimite).not.toHaveBeenCalled();
+  });
+
   it("sem fatiaSegundos, é a gravação de sempre: uma parte só, com a duração inteira", async () => {
     navegadorQueGrava(["audio/mp4"]);
     const aoFecharParte = vi.fn();
