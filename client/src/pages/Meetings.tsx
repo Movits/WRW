@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
@@ -555,17 +555,25 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
-  // A busca cujo ?t já levou o player ao ponto: cada link novo pula uma vez.
+  const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
+  useEffect(() => { if (pedeTranscricao) setTab("transcript"); }, [busca]);
+  // O ?t do link leva o player ao ponto quando a parte que cobre o segundo
+  // existe. Na reunião que ainda está chegando (gravando, enviando ou
+  // transcrevendo), o pulo espera a parte; pronta, vai à mais próxima. Cada
+  // link diferente pula uma vez: o mesmo ?t de novo (o mesmo endereço) não muda
+  // a busca e não pula outra vez — o "▶" dentro da reunião fala direto com o
+  // player, sem passar por aqui.
   const buscaJaAtendida = useRef<string | null>(null);
-  const pularParaOPedido = (controle: ControleDoPlayer | null) => {
-    if (!controle || buscaJaAtendida.current === busca || !(Number.isFinite(segundoPedido) && segundoPedido > 0)) return;
-    buscaJaAtendida.current = busca;
-    controle.irPara(segundoPedido);
-  };
+  const partesDoDado = data?.recording?.partes ?? (data?.recording ? [{ inicioSegundos: 0, duracaoSegundos: data.recording.durationSeconds }] : []);
+  const cobreOPedido = partesDoDado.some(parte => segundoPedido >= parte.inicioSegundos && segundoPedido < parte.inicioSegundos + parte.duracaoSegundos);
+  const statusDaReuniao = data?.meeting.status;
+  const aindaChegando = statusDaReuniao === "recording" || statusDaReuniao === "uploading" || statusDaReuniao === "processing";
   useEffect(() => {
-    if (pedeTranscricao) setTab("transcript");
-    pularParaOPedido(player.current);
-  }, [busca]);
+    if (!player.current || buscaJaAtendida.current === busca || !(Number.isFinite(segundoPedido) && segundoPedido > 0)) return;
+    if (!cobreOPedido && aindaChegando) return;
+    buscaJaAtendida.current = busca;
+    player.current.irPara(segundoPedido);
+  }, [busca, partesDoDado.length, cobreOPedido, aindaChegando]);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
   // lista, mandando a tradução para pt-BR com a tela em inglês.
@@ -818,8 +826,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   </div>
     {/* Sem onError o player falha MUDO: sessão vencida, limite de requisições ou
         storage fora do ar desenham os controles e simplesmente não tocam, e a
-        usuária não tem o que reportar. O ?t do link pula quando o player existe. */}
-    <BarraDoPlayer ref={controle => { player.current = controle; pularParaOPedido(controle); }} partes={partesParaOuvir}
+        usuária não tem o que reportar. */}
+    <BarraDoPlayer ref={definirPlayer} partes={partesParaOuvir}
       aviso={falhaNoAudio ? t("meetings.audioLoadError") : null}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
   </main>;

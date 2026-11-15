@@ -30,7 +30,8 @@ export const BarraDoPlayer = forwardRef<ControleDoPlayer, {
     >
       <div className="max-w-5xl mx-auto">
         <PlayerDasPartes ref={ref} partes={partes} aoFalhar={aoFalhar} aoCarregar={aoCarregar} className="w-full"/>
-        {aviso && <p role="status" className="text-xs text-amber-200/80 mt-1">{aviso}</p>}
+        {/* Sempre montado: o leitor de tela anuncia o aviso quando ele aparece. */}
+        <p role="status" className={aviso ? "text-xs text-amber-200/80 mt-1" : "sr-only"}>{aviso ?? ""}</p>
       </div>
     </div>
   );

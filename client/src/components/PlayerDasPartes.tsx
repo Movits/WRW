@@ -56,6 +56,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
         preload="metadata"
         src={atual.url}
         className={className}
+        aria-label={t("meetings.recordingHeading")}
         data-parte={atual.seq}
         onError={() => {
           aoFalhar?.();

@@ -767,14 +767,55 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
       act(() => { window.history.pushState(null, "", `/meetings/${REUNIAO.id}?t=10`); });
       expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
       expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
-      // O mesmo ?t de novo (sem link novo) não pula outra vez.
-      const tocar = vi.mocked(HTMLMediaElement.prototype.play);
-      const chamadas = tocar.mock.calls.length;
-      act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
-      expect(tocar.mock.calls.length).toBe(chamadas);
+      // A usuária vai a outro ponto pelo "▶" da transcrição; trocar de aba
+      // (que redesenha a tela com a mesma busca) não a puxa de volta ao ?t.
+      fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:20" }));
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+      fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
     } finally {
       window.history.replaceState(null, "", antes);
     }
+  });
+
+  it("?t além das partes que chegaram, com a reunião ainda chegando: o pulo espera a parte, e vai quando ela chega", () => {
+    const tocar = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      const meeting = { ...REUNIAO, status: "uploading", audioPipeline: "slices" };
+      const dado = (partes: typeof PARTES) => ({
+        data: { meeting, transcript: null, entities: [], suggestions: [], recording: { ...GRAVACAO, partes }, recordingExpired: false, andamento: { recebidas: partes.length, transcritas: 0, esperadas: 2 } },
+        isLoading: false,
+      });
+      duble.list.mockReturnValue({ data: [meeting], isLoading: false });
+      duble.get.mockReturnValue(dado([PARTES[0]]));
+      window.history.replaceState(null, "", `/meetings/${REUNIAO.id}?t=620`);
+      const { rerender } = render(<Meetings />);
+      // Só a parte 0 (0 a 600 s) chegou: o player não pula para o fim dela.
+      expect(tocar).not.toHaveBeenCalled();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+      duble.get.mockReturnValue(dado(PARTES));
+      rerender(<Meetings />);
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("sem áudio, não há barra do player nem o espaço dela", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: null });
+    expect(screen.queryByRole("region", { name: "Gravação" })).toBeNull();
+    expect(document.querySelector("main")!.className).not.toContain("pb-36");
+  });
+
+  it("o áudio que não carrega vira o aviso na barra", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(within(barra).getByRole("status")).toHaveTextContent("");
+    fireEvent.error(barra.querySelector("audio")!);
+    expect(within(barra).getByRole("status")).not.toHaveTextContent(/^$/);
+    expect(document.querySelector("main")!.className).toContain("pb-36");
   });
 
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {

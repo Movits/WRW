@@ -125,7 +125,7 @@ export default function ReuniaoAberta() {
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
   // tela em árabe continua da esquerda para a direita.
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
-  return <Moldura comPlayer={!!gravacao}>
+  return <Moldura comPlayer={!!gravacao && partes.length > 0}>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
     <h1 dir="auto" className="text-3xl font-bold mt-1">{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>

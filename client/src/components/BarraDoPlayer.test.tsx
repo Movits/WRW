@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import { act, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BarraDoPlayer } from "./BarraDoPlayer";
 import type { ControleDoPlayer } from "./PlayerDasPartes";
 
@@ -13,6 +13,8 @@ const PARTES = [
   { seq: 0, url: "/a/0.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
   { seq: 1, url: "/a/1.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 120 },
 ];
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("BarraDoPlayer", () => {
   it("sem partes, não desenha nada", () => {
@@ -31,8 +33,20 @@ describe("BarraDoPlayer", () => {
     expect(barra.querySelector("audio")).toHaveAttribute("src", "/a/1.m4a");
   });
 
-  it("o aviso aparece embaixo do player, como status", () => {
-    render(<BarraDoPlayer partes={PARTES} aviso="O áudio não carregou."/>);
+  it("o aviso aparece embaixo do player, como status; sem aviso, o status fica montado e vazio", () => {
+    const { rerender } = render(<BarraDoPlayer partes={PARTES}/>);
+    expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+    rerender(<BarraDoPlayer partes={PARTES} aviso="O áudio não carregou."/>);
     expect(screen.getByRole("status")).toHaveTextContent("O áudio não carregou.");
+  });
+
+  it("o áudio leva o rótulo da gravação, e o pulo dentro da mesma parte toca dali", () => {
+    const tocar = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const controle = createRef<ControleDoPlayer>();
+    render(<BarraDoPlayer ref={controle} partes={PARTES}/>);
+    const audio = screen.getByLabelText("Gravação", { selector: "audio" }) as HTMLAudioElement;
+    act(() => controle.current!.irPara(30));
+    expect(audio.getAttribute("src")).toBe("/a/0.m4a");
+    expect(tocar).toHaveBeenCalledTimes(1);
   });
 });
