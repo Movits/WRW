@@ -63,7 +63,11 @@ export function useAvisoDeHora(opcoes: OpcoesDoAvisoDeHora): AvisoDeHora {
     const horas = Math.floor(segundos / AVISO_DE_HORA_SEGUNDOS);
     if (estado === "gravando" && horas > horasAvisadas.current) {
       horasAvisadas.current = horas;
-      setAviso({ horas, venceEm: Date.now() + PRAZO_DO_AVISO_DE_HORA_MS });
+      const venceEm = Date.now() + PRAZO_DO_AVISO_DE_HORA_MS;
+      // O aviso ainda aberto guarda o prazo dele: a hora seguinte só o alcança
+      // aberto quando os tiques atrasaram (aba congelada, notebook que dormiu),
+      // e o que já venceu não ganha mais 10 minutos.
+      setAviso(atual => ({ horas, venceEm: atual?.venceEm ?? venceEm }));
     }
   }, [estado, segundos]);
 

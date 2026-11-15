@@ -150,3 +150,50 @@ describe("useAvisoDeHora — Continuar gravando", () => {
     expect(result.current).toMatchObject({ aberto: true, horas: 1 });
   });
 });
+
+describe("useAvisoDeHora — os saltos do relógio e o mesmo tique", () => {
+  it("os segundos que saltam de uma vez para além das 2 h abrem um aviso só, o das 2 h", () => {
+    const { result, rerender, aoExpirar } = montar();
+    rerender({ estado: "gravando", segundos: HORA - 1 });
+    // A aba em segundo plano: o relógio do gravador pula a hora 1 inteira num tique.
+    rerender({ estado: "gravando", segundos: 2 * HORA + 30 });
+    expect(result.current).toMatchObject({ aberto: true, horas: 2 });
+    andar(PRAZO_DO_AVISO_DE_HORA_MS);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+    // A hora 1 que ficou para trás não abre depois, nem a 2 de novo.
+    rerender({ estado: "gravando", segundos: 2 * HORA + 31 });
+    expect(result.current.aberto).toBe(false);
+    andar(2 * PRAZO_DO_AVISO_DE_HORA_MS);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+  });
+
+  it("o aviso que venceu com a aba congelada não ganha mais 10 min quando a hora seguinte chega antes do tique atrasado", () => {
+    const { result, rerender, aoExpirar } = montar();
+    rerender({ estado: "gravando", segundos: HORA });
+    // O notebook dormiu: 1 h de relógio sem nenhum tique, e a volta traz
+    // primeiro os segundos do gravador, já na hora 2.
+    vi.setSystemTime(Date.now() + HORA * 1000);
+    rerender({ estado: "gravando", segundos: 2 * HORA + 5 });
+    expect(result.current).toMatchObject({ aberto: true, horas: 2 });
+    andar(CONFERENCIA_DO_PRAZO_MS);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+    expect(result.current.aberto).toBe(false);
+  });
+
+  it("a gravação que passa a fechar o arquivo no mesmo tique em que o prazo vence: o aviso fecha e expira uma vez só", () => {
+    const { result, rerender, aoExpirar } = montar();
+    rerender({ estado: "gravando", segundos: HORA });
+    andar(PRAZO_DO_AVISO_DE_HORA_MS - CONFERENCIA_DO_PRAZO_MS);
+    // Um act só, como a tarefa do navegador antes de o React renderizar: o
+    // prazo vence, o gravador passa a "finalizando" e mais tiques chegam.
+    act(() => {
+      vi.advanceTimersByTime(CONFERENCIA_DO_PRAZO_MS);
+      rerender({ estado: "finalizando", segundos: HORA });
+      vi.advanceTimersByTime(3 * CONFERENCIA_DO_PRAZO_MS);
+    });
+    expect(result.current.aberto).toBe(false);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+    andar(2 * PRAZO_DO_AVISO_DE_HORA_MS);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+  });
+});

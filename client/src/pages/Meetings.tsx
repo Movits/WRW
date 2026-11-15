@@ -16,7 +16,7 @@ import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
-import { AvisoDeHoraDeGravacao } from "@/components/AvisoDeHoraDeGravacao";
+import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
@@ -35,6 +35,8 @@ import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 const formatDuration = mmss;
 /** As horas do teto técnico da gravação em partes (12), para os textos. */
 const HORAS_DA_GRAVACAO_EM_PARTES = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
+/** O id fixo do aviso das 12 h: a gravação seguinte o fecha por ele (toast.dismiss). */
+const ID_DO_AVISO_DO_LIMITE = "gravacao-chegou-ao-limite";
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -187,8 +189,9 @@ export default function Meetings() {
     // hora cheia, e as 12 h são só o teto técnico. O envio único segue nos 10 min.
     limiteSegundos: emPartes ? GRAVACAO_EM_PARTES_SEGUNDOS_MAX : ENVIO_UNICO_SEGUNDOS_MAX,
     // A gravação em partes que bate nas 12 h para e entrega como no Encerrar; o
-    // aviso fica até ser fechado, porque quem gravou pode não estar olhando.
-    aoChegarAoLimite: emPartes ? () => toast.info(t("meetings.recordingMaxReached", { horas: HORAS_DA_GRAVACAO_EM_PARTES }), { id: "gravacao-chegou-ao-limite", duration: Infinity }) : undefined,
+    // aviso fica até ser fechado, porque quem gravou pode não estar olhando. Sem
+    // prazo, leva o botão de fechar (sem ele, só saía arrastando).
+    aoChegarAoLimite: emPartes ? () => toast.info(t("meetings.recordingMaxReached", { horas: HORAS_DA_GRAVACAO_EM_PARTES }), { id: ID_DO_AVISO_DO_LIMITE, duration: Infinity, closeButton: true }) : undefined,
     fatiaSegundos: emPartes ? PARTE_SEGUNDOS : undefined,
     aoFecharParte: emPartes ? gravacaoEmPartes.receberParte : undefined,
     bitsPorSegundo: 64_000,
@@ -332,6 +335,11 @@ export default function Meetings() {
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
     if (emPartes) {
+      // Os avisos das 12 h e da hora sem OK ficam até ser fechados e falam da
+      // gravação anterior: na nova, pareceriam ser dela. Só a gravação em
+      // partes os cria.
+      toast.dismiss(ID_DO_AVISO_DO_LIMITE);
+      toast.dismiss(ID_DO_AVISO_PAROU_SOZINHA);
       try {
         await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       } catch (error) {
