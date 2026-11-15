@@ -54,7 +54,7 @@ import {
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
-  meetingEntities, meetingRecordings, meetingTranscriptTranslations, meetingTranscripts,
+  meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingTranscriptTranslations, meetingTranscripts,
   meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
@@ -154,6 +154,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },
   { tabela: meetingTranscriptTranslations, coluna: meetingTranscriptTranslations.ownerId, origem: "openId" },
   { tabela: meetingTranscripts, coluna: meetingTranscripts.ownerId, origem: "openId" },
+  // O resumo guardado da reunião (H4) e os itens dele, que carregam trechos da transcrição.
+  { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
+  { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {
     tabela: meetingAudioSlices, coluna: meetingAudioSlices.ownerId, origem: "openId",
     filtro: (_chaves, contexto) => (contexto?.fatiasQueFicam.length
