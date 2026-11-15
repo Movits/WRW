@@ -30,6 +30,7 @@ import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
+import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -244,6 +245,36 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => resumirReuniao(ctx.user.openId, input.meetingId, input.idioma));
+    }),
+
+  // O resumo GUARDADO (H4): gerado em segundo plano pela fila do resumo, cada
+  // item pendente até a dona confirmar. Só a dona; a dona no WHERE de tudo
+  // (server/resumo-guardado.ts). Pedir o resumo que ainda não existe (ou que
+  // falhou) gasta uma vaga do mesmo teto de pedidos à IA.
+  resumoGuardado: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
+
+  pedirResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  decidirItemDoResumo: protectedProcedure
+    .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await decidirItemDoResumo(ctx.user.openId, input.itemId, input.status);
+      return { ok: true as const };
+    }),
+
+  confirmarItensDoResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => ({ confirmados: await confirmarItensDoResumo(ctx.user.openId, input.meetingId) })),
+
+  marcarAcaoFeita: protectedProcedure
+    .input(z.object({ itemId: z.string().uuid(), feito: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await marcarAcaoFeita(ctx.user.openId, input.itemId, input.feito);
+      return { ok: true as const };
     }),
 
   perguntar: protectedProcedure

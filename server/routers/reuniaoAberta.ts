@@ -7,6 +7,7 @@ import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
 import { perguntarAReuniao, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { comRecusaTraduzida } from "./meetings";
 
 /**
@@ -48,12 +49,14 @@ type Pedido = Parameters<typeof ipDaCliente>[0];
  * em qualquer um, e a recusa de um não gasta a vaga do outro (o teto não
  * devolve vaga). Tudo síncrono: nenhum pedido entra entre conferir e reservar.
  */
-function reservarVagaDaIA(reuniaoId: string, pedido: Pedido) {
+function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
   const daVisitante = `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
   tetoDaIADoVisitanteDoLink.conferir(daVisitante);
   tetoDaIADoLinkAberto.conferir(reuniaoId);
-  tetoDaIADoVisitanteDoLink.reservar(daVisitante);
-  tetoDaIADoLinkAberto.reservar(reuniaoId);
+  const soltarDaVisitante = tetoDaIADoVisitanteDoLink.reservar(daVisitante);
+  const soltarDaReuniao = tetoDaIADoLinkAberto.reservar(reuniaoId);
+  // Para quem não chegou a usar a vaga (o resumo pedido duas vezes ao mesmo tempo).
+  return () => { soltarDaVisitante(); soltarDaReuniao(); };
 }
 
 export const MENSAGEM_TRADUCAO_INDISPONIVEL = "A tradução não respondeu agora. Tente de novo em instantes.";
@@ -90,6 +93,17 @@ export const reuniaoAbertaRouter = router({
       reservarVagaDaIA(reuniao.id, ctx.req);
       return resumirReuniao(reuniao.ownerId, reuniao.id, input.idioma);
     })),
+
+  // O resumo guardado (H4), só leitura: sem ids, sem os itens ignorados e
+  // com as vozes como rótulo. Pedir o resumo que a reunião ainda não tem gasta
+  // uma vaga dos dois tetos; pedir o que já está na fila, não.
+  resumoGuardado: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .query(({ input }) => comRecusaTraduzida(() => resumoGuardadoPeloLink(input.token))),
+
+  pedirResumo: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
 
   perguntar: publicProcedure
     .input(z.object({
