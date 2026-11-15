@@ -363,7 +363,9 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 
 ## 15/11/2026 — o teste que dá para automatizar entra na PR; o resto vira cartão
 
-- **Quem:** Roberto, em 15/11.
+- **Quem:** Roberto, em 15/11, respondendo à pergunta sobre a bancada B do desenho: que o
+  Claude teste o que puder, e que o que precisa de toque humano vire cartão no Notion para
+  o Gabriel e o Nicolas testarem. O plano aprovado no mesmo dia aplicou a resposta a toda PR.
 - **O quê:** o teste que dá para automatizar entra na PR. O que exige mão humana vira
   cartão no Notion para o Gabriel e o Nicolas, um por PR que precise.
 - **Na G13:** isso troca a bancada B do desenho, que pedia reuniões reais de 45 minutos ou

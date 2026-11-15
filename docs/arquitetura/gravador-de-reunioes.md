@@ -89,7 +89,8 @@ ilimitado. Elas mudam o plano de 30/10 e valem sobre ele.
 - **Gravação ilimitada.** Sai o teto de 60 minutos: a G13 tira o teto de tempo da
   gravação, para todos os níveis e sem teto mensal. No lugar do teto, a G10 avisa a
   cada hora completa de gravação ("1 hora de gravação", "2 horas"...), sem parar a
-  gravação, para quem grava acompanhar o tempo. O envio único em base64 continua em 10
+  gravação, para quem grava acompanhar o tempo (trocado em 15/11: o aviso passa a pedir
+  OK, ver "Decisões de 15/11/2026"). O envio único em base64 continua em 10
   minutos e 10 MB até sair na G14. O teto de 3 gravações abertas por conta, que é
   contra abuso e não de tempo, segue como pergunta ao Roberto.
 - **Compartilhar sem link público e sem senha.** A reunião continua visível só para as
@@ -409,8 +410,9 @@ O áudio e as transcrições das duas bancadas ficam fora do repositório, que �
   MAX_TOKENS (a resposta do Gemini cortada no teto de saída). É ela que escolhe o modelo
   de áudio, e a fila (G7) só vai a produção com um id que esteja na lista de modelos que
   a chave enxerga (o script da G2).
-- **Bancada B (antes da G13), trocada em 15/11.** Pela decisão do Roberto, a G13 passa a
-  ser provada por testes automatizados e por um cartão de teste humano no Notion para o
+- **Bancada B (antes da G13), trocada em 15/11.** Pela resposta do Roberto à pergunta sobre
+  esta bancada, em 15/11 (teste o que der; o que precisa de toque humano vira cartão), a
+  G13 passa a ser provada por testes automatizados e por um cartão de teste humano no Notion para o
   Gabriel e o Nicolas. O roteiro do cartão e os testes foram propostos no plano de 15/11 e
   aprovados por ele. O cartão é "Gravação real de mais de 1 hora", em produção com
   `?emPartes=1`: no iPhone (Safari e app instalado), no Android e no computador, com uma
