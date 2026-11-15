@@ -39,6 +39,9 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcript_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O resumo guardado da reunião (H4) e os itens dele.
+  { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as
   // contas QA não têm parte nem objeto no bucket, e este DELETE não olha o
   // bucket. Se o exame passar a gravar, a linha é o ponteiro para o objeto:

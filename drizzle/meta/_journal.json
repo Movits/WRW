@@ -120,6 +120,13 @@
       "when": 1794697000688,
       "tag": "0016_warm_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1794754092667,
+      "tag": "0017_resumo-guardado",
+      "breakpoints": true
     }
   ]
 }

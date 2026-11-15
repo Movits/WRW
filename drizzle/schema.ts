@@ -1179,6 +1179,85 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   statusIdx: index("meeting_contact_suggestions_status_idx").on(table.ownerId, table.status),
 }));
 
+// O resumo GUARDADO da reunião (H4 do desenho do gravador,
+// docs/arquitetura/gravador-de-reunioes.md), no formato que a cliente pediu:
+// ações com caixa de marcar, foco, tarefas por assunto, decisões, bloqueios e
+// questões pendentes. Uma linha por reunião, gerada em segundo plano pela fila
+// do resumo; os itens ficam em meeting_summary_items. Varchar com o enum só no
+// TypeScript, como em network_sugestoes: valor novo não pede migração.
+export const meetingSummaries = mysqlTable("meeting_summaries", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // A transcrição de que o resumo saiu: o reprocessamento troca a transcrição,
+  // e o resumo da anterior não é gravado.
+  transcriptId: varchar("transcript_id", { length: 36 }),
+  status: varchar("status", { length: 12, enum: ["pending", "ready", "failed"] }).default("pending").notNull(),
+  // O modelo de resumo; só 'general' até a PR dos modelos (H4d).
+  template: varchar("template", { length: 16, enum: ["general", "networking", "mentoring", "sales", "one_on_one"] }).default("general").notNull(),
+  // O idioma em que o resumo foi escrito: o da reunião.
+  language: varchar("language", { length: 12 }),
+  // O emoji do título, como no app de referência da cliente. Nulo: sem emoji.
+  emoji: varchar("emoji", { length: 16 }),
+  // O id do modelo de IA que escreveu o resumo.
+  model: varchar("model", { length: 80 }),
+  // Sobe a cada resumo gravado: a tradução do resumo (H11) guarda de qual
+  // versão saiu e é refeita quando ela muda.
+  version: int("version").default(0).notNull(),
+  generatedAt: bigint("generated_at", { mode: "number" }),
+  // Controle da fila do resumo; fica no servidor.
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // Código nosso, nunca o texto da IA ou do driver.
+  lastError: varchar("last_error", { length: 40 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  meetingUnique: uniqueIndex("meeting_summaries_meeting_unique").on(table.meetingId),
+  ownerMeetingIdx: index("meeting_summaries_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // A fila reserva pelo estado e pela reserva vencida.
+  statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
+}));
+
+// Cada item do resumo guardado. Nada extraído por IA entra sozinho
+// (CLAUDE.md): o item nasce 'pending', com a confiança e o TRECHO literal da
+// transcrição que o sustenta, e só vale como dado da dona quando ela confirma.
+// Quem falou aparece como o rótulo da voz ({F2}), que a tela troca pelo nome
+// que a dona deu (meetings.speaker_names); o servidor nunca escreve o nome.
+export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  section: varchar("section", { length: 12, enum: ["action", "focus", "task", "decision", "blocker", "question"] }).notNull(),
+  position: int("position").notNull(),
+  // O assunto das tarefas ("Publicação nas lojas"); nulo nas outras seções.
+  subject: varchar("subject", { length: 120 }),
+  text: text("text").notNull(),
+  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito.
+  // Nulo quando a transcrição não sustenta ninguém perto do trecho.
+  assignee: varchar("assignee", { length: 120 }),
+  // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
+  due: varchar("due", { length: 120 }),
+  excerpt: text("excerpt").notNull(),
+  // O segundo da reunião em que o trecho começa; nulo sem tempo (envio único).
+  startSeconds: int("start_seconds"),
+  confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
+  status: varchar("status", { length: 12, enum: ["pending", "confirmed", "ignored"] }).default("pending").notNull(),
+  // A caixa de marcar das ações.
+  done: boolean("done").default(false).notNull(),
+  decidedAt: bigint("decided_at", { mode: "number" }),
+  doneAt: bigint("done_at", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  summaryPositionIdx: index("meeting_summary_items_summary_position_idx").on(table.summaryId, table.position),
+  ownerMeetingIdx: index("meeting_summary_items_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // As próximas ações (H5) leem os itens confirmados de todas as reuniões da dona.
+  ownerSectionStatusIdx: index("meeting_summary_items_owner_section_status_idx").on(table.ownerId, table.section, table.status),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é

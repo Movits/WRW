@@ -8,6 +8,8 @@ import {
   meetings,
   meetingTranscripts,
   meetingTranscriptTranslations,
+  meetingSummaries,
+  meetingSummaryItems,
 } from "../drizzle/schema";
 import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
@@ -357,7 +359,7 @@ export function ajustarSugestaoAosLimites(contato: MeetingExtraction["contacts"]
 }
 
 /** Escritas sem espaço entre as palavras: nelas o nome aparece colado ao resto da fala. */
-const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
+export const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
 
 /**
  * O nome da pessoa sugerida reduzido às palavras que a transcrição sustenta.
@@ -1445,8 +1447,8 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
 }
 
 /**
- * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição e
- * traduções —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
+ * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição,
+ * traduções e resumo guardado —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
  * fica, porque é dele que sai o resultado novo. Mora dentro da lista única de
  * apagarDerivadosDaReuniao para as duas nunca divergirem.
  */
@@ -1460,6 +1462,10 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   // As TRADUÇÕES são cópias da transcrição em outros idiomas: apagar só o
   // original deixaria o mesmo conteúdo vivo em até nove línguas.
   await db.delete(meetingTranscriptTranslations).where(and(eq(meetingTranscriptTranslations.meetingId, meetingId), eq(meetingTranscriptTranslations.ownerId, ownerId)));
+  // O resumo guardado (H4) foi escrito a partir da transcrição e cita trechos
+  // dela: sai com ela. Os itens antes do resumo, que é a linha de que eles saem.
+  await db.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.meetingId, meetingId), eq(meetingSummaryItems.ownerId, ownerId)));
+  await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
 }
 
 export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
