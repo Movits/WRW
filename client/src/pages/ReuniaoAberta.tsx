@@ -7,7 +7,7 @@ import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
-import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -53,10 +53,6 @@ function mensagemDaTraducao(t: TranslateFn, erro: unknown) {
     }
     default: return t("meetings.translateError");
   }
-}
-
-function duracao(segundos: number) {
-  return `${String(Math.floor(segundos / 60)).padStart(2, "0")}:${String(segundos % 60).padStart(2, "0")}`;
 }
 
 function Moldura({ children, comPlayer = false }: { children: React.ReactNode; comPlayer?: boolean }) {
@@ -169,7 +165,7 @@ export default function ReuniaoAberta() {
         <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
-          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
+          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {mmss(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
         </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
           : t("meetings.noRecordingStored")}</p>}
