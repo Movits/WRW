@@ -80,6 +80,14 @@ function abrir() {
   return render(<Route path="/r/:token" component={ReuniaoAberta}/>);
 }
 
+// A página abre na aba Resumo (H4c); a transcrição e a tradução ficam na aba
+// Transcrição.
+function abrirNaTranscricao() {
+  const tela = abrir();
+  fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+  return tela;
+}
+
 beforeEach(() => {
   duble.ver.mockReset();
   duble.opcoesDaConsulta = null;
@@ -100,12 +108,46 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Reunião com a Ana" })).toBeInTheDocument();
     expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
     expect(screen.getByText(/01:35/)).toBeInTheDocument();
-    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
     expect(screen.getByTestId("resumo")).toHaveTextContent(`${TOKEN} sem_resumo`);
     expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
     // Nada do que é só da dona.
     expect(screen.queryByRole("button", { name: /Excluir/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Contatos/)).not.toBeInTheDocument();
+  });
+
+  it("abre na aba Resumo, como no app de referência; a Transcrição fica na outra aba", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const resumo = screen.getByRole("button", { name: "Resumo" });
+    const transcricao = screen.getByRole("button", { name: "Transcrição" });
+    expect(resumo).toHaveAttribute("aria-pressed", "true");
+    expect(transcricao).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("resumo")).toBeInTheDocument();
+    expect(screen.queryByText("Combinamos a entrega na sexta.")).not.toBeInTheDocument();
+    fireEvent.click(transcricao);
+    expect(transcricao).toHaveAttribute("aria-pressed", "true");
+    expect(resumo).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pergunte")).not.toBeInTheDocument();
+  });
+
+  it("trocar de aba não corta o áudio nem perde a tradução", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrirNaTranscricao();
+    const audio = document.querySelector("audio");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
+    const { onSuccess } = duble.traduzir.mutate.mock.calls[0][1] as { onSuccess: (r: { text: string }) => void };
+    act(() => onSuccess({ text: "Acordamos la entrega el viernes." }));
+    fireEvent.click(screen.getByRole("button", { name: "Resumo" }));
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(document.querySelector("audio")).toBe(audio);
+    expect(screen.getByText("Acordamos la entrega el viernes.")).toBeInTheDocument();
+    // A volta à aba não pede a tradução de novo.
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("link que não existe ou foi desligado: aviso traduzido, sem tentar de novo", () => {
@@ -144,6 +186,7 @@ describe("Reunião aberta pelo link", () => {
     // Sem texto para resumir, a consulta do resumo nem sai.
     expect(duble.opcoesDoResumo!.enabled).toBe(false);
     expect(screen.queryByTestId("pergunte")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
     expect(screen.getByText("A transcrição ainda não está disponível.")).toBeInTheDocument();
   });
 
@@ -167,7 +210,7 @@ describe("Reunião aberta pelo link", () => {
 
   it("em pt-BR mostra o original sem pedir tradução; trocar o idioma traduz pelo token", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     expect(duble.traduzir.mutate).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
     expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "es" }, expect.anything());
@@ -182,7 +225,7 @@ describe("Reunião aberta pelo link", () => {
 
   it("reunião em inglês com a tela em pt-BR: traduz para o pt-BR, e o inglês é o original (G1b)", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "We agreed on Friday.", idioma: "en" } }));
-    abrir();
+    abrirNaTranscricao();
     expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "pt-BR" }, expect.anything());
     expect(screen.getByRole("option", { name: /English \(original\)/ })).toBeInTheDocument();
     duble.traduzir.mutate.mockClear();
@@ -195,7 +238,7 @@ describe("Reunião aberta pelo link", () => {
     vi.useFakeTimers();
     try {
       duble.ver.mockReturnValue(pronta());
-      abrir();
+      abrirNaTranscricao();
       fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
       const pedidos = duble.traduzir.mutate.mock.calls;
       act(() => (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "es", text: null, cached: false, emAndamento: true }));
@@ -222,7 +265,7 @@ describe("Reunião aberta pelo link", () => {
         { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
       ] },
     }));
-    abrir();
+    abrirNaTranscricao();
     expect(screen.getAllByText("Falante 2").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:10" }));
     expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
@@ -238,7 +281,7 @@ describe("Reunião aberta pelo link", () => {
   it("tradução que falhou: avisa e mostra o original", () => {
     duble.traduzir = { ...duble.traduzir, isError: true };
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
     expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível traduzir a transcrição.");
     expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
@@ -249,7 +292,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
   const comErro = (code: string, message = "frase do servidor") => {
     duble.traduzir = { ...duble.traduzir, isError: true, error: { message, data: { code } } } as typeof duble.traduzir;
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
     return screen.getByRole("alert");
   };
@@ -278,7 +321,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
 
   it("o texto da transcrição segue a direção dele mesmo, e o idioma dele vai para o leitor de tela", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     const original = screen.getByText("Combinamos a entrega na sexta.");
     expect(original).toHaveAttribute("dir", "auto");
     expect(original).toHaveAttribute("lang", "pt-BR");
@@ -286,7 +329,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
 
   it("o subtítulo da tradução fala com quem lê, não com a dona", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     expect(screen.getByText("Escolha o idioma em que você quer ler a transcrição.")).toBeInTheDocument();
   });
 
@@ -308,7 +351,7 @@ describe("Reunião aberta pelo link — direção e anúncios", () => {
   it("\"Traduzindo\" é anunciado ao leitor de tela", () => {
     duble.traduzir = { ...duble.traduzir, isPending: true };
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
     // Há também o status da barra do player (H4b): o anúncio é o status com este texto.
     expect(screen.getByText(/Traduzindo/).closest("[role=status]")).not.toBeNull();

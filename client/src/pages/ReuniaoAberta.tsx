@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "wouter";
-import { Clock3, Loader2 } from "lucide-react";
+import { Clock3, FileText, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
@@ -90,6 +90,11 @@ export default function ReuniaoAberta() {
   });
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
+  // As abas, como no app de referência da cliente (H4c): o resumo abre
+  // primeiro, e a transcrição fica na outra aba. O player é um só, na barra do
+  // rodapé, fora das abas: trocar de aba não corta o áudio. A tradução mora
+  // aqui em cima e também sobrevive à troca.
+  const [aba, setAba] = useState<"summary" | "transcript">("summary");
   // Como no detalhe da dona: a tradução começa no idioma da tela, e o idioma
   // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
@@ -147,22 +152,27 @@ export default function ReuniaoAberta() {
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
     <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
 
-    {temTextoParaResumir && <div className="mt-6 space-y-4">
-      <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
-      <PergunteAReuniao token={token}/>
-    </div>}
+    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3]] as const).map(([id, rotulo, Icone]) =>
+      <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
 
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
-      {gravacao ? <>
-        {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
-        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
-      </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
-        ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
-        : t("meetings.noRecordingStored")}</p>}
-    </section>
+    {aba === "summary" && <>
+      {temTextoParaResumir && <div className="mt-6 space-y-4">
+        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <PergunteAReuniao token={token}/>
+      </div>}
 
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+      <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
+        {gravacao ? <>
+          {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
+          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
+        </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
+          ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
+          : t("meetings.noRecordingStored")}</p>}
+      </section>
+    </>}
+
+    {aba === "transcript" && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><Clock3 size={16}/>{t("meetings.transcriptTab")}</h2>
       {transcricao ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
@@ -190,7 +200,7 @@ export default function ReuniaoAberta() {
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
-    </section>
+    </section>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>}
