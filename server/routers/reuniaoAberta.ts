@@ -7,6 +7,7 @@ import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
 import { perguntarAReuniao, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { comRecusaTraduzida } from "./meetings";
 
 /**
@@ -90,6 +91,17 @@ export const reuniaoAbertaRouter = router({
       reservarVagaDaIA(reuniao.id, ctx.req);
       return resumirReuniao(reuniao.ownerId, reuniao.id, input.idioma);
     })),
+
+  // O resumo guardado (H4), só leitura: sem ids, sem os itens ignorados e
+  // com as vozes como rótulo. Pedir o resumo que a reunião ainda não tem gasta
+  // uma vaga dos dois tetos; pedir o que já está na fila, não.
+  resumoGuardado: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .query(({ input }) => comRecusaTraduzida(() => resumoGuardadoPeloLink(input.token))),
+
+  pedirResumo: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
 
   perguntar: publicProcedure
     .input(z.object({

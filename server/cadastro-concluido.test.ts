@@ -150,6 +150,8 @@ describe("o appRouter inteiro", () => {
     "faq.ask", "stats.platform", "stats.presencaPorPais",
     // O link aberto da reunião (12/11/2026): quem abre o link não tem conta.
     "reuniaoAberta.ver", "reuniaoAberta.traduzir", "reuniaoAberta.resumir", "reuniaoAberta.perguntar",
+    // O resumo guardado (H4), só leitura, e o pedido dele pelo link.
+    "reuniaoAberta.resumoGuardado", "reuniaoAberta.pedirResumo",
   ]);
   let caminhos: string[] = [];
 

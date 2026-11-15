@@ -1,0 +1,279 @@
+import crypto from "node:crypto";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
+
+vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
+
+/**
+ * A fila do resumo guardado (H4) contra um banco real DE TESTE (sem
+ * DATABASE_URL_TESTES, se pula). A IA é dublê: o que se prova é o banco — a
+ * reserva atômica, a gravação que confere a reunião e a reserva, as falhas, a
+ * devolução das reservas no SIGTERM, a dona no WHERE e o que o link aberto vê.
+ */
+const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
+vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+
+const { getDb } = await import("./db");
+const { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const fila = await import("./fila-do-resumo");
+const servico = await import("./resumo-guardado");
+const { FalhaDaIA } = await import("./ia-em-json");
+const { deletePrivateMeeting } = await import("./meeting-service");
+
+const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
+const DONA = `teste-resumo-${crypto.randomUUID()}`;
+const OUTRA = `teste-resumo-outra-${crypto.randomUUID()}`;
+const rodar = () => fila.rodarUmaVez({ ownerId: DONA });
+const AGORA = () => Date.now();
+
+async function db() { return (await getDb())!; }
+
+const SEGMENTOS = [
+  { inicio: 0, fim: 5, falante: "F1", texto: "Bom dia. Vamos falar da exportação de café." },
+  { inicio: 5, fim: 12, falante: "F2", texto: "Decidimos não renovar o contrato com a transportadora." },
+];
+
+async function reuniaoPronta(extra: Record<string, unknown> = {}, comTranscricao = true) {
+  const id = crypto.randomUUID();
+  await (await db()).insert(meetings).values({
+    id, ownerId: DONA, title: "Reunião do resumo", status: "ready", consentGranted: true, consentAt: AGORA(), language: "pt-BR",
+    createdAt: AGORA(), updatedAt: AGORA(), ...extra,
+  });
+  if (comTranscricao) {
+    await (await db()).insert(meetingTranscripts).values({
+      id: crypto.randomUUID(), meetingId: id, ownerId: DONA, transcript: SEGMENTOS.map(s => s.texto).join("\n"), segments: SEGMENTOS,
+      language: "pt-BR", durationSeconds: 12, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+  }
+  return id;
+}
+
+const ITENS = [
+  { section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null, excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, confidence: 0.9 },
+  { section: "decision", subject: null, text: "Não renovar com a transportadora", assignee: null, due: null, excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, confidence: 1 },
+] as const;
+const RESUMO = { emoji: "☕", modelo: "gemini-teste-1", itens: ITENS, recebidos: 2 };
+
+const linhaDoResumo = async (meetingId: string) => (await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, meetingId)))[0];
+const itensDe = async (meetingId: string) => (await db()).select().from(meetingSummaryItems).where(eq(meetingSummaryItems.meetingId, meetingId)).orderBy(meetingSummaryItems.position);
+const vaga = vi.fn();
+const pedir = (meetingId: string) => servico.pedirResumoDaDona(DONA, meetingId, vaga);
+
+async function limpar() {
+  const banco = await db();
+  for (const dona of [DONA, OUTRA]) {
+    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
+    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
+    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
+    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+  }
+}
+
+describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", () => {
+  beforeAll(async () => { await (await db()).insert(users).values([{ openId: DONA }, { openId: OUTRA }]); });
+  afterAll(async () => {
+    if (!(await getDb())) return;
+    await limpar();
+    await (await db()).delete(users).where(inArray(users.openId, [DONA, OUTRA]));
+  });
+  beforeEach(async () => {
+    await limpar();
+    fila.religarParaTestes();
+    gerarResumoDaReuniao.mockReset();
+    gerarResumoDaReuniao.mockResolvedValue(RESUMO);
+    vaga.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("pedir cria o trabalho; a rodada grava os itens pendentes, com o tempo, e o resumo fica pronto", async () => {
+    const id = await reuniaoPronta();
+    expect((await pedir(id)).estado).toBe("pendente");
+    expect(vaga).toHaveBeenCalledTimes(1);
+
+    await rodar();
+
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR" });
+    const resumo = await servico.resumoGuardadoDaDona(DONA, id);
+    expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
+    expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
+      ["action", 0, "pending", false, 5, "{F2}"],
+      ["decision", 1, "pending", false, 5, null],
+    ]);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, model: "gemini-teste-1" });
+  });
+
+  it("pedir de novo o que já está na fila, ou pronto, não gasta vaga nem duplica", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await pedir(id);
+    expect(vaga).toHaveBeenCalledTimes(1);
+    await rodar();
+    await pedir(id);
+    expect(vaga).toHaveBeenCalledTimes(1);
+    expect(await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id))).toHaveLength(1);
+  });
+
+  it("de duas rodadas ao mesmo tempo, só uma reserva e gera", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockImplementation(async () => { await new Promise(r => setTimeout(r, 50)); return RESUMO; });
+    await Promise.all([rodar(), rodar()]);
+    expect(gerarResumoDaReuniao).toHaveBeenCalledTimes(1);
+    expect(await itensDe(id)).toHaveLength(2);
+  });
+
+  it("falha passageira volta à fila com espera; na 3ª tentativa vira falha, e pedir de novo reabre", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("IA_INDISPONIVEL"));
+
+    await rodar();
+    let linha = await linhaDoResumo(id);
+    expect(linha).toMatchObject({ status: "pending", attempts: 1, lastError: "IA_INDISPONIVEL", lockToken: null });
+    expect(Number(linha.lockedUntil)).toBeGreaterThan(AGORA());
+    // Enquanto espera, nenhuma rodada pega.
+    await rodar();
+    expect(gerarResumoDaReuniao).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 2; i++) {
+      await (await db()).update(meetingSummaries).set({ lockedUntil: AGORA() - 1 }).where(eq(meetingSummaries.meetingId, id));
+      await rodar();
+    }
+    linha = await linhaDoResumo(id);
+    expect(linha).toMatchObject({ status: "failed", attempts: 3, lastError: "IA_INDISPONIVEL" });
+    expect((await servico.resumoGuardadoDaDona(DONA, id)).estado).toBe("falhou");
+
+    await pedir(id);
+    expect(vaga).toHaveBeenCalledTimes(2);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", attempts: 0, lastError: null });
+  });
+
+  it("resposta cortada no teto de saída é falha de vez, sem nova tentativa", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", attempts: 1, lastError: "RESPOSTA_CORTADA" });
+  });
+
+  it("a conferência tirou tudo: o resumo fica pronto e vazio, com o registro", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockResolvedValue({ emoji: null, modelo: "gemini-teste-1", itens: [], recebidos: 3 });
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", lastError: "CONFERENCIA_TIROU_TUDO" });
+    expect(await itensDe(id)).toEqual([]);
+  });
+
+  it("reunião excluída enquanto a IA responde: nada é gravado e nada sobra", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockImplementation(async () => {
+      await deletePrivateMeeting(DONA, id);
+      return RESUMO;
+    });
+    await rodar();
+    expect(await itensDe(id)).toEqual([]);
+    expect(await linhaDoResumo(id)).toBeUndefined();
+  });
+
+  it("transcrição trocada durante a geração (reprocesso): o resumo da antiga não é gravado", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarResumoDaReuniao.mockImplementation(async () => {
+      await (await db()).update(meetingTranscripts).set({ id: crypto.randomUUID() }).where(eq(meetingTranscripts.meetingId, id));
+      return RESUMO;
+    });
+    await rodar();
+    expect(await itensDe(id)).toEqual([]);
+    expect((await linhaDoResumo(id)).status).toBe("pending");
+  });
+
+  it("o desligamento devolve a reserva sem gastar a tentativa, e a geração em curso não grava", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    let devolvidas = -1;
+    gerarResumoDaReuniao.mockImplementation(async () => {
+      devolvidas = (await fila.pararFilaDoResumo()).resumos;
+      return RESUMO;
+    });
+    await rodar();
+    expect(devolvidas).toBe(1);
+    expect(await itensDe(id)).toEqual([]);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", attempts: 0, lockToken: null, lockedUntil: null });
+  });
+
+  it("decidir, confirmar todos e marcar a ação feita; só ação tem caixa", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    const [acao, decisao] = await itensDe(id);
+
+    await servico.decidirItemDoResumo(DONA, decisao.id, "ignored");
+    await servico.marcarAcaoFeita(DONA, acao.id, true);
+    let [a, d] = await itensDe(id);
+    expect(d.status).toBe("ignored");
+    expect(a).toMatchObject({ status: "confirmed", done: true });
+    expect(Number(a.decidedAt)).toBeGreaterThan(0);
+
+    // Voltar a pendente tira a marca de feito.
+    await servico.decidirItemDoResumo(DONA, acao.id, "pending");
+    [a] = await itensDe(id);
+    expect(a).toMatchObject({ status: "pending", done: false, doneAt: null, decidedAt: null });
+
+    await expect(servico.marcarAcaoFeita(DONA, decisao.id, true)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await servico.confirmarItensDoResumo(DONA, id)).toBe(1);
+    expect((await itensDe(id)).map(i => i.status)).toEqual(["confirmed", "ignored"]);
+  });
+
+  it("só a dona: outra conta recebe NOT_FOUND para ler, pedir e decidir", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    await expect(servico.resumoGuardadoDaDona(OUTRA, id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(servico.pedirResumoDaDona(OUTRA, id, vaga)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(servico.decidirItemDoResumo(OUTRA, acao.id, "ignored")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(servico.marcarAcaoFeita(OUTRA, acao.id, true)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(servico.confirmarItensDoResumo(OUTRA, id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await itensDe(id))[0].status).toBe("pending");
+  });
+
+  it("reunião que não está pronta, ou sem transcrição, não pede resumo", async () => {
+    const processando = await reuniaoPronta({ status: "processing" });
+    await expect(pedir(processando)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    const semTexto = await reuniaoPronta({}, false);
+    await expect(pedir(semTexto)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(vaga).not.toHaveBeenCalled();
+  });
+
+  it("o link aberto vê o resumo sem ids, sem a caixa e sem os ignorados; os pendentes vão com o estado", async () => {
+    const token = crypto.randomBytes(24).toString("base64url");
+    const id = await reuniaoPronta({ shareToken: token });
+    const vagaDoLink = vi.fn();
+    expect((await servico.pedirResumoPeloLink(token, vagaDoLink)).estado).toBe("pendente");
+    expect(vagaDoLink).toHaveBeenCalledWith(id);
+    await rodar();
+    const [, decisao] = await itensDe(id);
+    await servico.decidirItemDoResumo(DONA, decisao.id, "ignored");
+
+    const visto = await servico.resumoGuardadoPeloLink(token);
+    expect(visto.estado).toBe("pronto");
+    expect(visto.itens).toEqual([{
+      section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,
+      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending",
+    }]);
+    await expect(servico.resumoGuardadoPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
+  });
+
+  it("excluir a reunião apaga o resumo e os itens", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    expect(await itensDe(id)).toHaveLength(2);
+    await deletePrivateMeeting(DONA, id);
+    expect(await itensDe(id)).toEqual([]);
+    expect(await linhaDoResumo(id)).toBeUndefined();
+  });
+});

@@ -385,26 +385,34 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
-  // A fila da reunião gravada em partes (G7): transcreve as partes e monta as
-  // reuniões no próprio processo, a cada poucos segundos. Sem banco (dev sem
-  // DATABASE_URL), não liga.
+  // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
+  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas.
+  // As duas rodam no próprio processo, a cada poucos segundos, cada uma com o
+  // seu laço. Sem banco (dev sem DATABASE_URL), não ligam.
   if (process.env.DATABASE_URL) {
     const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
+    const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
+    iniciarFilaDoResumo();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
-    // SIGINT. A fila para de reservar e devolve as reservas desta instância
-    // ANTES de o processo sair, para o próximo retomar na hora (e não depois
-    // de a reserva vencer). Depois, o servidor fecha e o processo sai.
+    // SIGINT. As duas filas param de reservar e devolvem as reservas desta
+    // instância ANTES de o processo sair, para o próximo retomar na hora (e não
+    // depois de a reserva vencer); a falha de uma não segura a outra. Depois, o
+    // servidor fecha e o processo sai.
     let saindo = false;
     const desligar = (sinal: string) => {
       if (saindo) return;
       saindo = true;
       console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
-      pararFila()
-        .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))
-        .catch(erro => console.error("[Fila] não foi possível devolver as reservas:", descreverErroDeBanco(erro)))
-        .finally(() => {
+      Promise.allSettled([
+        pararFila()
+          .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))
+          .catch(erro => console.error("[Fila] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararFilaDoResumo()
+          .then(r => console.log(`[Resumo] devolvidos: ${r.resumos} resumo(s).`))
+          .catch(erro => console.error("[Resumo] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+      ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.
           setTimeout(() => process.exit(0), 10_000).unref();
