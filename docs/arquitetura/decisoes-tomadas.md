@@ -245,6 +245,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   Os pedidos à IA pelo link têm dois tetos, os dois pela reunião: 10 por visitante (rede do
   IP) e 60 no total, a cada 10 minutos. O token é comparado com a caixa exata: a coluna
   herda a collation do banco, que não distingue maiúsculas.
+- **Nota:** com a #208 (aberta), o link passa a mostrar o resumo guardado, no lugar do
+  resumo pedido à IA (ver 15/11). As perguntas à IA continuam.
 - **Junto:** compartilhar é por WhatsApp e por e-mail (o app da própria dona abre com a
   mensagem pronta), em vez do Outlook que a H16 previa para a agenda.
 - **Antes:** decisão de 10/11, "sem link público e sem senha": só as participantes
@@ -259,10 +261,11 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `client/src/components/CompartilharReuniao.tsx` e `client/src/pages/ReuniaoAberta.tsx`;
   migração 0015 (`meetings.share_token`).
 
-## 14/11/2026 — a gravação em partes fica atrás de um interruptor até a G13
+## 14/11/2026 — a gravação em partes fica atrás de um interruptor até a G13b
 
-- **Quem:** a #202, que trouxe o gravador em partes (G9), mesclada em 14/11. O plano do
-  gravador aprovado pelo Roberto em 15/11 mantém o interruptor até a G13b.
+- **Quem:** a #202, que trouxe o gravador em partes (G9), mesclada em 14/11. Manter o
+  interruptor até a G13b foi proposto no plano do gravador de 15/11 e aprovado pelo
+  Roberto.
 - **O quê:** o gravador em partes só liga com `/gravar?emPartes=1`. Sem o parâmetro, o
   gravador é o de sempre, com o envio único (`meetings.submitRecording`). O motivo, na
   #202: com o teto de 600 s por reunião ainda valendo, a gravação em partes teria uma
@@ -274,7 +277,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 ## 14/11/2026 — os nomes das vozes ficam fora do link aberto
 
 - **Quem:** a #204, em que a dona dá nome às vozes da transcrição (H3), mesclada em 14/11.
-  O plano aprovado pelo Roberto em 15/11 estende a regra ao texto que a IA escreve.
+  Estender a regra ao texto que a IA escreve foi proposto no plano de 15/11 e aprovado
+  pelo Roberto.
 - **O quê:** a dona troca "Falante 1" por um nome, e só ela vê os nomes. O link aberto
   continua com "Falante n". Reprocessar a reunião apaga os nomes, porque a transcrição nova
   renumera as vozes.
@@ -293,7 +297,9 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 ## 15/11/2026 — Face ID e digital voltam ao plano, com as chaves presas a `wrwglobal.org`
 
 - **Quem:** Roberto, na conversa com o Claude de 15/11 que montou o plano do gravador da
-  H4 em diante.
+  H4 em diante: a volta das chaves de acesso, o RP ID, as origens e a biblioteca. A
+  posição na fila, logo depois da G13, foi proposta no plano de 15/11, com a ressalva "se
+  preferir as passkeys no fim, é só dizer", e aprovada pelo Roberto.
 - **O quê:** a sessão continua durando 90 dias desde o último uso (#179). Quando ela vence,
   ou num aparelho novo, a pessoa entra com Face ID ou digital, em vez de e-mail e senha, no
   site e no app. As chaves de acesso (WebAuthn) voltam ao plano logo depois da G13: a A6
@@ -324,8 +330,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 
 ## 15/11/2026 — a gravação sem o teto de 10 minutos, com um OK a cada hora (G13)
 
-- **Quem:** Roberto, em 15/11. O teto técnico de 12 h veio do plano aprovado por ele no
-  mesmo dia.
+- **Quem:** Roberto, em 15/11. O teto técnico de 12 h e a divisão em duas PRs foram
+  propostos no plano de 15/11 e aprovados por ele.
 - **O quê:**
   - sai o teto de 10 minutos da gravação;
   - a cada hora cheia de gravação, um aviso pequeno pede OK e fica ativo por 10 minutos;
@@ -341,16 +347,16 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   - a G13a (#209, aberta) traz o aviso de hora e o teto de 12 h, ainda só no
     `/gravar?emPartes=1`. O envio único segue em 10 minutos e 10 MB até a G14;
   - a G13b, ainda sem PR em 15/11, faz das partes o padrão para todas, com o
-    `?envioUnico=1` como saída de suporte até a G14. Junto vêm o "Descartar gravação",
-    com confirmação, porque some a revisão antes de enviar, os avisos de parte recusada e
-    de cópia no aparelho indisponível, o painel de minutos com o limite de 12 h por
-    reunião, os textos que ainda falam em 10
-    minutos e o conserto do duplo clique em "Iniciar gravação". Esse defeito veio com a
-    G9 e foi achado na revisão da #209: no modo em partes, o duplo clique cria duas
-    reuniões, e a gravação em curso perde as partes.
+    `?envioUnico=1` como saída de suporte até a G14. Junto vêm o "Descartar gravação", com
+    confirmação, porque some a revisão antes de enviar, os avisos de parte recusada e de
+    cópia no aparelho indisponível, o painel de minutos com o limite de 12 h por reunião,
+    os textos que ainda falam em 10 minutos e o conserto do duplo clique em "Iniciar
+    gravação". Esse defeito veio com a G9 e foi achado na revisão da #209: no modo em
+    partes, o duplo clique cria duas reuniões, e a gravação em curso perde as partes.
 - **Em aberto:** o faturamento do Gemini, com alerta de orçamento, sem resposta do Roberto
-  em 15/11. A G13b libera gravações de horas para todas, e a H4c gera o resumo de toda
-  reunião (abaixo). Sem faturamento, a cota grátis pode travar também a transcrição.
+  em 15/11. A G13b libera gravações de horas para todas, e a H4c (#208, aberta) passa a
+  gerar o resumo de toda reunião pronta (abaixo). Sem faturamento, a cota grátis pode
+  travar também a transcrição.
 - **Onde:** na #209, `shared/const.ts` (os tetos e o prazo do aviso),
   `server/fatias-de-reuniao.ts` (a parte até 720 s, até 200 partes e a soma até 12 h, com
   10 min de folga) e os novos `useAvisoDeHora` e `AvisoDeHoraDeGravacao`.
@@ -361,22 +367,28 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **O quê:** o teste que dá para automatizar entra na PR. O que exige mão humana vira
   cartão no Notion para o Gabriel e o Nicolas, um por PR que precise.
 - **Na G13:** isso troca a bancada B do desenho, que pedia reuniões reais de 45 minutos ou
-  mais antes da G13. No lugar dela entram os testes automatizados e o cartão "Gravação real
-  de mais de 1 hora", em produção com `?emPartes=1`. O roteiro está no desenho, em "As
-  duas bancadas de teste".
+  mais antes da G13. No lugar dela:
+  - os testes de relógio falso e os de integração dos tetos, que estão na #209 (aberta);
+  - um ponta a ponta com o microfone dublado e o relógio adiantado, previsto no plano de
+    15/11 e ainda não rodado: a #209 diz que não o verificou;
+  - a gravação real de mais de 1 hora, no cartão de teste humano "Gravação real de mais de
+    1 hora", em produção com `?emPartes=1`. O roteiro está no desenho, em "As duas
+    bancadas de teste".
 - **Antes:** a G13 só entrava com a bancada B aprovada, e as reuniões reais para ela
   estavam entre as pendências do Roberto.
 - **Onde:** fora do código: os cartões ficam no quadro do Notion.
 
 ## 15/11/2026 — o resumo guardado, também no link aberto (H4, H6 e H8)
 
-- **Quem:** o plano do gravador aprovado pelo Roberto em 15/11. O formato vem do app de
-  referência que a Glenda mandou no grupo em 10/11.
+- **Quem:** proposto no plano do gravador de 15/11 e aprovado pelo Roberto. O formato vem
+  do app de referência que a Glenda mandou no grupo em 10/11.
 - **O quê:**
-  - o resumo fica guardado e é gerado sozinho, em segundo plano, quando a reunião fica
-    pronta. Ele sai no idioma da reunião e no formato que a cliente pediu: ações com caixa
-    de marcar, foco do trabalho, tarefas por assunto, decisões, bloqueios e questões
-    pendentes. Cada item fica pendente até a dona confirmar;
+  - o resumo fica guardado e passa a ser gerado sozinho, em segundo plano, quando a
+    reunião fica pronta. O disparo automático só entra com a H4c (#208, ainda aberta); até
+    lá, a produção segue com o resumo a pedido da #171. O resumo sai no idioma da reunião
+    e no formato que a cliente pediu: ações com caixa de marcar, foco do trabalho, tarefas
+    por assunto, decisões, bloqueios e questões pendentes. Cada item fica pendente até a
+    dona confirmar;
   - reunião antiga, já pronta, não ganha resumo em lote: a dona toca em "Gerar resumo";
   - o link aberto mostra o resumo guardado: os itens confirmados e os pendentes, estes com
     um aviso de que foram gerados pela IA e a dona ainda não os conferiu. Os ignorados
@@ -393,8 +405,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   player fixo no rodapé, um só para todas as abas; H4c (#208, aberta), o resumo na tela e
   no link aberto, com o disparo automático e o fim do resumo a pedido; e H4d, os modelos
   de resumo, que esperam a Glenda. As três primeiras estão no ar desde 15/11.
-- **Em aberto:** o faturamento do Gemini (ver a G13, acima). O merge da #208 espera essa
-  resposta.
+- **Em aberto:** o faturamento do Gemini, ainda sem resposta (ver a G13, acima). A H4c
+  (#208, aberta) passa a gerar o resumo de toda reunião pronta.
 - **Onde:** `server/resumo-da-reuniao.ts` e a migração 0017 (#205),
   `server/fila-do-resumo.ts` e `server/resumo-guardado.ts` (#206) e
   `client/src/components/BarraDoPlayer.tsx` (#207). O `ResumoGuardado.tsx` vem na #208. A
@@ -402,7 +414,7 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 
 ## 15/11/2026 — a agenda fala com a Google Agenda pela API (H16)
 
-- **Quem:** o plano do gravador aprovado pelo Roberto em 15/11.
+- **Quem:** proposto no plano do gravador de 15/11 e aprovado pelo Roberto.
 - **O quê:** a H16 vira três PRs.
   - **H16a:** a agenda na WRW (título, início, duração, fuso, local ou link, participantes
     e lembrete), o .ics gerado no navegador, o link de criação de evento da Google Agenda e

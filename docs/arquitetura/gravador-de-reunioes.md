@@ -1,6 +1,6 @@
 # Gravador de reuniões: o desenho em ondas
 
-Plano aprovado pelo Roberto em 30/10/2026 e atualizado com as decisões dele de 10/11,
+Plano aprovado pelo Roberto em 30/10/2026 e atualizado com as decisões de 10/11,
 12/11 e 15/11/2026. É desenho, não retrato do código: onde a `main` divergir deste texto,
 vale a `main`. Em 10/11 entraram na `main` a A1 (#169), a A3 (#170), a A4 (#172), a G1a
 (#174) e uma primeira versão do resumo e do "Pergunte à reunião" (#171), descrita nas
@@ -12,16 +12,16 @@ Notion. O detalhe de cada PR (arquivos, testes e as correções que a revisão d
 pediu) fica fora do repositório, com o Roberto: quem pegar uma PR pede esse detalhe a ele.
 
 Os códigos de PR deste plano são A1 a A8, D1, G1a, G1b, G2 a G10, G13, G14, H1r, H3 a
-H16, H9b, R1, S e DOC-0 (este documento). A numeração tem lacunas porque a revisão do
-desenho juntou, dividiu e tirou PRs: a G1 virou G1a e G1b; da H1 sobrou a H1r, e o resto
-foi para a A3; a H2 e a G11 foram absorvidas pela D1; a G12 saiu do plano, porque a
-importação é a H9, pelo navegador; e a H9b completa a H9 com WAV, OGG e WebM longos, na
-Onda 5. A H16, da agenda, entrou em 10/11. Em 15/11, o plano aprovado pelo Roberto dividiu
-PRs grandes, para cada uma caber numa rodada de revisão: a H4 virou H4a1, H4a2, H4b, H4c e
-H4d; a G13 virou G13a e G13b; e a H16 virou H16a, H16b e H16c. A H5, a H7 e a H9 também
-foram divididas, e o desenho delas vem na DOC-2, depois da fila. A DOC-1 registra as
-decisões de 12/11 a 15/11. Estes códigos valem só para este plano: não são os ajustes A1 a
-A14 nem as decisões D1, D2… do glossário, em [docs/README.md](../README.md).
+H16, H9b, R1, S, DOC-0 (este documento), DOC-1 e DOC-2. A numeração tem lacunas porque a
+revisão do desenho juntou, dividiu e tirou PRs: a G1 virou G1a e G1b; da H1 sobrou a H1r,
+e o resto foi para a A3; a H2 e a G11 foram absorvidas pela D1; a G12 saiu do plano,
+porque a importação é a H9, pelo navegador; e a H9b completa a H9 com WAV, OGG e WebM
+longos, na Onda 5. A H16, da agenda, entrou em 10/11. Em 15/11, o plano aprovado pelo
+Roberto dividiu PRs grandes, para cada uma caber numa rodada de revisão: a H4 virou H4a1,
+H4a2, H4b, H4c e H4d; a G13 virou G13a e G13b; e a H16 virou H16a, H16b e H16c. A H5, a H7
+e a H9 também foram divididas, e o desenho delas vem na DOC-2, depois da fila. A DOC-1
+registra as decisões de 12/11 a 15/11. Estes códigos valem só para este plano: não são os
+ajustes A1 a A14 nem as decisões D1, D2… do glossário, em [docs/README.md](../README.md).
 
 ## O pedido
 
@@ -112,8 +112,9 @@ Do Roberto. Valem sobre as de 10/11 nos dois pontos abaixo.
 - **Compartilhar por link aberto, por enquanto.** Troca o "sem link público e sem senha"
   de 10/11. A dona liga o link de uma reunião pronta, e qualquer pessoa com o endereço
   `/r/{token}` ouve a gravação, lê e traduz a transcrição e pede à IA o resumo e respostas,
-  sem conta na WRW. O que já entrou (em
-  [decisoes-tomadas.md](./decisoes-tomadas.md), 12/11):
+  sem conta na WRW. Com a #208 (aberta), o link passa a mostrar o resumo guardado, no
+  lugar do resumo pedido à IA (ver as decisões de 15/11). As perguntas à IA continuam. O
+  que já entrou (em [decisoes-tomadas.md](./decisoes-tomadas.md), 12/11):
   - só leitura: excluir, reprocessar e a rede particular da dona (contatos e entidades)
     continuam só com ela, e o nome dela não aparece;
   - ligar pede de novo a confirmação de que as pessoas que falaram autorizaram
@@ -158,9 +159,9 @@ mudou, está em [decisoes-tomadas.md](./decisoes-tomadas.md), em 14/11 e 15/11.
   horário de término de uma reunião agendada (H16). Isso troca o aviso de hora "sem parar
   a gravação" de 10/11. O plano acrescentou um teto técnico de 12 h por reunião, no
   servidor, contra gasto. A G13 vem logo depois da H4.
-- **Face ID e digital, no site e no app.** A A6 e a A7 voltam ao plano, logo depois da
-  G13, com o RP ID `wrwglobal.org` (ver os contratos das passkeys). O app das lojas (M1)
-  usa a mesma A6, com as chaves ligadas na WebView.
+- **Face ID e digital, no site e no app.** A A6 e a A7 voltam ao plano, com o RP ID
+  `wrwglobal.org` (ver os contratos das passkeys). O app das lojas (M1) usa a mesma A6,
+  com as chaves ligadas na WebView.
 - **Bibliotecas.** A `mp4box` e a `docx` estão aprovadas, e também qualquer outra
   biblioteca segura: licença aberta, mantida e versão publicada há pelo menos duas
   semanas. Só entra dependência quando a plataforma não resolve bem.
@@ -168,8 +169,10 @@ mudou, está em [decisoes-tomadas.md](./decisoes-tomadas.md), em 14/11 e 15/11.
   Notion para o Gabriel e o Nicolas, um por PR que precise. Na G13, isso troca a bancada B
   (ver "As duas bancadas de teste").
 
-Do plano aprovado no mesmo dia:
+Propostas no plano do mesmo dia e aprovadas pelo Roberto:
 
+- a A6 e a A7 vêm logo depois da G13, com a ressalva do plano: "se preferir as passkeys no
+  fim, é só dizer";
 - reunião antiga, já pronta, não ganha resumo em lote: a dona toca em "Gerar resumo";
 - o link aberto mostra o resumo guardado: os itens confirmados e os pendentes, estes com
   um aviso de que foram gerados pela IA e a dona ainda não os conferiu. Os ignorados nunca
@@ -202,7 +205,7 @@ gravação contínua).
 
 1. **Fatias de 10 minutos, cada uma um arquivo válido.** O gravador reinicia o
    MediaRecorder a cada fatia e pede mp4 antes de webm (o webm já falhou no Gemini; ver a
-   PR #158). A troca de fatia não pode deixar buraco no áudio. A bancada B, que conferiria
+   PR #158). A troca de parte não pode deixar buraco no áudio. A bancada B, que conferiria
    a emenda, foi trocada em 15/11 (ver "As duas bancadas de teste").
 2. **Cópia no aparelho.** A fatia fica no IndexedDB até o servidor confirmar. O trecho
    em curso também vai para o aparelho aos poucos, e não só no fim da fatia, para um
@@ -222,7 +225,9 @@ gravação contínua).
 
 ## Contratos entre as PRs
 
-Fixados antes da transcrição por fatia, para as PRs não se contradizerem:
+Fixados antes da transcrição por fatia, para as PRs não se contradizerem. Fatia e parte
+são a mesma coisa: o desenho antigo diz "fatia", e o texto novo diz "parte", o nome que a
+tela e a rota usam (`/gravar?emPartes=1` e `/api/reunioes/:id/partes/:seq`).
 
 - **Segmento da transcrição:** `{inicio, fim, falante, texto, lacuna?}`.
   - O tempo vai em segundos absolutos da reunião.
@@ -340,11 +345,11 @@ Tamanho: P é pequena, M é média e G é grande.
 |---|---|---|
 | G3 (M, migração) | Tabela de fatias, estado "enviando", versão do aviso, `origem` e `audio_pipeline`, transcrição em MEDIUMTEXT. A lista e o detalhe passam a escolher as colunas e deixam de mandar as colunas de controle da fila. | decisão sobre a #134 |
 | G1b (M) | Seletor do idioma da reunião, que por padrão é o da tela de quem grava. A G1b traz a função `nomeDoIdioma` (ver os contratos), e o ditado e a voz do contato passam a usá-la também. Na tradução, o servidor e a tela deixam de tratar o pt-BR como o original fixo: sem isso, uma reunião em inglês "traduzida" para pt-BR voltaria em inglês. | G1a, G2 |
-| A6 (G, migração) | Servidor das passkeys com `@simplewebauthn/server`: a tabela das chaves e a do desafio de uso único, a entrada sem senha e a gestão pela dona, seguindo os contratos das passkeys. Sem `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS`, a função some. Voltou ao plano em 15/11, logo depois da G13, com o RP ID `wrwglobal.org` (ver as decisões de 15/11). | A5 |
+| A6 (G, migração) | Servidor das passkeys com `@simplewebauthn/server`: a tabela das chaves e a do desafio de uso único, a entrada sem senha e a gestão pela dona, seguindo os contratos das passkeys. Sem `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS`, a função some. Voltou ao plano em 15/11, por decisão do Roberto, com o RP ID `wrwglobal.org`. A posição, logo depois da G13, foi proposta no plano do mesmo dia e aprovada por ele (ver as decisões de 15/11). | A5 |
 | G4 (M) | Aviso de gravação em rascunho, versionado como dizem os contratos. Ele cita a IA do Google, a transferência internacional, a retenção e a separação de falantes, e diz quem terá acesso: as participantes adicionadas e, para consulta, a presidência e a admin, com registro, e quem receber o link aberto que a dona ligar (decisões de 12/11). O rascunho completo fica em `docs/termos/` para a Cris. | G1b, G3 |
 | G6 (M) | Transcrição de uma fatia no Gemini, com falantes e tempos, e o script da bancada A (ver "As duas bancadas de teste"). | G1b |
 | G8 (M) | Extração, tradução e Memória leem a reunião inteira, em janelas. A tradução de uma reunião longa sai da requisição e vira trabalho em segundo plano. | G1b, A3 |
-| A7 (G) | Tela das passkeys: login, convite depois da senha e gestão no Perfil. Voltou ao plano em 15/11, logo depois da A6. | A6 |
+| A7 (G) | Tela das passkeys: login, convite depois da senha e gestão no Perfil. Voltou ao plano em 15/11 com a A6, por decisão do Roberto. A posição, logo depois da A6, foi proposta no plano do mesmo dia e aprovada por ele. | A6 |
 
 **Onda 3: o gravador sem teto de tempo.**
 
@@ -355,9 +360,9 @@ Tamanho: P é pequena, M é média e G é grande.
 | G7 (G) | Fila de transcrição no MySQL. | G5, G6 |
 | R1 (G, migração) | Reunião compartilhada com participantes e consulta auditada da administração. Adiada em 12/11: por ora, no lugar dela, entrou o link aberto (decisões de 12/11). | G3, A3, #149 |
 | D1 (G) | Detalhe único: transcrição por falante, player que renova a URL, andamento, busca e tempo de fala, também na página do link aberto (`ReuniaoAberta.tsx`). | G7, S, R1 (adiada em 12/11) |
-| G9 (G) | Gravador que envia em fatias por baixo, numa gravação contínua para quem grava, com cópia no aparelho até o servidor confirmar e retomada do envio. Uma trava do navegador (Web Locks) impede duas abas de enviarem a mesma gravação, e a cópia é apagada ao sair e ao excluir a conta. Entrou em 14/11 (#202) atrás de um interruptor: só liga com `/gravar?emPartes=1`, até a G13b. | D1, G4, G5, G7, S |
+| G9 (G) | Gravador que envia em partes por baixo, numa gravação contínua para quem grava, com cópia no aparelho até o servidor confirmar e retomada do envio. Uma trava do navegador (Web Locks) impede duas abas de enviarem a mesma gravação, e a cópia é apagada ao sair e ao excluir a conta. Entrou em 14/11 (#202) atrás de um interruptor: só liga com `/gravar?emPartes=1`, até a G13b. | D1, G4, G5, G7, S |
 | G10 (M) | Gravação longa no celular: tela acesa, aviso do iPhone, pausa e "continuar gravando". Em vez do aviso de limite, que não há mais, um aviso a cada hora completa de gravação ("1 hora de gravação", "2 horas"...), sem parar a gravação. Pela decisão de 15/11, esse aviso passa a pedir OK: na G13a (#209), ele vira o aviso que para a gravação quando ninguém responde em 10 minutos (ver a G13). | G9 |
-| H9 (G) | Importar M4A, MP3, MP4 e MOV pelas fatias, com o mesmo teto de tempo da gravação: 12 h, depois da G13. O navegador corta o MP3 nas fronteiras de quadro e tira o áudio (AAC) de M4A, MP4 e MOV com o `mp4box`; do vídeo, só o áudio sai do aparelho. | G9 |
+| H9 (G) | Importar M4A, MP3, MP4 e MOV pelas partes, com o mesmo teto de tempo da gravação: 12 h, depois da G13. O navegador corta o MP3 nas fronteiras de quadro e tira o áudio (AAC) de M4A, MP4 e MOV com o `mp4box`; do vídeo, só o áudio sai do aparelho. | G9, G13 |
 | G13 (M) | Tira o teto de tempo da gravação em partes, que até ela segue em 600 s, para todos os níveis e sem teto mensal. Pelas decisões de 15/11, no lugar do aviso sem parar da G10, a cada hora cheia de gravação um aviso pede OK e fica ativo por 10 minutos; sem resposta, a gravação para sozinha e entrega o que gravou. Fora isso, só o Encerrar para a gravação. Fica um teto técnico de 12 h por reunião, no servidor, contra gasto. O envio único em base64 (`meetings.submitRecording`, que até a H9b ainda recebe WAV, OGG e WebM) continua em 600 s e 10 MB, numa constante própria e com os textos dele, até sair na G14. Vem logo depois da H4, em duas PRs: a **G13a** (#209, aberta) traz o aviso de hora e o teto de 12 h, ainda só no `/gravar?emPartes=1`; a **G13b**, ainda sem PR, faz das partes o padrão para todas, com o `?emPartes=1` aceito e sem efeito e o `?envioUnico=1` como saída de suporte até a G14. A G13b traz também o "Descartar gravação", com confirmação, os avisos de parte recusada e de cópia no aparelho indisponível, o conserto do duplo clique em "Iniciar gravação", o painel de minutos com o limite de 12 h por reunião, o FAQ (`server/routers/faq.ts`) e os textos de tela que ainda falam em 10 minutos. A importação (H9), que agora vem depois, já nasce com o teto de 12 h. No lugar da bancada B, testes automatizados e um cartão de teste humano no Notion (ver "As duas bancadas de teste"). | G4, G7 a G10, D1 |
 
 **Onda 4: resumo e funções em volta.** H3 e H4 podem correr ao lado de G9 e G10.
@@ -374,7 +379,12 @@ Tamanho: P é pequena, M é média e G é grande.
 
 **Onda 5: depois, conforme a cliente.**
 
-- **H10:** mapa mental em Mermaid (diagrama escrito em texto), sem dependência nova.
+- **H10:** mapa mental, com migração: colunas novas em `meeting_summaries`. A IA gera o
+  mapa numa chamada separada, depois do resumo; se o mapa falhar, o resumo continua
+  pronto. O mapa tem de 2 a 12 ramos e até 3 níveis, com rótulos de até 60 caracteres e
+  sem token de voz. Na tela, o `MapaMental.tsx` é feito em CSS: árvore horizontal a partir
+  de 768 px, contorno vertical que recolhe no celular, e funciona também da direita para a
+  esquerda (árabe). A aba "Mapa mental" fica no detalhe da reunião e no link aberto.
 - **H11:** tradução do resumo.
 - **H12:** resumo de PDF.
 - **H13:** resumo de vídeo do YouTube. O recurso do Gemini para isso ainda está em
@@ -401,15 +411,16 @@ O áudio e as transcrições das duas bancadas ficam fora do repositório, que �
   a chave enxerga (o script da G2).
 - **Bancada B (antes da G13), trocada em 15/11.** Pela decisão do Roberto, a G13 passa a
   ser provada por testes automatizados e por um cartão de teste humano no Notion para o
-  Gabriel e o Nicolas, "Gravação real de mais de 1 hora", em produção com `?emPartes=1`:
-  no iPhone (Safari e app instalado), no Android e no computador, com uma das reuniões
-  passando de 2 h e o aviso deixado sem resposta, 20 minutos em outra aba e 2 minutos em
-  modo avião. Pelo plano, os testes automatizados são os de relógio falso, a integração
-  dos tetos e um ponta a ponta sem humano, com o microfone dublado por uma fala sintética
-  e o relógio adiantado. O desenho antigo da bancada B era este: reuniões reais de 45
-  minutos ou mais, ao menos uma com mais de 1 hora, com o consentimento de quem fala,
-  gravadas por HTTPS no iPhone (Safari e app instalado), no Android (Chrome) e no Chrome
-  do computador. Ela conferia que:
+  Gabriel e o Nicolas. O roteiro do cartão e os testes foram propostos no plano de 15/11 e
+  aprovados por ele. O cartão é "Gravação real de mais de 1 hora", em produção com
+  `?emPartes=1`: no iPhone (Safari e app instalado), no Android e no computador, com uma
+  das reuniões passando de 2 h e o aviso deixado sem resposta, 20 minutos em outra aba e 2
+  minutos em modo avião. Os testes automatizados são os de relógio falso, a integração dos
+  tetos e um ponta a ponta sem humano, com o microfone dublado por uma fala sintética e o
+  relógio adiantado. O desenho antigo da bancada B era este: reuniões reais de 45 minutos
+  ou mais, ao menos uma com mais de 1 hora, com o consentimento de quem fala, gravadas por
+  HTTPS no iPhone (Safari e app instalado), no Android (Chrome) e no Chrome do computador.
+  Ela conferia que:
   - as fatias chegam;
   - a emenda entre as fatias não perde fala;
   - queda de rede, recarregar a página e um novo login depois de a sessão vencer não
@@ -428,7 +439,7 @@ O áudio e as transcrições das duas bancadas ficam fora do repositório, que �
 ## Regras de trânsito
 
 - **Migrações:**
-  - uma aberta por vez, na ordem G3, A6, R1, H3, H4, H7, H16, H11, H12, H13 e H15;
+  - uma aberta por vez, na ordem G3, A6, R1, H3, H4, H7, H10, H16, H11, H12, H13 e H15;
   - cada uma traz a `main` e roda `pnpm db:generate` de novo (`/mudar-schema`);
   - conflito em `drizzle/meta` nunca se resolve à mão.
 - **Arquivos em série:** só uma PR por vez mexe em `client/src/pages/Meetings.tsx`,
@@ -521,14 +532,13 @@ mescla, só por `gh pr merge`).
       reunião (H6), porque isso muda a H6 e o aviso de gravação (G4);
   - antes da Onda 3:
     - o faturamento da chave do Gemini, com alerta de orçamento, ainda sem resposta em
-      15/11. A H4c (#208) gera o resumo de toda reunião pronta, e a G13b libera
-      gravações de horas para todas. Sem faturamento, a cota grátis pode travar também a
-      transcrição, e o merge da #208 espera essa resposta;
+      15/11. A H4c (#208, aberta) passa a gerar o resumo de toda reunião pronta, e a G13b
+      libera gravações de horas para todas. Sem faturamento, a cota grátis pode travar
+      também a transcrição;
     - o plano do Render em vigor;
     - a cota de download do B2 e um bucket de desenvolvimento;
     - o aval ao teto de 3 gravações abertas por conta, que é contra abuso e não um teto
       de minutos;
-  - antes da H3 (Onda 4): confirmar a proposta dos nomes de quem falou;
   - antes da H16b (o desenho detalhado da H16 está no plano de 15/11):
     - no Google Cloud: ativar a Calendar API; o branding (nome WRW, e-mail de suporte e
       domínio verificado); o público "Externo", em modo Teste, com as contas da Glenda e
