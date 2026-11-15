@@ -744,6 +744,39 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     }
   });
 
+  it("o player é um só, fixo no rodapé, e é o mesmo em todas as abas (o áudio não para ao trocar)", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio");
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: /^Contatos/ }));
+    expect(document.querySelector("audio")).toBe(audio);
+  });
+
+  it("outro ?t para a mesma reunião, sem remontar a tela, leva o mesmo player ao ponto novo", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620");
+      const audio = document.querySelector("audio");
+      expect(audio!.getAttribute("src")).toBe(PARTES[1].url);
+      // Um link vindo do sino ou da busca, com a reunião já aberta.
+      fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+      act(() => { window.history.pushState(null, "", `/meetings/${REUNIAO.id}?t=10`); });
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+      // O mesmo ?t de novo (sem link novo) não pula outra vez.
+      const tocar = vi.mocked(HTMLMediaElement.prototype.play);
+      const chamadas = tocar.mock.calls.length;
+      act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+      expect(tocar.mock.calls.length).toBe(chamadas);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));

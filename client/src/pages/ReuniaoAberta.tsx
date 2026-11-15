@@ -5,7 +5,8 @@ import { Clock3, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
-import { PlayerDasPartes, type ControleDoPlayer } from "@/components/PlayerDasPartes";
+import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
+import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
@@ -56,8 +57,9 @@ function duracao(segundos: number) {
   return `${String(Math.floor(segundos / 60)).padStart(2, "0")}:${String(segundos % 60).padStart(2, "0")}`;
 }
 
-function Moldura({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
+function Moldura({ children, comPlayer = false }: { children: React.ReactNode; comPlayer?: boolean }) {
+  // Com o player fixo no rodapé, o fim da página fica livre embaixo dele.
+  return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${comPlayer ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <a href="/" aria-label="WRW" className="inline-block mb-8"><BrandLogo variante="lockup" className="w-36"/></a>
     {children}
   </div></main>;
@@ -123,7 +125,7 @@ export default function ReuniaoAberta() {
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
   // tela em árabe continua da esquerda para a direita.
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
-  return <Moldura>
+  return <Moldura comPlayer={!!gravacao}>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
     <h1 dir="auto" className="text-3xl font-bold mt-1">{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
@@ -134,10 +136,8 @@ export default function ReuniaoAberta() {
     <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {gravacao ? <>
-        <PlayerDasPartes ref={player} partes={partes} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
-        {falhaNoAudio
-          ? <p className="text-xs text-amber-200/80 mt-2">{t("meetings.openLink.audioLoadError")}</p>
-          : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>}
+        {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
+        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
       </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
         ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
         : t("meetings.noRecordingStored")}</p>}
@@ -172,5 +172,8 @@ export default function ReuniaoAberta() {
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>
+    {gravacao && <BarraDoPlayer ref={player} partes={partes}
+      aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
+      aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>}
   </Moldura>;
 }

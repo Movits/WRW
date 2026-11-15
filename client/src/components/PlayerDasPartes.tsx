@@ -16,8 +16,8 @@ export type ControleDoPlayer = { irPara: (segundo: number) => void };
  * Sem onError o player falha MUDO (sessão vencida, limite de requisições,
  * storage fora do ar): `aoFalhar` deixa a tela explicar.
  */
-export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPlayer[]; aoFalhar?: () => void; aoCarregar?: () => void }>(
-  function PlayerDasPartes({ partes, aoFalhar, aoCarregar }, ref) {
+export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPlayer[]; aoFalhar?: () => void; aoCarregar?: () => void; className?: string }>(
+  function PlayerDasPartes({ partes, aoFalhar, aoCarregar, className = "w-full mt-4" }, ref) {
     const { t } = useTranslation();
     const audio = useRef<HTMLAudioElement | null>(null);
     const [indice, setIndice] = useState(0);
@@ -55,7 +55,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
         controls
         preload="metadata"
         src={atual.url}
-        className="w-full mt-4"
+        className={className}
         data-parte={atual.seq}
         onError={() => {
           aoFalhar?.();
