@@ -261,6 +261,25 @@ describe("processMeetingRecording — áudio recusado vira reunião com falha, n
     expect(valoresDe(schema.consumoDeMinutos)).toEqual([expect.objectContaining({ origem: "reuniao", referencia: "reuniao-1", segundos: 603 })]);
   });
 
+  it("a reunião que fica pronta ganha o pedido do resumo guardado (H4c): pendente, da dona e da transcrição gravada", async () => {
+    await processMeetingRecording(entradaValida);
+    const valoresDe = (tabela: unknown) => insercoes.filter(operacao => operacao.tabela === tabela).flatMap(operacao => operacao.valores);
+    const [transcricao] = valoresDe(schema.meetingTranscripts);
+    expect(valoresDe(schema.meetingSummaries)).toEqual([expect.objectContaining({
+      meetingId: "reuniao-1", ownerId: "dona-1", status: "pending", transcriptId: transcricao.id,
+    })]);
+    expect(String(transcricao.id)).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("o pedido do resumo é escrita da ficha, antes do 'ready': banco fora do ar nele vira falha, e a reunião não fica pronta sem o resumo", async () => {
+    recusarInsert = tabela => tabela === schema.meetingSummaries
+      ? new DrizzleQueryError("insert into `meeting_summaries` (`id`, `owner_id`) values (?, ?)", ["uuid", "dona-1"],
+        Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3306"), { code: "ECONNREFUSED" }))
+      : null;
+    await expect(processMeetingRecording(entradaValida)).rejects.toThrow();
+    expect(atualizacoes.map(a => a.status)).toEqual(["processing", "failed"]);
+  });
+
   it("o 'ready' grava processing_error null: reunião pronta nunca carrega motivo de falha", async () => {
     await processMeetingRecording(entradaValida);
     const pronta = atualizacoes.find(a => a.status === "ready")!;

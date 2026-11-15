@@ -18,7 +18,7 @@ const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetings, meetingTranscripts, users } = await import("../drizzle/schema");
+const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const { GeminiIndisponivelError } = await import("./gemini");
@@ -59,6 +59,9 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
   afterAll(async () => {
     const banco = await getDb();
     if (!banco) return;
+    // A reunião que fica pronta ganha o pedido do resumo guardado (H4c).
+    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
+    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
     await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
@@ -66,6 +69,8 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
   });
   beforeEach(async () => {
     const banco = await db();
+    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
+    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
     await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
@@ -120,6 +125,10 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
       { inicio: 601, fim: 602, falante: "F2", texto: "Combinado." },
     ]);
     expect(gancho).toHaveBeenCalledWith({ meetingId: id, ownerId: DONA });
+    // Pronta, a reunião em partes ganha o pedido do resumo guardado, da
+    // transcrição montada: a fila do resumo o gera em segundo plano (H4c).
+    const resumos = await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id));
+    expect(resumos).toEqual([expect.objectContaining({ ownerId: DONA, status: "pending", transcriptId: transcricao.id, attempts: 0, lockToken: null })]);
   });
 
   it("áudio que sumiu do bucket é falha definitiva: a parte vira lacuna, e a reunião monta com o que chegou", async () => {

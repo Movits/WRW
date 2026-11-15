@@ -9,7 +9,8 @@ import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
-import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
+import { PergunteAReuniao } from "@/components/ReuniaoComIA";
+import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
@@ -533,6 +534,18 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     refetchOnWindowFocus: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
     refetchOnReconnect: consulta => !erroDefinitivoDaReuniao(consulta.state.error),
   });
+  // O resumo guardado (H4), de reunião pronta: a fila do servidor o gera em
+  // segundo plano, e a tela pergunta de novo a cada 5 s enquanto ele está na
+  // fila ou sendo gerado. Lido aqui, e não dentro do resumo, porque o emoji
+  // dele vai antes do título da reunião. As decisões (ResumoGuardado) relêem.
+  const resumoGuardado = trpc.meetings.resumoGuardado.useQuery({ meetingId }, {
+    enabled: data?.meeting.status === "ready",
+    refetchInterval: consulta => {
+      const estado = consulta.state.data?.estado;
+      return (estado === "pendente" || estado === "gerando") && !erroDefinitivoDaReuniao(consulta.state.error) ? 5_000 : false;
+    },
+    retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
+  });
   // true só com este detalhe montado e visível: a exclusão que termina depois
   // de a pessoa sair dele não a puxa de volta para a lista. Efeito de layout
   // pelo mesmo motivo do noGravadorAgora: escondido pelo Suspense (a ida a uma
@@ -551,12 +564,22 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const parametros = useMemo(() => new URLSearchParams(busca), [busca]);
   const segundoPedido = Number(parametros.get("t"));
   const termoPedido = parametros.get("q") ?? "";
+  // ?item (um item do resumo guardado, dos links das próximas ações e dos
+  // lembretes) abre a aba Resumo, que rola até ele e o destaca; ele vale mais
+  // que ?t e ?q para a aba (o ?t ainda leva o player, que serve a todas).
+  const itemPedido = parametros.get("item") ?? "";
+  // O item até o qual a aba Resumo já rolou: trocar de aba e voltar não rola de
+  // novo até ele (como o ?t, que pula uma vez por link).
+  const itemJaDestacado = useRef<string | null>(null);
   const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
-  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(pedeTranscricao ? "transcript" : "summary");
+  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
-  useEffect(() => { if (pedeTranscricao) setTab("transcript"); }, [busca]);
+  useEffect(() => {
+    if (itemPedido) setTab("summary");
+    else if (pedeTranscricao) setTab("transcript");
+  }, [busca]);
   // O ?t do link leva o player ao ponto quando a parte que cobre o segundo
   // existe. Na reunião que ainda está chegando (gravando, enviando ou
   // transcrevendo), o pulo espera a parte; pronta, vai à mais próxima. Cada
@@ -717,9 +740,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
+  // O emoji do resumo vai antes do título, como no app de referência da cliente.
+  const emojiDoResumo = meeting.status === "ready" ? resumoGuardado.data?.emoji ?? null : null;
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
-    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
@@ -745,7 +770,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     </div>}
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
-    {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4"><ResumoDaReuniaoPelaIA meetingId={meetingId}/><PergunteAReuniao meetingId={meetingId}/></div>}
+    {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
+      <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
+        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+      <PergunteAReuniao meetingId={meetingId}/>
+    </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}

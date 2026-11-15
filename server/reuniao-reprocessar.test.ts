@@ -104,9 +104,17 @@ vi.mock("./db", () => ({
       Object.assign(estado.reuniao, valores);
       return [{ affectedRows: 1 }];
     } }) }),
-    insert: (tabela: unknown) => ({ values: async (valores: Record<string, unknown> | Record<string, unknown>[]) => {
-      estado.operacoes.push({ tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] });
-      estado.aoInserir?.(tabela);
+    // Preguiçoso como o builder do Drizzle: grava ao ser aguardado, ou pelo
+    // onDuplicateKeyUpdate (o contador de minutos e o resumo guardado).
+    insert: (tabela: unknown) => ({ values: (valores: Record<string, unknown> | Record<string, unknown>[]) => {
+      const gravar = async () => {
+        estado.operacoes.push({ tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] });
+        estado.aoInserir?.(tabela);
+      };
+      return {
+        then: (ok: (valor: unknown) => unknown, falha: (erro: unknown) => unknown) => gravar().then(ok, falha),
+        onDuplicateKeyUpdate: () => gravar(),
+      };
     } }),
     delete: (tabela: unknown) => ({ where: async (condicao?: SQL) => {
       estado.operacoes.push({ tipo: "delete", tabela, ...renderizar(condicao) });
@@ -371,6 +379,20 @@ describe("reprocessar — com o áudio guardado", () => {
     expect(transcricao).toMatchObject({ meetingId: REUNIAO, ownerId: DONA, transcript: "Transcrição nova da conversa com a Ana Souza.", durationSeconds: 30 });
     expect(linhasInseridas(schema.meetingContactSuggestions).map(sugestao => sugestao.fullName)).toEqual(["Ana Souza"]);
     expect(falhasGravadas()).toEqual([]);
+  });
+
+  it("o resumo guardado é refeito: o antigo sai com os derivados, e o pedido novo, pendente e da transcrição nova, entra antes do 'ready'", async () => {
+    await reprocessar();
+    const apagouOResumo = primeira(o => o.tipo === "delete" && o.tabela === schema.meetingSummaries);
+    expect(apagouOResumo).toBeGreaterThanOrEqual(0);
+    const [transcricao] = linhasInseridas(schema.meetingTranscripts);
+    const [pedido, ...outros] = de("insert", schema.meetingSummaries);
+    expect(outros).toEqual([]);
+    expect(pedido.linhas).toEqual([expect.objectContaining({ meetingId: REUNIAO, ownerId: DONA, status: "pending", transcriptId: transcricao.id })]);
+    const posicaoDoPedido = estado.operacoes.indexOf(pedido);
+    const posicaoDoReady = estado.operacoes.findIndex(o => o.tipo === "update" && o.tabela === schema.meetings && o.valores?.status === "ready");
+    expect(posicaoDoPedido).toBeGreaterThan(apagouOResumo);
+    expect(posicaoDoPedido).toBeLessThan(posicaoDoReady);
   });
 });
 

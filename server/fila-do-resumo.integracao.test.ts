@@ -14,11 +14,11 @@ const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
 
 const { getDb } = await import("./db");
-const { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
 const fila = await import("./fila-do-resumo");
 const servico = await import("./resumo-guardado");
 const { FalhaDaIA } = await import("./ia-em-json");
-const { deletePrivateMeeting } = await import("./meeting-service");
+const { deletePrivateMeeting, gravarResultadoDaReuniao } = await import("./meeting-service");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-resumo-${crypto.randomUUID()}`;
@@ -66,6 +66,8 @@ async function limpar() {
     await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
     await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    // gravarResultadoDaReuniao (o disparo automático) conta os minutos da reunião.
+    await banco.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, dona));
   }
 }
 
@@ -355,5 +357,65 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await deletePrivateMeeting(DONA, id);
     expect(await itensDe(id)).toEqual([]);
     expect(await linhaDoResumo(id)).toBeUndefined();
+  });
+
+  describe("o disparo automático (H4c): toda reunião que fica pronta ganha o pedido do resumo", () => {
+    const TRANSCRICAO = { text: SEGMENTOS.map(s => s.texto).join("\n"), segments: SEGMENTOS, language: "pt-BR" };
+    const SEM_EXTRACAO = { entities: [], contacts: [] } as never;
+
+    async function reuniaoProcessando(ficha: number) {
+      const id = crypto.randomUUID();
+      await (await db()).insert(meetings).values({
+        id, ownerId: DONA, title: "Reunião que fica pronta", status: "processing", consentGranted: true, consentAt: ficha, language: "pt-BR",
+        createdAt: ficha, updatedAt: ficha,
+      });
+      return id;
+    }
+    const transcricaoDe = async (meetingId: string) => (await (await db()).select({ id: meetingTranscripts.id }).from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, meetingId)))[0];
+
+    it("gravarResultadoDaReuniao cria a linha pendente da transcrição gravada; a fila a gera; o reprocesso a recria do zero", async () => {
+      const banco = await db();
+      const ficha = AGORA();
+      const id = await reuniaoProcessando(ficha);
+      await gravarResultadoDaReuniao(banco, { meetingId: id, ownerId: DONA, ficha, limparAntes: false, durationSeconds: 12, transcription: TRANSCRICAO, extraction: SEM_EXTRACAO });
+
+      const primeira = await transcricaoDe(id);
+      const pedido = await linhaDoResumo(id);
+      expect(pedido).toMatchObject({ ownerId: DONA, status: "pending", transcriptId: primeira.id, attempts: 0, lockToken: null, version: 0 });
+      expect((await servico.resumoGuardadoDaDona(DONA, id)).estado).toBe("pendente");
+
+      await rodar();
+      expect((await servico.resumoGuardadoDaDona(DONA, id)).estado).toBe("pronto");
+      const [acao] = await itensDe(id);
+      await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
+
+      // O reprocesso toma a reunião com ficha nova e passa de novo por aqui, limpando antes.
+      const fichaNova = ficha + 1_000;
+      await banco.update(meetings).set({ status: "processing", updatedAt: fichaNova }).where(eq(meetings.id, id));
+      await gravarResultadoDaReuniao(banco, { meetingId: id, ownerId: DONA, ficha: fichaNova, limparAntes: true, durationSeconds: 12, transcription: TRANSCRICAO, extraction: SEM_EXTRACAO });
+
+      const segunda = await transcricaoDe(id);
+      expect(segunda.id).not.toBe(primeira.id);
+      const refeito = await linhaDoResumo(id);
+      expect(refeito.id).not.toBe(pedido.id);
+      expect(refeito).toMatchObject({ status: "pending", transcriptId: segunda.id, version: 0, emoji: null, generatedAt: null });
+      expect(await itensDe(id)).toEqual([]);
+      expect(await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id))).toHaveLength(1);
+    });
+
+    it("a linha que já existir fica como está: o insert é idempotente, uma linha por reunião, e a reunião fica pronta", async () => {
+      const banco = await db();
+      const ficha = AGORA();
+      const id = await reuniaoProcessando(ficha);
+      const existente = crypto.randomUUID();
+      await banco.insert(meetingSummaries).values({ id: existente, meetingId: id, ownerId: DONA, status: "pending", createdAt: ficha, updatedAt: ficha });
+
+      await gravarResultadoDaReuniao(banco, { meetingId: id, ownerId: DONA, ficha, limparAntes: false, durationSeconds: 12, transcription: TRANSCRICAO, extraction: SEM_EXTRACAO });
+
+      const linhas = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id));
+      expect(linhas).toEqual([expect.objectContaining({ id: existente, status: "pending" })]);
+      const [reuniao] = await banco.select({ status: meetings.status }).from(meetings).where(eq(meetings.id, id));
+      expect(reuniao.status).toBe("ready");
+    });
   });
 });

@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 /**
- * meetings.resumir e meetings.perguntar no router: o que chega ao serviço e o
- * teto de pedidos à IA por dona, resumo e perguntas somados. O serviço é
- * dublado; o que ele faz com a transcrição e a IA está em reuniao-com-ia.test.ts.
+ * meetings.perguntar e meetings.pedirResumo no router: o que chega ao serviço
+ * e o teto de pedidos à IA por dona, pedidos de resumo e perguntas somados. Os
+ * serviços são dublados; o que a pergunta faz com a transcrição e a IA está em
+ * reuniao-com-ia.test.ts, e o resumo guardado em resumo-guardado-rota.test.ts.
  */
 
-const resumirReuniao = vi.fn();
 const perguntarAReuniao = vi.fn();
+const pedirResumoDaDona = vi.fn();
 
 vi.mock("./db", () => ({
   getDb: async () => null,
@@ -17,64 +18,78 @@ vi.mock("./db", () => ({
 }));
 vi.mock("./reuniao-com-ia", async importOriginal => ({
   ...await importOriginal<typeof import("./reuniao-com-ia")>(),
-  resumirReuniao: (...args: unknown[]) => resumirReuniao(...(args as [])),
   perguntarAReuniao: (...args: unknown[]) => perguntarAReuniao(...(args as [])),
+}));
+vi.mock("./resumo-guardado", async importOriginal => ({
+  ...await importOriginal<typeof import("./resumo-guardado")>(),
+  pedirResumoDaDona: (...args: unknown[]) => pedirResumoDaDona(...(args as [])),
 }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");
 const { RecusaDaReuniaoComIA } = await import("./reuniao-com-ia");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
-const RESUMO_VAZIO = { topicos: [], decisoes: [], tarefas: [] };
+const PENDENTE = { estado: "pendente", emoji: null, idioma: null, erro: null, itens: [] };
 const contexto = (openId: string) => ({
   user: { id: 7, openId, email: `${openId}@local`, role: "silver" },
   req: { headers: {}, socket: {} },
   res: { cookie: () => {} },
 }) as never;
 const rota = (openId = "dona-1") => meetingsRouter.createCaller(contexto(openId));
-const resumir = (openId?: string) => rota(openId).resumir({ meetingId: ID, idioma: "pt-BR" });
+const pedirResumo = (openId?: string) => rota(openId).pedirResumo({ meetingId: ID });
 const perguntar = (openId?: string) => rota(openId).perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: "Qual prazo ficou combinado?" });
 
 beforeEach(() => {
   tetoDaIADaReuniao.esquecer();
-  resumirReuniao.mockReset();
-  resumirReuniao.mockResolvedValue(RESUMO_VAZIO);
   perguntarAReuniao.mockReset();
   perguntarAReuniao.mockResolvedValue({ respondida: false });
+  // Como o serviço real: o resumo que ainda não existe gasta a vaga antes de criar o trabalho.
+  pedirResumoDaDona.mockReset();
+  pedirResumoDaDona.mockImplementation(async (_dona: string, _id: string, antesDeCriar: () => void) => { antesDeCriar(); return PENDENTE; });
 });
 afterEach(() => { vi.useRealTimers(); });
 
-describe("meetings.resumir e meetings.perguntar — o que chega ao serviço", () => {
+describe("meetings.perguntar — o que chega ao serviço", () => {
   it("o openId da dona, a reunião, o idioma e a pergunta aparada", async () => {
-    await expect(rota().resumir({ meetingId: ID, idioma: "en" })).resolves.toEqual(RESUMO_VAZIO);
     await expect(rota().perguntar({ meetingId: ID, idioma: "ja", pergunta: "  Quem participou?  " })).resolves.toEqual({ respondida: false });
-    expect(resumirReuniao).toHaveBeenCalledWith("dona-1", ID, "en");
     expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Quem participou?", "ja");
   });
 
   it("a recusa do serviço sai com o código que a tela traduz", async () => {
-    resumirReuniao.mockRejectedValue(new RecusaDaReuniaoComIA("PRECONDITION_FAILED", "sem transcrição"));
-    perguntarAReuniao.mockRejectedValue(new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", "IA fora do ar"));
-    await expect(resumir()).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    perguntarAReuniao.mockRejectedValueOnce(new RecusaDaReuniaoComIA("PRECONDITION_FAILED", "sem transcrição"));
+    perguntarAReuniao.mockRejectedValueOnce(new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", "IA fora do ar"));
+    await expect(perguntar()).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     await expect(perguntar()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("o resumo a pedido de antes saiu: o resumo é o guardado (pedirResumo)", () => {
+    expect("resumir" in meetingsRouter._def.procedures).toBe(false);
+    expect("pedirResumo" in meetingsRouter._def.procedures).toBe(true);
   });
 });
 
-describe(`meetings.resumir e meetings.perguntar — teto de ${PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA} pedidos à IA a cada 10 minutos por dona`, () => {
-  it("resumo e perguntas somam no mesmo teto; passado ele, TOO_MANY_REQUESTS sem chamar a IA; outra dona passa", async () => {
+describe(`meetings.pedirResumo e meetings.perguntar — teto de ${PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA} pedidos à IA a cada 10 minutos por dona`, () => {
+  it("pedidos de resumo e perguntas somam no mesmo teto; passado ele, TOO_MANY_REQUESTS sem chamar a IA; outra dona passa", async () => {
     const resumos = Math.floor(PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA / 2);
-    for (let i = 0; i < resumos; i++) await resumir();
+    for (let i = 0; i < resumos; i++) await pedirResumo();
     for (let i = resumos; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await perguntar();
 
-    await expect(resumir()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(pedirResumo()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-    expect(resumirReuniao).toHaveBeenCalledTimes(resumos);
     expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA - resumos);
 
-    await expect(resumir("outra-dona")).resolves.toEqual(RESUMO_VAZIO);
+    await expect(pedirResumo("outra-dona")).resolves.toEqual(PENDENTE);
+    await expect(perguntar("outra-dona")).resolves.toEqual({ respondida: false });
   });
 
-  it("pedido recusado também conta: sondar reuniões alheias esbarra no mesmo teto", async () => {
+  it("pedir o resumo que já está na fila não gasta vaga: só o trabalho novo conta", async () => {
+    pedirResumoDaDona.mockImplementation(async () => PENDENTE);
+    for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA + 5; i++) await pedirResumo();
+    for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await perguntar();
+    await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("pergunta recusada também conta: sondar reuniões alheias esbarra no mesmo teto", async () => {
     perguntarAReuniao.mockRejectedValue(new RecusaDaReuniaoComIA("NOT_FOUND", "não encontrada"));
     for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await expect(perguntar()).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
@@ -91,9 +106,9 @@ describe(`meetings.resumir e meetings.perguntar — teto de ${PEDIDOS_A_IA_DA_RE
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-10T12:00:00Z"));
     for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await perguntar();
-    await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(pedirResumo()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
 
     vi.setSystemTime(new Date("2026-11-10T12:10:01Z"));
-    await expect(perguntar()).resolves.toEqual({ respondida: false });
+    await expect(pedirResumo()).resolves.toEqual(PENDENTE);
   });
 });

@@ -149,7 +149,7 @@ describe("o appRouter inteiro", () => {
   const PUBLICOS = new Set([
     "faq.ask", "stats.platform", "stats.presencaPorPais",
     // O link aberto da reunião (12/11/2026): quem abre o link não tem conta.
-    "reuniaoAberta.ver", "reuniaoAberta.traduzir", "reuniaoAberta.resumir", "reuniaoAberta.perguntar",
+    "reuniaoAberta.ver", "reuniaoAberta.traduzir", "reuniaoAberta.perguntar",
     // O resumo guardado (H4), só leitura, e o pedido dele pelo link.
     "reuniaoAberta.resumoGuardado", "reuniaoAberta.pedirResumo",
   ]);
