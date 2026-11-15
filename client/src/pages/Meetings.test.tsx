@@ -744,6 +744,80 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     }
   });
 
+  it("o player é um só, fixo no rodapé, e é o mesmo em todas as abas (o áudio não para ao trocar)", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio");
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: /^Contatos/ }));
+    expect(document.querySelector("audio")).toBe(audio);
+  });
+
+  it("outro ?t para a mesma reunião, sem remontar a tela, leva o mesmo player ao ponto novo", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620");
+      const audio = document.querySelector("audio");
+      expect(audio!.getAttribute("src")).toBe(PARTES[1].url);
+      // Um link vindo do sino ou da busca, com a reunião já aberta.
+      fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+      act(() => { window.history.pushState(null, "", `/meetings/${REUNIAO.id}?t=10`); });
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+      // A usuária vai a outro ponto pelo "▶" da transcrição; trocar de aba
+      // (que redesenha a tela com a mesma busca) não a puxa de volta ao ?t.
+      fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:20" }));
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+      fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("?t além das partes que chegaram, com a reunião ainda chegando: o pulo espera a parte, e vai quando ela chega", () => {
+    const tocar = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      const meeting = { ...REUNIAO, status: "uploading", audioPipeline: "slices" };
+      const dado = (partes: typeof PARTES) => ({
+        data: { meeting, transcript: null, entities: [], suggestions: [], recording: { ...GRAVACAO, partes }, recordingExpired: false, andamento: { recebidas: partes.length, transcritas: 0, esperadas: 2 } },
+        isLoading: false,
+      });
+      duble.list.mockReturnValue({ data: [meeting], isLoading: false });
+      duble.get.mockReturnValue(dado([PARTES[0]]));
+      window.history.replaceState(null, "", `/meetings/${REUNIAO.id}?t=620`);
+      const { rerender } = render(<Meetings />);
+      // Só a parte 0 (0 a 600 s) chegou: o player não pula para o fim dela.
+      expect(tocar).not.toHaveBeenCalled();
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+      duble.get.mockReturnValue(dado(PARTES));
+      rerender(<Meetings />);
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("sem áudio, não há barra do player nem o espaço dela", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: null });
+    expect(screen.queryByRole("region", { name: "Gravação" })).toBeNull();
+    expect(document.querySelector("main")!.className).not.toContain("pb-36");
+  });
+
+  it("o áudio que não carrega vira o aviso na barra", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(within(barra).getByRole("status")).toHaveTextContent("");
+    fireEvent.error(barra.querySelector("audio")!);
+    expect(within(barra).getByRole("status")).not.toHaveTextContent(/^$/);
+    expect(document.querySelector("main")!.className).toContain("pb-36");
+  });
+
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));

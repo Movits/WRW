@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +12,8 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
-import { PlayerDasPartes, type ControleDoPlayer } from "@/components/PlayerDasPartes";
+import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
+import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
@@ -543,12 +544,36 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   }, []);
   // ?t (o segundo de uma fala) e ?q (o termo buscado) vêm dos links para dentro
   // da reunião (Memória, busca, combinados): abrem a transcrição já no ponto.
-  const parametros = useRef(new URLSearchParams(typeof window === "undefined" ? "" : window.location.search));
-  const segundoPedido = Number(parametros.current.get("t"));
-  const termoPedido = parametros.current.get("q") ?? "";
-  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(Number.isFinite(segundoPedido) && segundoPedido > 0 || termoPedido ? "transcript" : "summary");
+  // Lidos pelo useSearch, e não uma vez só: o detalhe tem key=id, então um link
+  // para esta mesma reunião com outro ?t não remonta a tela (nem corta o áudio),
+  // e é aqui que ele chega.
+  const busca = useSearch();
+  const parametros = useMemo(() => new URLSearchParams(busca), [busca]);
+  const segundoPedido = Number(parametros.get("t"));
+  const termoPedido = parametros.get("q") ?? "";
+  const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
+  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(pedeTranscricao ? "transcript" : "summary");
+  // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
-  const pulouParaOPedido = useRef(false);
+  const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
+  useEffect(() => { if (pedeTranscricao) setTab("transcript"); }, [busca]);
+  // O ?t do link leva o player ao ponto quando a parte que cobre o segundo
+  // existe. Na reunião que ainda está chegando (gravando, enviando ou
+  // transcrevendo), o pulo espera a parte; pronta, vai à mais próxima. Cada
+  // link diferente pula uma vez: o mesmo ?t de novo (o mesmo endereço) não muda
+  // a busca e não pula outra vez — o "▶" dentro da reunião fala direto com o
+  // player, sem passar por aqui.
+  const buscaJaAtendida = useRef<string | null>(null);
+  const partesDoDado = data?.recording?.partes ?? (data?.recording ? [{ inicioSegundos: 0, duracaoSegundos: data.recording.durationSeconds }] : []);
+  const cobreOPedido = partesDoDado.some(parte => segundoPedido >= parte.inicioSegundos && segundoPedido < parte.inicioSegundos + parte.duracaoSegundos);
+  const statusDaReuniao = data?.meeting.status;
+  const aindaChegando = statusDaReuniao === "recording" || statusDaReuniao === "uploading" || statusDaReuniao === "processing";
+  useEffect(() => {
+    if (!player.current || buscaJaAtendida.current === busca || !(Number.isFinite(segundoPedido) && segundoPedido > 0)) return;
+    if (!cobreOPedido && aindaChegando) return;
+    buscaJaAtendida.current = busca;
+    player.current.irPara(segundoPedido);
+  }, [busca, partesDoDado.length, cobreOPedido, aindaChegando]);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
   // lista, mandando a tradução para pt-BR com a tela em inglês.
@@ -692,7 +717,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
-  return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
+  return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
@@ -723,13 +748,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4"><ResumoDaReuniaoPelaIA meetingId={meetingId}/><PergunteAReuniao meetingId={meetingId}/></div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
-        {/* Sem onError o player falha MUDO: sessão vencida, limite de
-            requisições ou storage fora do ar desenham os controles e
-            simplesmente não tocam, e a usuária não tem o que reportar. */}
-        <PlayerDasPartes partes={partesParaOuvir} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
-        {falhaNoAudio
-          ? <p className="text-xs text-amber-200/80 mt-2">{t("meetings.audioLoadError")}</p>
-          : <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>}
+        {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
+        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
       </> : recordingExpired ? (
         // "A transcrição continua aqui" só é verdade com transcrição, e numa
         // reunião que falhou antes de guardar o áudio não houve gravação apagada.
@@ -757,15 +777,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
           </div>}
           {mostraFalas
             ? <>
-              {partesParaOuvir.length > 0 && <div className="mb-4"><PlayerDasPartes ref={controle => {
-                player.current = controle;
-                // O ?t do link: pula uma vez, quando o player existe.
-                if (controle && !pulouParaOPedido.current && Number.isFinite(segundoPedido) && segundoPedido > 0) {
-                  pulouParaOPedido.current = true;
-                  controle.irPara(segundoPedido);
-                }
-              }} partes={partesParaOuvir} aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/></div>}
-              <TranscricaoPorFalante segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
+              {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
+              <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
                 nomes={nomesDosFalantes(meeting.speakerNames)} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
@@ -810,5 +823,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         </div>
       </div>
     )}
-  </div></main>;
+  </div>
+    {/* Sem onError o player falha MUDO: sessão vencida, limite de requisições ou
+        storage fora do ar desenham os controles e simplesmente não tocam, e a
+        usuária não tem o que reportar. */}
+    <BarraDoPlayer ref={definirPlayer} partes={partesParaOuvir}
+      aviso={falhaNoAudio ? t("meetings.audioLoadError") : null}
+      aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
+  </main>;
 }

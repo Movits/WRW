@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "wouter";
 import i18n from "@/i18n";
@@ -131,6 +131,16 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.queryByText(/entre de novo/)).not.toBeInTheDocument();
   });
 
+  it("o player fica na barra fixa do rodapé (H4b), com o aviso dentro dela, e a página reserva o espaço", () => {
+    duble.ver.mockReturnValue(pronta());
+    const { container } = abrir();
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(barra.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
+    expect(container.querySelector("main")!.className).toContain("pb-36");
+    fireEvent.error(barra.querySelector("audio")!);
+    expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
+  });
+
   it("em pt-BR mostra o original sem pedir tradução; trocar o idioma traduz pelo token", () => {
     duble.ver.mockReturnValue(pronta());
     abrir();
@@ -165,7 +175,8 @@ describe("Reunião aberta pelo link", () => {
       fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
       const pedidos = duble.traduzir.mutate.mock.calls;
       act(() => (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "es", text: null, cached: false, emAndamento: true }));
-      expect(screen.getByRole("status")).toHaveTextContent("A reunião é longa");
+      // Há também o status da barra do player (H4b): o aviso é o status com este texto.
+      expect(screen.getByText(/A reunião é longa/).closest("[role=status]")).not.toBeNull();
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
       expect(pedidos).toHaveLength(2);
       expect(pedidos[1][0]).toEqual({ token: TOKEN, language: "es" });
@@ -275,6 +286,7 @@ describe("Reunião aberta pelo link — direção e anúncios", () => {
     duble.ver.mockReturnValue(pronta());
     abrir();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
-    expect(screen.getByRole("status")).toHaveTextContent(/Traduzindo/);
+    // Há também o status da barra do player (H4b): o anúncio é o status com este texto.
+    expect(screen.getByText(/Traduzindo/).closest("[role=status]")).not.toBeNull();
   });
 });
