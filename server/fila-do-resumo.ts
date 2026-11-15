@@ -98,6 +98,16 @@ async function reservar(db: Banco, id: string, agora: number): Promise<string | 
   return null;
 }
 
+/**
+ * Devolve a reserva sem gastar a tentativa: a geração não chegou a ser gravada
+ * por um motivo que não é falha dela (desligamento, reunião fora de 'ready',
+ * transcrição trocada). Sem isto, a linha ficaria presa até a reserva vencer.
+ */
+async function devolverReserva(db: Banco, id: string, token: string) {
+  await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
+    .where(and(eq(meetingSummaries.id, id), eq(meetingSummaries.lockToken, token)));
+}
+
 /** Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez. */
 async function registrarFalha(db: Banco, alvo: { id: string }, token: string, codigo: string, definitiva: boolean) {
   const [linha] = await db.select({ attempts: meetingSummaries.attempts }).from(meetingSummaries)
@@ -125,26 +135,61 @@ async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId
     // Resposta cortada no teto de saída se repetiria com a mesma entrada: é
     // falha de vez. O resto (IA fora, JSON inválido) tenta de novo.
     const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
-    console.error(`[Resumo] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : descreverErroDeBanco(erro));
+    // Erro que não é da IA é bug ou banco: vai a pilha ao log, não só o código.
+    console.error(`[Resumo] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
     return registrarFalha(db, alvo, token, codigoDoErro(erro), definitiva);
   }
+  // O desligamento chegou durante a chamada à IA: as reservas já foram
+  // devolvidas, e o próximo processo refaz o resumo.
+  if (parada) return;
 
   const agora = Date.now();
-  const gravou = await db.transaction(async tx => {
+  let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
+  try {
+    resultado = await gravarResumo(db, alvo, token, transcricao, idioma, resumo, agora);
+  } catch (erro) {
+    // A IA já respondeu e o banco recusou (queda, deadlock): conta como falha
+    // passageira, com espera, em vez de prender a linha até a reserva vencer.
+    console.error("[Resumo] o resumo não foi gravado:", descreverErroDeBanco(erro));
+    try {
+      await registrarFalha(db, alvo, token, "ERRO_GRAVACAO", false);
+    } catch (erroAoRegistrar) {
+      console.error("[Resumo] nem a falha foi registrada; a reserva vence sozinha:", descreverErroDeBanco(erroAoRegistrar));
+    }
+    return;
+  }
+  if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
+    console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    await devolverReserva(db, alvo.id, token);
+  } else if (resultado === "sem_reserva") {
+    console.warn("[Resumo] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
+  }
+}
+
+/**
+ * Grava os itens e marca o resumo como pronto, numa transação. A reunião fica
+ * travada até o fim: a exclusão (que marca 'deleted' antes de apagar) espera
+ * esta transação, e o que ela gravar sai junto.
+ */
+async function gravarResumo(
+  db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
+  transcricao: { id: string }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
+  return db.transaction(async tx => {
     // A reunião travada até o fim: a exclusão (que marca 'deleted' antes de
     // apagar) espera esta transação, e o que ela gravar sai junto.
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
-    if (reuniao?.status !== "ready") return false;
     const [ainda] = await tx.select({ id: meetingSummaries.id }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     // Sem a linha com o meu token: a reunião foi reprocessada ou excluída, ou a
     // reserva venceu e outra rodada a tomou.
-    if (!ainda) return false;
+    if (!ainda) return "sem_reserva";
+    if (reuniao?.status !== "ready") return "reuniao_fora";
     // A transcrição tem de ser a mesma que a IA leu.
     const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-    if (atual?.id !== transcricao.id) return false;
+    if (atual?.id !== transcricao.id) return "transcricao_trocada";
     await tx.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
     if (resumo.itens.length) {
       await tx.insert(meetingSummaryItems).values(resumo.itens.map((item, position) => ({
@@ -162,9 +207,8 @@ async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
-    return linhas(r) > 0;
+    return linhas(r) > 0 ? "gravou" : "sem_reserva";
   });
-  if (!gravou) console.warn("[Resumo] a reunião mudou durante a geração (excluída, reprocessada ou retomada por outra rodada): o resumo foi descartado.");
 }
 
 /**
@@ -181,6 +225,9 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   const token = await reservar(db, alvo.id, agora);
   if (!token) return;
   try {
+    // O desligamento pode ter tirado a foto das reservas antes desta: devolve
+    // na hora, sem chamar a IA.
+    if (parada) return await devolverReserva(db, alvo.id, token);
     await gerarUm(db, alvo, token);
   } finally {
     tokensVivos.delete(token);

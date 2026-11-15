@@ -49,12 +49,14 @@ type Pedido = Parameters<typeof ipDaCliente>[0];
  * em qualquer um, e a recusa de um não gasta a vaga do outro (o teto não
  * devolve vaga). Tudo síncrono: nenhum pedido entra entre conferir e reservar.
  */
-function reservarVagaDaIA(reuniaoId: string, pedido: Pedido) {
+function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
   const daVisitante = `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
   tetoDaIADoVisitanteDoLink.conferir(daVisitante);
   tetoDaIADoLinkAberto.conferir(reuniaoId);
-  tetoDaIADoVisitanteDoLink.reservar(daVisitante);
-  tetoDaIADoLinkAberto.reservar(reuniaoId);
+  const soltarDaVisitante = tetoDaIADoVisitanteDoLink.reservar(daVisitante);
+  const soltarDaReuniao = tetoDaIADoLinkAberto.reservar(reuniaoId);
+  // Para quem não chegou a usar a vaga (o resumo pedido duas vezes ao mesmo tempo).
+  return () => { soltarDaVisitante(); soltarDaReuniao(); };
 }
 
 export const MENSAGEM_TRADUCAO_INDISPONIVEL = "A tradução não respondeu agora. Tente de novo em instantes.";

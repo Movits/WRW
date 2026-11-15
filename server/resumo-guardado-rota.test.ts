@@ -21,7 +21,7 @@ vi.mock("./resumo-guardado", () => servico);
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");
-const { reuniaoAbertaRouter, PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA } = await import("./routers/reuniaoAberta");
+const { reuniaoAbertaRouter, PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA, PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA } = await import("./routers/reuniaoAberta");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const contexto = (openId: string) => ({
@@ -56,6 +56,14 @@ describe("rotas do resumo guardado da dona", () => {
     const rota = daDona();
     for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await rota.pedirResumo({ meetingId: ID });
     await expect(rota.pedirResumo({ meetingId: ID })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // A vaga devolvida (pedido que perdeu a corrida) volta a valer.
+    servico.pedirResumoDaDona.mockImplementationOnce(async (_d: string, _i: string, antesDeCriar: () => (() => void) | void) => { antesDeCriar(); return { estado: "pendente" }; });
+    const outra = daDona();
+    for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA - 1; i++) await outra.pedirResumo({ meetingId: ID });
+    servico.pedirResumoDaDona.mockImplementationOnce(async (_d: string, _i: string, antesDeCriar: () => (() => void) | void) => { const soltar = antesDeCriar(); soltar?.(); return { estado: "pendente" }; });
+    await outra.pedirResumo({ meetingId: ID });
+    await outra.pedirResumo({ meetingId: ID });
+    await expect(outra.pedirResumo({ meetingId: ID })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     expect(tetoDaIADaReuniao).toBeDefined();
   });
 
@@ -76,5 +84,15 @@ describe("rotas do resumo guardado pelo link aberto", () => {
     // A mesma reunião e a mesma rede: o teto do visitante acaba antes do da reunião.
     for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await rota.pedirResumo({ token: "t".repeat(32) });
     await expect(rota.pedirResumo({ token: "t".repeat(32) })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("o teto da reunião soma as redes: passado o total, até uma rede nova é recusada", async () => {
+    servico.pedirResumoPeloLink.mockImplementation(async (_token: string, antesDeCriar: (reuniaoId: string) => void) => { antesDeCriar("reuniao-de-muitas-redes"); return { estado: "pendente" }; });
+    const daRede = (n: number) => reuniaoAbertaRouter.createCaller({ user: null, req: { headers: {}, socket: { remoteAddress: `198.51.${n}.7` }, ip: `198.51.${n}.7` }, res: { cookie: () => {} } } as never);
+    let feitos = 0;
+    for (let rede = 0; feitos < PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA; rede++) {
+      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA && feitos < PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA; i++, feitos++) await daRede(rede).pedirResumo({ token: "r".repeat(32) });
+    }
+    await expect(daRede(250).pedirResumo({ token: "r".repeat(32) })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
   });
 });

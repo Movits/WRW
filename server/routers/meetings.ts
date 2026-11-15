@@ -257,7 +257,7 @@ export const meetingsRouter = router({
 
   pedirResumo: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => { tetoDaIADaReuniao.reservar(ctx.user.openId); })),
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
 
   decidirItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))

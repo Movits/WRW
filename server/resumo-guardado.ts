@@ -20,18 +20,22 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 
 export const MENSAGEM_RESUMO_SENDO_GERADO = "O resumo desta reunião está sendo refeito. Espere terminar para decidir.";
 export const MENSAGEM_ITEM_NAO_ENCONTRADO = "Este item do resumo não existe mais. Atualize a tela.";
+export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa de marcar.";
 
-function estadoDe(linha: { status: string; lockedUntil: number | null } | undefined, agora: number): EstadoDoResumo {
+// "Gerando" só com uma reserva viva: na espera depois de uma falha passageira a
+// linha também tem prazo no futuro, mas ninguém está gerando.
+function estadoDe(linha: { status: string; lockedUntil: number | null; lockToken: string | null } | undefined, agora: number): EstadoDoResumo {
   if (!linha) return "sem_resumo";
   if (linha.status === "ready") return "pronto";
   if (linha.status === "failed") return "falhou";
-  return linha.lockedUntil !== null && Number(linha.lockedUntil) > agora ? "gerando" : "pendente";
+  return linha.lockToken && linha.lockedUntil !== null && Number(linha.lockedUntil) > agora ? "gerando" : "pendente";
 }
 
 const COLUNAS_DO_RESUMO = {
   id: meetingSummaries.id,
   status: meetingSummaries.status,
   lockedUntil: meetingSummaries.lockedUntil,
+  lockToken: meetingSummaries.lockToken,
   emoji: meetingSummaries.emoji,
   language: meetingSummaries.language,
   lastError: meetingSummaries.lastError,
@@ -84,32 +88,45 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * Pede o resumo de uma reunião pronta: cria o trabalho para a fila, ou reabre
  * o que falhou. Resumo pendente ou pronto não muda. `antesDeCriar` roda só
  * quando há trabalho novo (é o teto de pedidos à IA, que pode recusar
- * lançando): pedir de novo o que já está na fila não gasta vaga.
+ * lançando, e devolve como soltar a vaga): pedir de novo o que já está na fila
+ * não gasta vaga, e o pedido que perdeu a corrida para outro igual a devolve.
  */
-async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: () => void) {
+type AntesDeCriar = () => (() => void) | void;
+async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const agora = Date.now();
   if (!linha) {
-    antesDeCriar();
+    const soltarVaga = antesDeCriar();
     try {
       await db.insert(meetingSummaries).values({ id: crypto.randomUUID(), meetingId, ownerId, status: "pending", createdAt: agora, updatedAt: agora });
     } catch (erro) {
       // Outro pedido criou o trabalho entre a leitura e aqui (índice único por
-      // reunião): o trabalho existe, que é o que se queria.
-      if ((erro as { cause?: { code?: string }; code?: string })?.cause?.code !== "ER_DUP_ENTRY" && (erro as { code?: string })?.code !== "ER_DUP_ENTRY") throw erro;
+      // reunião): o trabalho existe, que é o que se queria, e a vaga volta.
+      if (!ehChaveRepetida(erro)) throw erro;
+      soltarVaga?.();
     }
   } else if (linha.status === "failed") {
-    antesDeCriar();
-    await db.update(meetingSummaries).set({ status: "pending", attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora })
+    const soltarVaga = antesDeCriar();
+    const r = await db.update(meetingSummaries).set({ status: "pending", attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora })
       .where(and(eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, "failed")));
+    // Outro pedido reabriu antes: a vaga volta.
+    if (!linhasAfetadas(r)) soltarVaga?.();
   }
 }
 
+/** O MySQL recusou por índice único (ER_DUP_ENTRY), no erro ou na causa dele (o drizzle embrulha o do driver). */
+function ehChaveRepetida(erro: unknown): boolean {
+  for (let atual: unknown = erro, i = 0; atual && i < 5; atual = (atual as { cause?: unknown }).cause, i++) {
+    if ((atual as { code?: unknown }).code === "ER_DUP_ENTRY") return true;
+  }
+  return false;
+}
+
 /** A dona pede (ou pede de novo, depois de uma falha) o resumo de uma reunião pronta. */
-export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: () => void) {
+export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
@@ -179,7 +196,7 @@ export async function confirmarItensDoResumo(ownerId: string, meetingId: string)
 export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: boolean) {
   const db = await exigirDb();
   const item = await itemParaDecidir(db, ownerId, itemId);
-  if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: "Só as ações do resumo têm caixa de marcar." });
+  if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_SO_ACAO_TEM_CAIXA });
   const agora = Date.now();
   const r = await db.update(meetingSummaryItems).set({
     done: feito,
@@ -220,7 +237,7 @@ export async function resumoGuardadoPeloLink(token: string) {
 }
 
 /** Quem tem o link pede o resumo que a reunião ainda não tem (ou que falhou). */
-export async function pedirResumoPeloLink(token: string, antesDeCriar: (reuniaoId: string) => void) {
+export async function pedirResumoPeloLink(token: string, antesDeCriar: (reuniaoId: string) => (() => void) | void) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
   await pedirResumoDaReuniao(db, reuniao.ownerId, reuniao.id, () => antesDeCriar(reuniao.id));
