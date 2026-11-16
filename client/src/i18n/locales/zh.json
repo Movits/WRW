@@ -1572,7 +1572,16 @@
       "decisionError": "无法保存，请重试。",
       "errorRegenerating": "这次会议的摘要正在重新生成。请等它完成后再做决定。",
       "errorItemGone": "此摘要条目已不存在。请刷新页面。",
-      "errorOnlyActions": "只有摘要中的行动项才有复选框。"
+      "errorOnlyActions": "只有摘要中的行动项才有复选框。",
+      "listen": "收听摘要",
+      "listenPause": "暂停朗读",
+      "listenResume": "继续朗读",
+      "listenStop": "停止朗读",
+      "listenNoVoice": "此设备没有摘要语言（{{idioma}}）的语音。请在设备设置中安装该语言的语音后再收听。",
+      "listenUnsupported": "此浏览器无法朗读文字。要收听摘要，请在其他浏览器中打开此页面。",
+      "listenError": "无法朗读摘要，请重试。",
+      "listenNoneReviewed": "此摘要由 AI 撰写，尚未核对任何条目。",
+      "listenSomeToReview": "以“待核对”开头的条目由 AI 撰写，尚未核对。"
     },
     "entity": {
       "person": "人物",

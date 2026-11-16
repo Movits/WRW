@@ -1572,7 +1572,16 @@
       "decisionError": "Could not save. Please try again.",
       "errorRegenerating": "This meeting's summary is being regenerated. Wait for it to finish before deciding.",
       "errorItemGone": "This summary item no longer exists. Refresh the page.",
-      "errorOnlyActions": "Only the summary's actions have a checkbox."
+      "errorOnlyActions": "Only the summary's actions have a checkbox.",
+      "listen": "Listen to the summary",
+      "listenPause": "Pause reading",
+      "listenResume": "Resume reading",
+      "listenStop": "Stop reading",
+      "listenNoVoice": "This device has no voice for the summary's language ({{idioma}}). Install a voice for that language in the device settings to listen.",
+      "listenUnsupported": "This browser can't read text aloud. To listen to the summary, open this page in another browser.",
+      "listenError": "Could not read the summary aloud. Please try again.",
+      "listenNoneReviewed": "This summary was written by the AI, and no item has been reviewed yet.",
+      "listenSomeToReview": "Items that start with “To review” were written by the AI and have not been reviewed yet."
     },
     "entity": {
       "person": "Person",

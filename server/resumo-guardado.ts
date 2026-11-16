@@ -213,7 +213,9 @@ export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: bo
  * leitura, sem ids, sem a caixa de feito e sem os itens que a dona ignorou.
  * Os pendentes vão com o estado, para a tela avisar que a dona ainda não os
  * conferiu. Os rótulos de voz ({F2}) vão crus: a tela do link mostra
- * "Falante 2", e os nomes que a dona deu às vozes não saem por aqui.
+ * "Falante 2", e os nomes que a dona deu às vozes não saem por aqui. O idioma
+ * em que a IA escreveu vai junto, como para a dona: "Ouvir o resumo" (H19) lê
+ * com a voz do aparelho nesse idioma.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
@@ -234,7 +236,7 @@ export async function resumoGuardadoPeloLink(token: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  return { estado, emoji: linha?.emoji ?? null, itens };
+  return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, itens };
 }
 
 /** Quem tem o link pede o resumo que a reunião ainda não tem (ou que falhou). */
