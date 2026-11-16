@@ -203,6 +203,47 @@ export function avaliarTermoGeralVigente(vigentes) {
   return { ok: false, detalhe: `${Number.isFinite(n) ? n : "?"} versões vigentes: getCurrentDocument escolhe uma qualquer` };
 }
 
+/**
+ * O 307 do proxy /manus-storage/ para uma IMAGEM da dona (a do exame é um PNG
+ * em contexts/), aberta duas vezes seguidas, como a tela reaberta.
+ *
+ * Desde a PR #149, imagem de contato, de contexto e gerada sai com
+ * `private, max-age=300` no 307 e com a MESMA URL assinada por 50 minutos
+ * (server/_core/storageProxy.ts, politicaDeCacheDaChave): é o que evita baixar
+ * de novo os mesmos bytes do bucket a cada abertura. A checagem antiga exigia
+ * `no-store` e reprovaria o primeiro exame depois do merge.
+ *
+ * O cabeçalho é comparado INTEIRO: uma CDN ou a borda do Render que o
+ * reescreva (outro max-age, `public`) aparece aqui. E a segunda abertura tem de
+ * trazer o MESMO Location: é a prova, em produção, de que a URL é reaproveitada.
+ *
+ * `detalhe` nunca leva o Location: a URL assinada abre o arquivo sem sessão por
+ * até uma hora, e a saída do exame é colada em PR pública. O Cache-Control entra
+ * cortado em 40 caracteres, como as mensagens do servidor.
+ *
+ * Recebe { status, cacheControl, location } de cada abertura.
+ */
+export const CACHE_DO_307_DE_IMAGEM_DA_DONA = "private, max-age=300";
+
+export function avaliarRedirecionamentoComCache(primeira, segunda) {
+  const status = primeira && primeira.status;
+  const cache = String((primeira && primeira.cacheControl) || "");
+  const location = (primeira && primeira.location) || "";
+  const problemas = [];
+  if (status !== 307) problemas.push(`status ${status}`);
+  if (cache !== CACHE_DO_307_DE_IMAGEM_DA_DONA) {
+    problemas.push(`Cache-Control "${cache.slice(0, 40)}" (esperado "${CACHE_DO_307_DE_IMAGEM_DA_DONA}")`);
+  }
+  if (!location) problemas.push("sem Location");
+  const statusDeNovo = segunda && segunda.status;
+  if (statusDeNovo !== 307) problemas.push(`segunda abertura: status ${statusDeNovo}`);
+  else if (location && ((segunda && segunda.location) || "") !== location) {
+    problemas.push("segunda abertura: outra URL assinada (o proxy não reaproveitou a URL)");
+  }
+  if (problemas.length) return { ok: false, detalhe: problemas.join("; ") };
+  return { ok: true, detalhe: "307 e a mesma URL assinada nas duas aberturas" };
+}
+
 /** Cabeçalho combinado RateLimit (draft-7): "limit=100, remaining=87, reset=42". */
 export function analisarRateLimit(valor) {
   if (!valor || typeof valor !== "string") return null;

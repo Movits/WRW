@@ -6,7 +6,7 @@ import { BancoIndisponivel, descreverErroDeBanco, ehErroDoDriverDeBanco } from "
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
-import { perguntarAReuniao, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { comRecusaTraduzida } from "./meetings";
 
@@ -21,8 +21,8 @@ import { comRecusaTraduzida } from "./meetings";
 // limitando só o tamanho, link cortado e link desligado recebem a mesma resposta.
 const tokenDoLink = z.string().max(128);
 
-// Cada resumo, pergunta e tradução nova é um pedido pago à IA, agora feito por
-// quem não tem conta. Dois tetos, os dois pela REUNIÃO (não pelo token: a
+// Cada pedido de resumo novo, pergunta e tradução nova é um pedido pago à IA,
+// agora feito por quem não tem conta. Dois tetos, os dois pela REUNIÃO (não pelo token: a
 // variação de caixa e o link religado caem no mesmo balde), em memória como o
 // da dona (zeram a cada deploy). A tradução já guardada não conta: só chega
 // aqui o que vai mesmo à IA.
@@ -84,14 +84,6 @@ export const reuniaoAbertaRouter = router({
         console.error(`[LinkAberto] a tradução da reunião ${reuniao.id} falhou: ${descreverErroDeBanco(erro)}`);
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_TRADUCAO_INDISPONIVEL });
       }
-    })),
-
-  resumir: publicProcedure
-    .input(z.object({ token: tokenDoLink, idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES) }))
-    .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
-      const reuniao = await exigirReuniaoDoLink(input.token);
-      reservarVagaDaIA(reuniao.id, ctx.req);
-      return resumirReuniao(reuniao.ownerId, reuniao.id, input.idioma);
     })),
 
   // O resumo guardado (H4), só leitura: sem ids, sem os itens ignorados e

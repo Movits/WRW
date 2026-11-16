@@ -17,8 +17,24 @@
 export const ROTA_GRAVAR = "/gravar";
 export const ROTA_DAS_REUNIOES = "/meetings";
 
-export function rotaDaReuniao(id: string) {
-  return `${ROTA_DAS_REUNIOES}/${encodeURIComponent(id)}`;
+/**
+ * O detalhe de uma reunião. As opções abrem a tela já num ponto: `t` é o
+ * segundo de uma fala (o player vai até ele), `q` o termo buscado na
+ * transcrição e `item` o id de um item do resumo guardado (a aba Resumo abre
+ * nele, destacado). Servem aos links da busca entre reuniões (H7), das próximas
+ * ações (H5) e dos lembretes (H15); a tela os lê pelo useSearch
+ * (client/src/pages/Meetings.tsx). Sem opções, é o endereço de sempre.
+ */
+export function rotaDaReuniao(id: string, opcoes: { t?: number; q?: string; item?: string } = {}) {
+  const caminho = `${ROTA_DAS_REUNIOES}/${encodeURIComponent(id)}`;
+  const busca = new URLSearchParams();
+  // A tela só pula com t > 0: o começo da reunião não é um ponto.
+  if (typeof opcoes.t === "number" && Number.isFinite(opcoes.t) && opcoes.t > 0) busca.set("t", String(opcoes.t));
+  const termo = opcoes.q?.trim();
+  if (termo) busca.set("q", termo);
+  if (opcoes.item) busca.set("item", opcoes.item);
+  const consulta = busca.toString();
+  return consulta ? `${caminho}?${consulta}` : caminho;
 }
 
 /**

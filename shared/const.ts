@@ -63,6 +63,17 @@ export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião
 export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
 
+/**
+ * As recusas do resumo guardado da reunião (H4), nas palavras que chegam ao
+ * navegador. Moram aqui pelo mesmo motivo de MENSAGEM_BANCO_INDISPONIVEL: o
+ * servidor (server/resumo-guardado.ts, que as reexporta) escreve sem saber o
+ * idioma da dona, e a tela as traduz reconhecendo o texto exato
+ * (client/src/lib/mensagem-de-erro.ts, chaves meetings.summary.*).
+ */
+export const MENSAGEM_RESUMO_SENDO_GERADO = "O resumo desta reunião está sendo refeito. Espere terminar para decidir.";
+export const MENSAGEM_ITEM_NAO_ENCONTRADO = "Este item do resumo não existe mais. Atualize a tela.";
+export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa de marcar.";
+
 /** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
 export const NOME_DO_FALANTE_MAX = 60;
 /** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */

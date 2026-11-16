@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_DO_LIMITE } from "@shared/const";
+import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { TRPCClientError } from "@trpc/client";
-import { mensagemDeErroParaTela } from "./mensagem-de-erro";
+import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
  * O que a tela mostra quando a consulta falha (revisão da PR-A): só a
@@ -83,5 +83,33 @@ describe("mensagemDeErroParaTela — a frase do limite da API no idioma da tela"
   it("em inglês sai traduzida", async () => {
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(limite(), chave => i18n.t(chave))).toBe("Too many requests in a short time. Wait a few seconds and try again.");
+  });
+});
+
+// As recusas das decisões do resumo guardado (H4c, server/resumo-guardado.ts)
+// chegam no envelope, com a frase do servidor em português, e saem no idioma
+// da tela pela mesma tabela.
+describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da tela", () => {
+  const recusa = (codigo: string, mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32009, message: mensagem, data: { code: codigo, httpStatus: 409 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["CONFLICT", MENSAGEM_RESUMO_SENDO_GERADO, "meetings.summary.errorRegenerating", "This meeting's summary is being regenerated. Wait for it to finish before deciding."],
+    ["NOT_FOUND", MENSAGEM_ITEM_NAO_ENCONTRADO, "meetings.summary.errorItemGone", "This summary item no longer exists. Refresh the page."],
+    ["BAD_REQUEST", MENSAGEM_SO_ACAO_TEM_CAIXA, "meetings.summary.errorOnlyActions", "Only the summary's actions have a checkbox."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (codigo, mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (codigo, mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
   });
 });

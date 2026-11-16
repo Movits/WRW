@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "wouter";
-import { Clock3, Loader2 } from "lucide-react";
+import { Clock3, FileText, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
@@ -13,12 +13,14 @@ import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/const";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
-import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "@/components/ReuniaoComIA";
+import { PergunteAReuniao } from "@/components/ReuniaoComIA";
+import { ResumoGuardado } from "@/components/ResumoGuardado";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
  * quem recebeu o endereço /r/{token} ouve a gravação, lê e traduz a
- * transcrição e pede à IA o resumo e respostas, sem conta na WRW. Só leitura:
+ * transcrição, lê o resumo guardado (e pede o que a reunião ainda não tem) e
+ * faz perguntas à IA, sem conta na WRW. Só leitura:
  * excluir, reprocessar e o que é da rede particular da dona (contatos e
  * entidades) ficam no detalhe dela, em Meetings.tsx, e o servidor nem manda
  * esses dados para cá (server/link-aberto-da-reuniao.ts).
@@ -73,8 +75,30 @@ export default function ReuniaoAberta() {
     refetchOnWindowFocus: false,
     refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
   });
+  // O resumo guardado (H4), só leitura: sem ids, sem os ignorados e com as
+  // vozes como "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
+  // fila ou sendo gerado, e para em qualquer erro, não só no link desligado: a
+  // página não pede conta, e um 500 que persiste deixaria cada visitante
+  // perguntando ao servidor para sempre. O erro só chega ao estado depois das
+  // novas tentativas do retry; a releitura que dá certo (o tentar de novo, a
+  // reconexão) o limpa e religa a repetição.
+  const temTextoParaResumir = !!data?.transcricao?.texto?.trim();
+  const resumoGuardado = trpc.reuniaoAberta.resumoGuardado.useQuery({ token }, {
+    enabled: temTextoParaResumir,
+    retry: (tentativas, erro) => !linkNaoAbre(erro) && tentativas < 3,
+    refetchOnWindowFocus: false,
+    refetchInterval: consulta => {
+      const estado = consulta.state.data?.estado;
+      return (estado === "pendente" || estado === "gerando") && !consulta.state.error ? 5_000 : false;
+    },
+  });
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
+  // As abas, como no app de referência da cliente (H4c): o resumo abre
+  // primeiro, e a transcrição fica na outra aba. O player é um só, na barra do
+  // rodapé, fora das abas: trocar de aba não corta o áudio. A tradução mora
+  // aqui em cima e também sobrevive à troca.
+  const [aba, setAba] = useState<"summary" | "transcript">("summary");
   // Como no detalhe da dona: a tradução começa no idioma da tela, e o idioma
   // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
@@ -127,23 +151,32 @@ export default function ReuniaoAberta() {
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
   return <Moldura comPlayer={!!gravacao && partes.length > 0}>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
-    <h1 dir="auto" className="text-3xl font-bold mt-1">{titulo}</h1>
+    {/* O emoji do resumo antes do título, como no detalhe da dona. */}
+    <h1 dir="auto" className="text-3xl font-bold mt-1">{temTextoParaResumir && resumoGuardado.data?.emoji && <span aria-hidden="true" className="mr-2">{resumoGuardado.data.emoji}</span>}{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
     <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
 
-    {transcricao?.texto?.trim() && <div className="mt-6 space-y-4"><ResumoDaReuniaoPelaIA token={token}/><PergunteAReuniao token={token}/></div>}
+    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3]] as const).map(([id, rotulo, Icone]) =>
+      <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
 
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
-      {gravacao ? <>
-        {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
-        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
-      </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
-        ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
-        : t("meetings.noRecordingStored")}</p>}
-    </section>
+    {aba === "summary" && <>
+      {temTextoParaResumir && <div className="mt-6 space-y-4">
+        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <PergunteAReuniao token={token}/>
+      </div>}
 
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+      <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
+        {gravacao ? <>
+          {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
+          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
+        </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
+          ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
+          : t("meetings.noRecordingStored")}</p>}
+      </section>
+    </>}
+
+    {aba === "transcript" && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><Clock3 size={16}/>{t("meetings.transcriptTab")}</h2>
       {transcricao ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
@@ -171,7 +204,7 @@ export default function ReuniaoAberta() {
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
-    </section>
+    </section>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>}
