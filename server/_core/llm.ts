@@ -1,5 +1,5 @@
 import { ENV } from "./env";
-import { modeloDeTexto } from "./modelos-de-ia";
+import { modeloDeTexto, type FuncaoDeTexto } from "./modelos-de-ia";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -67,7 +67,13 @@ export type InvokeParams = {
   output_schema?: OutputSchema;
   responseFormat?: ResponseFormat;
   response_format?: ResponseFormat;
-  model?: string;
+  /**
+   * A função da chamada, que escolhe o modelo: LLM_MODEL_<FUNÇÃO> > o padrão
+   * da função > LLM_MODEL > o padrão (server/_core/modelos-de-ia.ts). Sem
+   * ela, vale o LLM_MODEL. Quem chama não passa o id: o `model` herdado do
+   * proxy Manus saiu, porque o LLM_MODEL ganhava dele e nenhum caminho o usava.
+   */
+  funcao?: FuncaoDeTexto;
   thinking?: Record<string, unknown>;
   reasoning?: Record<string, unknown>;
   /**
@@ -448,7 +454,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     output_schema,
     responseFormat,
     response_format,
-    model,
+    funcao,
     thinking,
     reasoning,
     temperature,
@@ -463,15 +469,15 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     messages: messages.map(normalizeMessage),
   };
 
-  // LLM_MODEL redireciona todos os modelos herdados do proxy Manus (gpt-*, etc.)
-  // para o provedor configurado no .env. O default garante que o payload sempre
-  // leve um modelo: a API OpenAI-compatível do Gemini rejeita requisições sem o
-  // campo `model` com 400 — foi o que derrubou FAQ, matches e compliance em
-  // produção quando LLM_MODEL não estava definida. Modelo concreto, não o alias
+  // O modelo sai da função da chamada, pelo ambiente (modelos-de-ia.ts). O
+  // default garante que o payload sempre leve um modelo: a API
+  // OpenAI-compatível do Gemini rejeita requisições sem o campo `model` com
+  // 400 — foi o que derrubou FAQ, matches e compliance em produção quando
+  // LLM_MODEL não estava definida. Modelo concreto, não o alias
   // gemini-flash-latest: o alias resolve para um modelo com cota gratuita de 20
   // requisições por dia, que esgota em minutos de uso real. Por isso o nome
   // passa pela guarda de modelos-de-ia.ts, que recusa alias e usa o padrão.
-  const resolvedModel = modeloDeTexto(model);
+  const resolvedModel = modeloDeTexto(funcao);
   payload.model = resolvedModel;
 
   if (tools && tools.length > 0) {

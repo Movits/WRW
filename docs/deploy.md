@@ -156,7 +156,10 @@ código conseguia assinar uma sessão válida.
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
-| `LLM_MODEL` | opcional: modelo das chamadas de texto (extração, tradução, FAQ, Memória), que vão ao `LLM_API_URL` | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
+| `LLM_MODEL` | opcional: modelo das chamadas de texto (tradução, FAQ, Memória, recomendações, complementos de contato), que vão ao `LLM_API_URL`; é também o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
+| `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | padrão no código `gemini-3.5-flash-lite`, que vale mesmo com o `LLM_MODEL` definido (com o `LLM_MODEL` em outro provedor, vale ele); a mesma guarda do `LLM_MODEL` |
+| `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
+| `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 
 A transcrição e os embeddings (`server/gemini.ts`) não usam o `LLM_API_URL`:
 vão sempre à API do Gemini, com o id na URL e a mesma chave (`LLM_API_KEY` ou,
@@ -164,9 +167,20 @@ sem ela, `GOOGLE_API_KEY`). Por isso o modelo do áudio só aceita o formato
 `gemini-<versão>`. Pôr o texto em outro provedor deixaria a transcrição e os
 embeddings com a chave errada: chaves separadas ainda não existem no código.
 
-No boot, o log mostra `[IA] áudio … · reserva … · texto …` com os modelos
-que valem depois da guarda, sem a chave (id de outro provedor no texto aparece
-como "fora do log"). Os ids que a chave do Gemini enxerga saem de
+O texto tem um modelo por função, na ordem: a variável da função
+(`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO` ou `LLM_MODEL_PERGUNTA`) > o padrão
+da função no código, quando houver > `LLM_MODEL` > o padrão. Variável recusada
+cai no degrau seguinte. Só a extração tem padrão no código, o
+`gemini-3.5-flash-lite` (bancada A de texto, 16/11/2026: nota melhor, 5 vezes
+mais rápida e 78% mais barata por chamada): o deploy já a leva ao Lite, sem
+mexer no painel, e `LLM_MODEL_EXTRACAO` a devolve ao Flash sem deploy. Quem
+chama sem função (tradução, FAQ, Memória, recomendações, complementos de
+contato) fica no `LLM_MODEL`.
+
+No boot, o log mostra `[IA] áudio … · reserva … · texto … · extração … ·
+resumo … · pergunta …` com os modelos que valem depois da guarda, sem a chave
+(id de outro provedor no texto aparece como "fora do log"). Os ids que a chave
+do Gemini enxerga saem de
 `node scripts/listar-modelos-gemini.mjs --conferir id1,id2` (ver
 `scripts/README.md`); existir na lista não prova que o id é concreto.
 

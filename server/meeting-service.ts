@@ -254,6 +254,8 @@ function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtract
 
 async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
   const response = await invokeLLM({
+    // O Lite por padrão (bancada A de texto); LLM_MODEL_EXTRACAO troca sem deploy.
+    funcao: "extracao",
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
     messages: [
