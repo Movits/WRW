@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { emailDoParticipanteValido } from "@shared/agenda";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
@@ -90,6 +92,10 @@ describe("rotas da agenda", () => {
     ["local longo demais", { local: "x".repeat(501) }],
     ["participante sem nome e sem e-mail", { participantes: [{ nome: "  ", email: "" }] }],
     ["e-mail inválido", { participantes: [{ nome: "Ana", email: "ana-arroba-exemplo" }] }],
+    // Os três que a regra frouxa da tela deixava passar (ver o teste da regra única, abaixo).
+    ["e-mail com o ponto que o iPhone põe depois de dois espaços", { participantes: [{ nome: "Ana", email: "ana@exemplo.com." }] }],
+    ["e-mail com acento", { participantes: [{ nome: "João", email: "joão@exemplo.com.br" }] }],
+    ["e-mail com dois pontos seguidos", { participantes: [{ nome: "Ana", email: "ana@exemplo..com" }] }],
     ["participantes demais", { participantes: Array.from({ length: 51 }, (_, i) => ({ nome: `P${i}`, email: null })) }],
     ["lembrete fora das opções", { lembreteMinutos: 7 }],
   ])("%s é recusado antes do serviço (BAD_REQUEST)", async (_caso, troca) => {
@@ -106,6 +112,25 @@ describe("rotas da agenda", () => {
     expect(servico.obterDaAgenda).not.toHaveBeenCalled();
     expect(servico.excluirDaAgenda).not.toHaveBeenCalled();
     expect(servico.ligarGravacaoNaAgenda).not.toHaveBeenCalled();
+  });
+
+  // A tela (pages/Agenda.tsx) e a rota usam emailDoParticipanteValido: o que
+  // a tela deixa passar, a rota aceita, e o que a rota recusa a tela aponta,
+  // com o número do participante. A regra é a do z.string().email() do zod,
+  // copiada para a tela não carregar o zod; aqui as duas são comparadas.
+  it("a regra do e-mail do participante é uma só, e é a do zod", async () => {
+    const validos = ["ana@exemplo.com", "Ana.Souza+wrw@empresa.com.br", "o'neil@exemplo.ie", "a_b-c@sub-dominio.exemplo.org"];
+    const invalidos = [
+      "ana@exemplo.com.", "joão@exemplo.com.br", "ana@exemplo..com", ".ana@exemplo.com", "ana.@exemplo.com",
+      "ana@exemplo", "ana@-exemplo.com", "ana@exemplo.c", "ana exemplo@x.com", "ana-arroba-exemplo", "",
+    ];
+    for (const email of [...validos, ...invalidos]) {
+      expect(emailDoParticipanteValido(email), email).toBe(z.string().email().safeParse(email).success);
+    }
+    expect(validos.every(emailDoParticipanteValido)).toBe(true);
+    expect(invalidos.some(emailDoParticipanteValido)).toBe(false);
+    await daDona().criar({ ...valida, participantes: [{ nome: null, email: "Ana.Souza+wrw@empresa.com.br" }] });
+    expect(servico.criarNaAgenda).toHaveBeenCalledWith("dona-1", expect.objectContaining({ participantes: [{ nome: null, email: "ana.souza+wrw@empresa.com.br" }] }));
   });
 
   it("sem sessão, nada", async () => {

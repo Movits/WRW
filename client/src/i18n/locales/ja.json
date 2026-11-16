@@ -1909,6 +1909,7 @@
       "recording": "録音",
       "recordNow": "今すぐ録音",
       "openRecording": "録音を開く",
+      "recordAgain": "もう一度録音",
       "inviteGroup": "招待とカレンダー",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "メール",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "予定から：{{when}}",
       "notFound": "このミーティングは予定にありません。録音は関連付けなしで続きます。",
-      "loadError": "予定のミーティングを読み込めませんでした。録音は関連付けなしで続きます。"
+      "loadError": "予定のミーティングを読み込めませんでした。録音は関連付けなしで続きます。",
+      "sendInvite": "招待を送る"
     }
   },
   "appHeader": {

@@ -31,6 +31,22 @@ export const FUSO_MAX = 64;
 export type ParticipanteDaAgenda = { nome: string | null; email: string | null };
 
 /**
+ * A regra do e-mail do participante, a mesma na tela e no servidor: a regra
+ * padrão do `z.string().email()` do zod 4 (zod/v4/core/regexes.js), copiada
+ * para a tela não carregar o zod. Com uma regra frouxa na tela, o e-mail que o
+ * servidor recusa ("ana@exemplo.com." do teclado do iPhone, "joão@exemplo.com.br",
+ * "ana@exemplo..com") saía só como "confira os campos", sem dizer qual
+ * participante corrigir. server/agenda-rota.test.ts confere que as duas regras
+ * dão o mesmo resultado.
+ */
+const EMAIL_DO_PARTICIPANTE = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
+
+/** O e-mail já sem espaços nas pontas: vale como e-mail de participante? */
+export function emailDoParticipanteValido(email: string): boolean {
+  return email.length <= EMAIL_DO_PARTICIPANTE_MAX && EMAIL_DO_PARTICIPANTE.test(email);
+}
+
+/**
  * O fuso no nome canônico da IANA ("america/sao_paulo" vira "America/Sao_Paulo"),
  * ou null quando o Intl não o conhece. Serve à tela e ao servidor: os dois têm
  * o banco de fusos completo (Node 20 e os navegadores atuais).

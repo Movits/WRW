@@ -1909,6 +1909,7 @@
       "recording": "录音",
       "recordNow": "立即录制",
       "openRecording": "打开录音",
+      "recordAgain": "重新录制",
       "inviteGroup": "邀请与日历",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "电子邮件",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "来自您的日程：{{when}}",
       "notFound": "这场会议已不在您的日程中。录音将继续，但不会关联。",
-      "loadError": "无法读取日程中的会议。录音将继续，但不会关联。"
+      "loadError": "无法读取日程中的会议。录音将继续，但不会关联。",
+      "sendInvite": "发送邀请"
     }
   },
   "appHeader": {

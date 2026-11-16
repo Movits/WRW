@@ -1,11 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReuniaoDaAgendaNoGravador } from "./ReuniaoDaAgendaNoGravador";
 
 /**
  * A reunião da agenda no gravador (H16a), sozinha: preenche o título uma vez só
  * e só com o campo vazio, diz ao gravador qual reunião ligar (e nenhuma ao
- * sair), e avisa quando a reunião não está mais na agenda ou a leitura falha.
+ * sair), mostra o link da chamada e o convite, e avisa quando a reunião não
+ * está mais na agenda ou a leitura falha.
  * O uso dentro do gravador está em pages/Meetings.agenda.test.tsx.
  */
 
@@ -35,6 +36,44 @@ describe("ReuniaoDaAgendaNoGravador", () => {
     rerender(<ReuniaoDaAgendaNoGravador id={ID} tituloAtual="" aoPreencherTitulo={preencher} aoCarregar={carregar}/>);
     expect(preencher).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("note")).toHaveTextContent("Da sua agenda:");
+  });
+
+  // Quem pede o link no meio da reunião o recebe sem a dona sair do gravador:
+  // sair dele desmonta a página e descarta a gravação.
+  it("o link da chamada e o convite pelo WhatsApp e pelo e-mail ficam no gravador, todos abrindo fora desta aba", () => {
+    consulta.useQuery.mockReturnValue({ ...pronta, data: {
+      ...DA_AGENDA, local: "https://meet.google.com/abc-defg-hij",
+      participantes: [{ nome: "Ana", email: "ana@exemplo.com" }, { nome: "Bia", email: null }, { nome: null, email: "cris@exemplo.com" }],
+    } });
+    render(<ReuniaoDaAgendaNoGravador id={ID} tituloAtual="" aoPreencherTitulo={vi.fn()} aoCarregar={vi.fn()}/>);
+    const chamada = screen.getByRole("link", { name: "https://meet.google.com/abc-defg-hij" });
+    expect(chamada).toHaveAttribute("href", "https://meet.google.com/abc-defg-hij");
+    expect(chamada).toHaveAttribute("target", "_blank");
+    expect(chamada).toHaveAttribute("rel", "noopener noreferrer");
+    const convite = screen.getByRole("group", { name: "Mandar o convite" });
+    const whatsapp = within(convite).getByRole("link", { name: /WhatsApp/ });
+    expect(whatsapp).toHaveAttribute("target", "_blank");
+    const texto = new URL(whatsapp.getAttribute("href")!).searchParams.get("text")!;
+    expect(texto).toContain("Convite para a reunião “Conversa com a Bia”");
+    expect(texto).toContain("Onde: https://meet.google.com/abc-defg-hij");
+    expect(texto).not.toContain("ana@exemplo.com");
+    // O mailto em outra aba: nesta, com a gravação em curso, o navegador podia perguntar se a dona quer sair.
+    const email = within(convite).getByRole("link", { name: /E-mail/ });
+    expect(email).toHaveAttribute("target", "_blank");
+    expect(email.getAttribute("href")!.startsWith("mailto:?bcc=ana@exemplo.com,cris@exemplo.com&")).toBe(true);
+    expect(new URLSearchParams(email.getAttribute("href")!.slice("mailto:?".length)).get("subject")).toBe("Convite: Conversa com a Bia");
+  });
+
+  it("local que não é link sai como texto, nunca como href; sem local, só o convite", () => {
+    consulta.useQuery.mockReturnValue({ ...pronta, data: { ...DA_AGENDA, local: "javascript:alert(1)" } });
+    const { unmount } = render(<ReuniaoDaAgendaNoGravador id={ID} tituloAtual="" aoPreencherTitulo={vi.fn()} aoCarregar={vi.fn()}/>);
+    expect(screen.getByText("javascript:alert(1)").tagName).toBe("P");
+    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).not.toContain("javascript:alert(1)");
+    unmount();
+    consulta.useQuery.mockReturnValue(pronta);
+    render(<ReuniaoDaAgendaNoGravador id={ID} tituloAtual="" aoPreencherTitulo={vi.fn()} aoCarregar={vi.fn()}/>);
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "Mandar o convite" })).toBeInTheDocument();
   });
 
   it("com o título já escrito, não troca nada, mas liga a reunião", () => {

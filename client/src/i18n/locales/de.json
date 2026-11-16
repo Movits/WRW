@@ -1909,6 +1909,7 @@
       "recording": "Aufnahme",
       "recordNow": "Jetzt aufnehmen",
       "openRecording": "Aufnahme öffnen",
+      "recordAgain": "Erneut aufnehmen",
       "inviteGroup": "Einladung und Kalender",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "E-Mail",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "Aus Ihren Terminen: {{when}}",
       "notFound": "Dieses Meeting ist nicht mehr in Ihren Terminen. Die Aufnahme läuft ohne Verknüpfung weiter.",
-      "loadError": "Das geplante Meeting konnte nicht gelesen werden. Die Aufnahme läuft ohne Verknüpfung weiter."
+      "loadError": "Das geplante Meeting konnte nicht gelesen werden. Die Aufnahme läuft ohne Verknüpfung weiter.",
+      "sendInvite": "Einladung senden"
     }
   },
   "appHeader": {

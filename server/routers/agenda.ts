@@ -3,6 +3,7 @@ import {
   DURACAO_DA_AGENDADA_MAX,
   DURACAO_DA_AGENDADA_MIN,
   EMAIL_DO_PARTICIPANTE_MAX,
+  emailDoParticipanteValido,
   fusoCanonico,
   LEMBRETES_DA_AGENDA,
   LOCAL_DA_AGENDADA_MAX,
@@ -36,9 +37,10 @@ const textoOpcional = (maximo: number) => z.string().trim().max(maximo).nullish(
 
 const participante = z.object({
   nome: textoOpcional(NOME_DO_PARTICIPANTE_MAX),
+  // A mesma regra da tela (shared/agenda.ts): o que a tela deixa passar, aqui passa.
   email: z.string().trim().max(EMAIL_DO_PARTICIPANTE_MAX).nullish()
     .transform(valor => valor ? valor.toLowerCase() : null)
-    .refine(valor => valor === null || z.string().email().safeParse(valor).success, "E-mail do participante inválido."),
+    .refine(valor => valor === null || emailDoParticipanteValido(valor), "E-mail do participante inválido."),
 }).refine(p => Boolean(p.nome || p.email), "O participante precisa de um nome ou de um e-mail.");
 
 export const entradaDaAgendada = z.object({

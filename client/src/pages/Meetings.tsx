@@ -148,11 +148,16 @@ export default function Meetings() {
     return valor && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valor) ? valor : null;
   }, [busca]);
   // A reunião da agenda lida na tela (nula sem ela, ou se não é mais da agenda), e
-  // a que valia quando a gravação começou: durante a gravação a URL volta a
-  // /gravar sem a busca (o efeito mais abaixo), e o envio único só cria a
-  // reunião no fim.
+  // a que valia quando a gravação começou: durante a gravação a faixa sai da
+  // tela sempre que a URL sai de /gravar (e volta, pelo efeito mais abaixo), ou
+  // se a URL perder o ?agendada, e o envio único só cria a reunião no fim.
   const agendaNaTela = useRef<string | null>(null);
   const agendaDaGravacao = useRef<string | null>(null);
+  // O endereço do gravador quando a gravação começou, com a busca (?agendada,
+  // ?emPartes): é para ele que a URL volta se sair de /gravar no meio da
+  // gravação (o efeito mais abaixo). Assim a faixa da reunião da agenda, com o
+  // link da chamada e o convite, continua no gravador.
+  const urlDaGravacao = useRef<string>(ROTA_GRAVAR);
   // Não trava nada: se ligar falhar, a gravação segue, e a dona é avisada.
   const ligarAAgenda = useCallback((agendaId: string | null, meetingId: string) => {
     if (!agendaId) return;
@@ -316,14 +321,17 @@ export default function Meetings() {
   // ir de /gravar para /meetings ou /meetings/:id (o item Reuniões do menu, ou o
   // voltar do navegador que cai numa delas) não desmonta o gravador. Com a
   // gravação em curso, a URL volta para /gravar e a tela continua nele: sem
-  // isto, a lista aparecia e o microfone seguia gravando escondido. Qualquer
-  // outro destino (os outros itens do menu, o logo, a seta, o avatar, o sino, o
-  // voltar que sai de Reuniões) desmonta a página e descarta a gravação, como
-  // antes, sem perguntar: a sessão ocupada (lib/sessao-ocupada.ts) confirma só o
-  // Sair da conta e o fechar ou recarregar da aba.
+  // isto, a lista aparecia e o microfone seguia gravando escondido. A URL volta
+  // com a busca de quando a gravação começou (urlDaGravacao): a gravação que
+  // veio da agenda continua com a faixa dela. Qualquer outro destino (os outros
+  // itens do menu, o logo, a seta, o avatar, o sino, o voltar que sai de
+  // Reuniões) desmonta a página e descarta a gravação, como antes, sem
+  // perguntar: a sessão ocupada (lib/sessao-ocupada.ts) confirma só o Sair da
+  // conta e o fechar ou recarregar da aba. Por isso o "Gravar agora" da agenda
+  // põe a lista no histórico antes do gravador (pages/Agenda.tsx).
   useEffect(() => {
     if (!recording || naGravacao) return;
-    navigate(ROTA_GRAVAR, { replace: true });
+    navigate(urlDaGravacao.current, { replace: true });
     // Um aviso só, com o mesmo id, mesmo com vários toques no menu ou no voltar.
     toast.info(t("meetings.stopRecordingToLeave"), { id: "gravacao-em-curso" });
   }, [recording, naGravacao]);
@@ -356,6 +364,8 @@ export default function Meetings() {
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
     agendaDaGravacao.current = agendaNaTela.current;
+    // O Iniciar só aparece no gravador: o caminho é o /gravar (com ou sem a barra final).
+    urlDaGravacao.current = `${ROTA_GRAVAR}${window.location.search}`;
     let reuniaoEmPartes: string | null = null;
     if (emPartes) {
       try {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
@@ -127,19 +127,38 @@ describe("Agenda — a lista", () => {
     expect(within(cartao).getByText("javascript:alert(1)").tagName).toBe("P");
   });
 
-  it("Gravar agora abre o gravador com a reunião marcada", () => {
+  it("Gravar agora abre o gravador com a reunião marcada, com a lista de Reuniões logo atrás no histórico", async () => {
     render(<Agenda/>);
     fireEvent.click(screen.getByRole("button", { name: /Gravar agora/ }));
     expect(`${window.location.pathname}${window.location.search}`).toBe(`/gravar?agendada=${ID}`);
+    // O voltar do navegador cai em Reuniões, a mesma página do gravador, que
+    // devolve a ele quem está gravando (Meetings.agenda.test.tsx); na agenda, o
+    // gravador desmontaria e a gravação se perderia.
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.pathname).toBe("/meetings"));
   });
 
-  it("com a gravação ligada: Abrir a gravação, o estado dela, e nada de Gravar agora", () => {
+  it("com a gravação ligada: Abrir a gravação, o estado dela, e Gravar de novo no lugar de Gravar agora", () => {
     duble.listar.mockReturnValue(lista([reuniao({ gravacao: { id: GRAVACAO, status: "ready" } })]));
     render(<Agenda/>);
     expect(screen.queryByRole("button", { name: /Gravar agora/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gravar de novo/ })).toBeInTheDocument();
     expect(screen.getByText(/Gravação: Pronta/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Abrir a gravação/ }));
     expect(window.location.pathname).toBe(`/meetings/${GRAVACAO}`);
+  });
+
+  // O envio que falha deixa ligada uma reunião sem áudio, em "Gravação pendente"
+  // (a ligação vem logo depois de criar a reunião): gravar de novo a mesma
+  // reunião não pode depender de excluir essa em Reuniões.
+  it.each([["recording", "Gravação pendente"], ["failed", "Falhou"]])("com a gravação ligada em '%s', Gravar de novo abre o gravador com a mesma reunião", async (status, rotulo) => {
+    duble.listar.mockReturnValue(lista([reuniao({ gravacao: { id: GRAVACAO, status } })]));
+    render(<Agenda/>);
+    expect(screen.getByText(`Gravação: ${rotulo}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Gravar de novo/ }));
+    expect(`${window.location.pathname}${window.location.search}`).toBe(`/gravar?agendada=${ID}`);
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.pathname).toBe("/meetings"));
   });
 
   it("a reunião em curso ganha o selo 'Acontecendo agora'", () => {
@@ -204,6 +223,19 @@ describe("Agenda — convites e calendário", () => {
     expect(cliques).toEqual(["Conversa-com-a-Bia.ics"]);
     clicar.mockRestore();
   });
+
+  it(".ics da reunião mudada: o mesmo UID, com o SEQUENCE maior e o LAST-MODIFIED da última mudança", async () => {
+    const criada = Date.UTC(2026, 10, 10, 9, 0);
+    duble.listar.mockReturnValue(lista([reuniao({ createdAt: criada, updatedAt: criada + 60 * 60_000 })]));
+    const clicar = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<Agenda/>);
+    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    const linhas = (await (criarUrl.mock.calls[0][0] as Blob).text()).replace(/\r\n /g, "").split("\r\n");
+    expect(linhas).toContain(`UID:${ID}@wrwglobal.org`);
+    expect(linhas).toContain("SEQUENCE:3600");
+    expect(linhas).toContain("LAST-MODIFIED:20261110T100000Z");
+    clicar.mockRestore();
+  });
 });
 
 describe("Agenda — marcar, editar e excluir", () => {
@@ -245,6 +277,26 @@ describe("Agenda — marcar, editar e excluir", () => {
     fireEvent.change(screen.getByLabelText("E-mail 1"), { target: { value: "ana-arroba-exemplo" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     expect(toast.error).toHaveBeenCalledWith("Confira o e-mail do participante 1.");
+    expect(duble.mutacao("criar").mutate).not.toHaveBeenCalled();
+  });
+
+  // A regra é a do servidor (emailDoParticipanteValido): com a regra frouxa de
+  // antes, estes iam ao servidor, voltavam BAD_REQUEST, e a dona lia só
+  // "Confira os campos", sem saber qual participante corrigir.
+  it.each([
+    ["o ponto que o iPhone põe depois de dois espaços", "ana@exemplo.com.  "],
+    ["o acento", "joão@exemplo.com.br"],
+    ["os dois pontos seguidos", "ana@exemplo..com"],
+  ])("e-mail com %s: a tela aponta o participante, e nada vai ao servidor", (_caso, email) => {
+    render(<Agenda/>);
+    fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
+    preencher("Reunião");
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar participante/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar participante/ }));
+    fireEvent.change(screen.getByLabelText("E-mail 1"), { target: { value: "ana@exemplo.com" } });
+    fireEvent.change(screen.getByLabelText("E-mail 2"), { target: { value: email } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(toast.error).toHaveBeenCalledWith("Confira o e-mail do participante 2.");
     expect(duble.mutacao("criar").mutate).not.toHaveBeenCalled();
   });
 

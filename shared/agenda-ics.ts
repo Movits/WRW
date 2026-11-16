@@ -13,11 +13,13 @@ import { ehLinkDaChamada } from "./agenda";
  * - linha com mais de 75 octetos é dobrada (CRLF e um espaço), contando os
  *   octetos do UTF-8 e sem partir um caractere no meio;
  * - as datas vão em UTC (com o Z): cada calendário mostra na hora local de quem
- *   abre, sem precisar descrever o fuso (VTIMEZONE).
+ *   abre, sem precisar descrever o fuso (VTIMEZONE);
+ * - o UID é o mesmo a cada download, e o SEQUENCE cresce a cada mudança da
+ *   reunião: o calendário que já tem o evento fica com a versão nova.
  */
 
 export type EventoDoIcs = {
-  /** Estável por reunião: baixar de novo atualiza o evento, em vez de duplicar. */
+  /** Estável por reunião: com o SEQUENCE maior, baixar de novo atualiza o evento, em vez de duplicar. */
   uid: string;
   titulo: string;
   inicioMs: number;
@@ -26,6 +28,16 @@ export type EventoDoIcs = {
   descricao?: string | null;
   /** Minutos antes do início; nulo ou ausente é sem lembrete. */
   lembreteMinutos?: number | null;
+  /**
+   * A revisão do evento (SEQUENCE, RFC 5545, 3.8.7.4), que cresce a cada mudança:
+   * ver revisaoDoIcs. O calendário que já tem o UID escolhe a versão pelo
+   * SEQUENCE (RFC 5546, 2.1.5); com o mesmo número, o arquivo da reunião
+   * mudada podia ser ignorado ou recusado como repetido, e a dona chegava na
+   * hora velha. Ausente é 0, a da reunião recém-criada.
+   */
+  revisao?: number;
+  /** A última mudança da reunião (LAST-MODIFIED), em ms. */
+  modificadoEmMs?: number | null;
 };
 
 const OCTETOS_POR_LINHA = 75;
@@ -84,6 +96,16 @@ export function dataIcsUtc(ms: number): string {
   return new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 }
 
+/**
+ * A revisão do .ics de uma reunião da agenda: os segundos entre a criação e a
+ * última mudança (o updatedAt que o servidor grava a cada mudança). Cresce a
+ * cada mudança sem guardar contador, e cabe no INTEGER do iCalendar por 68 anos.
+ */
+export function revisaoDoIcs(criadoEmMs: number, modificadoEmMs: number): number {
+  const segundos = Math.floor((modificadoEmMs - criadoEmMs) / 1000);
+  return Number.isFinite(segundos) && segundos > 0 ? segundos : 0;
+}
+
 /** O aviso antes do início: em dias, horas ou minutos, o que for exato. Zero é na hora. */
 function antecedenciaDoAviso(minutos: number): string {
   const inteiro = Math.max(0, Math.round(minutos));
@@ -99,6 +121,7 @@ export function montarIcs(evento: EventoDoIcs, agoraMs: number = Date.now()): st
     throw new RangeError("Evento sem início ou duração válidos.");
   }
   const fimMs = evento.inicioMs + evento.duracaoMinutos * 60_000;
+  const revisao = typeof evento.revisao === "number" && Number.isInteger(evento.revisao) && evento.revisao > 0 ? evento.revisao : 0;
   const linhas = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -108,10 +131,16 @@ export function montarIcs(evento: EventoDoIcs, agoraMs: number = Date.now()): st
     "BEGIN:VEVENT",
     `UID:${escaparTextoIcs(evento.uid)}`,
     `DTSTAMP:${dataIcsUtc(agoraMs)}`,
+    `SEQUENCE:${revisao}`,
+  ];
+  if (typeof evento.modificadoEmMs === "number" && Number.isFinite(evento.modificadoEmMs)) {
+    linhas.push(`LAST-MODIFIED:${dataIcsUtc(evento.modificadoEmMs)}`);
+  }
+  linhas.push(
     `DTSTART:${dataIcsUtc(evento.inicioMs)}`,
     `DTEND:${dataIcsUtc(fimMs)}`,
     `SUMMARY:${escaparTextoIcs(evento.titulo)}`,
-  ];
+  );
   const local = evento.local?.trim();
   if (local) {
     linhas.push(`LOCATION:${escaparTextoIcs(local)}`);

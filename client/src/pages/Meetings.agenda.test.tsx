@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Route, Switch } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
+import Agenda from "./Agenda";
 import Meetings from "./Meetings";
 
 /**
@@ -10,7 +12,9 @@ import Meetings from "./Meetings";
  * à reunião marcada a gravação que nascer, nos três caminhos: o arquivo
  * enviado, a gravação de envio único (no Transcrever) e a gravação em partes
  * (no Iniciar). A agenda nunca trava a gravação: sem a reunião, ou com a
- * ligação recusada, a gravação segue e a dona é avisada.
+ * ligação recusada, a gravação segue e a dona é avisada. E, com a agenda e o
+ * gravador montados como no App, o voltar do navegador no meio da gravação
+ * não descarta o áudio.
  *
  * O tRPC é o dublê de Meetings.sessao-ocupada.test.tsx, com a agenda.
  */
@@ -41,6 +45,7 @@ const duble = vi.hoisted(() => {
     duracao: vi.fn(),
     resumoGuardado: vi.fn(),
     obterDaAgenda: vi.fn(),
+    listarDaAgenda: vi.fn(),
     utils: {
       meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
@@ -93,7 +98,14 @@ vi.mock("@/lib/trpc", () => ({
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink") },
     networkInteligente: { pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) } },
-    agenda: { obter: { useQuery: (...args: unknown[]) => duble.obterDaAgenda(...args) } },
+    agenda: {
+      obter: { useQuery: (...args: unknown[]) => duble.obterDaAgenda(...args) },
+      // A página da agenda, para o "Gravar agora" montado como no App.
+      listar: { useQuery: (...args: unknown[]) => duble.listarDaAgenda(...args) },
+      criar: duble.registrar("criarNaAgenda"),
+      atualizar: duble.registrar("atualizarNaAgenda"),
+      excluir: duble.registrar("excluirDaAgenda"),
+    },
   },
 }));
 
@@ -134,6 +146,7 @@ beforeEach(() => {
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.obterDaAgenda.mockReturnValue({ data: DA_AGENDA, isLoading: false, isError: false, error: null });
+  duble.listarDaAgenda.mockReturnValue({ data: { proximas: [DA_AGENDA], anteriores: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.duracao.mockResolvedValue(30);
   duble.mutacao("create").mutateAsync.mockResolvedValue({ id: VINICOLA });
   duble.mutacao("submitRecording").mutateAsync.mockResolvedValue({ success: true });
@@ -215,6 +228,36 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
   });
 
+  // A decisão 2 da H16a: a reunião da agenda de quando a gravação começou vale
+  // até o envio. Se a URL perder o ?agendada no meio da gravação, a faixa sai da
+  // tela e já não diz qual reunião ligar; o Transcrever liga mesmo assim.
+  it("a URL que perde o ?agendada no meio da gravação não desfaz a ligação: o Transcrever liga a reunião de quando a gravação começou", async () => {
+    abrir(`/gravar?agendada=${AGENDADA}`);
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    act(() => window.history.replaceState(null, "", "/gravar"));
+    await waitFor(() => expect(screen.queryByText(/Da sua agenda:/)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Transcrever áudio/ })); });
+    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+  });
+
+  it("ir a Reuniões pelo menu no meio da gravação: a URL volta ao gravador com a reunião da agenda, e a faixa com o convite continua", async () => {
+    abrir(`/gravar?agendada=${AGENDADA}`);
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    act(() => window.history.pushState(null, "", "/meetings"));
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe(`/gravar?agendada=${AGENDADA}`));
+    expect(toast.info).toHaveBeenCalledWith("Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" });
+    expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Mandar o convite" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+  });
+
   it("gravação em partes: liga no Iniciar, com a reunião que nasce ali", async () => {
     abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
     await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
@@ -244,6 +287,47 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
     enviarArquivo();
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(AVISO_DA_LIGACAO));
     await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+  });
+});
+
+describe("Gravar agora pela agenda, montado como no App", () => {
+  /** A agenda numa rota e as três de Reuniões com a mesma página, como em App.tsx. */
+  function abrirAAgenda() {
+    window.history.replaceState(null, "", "/agenda");
+    return render(<Switch>
+      <Route path="/agenda"><Agenda /></Route>
+      <Route path="/gravar"><Meetings /></Route>
+      <Route path="/meetings/:id"><Meetings /></Route>
+      <Route path="/meetings"><Meetings /></Route>
+    </Switch>);
+  }
+
+  // O cenário do achado: no celular, a dona grava pela agenda e faz o gesto de
+  // voltar no meio da reunião. Com a agenda logo atrás no histórico, a página do
+  // gravador desmontava e o áudio era descartado sem aviso.
+  it("o voltar do navegador no meio da gravação não descarta o áudio: volta ao gravador, com a reunião da agenda, e a gravação fica ligada", async () => {
+    abrirAAgenda();
+    fireEvent.click(screen.getByRole("button", { name: /Gravar agora/ }));
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    const pararGravador = vi.spyOn(GravadorFalso.prototype, "stop");
+    try {
+      act(() => window.history.back());
+      await waitFor(() => expect(toast.info).toHaveBeenCalledWith("Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" }));
+      await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe(`/gravar?agendada=${AGENDADA}`));
+      // O gravador não parou nem saiu da tela, e a faixa da agenda voltou com ele.
+      expect(pararGravador).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /Gravar agora/ })).not.toBeInTheDocument();
+      expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+      await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Transcrever áudio/ })); });
+      await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+      await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+    } finally {
+      pararGravador.mockRestore();
+    }
   });
 });
 

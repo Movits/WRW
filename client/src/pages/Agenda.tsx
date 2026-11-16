@@ -12,6 +12,7 @@ import {
   DURACAO_PADRAO,
   DURACOES_DA_TELA,
   ehLinkDaChamada,
+  emailDoParticipanteValido,
   fusoDoAparelho,
   LEMBRETE_PADRAO,
   LEMBRETES_DA_AGENDA,
@@ -20,10 +21,11 @@ import {
   EMAIL_DO_PARTICIPANTE_MAX,
   PARTICIPANTES_DA_AGENDADA_MAX,
 } from "@shared/agenda";
-import { montarIcs, nomeDoArquivoIcs } from "@shared/agenda-ics";
-import { linkDaGoogleAgenda, linkDoEmailDoConvite, linkDoWhatsAppDoConvite, mensagemDoConvite, quandoDaReuniao } from "@shared/agenda-links";
+import { montarIcs, nomeDoArquivoIcs, revisaoDoIcs } from "@shared/agenda-ics";
+import { linkDaGoogleAgenda, quandoDaReuniao } from "@shared/agenda-links";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
-import { rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
+import { ROTA_DAS_REUNIOES, rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
+import { conviteDaReuniao } from "@/lib/convite-da-agenda";
 
 /**
  * A agenda de reuniões (H16a do plano do gravador): a dona marca a reunião,
@@ -97,11 +99,6 @@ function rotuloDaGravacao(t: TranslateFn, status: string): string {
 
 const doisDigitos = (n: number) => String(n).padStart(2, "0");
 
-/** A reunião da agenda como os links e o .ics a leem. */
-function eventoDe(reuniao: ReuniaoDaAgenda) {
-  return { titulo: reuniao.titulo, inicioMs: reuniao.inicioEm, duracaoMinutos: reuniao.duracaoMinutos, fuso: reuniao.fuso, local: reuniao.local };
-}
-
 type Formulario = {
   titulo: string;
   /** AAAA-MM-DD e HH:MM, na hora do aparelho (os campos nativos de data e hora). */
@@ -143,12 +140,12 @@ function formularioDe(reuniao: ReuniaoDaAgenda): Formulario {
   };
 }
 
-const PARECE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 /**
  * O formulário vira a entrada do servidor, ou a frase do que falta. A data e a
  * hora são lidas na hora do aparelho; o fuso dele vai junto. As linhas de
- * participante vazias saem.
+ * participante vazias saem. O e-mail passa pela regra do servidor
+ * (emailDoParticipanteValido): o que ele recusaria aparece aqui, com o número
+ * do participante.
  */
 export function entradaDoFormulario(formulario: Formulario, t: TranslateFn, fuso: string = fusoDoAparelho()) {
   const titulo = formulario.titulo.trim();
@@ -166,7 +163,7 @@ export function entradaDoFormulario(formulario: Formulario, t: TranslateFn, fuso
   if (participantes.length > PARTICIPANTES_DA_AGENDADA_MAX) {
     return { erro: t("agenda.form.tooManyParticipants", { max: PARTICIPANTES_DA_AGENDADA_MAX }) } as const;
   }
-  const comEmailRuim = participantes.findIndex(p => p.email && !PARECE_EMAIL.test(p.email));
+  const comEmailRuim = participantes.findIndex(p => p.email && !emailDoParticipanteValido(p.email));
   if (comEmailRuim >= 0) return { erro: t("agenda.form.emailInvalid", { position: comEmailRuim + 1 }) } as const;
   return {
     entrada: {
@@ -181,7 +178,11 @@ export function entradaDoFormulario(formulario: Formulario, t: TranslateFn, fuso
   } as const;
 }
 
-/** O .ics, feito aqui: nada vai ao servidor. O link temporário sai depois do download. */
+/**
+ * O .ics, feito aqui: nada vai ao servidor. O link temporário sai depois do
+ * download. A reunião mudada sai com o mesmo UID e o SEQUENCE maior: o
+ * calendário que já a tem troca pela versão nova.
+ */
 function baixarIcs(reuniao: ReuniaoDaAgenda) {
   const conteudo = montarIcs({
     uid: `${reuniao.id}@wrwglobal.org`,
@@ -190,6 +191,8 @@ function baixarIcs(reuniao: ReuniaoDaAgenda) {
     duracaoMinutos: reuniao.duracaoMinutos,
     local: reuniao.local,
     lembreteMinutos: reuniao.lembreteMinutos,
+    revisao: revisaoDoIcs(reuniao.createdAt, reuniao.updatedAt),
+    modificadoEmMs: reuniao.updatedAt,
   });
   const endereco = URL.createObjectURL(new Blob([conteudo], { type: "text/calendar;charset=utf-8" }));
   const link = document.createElement("a");
@@ -254,10 +257,21 @@ export default function Agenda() {
     else criar.mutate(resultado.entrada);
   }
 
+  // A lista de Reuniões entra no histórico antes do gravador, como quando a dona
+  // abre o gravador pela lista. Com a agenda logo atrás, o voltar do navegador
+  // (o gesto do celular) no meio da gravação caía em /agenda, que desmonta o
+  // gravador e descarta o áudio sem aviso; caindo em /meetings, a mesma página
+  // devolve a dona ao gravador e avisa (Meetings.tsx). As duas trocas vão no
+  // mesmo toque, e a tela só desenha a última.
+  function gravar(id: string) {
+    navigate(ROTA_DAS_REUNIOES);
+    navigate(rotaGravarDaAgenda(id));
+  }
+
   const dados = consulta.data;
   const salvando = criar.isPending || atualizar.isPending;
   const cartao = (reuniao: ReuniaoDaAgenda) => <CartaoDaAgendada key={reuniao.id} reuniao={reuniao} agora={agora} idioma={idioma}
-    aoGravar={() => navigate(rotaGravarDaAgenda(reuniao.id))}
+    aoGravar={() => gravar(reuniao.id)}
     aoAbrirGravacao={id => navigate(rotaDaReuniao(id))}
     aoEditar={() => abrir(formularioDe(reuniao), reuniao.id)}
     aoExcluir={() => excluir.mutate({ id: reuniao.id })}
@@ -424,15 +438,8 @@ function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, a
   const [confirmando, setConfirmando] = useState(false);
   const fim = reuniao.inicioEm + reuniao.duracaoMinutos * 60_000;
   const acontecendo = reuniao.inicioEm <= agora && agora < fim;
-  const emails = reuniao.participantes.map(p => p.email).filter((email): email is string => Boolean(email));
   const pessoas = reuniao.participantes.map(p => p.nome ?? p.email).filter(Boolean).join(", ");
-  const evento = eventoDe(reuniao);
-  const mensagem = mensagemDoConvite(evento, {
-    cabecalho: t("agenda.invite.heading", { title: reuniao.titulo }),
-    quando: t("agenda.invite.when"),
-    onde: t("agenda.invite.where"),
-    adicionarNaGoogle: t("agenda.invite.addToGoogle"),
-  }, idioma);
+  const { evento, emails, whatsapp, email } = conviteDaReuniao(reuniao, t, idioma);
   const idDoTitulo = `agendada-${reuniao.id}`;
 
   return <article aria-labelledby={idDoTitulo} className={`rounded-2xl border p-5 ${acontecendo ? "border-amber-300/40 bg-amber-300/[0.06]" : "border-white/10 bg-white/[0.035]"}`}>
@@ -451,11 +458,17 @@ function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, a
     </div>
 
     <div className="mt-4 flex flex-wrap gap-2">
+      {/* Com a gravação ligada, o "Gravar de novo" segue à mão: a gravação que
+          falhou no envio deixa ligada uma reunião sem áudio, e gravar de novo
+          troca a ligação pela gravação nova (a antiga fica em Reuniões). */}
       {reuniao.gravacao
-        ? <button type="button" onClick={() => aoAbrirGravacao(reuniao.gravacao!.id)}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8]">
-          <FileText size={15}/> {t("agenda.card.openRecording")}
-        </button>
+        ? <>
+          <button type="button" onClick={() => aoAbrirGravacao(reuniao.gravacao!.id)}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8]">
+            <FileText size={15}/> {t("agenda.card.openRecording")}
+          </button>
+          <button type="button" onClick={aoGravar} className={CLASSE_DO_BOTAO}><Mic size={15}/> {t("agenda.card.recordAgain")}</button>
+        </>
         : <button type="button" onClick={aoGravar}
           className="inline-flex items-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8]">
           <Mic size={15}/> {t("agenda.card.recordNow")}
@@ -465,10 +478,10 @@ function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, a
     </div>
 
     <div role="group" aria-label={t("agenda.card.inviteGroup")} className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
-      <a href={linkDoWhatsAppDoConvite(mensagem)} target="_blank" rel="noopener noreferrer" className={CLASSE_DO_BOTAO}>
+      <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={CLASSE_DO_BOTAO}>
         <MessageCircle size={15}/> {t("agenda.card.inviteWhatsapp")}
       </a>
-      <a href={linkDoEmailDoConvite(emails, t("agenda.invite.emailSubject", { title: reuniao.titulo }), mensagem)} className={CLASSE_DO_BOTAO}>
+      <a href={email} className={CLASSE_DO_BOTAO}>
         <Mail size={15}/> {t("agenda.card.inviteEmail")}
       </a>
       <a href={linkDaGoogleAgenda({ ...evento, convidados: emails })} target="_blank" rel="noopener noreferrer" className={CLASSE_DO_BOTAO}>

@@ -1909,6 +1909,7 @@
       "recording": "التسجيل",
       "recordNow": "سجّل الآن",
       "openRecording": "فتح التسجيل",
+      "recordAgain": "سجّل من جديد",
       "inviteGroup": "الدعوة والتقويم",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "البريد الإلكتروني",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "من جدولك: {{when}}",
       "notFound": "لم يعد هذا الاجتماع في جدولك. يستمر التسجيل دون ربط.",
-      "loadError": "تعذّرت قراءة الاجتماع من الجدول. يستمر التسجيل دون ربط."
+      "loadError": "تعذّرت قراءة الاجتماع من الجدول. يستمر التسجيل دون ربط.",
+      "sendInvite": "أرسل الدعوة"
     }
   },
   "appHeader": {

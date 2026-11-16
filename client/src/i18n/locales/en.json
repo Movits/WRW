@@ -1909,6 +1909,7 @@
       "recording": "Recording",
       "recordNow": "Record now",
       "openRecording": "Open the recording",
+      "recordAgain": "Record again",
       "inviteGroup": "Invitation and calendar",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "Email",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "From your schedule: {{when}}",
       "notFound": "This meeting is no longer in your schedule. The recording goes on without the link.",
-      "loadError": "Could not read the scheduled meeting. The recording goes on without the link."
+      "loadError": "Could not read the scheduled meeting. The recording goes on without the link.",
+      "sendInvite": "Send the invitation"
     }
   },
   "appHeader": {

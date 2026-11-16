@@ -1909,6 +1909,7 @@
       "recording": "Gravação",
       "recordNow": "Gravar agora",
       "openRecording": "Abrir a gravação",
+      "recordAgain": "Gravar de novo",
       "inviteGroup": "Convite e calendário",
       "inviteWhatsapp": "WhatsApp",
       "inviteEmail": "E-mail",
@@ -1942,7 +1943,8 @@
     "recorder": {
       "fromAgenda": "Da sua agenda: {{when}}",
       "notFound": "Esta reunião não está mais na sua agenda. A gravação segue sem ligação.",
-      "loadError": "Não deu para ler a reunião da agenda. A gravação segue sem ligação."
+      "loadError": "Não deu para ler a reunião da agenda. A gravação segue sem ligação.",
+      "sendInvite": "Mandar o convite"
     }
   },
   "appHeader": {
