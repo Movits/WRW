@@ -131,14 +131,43 @@ describe("trecho com reticências: 30 palavras seguidas", () => {
   const TEXTO = TRANSCRICAO_DA_REUNIAO_SINTETICA;
   const KIT = "Fica decidido então: o kit de Natal vai ter 200 unidades, e não 500.";
   const LONGE = `${KIT} [...] a embalagem do kit vai ser o saquinho de algodão da Tecelagem Aurora, e o acetato sai.`;
+  // 43 palavras.
+  const MEIO = "porque antes eu preciso conversar com o pessoal do financeiro, revisar os números do trimestre, ver o que mudou no frete, confirmar o desconto com o fornecedor e ainda alinhar com a equipe de vendas o que cada um vai fazer, então eu";
 
   it("pedaços que só aparecem longe uns dos outros não são uma ocorrência, com falas ou no texto corrido", () => {
-    // Os dois pedaços estão na reunião, na ordem, mas a mais de 200 palavras:
-    // o Pergunte, que só confere a presença, não muda.
-    expect(trechoApareceNaTranscricao(LONGE, TEXTO)).toBe(true);
+    // Os dois pedaços estão na reunião, na ordem, mas a mais de 200 palavras e
+    // em turnos diferentes (falas 33 e 60).
     expect(ocorrenciasDoTrecho(LONGE, TEXTO, FALAS)).toEqual([]);
     expect(ocorrenciasDoTrecho(LONGE, TEXTO, [])).toEqual([]);
-    expect(localizarTrecho(LONGE, FALAS)).toBeNull();
+  });
+
+  it("o Pergunte, que aceita a citação só pela presença, segue com o ▶ no começo dela", () => {
+    // A citação do Pergunte não passa pela regra (trechoApareceNaTranscricao):
+    // o ▶ vai para a fala 33, onde ela começa, em vez de sumir.
+    expect(trechoApareceNaTranscricao(LONGE, TEXTO)).toBe(true);
+    expect(localizarTrecho(LONGE, FALAS)).toBe(409);
+    // Com uma vez dentro da regra, vale ela: "Eu te apresento" (fala 42).
+    expect(localizarTrecho("Eu te apresento … até sexta", FALAS)).toBe(489);
+  });
+
+  it("no mesmo turno os pedaços contam, por mais palavras que haja entre eles; no envio único, sem falas, vale a conta", () => {
+    // A fala 2 tem 46 palavras entre os dois pedaços, numa fala só: a
+    // vizinhança, medida em turnos, é a mesma, e o trecho fica como veio.
+    const fala2 = "Eu tenho a Tecelagem Aurora. [...] alguém que entenda de certificação orgânica para exportação.";
+    expect(trechoDentroDaRegra(fala2, TEXTO, FALAS)).toBe(fala2);
+    expect(ocorrenciasDoTrecho(fala2, TEXTO, FALAS).map(o => o.inicio)).toEqual([44]);
+    expect(localizarTrecho(fala2, FALAS)).toBe(44);
+    expect(trechoDentroDaRegra(fala2, TEXTO, [])).toBe("Eu tenho a Tecelagem Aurora.");
+    // Falas seguidas da mesma voz são um turno só, como a IA as lê.
+    const turno: Segmento[] = [
+      { inicio: 0, fim: 4, falante: "F1", texto: "Eu mando a proposta." },
+      { inicio: 4, fim: 25, falante: "F1", texto: `Mas ${MEIO}` },
+      { inicio: 25, fim: 28, falante: "F1", texto: "entrego até sexta-feira." },
+      { inicio: 28, fim: 31, falante: "F2", texto: "Combinado, fico esperando." },
+    ];
+    const trecho = "Eu mando a proposta [...] até sexta-feira.";
+    expect(ocorrenciasDoTrecho(trecho, "", turno).map(o => [o.inicio, [...o.falantes].sort()])).toEqual([[0, ["F1", "F2"]]]);
+    expect(trechoDentroDaRegra(trecho, turno.map(f => f.texto).join("\n"), turno)).toBe(trecho);
   });
 
   it("dentro de 30 palavras seguidas, mesmo cruzando falas, segue achado", () => {
@@ -178,9 +207,28 @@ describe("trecho com reticências: 30 palavras seguidas", () => {
     ];
     const texto = falas.map(f => f.texto).join("\n");
     // 11 + 2 + 4 caracteres: cabe.
-    expect(localizarTrecho("我们下周五之前完成报告……我来负责", falas)).toBe(0);
+    expect(ocorrenciasDoTrecho("我们下周五之前完成报告……我来负责", texto, falas).map(o => o.inicio)).toEqual([0]);
     // Passa a fala de 35 caracteres: está na reunião, mas não em 30 seguidas.
     expect(trechoApareceNaTranscricao("我们下周五之前完成报告……我完全同意", texto)).toBe(true);
-    expect(localizarTrecho("我们下周五之前完成报告……我完全同意", falas)).toBeNull();
+    expect(ocorrenciasDoTrecho("我们下周五之前完成报告……我完全同意", texto, falas)).toEqual([]);
+    expect(trechoDentroDaRegra("我们下周五之前完成报告……我完全同意", texto, falas)).toBe("我们下周五之前完成报告");
+  });
+
+  it("a parte cortada sai sem a sobra das reticências de largura total e sem a aspa que ficou sozinha", () => {
+    const falas: Segmento[] = [
+      { inicio: 0, fim: 6, falante: "F1", texto: "我们下周五之前完成报告。" },
+      { inicio: 6, fim: 9, falante: "F2", texto: "好的,我来负责。" },
+      { inicio: 9, fim: 20, falante: "F1", texto: "然后我们讨论一下明年的展会计划和预算安排以及参展人员名单和时间表的问题。" },
+      { inicio: 20, fim: 25, falante: "F2", texto: "我完全同意这个计划。" },
+    ];
+    const texto = falas.map(f => f.texto).join("\n");
+    expect(trechoDentroDaRegra("我们下周五之前完成报告（……）我完全同意这个计划", texto, falas)).toBe("我们下周五之前完成报告");
+    expect(trechoDentroDaRegra("我们下周五之前完成报告。【…】我完全同意这个计划", texto, falas)).toBe("我们下周五之前完成报告。");
+    // O começo ("好的,我来") não chega a 5 palavras: fica a outra parte, sem o "）".
+    expect(trechoDentroDaRegra("好的,我来（……）我完全同意这个计划", texto, falas)).toBe("我完全同意这个计划");
+    // As aspas em volta do trecho: a parte que fica levava só a de abertura.
+    expect(trechoDentroDaRegra(`“${KIT} […] a embalagem do kit vai ser o saquinho de algodão da Tecelagem Aurora, e o acetato sai.”`, TEXTO, FALAS)).toBe(KIT);
+    // Aspas que fecham dentro da parte ficam.
+    expect(trechoDentroDaRegra(`“${KIT}” [...] “a embalagem do kit vai ser o saquinho de algodão da Tecelagem Aurora, e o acetato sai.”`, TEXTO, FALAS)).toBe(`“${KIT}”`);
   });
 });

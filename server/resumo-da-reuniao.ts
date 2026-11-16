@@ -69,13 +69,22 @@ const UM_EMOJI = new RegExp("^(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20
 const LETRAS_POR_LINHA = 2_000;
 // O que separa as pessoas de um responsável composto ("{F2}, {F3}", "Ana e
 // Bia"): vírgula (também a árabe e a chinesa), ponto e vírgula, barra, "&",
-// "+" ou a conjunção solta entre espaços, nos 10 idiomas da reunião.
-const CONJUNCOES = "e|y|and|et|und|и|और|و|和|与|及|跟|と";
+// "+" ou a conjunção solta entre espaços, nos 10 idiomas da reunião. A
+// conjunção que vem logo depois da vírgula ("{F2}, {F3}, and {F1}", ", e",
+// ", y") sai do começo da pessoa seguinte.
+const CONJUNCOES = "e|y|and|et|ainsi\\s+que|und|sowie|и|а\\s+также|और|तथा|एवं|و|和|与|及|以及|跟|と|および|及び|や";
 const ENTRE_PESSOAS = new RegExp(`\\s*[,;/&+、،，；]\\s*|\\s+(?:${CONJUNCOES})\\s+`, "iu");
 const SO_A_CONJUNCAO = new RegExp(`^(?:${CONJUNCOES})$`, "iu");
+const CONJUNCAO_NO_COMECO = new RegExp(`^(?:${CONJUNCOES})\\s+`, "iu");
+// O "و" (e) do árabe também vem colado à palavra seguinte: em "أحمد وسارة",
+// "وسارة" é "و" + "سارة".
+const WAW = "و";
 // Os dias da semana que o português escreve com "-feira": "sexta-feira" e
 // "até sexta" são o mesmo prazo.
 const DIAS_COM_FEIRA = new Set(["segunda", "terça", "terca", "quarta", "quinta", "sexta"]);
+// Antes do dia, o que faz dele o ordinal, e não o dia da semana: "a segunda
+// possibilidade", "pela segunda vez", "uma segunda opção".
+const ANTES_DO_ORDINAL = new Set(["a", "pela", "uma", "numa", "duma", "sua", "minha", "nossa"]);
 // O que diz "a próxima": "próxima semana" e "semana que vem" são o mesmo
 // prazo. Português, espanhol, inglês, francês e alemão; o "que vem" e o "que
 // viene" são lidos à parte, por serem duas palavras. "Seguinte" fica de fora:
@@ -112,7 +121,7 @@ function instrucoes(idioma: IdiomaDaReuniao, rotulada: boolean): string {
     TRANSCRICAO_E_DADO,
     `Escreva todo o texto em ${nomeDoIdioma(idioma)}.`,
     rotulada
-      ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). Quando quem falou ou quem ficou responsável é uma das vozes, escreva sempre o rótulo dela, exatamente assim, entre chaves (\"{F2} ficou de enviar a proposta\"), mesmo que o nome tenha sido dito na reunião: a tela troca o rótulo pelo nome. Use um nome só para quem não fala na reunião (alguém apenas citado), do jeito que foi dito. Nunca invente um nome para uma voz."
+      ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). Quando quem falou ou quem ficou responsável é uma das vozes, escreva sempre o rótulo dela, exatamente assim, entre chaves (\"{F2} ficou de enviar a proposta\"), mesmo que o nome tenha sido dito na reunião: a tela troca o rótulo pelo nome. Em \"responsavel\", porém, o rótulo só serve para a voz que fala no trecho ou responde a ele: quem só é nomeado ali por outra voz vai pelo nome, do jeito que foi dito (se {F1} diz \"a Bia manda a planilha\" e a Bia não fala ali, o responsável é \"Bia\"). Use um nome também para quem não fala na reunião (alguém apenas citado), do jeito que foi dito. Nunca invente um nome para uma voz."
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
     `Em cada item, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala, e não emenda com reticências ("[...]") partes distantes da reunião.`,
     "- emoji: um único emoji que represente o assunto principal da reunião.",
@@ -179,31 +188,51 @@ function itensDe(valor: unknown): Array<Record<string, unknown>> {
 }
 
 /**
- * As palavras de um texto já normalizado, sem a "feira" do dia da semana
- * ("sexta-feira" vira "sexta"), e se ele diz "a próxima" ("próxima", "que
- * vem"...), que fica de fora das palavras.
+ * Se a palavra `palavras[i]` (um dos DIAS_COM_FEIRA) está dita como dia da
+ * semana, e não como o ordinal ("a segunda possibilidade"): com a "feira",
+ * antes de "que vem", depois de "até a" ou de qualquer palavra que não seja um
+ * artigo ou um possessivo (ANTES_DO_ORDINAL).
  */
-function palavrasDoPrazo(normalizado: string): { palavras: string[]; proximo: boolean } {
+function diaDaSemanaEm(palavras: readonly string[], i: number): boolean {
+  const antes = palavras[i - 1];
+  if (palavras[i + 1] === "feira" || (palavras[i + 1] === "que" && palavras[i + 2] === "vem")) return true;
+  if (antes === "a" && (palavras[i - 2] === "até" || palavras[i - 2] === "ate")) return true;
+  return !ANTES_DO_ORDINAL.has(antes);
+}
+
+/**
+ * As palavras de um texto já normalizado, sem a "feira" do dia da semana
+ * ("sexta-feira" vira "sexta"), se ele diz "a próxima" ("próxima", "que
+ * vem"...), que fica de fora das palavras, e os dias da semana que ele diz
+ * como prazo: o dia com a "feira", antes de "que vem" ou fechando o prazo
+ * ("até sexta"). O dia seguido de outra palavra ("segunda quinzena de
+ * dezembro") fica de fora: pode ser o ordinal.
+ */
+function palavrasDoPrazo(normalizado: string): { palavras: string[]; proximo: boolean; dias: Set<string> } {
   const todas = normalizado.split(" ").filter(Boolean);
   const palavras: string[] = [];
+  const dias = new Set<string>();
   let proximo = false;
   for (let i = 0; i < todas.length; i++) {
     const palavra = todas[i];
     if (palavra === "feira" && DIAS_COM_FEIRA.has(todas[i - 1])) continue;
+    if (DIAS_COM_FEIRA.has(palavra) && (todas[i + 1] === "feira" || (todas[i + 1] === "que" && todas[i + 2] === "vem") || i === todas.length - 1)) dias.add(palavra);
     if (PROXIMO.has(palavra)) proximo = true;
     else if (palavra === "que" && (todas[i + 1] === "vem" || todas[i + 1] === "viene")) {
       proximo = true;
       i++;
     } else palavras.push(palavra);
   }
-  return { palavras, proximo };
+  return { palavras, proximo, dias };
 }
 
 /**
  * O prazo fica se foi dito perto do trecho: as palavras dele com número ou com
  * 4+ letras precisam estar lá; sem nenhuma assim ("até o fim do mês"), todas
  * as palavras. As formas do mesmo prazo valem: "sexta-feira" e "até sexta",
- * "próxima semana" e "semana que vem", "segunda-feira" e "segunda que vem". Em
+ * "próxima semana" e "semana que vem", "segunda-feira" e "segunda que vem". O
+ * dia da semana do prazo precisa estar dito como dia da semana: o ordinal ("a
+ * segunda possibilidade") não sustenta "segunda-feira" nem "até segunda". Em
  * chinês, japonês e tailandês, que não separam as palavras, o prazo inteiro
  * precisa aparecer no texto em volta.
  */
@@ -219,8 +248,9 @@ function prazoSustentado(prazo: string, emVolta: string): boolean {
   const exigidas = longas.length ? longas : doPrazo.palavras;
   if (!exigidas.length) return false;
   if (doPrazo.proximo && !palavrasDoPrazo(emVoltaNormalizado).proximo) return false;
-  const ditas = new Set(emVoltaNormalizado.split(" "));
-  return exigidas.every(p => ditas.has(p));
+  const ditas = emVoltaNormalizado.split(" ");
+  const conjunto = new Set(ditas);
+  return exigidas.every(p => (doPrazo.dias.has(p) ? ditas.some((dita, i) => dita === p && diaDaSemanaEm(ditas, i)) : conjunto.has(p)));
 }
 
 type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada: boolean; vozes: Set<string> };
@@ -232,8 +262,28 @@ type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada:
  */
 function pessoasDoResponsavel(dito: string): string[] | null {
   // Espaço em volta de cada rótulo: "{F2}和{F3}" e "{F1} و{F2}" se separam como "{F2} e {F3}".
-  const pessoas = dito.replace(ROTULO_DE_VOZ, " $& ").split(ENTRE_PESSOAS).map(parte => parte.trim()).filter(parte => parte && !SO_A_CONJUNCAO.test(parte));
+  const pessoas = dito
+    .replace(ROTULO_DE_VOZ, " $& ")
+    .split(ENTRE_PESSOAS)
+    .map(parte => parte.trim().replace(CONJUNCAO_NO_COMECO, ""))
+    .filter(parte => parte && !SO_A_CONJUNCAO.test(parte));
   return pessoas.length && pessoas.every(pessoa => SO_O_ROTULO.test(pessoa) || !/[{}]/.test(pessoa)) ? pessoas : null;
+}
+
+/**
+ * O nome com o "و" colado separado em pessoas: "أحمد وسارة" são duas quando
+ * "وسارة" não foi dito na reunião e "سارة" foi. Só assim, porque há nomes que
+ * começam com "و" (وليد, وفاء), e a primeira palavra nunca se separa.
+ */
+function separarOWawColado(nome: string, nomeNaReuniao: (nome: string) => string): string[] {
+  const pessoas: string[][] = [];
+  for (const palavra of nome.split(/\s+/)) {
+    const resto = palavra.slice(WAW.length);
+    const outraPessoa = pessoas.length > 0 && palavra.startsWith(WAW) && !!resto && !nomeNaReuniao(palavra) && nomeNaReuniao(resto) === resto;
+    if (outraPessoa || !pessoas.length) pessoas.push([outraPessoa ? resto : palavra]);
+    else pessoas[pessoas.length - 1].push(palavra);
+  }
+  return pessoas.map(palavras => palavras.join(" "));
 }
 
 type ResponsavelSustentado = { valor: string; perto: boolean };
@@ -245,11 +295,12 @@ type ResponsavelSustentado = { valor: string; perto: boolean };
  * na abertura não repete o próprio nome quando assume uma tarefa, e o nome
  * fica só com as palavras ditas ("Carla Mendes" vira "Carla"). No responsável
  * composto, ou todas as pessoas ficam, inteiras, ou nenhuma: tirar uma
- * deixaria o prazo, que pode ser só dela, com quem sobrou. `perto` diz se os
- * nomes também foram ditos em volta do trecho: é a ocorrência que o "▶" prefere.
+ * deixaria o prazo, que pode ser só dela, com quem sobrou. O "و" colado do
+ * árabe também separa pessoas (separarOWawColado). `perto` diz se os nomes
+ * também foram ditos em volta do trecho: é a ocorrência que o "▶" prefere.
  */
 function responsavelSustentado(dito: string, ocorrencia: OcorrenciaDoTrecho, contexto: Contexto, nomeNaReuniao: (nome: string) => string): ResponsavelSustentado | null {
-  const pessoas = pessoasDoResponsavel(dito);
+  const pessoas = pessoasDoResponsavel(dito)?.flatMap(pessoa => (SO_O_ROTULO.test(pessoa) ? [pessoa] : separarOWawColado(pessoa, nomeNaReuniao)));
   if (!pessoas) return null;
   const valores: string[] = [];
   let perto = true;

@@ -17,6 +17,10 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * - com a reunião sintética da bancada de 16/11 (server/test/reuniao-sintetica.ts):
  *   o nome dito só na abertura, as formas do mesmo prazo, o responsável
  *   composto, as 7 ações e o "[...]" que emendava falas distantes;
+ * - e o que a revisão da IA2 pediu: o ordinal ("a segunda possibilidade") não
+ *   sustenta o dia da semana; a conjunção depois da vírgula e o "و" colado do
+ *   árabe separam pessoas; os pedaços num turno só ficam inteiros; e
+ *   responsável e prazo saem da mesma vez em que a frase foi dita;
  * - reunião longa vai em janelas e uma junção, e nada é cortado em silêncio;
  * - resposta cortada, JSON inválido e IA fora do ar viram FalhaDaIA com o código.
  */
@@ -223,6 +227,39 @@ describe("o que a revisão da H4a1 pediu", () => {
     expect(itens).toEqual([expect.objectContaining({ due: "下周五", assignee: "{F1}", startSeconds: 0 })]);
   });
 
+  describe("frase dita duas vezes: responsável e prazo saem da mesma vez", () => {
+    // A proposta é dita pela F1 aos 0 s e pela F2 aos 300 s, a mais de 3 turnos.
+    const reuniao = (primeira: string, segunda: string): Segmento[] => [
+      { inicio: 0, fim: 5, falante: "F1", texto: primeira },
+      { inicio: 5, fim: 9, falante: "F3", texto: "Ótimo, combinado." },
+      { inicio: 9, fim: 15, falante: "F1", texto: "Depois falamos do frete." },
+      { inicio: 15, fim: 20, falante: "F3", texto: "Certo." },
+      { inicio: 20, fim: 26, falante: "F1", texto: "E do seguro também." },
+      { inicio: 26, fim: 30, falante: "F3", texto: "Pode ser." },
+      { inicio: 30, fim: 36, falante: "F1", texto: "Então está bem." },
+      { inicio: 300, fim: 306, falante: "F2", texto: segunda },
+    ];
+    const resumirAProposta = (falas: Segmento[], responsavel: string) => {
+      invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [{ texto: "Mandar a proposta", responsavel, prazo: "até sexta", trecho: "vou mandar a proposta amanhã cedo", confianca: 0.8 }] }));
+      return gerarResumoDaReuniao({ transcricao: falas.map(f => f.texto).join("\n"), segmentos: falas, idioma: "pt-BR" });
+    };
+
+    it("o rótulo só se sustenta na 2ª vez e o prazo só na 1ª: fica o rótulo, sem o prazo, com o tempo da 2ª", async () => {
+      const falas = reuniao("Eu vou mandar a proposta amanhã cedo, até sexta.", "Eu vou mandar a proposta amanhã cedo, sem falta.");
+      const { itens } = await resumirAProposta(falas, "{F2}");
+      expect(itens.map(i => [i.assignee, i.due, i.startSeconds])).toEqual([["{F2}", null, 300]]);
+    });
+
+    it("o nome dito só perto da 2ª vez vence o prazo dito só perto da 1ª: o prazo sai", async () => {
+      // A conduta conservadora: o prazo dito perto da outra vez, onde a pessoa
+      // não foi nomeada, pode ser de outra pessoa. O item fica com ela e sem o
+      // prazo, e não junta os dois.
+      const falas = reuniao("Eu vou mandar a proposta amanhã cedo, até sexta.", "Combinado, Paula: eu vou mandar a proposta amanhã cedo, sem falta.");
+      const { itens } = await resumirAProposta(falas, "Paula");
+      expect(itens.map(i => [i.assignee, i.due, i.startSeconds])).toEqual([["Paula", null, 300]]);
+    });
+  });
+
   it("frase dita duas vezes: vale a vez em volta da qual o responsável fala, e o tempo é o dela", async () => {
     const falas: Segmento[] = [
       { inicio: 0, fim: 5, falante: "F1", texto: "Eu vou mandar a proposta amanhã cedo." },
@@ -383,6 +420,33 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
       expect(sistema).not.toContain("quando o nome não foi dito");
     });
 
+    it("no responsável, o rótulo só vale para a voz que fala perto do trecho; quem só é nomeado ali vai pelo nome, e o prompt pede assim", async () => {
+      // Quatro vozes. A Bia (F2) só fala na abertura e no fim, a mais de 3
+      // turnos da fala em que a F1 a nomeia responsável.
+      const falas: Segmento[] = [
+        ["F1", "Bom dia, eu sou a Ana."], ["F2", "Eu sou a Bia."], ["F3", "Eu sou o Caio."], ["F4", "Eu sou a Duda."],
+        ["F1", "Vamos aos números do trimestre."], ["F3", "As vendas subiram dez por cento."], ["F4", "O frete ficou mais caro."],
+        ["F3", "Precisamos rever a tabela de preços."], ["F1", "Então ficou assim: a Bia manda a planilha de custos até segunda."],
+        ["F3", "Certo, e eu reviso a tabela."], ["F4", "Eu cuido do frete."], ["F3", "Mais alguma coisa?"], ["F1", "Por hoje é isso."], ["F2", "Obrigada a todos."],
+      ].map(([falante, texto], i) => ({ inicio: i * 10, fim: i * 10 + 9, falante, texto }));
+      const trecho = "a Bia manda a planilha de custos até segunda";
+      invokeLLM.mockResolvedValue(resposta({
+        ...VAZIO,
+        acoes: [
+          { texto: "Mandar a planilha de custos", responsavel: "{F2}", prazo: "até segunda", trecho, confianca: 1 },
+          { texto: "Enviar a planilha de custos", responsavel: "Bia", prazo: "até segunda", trecho, confianca: 1 },
+        ],
+      }));
+      const { itens } = await gerarResumoDaReuniao({ transcricao: falas.map(f => f.texto).join("\n"), segmentos: falas, idioma: "pt-BR" });
+      expect(itens.map(i => [i.assignee, i.due, i.startSeconds])).toEqual([
+        [null, "até segunda", 80],
+        ["Bia", "até segunda", 80],
+      ]);
+      const sistema = pedido().messages[0].content;
+      expect(sistema).toContain("Em \"responsavel\", porém, o rótulo só serve para a voz que fala no trecho ou responde a ele");
+      expect(sistema).toContain("quem só é nomeado ali por outra voz vai pelo nome, do jeito que foi dito");
+    });
+
     it("as ações do Flash na bancada: os 5 responsáveis por nome e os prazos ficam (antes, 1 de 5 em cada rodada)", async () => {
       // As ações cruas que o Flash devolveu nas rodadas 1 e 2 (saídas X-resumo-r1 e r2).
       const rodada1 = [
@@ -437,6 +501,40 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
       });
       expect(itens.map(i => i.due)).toEqual([null, null, null, null, null]);
     });
+
+    it("o ordinal não sustenta o dia da semana: \"A segunda possibilidade\" (fala 44) não vira prazo de segunda", async () => {
+      // Perto da fala 42 só se diz "até sexta"; a fala 44, a 2 turnos, abre com "A segunda possibilidade".
+      const { itens } = await resumir({
+        acoes: [
+          acao("Apresentar a Camila à Sônia", "{F1}", "segunda-feira", "Mando um e-mail apresentando vocês duas até sexta."),
+          acao("Apresentar a fornecedora", "{F1}", "até segunda", "Mando um e-mail apresentando vocês duas até sexta."),
+          // O dia dito como dia da semana segue valendo, também depois de "até a".
+          acao("Escrever para a Sônia", "{F1}", "até a sexta-feira", "Mando um e-mail apresentando vocês duas até sexta."),
+        ],
+      });
+      expect(itens.map(i => i.due)).toEqual([null, null, "até a sexta-feira"]);
+    });
+
+    it("o prazo com o ordinal (\"segunda quinzena\") casa com o ordinal dito; o dia da semana, não; \"até a sexta\" é dia da semana", async () => {
+      const falas: Segmento[] = [
+        { inicio: 0, fim: 6, falante: "F1", texto: "A entrega do kit fica para a segunda quinzena de dezembro." },
+        { inicio: 6, fim: 12, falante: "F2", texto: "Combinado. Eu termino o relatório até a sexta, sem falta." },
+        { inicio: 12, fim: 18, falante: "F1", texto: "E a reunião com o banco fica para a semana que vem." },
+      ];
+      const kit = "A entrega do kit fica para a segunda quinzena de dezembro";
+      invokeLLM.mockResolvedValue(resposta({
+        ...VAZIO,
+        acoes: [
+          { texto: "Entregar o kit", responsavel: "{F1}", prazo: "segunda quinzena de dezembro", trecho: kit, confianca: 1 },
+          { texto: "Entregar o kit às empresas", responsavel: "{F1}", prazo: "até segunda", trecho: kit, confianca: 1 },
+          // Há um "que vem" por perto, mas a segunda dita é o ordinal.
+          { texto: "Entregar o kit aos clientes", responsavel: "{F1}", prazo: "segunda que vem", trecho: kit, confianca: 1 },
+          { texto: "Terminar o relatório", responsavel: "{F2}", prazo: "sexta-feira", trecho: "Eu termino o relatório até a sexta", confianca: 1 },
+        ],
+      }));
+      const { itens } = await gerarResumoDaReuniao({ transcricao: falas.map(f => f.texto).join("\n"), segmentos: falas, idioma: "pt-BR" });
+      expect(itens.map(i => i.due)).toEqual(["segunda quinzena de dezembro", null, null, "sexta-feira"]);
+    });
   });
 
   describe("3. responsável composto", () => {
@@ -464,6 +562,45 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
         ["{F2}和{F3}", null],
         ["{F2} و{F3}", null],
         [null, null],
+      ]);
+    });
+
+    it("a conjunção depois da vírgula, e as dos outros idiomas, também separam as pessoas: todas ficam", async () => {
+      // Perto da fala 23 falam as três vozes.
+      const formas = [
+        "{F2}, {F3}, and {F1}", "{F2}, {F3}, y {F1}", "{F2}, e {F3}", "{F2}, {F3} sowie {F1}", "{F2} ainsi que {F3}", "{F2}, а также {F3}",
+        "{F2} तथा {F3}", "{F2} एवं {F3}", "{F2}、{F3}以及{F1}", "{F2}および{F3}", "{F2}及び{F3}", "{F2}や{F3}",
+      ];
+      for (const forma of formas) {
+        const { itens } = await resumir({ tarefas: [tarefa("Planilha", "A planilha de custos.", forma, null, PLANILHA)] });
+        expect(itens.map(i => i.assignee), forma).toEqual([forma]);
+      }
+    });
+
+    it("o nome com uma palavra que ninguém disse não fica inteiro numa lista", async () => {
+      // "Silva" nunca é dito: a lista sai inteira, e não vira "Camila Silva e Fernando".
+      const { itens } = await resumir({ tarefas: [tarefa("Números do kit", "Camila manda a planilha.", "Camila Silva e Fernando", null, PLANILHA)] });
+      expect(itens.map(i => [i.assignee, i.startSeconds])).toEqual([[null, 311]]);
+    });
+
+    it("em árabe, o \"و\" colado separa duas pessoas ditas na reunião, que ficam juntas; o nome que começa com \"و\" fica inteiro", async () => {
+      // Envio único, sem falas: Ahmad e Sara se apresentam separados.
+      const transcricao = ["مرحبا، أنا أحمد.", "وأنا سارة.", "وأنا وليد.", "سأرسل التقرير المالي الكامل إلى العميل قبل يوم الجمعة القادم."].join("\n");
+      const trecho = "سأرسل التقرير المالي الكامل إلى العميل قبل يوم الجمعة القادم";
+      invokeLLM.mockResolvedValue(resposta({
+        ...VAZIO,
+        acoes: [
+          { texto: "إرسال التقرير", responsavel: "أحمد وسارة", prazo: "يوم الجمعة", trecho, confianca: 1 },
+          { texto: "مراجعة التقرير", responsavel: "وليد", prazo: null, trecho, confianca: 1 },
+          // A palavra que ninguém disse sai, como em "Carla Mendes".
+          { texto: "إرسال التقرير إلى العميل", responsavel: "أحمد الكبير", prazo: null, trecho, confianca: 1 },
+        ],
+      }));
+      const { itens } = await gerarResumoDaReuniao({ transcricao, segmentos: [], idioma: "ar" });
+      expect(itens.map(i => [i.assignee, i.due])).toEqual([
+        ["أحمد وسارة", "يوم الجمعة"],
+        ["وليد", null],
+        ["أحمد", null],
       ]);
     });
 
@@ -558,6 +695,26 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
       });
       expect(itens.map(i => [i.text, i.excerpt, i.startSeconds])).toEqual([["O perfil será atualizado até o fim do mês", "Faço isso até o fim do mês.", 1119]]);
       expect(recebidos).toBe(2);
+    });
+
+    it("no mesmo turno os pedaços ficam, por mais palavras que haja entre eles: a ação segue com o rótulo, o prazo e o ▶", async () => {
+      // 43 palavras entre os pedaços, numa fala só da F1: a vizinhança, medida
+      // em turnos, não se alarga.
+      const meio = "porque antes eu preciso conversar com o pessoal do financeiro, revisar os números do trimestre, ver o que mudou no frete, confirmar o desconto com o fornecedor e ainda alinhar com a equipe de vendas o que cada um vai fazer, então eu";
+      const falas: Segmento[] = [
+        { inicio: 0, fim: 30, falante: "F1", texto: `Eu mando a proposta, ${meio} entrego até sexta-feira.` },
+        { inicio: 30, fim: 33, falante: "F2", texto: "Combinado, fico esperando." },
+      ];
+      const trecho = "Eu mando a proposta [...] até sexta-feira.";
+      invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [acao("Mandar a proposta", "{F1}", "até sexta-feira", trecho)] }));
+      const { itens } = await gerarResumoDaReuniao({ transcricao: falas.map(f => f.texto).join("\n"), segmentos: falas, idioma: "pt-BR" });
+      expect(itens.map(i => [i.excerpt, i.assignee, i.due, i.startSeconds])).toEqual([[trecho, "{F1}", "até sexta-feira", 0]]);
+    });
+
+    it("a fala 2 inteira fica como veio, e não só \"Eu tenho a Tecelagem Aurora.\"", async () => {
+      const trecho = "Eu tenho a Tecelagem Aurora. [...] alguém que entenda de certificação orgânica para exportação.";
+      const { itens } = await resumir({ questoes: [{ texto: "{F1} procura quem entenda de certificação orgânica para exportação", trecho, confianca: 1 }] });
+      expect(itens.map(i => [i.excerpt, i.startSeconds])).toEqual([[trecho, 44]]);
     });
 
     it("o prompt pede que o trecho não emende partes distantes com reticências", async () => {

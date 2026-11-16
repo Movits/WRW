@@ -23,14 +23,19 @@ const OCORRENCIAS_NO_MAXIMO = 20;
 // A regra do prompt (REGRA_DO_TRECHO, em reuniao-com-ia.ts): o trecho é cópia
 // de 5 a 30 palavras SEGUIDAS da transcrição. Com reticências, os pedaços
 // precisam caber nessas 30 palavras: um "[...]" que emenda falas distantes
-// alargaria a vizinhança em que o resumo procura responsável e prazo. O mínimo
-// vale para o trecho que o app encurta (trechoDentroDaRegra); o que a IA manda
-// segue o mínimo de letras de sempre.
+// alargaria a vizinhança em que o resumo procura responsável e prazo. Dentro
+// de um mesmo turno (falas seguidas da mesma voz) a conta não vale: a
+// vizinhança é medida em turnos e não se alarga, e a IA lê o turno como uma
+// linha só, que ela encurta com "[...]" ("Eu mando a proposta [...] até
+// sexta"). No envio único, sem falas, a conta vale sempre. O mínimo vale para
+// o trecho que o app encurta (trechoDentroDaRegra); o que a IA manda segue o
+// mínimo de letras de sempre.
 const PALAVRAS_SEGUIDAS_NO_MAXIMO = 30;
 const PALAVRAS_SEGUIDAS_NO_MINIMO = 5;
 // Só limita até onde se procuram os pedaços seguintes, para a busca não varrer
-// a reunião inteira a cada vez que o primeiro aparece; a regra é contada em
-// palavras. 30 palavras nunca chegam perto disso.
+// a reunião inteira a cada vez que o primeiro aparece. 30 palavras nunca
+// chegam perto disso, e dentro de um turno é o tamanho da linha que a IA lê
+// (LETRAS_POR_LINHA, em resumo-da-reuniao.ts).
 const LETRAS_DA_JANELA = 2_000;
 
 // Pelo construtor, como ESCRITA_SEM_ESPACO em meeting-service.ts: o alvo do
@@ -44,9 +49,17 @@ const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{S
 const RETICENCIAS = /\.{3}|…/;
 const CADA_RETICENCIAS = /\.{3}|…/g;
 // O que sobra nas pontas de uma parte tirada de entre reticências: os
-// colchetes de "[...]", os parênteses de "(...)", a vírgula e o espaço.
-const SOBRA_NO_COMECO = /^[\s)\]},;:.–—-]+/;
-const SOBRA_NO_FIM = /[\s([{,;:–—-]+$/;
+// colchetes de "[...]", os parênteses de "(...)", a vírgula e o espaço, também
+// os de largura total do chinês e do japonês ("（……）", "【…】", "，", "、") e
+// a vírgula árabe.
+const SOBRA_NO_COMECO = /^[\s)\]}）】」』］〕〉》,;:，、،；：。.–—-]+/;
+const SOBRA_NO_FIM = /[\s([{（【「『［〔〈《,;:，、،；：–—-]+$/;
+// As aspas que a IA põe em volta do trecho. A parte cortada fica com uma só
+// ("“Fica decidido então: ... e não 500."), e ela sai. O apóstrofo (' e ’)
+// não conta: aparece no meio das palavras ("d'água", "it’s").
+const ASPAS = /["“”„‟«»‹›‘‚‛「」『』]/g;
+const ASPA_NO_COMECO = /^["“”„‟«»‹›‘‚‛「」『』]\s*/;
+const ASPA_NO_FIM = /\s*["“”„‟«»‹›‘‚‛「」『』]$/;
 // O rótulo que a IA às vezes copia junto da fala: "[12:34]", "[1:02:03]",
 // "{F2}:" ou "F2:".
 const ROTULO_DE_TEMPO = /\[\d{1,2}(?::\d{2}){1,2}\]/g;
@@ -106,10 +119,11 @@ function ondeNaFonte(pedacos: string[], fonte: string): [number, number] | null 
 /**
  * Todas as vezes em que o trecho aparece, até o teto. Com reticências, só
  * conta a vez em que os pedaços cabem em 30 palavras seguidas (a regra do
- * prompt): pedaços que só aparecem longe uns dos outros não são uma
- * ocorrência, e a vizinhança nunca se estica até uma fala distante.
+ * prompt) ou ficam num turno só (`mesmoTurno`, que só existe com falas):
+ * pedaços que só aparecem longe uns dos outros não são uma ocorrência, e a
+ * vizinhança nunca se estica até uma fala distante.
  */
-function todasAsOcorrencias(pedacos: string[], fonte: string): Array<[number, number]> {
+function todasAsOcorrencias(pedacos: string[], fonte: string, mesmoTurno?: (comeco: number, fim: number) => boolean): Array<[number, number]> {
   const achadas: Array<[number, number]> = [];
   for (let comeco = fonte.indexOf(pedacos[0]); comeco >= 0 && achadas.length < OCORRENCIAS_NO_MAXIMO; comeco = fonte.indexOf(pedacos[0], comeco + 1)) {
     if (pedacos.length === 1) {
@@ -118,7 +132,9 @@ function todasAsOcorrencias(pedacos: string[], fonte: string): Array<[number, nu
     }
     const janela = fonte.slice(comeco, comeco + LETRAS_DA_JANELA);
     const onde = ondeNaFonte(pedacos, janela);
-    if (onde && contarPalavras(janela.slice(onde[0], onde[1])) <= PALAVRAS_SEGUIDAS_NO_MAXIMO) achadas.push([comeco + onde[0], comeco + onde[1]]);
+    if (!onde) continue;
+    const [inicio, fim] = [comeco + onde[0], comeco + onde[1]];
+    if (mesmoTurno?.(inicio, fim) || contarPalavras(janela.slice(onde[0], onde[1])) <= PALAVRAS_SEGUIDAS_NO_MAXIMO) achadas.push([inicio, fim]);
   }
   return achadas;
 }
@@ -146,8 +162,9 @@ function falasComTexto(segmentos: readonly Segmento[]): Segmento[] {
 
 /**
  * As falas emendadas num texto só, normalizado, com a posição em que cada
- * fala começa (um trecho que cruza duas falas também é achado) e o turno de
- * cada uma (falas seguidas da mesma voz são um turno).
+ * fala começa (um trecho que cruza duas falas também é achado), o turno de
+ * cada uma (falas seguidas da mesma voz são um turno) e se as posições
+ * [comeco, fim) do texto emendado ficam num turno só.
  */
 function falasEmendadas(segmentos: readonly Segmento[]) {
   const falas = falasComTexto(segmentos);
@@ -162,7 +179,9 @@ function falasEmendadas(segmentos: readonly Segmento[]) {
     if (i === 0 || fala.falante !== falas[i - 1].falante) turno++;
     turnos.push(turno);
   });
-  return { falas, inicios, turnos, fonte };
+  const mesmoTurno = (comeco: number, fim: number) =>
+    falas.length > 0 && turnos[falaNaPosicao(inicios, comeco)] === turnos[falaNaPosicao(inicios, Math.max(comeco, fim - 1))];
+  return { falas, inicios, turnos, fonte, mesmoTurno };
 }
 
 /** O índice da fala que contém a posição `pos` do texto emendado. */
@@ -170,6 +189,11 @@ function falaNaPosicao(inicios: number[], pos: number): number {
   let i = 0;
   while (i + 1 < inicios.length && inicios[i + 1] <= pos) i++;
   return i;
+}
+
+/** O segundo em que a fala começa, inteiro; null se a fala não tem um tempo válido. */
+function inicioDaFala(fala: Segmento): number | null {
+  return Number.isFinite(fala.inicio) && fala.inicio >= 0 ? Math.floor(fala.inicio) : null;
 }
 
 export type OcorrenciaDoTrecho = {
@@ -186,21 +210,21 @@ export type OcorrenciaDoTrecho = {
  * que foi dito em volta: as falas dele e as de até 3 turnos de cada lado (no
  * envio único, sem falas, 400 letras de cada lado no texto corrido). Vazio
  * quando o trecho não está na transcrição — ou, com reticências, quando os
- * pedaços só aparecem longe uns dos outros (ver trechoDentroDaRegra).
+ * pedaços só aparecem longe uns dos outros, em turnos diferentes (ver
+ * trechoDentroDaRegra).
  */
 export function ocorrenciasDoTrecho(trecho: unknown, transcricao: string, segmentos: readonly Segmento[]): OcorrenciaDoTrecho[] {
   const pedacos = pedacosDoTrecho(trecho);
   if (!pedacos) return [];
   const emendadas = falasEmendadas(segmentos);
   if (emendadas.falas.length) {
-    const { falas, inicios, turnos, fonte } = emendadas;
-    return todasAsOcorrencias(pedacos, fonte).map(([comeco, fim]) => {
+    const { falas, inicios, turnos, fonte, mesmoTurno } = emendadas;
+    return todasAsOcorrencias(pedacos, fonte, mesmoTurno).map(([comeco, fim]) => {
       const primeira = falaNaPosicao(inicios, comeco);
       const ultima = falaNaPosicao(inicios, Math.max(comeco, fim - 1));
       const emVolta = falas.filter((_, i) => turnos[i] >= turnos[primeira] - TURNOS_EM_VOLTA && turnos[i] <= turnos[ultima] + TURNOS_EM_VOLTA);
-      const inicio = falas[primeira].inicio;
       return {
-        inicio: Number.isFinite(inicio) && inicio >= 0 ? Math.floor(inicio) : null,
+        inicio: inicioDaFala(falas[primeira]),
         texto: emVolta.map(fala => fala.texto).join("\n"),
         falantes: new Set(emVolta.map(fala => fala.falante)),
       };
@@ -215,22 +239,34 @@ export function ocorrenciasDoTrecho(trecho: unknown, transcricao: string, segmen
 }
 
 /**
+ * A parte cortada sem a aspa que ficou sozinha: com um número ímpar de aspas,
+ * sai a da ponta (a do começo, se há; se não, a do fim).
+ */
+function semAspaSozinha(parte: string): string {
+  if ((parte.match(ASPAS)?.length ?? 0) % 2 === 0) return parte;
+  return ASPA_NO_COMECO.test(parte) ? parte.replace(ASPA_NO_COMECO, "") : parte.replace(ASPA_NO_FIM, "");
+}
+
+/**
  * O trecho como a regra do prompt pede: palavras seguidas da transcrição. Com
- * reticências, os pedaços precisam caber em 30 palavras seguidas. Quando só
- * aparecem longe uns dos outros (um "[...]" que emenda falas distantes), fica
- * uma parte do trecho que cabe e tem as 5 palavras da regra: o começo dele, o
- * mais longo que der (é para onde o "▶" já apontava); se o começo não chega a
- * 5 palavras ("Eu sei. [...]"), a maior das outras partes. Sem nenhuma, null,
- * e o item sai. Trecho sem reticências, e trecho que nem aparece na
- * transcrição, voltam como vieram: quem chama confere a presença
- * (trechoApareceNaTranscricao).
+ * reticências, os pedaços precisam caber em 30 palavras seguidas ou ficar num
+ * turno só. Quando só aparecem longe uns dos outros (um "[...]" que emenda
+ * falas distantes), fica uma parte do trecho que cabe e tem as 5 palavras da
+ * regra: o começo dele, o mais longo que der (é para onde o "▶" já apontava);
+ * se o começo não chega a 5 palavras ("Eu sei. [...]"), a maior das outras
+ * partes. Sem nenhuma, null, e o item sai. A parte sai sem a sobra das
+ * reticências e sem a aspa que ficou sozinha. Trecho sem reticências, e
+ * trecho que nem aparece na transcrição, voltam como vieram: quem chama
+ * confere a presença (trechoApareceNaTranscricao).
  */
 export function trechoDentroDaRegra(trecho: string, transcricao: string, segmentos: readonly Segmento[]): string | null {
   const pedacos = pedacosDoTrecho(trecho);
   if (!pedacos || pedacos.length === 1) return trecho;
   const emendadas = falasEmendadas(segmentos);
-  const fonte = emendadas.falas.length ? emendadas.fonte : normalizarParaComparar(transcricao);
-  if (!ondeNaFonte(pedacos, fonte) || todasAsOcorrencias(pedacos, fonte).length) return trecho;
+  const comFalas = emendadas.falas.length > 0;
+  const fonte = comFalas ? emendadas.fonte : normalizarParaComparar(transcricao);
+  const mesmoTurno = comFalas ? emendadas.mesmoTurno : undefined;
+  if (!ondeNaFonte(pedacos, fonte) || todasAsOcorrencias(pedacos, fonte, mesmoTurno).length) return trecho;
 
   // Os pedaços com a posição no trecho como veio, para devolver o texto dele.
   const crus: Array<{ inicio: number; fim: number; normalizado: string }> = [];
@@ -253,21 +289,28 @@ export function trechoDentroDaRegra(trecho: string, transcricao: string, segment
   }
   partes.sort((a, b) => Number(a.primeiro > 0) - Number(b.primeiro > 0) || b.palavras - a.palavras || a.primeiro - b.primeiro);
   for (const { primeiro, ultimo } of partes) {
-    const parte = trecho.slice(crus[primeiro].inicio, crus[ultimo].fim).replace(SOBRA_NO_COMECO, "").replace(SOBRA_NO_FIM, "");
+    const parte = semAspaSozinha(trecho.slice(crus[primeiro].inicio, crus[ultimo].fim).replace(SOBRA_NO_COMECO, "").replace(SOBRA_NO_FIM, ""));
     const pedacosDaParte = pedacosDoTrecho(parte);
-    if (pedacosDaParte && todasAsOcorrencias(pedacosDaParte, fonte).length) return parte;
+    if (pedacosDaParte && todasAsOcorrencias(pedacosDaParte, fonte, mesmoTurno).length) return parte;
   }
   return null;
 }
 
 /**
  * O segundo da reunião em que o trecho começa (o início da fala em que ele
- * começa, na primeira vez em que aparece), para o "▶ mm:ss" da tela. Null
- * quando a transcrição não tem falas (envio único) ou o trecho não está nelas.
+ * começa), para o "▶ mm:ss" da tela: a primeira vez em que ele aparece dentro
+ * da regra, como no resumo. O Pergunte aceita a citação só pela presença
+ * (trechoApareceNaTranscricao), sem a regra das 30 palavras: quando os
+ * pedaços só aparecem longe uns dos outros, o "▶" vai para onde a citação
+ * aceita começa, em vez de sumir. Null quando a transcrição não tem falas
+ * (envio único) ou o trecho não está nelas.
  */
 export function localizarTrecho(trecho: unknown, segmentos: readonly Segmento[]): number | null {
-  if (!falasComTexto(segmentos).length) return null;
-  return ocorrenciasDoTrecho(trecho, "", segmentos)[0]?.inicio ?? null;
+  const pedacos = pedacosDoTrecho(trecho);
+  const { falas, inicios, fonte, mesmoTurno } = falasEmendadas(segmentos);
+  if (!pedacos || !falas.length) return null;
+  const onde = todasAsOcorrencias(pedacos, fonte, mesmoTurno)[0] ?? ondeNaFonte(pedacos, fonte);
+  return onde ? inicioDaFala(falas[falaNaPosicao(inicios, onde[0])]) : null;
 }
 
 /** O que foi dito em volta da primeira vez em que o trecho aparece; null se ele não está na transcrição. */
