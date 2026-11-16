@@ -49,6 +49,7 @@ import {
 } from "../drizzle/schema";
 import { encryptData } from "./security";
 import { URL_DE_REVOGACAO } from "./google-oauth";
+import { BancoIndisponivel } from "./banco-indisponivel";
 
 const AQUI: string = (import.meta as { dirname?: string }).dirname ?? path.dirname(fileURLToPath(import.meta.url));
 const FONTE_SCHEMA = readFileSync(path.resolve(AQUI, "..", "drizzle", "schema.ts"), "utf8");
@@ -583,6 +584,30 @@ describe("B7) a conexão com a Google Agenda é revogada antes do laço, sem tra
     erro.mockRestore();
   });
 
+  it("banco fora do ar ao ler a conexão NÃO vira 'a Google não confirmou': a exclusão para antes de apagar qualquer linha", async () => {
+    // Seguir apagaria a única cópia de um token que continua valendo na Google.
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const quedas = [
+      new BancoIndisponivel(),
+      Object.assign(new Error("Failed query: select `refresh_token_cifrado` from `google_agenda_conexoes`"), {
+        cause: Object.assign(new Error("Connection lost: The server closed the connection."), { code: "PROTOCOL_CONNECTION_LOST" }),
+      }),
+    ];
+    for (const queda of quedas) {
+      delecoes = [];
+      await expect(excluirConta(fakeDb, CONTA, { apagarArquivo, revogarGoogle: async () => { throw queda; } })).rejects.toBe(queda);
+      expect(delecoes).toEqual([]);
+    }
+    expect(erro.mock.calls.some(chamada => String(chamada[0]).includes("Google Agenda"))).toBe(false);
+    erro.mockRestore();
+  });
+
+  it("outra conta da WRW usa a mesma conta Google: o relatório diz que a autorização ficou para ela, sem falha", async () => {
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo, revogarGoogle: async () => "mantida-para-outra-conta" as const });
+    expect(relatorio.googleAgenda).toBe("mantida-para-outra-conta");
+    expect(delecoes.some(d => d.tabela === googleAgendaConexoes)).toBe(true);
+  });
+
   it("o padrão lê a conexão pelo mesmo banco: sem linha, nada vai à Google", async () => {
     const buscar = vi.fn(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", buscar);
@@ -596,7 +621,9 @@ describe("B7) a conexão com a Google Agenda é revogada antes do laço, sem tra
   });
 
   it("o padrão, com conexão: decifra o refresh token e o revoga na Google, no corpo do POST", async () => {
-    linhasPorTabela.set(googleAgendaConexoes, [{ versao: encryptData("refresh-da-dona") }]);
+    // A linha traz a conta Google: o padrão confere se outra conta da WRW a usa
+    // (a mesma linha volta na consulta pelo sub, e é desta conta).
+    linhasPorTabela.set(googleAgendaConexoes, [{ versao: encryptData("refresh-da-dona"), sub: "sub-da-dona", userId: 7 }]);
     const buscar = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", buscar);
     try {

@@ -1959,6 +1959,7 @@
     "privacyNote": "WRW solo modifica los eventos de las reuniones que programes en la agenda de reuniones de WRW. Puedes desconectarlo cuando quieras.",
     "wrongAddress": "Para conectar Google Calendar, entra en WRW desde la dirección {{address}}.",
     "openAddress": "Abrir {{address}}",
+    "inApp": "Desde la app no se puede conectar Google Calendar. Abre {{address}} en el navegador, inicia sesión y conéctalo desde tu Perfil.",
     "disconnect": "Desconectar",
     "disconnecting": "Desconectando…",
     "disconnectConfirm": "¿Desconectar Google Calendar? Los eventos que ya están en tu Google Calendar seguirán allí.",
@@ -1970,7 +1971,8 @@
       "missingPermission": "Faltó el permiso del calendario. Vuelve a conectar y deja marcada la opción de Google Calendar.",
       "expired": "La conexión tardó demasiado. Inténtalo de nuevo.",
       "wrongAddress": "La conexión con Google Calendar solo funciona desde la dirección oficial de WRW.",
-      "error": "No se pudo conectar Google Calendar. Inténtalo de nuevo en unos instantes."
+      "error": "No se pudo conectar Google Calendar. Inténtalo de nuevo en unos instantes.",
+      "errorAccessLeft": "No se pudo conectar Google Calendar, y Google no confirmó que deshizo la autorización que acabas de dar. Si quieres, quita el acceso de WRW en la configuración de tu cuenta de Google."
     },
     "toast": {
       "disconnected": "Google Calendar desconectado.",
@@ -2028,7 +2030,8 @@
       "confirmar": "Eliminar definitivamente",
       "excluindo": "Eliminando...",
       "sucesso": "Tu cuenta y tus datos fueron eliminados.",
-      "sucessoComPendencias": "Tu cuenta y tus datos fueron eliminados. {{quantidade}} archivo(s) todavía no salieron del almacenamiento y pueden tardar más; su eliminación quedó registrada."
+      "sucessoComPendencias": "Tu cuenta y tus datos fueron eliminados. {{quantidade}} archivo(s) todavía no salieron del almacenamiento y pueden tardar más; su eliminación quedó registrada.",
+      "googleNaoConfirmou": "La conexión con Google Calendar se eliminó junto con tu cuenta, pero Google no confirmó que quitó el acceso de WRW. Si quieres, quita ese acceso en la configuración de tu cuenta de Google."
     }
   },
   "termoGeral": {

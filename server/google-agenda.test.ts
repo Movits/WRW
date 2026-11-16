@@ -15,7 +15,12 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  *   confirmação dela;
  * - o token de acesso vem da memória enquanto vale, e o invalid_grant marca a
  *   conexão (a tela pede "Reconectar");
- * - a exclusão da conta revoga o token.
+ * - a exclusão da conta revoga o token;
+ * - revogar é decidido pela conta Google (o sub), porque a Google revoga a
+ *   autorização inteira da conta no projeto: reconectar com a mesma conta não
+ *   revoga nada, e nada se revoga enquanto outra conta da WRW usa a mesma conta
+ *   Google;
+ * - fora de GOOGLE_AGENDA_LIBERADA_PARA (modo Teste), a função some.
  * O banco de verdade está em google-agenda.integracao.test.ts.
  */
 
@@ -108,18 +113,34 @@ beforeEach(() => {
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "segredo-do-cliente");
   vi.stubEnv("FRONTEND_URL", "https://wrwglobal.org");
   vi.stubEnv("VAULT_ENCRYPTION_KEY", "chave-do-cofre-de-teste-com-mais-de-32");
+  vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "todas");
   efeitos = [];
   linhas = [];
   falharNaAuditoria = false;
   servico.esquecerAcesso(7);
 });
-afterEach(() => { vi.unstubAllEnvs(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+/** A linha da conexão como o banco falso a devolve: o token cifrado, a conta Google e a conta da WRW. */
+const linhaDa = (refreshToken: string, sub = "sub-da-dona", userId = 7) => ({ versao: encryptData(refreshToken), sub, userId, falha: null });
+/** As consultas pela conta Google (o sub), não pela conta da WRW. */
+const consultasPeloSub = () => efeitos.filter(e => e.tipo === "select" && renderizar(e.condicao).sql.includes("`google_sub` = ?"));
 
 describe("o estado para o Perfil", () => {
   it("sem as variáveis, só 'indisponível', sem perguntar ao banco", async () => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "");
     expect(await servico.estadoDaGoogleAgenda(7)).toEqual({ disponivel: false });
     expect(efeitos).toEqual([]);
+  });
+
+  it("em modo Teste, a conta fora de GOOGLE_AGENDA_LIBERADA_PARA não vê a função, e o banco nem é lido", async () => {
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "3, 9");
+    expect(await servico.estadoDaGoogleAgenda(7)).toEqual({ disponivel: false });
+    expect(efeitos).toEqual([]);
+    expect(await servico.estadoDaGoogleAgenda(9)).toEqual({ disponivel: true, origem: "https://wrwglobal.org", conectada: false });
+    // Sem a variável, ninguém: esquecê-la não põe um botão quebrado diante de todas.
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "");
+    expect(await servico.estadoDaGoogleAgenda(9)).toEqual({ disponivel: false });
   });
 
   it("sem conexão: disponível, com a origem do FRONTEND_URL; a consulta leva a conta", async () => {
@@ -139,12 +160,13 @@ describe("o estado para o Perfil", () => {
 describe("gravar a conexão que voltou da Google", () => {
   const conexao = {
     refreshToken: "refresh-novo",
+    sub: "sub-da-dona",
     email: "dona@exemplo.com",
     escopos: [ESCOPO, "openid", ESCOPO, "https://www.googleapis.com/auth/userinfo.email"],
     acesso: { token: "acesso-novo", expiraEm: Date.now() + 3_600_000 },
   };
 
-  it("o token entra cifrado (e se lê de volta), e a prova entra na mesma transação", async () => {
+  it("o token entra cifrado (e se lê de volta), com a conta Google, e a prova entra na mesma transação", async () => {
     expect(await servico.gravarConexaoGoogle(7, conexao, PROVA, 1_000)).toEqual({ anterior: null });
     expect(tipos()).toEqual(["transacao", "select", "insert", "insert", "fim-da-transacao"]);
 
@@ -152,35 +174,60 @@ describe("gravar a conexão que voltou da Google", () => {
     expect(conexaoGravada.tabela).toBe(googleAgendaConexoes);
     const valores = conexaoGravada.valores!;
     expect(valores).toMatchObject({
-      userId: 7, emailGoogle: "dona@exemplo.com", falha: null, createdAt: 1_000, updatedAt: 1_000,
+      userId: 7, googleSub: "sub-da-dona", emailGoogle: "dona@exemplo.com", falha: null, createdAt: 1_000, updatedAt: 1_000,
       escopos: `${ESCOPO} https://www.googleapis.com/auth/userinfo.email openid`,
     });
     expect(valores.refreshTokenCifrado).not.toContain("refresh-novo");
     expect(decryptData(String(valores.refreshTokenCifrado))).toBe("refresh-novo");
-    // Reconectar troca a linha da conta, com a falha zerada.
-    expect(conexaoGravada.aoDuplicar).toMatchObject({ refreshTokenCifrado: valores.refreshTokenCifrado, falha: null, emailGoogle: "dona@exemplo.com", updatedAt: 1_000 });
+    // Reconectar troca a linha da conta, com a falha zerada e a conta Google nova.
+    expect(conexaoGravada.aoDuplicar).toMatchObject({
+      refreshTokenCifrado: valores.refreshTokenCifrado, googleSub: "sub-da-dona", falha: null, emailGoogle: "dona@exemplo.com", updatedAt: 1_000,
+    });
 
     const prova = efeitos[3];
     expect(prova.tabela).toBe(auditLogs);
     expect(prova.valores).toMatchObject({
       userId: 7, action: servico.ACAO_GOOGLE_CONECTADA, resource: "google_agenda", status: "success",
       ipAddress: "203.0.113.9", userAgent: "Navegador de teste",
-      details: { escopos: [ESCOPO, "https://www.googleapis.com/auth/userinfo.email", "openid"], reconexao: false },
+      details: { escopos: [ESCOPO, "https://www.googleapis.com/auth/userinfo.email", "openid"], reconexao: false, trocouDeContaGoogle: false },
     });
-    // A prova não guarda token nem e-mail.
+    // A prova não guarda token, e-mail nem o id da conta Google.
     expect(JSON.stringify(prova.valores)).not.toContain("refresh-novo");
     expect(JSON.stringify(prova.valores)).not.toContain("dona@exemplo.com");
+    expect(JSON.stringify(prova.valores)).not.toContain("sub-da-dona");
   });
 
-  it("reconectar devolve o token anterior decifrado, para a rota revogá-lo; a prova diz que foi reconexão", async () => {
-    linhas = [{ versao: encryptData("refresh-antigo") }];
-    expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: "refresh-antigo" });
-    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toMatchObject({ reconexao: true });
-  });
-
-  it("o anterior cifrado com outra chave não se revoga daqui: anterior nulo, sem erro", async () => {
-    linhas = [{ versao: "lixo:que:nao-se-le" }];
+  it("reconectar com a MESMA conta Google não devolve nada para revogar: os dois tokens são da mesma autorização", async () => {
+    // A Google revoga por conta e projeto: revogar o anterior derrubaria a conexão nova.
+    linhas = [linhaDa("refresh-antigo", "sub-da-dona")];
     expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: null });
+    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toMatchObject({ reconexao: true, trocouDeContaGoogle: false });
+    expect(consultasPeloSub()).toEqual([]);
+  });
+
+  it("reconectar com OUTRA conta Google devolve o anterior decifrado, para a rota revogá-lo", async () => {
+    linhas = [linhaDa("refresh-antigo", "sub-de-outra-conta-google")];
+    expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: "refresh-antigo" });
+    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toMatchObject({ reconexao: true, trocouDeContaGoogle: true });
+    // A conta Google anterior é procurada pelo sub dela, dentro da transação.
+    const [consulta] = consultasPeloSub();
+    expect(renderizar(consulta.condicao).params).toEqual(["sub-de-outra-conta-google"]);
+    expect(efeitos.indexOf(consulta)).toBeLessThan(tipos().indexOf("fim-da-transacao"));
+  });
+
+  it("a conta Google anterior que outra conta da WRW ainda usa não é revogada: derrubaria a conexão dela", async () => {
+    linhas = [linhaDa("refresh-antigo", "sub-antigo", 7), linhaDa("refresh-da-outra", "sub-antigo", 8)];
+    expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: null });
+    expect(consultasPeloSub()).toHaveLength(1);
+  });
+
+  it("o anterior cifrado com outra chave não se revoga daqui: anterior nulo, sem erro, e o log avisa sem token", async () => {
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => {});
+    linhas = [{ versao: "lixo:que:nao-se-le", sub: "sub-de-outra-conta-google", userId: 7 }];
+    expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: null });
+    expect(avisos).toHaveBeenCalledTimes(1);
+    expect(String(avisos.mock.calls[0][0])).toContain("não se decifra");
+    expect(String(avisos.mock.calls[0][0])).not.toContain("lixo");
   });
 
   it("sem a prova, a conexão não fica: o erro sobe e a transação não termina", async () => {
@@ -207,26 +254,40 @@ describe("gravar a conexão que voltou da Google", () => {
 
 describe("desconectar", () => {
   it("revoga na Google ANTES de apagar; apaga e grava a prova na mesma transação", async () => {
-    linhas = [{ versao: encryptData("refresh-1") }];
+    linhas = [linhaDa("refresh-1")];
     const google = dubleDaGoogle(new Response(null, { status: 200 }));
     expect(await servico.desconectarGoogleAgenda(7, PROVA, google)).toEqual({ googleNaoConfirmou: false });
-    expect(tipos()).toEqual(["select", "google", "transacao", "delete", "insert", "fim-da-transacao"]);
-    expect(corpoDe(efeitos[1]).get("token")).toBe("refresh-1");
-    expect(efeitos[3].tabela).toBe(googleAgendaConexoes);
-    expect(renderizar(efeitos[3].condicao).params).toEqual([7]);
-    expect(efeitos[4].valores).toMatchObject({ userId: 7, action: servico.ACAO_GOOGLE_DESCONECTADA, details: { revogadaNaGoogle: true } });
+    // A conta da WRW, depois a conta Google (quem mais a usa), depois a Google.
+    expect(tipos()).toEqual(["select", "select", "google", "transacao", "delete", "insert", "fim-da-transacao"]);
+    expect(renderizar(efeitos[1].condicao).params).toEqual(["sub-da-dona"]);
+    expect(corpoDe(efeitos[2]).get("token")).toBe("refresh-1");
+    expect(efeitos[4].tabela).toBe(googleAgendaConexoes);
+    expect(renderizar(efeitos[4].condicao).params).toEqual([7]);
+    expect(efeitos[5].valores).toMatchObject({
+      userId: 7, action: servico.ACAO_GOOGLE_DESCONECTADA, details: { revogadaNaGoogle: true, mantidaParaOutraConta: false },
+    });
+  });
+
+  it("outra conta da WRW na mesma conta Google: nada vai à Google, a linha sai e a tela não manda tirar o acesso", async () => {
+    // Revogar derrubaria em silêncio a conexão da outra conta (a Google revoga por conta e projeto).
+    linhas = [linhaDa("refresh-1", "sub-da-dona", 7), linhaDa("refresh-da-outra", "sub-da-dona", 8)];
+    const google = dubleDaGoogle();
+    expect(await servico.desconectarGoogleAgenda(7, PROVA, google)).toEqual({ googleNaoConfirmou: false });
+    expect(google).not.toHaveBeenCalled();
+    expect(efeitos.find(e => e.tipo === "delete")?.tabela).toBe(googleAgendaConexoes);
+    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toEqual({ revogadaNaGoogle: false, mantidaParaOutraConta: true });
   });
 
   it("a Google fora do ar não segura a desconexão: a linha sai, e a tela é avisada", async () => {
-    linhas = [{ versao: encryptData("refresh-1") }];
+    linhas = [linhaDa("refresh-1")];
     const google = dubleDaGoogle(new Response("", { status: 503 }));
     expect(await servico.desconectarGoogleAgenda(7, PROVA, google)).toEqual({ googleNaoConfirmou: true });
     expect(tipos()).toContain("delete");
-    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toEqual({ revogadaNaGoogle: false });
+    expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toEqual({ revogadaNaGoogle: false, mantidaParaOutraConta: false });
   });
 
   it("o token que não se decifra não vai à Google, e a linha sai do mesmo jeito", async () => {
-    linhas = [{ versao: "lixo:que:nao-se-le" }];
+    linhas = [{ versao: "lixo:que:nao-se-le", sub: "sub-da-dona", userId: 7 }];
     const google = dubleDaGoogle();
     expect(await servico.desconectarGoogleAgenda(7, PROVA, google)).toEqual({ googleNaoConfirmou: true });
     expect(google).not.toHaveBeenCalled();
@@ -240,9 +301,9 @@ describe("desconectar", () => {
   });
 
   it("depois de desconectar, o token de acesso guardado não serve mais", async () => {
-    await servico.gravarConexaoGoogle(7, { refreshToken: "r", email: null, escopos: [ESCOPO], acesso: { token: "acesso-velho", expiraEm: Date.now() + 3_600_000 } }, PROVA);
+    await servico.gravarConexaoGoogle(7, { refreshToken: "r", sub: "sub-da-dona", email: null, escopos: [ESCOPO], acesso: { token: "acesso-velho", expiraEm: Date.now() + 3_600_000 } }, PROVA);
     const versao = efeitos[2].valores!.refreshTokenCifrado;
-    linhas = [{ versao }];
+    linhas = [{ versao, sub: "sub-da-dona", userId: 7 }];
     await servico.desconectarGoogleAgenda(7, PROVA, dubleDaGoogle(new Response(null, { status: 200 })));
     // Mesmo que a linha voltasse igual, a memória foi esquecida: renova.
     linhas = [{ versao, falha: null }];
@@ -266,6 +327,14 @@ describe("o token de acesso (para a H16c)", () => {
     await expect(servico.tokenDeAcessoDaGoogleAgenda(7, google)).rejects.toBeInstanceOf(servico.GoogleAgendaNaoConectada);
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "");
     await expect(servico.tokenDeAcessoDaGoogleAgenda(7, google)).rejects.toBeInstanceOf(servico.GoogleAgendaIndisponivel);
+    expect(google).not.toHaveBeenCalled();
+  });
+
+  it("a conta fora de GOOGLE_AGENDA_LIBERADA_PARA também não tem a função, sem ler o banco", async () => {
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "8");
+    const google = dubleDaGoogle();
+    await expect(servico.tokenDeAcessoDaGoogleAgenda(7, google)).rejects.toBeInstanceOf(servico.GoogleAgendaIndisponivel);
+    expect(efeitos).toEqual([]);
     expect(google).not.toHaveBeenCalled();
   });
 
@@ -344,16 +413,33 @@ describe("a exclusão da conta revoga o token", () => {
   });
 
   it("com conexão: revoga o refresh token decifrado", async () => {
-    linhas = [{ versao: encryptData("refresh-1") }];
+    linhas = [linhaDa("refresh-1")];
     const google = dubleDaGoogle(new Response(null, { status: 200 }));
     expect(await servico.revogarGoogleDaConta(fakeDb as never, 7, google)).toBe("revogada");
     expect(corpoDe(efeitos.find(e => e.tipo === "google")!).get("token")).toBe("refresh-1");
   });
 
+  it("outra conta da WRW na mesma conta Google: não revoga (derrubaria a dela), e diz isso", async () => {
+    linhas = [linhaDa("refresh-1", "sub-da-dona", 7), linhaDa("refresh-da-outra", "sub-da-dona", 8)];
+    const google = dubleDaGoogle();
+    expect(await servico.revogarGoogleDaConta(fakeDb as never, 7, google)).toBe("mantida-para-outra-conta");
+    expect(google).not.toHaveBeenCalled();
+    expect(renderizar(consultasPeloSub()[0].condicao).params).toEqual(["sub-da-dona"]);
+  });
+
   it("a Google não confirmou, ou o token não se decifra: lança, e quem exclui anota e segue", async () => {
-    linhas = [{ versao: encryptData("refresh-1") }];
+    linhas = [linhaDa("refresh-1")];
     await expect(servico.revogarGoogleDaConta(fakeDb as never, 7, dubleDaGoogle(new Response("", { status: 503 })))).rejects.toThrow();
-    linhas = [{ versao: "lixo:que:nao-se-le" }];
+    linhas = [{ versao: "lixo:que:nao-se-le", sub: "sub-da-dona", userId: 7 }];
     await expect(servico.revogarGoogleDaConta(fakeDb as never, 7, dubleDaGoogle())).rejects.toThrow();
+  });
+});
+
+describe("a conta Google em uso (para a volta decidir se pode revogar)", () => {
+  it("procura pelo sub, em qualquer conta da WRW, inclusive a de quem está conectando", async () => {
+    expect(await servico.contaGoogleEmUso("sub-da-dona")).toBe(false);
+    expect(renderizar(efeitos[0].condicao).params).toEqual(["sub-da-dona"]);
+    linhas = [linhaDa("refresh-1", "sub-da-dona", 7)];
+    expect(await servico.contaGoogleEmUso("sub-da-dona")).toBe(true);
   });
 });

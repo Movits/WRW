@@ -74,8 +74,18 @@ const CHROME = /\(KHTML, like Gecko\) Chrome\/[\d.]+ (?:Mobile )?Safari\/[\d.]+$
 const SAFARI_DO_MAC = /Version\/[\d.]+ Safari\/[\d.]+$/;
 const EDGE_NO_COMPUTADOR = /\bEdg\/[\d.]+$/;
 
+/**
+ * Aberta dentro da casca das lojas (PR #180)? É uma WebView: o que sai do
+ * endereço da WRW abre no navegador do sistema, com outros cookies e sem a
+ * sessão, e a Google recusa login dentro de WebView. Fluxo que depende disso
+ * (a conexão com a Google Agenda) manda usar o navegador.
+ */
+export function abertoNaCascaDasLojas(userAgent: string): boolean {
+  return CASCA_DAS_LOJAS.test(userAgent);
+}
+
 export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoApp }: AmbienteDoNavegador): Plataforma {
-  if (abertoComoApp || CASCA_DAS_LOJAS.test(userAgent)) return "app-instalado";
+  if (abertoComoApp || abertoNaCascaDasLojas(userAgent)) return "app-instalado";
   if (NAVEGADOR_EMBUTIDO.test(userAgent)) return "navegador-embutido";
   const mac = /Macintosh/.test(userAgent);
   if (/iPhone|iPad|iPod/.test(userAgent) || (mac && maxTouchPoints > 1)) {

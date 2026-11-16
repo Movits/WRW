@@ -48,6 +48,9 @@
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
 import type { exigirDb } from "./db";
+import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
+// Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
+import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona } from "./storage";
 import {
   agendaReunioes, aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
@@ -273,10 +276,11 @@ export type RelatorioDeExclusao = {
   linhasApagadas: number;
   /**
    * A conexão com a Google Agenda (H16b): o token revogado na Google, nenhuma
-   * conexão, ou a revogação falhou (a linha sai do banco assim mesmo, e a falha
-   * vai ao log e à auditoria da exclusão).
+   * conexão, a autorização mantida porque outra conta da WRW usa a mesma conta
+   * Google, ou a revogação falhou (a linha sai do banco assim mesmo, e a falha
+   * vai ao log, à auditoria da exclusão e ao aviso da tela).
    */
-  googleAgenda: "revogada" | "sem-conexao" | "falhou";
+  googleAgenda: RevogacaoNaExclusao | "falhou";
 };
 
 /** Descobre os ids que o plano precisa antes de apagar qualquer coisa. */
@@ -452,14 +456,15 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
  *
  * `revogarGoogle` é injetável pelo mesmo motivo: revoga na Google o token da
  * Google Agenda da conta (H16b) antes de a linha dele sair no plano. Falha da
- * Google também não aborta: vai ao log e ao relatório (`googleAgenda`).
+ * Google também não aborta: vai ao log e ao relatório (`googleAgenda`). Banco
+ * fora do ar aborta, antes de apagar qualquer linha.
  */
 export async function excluirConta(
   db: Db,
   conta: { id: number; openId: string; email: string | null },
   opcoes: {
     apagarArquivo?: (chave: string) => Promise<void>;
-    revogarGoogle?: (userId: number) => Promise<"revogada" | "sem-conexao">;
+    revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
   } = {},
 ): Promise<RelatorioDeExclusao> {
   // Import tardio do bucket: sem ele, importar este módulo puxaria o SDK da AWS
@@ -527,6 +532,11 @@ export async function excluirConta(
   try {
     googleAgenda = await revogarGoogle(conta.id);
   } catch (erro) {
+    // Banco fora do ar não é "a Google não confirmou": a leitura da conexão
+    // falhou antes de falar com a Google, e seguir apagaria a única cópia de um
+    // token que continua valendo lá. A exclusão para aqui, antes de apagar
+    // qualquer linha, como pararia no primeiro DELETE com o banco fora.
+    if (ehErroDeBancoIndisponivel(erro)) throw erro;
     googleAgenda = "falhou";
     console.error(
       `[ExclusãoDeConta] o token da Google Agenda não foi revogado na Google (userId ${conta.id}); a conexão sai do banco assim mesmo:`,

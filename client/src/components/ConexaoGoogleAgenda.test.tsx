@@ -42,13 +42,23 @@ vi.mock("@/lib/trpc", () => ({
 const consulta = (data: unknown, extra: Record<string, unknown> = {}) => ({ data, isLoading: false, isError: false, error: null, refetch: vi.fn(), ...extra });
 const naOrigem = () => window.location.origin;
 
+/** O userAgent da casca das lojas (#180): o padrão do sistema com "WRWApp/1.0" no fim. */
+const UA_DA_CASCA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WRWApp/1.0";
+function abrirNaCasca() {
+  Object.defineProperty(window.navigator, "userAgent", { value: UA_DA_CASCA, configurable: true });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   duble.isPending = false;
   duble.opcoes = {};
   window.history.replaceState(null, "", "/profile");
 });
-afterEach(async () => { await i18n.changeLanguage("pt-BR"); });
+afterEach(async () => {
+  // Tira o userAgent da casca: volta o do jsdom, do protótipo.
+  delete (window.navigator as unknown as Record<string, unknown>).userAgent;
+  await i18n.changeLanguage("pt-BR");
+});
 
 describe("quando a seção aparece", () => {
   it("sem a função no servidor, nada aparece", () => {
@@ -94,6 +104,50 @@ describe("conectar", () => {
     expect(screen.queryByRole("link", { name: /Conectar a Google Agenda/ })).not.toBeInTheDocument();
     expect(screen.getByText("Para conectar a Google Agenda, entre na WRW pelo endereço wrwglobal.org.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Abrir wrwglobal.org/ })).toHaveAttribute("href", "https://wrwglobal.org/profile");
+  });
+});
+
+describe("no app das lojas (a casca da #180, uma WebView)", () => {
+  // A ida à Google sairia para o navegador do sistema, sem o cookie da ida nem
+  // a sessão, e a Google recusa login dentro de WebView: conectar não terminaria.
+  it("sem conexão: no lugar do botão, o aviso para conectar pelo navegador", () => {
+    abrirNaCasca();
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
+    render(<ConexaoGoogleAgenda />);
+    expect(screen.queryByRole("link", { name: /Conectar a Google Agenda/ })).not.toBeInTheDocument();
+    expect(screen.getByText(`Pelo app não dá para conectar a Google Agenda. Abra ${window.location.host} no navegador, entre na sua conta e conecte no Perfil.`))
+      .toBeInTheDocument();
+  });
+
+  it("a conexão que parou de funcionar: sem Reconectar, com o aviso, e desconectar continua", () => {
+    abrirNaCasca();
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: true, email: "dona@exemplo.com", falha: "revogada" }));
+    render(<ConexaoGoogleAgenda />);
+    expect(screen.queryByRole("link", { name: /Reconectar/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Pelo app não dá para conectar a Google Agenda/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Desconectar/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Desconectar" }));
+    expect(duble.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("conectada e funcionando: nada a avisar; noutro endereço, o aviso do app no lugar do link (que ficaria na WebView)", () => {
+    abrirNaCasca();
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: true, email: "dona@exemplo.com", falha: null }));
+    const { unmount } = render(<ConexaoGoogleAgenda />);
+    expect(screen.queryByText(/Pelo app não dá para conectar/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Desconectar/ })).toBeInTheDocument();
+    unmount();
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: "https://wrwglobal.org", conectada: false }));
+    render(<ConexaoGoogleAgenda />);
+    expect(screen.getByText(/Abra wrwglobal.org no navegador/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Abrir wrwglobal.org/ })).not.toBeInTheDocument();
+  });
+
+  it("o mesmo userAgent sem a marca da casca (o Safari do iPhone) conecta normalmente", () => {
+    Object.defineProperty(window.navigator, "userAgent", { value: UA_DA_CASCA.replace(" WRWApp/1.0", " Safari/604.1"), configurable: true });
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
+    render(<ConexaoGoogleAgenda />);
+    expect(screen.getByRole("link", { name: /Conectar a Google Agenda/ })).toHaveAttribute("href", "/api/google-agenda/conectar");
   });
 });
 
@@ -165,6 +219,14 @@ describe("a volta da Google (?google=)", () => {
     window.history.replaceState(null, "", "/profile?google=negada");
     render(<ConexaoGoogleAgenda />);
     expect(toast.info).toHaveBeenCalledWith("A conexão com a Google Agenda não foi autorizada.");
+    expect(window.location.search).toBe("");
+  });
+
+  it("a conexão que falhou com a autorização ainda na Google: aviso longo, que diz como tirar o acesso", () => {
+    window.history.replaceState(null, "", "/profile?google=erro-acesso-ficou");
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
+    render(<ConexaoGoogleAgenda />);
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("tire o acesso da WRW nas configurações da sua conta Google"), { duration: 15000 });
     expect(window.location.search).toBe("");
   });
 

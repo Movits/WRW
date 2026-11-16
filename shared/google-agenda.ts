@@ -27,10 +27,13 @@ export const PARAMETRO_DO_RESULTADO_GOOGLE = "google";
  * - `expirou`: passou do prazo da ida (10 min) ou o cookie da ida sumiu;
  * - `erro`: qualquer outra falha (cookie adulterado, conta trocada no meio,
  *   Google ou banco fora do ar);
+ * - `erro-acesso-ficou`: a conexão não foi feita, e a Google não confirmou a
+ *   revogação da autorização que a dona acabou de dar (a WRW não guardou o
+ *   token, mas a autorização pode seguir na conta Google dela);
  * - `endereco`: a dona começou por um endereço que não é o do FRONTEND_URL, e
  *   a volta cairia em outro host, sem o cookie da ida.
  */
-export const RESULTADOS_DA_GOOGLE_AGENDA = ["conectada", "negada", "sem-permissao", "expirou", "erro", "endereco"] as const;
+export const RESULTADOS_DA_GOOGLE_AGENDA = ["conectada", "negada", "sem-permissao", "expirou", "erro", "erro-acesso-ficou", "endereco"] as const;
 export type ResultadoDaGoogleAgenda = (typeof RESULTADOS_DA_GOOGLE_AGENDA)[number];
 
 export function rotaDoResultadoNoPerfil(resultado: ResultadoDaGoogleAgenda): string {

@@ -5,7 +5,7 @@ import { auditLogs, googleAgendaConexoes } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import {
   ConexaoGoogleRevogada,
-  configuracaoDaGoogleAgenda,
+  configuracaoDaGoogleAgendaPara,
   fetchGlobal,
   renovarAcesso,
   revogarToken,
@@ -28,9 +28,16 @@ import { decryptData, encryptData } from "./security";
  * `audit_logs` entra na MESMA transação, por insert direto, que lança (o
  * `createAuditLog` engole o erro). Sem a prova, a conexão não fica. É o padrão
  * do link aberto (server/link-aberto-da-reuniao.ts).
+ *
+ * Revogar é sempre decidido pela CONTA GOOGLE (o `sub` do id_token), nunca pelo
+ * token: a Google revoga a autorização inteira da conta no projeto, e revogar
+ * um token derruba toda outra conexão com a mesma conta Google (ver
+ * revogarToken, em server/google-oauth.ts).
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
+/** O banco ou a transação: as consultas daqui só leem. */
+type Leitor = Pick<Banco, "select">;
 
 export const ACAO_GOOGLE_CONECTADA = "GOOGLE_CALENDAR_CONNECTED";
 export const ACAO_GOOGLE_DESCONECTADA = "GOOGLE_CALENDAR_DISCONNECTED";
@@ -61,8 +68,9 @@ export type EstadoDaGoogleAgenda =
   | { disponivel: true; origem: string; conectada: true; email: string | null; falha: FalhaDaConexaoGoogle | null };
 
 export async function estadoDaGoogleAgenda(userId: number): Promise<EstadoDaGoogleAgenda> {
-  const config = configuracaoDaGoogleAgenda();
-  // Sem as variáveis a função some, e o Perfil nem pergunta ao banco.
+  // Sem as variáveis, ou com a conta fora de GOOGLE_AGENDA_LIBERADA_PARA (o app
+  // do Google Cloud em modo Teste), a função some, e o Perfil nem pergunta ao banco.
+  const config = configuracaoDaGoogleAgendaPara(userId);
   if (!config) return { disponivel: false };
   const db = await exigirDb();
   const [linha] = await db.select({ email: googleAgendaConexoes.emailGoogle, falha: googleAgendaConexoes.falha })
@@ -138,17 +146,17 @@ async function renovar(db: Banco, config: ConfiguracaoDaGoogleAgenda, userId: nu
 /**
  * O token de acesso da Google Agenda da dona, para a H16c criar, mudar e
  * excluir eventos. Vem da memória enquanto vale; senão, é renovado pelo refresh
- * token. Lança GoogleAgendaIndisponivel (sem as variáveis),
- * GoogleAgendaNaoConectada, ConexaoGoogleRevogada (a conexão parou de
- * funcionar; a linha fica marcada) ou RecusaDaGoogle (Google fora do ar: tente
- * de novo depois). Banco fora do ar sobe como erro.
+ * token. Lança GoogleAgendaIndisponivel (sem as variáveis, ou a conta fora de
+ * GOOGLE_AGENDA_LIBERADA_PARA), GoogleAgendaNaoConectada, ConexaoGoogleRevogada
+ * (a conexão parou de funcionar; a linha fica marcada) ou RecusaDaGoogle
+ * (Google fora do ar: tente de novo depois). Banco fora do ar sobe como erro.
  */
 export async function tokenDeAcessoDaGoogleAgenda(
   userId: number,
   buscar: Fetch = fetchGlobal,
   agora: () => number = Date.now,
 ): Promise<string> {
-  const config = configuracaoDaGoogleAgenda();
+  const config = configuracaoDaGoogleAgendaPara(userId);
   if (!config) throw new GoogleAgendaIndisponivel();
   const db = await exigirDb();
   const [linha] = await db.select({ versao: googleAgendaConexoes.refreshTokenCifrado, falha: googleAgendaConexoes.falha })
@@ -173,10 +181,44 @@ export async function tokenDeAcessoDaGoogleAgenda(
   return renovacao;
 }
 
+// ── a conta Google: quem divide a mesma autorização ───────────────────────
+
+/**
+ * As contas da WRW ligadas a esta conta Google (o `sub`). Todas dividem a mesma
+ * autorização na Google: revogar o token de qualquer uma derruba as outras.
+ * Sem .limit: são poucas linhas, e o banco falso do teste da exclusão só
+ * conhece o where.
+ */
+async function contasDaContaGoogle(db: Leitor, sub: string): Promise<number[]> {
+  const linhas = await db.select({ userId: googleAgendaConexoes.userId })
+    .from(googleAgendaConexoes)
+    .where(eq(googleAgendaConexoes.googleSub, sub));
+  return linhas.map(linha => linha.userId);
+}
+
+/** Outra conta da WRW, que não `userId`, usa esta conta Google? Revogar derrubaria a conexão dela. */
+async function outraContaUsa(db: Leitor, sub: string, userId: number): Promise<boolean> {
+  return (await contasDaContaGoogle(db, sub)).some(id => id !== userId);
+}
+
+/**
+ * Alguma conexão gravada, de qualquer conta da WRW (inclusive a de quem está
+ * conectando), usa esta conta Google? A volta da Google pergunta isso antes de
+ * revogar a autorização que não vai ficar: se a resposta é sim, revogar
+ * derrubaria uma conexão que a tela continuaria chamando de conectada. Banco
+ * fora do ar sobe como erro; quem chama decide.
+ */
+export async function contaGoogleEmUso(sub: string): Promise<boolean> {
+  const db = await exigirDb();
+  return (await contasDaContaGoogle(db, sub)).length > 0;
+}
+
 // ── conectar, desconectar e excluir ────────────────────────────────────────
 
 export type ConexaoNova = {
   refreshToken: string;
+  /** A conta Google (o `sub` do id_token), que decide o que se pode revogar. */
+  sub: string;
   email: string | null;
   escopos: string[];
   /** O token de acesso que veio na troca do código: fica em memória até vencer. */
@@ -186,8 +228,14 @@ export type ConexaoNova = {
 /**
  * Grava a conexão que voltou da Google (ou troca a anterior) e a prova do
  * consentimento, numa transação só. Devolve o refresh token ANTERIOR, já
- * decifrado, para a rota revogá-lo depois do commit, por melhor esforço: a
- * conexão nova já vale.
+ * decifrado, só quando ele deve ser revogado: a rota o revoga depois do commit,
+ * por melhor esforço, porque a conexão nova já vale.
+ *
+ * Quando deve: só quando a conexão anterior era de OUTRA conta Google e
+ * nenhuma outra conta da WRW usa aquela conta. Com a mesma conta Google, o
+ * token anterior e o novo são da mesma autorização, e revogar o anterior
+ * derrubaria a conexão que acabou de nascer; ele fica sem dono e cai junto na
+ * próxima desconexão, que revoga a autorização inteira.
  */
 export async function gravarConexaoGoogle(
   userId: number,
@@ -198,14 +246,15 @@ export async function gravarConexaoGoogle(
   const db = await exigirDb();
   const versao = encryptData(conexao.refreshToken);
   const escopos = Array.from(new Set(conexao.escopos)).sort().join(" ").slice(0, 1000);
-  const { versaoAnterior } = await db.transaction(async tx => {
-    const [antiga] = await tx.select({ versao: googleAgendaConexoes.refreshTokenCifrado })
+  const { versaoARevogar } = await db.transaction(async tx => {
+    const [antiga] = await tx.select({ versao: googleAgendaConexoes.refreshTokenCifrado, sub: googleAgendaConexoes.googleSub })
       .from(googleAgendaConexoes)
       .where(eq(googleAgendaConexoes.userId, userId))
       .limit(1);
     await tx.insert(googleAgendaConexoes).values({
       id: crypto.randomUUID(),
       userId,
+      googleSub: conexao.sub,
       emailGoogle: conexao.email,
       refreshTokenCifrado: versao,
       escopos,
@@ -213,29 +262,36 @@ export async function gravarConexaoGoogle(
       createdAt: agora,
       updatedAt: agora,
     }).onDuplicateKeyUpdate({
-      set: { emailGoogle: conexao.email, refreshTokenCifrado: versao, escopos, falha: null, updatedAt: agora },
+      set: { googleSub: conexao.sub, emailGoogle: conexao.email, refreshTokenCifrado: versao, escopos, falha: null, updatedAt: agora },
     });
+    const trocouDeContaGoogle = antiga !== undefined && antiga.sub !== conexao.sub;
     // Lançar aqui desfaz a gravação da conexão.
     await tx.insert(auditLogs).values({
       userId,
       action: ACAO_GOOGLE_CONECTADA,
       resource: "google_agenda",
-      // Os escopos dados e se trocou uma conexão anterior; nunca token nem e-mail.
-      details: { escopos: escopos ? escopos.split(" ") : [], reconexao: Boolean(antiga) },
+      // Os escopos dados, se trocou uma conexão anterior e se foi por outra
+      // conta Google; nunca token, e-mail nem o id da conta Google.
+      details: { escopos: escopos ? escopos.split(" ") : [], reconexao: Boolean(antiga), trocouDeContaGoogle },
       // Os mesmos cortes do createAuditLog (server/security.ts).
       ipAddress: prova.ipAddress.substring(0, 45),
       userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
       status: "success",
       riskLevel: "medium",
     });
-    return { versaoAnterior: antiga?.versao ?? null };
+    // A mesma conta Google: a autorização é uma só, e nada se revoga.
+    if (!antiga || antiga.sub === conexao.sub) return { versaoARevogar: null };
+    // Outra conta Google, mas outra conta da WRW ainda a usa: fica para ela.
+    if (await outraContaUsa(tx, antiga.sub, userId)) return { versaoARevogar: null };
+    return { versaoARevogar: antiga.versao };
   });
   guardarAcesso(userId, versao, conexao.acesso);
-  if (!versaoAnterior) return { anterior: null };
+  if (!versaoARevogar) return { anterior: null };
   try {
-    return { anterior: decryptData(versaoAnterior) };
+    return { anterior: decryptData(versaoARevogar) };
   } catch {
     // Cifrado com outra chave: ninguém aqui consegue mais usá-lo nem revogá-lo.
+    console.warn("[Google Agenda] o token da conexão anterior não se decifra (a chave do cofre mudou) e não foi revogado; a dona pode tirar o acesso pela conta Google");
     return { anterior: null };
   }
 }
@@ -250,6 +306,10 @@ export async function gravarConexaoGoogle(
  * decifra mais): a dona pediu para a WRW esquecer a conta, e a WRW esquece.
  * `googleNaoConfirmou` diz isso à tela, que sugere tirar o acesso pela conta
  * Google. Desconectar o que já não está conectado não é erro.
+ *
+ * Quando outra conta da WRW usa a mesma conta Google, nada vai à Google:
+ * revogar derrubaria a conexão dela. A linha sai, e a tela não sugere tirar o
+ * acesso pela conta Google, pelo mesmo motivo.
  */
 export async function desconectarGoogleAgenda(
   userId: number,
@@ -258,16 +318,19 @@ export async function desconectarGoogleAgenda(
 ): Promise<{ googleNaoConfirmou: boolean }> {
   const db = await exigirDb();
   esquecerAcesso(userId);
-  const [linha] = await db.select({ versao: googleAgendaConexoes.refreshTokenCifrado })
+  const [linha] = await db.select({ versao: googleAgendaConexoes.refreshTokenCifrado, sub: googleAgendaConexoes.googleSub })
     .from(googleAgendaConexoes)
     .where(eq(googleAgendaConexoes.userId, userId))
     .limit(1);
   if (!linha) return { googleNaoConfirmou: false };
+  const mantidaParaOutraConta = await outraContaUsa(db, linha.sub, userId);
   let revogadaNaGoogle = false;
-  try {
-    revogadaNaGoogle = await revogarToken(decryptData(linha.versao), buscar);
-  } catch {
-    revogadaNaGoogle = false;
+  if (!mantidaParaOutraConta) {
+    try {
+      revogadaNaGoogle = await revogarToken(decryptData(linha.versao), buscar);
+    } catch {
+      revogadaNaGoogle = false;
+    }
   }
   await db.transaction(async tx => {
     await tx.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, userId));
@@ -275,7 +338,7 @@ export async function desconectarGoogleAgenda(
       userId,
       action: ACAO_GOOGLE_DESCONECTADA,
       resource: "google_agenda",
-      details: { revogadaNaGoogle },
+      details: { revogadaNaGoogle, mantidaParaOutraConta },
       ipAddress: prova.ipAddress.substring(0, 45),
       userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
       status: "success",
@@ -283,29 +346,41 @@ export async function desconectarGoogleAgenda(
     });
   });
   esquecerAcesso(userId);
-  return { googleNaoConfirmou: !revogadaNaGoogle };
+  return { googleNaoConfirmou: !revogadaNaGoogle && !mantidaParaOutraConta };
 }
+
+/** O que a exclusão da conta fez com a autorização na Google. */
+export type RevogacaoNaExclusao = "revogada" | "sem-conexao" | "mantida-para-outra-conta";
 
 /**
  * Para a exclusão da conta (server/exclusao-de-conta.ts): revoga na Google o
  * token da conta, se houver. A linha sai pelo plano da exclusão, com o resto.
  * Não pede as variáveis do cliente OAuth: revogar só precisa do token.
  *
+ * Quando outra conta da WRW usa a mesma conta Google, não revoga: derrubaria a
+ * conexão dela ("mantida-para-outra-conta").
+ *
  * Lança quando havia token e a Google não confirmou (ou ele não se decifra): a
- * exclusão anota no relatório e segue, sem parar no meio.
+ * exclusão anota no relatório e segue, sem parar no meio. Banco fora do ar
+ * também lança, e a exclusão para (server/exclusao-de-conta.ts).
  */
-export async function revogarGoogleDaConta(db: Banco, userId: number, buscar: Fetch = fetchGlobal): Promise<"revogada" | "sem-conexao"> {
+export async function revogarGoogleDaConta(db: Banco, userId: number, buscar: Fetch = fetchGlobal): Promise<RevogacaoNaExclusao> {
   esquecerAcesso(userId);
   // Sem .limit(1): a coluna é única, e o banco falso do teste da exclusão só
   // conhece o where.
-  const linhas = await db.select({ versao: googleAgendaConexoes.refreshTokenCifrado })
+  const linhas = await db.select({ versao: googleAgendaConexoes.refreshTokenCifrado, sub: googleAgendaConexoes.googleSub })
     .from(googleAgendaConexoes)
     .where(eq(googleAgendaConexoes.userId, userId));
   if (!linhas.length) return "sem-conexao";
+  let mantida = false;
   for (const linha of linhas) {
+    if (await outraContaUsa(db, linha.sub, userId)) {
+      mantida = true;
+      continue;
+    }
     if (!(await revogarToken(decryptData(linha.versao), buscar))) {
       throw new Error("A Google não confirmou a revogação do token da agenda.");
     }
   }
-  return "revogada";
+  return mantida ? "mantida-para-outra-conta" : "revogada";
 }

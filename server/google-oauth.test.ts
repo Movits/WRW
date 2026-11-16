@@ -20,6 +20,7 @@ const AMBIENTE = {
   GOOGLE_OAUTH_CLIENT_SECRET: "segredo-do-cliente",
   FRONTEND_URL: "https://wrwglobal.org",
   VAULT_ENCRYPTION_KEY: "k".repeat(32),
+  GOOGLE_AGENDA_LIBERADA_PARA: "todas",
 } as NodeJS.ProcessEnv;
 
 const CONFIG = oauth.configuracaoDaGoogleAgenda(AMBIENTE)!;
@@ -43,23 +44,43 @@ function idToken(dados: Record<string, unknown>) {
   return `${parte({ alg: "RS256", typ: "JWT" })}.${parte(dados)}.assinatura`;
 }
 
-describe("a configuração: sem qualquer uma das quatro variáveis, a função some", () => {
-  it("com as quatro, o retorno sai do FRONTEND_URL, sem caminho e sem barra a mais", () => {
+describe("a configuração: sem qualquer uma das cinco variáveis, a função some", () => {
+  it("com as cinco, o retorno sai do FRONTEND_URL, sem caminho e sem barra a mais", () => {
     expect(CONFIG).toEqual({
       clientId: "id-do-cliente.apps.googleusercontent.com",
       clientSecret: "segredo-do-cliente",
       origem: "https://wrwglobal.org",
       host: "wrwglobal.org",
       redirectUri: "https://wrwglobal.org/api/google-agenda/retorno",
+      liberadaPara: "todas",
     });
     const comBarra = oauth.configuracaoDaGoogleAgenda({ ...AMBIENTE, FRONTEND_URL: "https://WRWglobal.org/painel/ " });
     expect(comBarra?.redirectUri).toBe("https://wrwglobal.org/api/google-agenda/retorno");
     expect(comBarra?.host).toBe("wrwglobal.org");
   });
 
-  it.each(["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "FRONTEND_URL", "VAULT_ENCRYPTION_KEY"])("sem %s: null", nome => {
+  it.each(["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "FRONTEND_URL", "VAULT_ENCRYPTION_KEY", "GOOGLE_AGENDA_LIBERADA_PARA"])("sem %s: null", nome => {
     expect(oauth.configuracaoDaGoogleAgenda({ ...AMBIENTE, [nome]: undefined })).toBeNull();
     expect(oauth.configuracaoDaGoogleAgenda({ ...AMBIENTE, [nome]: "" })).toBeNull();
+  });
+
+  it("em modo Teste, só as contas da lista: fora dela a função some, como sem variável", () => {
+    const lista = oauth.configuracaoDaGoogleAgenda({ ...AMBIENTE, GOOGLE_AGENDA_LIBERADA_PARA: " 7, 12;30  abc 0 -4 " })!;
+    expect(lista.liberadaPara).toEqual(new Set([7, 12, 30]));
+    expect(oauth.googleAgendaLiberadaPara(lista, 7)).toBe(true);
+    expect(oauth.googleAgendaLiberadaPara(lista, 30)).toBe(true);
+    expect(oauth.googleAgendaLiberadaPara(lista, 8)).toBe(false);
+    expect(oauth.configuracaoDaGoogleAgendaPara(12, { ...AMBIENTE, GOOGLE_AGENDA_LIBERADA_PARA: "7,12" })).not.toBeNull();
+    expect(oauth.configuracaoDaGoogleAgendaPara(8, { ...AMBIENTE, GOOGLE_AGENDA_LIBERADA_PARA: "7,12" })).toBeNull();
+    // Depois da verificação da Google, "todas" (sem diferença de maiúsculas).
+    expect(oauth.configuracaoDaGoogleAgendaPara(8, { ...AMBIENTE, GOOGLE_AGENDA_LIBERADA_PARA: " Todas " })).not.toBeNull();
+  });
+
+  it("a lista sem nenhum id válido não libera ninguém: esquecer ou errar a variável esconde a função", () => {
+    for (const valor of ["abc", "0", "-3", "1.5", ",", "todos"]) {
+      expect(oauth.lerContasLiberadas(valor), valor).toBeNull();
+      expect(oauth.configuracaoDaGoogleAgenda({ ...AMBIENTE, GOOGLE_AGENDA_LIBERADA_PARA: valor }), valor).toBeNull();
+    }
   });
 
   it("a chave do cofre precisa de 32 caracteres: com 31, encryptData usaria a derivada do JWT_SECRET", () => {
@@ -244,20 +265,28 @@ describe("o escopo da agenda e o e-mail do id_token", () => {
     expect(oauth.temEscopoDaAgenda(["https://www.googleapis.com/auth/calendar.events.readonly"])).toBe(false);
   });
 
-  it("lê o e-mail quando o token é para este cliente e vem da Google", () => {
-    const base = { iss: "https://accounts.google.com", aud: CONFIG.clientId, sub: "123", email: "Dona@Exemplo.com" };
-    expect(oauth.emailDoIdToken(idToken(base), CONFIG.clientId)).toBe("dona@exemplo.com");
-    expect(oauth.emailDoIdToken(idToken({ ...base, iss: "accounts.google.com", aud: ["outro", CONFIG.clientId] }), CONFIG.clientId)).toBe("dona@exemplo.com");
+  it("lê a conta Google (o sub) e o e-mail quando o token é para este cliente e vem da Google", () => {
+    const base = { iss: "https://accounts.google.com", aud: CONFIG.clientId, sub: "110169484474386276334", email: "Dona@Exemplo.com" };
+    expect(oauth.identidadeDoIdToken(idToken(base), CONFIG.clientId)).toEqual({ sub: "110169484474386276334", email: "dona@exemplo.com" });
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, iss: "accounts.google.com", aud: ["outro", CONFIG.clientId] }), CONFIG.clientId))
+      .toEqual({ sub: "110169484474386276334", email: "dona@exemplo.com" });
+    // O e-mail é só para a tela: sem ele (ou estranho), a conta vale assim mesmo.
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, email: undefined }), CONFIG.clientId)).toEqual({ sub: "110169484474386276334", email: null });
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, email: "sem-arroba" }), CONFIG.clientId)).toEqual({ sub: "110169484474386276334", email: null });
   });
 
-  it("outro destinatário, outro emissor, sem e-mail ou token quebrado: null", () => {
-    const base = { iss: "https://accounts.google.com", aud: CONFIG.clientId, email: "dona@exemplo.com" };
-    expect(oauth.emailDoIdToken(idToken({ ...base, aud: "outro-cliente" }), CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken(idToken({ ...base, iss: "https://evil.example" }), CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken(idToken({ ...base, email: undefined }), CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken(idToken({ ...base, email: "sem-arroba" }), CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken("a.b", CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken("a.%%%.c", CONFIG.clientId)).toBeNull();
-    expect(oauth.emailDoIdToken(null, CONFIG.clientId)).toBeNull();
+  it("sem o sub (ou com um sub fora do formato), outro destinatário, outro emissor ou token quebrado: null", () => {
+    const base = { iss: "https://accounts.google.com", aud: CONFIG.clientId, sub: "123", email: "dona@exemplo.com" };
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: undefined }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: "" }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: 123 }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: "com espaço" }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: "1".repeat(256) }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, sub: "1".repeat(255) }), CONFIG.clientId)).toMatchObject({ sub: "1".repeat(255) });
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, aud: "outro-cliente" }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(idToken({ ...base, iss: "https://evil.example" }), CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken("a.b", CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken("a.%%%.c", CONFIG.clientId)).toBeNull();
+    expect(oauth.identidadeDoIdToken(null, CONFIG.clientId)).toBeNull();
   });
 });

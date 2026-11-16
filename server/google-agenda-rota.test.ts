@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "segredo-do-cliente");
   vi.stubEnv("FRONTEND_URL", "https://wrwglobal.org");
   vi.stubEnv("VAULT_ENCRYPTION_KEY", "chave-do-cofre-de-teste-com-mais-de-32");
+  vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "todas");
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -51,6 +52,14 @@ describe("googleAgenda", () => {
     expect(erro).toBeInstanceOf(TRPCError);
     expect(erro).toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_GOOGLE_AGENDA_INDISPONIVEL });
     expect(servico.desconectarGoogleAgenda).not.toHaveBeenCalled();
+  });
+
+  it("em modo Teste, a conta fora de GOOGLE_AGENDA_LIBERADA_PARA: desconectar é NOT_FOUND; a da lista passa", async () => {
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "9");
+    await expect(daConta(7).desconectar()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(servico.desconectarGoogleAgenda).not.toHaveBeenCalled();
+    expect(await daConta(9).desconectar()).toEqual({ googleNaoConfirmou: false });
+    expect(servico.desconectarGoogleAgenda).toHaveBeenCalledWith(9, expect.anything());
   });
 
   it("sem sessão, UNAUTHORIZED nos dois", async () => {

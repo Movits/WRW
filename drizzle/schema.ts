@@ -1298,12 +1298,20 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
 // gravador), por OAuth com PKCE e sem biblioteca (server/google-oauth.ts). Só o
 // refresh token fica no banco, cifrado com a VAULT_ENCRYPTION_KEY (encryptData,
 // server/security.ts); o token de acesso vive só na memória do processo, menos
-// de 1 hora. Uma conexão por conta: reconectar troca a linha, e o token
-// anterior é revogado na Google. Desconectar e excluir a conta revogam o token
-// e apagam a linha (server/google-agenda.ts e server/exclusao-de-conta.ts).
+// de 1 hora. Uma conexão por conta: reconectar troca a linha. A Google revoga
+// por conta Google e projeto, não por token, então o token anterior só é
+// revogado quando a conta Google mudou e nenhuma outra conexão usa a anterior.
+// Desconectar e excluir a conta revogam o token (menos quando outra conta da
+// WRW usa a mesma conta Google) e apagam a linha (server/google-agenda.ts e
+// server/exclusao-de-conta.ts).
 export const googleAgendaConexoes = mysqlTable("google_agenda_conexoes", {
   id:                  varchar("id", { length: 36 }).primaryKey(),
   userId:              int("userId").notNull(),
+  // O `sub` do id_token: o id da conta Google, que nunca muda nem é reusado (o
+  // e-mail pode mudar). Duas linhas com o mesmo sub dividem a mesma
+  // autorização na Google: revogar o token de uma derruba a outra. É por ele
+  // que a WRW decide se pode revogar.
+  googleSub:           varchar("google_sub", { length: 255 }).notNull(),
   // O e-mail da conta Google, tirado do id_token, só para a dona saber qual
   // conta está ligada. Nulo quando a Google não o manda.
   emailGoogle:         varchar("email_google", { length: 320 }),
@@ -1320,6 +1328,9 @@ export const googleAgendaConexoes = mysqlTable("google_agenda_conexoes", {
 }, (table) => ({
   // Uma conexão por conta: o reconectar é INSERT ... ON DUPLICATE KEY UPDATE.
   userUnique: uniqueIndex("google_agenda_conexoes_user_unique").on(table.userId),
+  // Antes de revogar, a WRW procura outra conexão com a mesma conta Google.
+  // Não é único: duas contas da WRW podem ligar a mesma conta Google.
+  subIdx: index("google_agenda_conexoes_sub_idx").on(table.googleSub),
 }));
 
 // ============================================================

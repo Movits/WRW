@@ -7,18 +7,25 @@
 // parâmetro sai da URL logo depois, para o F5 não repetir o aviso.
 //
 // A seção só existe quando a função está disponível (as variáveis do cliente
-// OAuth no servidor). A falha da consulta é erro na tela (ErroDeConsulta),
-// nunca "nenhuma conta conectada". O cookie da ida é do host: quem está noutro
-// endereço (o do Render, por exemplo) recebe o caminho para o endereço certo
-// em vez do botão.
+// OAuth no servidor, e a conta na lista de GOOGLE_AGENDA_LIBERADA_PARA). A
+// falha da consulta é erro na tela (ErroDeConsulta), nunca "nenhuma conta
+// conectada". O cookie da ida é do host: quem está noutro endereço (o do
+// Render, por exemplo) recebe o caminho para o endereço certo em vez do botão.
+//
+// No app das lojas (a casca da #180, uma WebView), conectar nunca termina: a
+// ida à Google abre no navegador do sistema, que não tem o cookie da ida nem a
+// sessão, e a Google recusa login dentro de WebView (disallowed_useragent).
+// Lá, em vez do botão, a seção manda conectar pelo navegador; desconectar
+// (tRPC) funciona no app.
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useSearch } from "wouter";
-import { AlertTriangle, CalendarCheck, ExternalLink, Unplug } from "lucide-react";
+import { AlertTriangle, CalendarCheck, ExternalLink, Smartphone, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { abertoNaCascaDasLojas } from "@/lib/instalacao-do-app";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import {
   lerResultadoDaGoogleAgenda,
@@ -30,8 +37,8 @@ import {
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
-/** O aviso de cada resultado que a volta da Google traz em `?google=`. */
-export function avisoDaVolta(t: TranslateFn, resultado: ResultadoDaGoogleAgenda): { tipo: "success" | "info" | "error"; texto: string } {
+/** O aviso de cada resultado que a volta da Google traz em `?google=`. `duracao` só no aviso longo, que pede uma ação. */
+export function avisoDaVolta(t: TranslateFn, resultado: ResultadoDaGoogleAgenda): { tipo: "success" | "info" | "error"; texto: string; duracao?: number } {
   switch (resultado) {
     case "conectada": return { tipo: "success", texto: t("googleAgenda.result.connected") };
     case "negada": return { tipo: "info", texto: t("googleAgenda.result.denied") };
@@ -39,6 +46,7 @@ export function avisoDaVolta(t: TranslateFn, resultado: ResultadoDaGoogleAgenda)
     case "expirou": return { tipo: "error", texto: t("googleAgenda.result.expired") };
     case "endereco": return { tipo: "error", texto: t("googleAgenda.result.wrongAddress") };
     case "erro": return { tipo: "error", texto: t("googleAgenda.result.error") };
+    case "erro-acesso-ficou": return { tipo: "error", texto: t("googleAgenda.result.errorAccessLeft"), duracao: 15000 };
   }
 }
 
@@ -96,7 +104,8 @@ export function ConexaoGoogleAgenda() {
     if (!resultado || avisado.current) return;
     avisado.current = true;
     const aviso = avisoDaVolta(t, resultado);
-    toast[aviso.tipo](aviso.texto);
+    if (aviso.duracao) toast[aviso.tipo](aviso.texto, { duration: aviso.duracao });
+    else toast[aviso.tipo](aviso.texto);
     const resto = new URLSearchParams(busca);
     resto.delete(PARAMETRO_DO_RESULTADO_GOOGLE);
     const consulta = resto.toString();
@@ -125,6 +134,8 @@ export function ConexaoGoogleAgenda() {
 
   const hostCerto = hostDe(dados.origem);
   const noEnderecoCerto = hostCerto !== null && window.location.host.toLowerCase() === hostCerto;
+  const naCasca = abertoNaCascaDasLojas(window.navigator.userAgent);
+  const precisaConectar = !dados.conectada || Boolean(dados.falha);
   const botaoDeConectar = (rotulo: string) => (
     <a href={ROTA_CONECTAR_GOOGLE_AGENDA} className={CLASSE_PRINCIPAL}>
       <CalendarCheck size={15} aria-hidden="true" /> {rotulo}
@@ -150,7 +161,14 @@ export function ConexaoGoogleAgenda() {
 
       <p className="text-xs leading-relaxed text-white/40">{t("googleAgenda.privacyNote")}</p>
 
-      {!noEnderecoCerto && hostCerto && (!dados.conectada || dados.falha) && (
+      {naCasca && precisaConectar && (
+        <p className="flex gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs text-white/60">
+          <Smartphone size={14} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+          {t("googleAgenda.inApp", { address: hostCerto ?? dados.origem })}
+        </p>
+      )}
+
+      {!naCasca && !noEnderecoCerto && hostCerto && precisaConectar && (
         <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs text-white/60">{t("googleAgenda.wrongAddress", { address: hostCerto })}</p>
           <a href={`${dados.origem}${ROTA_DO_PERFIL}`} className={CLASSE_SECUNDARIA}>
@@ -160,8 +178,8 @@ export function ConexaoGoogleAgenda() {
       )}
 
       <div className="flex flex-wrap gap-2">
-        {noEnderecoCerto && !dados.conectada && botaoDeConectar(t("googleAgenda.connect"))}
-        {noEnderecoCerto && dados.conectada && dados.falha && botaoDeConectar(t("googleAgenda.reconnect"))}
+        {!naCasca && noEnderecoCerto && !dados.conectada && botaoDeConectar(t("googleAgenda.connect"))}
+        {!naCasca && noEnderecoCerto && dados.conectada && dados.falha && botaoDeConectar(t("googleAgenda.reconnect"))}
         {dados.conectada && !confirmando && (
           <button type="button" onClick={() => setConfirmando(true)} disabled={desconectar.isPending} className={CLASSE_SECUNDARIA}>
             <Unplug size={15} aria-hidden="true" /> {t("googleAgenda.disconnect")}

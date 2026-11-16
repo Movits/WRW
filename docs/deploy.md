@@ -174,7 +174,7 @@ como "fora do log"). Os ids que a chave do Gemini enxerga saem de
 
 ### Só para a Google Agenda (opcional)
 
-A conexão com a Google Agenda no Perfil (H16b) só existe com as quatro variáveis
+A conexão com a Google Agenda no Perfil (H16b) só existe com as cinco variáveis
 abaixo. Sem qualquer uma, a seção some do Perfil e `/api/google-agenda/conectar` e
 `/api/google-agenda/retorno` dão 404 (`configuracaoDaGoogleAgenda`, em
 `server/google-oauth.ts`). Só os nomes ficam no código; os valores, no painel do
@@ -186,14 +186,37 @@ Render.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | o segredo do mesmo cliente | o segredo do cliente |
 | `FRONTEND_URL` | vira o URI de retorno, `<FRONTEND_URL>/api/google-agenda/retorno`, que precisa estar cadastrado no cliente exatamente assim | https; http só em `localhost` |
 | `VAULT_ENCRYPTION_KEY` | cifra o refresh token no banco | 32 caracteres ou mais; mais curta, a função some |
+| `GOOGLE_AGENDA_LIBERADA_PARA` | quem vê a função | os ids das contas da WRW, separados por vírgula, enquanto o app do Google Cloud está em modo Teste; `todas` depois que a Google o verificar |
+
+**Por que a lista (escolha de 16/11/2026).** Em modo Teste, a Google só deixa
+autorizar as contas Google da lista de usuários de teste do Google Cloud (até 100). As
+outras param numa página de erro da própria Google ("Acesso bloqueado", Erro 403:
+access_denied), sem voltar à WRW. Então, até a Google verificar o app (o que pede a
+Política de Privacidade e um vídeo), a seção aparece só para as contas da WRW cujas
+contas Google estão naquela lista: ponha nas duas listas as mesmas pessoas (a Glenda e
+quem do time vai validar o pacote). Fora da lista, a seção não aparece e as rotas dão
+404. Sem a variável, ou sem nenhum id válido nela, a
+função some para todas: esquecê-la esconde a função, em vez de pôr diante de todo
+mundo um botão que não funciona. Depois da verificação, o valor vira `todas`.
 
 A conexão só começa pelo host do `FRONTEND_URL`, porque o cookie da ida é do host:
-quem entra pelo endereço do Render vê no Perfil o caminho para o endereço certo. O
-que configurar no Google Cloud (Calendar API, branding, público em modo Teste, os
-escopos `openid`, `email` e `calendar.events`) está em
-`docs/arquitetura/decisoes-tomadas.md`, na decisão de 15/11/2026. No modo Teste, o
-refresh token vence em 7 dias: na primeira vez que a WRW tentar usá-lo depois disso,
-a conexão fica marcada e a seção pede "Reconectar".
+quem entra pelo endereço do Render vê no Perfil o caminho para o endereço certo. No
+app das lojas (a casca da #180), a seção manda conectar pelo navegador: a WebView não
+consegue terminar a ida e a volta da Google. O que configurar no Google Cloud
+(Calendar API, branding, público em modo Teste, os escopos `openid`, `email` e
+`calendar.events`) está em `docs/arquitetura/decisoes-tomadas.md`, na decisão de
+15/11/2026. No modo Teste, o refresh token vence em 7 dias: na primeira vez que a WRW
+tentar usá-lo depois disso, a conexão fica marcada e a seção pede "Reconectar".
+
+**A Google revoga por conta Google e projeto, não por token.** Revogar qualquer token
+tira a autorização inteira daquela conta Google no projeto do Google Cloud, com os
+tokens de todos os clientes do projeto. Por isso a WRW guarda o `sub` da conta Google
+(`google_agenda_conexoes.google_sub`) e decide por ele: reconectar com a mesma conta
+Google não revoga nada, e desconectar ou excluir uma conta da WRW não revoga a conta
+Google que outra conta da WRW ainda usa. Pela mesma regra, **o cliente OAuth do
+localhost precisa de um projeto próprio do Google Cloud**: no mesmo projeto, desconectar
+no computador de quem desenvolve derrubaria a conexão de produção da mesma conta
+Google.
 
 ### Só para o exame de produção
 

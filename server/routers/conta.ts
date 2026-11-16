@@ -286,6 +286,10 @@ export const contaRouter = router({
         linhasApagadas: relatorio.linhasApagadas,
         arquivosApagados: relatorio.arquivosApagados,
         arquivosComFalha: relatorio.arquivosComFalha.length,
+        // A Google não confirmou a revogação do token da agenda (H16b): a WRW
+        // esqueceu o token, mas a autorização pode seguir na conta Google da
+        // dona, e a tela diz como tirá-la.
+        googleNaoConfirmou: relatorio.googleAgenda === "falhou",
       };
     }),
 });

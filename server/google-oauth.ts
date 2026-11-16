@@ -46,11 +46,42 @@ export type ConfiguracaoDaGoogleAgenda = {
   host: string;
   /** O URI de retorno cadastrado no cliente OAuth do Google Cloud. */
   redirectUri: string;
+  /** Quem vê a função (GOOGLE_AGENDA_LIBERADA_PARA): todas as contas da WRW, ou só as da lista. */
+  liberadaPara: "todas" | ReadonlySet<number>;
 };
 
 /**
+ * As contas da WRW que veem a função, lidas de GOOGLE_AGENDA_LIBERADA_PARA:
+ * "todas", ou os ids das contas separados por vírgula. Vazio, ausente ou sem
+ * nenhum id válido é null, e a função some para todas.
+ *
+ * Por quê: enquanto o app do Google Cloud está em modo Teste, a Google só deixa
+ * autorizar as contas Google da lista de usuários de teste (até 100). As outras
+ * param numa página de erro da própria Google (Erro 403: access_denied), sem
+ * voltar à WRW e sem aviso nosso. Então, até a Google verificar o app, a seção
+ * aparece só para as contas da WRW cujas contas Google estão nessa lista; depois
+ * da verificação, o valor vira "todas". Esquecer a variável deixa a função
+ * escondida, e não um botão que não funciona diante de todo mundo.
+ */
+export function lerContasLiberadas(valor: string | undefined): "todas" | ReadonlySet<number> | null {
+  const texto = valor?.trim() ?? "";
+  if (!texto) return null;
+  if (texto.toLowerCase() === "todas") return "todas";
+  const ids = new Set<number>();
+  for (const parte of texto.split(/[\s,;]+/)) {
+    if (/^[1-9]\d{0,9}$/.test(parte)) ids.add(Number(parte));
+  }
+  return ids.size ? ids : null;
+}
+
+/** Esta conta da WRW vê a função? (Ver lerContasLiberadas.) */
+export function googleAgendaLiberadaPara(config: ConfiguracaoDaGoogleAgenda, userId: number): boolean {
+  return config.liberadaPara === "todas" || config.liberadaPara.has(userId);
+}
+
+/**
  * A configuração lida do ambiente A CADA CHAMADA, ou null. Sem qualquer uma das
- * quatro variáveis, a função some: a seção do Perfil não aparece e as rotas dão
+ * cinco variáveis, a função some: a seção do Perfil não aparece e as rotas dão
  * 404. Só os nomes vão ao código; os valores ficam no painel do Render.
  *
  * A VAULT_ENCRYPTION_KEY é exigida, com 32 caracteres ou mais. Sem ela,
@@ -60,13 +91,17 @@ export type ConfiguracaoDaGoogleAgenda = {
  *
  * O FRONTEND_URL vira o URI de retorno. Precisa ser https, menos na máquina de
  * quem desenvolve (http://localhost, que a Google aceita no cliente de dev).
+ *
+ * A GOOGLE_AGENDA_LIBERADA_PARA diz quem vê a função (lerContasLiberadas): a
+ * configuração existe, e cada rota confere a conta com googleAgendaLiberadaPara.
  */
 export function configuracaoDaGoogleAgenda(ambiente: NodeJS.ProcessEnv = process.env): ConfiguracaoDaGoogleAgenda | null {
   const clientId = ambiente.GOOGLE_OAUTH_CLIENT_ID?.trim();
   const clientSecret = ambiente.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
   const frontendUrl = ambiente.FRONTEND_URL?.trim();
   const chaveDoCofre = ambiente.VAULT_ENCRYPTION_KEY ?? "";
-  if (!clientId || !clientSecret || !frontendUrl || chaveDoCofre.length < TAMANHO_MINIMO_DA_CHAVE_DO_COFRE) return null;
+  const liberadaPara = lerContasLiberadas(ambiente.GOOGLE_AGENDA_LIBERADA_PARA);
+  if (!clientId || !clientSecret || !frontendUrl || chaveDoCofre.length < TAMANHO_MINIMO_DA_CHAVE_DO_COFRE || !liberadaPara) return null;
   let url: URL;
   try {
     url = new URL(frontendUrl);
@@ -81,7 +116,14 @@ export function configuracaoDaGoogleAgenda(ambiente: NodeJS.ProcessEnv = process
     origem: url.origin,
     host: url.host.toLowerCase(),
     redirectUri: `${url.origin}${ROTA_RETORNO_GOOGLE_AGENDA}`,
+    liberadaPara,
   };
+}
+
+/** A configuração, só se esta conta vê a função; senão null, como se faltasse variável. */
+export function configuracaoDaGoogleAgendaPara(userId: number, ambiente: NodeJS.ProcessEnv = process.env): ConfiguracaoDaGoogleAgenda | null {
+  const config = configuracaoDaGoogleAgenda(ambiente);
+  return config && googleAgendaLiberadaPara(config, userId) ? config : null;
 }
 
 // ── state e PKCE ────────────────────────────────────────────────────────────
@@ -287,11 +329,20 @@ export async function renovarAcesso(
 }
 
 /**
- * Revoga o token na Google (o refresh token leva junto os tokens de acesso e a
- * autorização inteira). true quando a Google confirmou, ou quando o token já
+ * Revoga o token na Google. true quando a Google confirmou, ou quando o token já
  * não valia (400 invalid_token): nos dois casos ele não abre mais nada. false
  * na falha de rede ou de servidor; quem chama decide o que fazer com isso.
  * Nunca lança.
+ *
+ * ATENÇÃO: a Google revoga por conta Google e projeto do Google Cloud, não por
+ * token. Revogar QUALQUER token, de acesso ou refresh, tira a autorização
+ * inteira daquela conta Google no projeto, com todos os tokens de todos os
+ * clientes do projeto ("Revocation removes all OAuth 2.0 scopes previously
+ * granted to a project, invalidating any issued access or refresh tokens for
+ * all clients registered under that project", na documentação do OAuth para
+ * servidor web). Revogar o token de uma conexão derruba toda outra conexão com a
+ * mesma conta Google: a nova, numa reconexão, ou a de outra conta da WRW. Quem
+ * chama confere antes pelo `sub` da conta (server/google-agenda.ts).
  */
 export async function revogarToken(token: string, buscar: Fetch = fetchGlobal): Promise<boolean> {
   try {
@@ -308,14 +359,26 @@ export function temEscopoDaAgenda(escopos: readonly string[]): boolean {
   return escopos.includes(ESCOPO_DA_AGENDA);
 }
 
+/** A conta Google de quem autorizou, tirada do id_token. */
+export type IdentidadeGoogle = {
+  /**
+   * O id da conta Google: nunca muda nem é reusado (o e-mail pode mudar). É por
+   * ele que a WRW sabe se duas conexões dividem a mesma autorização na Google.
+   */
+  sub: string;
+  /** Só para a dona saber qual conta ligou; nada decide por ele. */
+  email: string | null;
+};
+
 /**
- * O e-mail da conta Google, do id_token, ou null. O id_token veio direto do
- * endpoint de token da Google, pelo TLS, em troca do código e do segredo do
- * cliente: pela OpenID Connect (3.1.3.7), a assinatura pode ficar sem conferir,
- * mas o destinatário e o emissor são conferidos. O e-mail só aparece para a
- * dona; nada decide por ele.
+ * A conta Google do id_token (o `sub` e o e-mail), ou null. O id_token veio
+ * direto do endpoint de token da Google, pelo TLS, em troca do código e do
+ * segredo do cliente: pela OpenID Connect (3.1.3.7), a assinatura pode ficar
+ * sem conferir, mas o destinatário e o emissor são conferidos. Sem um `sub`
+ * válido (até 255 caracteres ASCII visíveis, como a Google documenta), null: sem
+ * ele, a WRW não saberia o que pode revogar.
  */
-export function emailDoIdToken(idToken: string | null, clientId: string): string | null {
+export function identidadeDoIdToken(idToken: string | null, clientId: string): IdentidadeGoogle | null {
   if (!idToken) return null;
   const partes = idToken.split(".");
   if (partes.length !== 3) return null;
@@ -330,6 +393,8 @@ export function emailDoIdToken(idToken: string | null, clientId: string): string
   const destinatario = dados.aud;
   const paraNos = destinatario === clientId || (Array.isArray(destinatario) && destinatario.includes(clientId));
   if (!paraNos || !EMISSORES_DO_ID_TOKEN.has(String(dados.iss))) return null;
+  const sub = typeof dados.sub === "string" ? dados.sub : "";
+  if (!/^[\x21-\x7e]{1,255}$/.test(sub)) return null;
   const email = typeof dados.email === "string" ? dados.email.trim().toLowerCase() : "";
-  return email && email.length <= 320 && email.includes("@") ? email : null;
+  return { sub, email: email && email.length <= 320 && email.includes("@") ? email : null };
 }
