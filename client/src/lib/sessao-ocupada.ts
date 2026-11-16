@@ -14,10 +14,18 @@ import { apagarTodasAsPartes } from "./partes-no-aparelho";
  * saiu com a sessão de 90 dias desde o último uso (#179). Nada aqui adia a ida
  * ao login de uma sessão revogada, mas ela troca de página, e com a sessão
  * ocupada o navegador pergunta também nela (ver pedirConfirmacaoAoFechar).
+ *
+ * O último motivo não guarda áudio (G13b): é a gravação descartada cuja
+ * exclusão no servidor ainda não terminou (lib/descartes-pendentes.ts). O risco
+ * de sair é o contrário do dos outros: com a aba fechada nada tenta de novo, e
+ * a varredura de abandono do servidor transcreveria o que a dona descartou. A
+ * lista dos descartes fica no localStorage e sobrevive ao Sair; o recarregar
+ * depois de um deploy (lib/versao-nova.ts) espera a exclusão terminar, como
+ * espera os outros motivos.
  */
 
 /** Do mais importante ao menos importante: o diálogo do Sair fala do primeiro que estiver aberto. */
-export const MOTIVOS_DA_OCUPACAO = ["gravando", "enviando", "audio-nao-enviado"] as const;
+export const MOTIVOS_DA_OCUPACAO = ["gravando", "enviando", "audio-nao-enviado", "descarte-pendente"] as const;
 export type MotivoDaOcupacao = (typeof MOTIVOS_DA_OCUPACAO)[number];
 
 export type EstadoDaSessaoOcupada =
@@ -68,6 +76,10 @@ export function liberarTodas() {
   // o fim da sessão nesta aba (Sair, excluir a conta) a apaga, mesmo sem nada
   // ocupado agora.
   void apagarTodasAsPartes().catch(() => {});
+  // Os descartes de gravação que não terminaram (lib/descartes-pendentes.ts)
+  // ficam guardados: são só ids, por dona, e a retomada os repete no próximo
+  // login da mesma conta. A ocupação deles sai com as outras; o diálogo do Sair
+  // já avisou que a gravação descartada podia seguir para a transcrição (G13b).
   if (abertas.size === 0) return;
   abertas.clear();
   liberandoPeloFimDaSessao = true;
@@ -93,7 +105,7 @@ export function sessaoOcupada(): boolean {
   return atual.ocupada;
 }
 
-/** O motivo principal agora (gravando > enviando > audio-nao-enviado), ou null com a sessão livre. */
+/** O motivo principal agora (gravando > enviando > audio-nao-enviado > descarte-pendente), ou null com a sessão livre. */
 export function motivoDaOcupacao(): MotivoDaOcupacao | null {
   return atual.motivo;
 }

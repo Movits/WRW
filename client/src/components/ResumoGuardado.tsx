@@ -1,13 +1,12 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
-import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
-import { mmss } from "@/components/TranscricaoPorFalante";
+import { AvisoDeConferir, mensagemDoErroDaIA, TempoDoTrecho, Trecho } from "@/components/ReuniaoComIA";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
@@ -27,10 +26,11 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  *
  * Serve às duas telas: o detalhe da dona (pages/Meetings.tsx), que decide, e o
  * link aberto (pages/ReuniaoAberta.tsx), só de leitura: sem os botões de
- * decidir, com o aviso de que a dona ainda não conferiu nos pendentes e com as
- * vozes como "Falante n", porque o link não leva os nomes que a dona deu. A
- * consulta mora na página (que também lê o emoji e repete a consulta enquanto
- * o resumo é gerado); as mutações moram aqui e a relêem.
+ * decidir e com o aviso de que a dona ainda não conferiu nos pendentes. Nas
+ * duas, a voz aparece com o nome que a dona deu, ou como "Falante n"; o link
+ * recebe os nomes só quando foi ligado com a confirmação que fala deles (H3b).
+ * A consulta mora na página (que também lê o emoji e repete a consulta
+ * enquanto o resumo é gerado); as mutações moram aqui e a relêem.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -61,6 +61,11 @@ type DoLink = {
   token: string;
   meetingId?: undefined;
   consulta: ConsultaDoResumo<ResumoDoLink>;
+  /**
+   * Os nomes das vozes que o link recebeu (o `vozes` de reuniaoAberta.ver):
+   * vazio quando o link foi ligado antes da confirmação que fala deles (H3b).
+   */
+  nomes?: Readonly<Record<string, string>>;
   aoIrPara?: (segundo: number) => void;
 };
 
@@ -107,8 +112,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const peloLink = props.token !== undefined;
   const meetingId = props.meetingId ?? "";
   const token = props.token ?? "";
-  // O link nunca mostra nomes: as vozes são sempre "Falante n".
-  const nomes = props.token === undefined ? props.nomes ?? {} : {};
+  // Para a dona, os nomes que ela deu; pelo link, os que o servidor mandou.
+  const nomes = props.nomes ?? {};
   const itemDestacado = props.token === undefined ? props.itemDestacado ?? null : null;
   const dados = props.consulta.data as ResumoDaDona | ResumoDoLink | undefined;
 
@@ -285,14 +290,9 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
     </p>}
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {/* Sem player (a gravação venceu ou não existe), o tempo é só
-          informação: nada de botão desligado anunciando "Ouvir". */}
-      {item.startSeconds !== null && (aoIrPara
-        ? <button type="button" onClick={() => aoIrPara(item.startSeconds as number)}
-            aria-label={t("meetings.playFrom", { tempo: mmss(item.startSeconds) })}
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10">
-            <Play size={11} aria-hidden/>{mmss(item.startSeconds)}
-          </button>
-        : <span className="px-1.5 py-0.5 font-mono text-xs text-white/40">{mmss(item.startSeconds)}</span>)}
+          informação: nada de botão desligado anunciando "Ouvir". O mesmo
+          "▶" das citações do Pergunte à reunião (TempoDoTrecho). */}
+      {item.startSeconds !== null && <TempoDoTrecho segundos={item.startSeconds} aoIrPara={aoIrPara}/>}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
     </div>
     {/* O trecho fica aberto enquanto o item espera a conferência; depois, recolhido. */}

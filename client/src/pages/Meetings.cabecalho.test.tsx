@@ -22,6 +22,16 @@ const duble = vi.hoisted(() => ({
   pendencias: vi.fn(),
   resumoGuardado: vi.fn(),
   mutacao: () => ({ useMutation: () => ({ mutate: () => {}, mutateAsync: async () => {}, isPending: false }) }),
+  // O MESMO objeto a cada render, como o useUtils do tRPC. A gravação em partes,
+  // o padrão desde a G13b, retoma o que ficou no aparelho ao montar a página:
+  // lê a conta e fala com o servidor por aqui.
+  utils: {
+    meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+    reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
+    networkInteligente: { pendencias: { reset: vi.fn() } },
+    auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
+    client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
+  },
 }));
 
 // O AppHeader de verdade lê sessão e notificações pelo tRPC; aqui ele vira uma
@@ -32,11 +42,7 @@ vi.mock("@/components/AppHeader", () => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
-      reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
-      networkInteligente: { pendencias: { reset: vi.fn() } },
-    }),
+    useUtils: () => duble.utils,
     meetings: {
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },

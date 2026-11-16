@@ -1,7 +1,8 @@
 # Gravador de reuniões: o desenho em ondas
 
 Plano aprovado pelo Roberto em 30/10/2026 e atualizado com as decisões de 10/11,
-12/11 e 15/11/2026. É desenho, não retrato do código: onde a `main` divergir deste texto,
+12/11 e 15/11/2026, e com a de 16/11 sobre os nomes das vozes no link aberto (H3b, ver
+os contratos). É desenho, não retrato do código: onde a `main` divergir deste texto,
 vale a `main`. Em 10/11 entraram na `main` a A1 (#169), a A3 (#170), a A4 (#172), a G1a
 (#174) e uma primeira versão do resumo e do "Pergunte à reunião" (#171), descrita nas
 linhas da H4 e da H6. Na `main` de 15/11, a gravação ainda para em 10 minutos, também no
@@ -177,7 +178,8 @@ Propostas no plano do mesmo dia e aprovadas pelo Roberto:
 - reunião antiga, já pronta, não ganha resumo em lote: a dona toca em "Gerar resumo";
 - o link aberto mostra o resumo guardado: os itens confirmados e os pendentes, estes com
   um aviso de que foram gerados pela IA e a dona ainda não os conferiu. Os ignorados nunca
-  aparecem, e as vozes seguem como "Falante n" (ver os contratos);
+  aparecem. As vozes seguiam como "Falante n"; desde a decisão de 16/11 (H3b), levam os
+  nomes que a dona deu (ver os contratos);
 - na exportação (H8), só saem os itens confirmados;
 - o "Pergunte à reunião" (H6) lê até 400 mil caracteres, cerca de 7 h, e recusa acima
   disso, com aviso;
@@ -234,13 +236,19 @@ tela e a rota usam (`/gravar?emPartes=1` e `/api/reunioes/:id/partes/:seq`).
   - O tempo vai em segundos absolutos da reunião.
   - O falante é gravado como `F1`, `F2`... O rótulo "Falante 1" só existe na tela, numa
     chave de texto só.
-  - Os nomes que a dona dá às vozes (H3, #204) ficam só com ela: o link aberto mostra
-    "Falante n". No texto que a IA escreve (o resumo, desde a #205), a voz vai como
-    `{F1}`, e os nomes nunca vão ao prompt. Quem troca o token é a tela: pelo nome, para a
-    dona, e por "Falante n", no link aberto. Pelo plano de 15/11, há duas exceções: as
-    próximas ações (H5a) gravam o nome quando a reunião é excluída ou reprocessada, e o
-    lembrete no sino (H15) troca o token na hora do aviso. O mapa mental (H10) não aceita
-    token nos rótulos.
+  - Os nomes que a dona dá às vozes (H3, #204) aparecem para ela e, desde a H3b
+    (decisão do Roberto de 16/11, em [decisoes-tomadas.md](./decisoes-tomadas.md)),
+    para quem tem o link aberto. No link, só quando a última vez que a dona o ligou foi
+    com a confirmação que fala dos nomes (a versão 2, gravada na linha
+    `MEETING_OPEN_LINK_ON` da auditoria). O link ligado antes segue com "Falante n" até
+    ela desligar e ligar de novo. `reuniaoAberta.ver` manda os nomes no campo `vozes`
+    (`{F1: "Ana"}`), só as chaves `F1` a `F99`, cada nome aparado e cortado em 60
+    caracteres, e nada mais da dona. A voz sem nome é "Falante n" em toda tela. No texto
+    que a IA escreve (o resumo, desde a #205, e a resposta do Pergunte), a voz vai como
+    `{F1}`, e os nomes nunca vão ao prompt. Quem troca o token pelo nome é a tela, também
+    no link aberto. Pelo plano de 15/11, há duas exceções: as próximas ações (H5a)
+    gravam o nome quando a reunião é excluída ou reprocessada, e o lembrete no sino (H15)
+    troca o token na hora do aviso. O mapa mental (H10) não aceita token nos rótulos.
   - O trecho que não chegou é um segmento com `lacuna: true` e texto vazio.
 - **`meetings.get`** devolve `recording.partes`, com
   `[{seq, url, mimeType, inicioSegundos, duracaoSegundos, expiresAt}]`. A reunião de
@@ -379,7 +387,7 @@ Tamanho: P é pequena, M é média e G é grande.
 
 | PR | O que faz | Depende de |
 |---|---|---|
-| H3 (M, migração) | Nomes dos falantes. Entrou em 14/11 (#204): só a dona vê os nomes, e o link aberto segue com "Falante n" (ver os contratos). | D1, R1 (adiada em 12/11) |
+| H3 (M, migração) | Nomes dos falantes. Entrou em 14/11 (#204), só para a dona. Pela decisão do Roberto de 16/11, a **H3b** (P, sem migração) leva os nomes ao link aberto ligado com a confirmação que fala deles; o link ligado antes segue com "Falante n" (ver os contratos). | D1, R1 (adiada em 12/11) |
 | H4 (G, migração) | Resumo guardado, no formato que a cliente pediu (ações com caixa de marcar, foco do trabalho, tarefas por assunto, decisões, bloqueios e questões pendentes), no idioma da reunião, cada item pendente até a dona confirmar. Os modelos de resumo são Geral, Networking, Mentoria, Vendas e 1:1. A #171 já pôs na `main` uma primeira versão, gerada a pedido, sem modelos, sem guardar nada e só para a dona; a H4 parte dela. Dividida em 15/11: **H4a1** (#205), a base, com as tabelas, o prompt e a conferência de cada item; **H4a2** (#206), a fila que gera o resumo em segundo plano e as rotas para ler e decidir; **H4b** (#207), o player fixo no rodapé, um só para todas as abas; **H4c** (#208, aberta), o resumo na tela e no link aberto, gerado sozinho quando a reunião fica pronta, no lugar do resumo a pedido da #171; e **H4d**, os modelos de resumo, que esperam a Glenda. As três primeiras estão no ar desde 15/11. | H3, G7 |
 | H6 (M) | "Pergunte à reunião", só com o que foi dito e citando os tempos. Pelo plano, as perguntas e as respostas não ficam guardadas (ver o ponto sobre "o chat" nas decisões de 10/11). A #171 já pôs na `main` uma primeira versão, só para a dona e citando o trecho, ainda sem os tempos. Pelo plano de 15/11, lê até 400 mil caracteres da transcrição, cerca de 7 h, e recusa acima disso, com aviso. | H4 |
 | H5 (M) | Combinados confirmados viram "Próximas ações". | H4 |
@@ -588,8 +596,6 @@ mescla, só por `gh pr merge`).
       ela quer um lembrete no sino;
     - se a IA pode sugerir os nomes de quem falou, para a dona confirmar, e se a dona
       pode ligar quem falou a um contato;
-    - se o link aberto mostra os nomes que a dona deu às vozes. Hoje ele mostra
-      "Falante n" (H3, #204);
     - se a exportação fica liberada;
     - se o resumo de PDF (H12), o resumo de vídeo do YouTube (H13) e a gravação da aba
       de uma reunião online (H14) entram já, logo depois da Onda 4, ou ficam para mais
@@ -599,12 +605,16 @@ mescla, só por `gh pr merge`).
   - o texto do acesso às reuniões compartilhadas (as participantes adicionadas e a
     consulta pela presidência e pela admin, com registro, para conferir o cumprimento do
     Termo Geral de Uso), no aviso e no termo de gravação;
-  - o link aberto (12/11): a caixa que a dona marca ao ligar o link ("todas as pessoas
-    que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem
-    receber o link"; a prova guarda a frase e o idioma que ela viu), o aviso de privacidade
-    do detalhe (`meetings.privacyNotice`) e o aviso do gravador
+  - o link aberto (12/11): a caixa que a dona marca ao ligar o link, o aviso de
+    privacidade do detalhe (`meetings.privacyNotice`) e o aviso do gravador
     (`meetings.consentNotice`), que agora falam do link, e o que o aviso de gravação e o
-    termo de gravação dizem dele;
+    termo de gravação dizem dele. A caixa mudou em 16/11 (H3b) para falar dos nomes das
+    vozes: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram que quem
+    receber o link ouça a gravação e leia a transcrição, com os nomes que eu der às
+    vozes." (a de 12/11 dizia "autorizaram compartilhar a gravação e a transcrição com
+    quem receber o link"). A prova guarda a frase, o idioma e a versão que a dona viu. Na
+    versão nova do aviso de gravação, que vem com a H6b, o ponto 4 do rascunho passa a
+    dizer que os nomes dados às vozes aparecem também pelo link;
   - o texto das passkeys para a próxima versão do Termo Geral de Uso (cláusulas 7.3 e
     9.3). Ele espera a próxima versão porque republicar o Termo só por isso revogaria os
     aceites;

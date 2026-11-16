@@ -43,9 +43,41 @@ export const CODIGO_ERRO_INTERROMPIDO = "ERRO_INTERROMPIDO";
  * Quanto tempo uma reunião pode ficar em "processing" antes de a varredura
  * dá-la como interrompida. Mora em shared/ porque os dois lados o usam: o
  * servidor na varredura e para recusar reprocessar um áudio prestes a vencer
- * (a retenção o apagaria no meio), e a tela para nem oferecer o botão nesse caso.
+ * (a retenção não apaga o áudio da reunião em processamento, e o reprocesso o
+ * seguraria além dos 30 dias; ver margemDoReprocesso, logo abaixo), e a tela
+ * para nem oferecer o botão nesse caso.
  */
 export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
+
+/**
+ * O tempo que o reprocesso da gravação em partes conta por parte. A fila
+ * transcreve as partes que falharam uma depois da outra (cada uma espera a
+ * anterior), e a montagem extrai da transcrição inteira, em janelas; enquanto
+ * isso a reunião fica em 'uploading' ou 'processing', e o áudio vencido não sai
+ * (STATUS_QUE_SEGURAM_AS_PARTES, em server/meeting-service.ts). É estimativa,
+ * não garantia (a chamada da IA de uma parte pode levar até 5 min e se repetir,
+ * em server/gemini.ts): o reprocesso que passar da conta segura o áudio além
+ * dos 30 dias pelo tempo que passar, e ele sai na primeira varredura depois de
+ * a reunião deixar esses estados.
+ */
+export const TEMPO_POR_PARTE_DO_REPROCESSO_MS = 2 * 60 * 1000;
+
+/**
+ * Quanto o áudio guardado ainda tem de durar para a reunião ser reprocessada: o
+ * processamento inteiro (LIMITE_PROCESSAMENTO_MS) e mais
+ * TEMPO_POR_PARTE_DO_REPROCESSO_MS por parte da gravação. Antes eram 15 min
+ * para qualquer tamanho, e o reprocesso de uma gravação de 12 h (72 partes)
+ * aceito a 20 min do prazo passava dele no meio.
+ *
+ * `partes` é o número de partes da gravação, a coluna expected_slices da
+ * reunião, que a tela recebe; no envio único ela é nula e conta zero. O
+ * servidor recusa (iniciarReprocessamento) e a tela esconde o botão com a
+ * mesma conta, para os dois não divergirem. Conta todas as partes, e não só as
+ * que falharam, porque a montagem relê a transcrição inteira.
+ */
+export function margemDoReprocesso(partes: number | null | undefined): number {
+  return LIMITE_PROCESSAMENTO_MS + Math.max(0, partes ?? 0) * TEMPO_POR_PARTE_DO_REPROCESSO_MS;
+}
 
 /**
  * Frase (e não código) que o reprocessamento grava em `processing_error`
@@ -64,6 +96,44 @@ export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
 
 /**
+ * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
+ * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
+ * os mesmos antes de enviar, para a dona ver o aviso no idioma dela. Valem até
+ * a G14 tirar o envio único (docs/arquitetura/gravador-de-reunioes.md); a
+ * gravação em partes tem o teto dela, logo abaixo.
+ */
+export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
+export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
+
+/**
+ * A gravação em partes não tem teto de tempo para quem grava (decisão do
+ * Roberto de 15/11/2026): no lugar dele fica o aviso de hora, abaixo. As 12 h
+ * são um teto técnico, contra gasto (uma gravação esquecida ligada). A tela
+ * para nas 12 h pelo relógio dela; o servidor aceita a soma das partes com uma
+ * folga própria (server/fatias-de-reuniao.ts), porque a duração medida nos
+ * bytes e o relógio da tela não batem ao segundo.
+ */
+export const GRAVACAO_EM_PARTES_SEGUNDOS_MAX = 12 * 60 * 60;
+
+/**
+ * O aviso de hora da gravação em partes: a cada hora cheia de gravação (sem as
+ * pausas) ele pede um OK. Sem o OK em 10 minutos, contados no relógio de
+ * parede, a gravação para sozinha e entrega o que gravou, como no Encerrar.
+ */
+export const AVISO_DE_HORA_SEGUNDOS = 60 * 60;
+export const PRAZO_DO_AVISO_DE_HORA_MS = 10 * 60 * 1000;
+
+/**
+ * Os códigos da recusa DEFINITIVA de uma parte da gravação em partes
+ * (RecusaDaParte, em server/fatias-de-reuniao.ts): a rota das partes devolve
+ * só o código, em JSON, e não frase. Moram aqui porque a tela os traduz
+ * (client/src/lib/mensagem-de-erro.ts) para avisar a dona no idioma dela: o
+ * servidor não sabe o idioma de quem grava. Código novo no servidor obriga a
+ * tela a ter o aviso dele (o Record da tela é por este tipo).
+ */
+export type CodigoDaRecusaDaParte = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "FORMATO" | "SEM_DURACAO" | "LONGA_DEMAIS" | "POSICAO";
+
+/**
  * As recusas do resumo guardado da reunião (H4), nas palavras que chegam ao
  * navegador. Moram aqui pelo mesmo motivo de MENSAGEM_BANCO_INDISPONIVEL: o
  * servidor (server/resumo-guardado.ts, que as reexporta) escreve sem saber o
@@ -78,6 +148,15 @@ export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa d
 export const NOME_DO_FALANTE_MAX = 60;
 /** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */
 export const FORMATO_DO_FALANTE = /^F[1-9][0-9]?$/;
+
+/**
+ * A versão da confirmação que a dona marca ao ligar o link aberto da reunião
+ * (H3b, decisão do Roberto de 16/11/2026). A 2 é a caixa que fala dos nomes que
+ * ela der às vozes: só o link ligado com ela mostra esses nomes. A 1 é a caixa
+ * de 12/11, que não falava deles, e vale também para a aba aberta antes do
+ * deploy, que não manda versão nenhuma (server/link-aberto-da-reuniao.ts).
+ */
+export const VERSAO_DA_AUTORIZACAO_COM_NOMES = 2;
 
 /** Os nomes guardados, só os pares válidos (a coluna é JSON livre). */
 export function nomesDosFalantes(bruto: unknown): Record<string, string> {

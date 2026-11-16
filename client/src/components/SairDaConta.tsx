@@ -9,13 +9,17 @@ import { motivoDaOcupacao, useSessaoOcupada, type MotivoDaOcupacao } from "@/lib
 
 type Traduzir = (chave: string) => string;
 
-// Cada ramo chama t() com a chave literal, para o teste das chaves usadas
-// (server/i18n-chaves-usadas.test.ts) conferir que todas existem.
+// O texto inteiro do diálogo para cada motivo. Cada ramo chama t() com a chave
+// literal, para o teste das chaves usadas (server/i18n-chaves-usadas.test.ts)
+// conferir que todas existem.
 function textoDoMotivo(t: Traduzir, motivo: MotivoDaOcupacao) {
   switch (motivo) {
-    case "gravando": return t("sessaoOcupada.sairGravando");
-    case "enviando": return t("sessaoOcupada.sairEnviando");
-    case "audio-nao-enviado": return t("sessaoOcupada.sairAudioNaoEnviado");
+    case "gravando": return `${t("sessaoOcupada.sairGravando")} ${t("sessaoOcupada.sairPerdeOAudio")}`;
+    case "enviando": return `${t("sessaoOcupada.sairEnviando")} ${t("sessaoOcupada.sairPerdeOAudio")}`;
+    case "audio-nao-enviado": return `${t("sessaoOcupada.sairAudioNaoEnviado")} ${t("sessaoOcupada.sairPerdeOAudio")}`;
+    // O descarte que não terminou (G13b) não guarda áudio a perder: o risco de
+    // sair é o contrário, a gravação descartada seguir para a transcrição.
+    case "descarte-pendente": return t("sessaoOcupada.sairDescartePendente");
   }
 }
 
@@ -74,7 +78,7 @@ export function useSairDaConta(sair: () => void): { pedirSaida: () => void; dial
         <AlertDialogHeader>
           <AlertDialogTitle>{t("sessaoOcupada.sairTitulo")}</AlertDialogTitle>
           <AlertDialogDescription className="text-white/70">
-            {textoDoMotivo(t, motivo)} {t("sessaoOcupada.sairPerdeOAudio")}
+            {textoDoMotivo(t, motivo)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

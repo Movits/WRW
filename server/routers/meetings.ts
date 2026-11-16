@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
@@ -46,11 +46,13 @@ export function esquecerTentativasDeReprocesso() {
   reprocessosPorDona.clear();
 }
 
-// Cada pergunta manda até 24 mil caracteres da transcrição à IA, e cada
-// resumo pedido é uma geração paga na fila. Teto brando por dona, pedidos de
-// resumo e perguntas somados, em memória como o do reprocesso. A pergunta conta
-// todo pedido que passa da validação, até o recusado: a recusa não chama a IA,
-// e assim também não serve de sonda. O pedido de resumo só conta quando cria
+// Cada pergunta manda a transcrição inteira à IA (até 400 mil caracteres,
+// server/reuniao-com-ia.ts), e cada resumo pedido é uma geração paga na fila.
+// Teto brando por dona, pedidos de resumo e perguntas somados, em memória como
+// o do reprocesso. A pergunta conta todo pedido que passa da validação, até o
+// recusado: a recusa não chama a IA, e assim também não serve de sonda. A
+// pergunta sobre reunião longa conta duas (segundaVagaDaPerguntaLonga): a dona
+// faz até 10 delas a cada 10 minutos. O pedido de resumo só conta quando cria
 // trabalho novo (server/resumo-guardado.ts).
 export const PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA = 20;
 export const tetoDaIADaReuniao = criarTeto(
@@ -58,6 +60,27 @@ export const tetoDaIADaReuniao = criarTeto(
   10 * 60_000,
   "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
 );
+
+/**
+ * A pergunta sobre reunião longa (mais de 100 mil caracteres na entrada da IA,
+ * cerca de 1h45 de fala) custa mais, porque a IA cobra pelo tamanho da
+ * entrada: ela gasta uma SEGUNDA vaga do teto. O tamanho só se conhece depois
+ * de ler a transcrição, então a vaga é tomada no `antesDeChamarAIA` de
+ * perguntarAReuniao, antes da IA. Recusada a segunda, a primeira volta: a
+ * recusa do teto não gasta vaga. Vale para a dona (aqui) e para o link aberto
+ * (routers/reuniaoAberta.ts).
+ */
+export function segundaVagaDaPerguntaLonga(reservarSegunda: () => unknown, soltarPrimeira: () => void) {
+  return ({ longa }: { longa: boolean }) => {
+    if (!longa) return;
+    try {
+      reservarSegunda();
+    } catch (erro) {
+      soltarPrimeira();
+      throw erro;
+    }
+  };
+}
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -277,8 +300,9 @@ export const meetingsRouter = router({
       pergunta: z.string().trim().min(2).max(TAMANHO_MAXIMO_DA_PERGUNTA),
     }))
     .mutation(async ({ ctx, input }) => {
-      tetoDaIADaReuniao.reservar(ctx.user.openId);
-      return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma));
+      const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
+        segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
     }),
 
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
@@ -296,6 +320,10 @@ export const meetingsRouter = router({
       // prova, porque a frase muda com a revisão jurídica.
       idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
       textoExibido: z.string().trim().min(1).max(1000),
+      // A versão da caixa (H3b): a 2 fala dos nomes que a dona der às vozes, e
+      // só com ela o link mostra os nomes. A aba aberta antes do deploy não
+      // manda nada, e o serviço grava 1: a frase dela não falava dos nomes.
+      versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
@@ -304,6 +332,7 @@ export const meetingsRouter = router({
         userAgent: ctx.req.headers["user-agent"],
         idioma: input.idioma,
         textoExibido: input.textoExibido,
+        versaoDaAutorizacao: input.versaoDaAutorizacao,
       }));
       return { token };
     }),

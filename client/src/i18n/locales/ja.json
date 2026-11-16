@@ -145,7 +145,7 @@
     "impact": "あなたは、思い出せる以上の機会を知っています。",
     "record": {
       "title": "録音して、忘れない",
-      "desc": "10分までの会議を無料で録音・文字起こしし、会話を戦略的な記憶に変えましょう。"
+      "desc": "{{horas}}時間までの会議を無料で録音・文字起こしし、会話を戦略的な記憶に変えましょう。"
     },
     "organize": {
       "title": "AIが整理します",
@@ -1448,7 +1448,7 @@
     "pageTitle": "ミーティング",
     "privateSecureBadge": "非公開・安全",
     "heroTitle": "ミーティングアシスタント",
-    "heroSubtitle": "同意を得た上で短いミーティングを録音し、文字起こしを確認して、提案された連絡先を承認しましょう。",
+    "heroSubtitle": "同意を得た上でミーティングを録音し、文字起こしを確認して、提案された連絡先を承認しましょう。",
     "newMeetingButton": "新しいミーティング",
     "consentNotice": "必ず参加者全員の同意を得て録音してください。音声は Google の AI（Gemini）が文字起こしし、ブラジル国外で処理されることや、話者ごとに発言を分けることがあります。音声はアカウントに 30 日間、文字起こしは会議を削除するまで保存されます。会議の共有リンクをオンにしない限り（話した人の新たな許可が必要です）、アクセスできるのはあなただけです。",
     "loadingList": "ミーティングを読み込み中…",
@@ -1468,6 +1468,24 @@
     "pausedStatus": "録音を一時停止中",
     "keepScreenOpenNotice": "録音中はこの画面を開いたまま、端末のロックを解除しておいてください。iPhone では画面のロックやアプリの切り替えで録音が途切れることがあります。",
     "hoursOfRecording": "録音 {{count}} 時間",
+    "hourCheckDescription": "録音を続けるには、{{minutos}}分以内に確認してください。確認がない場合、録音は自動で停止し、録音済みの内容は文字起こしに回されます。",
+    "hourCheckTabTitle": "録音を確認してください",
+    "hourCheckStopped": "録音は自動で停止しました：{{minutos}}分以内に1時間ごとの確認がありませんでした。録音済みの内容は文字起こしに回されます。",
+    "recordingLimitInParts": "録音1時間ごとに、続けるかどうかを確認してください。上限：{{horas}}時間。",
+    "recordingMaxReached": "録音が{{horas}}時間の上限に達したため終了しました。録音済みの内容は文字起こしに回されます。",
+    "uploadLimit": "音声ファイル：最大{{minutos}}分または{{mb}}MB",
+    "discardRecording": "録音を破棄",
+    "discardRecordingConfirmTitle": "この録音を破棄しますか？",
+    "discardRecordingConfirmText": "これまでに録音した内容は、すでに送信した分も含めてすべて削除され、文字起こしには回されません。元に戻すことはできません。",
+    "discardRecordingCancel": "録音に戻る",
+    "recordingDiscarded": "録音を破棄しました。文字起こしには何も回されません。",
+    "discardRecordingError": "今は録音を削除できませんでした。アプリを開いている間は自動で再試行します。ミーティングが一覧に表示された場合は、一覧から削除してください。",
+    "partRejectedMeetingGone": "録音の一部を保存できませんでした：ミーティングが削除されたか、音声を受け付けなくなっています。",
+    "partRejectedTooLarge": "録音の一部がサーバーで受け付けられるサイズまたは長さを超えたため、文字起こしから除外されました。",
+    "partRejectedUnreadable": "サーバーが録音の一部を読み取れなかったため、その部分は文字起こしから除外されました。",
+    "partRejected": "サーバーが録音の一部を受け付けなかったため、その部分は文字起こしから除外されました。",
+    "deviceCopyUnavailable": "この端末に録音のコピーを保存できませんでした。送信は続いていますが、インターネットが切れると一部が失われる可能性があります。",
+    "recordingEndedOnLeave": "画面を離れたため録音を終了しました。録音済みの内容は文字起こしに回されます。",
     "stopRecording": "録音を終了",
     "reviewBeforeTranscribe": "文字起こしの前に録音を再生して確認",
     "durationLabel": "長さ：",
@@ -1501,6 +1519,7 @@
     "audioLoadError": "現在、音声を読み込めません。ページを再読み込みしてください。セッションが切れている場合は再度ログインしてください。",
     "availableUntil": "· 有効期限",
     "recordingExpiredNotice": "この録音は30日を経過したため、規定どおり削除されました。文字起こしはこちらに残っています。",
+    "recordingDeletionPending": "この録音は30日を経過したため、再生できなくなりました。アプリは現在もストレージから音声を削除しています。",
     "noRecordingStored": "このミーティングに保存された音声はありません。",
     "privacyNotice": "音声と文字起こしは、共有リンクをオンにしない限り、あなたのアカウント内だけに保存されます。音声は30日後に自動的に削除されます。",
     "translateHeading": "このミーティングの発言を翻訳する",
@@ -1539,7 +1558,9 @@
       "notAnswered": "このミーティングの文字起こしには、この質問への答えがありません。",
       "askError": "質問に回答できませんでした。",
       "unavailable": "AIサービスが応答しませんでした。少し時間をおいてもう一度お試しください。",
-      "needsTranscript": "このミーティングには、AIが読める文字起こしがまだありません。"
+      "needsTranscript": "このミーティングには、AIが読める文字起こしがまだありません。",
+      "tooLong": "このミーティングは長すぎるため、AIに質問できません。上限は発言約7時間です。",
+      "sourcesLabel": "発言の箇所"
     },
     "summary": {
       "title": "ミーティングの要約",
@@ -1587,12 +1608,13 @@
     "share": {
       "button": "共有",
       "title": "リンクで共有",
-      "intro": "リンクを受け取った人は、WRWのアカウントなしで録音を聞き、文字起こしを読み、AIにミーティングの要約や質問への回答を求めることができます。削除と再処理はあなただけが行えます。",
-      "authorization": "このミーティングで発言したすべての人が、録音と文字起こしをリンクの受け取り手と共有することに同意したことを確認します。",
+      "intro": "リンクを受け取った人は、WRWのアカウントなしで録音を聞き、文字起こしを読み、AIにミーティングの要約や質問への回答を求めることができます。声に付けた名前は、リンクを持っている人にも表示されます。削除と再処理はあなただけが行えます。",
+      "authorization": "このミーティングで発言したすべての人が、リンクの受け取り手が録音を聞き、私が声に付ける名前とともに文字起こしを読むことに同意したことを確認します。",
       "createButton": "リンクを作成",
       "cancel": "キャンセル",
       "activeTitle": "リンクで共有中",
       "activeIntro": "このリンクを持っている人は誰でもミーティングを開けます。転送されたリンクを受け取った人も含まれます。アクセスを止めるには、リンクをオフにしてください。",
+      "namesNeedRelink": "このリンクを開いた人には、声に付けた名前が表示されません。確認内容に名前が含まれる前にオンにしたリンクだからです。名前を表示するには、リンクをオフにしてから、もう一度共有してください。新しいリンクは別のものになり、古いリンクは開けなくなります。",
       "linkLabel": "ミーティングのリンク",
       "copy": "リンクをコピー",
       "copied": "リンクをコピーしました。",
@@ -1649,6 +1671,8 @@
     "speakerNamePlaceholder": "話した人の名前",
     "speakerNameLabel": "話者 {{n}} の名前",
     "speakerNameError": "名前を保存できませんでした。",
+    "speakerNameLinkHint": "この名前は、ミーティングのリンクを持っている人にも表示されます。",
+    "speakerNameRelinkHint": "ミーティングのリンクを持っている人には、この名前は表示されません。表示するには、リンクをオフにしてから、もう一度共有してください。",
     "saveSpeakerName": "保存",
     "speakingTime": "発言時間",
     "searchTranscriptPlaceholder": "文字起こしを検索",
@@ -1656,7 +1680,17 @@
     "playFrom": "{{tempo}} から再生",
     "progressRecording": "録音中：音声は少しずつ届きます。",
     "progressUploading": "音声を受信中：{{esperadas}} 中 {{recebidas}}",
-    "progressTranscribing": "文字起こし中：{{total}} 中 {{transcritas}}"
+    "progressTranscribing": "文字起こし中：{{total}} 中 {{transcritas}}",
+    "player": {
+      "play": "再生",
+      "pause": "一時停止",
+      "rewind": "{{segundos}} 秒戻る",
+      "forward": "{{segundos}} 秒進む",
+      "speed": "再生速度：{{velocidade}}",
+      "speedValue": "{{velocidade}}倍",
+      "position": "再生位置",
+      "positionValue": "{{total}} 中 {{atual}}"
+    }
   },
   "connections": {
     "messageSent": "メッセージを送信しました",
@@ -1796,13 +1830,14 @@
     "minutesUsed": "保存中のミーティング",
     "minutesUsedHelp": "アカウントに残っている文字起こし済みミーティングの合計時間です。",
     "minutesLimit": "1回あたりの無料上限",
-    "minutesLimitHelp": "録音とアップロードした音声ファイルのそれぞれに適用されます。",
+    "minutesLimitHelp": "録音に適用され、1時間ごとに確認が求められます。送信する音声ファイルは最大{{minutos}}分です。",
     "minutesValue": "{{minutos}}分",
+    "hoursValue": "{{horas}}時間",
     "moreTime": "もっと時間が必要ですか？ミーティングの分数を増やしましょう。",
-    "moreTimeUnavailable": "月額プランで分数を増やす機能はまだ利用できません。現在、各ミーティングは最大{{minutos}}分です。",
+    "moreTimeUnavailable": "月額プランで分数を増やす機能はまだ利用できません。現在、録音する各ミーティングは最大{{horas}}時間です。",
     "actionsTitle": "ここから始める",
     "actionRecord": "ミーティングを録音・アップロード",
-    "actionRecordDesc": "1回あたり最大{{minutos}}分。文字起こしと、話に出た連絡先の提案付き。",
+    "actionRecordDesc": "1回あたり最大{{horas}}時間の録音。文字起こしと、話に出た連絡先の提案付き。",
     "consentNotice": "録音の前に、参加者全員の同意を得て、適用されるプライバシー規則を守る責任はあなたにあります。",
     "actionContacts": "連絡先を整理する",
     "actionContactsDesc": "あなたの非公開の連絡先です。連絡先がメンバーになったり、プラットフォーム上にプロフィールが作られたりすることはありません。",
@@ -1840,6 +1875,7 @@
     "sairEnviando": "このタブの音声はまだ送信中です。",
     "sairAudioNaoEnviado": "このタブには、まだ送信していない録音があります。",
     "sairPerdeOAudio": "今サインアウトすると、この音声は失われます。",
+    "sairDescartePendente": "破棄した録音はまだ削除されていません。今サインアウトすると、文字起こしに回される可能性があります。",
     "continuarAqui": "このまま続ける",
     "sairMesmoAssim": "それでもサインアウト",
     "versaoNovaDepoisDoEnvio": "WRW の新しいバージョンがあります。音声の送信が終わると、このページは自動で更新されます。",
@@ -2216,7 +2252,7 @@
       "review": "マイ・スマートネットワークで確認"
     },
     "dashboard": {
-      "minutesLine": "今月 {{usados}} 分使用 · 会議ごとに最大 {{limite}} 分",
+      "minutesLine": "今月 {{usados}} 分使用 · 会議ごとに最大 {{horas}} 時間",
       "expandSoon": "拡張は今後の連携次第"
     }
   },

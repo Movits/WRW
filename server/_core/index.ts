@@ -282,11 +282,11 @@ async function startServer() {
   // Endpoint: POST /api/scheduled/cleanup-recordings
   // Mesma sessão de cron da limpeza de sessões.
   //
-  // Existe porque a tela promete que o áudio "expira automaticamente após 30
-  // dias" e essa promessa é sobre a voz de TODAS as participantes — que não
-  // têm login e nunca vão abrir a página. Sem esta varredura, o descarte só
-  // aconteceria quando a dona reabrisse a reunião, e o caso comum (nunca mais
-  // voltar lá) deixaria o áudio no bucket para sempre.
+  // A tela promete que o áudio "expira automaticamente após 30 dias", e essa
+  // promessa é sobre a voz de TODAS as participantes, que não têm login e nunca
+  // vão abrir a página. O laço da varredura (server/varredura-de-gravacoes.ts,
+  // ligado lá embaixo, depois do listen) já faz esta limpeza no boot e a cada
+  // 5 min; o endpoint fica para o dia em que houver um agendador externo.
   // ============================================================
   app.post("/api/scheduled/cleanup-recordings", async (req: Request, res: Response) => {
     const user = await autenticarCron(req, res);
@@ -320,9 +320,10 @@ async function startServer() {
   // Endpoint: POST /api/scheduled/mark-interrupted-meetings
   // Mesma sessão de cron das limpezas acima.
   //
-  // O boot e o setInterval lá em cima já fazem esta varredura; o endpoint
-  // fica ao lado das outras duas rotas de cron para o dia em que houver um
-  // agendador externo (hoje nenhuma delas tem chamador).
+  // O boot e o setInterval lá em cima já fazem esta varredura (e o laço da
+  // varredura das gravações faz a de cima); o endpoint fica ao lado das outras
+  // duas rotas de cron para o dia em que houver um agendador externo (hoje
+  // nenhuma delas tem chamador).
   // ============================================================
   app.post("/api/scheduled/mark-interrupted-meetings", async (req: Request, res: Response) => {
     const user = await autenticarCron(req, res);
@@ -388,18 +389,25 @@ async function startServer() {
   // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
   // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas.
   // As duas rodam no próprio processo, a cada poucos segundos, cada uma com o
-  // seu laço. Sem banco (dev sem DATABASE_URL), não ligam.
+  // seu laço. O terceiro laço é a varredura das gravações vencidas
+  // (server/varredura-de-gravacoes.ts): tira do bucket, com todas as versões, o
+  // áudio de reunião que passou dos 30 dias, já no boot (sem atrasar o listen,
+  // que já foi chamado aqui) e de 5 em 5 min. Sem banco (dev sem DATABASE_URL),
+  // nenhum liga.
   if (process.env.DATABASE_URL) {
     const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
     const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
+    const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
+    iniciarVarreduraDeGravacoes();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
     // SIGINT. As duas filas param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
-    // depois de a reserva vencer); a falha de uma não segura a outra. Depois, o
-    // servidor fecha e o processo sai.
+    // depois de a reserva vencer), e a varredura das gravações não começa outro
+    // áudio; a falha de um laço não segura os outros. Depois, o servidor fecha e
+    // o processo sai.
     let saindo = false;
     const desligar = (sinal: string) => {
       if (saindo) return;
@@ -412,6 +420,9 @@ async function startServer() {
         pararFilaDoResumo()
           .then(r => console.log(`[Resumo] devolvidos: ${r.resumos} resumo(s).`))
           .catch(erro => console.error("[Resumo] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararVarreduraDeGravacoes()
+          .then(r => console.log(`[Gravações] varredura parada${r.emCurso ? (r.terminou ? "; a passada em curso terminou." : "; a passada em curso fica para a próxima instância.") : "."}`))
+          .catch(erro => console.error("[Gravações] não foi possível parar a varredura:", descreverErroDeBanco(erro))),
       ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.

@@ -145,7 +145,7 @@
     "impact": "Sie kennen mehr Chancen, als Sie sich merken können.",
     "record": {
       "title": "AUFNEHMEN STATT VERGESSEN",
-      "desc": "Nehmen Sie Meetings von bis zu 10 Minuten kostenlos auf, lassen Sie sie transkribieren und machen Sie Gespräche zu strategischem Wissen."
+      "desc": "Nehmen Sie Meetings von bis zu {{horas}} Stunden kostenlos auf, lassen Sie sie transkribieren und machen Sie Gespräche zu strategischem Wissen."
     },
     "organize": {
       "title": "DIE KI ORDNET FÜR SIE",
@@ -1448,7 +1448,7 @@
     "pageTitle": "Meetings",
     "privateSecureBadge": "PRIVAT UND SICHER",
     "heroTitle": "Meeting-Assistent",
-    "heroSubtitle": "Nehmen Sie kurze Meetings mit Zustimmung auf, überprüfen Sie die Transkription und bestätigen Sie die vorgeschlagenen Kontakte.",
+    "heroSubtitle": "Nehmen Sie Meetings mit Zustimmung auf, überprüfen Sie die Transkription und bestätigen Sie die vorgeschlagenen Kontakte.",
     "newMeetingButton": "Neues Meeting",
     "consentNotice": "Nehmen Sie nur mit Zustimmung aller Beteiligten auf. Das Audio wird von der KI von Google (Gemini) transkribiert, die es außerhalb Brasiliens verarbeiten und die Beiträge nach Person trennen kann. Das Audio bleibt 30 Tage in Ihrem Konto, das Transkript, bis Sie das Meeting löschen. Nur Sie haben Zugriff, es sei denn, Sie aktivieren den Freigabelink des Meetings (dafür ist eine neue Erlaubnis der Sprechenden nötig).",
     "loadingList": "Meetings werden geladen…",
@@ -1468,6 +1468,24 @@
     "pausedStatus": "Aufnahme pausiert",
     "keepScreenOpenNotice": "Lass diesen Bildschirm geöffnet und das Gerät entsperrt, während du aufnimmst: Auf dem iPhone kann das Sperren des Bildschirms oder ein App-Wechsel die Aufnahme abbrechen.",
     "hoursOfRecording": "{{count}} Std. Aufnahme",
+    "hourCheckDescription": "Um weiter aufzunehmen, bestätige innerhalb von {{minutos}} Minuten. Ohne Bestätigung stoppt die Aufnahme von selbst, und das bereits Aufgenommene geht in die Transkription.",
+    "hourCheckTabTitle": "Aufnahme bestätigen",
+    "hourCheckStopped": "Die Aufnahme wurde von selbst beendet: Niemand hat den Stundenhinweis innerhalb von {{minutos}} Minuten bestätigt. Das Aufgenommene geht in die Transkription.",
+    "recordingLimitInParts": "Bestätige nach jeder Stunde Aufnahme, dass sie weiterläuft. Limit: {{horas}} Stunden.",
+    "recordingMaxReached": "Die Aufnahme hat das Limit von {{horas}} Stunden erreicht und wurde beendet. Das Aufgenommene geht in die Transkription.",
+    "uploadLimit": "Audiodatei: bis zu {{minutos}} Minuten oder {{mb}} MB",
+    "discardRecording": "Aufnahme verwerfen",
+    "discardRecordingConfirmTitle": "Diese Aufnahme verwerfen?",
+    "discardRecordingConfirmText": "Alles, was bisher aufgenommen wurde, wird gelöscht, auch das bereits Hochgeladene, und nichts geht in die Transkription. Das lässt sich nicht rückgängig machen.",
+    "discardRecordingCancel": "Zurück zur Aufnahme",
+    "recordingDiscarded": "Aufnahme verworfen. Nichts davon geht in die Transkription.",
+    "discardRecordingError": "Die Aufnahme konnte gerade nicht gelöscht werden. Die App versucht es von selbst erneut, solange sie geöffnet ist; falls das Meeting in der Liste erscheint, löschen Sie es dort.",
+    "partRejectedMeetingGone": "Ein Abschnitt der Aufnahme wurde nicht gespeichert: Das Meeting wurde gelöscht oder nimmt kein Audio mehr an.",
+    "partRejectedTooLarge": "Ein Abschnitt der Aufnahme hat die Größe oder Länge überschritten, die der Server annimmt, und fehlt in der Transkription.",
+    "partRejectedUnreadable": "Der Server konnte einen Abschnitt der Aufnahme nicht lesen; er fehlt in der Transkription.",
+    "partRejected": "Der Server hat einen Abschnitt der Aufnahme abgelehnt; er fehlt in der Transkription.",
+    "deviceCopyUnavailable": "Auf diesem Gerät konnte keine Kopie der Aufnahme gespeichert werden. Sie wird weiter hochgeladen, aber wenn die Internetverbindung abbricht, kann ein Abschnitt verloren gehen.",
+    "recordingEndedOnLeave": "Die Aufnahme wurde beim Verlassen des Bildschirms beendet. Das Aufgenommene geht in die Transkription.",
     "stopRecording": "Aufnahme beenden",
     "reviewBeforeTranscribe": "Hören Sie sich die Aufnahme an, bevor Sie sie transkribieren",
     "durationLabel": "Dauer:",
@@ -1501,6 +1519,7 @@
     "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu; falls die Sitzung abgelaufen ist, melden Sie sich erneut an.",
     "availableUntil": "· verfügbar bis",
     "recordingExpiredNotice": "Diese Aufnahme ist älter als 30 Tage und wurde, wie von der App zugesichert, gelöscht. Die Transkription bleibt weiterhin hier verfügbar.",
+    "recordingDeletionPending": "Diese Aufnahme ist älter als 30 Tage und kann nicht mehr angehört werden. Die App löscht das Audio gerade noch aus dem Speicher.",
     "noRecordingStored": "Für dieses Meeting ist kein Audio gespeichert.",
     "privacyNotice": "Audio und Transkription bleiben nur in Ihrem Konto, es sei denn, Sie aktivieren einen Freigabelink. Das Audio läuft automatisch nach 30 Tagen ab.",
     "translateHeading": "Übersetzen, was in diesem Meeting gesagt wurde",
@@ -1528,10 +1547,10 @@
     "storedAudioMissing": "Das gespeicherte Audio dieses Meetings wurde nicht gefunden.",
     "audioDurationUnreadable": "Die Dauer dieser Audiodatei konnte nicht gelesen werden. Laden Sie die Datei als MP3 oder M4A hoch.",
     "ai": {
-      "reviewNotice": "KI-Vorschläge, die Sie anhand des Auszugs aus der Transkription prüfen sollten. Nichts davon wurde gespeichert oder automatisch in Ihr Netzwerk übernommen.",
+      "reviewNotice": "KI-Vorschläge, die Sie anhand der Auszüge aus der Transkription prüfen sollten. Nichts davon wurde gespeichert oder automatisch in Ihr Netzwerk übernommen.",
       "excerptLabel": "Auszug aus der Transkription",
       "askTitle": "Fragen Sie das Meeting",
-      "askIntro": "Die Antwort stammt nur aus dem, was im Meeting gesagt wurde, mit dem Auszug aus der Transkription, der sie belegt.",
+      "askIntro": "Die Antwort stammt nur aus dem, was im Meeting gesagt wurde, mit den Auszügen aus der Transkription, die sie belegen.",
       "askLabel": "Ihre Frage zum Meeting",
       "askPlaceholder": "z. B.: Welche Frist wurde vereinbart?",
       "askButton": "Fragen",
@@ -1539,7 +1558,9 @@
       "notAnswered": "Die Transkription dieses Meetings beantwortet diese Frage nicht.",
       "askError": "Die Frage konnte nicht beantwortet werden.",
       "unavailable": "Der KI-Dienst hat gerade nicht geantwortet. Versuchen Sie es in einem Moment erneut.",
-      "needsTranscript": "Für dieses Meeting liegt noch keine Transkription vor, die die KI lesen kann."
+      "needsTranscript": "Für dieses Meeting liegt noch keine Transkription vor, die die KI lesen kann.",
+      "tooLong": "Dieses Meeting ist zu lang für Fragen an die KI: Die Grenze liegt bei etwa 7 Stunden Gesprächszeit.",
+      "sourcesLabel": "Wo das gesagt wurde"
     },
     "summary": {
       "title": "Zusammenfassung des Meetings",
@@ -1587,12 +1608,13 @@
     "share": {
       "button": "Teilen",
       "title": "Per Link teilen",
-      "intro": "Wer den Link erhält, kann die Aufnahme anhören, die Transkription lesen und die KI um eine Zusammenfassung und Antworten zum Meeting bitten, ohne WRW-Konto. Löschen und erneutes Verarbeiten bleiben Ihnen vorbehalten.",
-      "authorization": "Ich bestätige, dass alle Personen, die in diesem Meeting gesprochen haben, zugestimmt haben, die Aufnahme und die Transkription mit allen zu teilen, die den Link erhalten.",
+      "intro": "Wer den Link erhält, kann die Aufnahme anhören, die Transkription lesen und die KI um eine Zusammenfassung und Antworten zum Meeting bitten, ohne WRW-Konto. Die Namen, die Sie den Stimmen geben, sehen alle, die den Link haben. Löschen und erneutes Verarbeiten bleiben Ihnen vorbehalten.",
+      "authorization": "Ich bestätige, dass alle Personen, die in diesem Meeting gesprochen haben, zugestimmt haben, dass alle, die den Link erhalten, die Aufnahme anhören und die Transkription lesen dürfen, mit den Namen, die ich den Stimmen gebe.",
       "createButton": "Link erstellen",
       "cancel": "Abbrechen",
       "activeTitle": "Per Link geteilt",
       "activeIntro": "Jede Person mit diesem Link kann das Meeting öffnen, auch wenn der Link weitergeleitet wird. Um den Zugriff zu beenden, deaktivieren Sie den Link.",
+      "namesNeedRelink": "Wer diesen Link öffnet, sieht die Namen nicht, die Sie den Stimmen gegeben haben, weil der Link aktiviert wurde, bevor die Bestätigung die Namen einschloss. Um sie anzuzeigen, deaktivieren Sie den Link und teilen Sie erneut. Der neue Link ist ein anderer, und der alte funktioniert nicht mehr.",
       "linkLabel": "Link zum Meeting",
       "copy": "Link kopieren",
       "copied": "Link kopiert.",
@@ -1617,7 +1639,7 @@
       "notFound": "Dieser Link existiert nicht oder ist nicht mehr verfügbar.",
       "goHome": "WRW kennenlernen",
       "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
-      "reviewNotice": "Vorschläge der KI zum Abgleich mit dem Auszug aus der Transkription. Nichts davon wurde gespeichert.",
+      "reviewNotice": "Vorschläge der KI zum Abgleich mit den Auszügen aus der Transkription. Nichts davon wurde gespeichert.",
       "translateSubtext": "Wählen Sie die Sprache, in der Sie die Transkription lesen möchten."
     },
     "install": {
@@ -1649,6 +1671,8 @@
     "speakerNamePlaceholder": "Name der sprechenden Person",
     "speakerNameLabel": "Name von Sprecher {{n}}",
     "speakerNameError": "Der Name konnte nicht gespeichert werden.",
+    "speakerNameLinkHint": "Dieser Name wird auch allen angezeigt, die den Link zum Meeting haben.",
+    "speakerNameRelinkHint": "Wer den Link zum Meeting hat, sieht diesen Namen nicht. Um ihn anzuzeigen, deaktivieren Sie den Link und teilen Sie erneut.",
     "saveSpeakerName": "Speichern",
     "speakingTime": "Redezeit",
     "searchTranscriptPlaceholder": "Im Transkript suchen",
@@ -1656,7 +1680,17 @@
     "playFrom": "Ab {{tempo}} anhören",
     "progressRecording": "Aufnahme läuft: Das Audio kommt nach und nach an.",
     "progressUploading": "Audio wird empfangen: {{recebidas}} von {{esperadas}}",
-    "progressTranscribing": "Wird transkribiert: {{transcritas}} von {{total}}"
+    "progressTranscribing": "Wird transkribiert: {{transcritas}} von {{total}}",
+    "player": {
+      "play": "Abspielen",
+      "pause": "Pausieren",
+      "rewind": "{{segundos}} Sekunden zurück",
+      "forward": "{{segundos}} Sekunden vor",
+      "speed": "Wiedergabegeschwindigkeit: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "Position in der Aufnahme",
+      "positionValue": "{{atual}} von {{total}}"
+    }
   },
   "connections": {
     "messageSent": "Nachricht gesendet",
@@ -1796,13 +1830,14 @@
     "minutesUsed": "In gespeicherten Meetings",
     "minutesUsedHelp": "Gesamtdauer der transkribierten Meetings, die noch in Ihrem Konto sind.",
     "minutesLimit": "Kostenloses Limit pro Meeting",
-    "minutesLimitHelp": "Gilt für jede Aufnahme und jede hochgeladene Audiodatei.",
+    "minutesLimitHelp": "Für Aufnahmen, die jede Stunde eine Bestätigung verlangen. Eine hochgeladene Audiodatei darf bis zu {{minutos}} Minuten lang sein.",
     "minutesValue": "{{minutos}} Min.",
+    "hoursValue": "{{horas}} Std.",
     "moreTime": "Brauchen Sie mehr Zeit? Erweitern Sie Ihre Meeting-Minuten.",
-    "moreTimeUnavailable": "Mehr Minuten per Monatsabo sind noch nicht verfügbar. Vorerst kann jedes Meeting bis zu {{minutos}} Minuten dauern.",
+    "moreTimeUnavailable": "Mehr Minuten per Monatsabo sind noch nicht verfügbar. Vorerst kann jedes aufgenommene Meeting bis zu {{horas}} Stunden dauern.",
     "actionsTitle": "Hier anfangen",
     "actionRecord": "Meeting aufnehmen oder hochladen",
-    "actionRecordDesc": "Bis zu {{minutos}} Minuten pro Meeting, mit Transkript und Vorschlägen für die genannten Kontakte.",
+    "actionRecordDesc": "Aufnahmen von bis zu {{horas}} Stunden pro Meeting, mit Transkript und Vorschlägen für die genannten Kontakte.",
     "consentNotice": "Vor der Aufnahme sind Sie dafür verantwortlich, die Zustimmung aller Beteiligten einzuholen und die geltenden Datenschutzregeln einzuhalten.",
     "actionContacts": "Meine Kontakte ordnen",
     "actionContactsDesc": "Ihre private Kontaktbasis. Ein Kontakt wird weder Mitglied noch erhält er ein Profil auf der Plattform.",
@@ -1840,6 +1875,7 @@
     "sairEnviando": "Eine Aufnahme aus diesem Tab wird noch gesendet.",
     "sairAudioNaoEnviado": "In diesem Tab gibt es eine Aufnahme, die noch nicht gesendet wurde.",
     "sairPerdeOAudio": "Wenn Sie sich jetzt abmelden, geht diese Aufnahme verloren.",
+    "sairDescartePendente": "Die verworfene Aufnahme wurde noch nicht gelöscht. Wenn Sie sich jetzt abmelden, kann sie in die Transkription gehen.",
     "continuarAqui": "Hier bleiben",
     "sairMesmoAssim": "Trotzdem abmelden",
     "versaoNovaDepoisDoEnvio": "Es gibt eine neue Version von WRW. Diese Seite aktualisiert sich von selbst, sobald die Audioaufnahme gesendet wurde.",
@@ -2216,7 +2252,7 @@
       "review": "Im Intelligenten Netzwerk prüfen"
     },
     "dashboard": {
-      "minutesLine": "{{usados}} Min. diesen Monat genutzt · bis zu {{limite}} Min. pro Meeting",
+      "minutesLine": "{{usados}} Min. diesen Monat genutzt · bis zu {{horas}} Std. pro Meeting",
       "expandSoon": "Erweiterung hängt von einer künftigen Integration ab"
     }
   },

@@ -59,7 +59,7 @@ vi.mock("express", () => {
   return { default: fabrica, ...fabrica };
 });
 vi.mock("http", () => {
-  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { aoSubir?.(); jarra.servidorNoAr(); }, close: (aoFechar?: () => void) => aoFechar?.() });
+  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { jarra.ordem.push("listen"); aoSubir?.(); jarra.servidorNoAr(); }, close: (aoFechar?: () => void) => aoFechar?.() });
   return { default: { createServer }, createServer };
 });
 vi.mock("net", () => {
@@ -87,6 +87,17 @@ const fila = vi.hoisted(() => ({ iniciarFila: vi.fn(), pararFila: vi.fn(async ()
 vi.mock("./fila-de-transcricao", () => fila);
 const filaDoResumo = vi.hoisted(() => ({ iniciarFilaDoResumo: vi.fn(), pararFilaDoResumo: vi.fn(async () => ({ resumos: 1 })) }));
 vi.mock("./fila-do-resumo", () => filaDoResumo);
+// O laço da varredura das gravações vencidas liga no boot com banco, depois do
+// listen, e para no desligar junto com as filas; aqui é dublê (o laço em si está
+// em server/varredura-de-gravacoes.test.ts).
+const varredura = vi.hoisted(() => ({
+  iniciarVarreduraDeGravacoes: vi.fn(),
+  pararVarreduraDeGravacoes: vi.fn(async () => ({ emCurso: false, terminou: true })),
+}));
+vi.mock("./varredura-de-gravacoes", () => ({
+  iniciarVarreduraDeGravacoes: (...args: unknown[]) => { jarra.ordem.push("iniciarVarredura"); return varredura.iniciarVarreduraDeGravacoes(...args); },
+  pararVarreduraDeGravacoes: (...args: unknown[]) => varredura.pararVarreduraDeGravacoes(...(args as [])),
+}));
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -136,24 +147,43 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a fila da reunião em partes no index.ts real (G7)", () => {
-  it("as duas filas ligam no boot com banco, e o SIGTERM devolve as reservas das duas ANTES de o processo sair", async () => {
+  it("as duas filas e a varredura das gravações ligam no boot com banco, e o SIGTERM para as três ANTES de o processo sair", async () => {
     expect(fila.iniciarFila).toHaveBeenCalledTimes(1);
     expect(filaDoResumo.iniciarFilaDoResumo).toHaveBeenCalledTimes(1);
+    expect(varredura.iniciarVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
     const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const ordem: string[] = [];
     fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
-    // A falha da fila do resumo não segura a saída nem a devolução da outra.
+    // A falha da fila do resumo não segura a saída nem a parada dos outros laços.
     filaDoResumo.pararFilaDoResumo.mockImplementationOnce(async () => { ordem.push("pararFilaDoResumo"); throw new Error("banco caiu"); });
+    // A varredura das gravações termina por último (a passada em curso estourou
+    // a espera): a saída espera por ela também, como pelas filas.
+    let soltarVarredura: () => void = () => {};
+    varredura.pararVarreduraDeGravacoes.mockImplementationOnce(() => new Promise(resolver => {
+      soltarVarredura = () => { ordem.push("pararVarredura"); resolver({ emCurso: true, terminou: false }); };
+    }));
     vi.spyOn(console, "error").mockImplementation(() => {});
     sair.mockImplementation(((codigo?: number) => { ordem.push(`exit ${codigo}`); }) as never);
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
     process.emit("SIGTERM");
     // Só microtarefas: o setInterval deste arquivo é falso, e o vi.waitFor o
     // avançaria, disparando a varredura que o teste seguinte conta.
-    for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve));
-    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "exit 0"]);
+    const esperar = async () => { for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve)); };
+    await esperar();
+    expect(varredura.pararVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo"]);
+    soltarVarredura();
+    await esperar();
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararVarredura", "exit 0"]);
+    expect(JSON.stringify(logs.mock.calls)).toContain("a passada em curso fica para a próxima instância");
     // O SIGINT do dev também está ligado (process.once: um por sinal).
     expect(process.listenerCount("SIGINT")).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a varredura das gravações liga uma vez, DEPOIS do listen: a subida não espera o bucket", () => {
+    expect(jarra.ordem.filter(item => item === "iniciarVarredura")).toHaveLength(1);
+    expect(jarra.ordem.indexOf("listen")).toBeGreaterThanOrEqual(0);
+    expect(jarra.ordem.indexOf("iniciarVarredura")).toBeGreaterThan(jarra.ordem.indexOf("listen"));
   });
 });
 

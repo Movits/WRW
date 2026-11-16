@@ -8,7 +8,8 @@ process.env.DATABASE_URL ??= "mysql://teste:teste@localhost/teste";
  * itens 3, 4 e 25). Drizzle de verdade sobre um cliente mysql2 falso.
  *
  * O que se trava:
- * 1. O gratuito é o MESMO número que o servidor aplica ao receber a gravação.
+ * 1. O gratuito é o MESMO número que o servidor aplica ao receber a gravação:
+ *    desde a G13b, as 12 h da gravação em partes, o padrão para todas.
  * 2. A mensalidade é estrutura: sem integração de pagamento a ampliação NÃO
  *    está disponível, e o motivo vai junto. Nenhum preço é inventado.
  * 3. Sem assinatura ativa de plano ativo, vale o gratuito; plano configurado
@@ -42,7 +43,7 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
 });
 
 const minutos = await import("./minutos-de-reuniao");
-const { MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
+const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
 const { exigirDb } = await import("./db");
 const schema = await import("../drizzle/schema");
 
@@ -55,14 +56,14 @@ beforeEach(() => {
 });
 
 describe("minutos — o gratuito", () => {
-  it("10 minutos por reunião, o mesmo teto que o servidor aplica ao gravar", () => {
-    expect(minutos.LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS).toBe(600);
-    expect(minutos.LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS).toBe(MAX_MEETING_DURATION_SECONDS);
+  it("12 horas por reunião, o mesmo teto da gravação em partes, e não mais os 10 minutos do envio único (G13b)", () => {
+    expect(minutos.LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS).toBe(12 * 60 * 60);
+    expect(minutos.LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS).toBe(GRAVACAO_EM_PARTES_SEGUNDOS_MAX);
   });
 
   it("sem assinatura: plano gratuito, sem limite mensal adotado", async () => {
     const plano = await minutos.resolverPlanoDeMinutos(QUEM.id, AGORA);
-    expect(plano).toEqual({ plano: "gratuito", nome: null, limitePorReuniaoSegundos: 600, limiteMensalSegundos: null });
+    expect(plano).toEqual({ plano: "gratuito", nome: null, limitePorReuniaoSegundos: 12 * 60 * 60, limiteMensalSegundos: null });
     const [leitura] = estado.consultas;
     expect(leitura.sql).toContain("`assinaturas_de_minutos`.`userId` = ?");
     expect(leitura.sql).toContain("`assinaturas_de_minutos`.`status` = ?");
@@ -82,7 +83,7 @@ describe("minutos — a mensalidade é estrutura, não cobrança", () => {
     // fimEm, limitePorReuniaoSegundos, limiteMensalSegundos, nome
     estado.responder = sql => (/from `assinaturas_de_minutos`/.test(sql) ? [[null, 300, 36_000, "Plano configurado"]] : undefined);
     const plano = await minutos.resolverPlanoDeMinutos(QUEM.id, AGORA);
-    expect(plano).toEqual({ plano: "pago", nome: "Plano configurado", limitePorReuniaoSegundos: 600, limiteMensalSegundos: 36_000 });
+    expect(plano).toEqual({ plano: "pago", nome: "Plano configurado", limitePorReuniaoSegundos: 12 * 60 * 60, limiteMensalSegundos: 36_000 });
   });
 
   it("assinatura vencida não vale", async () => {

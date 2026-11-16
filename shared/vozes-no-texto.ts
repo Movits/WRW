@@ -4,11 +4,13 @@
  * docs/arquitetura/gravador-de-reunioes.md). O servidor nunca resolve o nome:
  * o banco guarda o rótulo, e quem lê decide.
  *
- * - Para a dona: o nome que ela deu à voz (o mapa de meetings.speaker_names,
- *   lido por nomesDosFalantes, de shared/const.ts).
- * - Sem nome, e sempre no link aberto, que não leva os nomes: o rótulo
- *   traduzido ("Falante 2"). Ele chega pronto, de quem chama: aqui não há i18n,
- *   porque o mesmo código roda no servidor (shared/CLAUDE.md).
+ * - O nome que a dona deu à voz (o mapa de meetings.speaker_names, lido por
+ *   nomesDosFalantes, de shared/const.ts): na tela dela e no link aberto, que
+ *   recebe os nomes só quando foi ligado com a confirmação que fala deles (H3b,
+ *   o `vozes` de reuniaoAberta.ver).
+ * - Sem nome: o rótulo traduzido ("Falante 2"). Ele chega pronto, de quem
+ *   chama: aqui não há i18n, porque o mesmo código roda no servidor
+ *   (shared/CLAUDE.md).
  *
  * Só o rótulo exato vira nome: {F1} a {F99}, com as chaves. "F1" solto, {F0} e
  * {f1} ficam como estão.

@@ -31,12 +31,13 @@ type Opcoes = { onSuccess?: (data: unknown, vars: unknown) => void; onError?: (e
 // vi.mock é içado para o topo do arquivo; o que as fábricas usam precisa
 // nascer em vi.hoisted, senão é lido antes de existir.
 const duble = vi.hoisted(() => {
-  const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn>; mutateAsync: ReturnType<typeof vi.fn> }> = {};
+  // `data` é o que a mutação já respondeu (o Pergunte à reunião lê a resposta dali).
+  const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn>; mutateAsync: ReturnType<typeof vi.fn>; data?: unknown }> = {};
   const registrar = (nome: string) => ({
     useMutation: (opcoes: Opcoes = {}) => {
       const m = (mutacoes[nome] ??= { opcoes, mutate: vi.fn(), mutateAsync: vi.fn() });
       m.opcoes = opcoes;
-      return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false };
+      return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false, data: m.data };
     },
   });
   return {
@@ -56,6 +57,16 @@ const duble = vi.hoisted(() => {
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+// A gravação em partes (o padrão desde a G13b) retoma, a cada 30 s, o que
+// ficou no aparelho, com a página aberta em qualquer das três rotas: o relógio
+// dela entraria na contagem dos testes da tradução longa (G8), que provam que
+// nenhuma pergunta fica agendada. Esta suíte é da lista e do detalhe; a
+// gravação em partes está em hooks/useGravacaoEmPartes.test.ts e em
+// Meetings.sessao-ocupada.test.tsx.
+vi.mock("@/hooks/useGravacaoEmPartes", () => ({
+  PARTE_SEGUNDOS: 600,
+  useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
+}));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("@/lib/trpc", () => ({
@@ -95,7 +106,7 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: unknown[]) => duble.duracao(...args) }));
 
 beforeEach(() => {
-  for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
+  for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); m.data = undefined; }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
@@ -148,10 +159,12 @@ describe("Reuniões — erro de consulta não é 'nenhuma reunião'", () => {
 const REUNIAO = {
   id: "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b", ownerId: "dona", title: "Reunião com a vinícola",
   status: "ready", processingError: null as string | null, createdAt: Date.UTC(2026, 8, 4, 12), updatedAt: Date.UTC(2026, 8, 4, 12),
+  // Como no servidor (COLUNAS_DA_REUNIAO_NA_TELA): envio único, sem partes.
+  audioPipeline: "single" as "single" | "slices", expectedSlices: null as number | null,
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
-type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean };
+type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean };
 function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<Detalhe> = {}) {
   const meeting = { ...REUNIAO, ...reuniao };
   duble.list.mockReturnValue({ data: [meeting], isLoading: false });
@@ -308,6 +321,26 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
   });
 
+  // A gravação em partes com as `partes` transcritas (a montagem falhou), todas vencendo em `expiraEm`.
+  const gravacaoEmPartes = (partes: number, expiraEm: number) => {
+    const lista = Array.from({ length: partes }, (_, seq) => ({
+      seq, url: `/manus-storage/meetings/dona/r/partes/${String(seq).padStart(4, "0")}.m4a`, mimeType: "audio/mp4",
+      inicioSegundos: seq * 600, duracaoSegundos: 600, expiresAt: expiraEm,
+    }));
+    return { url: lista[0].url, mimeType: "audio/mp4", durationSeconds: partes * 600, sizeBytes: 0, expiresAt: expiraEm, partes: lista };
+  };
+
+  it("gravação em partes de 12 h com o áudio vencendo em 20 min: nenhum botão, porque o reprocesso das 72 partes passaria do prazo", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 72 }, { recording: gravacaoEmPartes(72, Date.now() + 20 * 60 * 1000) });
+    expect(botaoReprocessar()).not.toBeInTheDocument();
+    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
+  });
+
+  it("…e a de uma parte só, com os mesmos 20 min, ainda oferece o botão: a margem cresce com as partes", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 1 }, { recording: gravacaoEmPartes(1, Date.now() + 20 * 60 * 1000) });
+    expect(botaoReprocessar()).toBeInTheDocument();
+  });
+
   it.each(["ready", "processing"])("reunião %s não oferece reprocessar", status => {
     abrirDetalhe({ status }, { recording: gravacao(Date.now() + 20 * DIA) });
     expect(botaoReprocessar()).not.toBeInTheDocument();
@@ -366,6 +399,13 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     expect(screen.queryByText(/A transcrição continua aqui/)).not.toBeInTheDocument();
     expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
     expect(screen.getByText(/O áudio fica guardado por no máximo 30 dias/)).toBeInTheDocument();
+  });
+
+  it("áudio vencido que ainda não saiu do bucket: a tela diz que está saindo, e não que 'foi apagada' nem que não há áudio guardado", () => {
+    abrirDetalhe({}, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" }, recordingDeletionPending: true });
+    expect(screen.getByText(/passou dos 30 dias e já não pode ser ouvida\. O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
+    expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nenhum áudio guardado/)).not.toBeInTheDocument();
   });
 });
 
@@ -830,6 +870,22 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     expect(document.querySelector("main")!.className).toContain("pb-36");
   });
 
+  it("a parte do meio que não carrega pula para a seguinte, e o aviso segue na barra quando a seguinte carrega (D1b)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const partes = [...PARTES, { seq: 2, url: "/manus-storage/meetings/dona/r/partes/0002-c.m4a", mimeType: "audio/mp4", inicioSegundos: 900, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 }];
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: { ...GRAVACAO, durationSeconds: 1200, partes } });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio")!;
+    fireEvent.click(within(barra).getByRole("button", { name: "Tocar" }));
+    fireEvent.ended(audio);
+    fireEvent.error(audio);
+    expect(audio.getAttribute("src")).toBe(partes[2].url);
+    fireEvent.loadedMetadata(audio);
+    fireEvent.loadedData(audio);
+    // Sem o aviso, o salto de 10 a 15 min ficaria sem explicação.
+    expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
+  });
+
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
@@ -1072,6 +1128,45 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
   });
 });
 
+describe("Detalhe da reunião — o Pergunte à reunião com os tempos e as vozes (H6)", () => {
+  const SEGMENTOS = [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ];
+  const TRANSCRICAO = { id: "t1", transcript: "Vamos fechar o contrato.\nO frete fica para sexta.", language: "pt-BR", segments: SEGMENTOS };
+  const PARTES = [
+    { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
+    { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
+  ];
+  const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
+  // A resposta que a pergunta já recebeu do servidor (server/reuniao-com-ia.ts).
+  const respondeu = () => {
+    (duble.mutacoes.perguntar ??= { opcoes: {}, mutate: vi.fn(), mutateAsync: vi.fn() }).data = {
+      respondida: true,
+      resposta: "{F1} quer fechar o contrato, e {F2} cuida do frete.",
+      citacoes: [{ trecho: "O frete fica para sexta", inicioSegundos: 620 }],
+      trecho: "O frete fica para sexta",
+    };
+  };
+
+  it("a resposta mostra o nome que a dona deu à voz, e o '▶' da citação leva o player da barra à parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    respondeu();
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO, recording: GRAVACAO });
+    expect(screen.getByText("Ana quer fechar o contrato, e Falante 2 cuida do frete.")).toBeInTheDocument();
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:20" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+  });
+
+  it("sem gravação guardada, o tempo da citação é só texto", () => {
+    respondeu();
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO, recording: null, recordingExpired: true });
+    expect(screen.getByText("10:20")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
   it("reunião pronta: o painel aparece, e a reunião segue marcada como privada enquanto não há link", () => {
     abrirDetalhe({ status: "ready" });
@@ -1088,5 +1183,37 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
   it.each(["processing", "failed"])("reunião %s: não há o que compartilhar ainda", (status) => {
     abrirDetalhe({ status });
     expect(screen.queryByRole("heading", { name: /Compartilhar por link|Compartilhada por link/ })).not.toBeInTheDocument();
+  });
+
+  // Os nomes das vozes pelo link (H3b): o detalhe diz se o link ligado os mostra (meeting.linkMostraNomes).
+  const TOKEN_DO_LINK = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const COM_FALAS = { id: "t1", transcript: "x", language: "pt-BR", segments: [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ] };
+  const abrirCampoDoNome = () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Dar nome a esta voz: Ana" }));
+    return screen.getByRole("textbox", { name: "Nome do falante 1" });
+  };
+
+  // O aviso do painel fica acima das abas, fora da vista de quem nomeia a voz na
+  // aba Transcrição: o próprio campo do nome diz que o nome não sai pelo link.
+  it("link da confirmação antiga com vozes nomeadas: o painel avisa que o link não mostra os nomes, e o campo do nome também, com o jeito de mostrá-los (H3b)", () => {
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkMostraNomes: false, speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.getByText(/não vê os nomes que você deu às vozes/)).toBeInTheDocument();
+    expect(abrirCampoDoNome()).toHaveAccessibleDescription("Quem tem o link da reunião não vê este nome. Para mostrá-lo, desligue o link e compartilhe de novo.");
+  });
+
+  it("link que mostra os nomes: sem o aviso, e o campo do nome diz que o nome aparece também para quem tem o link (H3b)", () => {
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkMostraNomes: true, speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
+    expect(abrirCampoDoNome()).toHaveAccessibleDescription("Este nome aparece também para quem tem o link da reunião.");
+  });
+
+  it("sem link, nem aviso nem dica: o nome fica só com a dona (H3b)", () => {
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
+    expect(abrirCampoDoNome()).not.toHaveAccessibleDescription();
   });
 });

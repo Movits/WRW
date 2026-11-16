@@ -4,9 +4,10 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
  * A troca dos rótulos de voz do resumo guardado (H4): a IA escreve "{F2}", o
- * banco guarda o rótulo, e a tela mostra o nome que a dona deu à voz ou, sem
- * nome (e sempre no link aberto), o "Falante n" traduzido, que vem de quem
- * chama. O teste não depende do i18n: o rótulo é uma função qualquer.
+ * banco guarda o rótulo, e a tela mostra o nome que a dona deu à voz (também
+ * no link aberto ligado com a confirmação que fala dos nomes, H3b) ou, sem
+ * nome, o "Falante n" traduzido, que vem de quem chama. O teste não depende do
+ * i18n: o rótulo é uma função qualquer.
  */
 const falante = (n: number) => `Falante ${n}`;
 
@@ -15,7 +16,7 @@ describe("vozesNoTexto", () => {
     expect(vozesNoTexto("{F2} ficou de enviar a proposta para {F1}", { F2: "Carla" }, falante)).toBe("Carla ficou de enviar a proposta para Falante 1");
   });
 
-  it("sem nomes (o link aberto), todas as vozes saem como 'Falante n', e o número vai inteiro", () => {
+  it("sem nomes (o link ligado antes da confirmação que fala deles), todas as vozes saem como 'Falante n', e o número vai inteiro", () => {
     expect(vozesNoTexto("{F1}, {F12} e {F99} combinaram", {}, falante)).toBe("Falante 1, Falante 12 e Falante 99 combinaram");
   });
 

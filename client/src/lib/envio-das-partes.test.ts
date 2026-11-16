@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const guardadas = vi.hoisted(() => ({ lista: [] as Array<{ meetingId: string; seq: number; blob: Blob; mimeType: string; duracaoMs: number; dona: string; guardadaEm: number }>, apagadas: [] as string[] }));
+const guardadas = vi.hoisted(() => ({ lista: [] as Array<{ meetingId: string; seq: number; blob: Blob; mimeType: string; duracaoMs: number; dona: string; guardadaEm: number }>, apagadas: [] as string[], conferenciaFalha: false }));
 vi.mock("./partes-no-aparelho", () => ({
   partesGuardadas: async (dona: string) => guardadas.lista.filter(p => p.dona === dona),
   apagarParte: async (meetingId: string, seq: number) => { guardadas.apagadas.push(`${meetingId}:${seq}`); },
+  // A parte segue no aparelho enquanto ninguém a apagou (G13c).
+  parteNoAparelho: async (meetingId: string, seq: number) => {
+    if (guardadas.conferenciaFalha) throw new Error("bloqueado por outra aba");
+    return guardadas.lista.some(p => p.meetingId === meetingId && p.seq === seq) && !guardadas.apagadas.includes(`${meetingId}:${seq}`);
+  },
 }));
 
 const { enviarParte, enviarPendentes, rotaDaParte } = await import("./envio-das-partes");
@@ -14,6 +19,7 @@ const semTrava = async <T,>(_nome: string, trabalho: () => Promise<T>) => trabal
 beforeEach(() => {
   guardadas.lista = [];
   guardadas.apagadas = [];
+  guardadas.conferenciaFalha = false;
 });
 
 describe("enviarParte (G9)", () => {
@@ -77,5 +83,60 @@ describe("enviarPendentes (G9)", () => {
     const r = await enviarPendentes("dona", { buscar: buscar as never, trava: async () => null });
     expect(buscar).not.toHaveBeenCalled();
     expect(r.restantes).toBe(1);
+  });
+});
+
+/**
+ * G13c: a retomada roda também em toda tela logada, e duas retomadas (a de
+ * Reuniões e a nova, ou as de duas abas) podem ler a lista ao mesmo tempo. A
+ * parte que a outra enviou e apagou depois da leitura não sobe de novo; a da
+ * gravação descartada não sobe.
+ */
+describe("enviarPendentes — a conferência com a trava e a gravação descartada (G13c)", () => {
+  const parte = (meetingId: string, seq: number, dona = "dona") => ({ meetingId, seq, blob: new Blob(["x"]), mimeType: "audio/mp4", duracaoMs: 1000, dona, guardadaEm: 1 });
+  const recebida = () => resposta(201, { codigo: "RECEBIDA" });
+
+  it("a parte que a outra aba enviou entre a leitura e a trava não sobe de novo, e a seguinte sobe", async () => {
+    guardadas.lista = [parte("a", 0), parte("a", 1)];
+    const buscar = vi.fn(async () => recebida());
+    // A outra aba segurava a trava: enviou a parte 0 e a apagou antes de soltar.
+    const travaDepoisDaOutraAba = async <T,>(_nome: string, trabalho: () => Promise<T>) => {
+      guardadas.apagadas.push("a:0");
+      return trabalho();
+    };
+    const r = await enviarPendentes("dona", { buscar: buscar as never, trava: travaDepoisDaOutraAba });
+    expect(buscar.mock.calls.map(([url]) => url)).toEqual([rotaDaParte("a", 1)]);
+    expect(r).toEqual({ restantes: 0, semSessao: false });
+  });
+
+  it("sem como conferir (o IndexedDB bloqueado), envia: o servidor aceita a mesma parte de novo", async () => {
+    guardadas.lista = [parte("a", 0)];
+    guardadas.conferenciaFalha = true;
+    const buscar = vi.fn(async () => recebida());
+    await enviarPendentes("dona", { buscar: buscar as never, trava: semTrava });
+    expect(buscar).toHaveBeenCalledWith(rotaDaParte("a", 0), expect.anything());
+  });
+
+  it("a gravação que `pular` aponta (a descartada) não sobe nem conta como áudio por enviar", async () => {
+    guardadas.lista = [parte("a", 0), parte("b", 0), parte("b", 1)];
+    const buscar = vi.fn(async () => recebida());
+    const trava = vi.fn(semTrava);
+    const r = await enviarPendentes("dona", { buscar: buscar as never, trava, pular: id => id === "b" });
+    expect(buscar.mock.calls.map(([url]) => url)).toEqual([rotaDaParte("a", 0)]);
+    expect(trava).not.toHaveBeenCalledWith("wrw-envio-b", expect.anything());
+    expect(guardadas.apagadas).toEqual(["a:0"]);
+    expect(r).toEqual({ restantes: 0, semSessao: false });
+  });
+
+  it("descartada no meio do envio: as partes seguintes não sobem", async () => {
+    guardadas.lista = [parte("a", 0), parte("a", 1), parte("a", 2)];
+    let descartada = false;
+    const buscar = vi.fn(async () => {
+      descartada = true;
+      return recebida();
+    });
+    const r = await enviarPendentes("dona", { buscar: buscar as never, trava: semTrava, pular: () => descartada });
+    expect(buscar).toHaveBeenCalledTimes(1);
+    expect(r.restantes).toBe(0);
   });
 });

@@ -145,7 +145,7 @@
     "impact": "You know more opportunities than you can remember.",
     "record": {
       "title": "RECORD IT, DON'T FORGET IT",
-      "desc": "Record and transcribe meetings of up to 10 minutes for free, and turn conversations into strategic memory."
+      "desc": "Record and transcribe meetings of up to {{horas}} hours for free, and turn conversations into strategic memory."
     },
     "organize": {
       "title": "AI ORGANIZES IT FOR YOU",
@@ -1448,7 +1448,7 @@
     "pageTitle": "Meetings",
     "privateSecureBadge": "PRIVATE AND SECURE",
     "heroTitle": "Meeting Assistant",
-    "heroSubtitle": "Record short meetings with consent, review the transcript, and confirm the suggested contacts.",
+    "heroSubtitle": "Record meetings with consent, review the transcript, and confirm the suggested contacts.",
     "newMeetingButton": "New meeting",
     "consentNotice": "Only record with the consent of everyone involved. The audio is transcribed by Google's AI (Gemini), which may process it outside Brazil and separate what each person said. The audio stays in your account for 30 days, and the transcript until you delete the meeting. Only you can access it, unless you turn on the meeting's sharing link (which needs new permission from the people who spoke).",
     "loadingList": "Loading meetings…",
@@ -1468,6 +1468,24 @@
     "pausedStatus": "Recording paused",
     "keepScreenOpenNotice": "Keep this screen open and your device unlocked while recording: on iPhone, locking the screen or switching apps may cut the recording.",
     "hoursOfRecording": "{{count}} h of recording",
+    "hourCheckDescription": "To keep recording, confirm within {{minutos}} minutes. Without confirmation, the recording stops on its own and what has been recorded goes on to transcription.",
+    "hourCheckTabTitle": "Confirm the recording",
+    "hourCheckStopped": "The recording stopped on its own: no one confirmed the hourly notice within {{minutos}} minutes. What was recorded goes on to transcription.",
+    "recordingLimitInParts": "Every hour of recording, confirm that it continues. Limit: {{horas}} hours.",
+    "recordingMaxReached": "The recording reached the {{horas}}-hour limit and was ended. What was recorded goes on to transcription.",
+    "uploadLimit": "Audio file: up to {{minutos}} minutes or {{mb}} MB",
+    "discardRecording": "Discard recording",
+    "discardRecordingConfirmTitle": "Discard this recording?",
+    "discardRecordingConfirmText": "Everything recorded so far will be deleted, including what has already been uploaded, and nothing will go to transcription. This cannot be undone.",
+    "discardRecordingCancel": "Back to recording",
+    "recordingDiscarded": "Recording discarded. None of it goes to transcription.",
+    "discardRecordingError": "The recording couldn't be deleted right now. The app keeps trying on its own while it's open; if the meeting shows up in the list, delete it there.",
+    "partRejectedMeetingGone": "A section of the recording wasn't saved: the meeting was deleted or is no longer receiving audio.",
+    "partRejectedTooLarge": "A section of the recording exceeded the size or length the server accepts and was left out of the transcription.",
+    "partRejectedUnreadable": "The server couldn't read a section of the recording, so it was left out of the transcription.",
+    "partRejected": "The server rejected a section of the recording, so it was left out of the transcription.",
+    "deviceCopyUnavailable": "A copy of the recording couldn't be saved on this device. It is still being uploaded, but if the internet drops, a section may be lost.",
+    "recordingEndedOnLeave": "The recording was ended when you left the screen. What was recorded goes on to transcription.",
     "stopRecording": "Stop recording",
     "reviewBeforeTranscribe": "Listen to the recording before transcribing",
     "durationLabel": "Duration:",
@@ -1501,6 +1519,7 @@
     "audioLoadError": "Could not load the audio right now. Reload the page; if your session has expired, sign in again.",
     "availableUntil": "· available until",
     "recordingExpiredNotice": "This recording passed the 30-day mark and was deleted, as promised. The transcript is still here.",
+    "recordingDeletionPending": "This recording passed the 30-day mark and can no longer be played. The app is still deleting the audio from storage.",
     "noRecordingStored": "No audio stored for this meeting.",
     "privacyNotice": "The audio and the transcript stay in your account only, unless you turn on a sharing link. The audio expires automatically after 30 days.",
     "translateHeading": "Translate what was said in this meeting",
@@ -1528,10 +1547,10 @@
     "storedAudioMissing": "This meeting's stored audio was not found.",
     "audioDurationUnreadable": "We couldn't read this audio's duration. Upload the file as MP3 or M4A.",
     "ai": {
-      "reviewNotice": "AI suggestions for you to check against the transcript excerpt. None of this was saved or added to your network on its own.",
+      "reviewNotice": "AI suggestions for you to check against the transcript excerpts. None of this was saved or added to your network on its own.",
       "excerptLabel": "Transcript excerpt",
       "askTitle": "Ask the meeting",
-      "askIntro": "The answer comes only from what was said in the meeting, with the transcript excerpt that supports it.",
+      "askIntro": "The answer comes only from what was said in the meeting, with the transcript excerpts that support it.",
       "askLabel": "Your question about the meeting",
       "askPlaceholder": "E.g.: What deadline was agreed?",
       "askButton": "Ask",
@@ -1539,7 +1558,9 @@
       "notAnswered": "This meeting's transcript does not answer this question.",
       "askError": "Could not answer the question.",
       "unavailable": "The AI service did not respond just now. Please try again in a moment.",
-      "needsTranscript": "This meeting does not have a transcript ready for the AI to read yet."
+      "needsTranscript": "This meeting does not have a transcript ready for the AI to read yet.",
+      "tooLong": "This meeting is too long for questions to the AI: the limit is about 7 hours of speech.",
+      "sourcesLabel": "Where this was said"
     },
     "summary": {
       "title": "Meeting summary",
@@ -1587,12 +1608,13 @@
     "share": {
       "button": "Share",
       "title": "Share by link",
-      "intro": "Anyone who gets the link can listen to the recording, read the transcript and ask the AI for a summary and answers about the meeting, without a WRW account. Deleting and reprocessing stay with you.",
-      "authorization": "I confirm that everyone who spoke in this meeting agreed to share the recording and the transcript with whoever receives the link.",
+      "intro": "Anyone who gets the link can listen to the recording, read the transcript and ask the AI for a summary and answers about the meeting, without a WRW account. The names you give the voices are shown to anyone with the link. Deleting and reprocessing stay with you.",
+      "authorization": "I confirm that everyone who spoke in this meeting agreed that whoever receives the link may listen to the recording and read the transcript, with the names I give the voices.",
       "createButton": "Create link",
       "cancel": "Cancel",
       "activeTitle": "Shared by link",
       "activeIntro": "Anyone with this link can open the meeting, including people it gets forwarded to. To cut off access, turn the link off.",
+      "namesNeedRelink": "People who open this link don't see the names you gave the voices: it was turned on before the confirmation included the names. To show them, turn the link off and share again. The new link will be different, and the old one will stop opening.",
       "linkLabel": "Meeting link",
       "copy": "Copy link",
       "copied": "Link copied.",
@@ -1617,7 +1639,7 @@
       "notFound": "This link doesn't exist or is no longer available.",
       "goHome": "Discover WRW",
       "audioLoadError": "Couldn't load the audio right now. Reload the page and try again.",
-      "reviewNotice": "AI suggestions to check against the transcript excerpt. None of this was saved.",
+      "reviewNotice": "AI suggestions to check against the transcript excerpts. None of this was saved.",
       "translateSubtext": "Choose the language you want to read the transcript in."
     },
     "install": {
@@ -1649,6 +1671,8 @@
     "speakerNamePlaceholder": "Name of the speaker",
     "speakerNameLabel": "Name of speaker {{n}}",
     "speakerNameError": "Could not save the name.",
+    "speakerNameLinkHint": "This name is also shown to anyone with the meeting link.",
+    "speakerNameRelinkHint": "People with the meeting link don't see this name. To show it, turn the link off and share again.",
     "saveSpeakerName": "Save",
     "speakingTime": "Speaking time",
     "searchTranscriptPlaceholder": "Search the transcript",
@@ -1656,7 +1680,17 @@
     "playFrom": "Listen from {{tempo}}",
     "progressRecording": "Recording in progress: the audio arrives a little at a time.",
     "progressUploading": "Receiving audio: {{recebidas}} of {{esperadas}}",
-    "progressTranscribing": "Transcribing: {{transcritas}} of {{total}}"
+    "progressTranscribing": "Transcribing: {{transcritas}} of {{total}}",
+    "player": {
+      "play": "Play",
+      "pause": "Pause",
+      "rewind": "Back {{segundos}} seconds",
+      "forward": "Forward {{segundos}} seconds",
+      "speed": "Playback speed: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "Position in the recording",
+      "positionValue": "{{atual}} of {{total}}"
+    }
   },
   "connections": {
     "messageSent": "Message sent",
@@ -1796,13 +1830,14 @@
     "minutesUsed": "In saved meetings",
     "minutesUsedHelp": "Total length of the transcribed meetings still in your account.",
     "minutesLimit": "Free limit per meeting",
-    "minutesLimitHelp": "Applies to each recording and each uploaded audio file.",
+    "minutesLimitHelp": "For recordings, which ask for confirmation every hour. An uploaded audio file can be up to {{minutos}} minutes long.",
     "minutesValue": "{{minutos}} min",
+    "hoursValue": "{{horas}} h",
     "moreTime": "Need more time? Expand your meeting minutes.",
-    "moreTimeUnavailable": "Expanding minutes with a monthly plan is not available yet. For now, each meeting can last up to {{minutos}} minutes.",
+    "moreTimeUnavailable": "Expanding minutes with a monthly plan is not available yet. For now, each recorded meeting can last up to {{horas}} hours.",
     "actionsTitle": "Start here",
     "actionRecord": "Record or upload a meeting",
-    "actionRecordDesc": "Up to {{minutos}} minutes per meeting, with a transcript and suggestions for the contacts mentioned.",
+    "actionRecordDesc": "Recordings of up to {{horas}} hours per meeting, with a transcript and suggestions for the contacts mentioned.",
     "consentNotice": "Before recording, you are responsible for obtaining consent from everyone taking part and for following the applicable privacy rules.",
     "actionContacts": "Organize my contacts",
     "actionContactsDesc": "Your private contact base. A contact does not become a member or get a profile on the platform.",
@@ -1840,6 +1875,7 @@
     "sairEnviando": "Audio from this tab is still being sent.",
     "sairAudioNaoEnviado": "This tab has recorded audio that hasn't been sent yet.",
     "sairPerdeOAudio": "If you sign out now, that audio will be lost.",
+    "sairDescartePendente": "The discarded recording hasn't been deleted yet. If you sign out now, it may go on to transcription.",
     "continuarAqui": "Stay here",
     "sairMesmoAssim": "Sign out anyway",
     "versaoNovaDepoisDoEnvio": "A new version of WRW is available. This page will refresh on its own once the audio has been sent.",
@@ -2216,7 +2252,7 @@
       "review": "Review in My Smart Network"
     },
     "dashboard": {
-      "minutesLine": "{{usados}} min used this month · up to {{limite}} min per meeting",
+      "minutesLine": "{{usados}} min used this month · up to {{horas}} h per meeting",
       "expandSoon": "expansion depends on a future integration"
     }
   },

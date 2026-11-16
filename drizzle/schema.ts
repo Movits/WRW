@@ -1069,7 +1069,8 @@ export const meetings = mysqlTable("meetings", {
   consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
   // Os nomes que a dona deu às vozes da transcrição por falante (H3 do desenho
   // do gravador): { "F1": "Ana", "F2": "Bia" }. Nulo: nenhuma voz nomeada, e a
-  // tela mostra "Falante n". Só a dona vê: o link aberto não leva os nomes.
+  // tela mostra "Falante n". A dona vê, e o link aberto também, quando foi
+  // ligado com a confirmação que fala dos nomes (H3b, decisão de 16/11/2026).
   speakerNames: jsonCompat("speaker_names").$type<Record<string, string>>(),
   // Quantas partes a gravação teve, informado quando ela termina. Nulo
   // enquanto grava e no envio único.
