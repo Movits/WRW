@@ -2030,6 +2030,35 @@
       "notFound": "Cette réunion n’est plus dans votre agenda. L’enregistrement continue sans lien.",
       "loadError": "Impossible de lire la réunion de l’agenda. L’enregistrement continue sans lien.",
       "sendInvite": "Envoyer l’invitation"
+    },
+    "google": {
+      "formNote": "La réunion est aussi ajoutée à votre Google Agenda.",
+      "invitesLabel": "Google envoie l’invitation depuis votre compte",
+      "invitesHint": "Décoché, les invités figurent dans l’événement, mais Google ne leur envoie pas l’invitation par e-mail. Coché, Google envoie l’invitation, puis les avis de modification et d’annulation, depuis votre compte, à chaque personne qui a un e-mail dans la liste.",
+      "onCalendar": "Dans votre Google Agenda",
+      "notOnCalendar": "Pas encore dans votre Google Agenda",
+      "send": "Ajouter à Google Agenda",
+      "retry": "Réessayer",
+      "sending": "Envoi…",
+      "broken": "La connexion à Google Agenda ne fonctionne plus, et les réunions n’y arrivent pas. Reconnectez-la depuis votre Profil.",
+      "openProfile": "Ouvrir le Profil",
+      "statusError": "Impossible de vérifier si votre Google Agenda est connecté.",
+      "toast": {
+        "sent": "La réunion est dans votre Google Agenda.",
+        "notSent": "La réunion est enregistrée dans WRW, mais elle n’a pas été ajoutée à votre Google Agenda.",
+        "removed": "La réunion a été retirée de votre Google Agenda.",
+        "notRemoved": "La réunion a été retirée de l’agenda de WRW, mais elle est toujours dans votre Google Agenda.",
+        "removeThere": "Si vous le souhaitez, supprimez l’événement là-bas.",
+        "pastNotSent": "Cette réunion a déjà eu lieu : elle reste uniquement dans l’agenda de WRW."
+      },
+      "reason": {
+        "notConnected": "Connectez Google Agenda depuis votre Profil.",
+        "revoked": "Reconnectez Google Agenda depuis votre Profil.",
+        "google": "Google n’a pas répondu. Réessayez dans quelques instants."
+      },
+      "errors": {
+        "stillInAgenda": "Cette réunion est toujours dans votre agenda. Actualisez la page."
+      }
     }
   },
   "googleAgenda": {

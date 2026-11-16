@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { FalhaDaConexaoGoogle } from "@shared/google-agenda";
-import { auditLogs, googleAgendaConexoes } from "../drizzle/schema";
+import { agendaReunioes, auditLogs, googleAgendaConexoes, users } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import {
   ConexaoGoogleRevogada,
@@ -33,11 +33,17 @@ import { decryptData, encryptData } from "./security";
  * token: a Google revoga a autorização inteira da conta no projeto, e revogar
  * um token derruba toda outra conexão com a mesma conta Google (ver
  * revogarToken, em server/google-oauth.ts).
+ *
+ * O estado das reuniões na Google (agenda_reunioes.google, da H16c) é da conta
+ * Google que recebeu os eventos: desconectar, ou conectar outra conta Google,
+ * o zera na mesma transação (esquecerEstadoNaGoogle).
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
 /** O banco ou a transação: as consultas daqui só leem. */
 type Leitor = Pick<Banco, "select">;
+/** A transação, para zerar o estado das reuniões na Google junto com a conexão. */
+type Escritor = Pick<Banco, "update">;
 
 export const ACAO_GOOGLE_CONECTADA = "GOOGLE_CALENDAR_CONNECTED";
 export const ACAO_GOOGLE_DESCONECTADA = "GOOGLE_CALENDAR_DISCONNECTED";
@@ -181,6 +187,36 @@ export async function tokenDeAcessoDaGoogleAgenda(
   return renovacao;
 }
 
+/**
+ * Um token de acesso novo, depois de a API da agenda recusar o guardado com
+ * 401 (a H16c): o guardado é esquecido, e o refresh token pede outro. Os erros
+ * são os de tokenDeAcessoDaGoogleAgenda.
+ */
+export async function renovarTokenDeAcessoDaGoogleAgenda(
+  userId: number,
+  buscar: Fetch = fetchGlobal,
+  agora: () => number = Date.now,
+): Promise<string> {
+  esquecerAcesso(userId);
+  return tokenDeAcessoDaGoogleAgenda(userId, buscar, agora);
+}
+
+/**
+ * A reunião marcada vai para a Google Agenda? Sim quando a função está
+ * disponível para a conta e há uma conexão gravada, mesmo marcada como
+ * revogada: aí o envio falha e a tela pede "Reconectar" (a H16c). Lê só a
+ * linha da conta; banco fora do ar sobe como erro.
+ */
+export async function googleAgendaConectada(userId: number): Promise<boolean> {
+  if (!configuracaoDaGoogleAgendaPara(userId)) return false;
+  const db = await exigirDb();
+  const [linha] = await db.select({ id: googleAgendaConexoes.id })
+    .from(googleAgendaConexoes)
+    .where(eq(googleAgendaConexoes.userId, userId))
+    .limit(1);
+  return Boolean(linha);
+}
+
 // ── a conta Google: quem divide a mesma autorização ───────────────────────
 
 /**
@@ -211,6 +247,33 @@ async function outraContaUsa(db: Leitor, sub: string, userId: number): Promise<b
 export async function contaGoogleEmUso(sub: string): Promise<boolean> {
   const db = await exigirDb();
   return (await contasDaContaGoogle(db, sub)).length > 0;
+}
+
+// ── o estado das reuniões na Google ────────────────────────────────────────
+
+/**
+ * O estado das reuniões da agenda na Google (agenda_reunioes.google, da H16c)
+ * diz se a conta Google CONECTADA tem o evento. Quando a conta sai (a
+ * desconexão) ou dá lugar a outra (conectar outra conta Google, também pelo
+ * "Reconectar" da conexão que parou de funcionar), ele volta a nulo, "nunca foi
+ * para a Google Agenda", na transação da conexão: o cartão deixa de dizer "Na
+ * sua Google Agenda" de uma agenda que não tem o evento, "Pôr na Google Agenda"
+ * volta às reuniões que vão acontecer, e a exclusão não manda o cancelamento à
+ * conta errada. Os eventos ficam na agenda da conta anterior, como o Perfil
+ * avisa ao desconectar; a exclusão de uma reunião futura ainda tenta tirar o
+ * evento com o estado nulo (excluirComAGoogle, em server/agenda-na-google.ts),
+ * para quem reconecta a mesma conta Google.
+ *
+ * A agenda é da dona pelo openId, e a conexão é pelo id da conta: a subconsulta
+ * liga os dois no banco, na mesma instrução.
+ */
+async function esquecerEstadoNaGoogle(tx: Escritor, userId: number) {
+  await tx.update(agendaReunioes)
+    .set({ google: null })
+    .where(and(
+      inArray(agendaReunioes.ownerId, sql`(select ${users.openId} from ${users} where ${users.id} = ${userId})`),
+      isNotNull(agendaReunioes.google),
+    ));
 }
 
 // ── conectar, desconectar e excluir ────────────────────────────────────────
@@ -265,6 +328,9 @@ export async function gravarConexaoGoogle(
       set: { googleSub: conexao.sub, emailGoogle: conexao.email, refreshTokenCifrado: versao, escopos, falha: null, updatedAt: agora },
     });
     const trocouDeContaGoogle = antiga !== undefined && antiga.sub !== conexao.sub;
+    // O estado das reuniões é de outra conta Google, ou de uma conexão que já
+    // não existe: volta a nulo. Com a mesma conta Google, os eventos são os dela.
+    if (!antiga || trocouDeContaGoogle) await esquecerEstadoNaGoogle(tx, userId);
     // Lançar aqui desfaz a gravação da conexão.
     await tx.insert(auditLogs).values({
       userId,
@@ -334,6 +400,8 @@ export async function desconectarGoogleAgenda(
   }
   await db.transaction(async tx => {
     await tx.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, userId));
+    // Sem a conta Google, o estado das reuniões lá não diz mais nada.
+    await esquecerEstadoNaGoogle(tx, userId);
     await tx.insert(auditLogs).values({
       userId,
       action: ACAO_GOOGLE_DESCONECTADA,

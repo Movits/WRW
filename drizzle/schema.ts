@@ -1396,6 +1396,20 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   // A gravação feita pelo "Gravar agora". Nulo enquanto ninguém gravou; a
   // exclusão da reunião volta a nulo (deletePrivateMeeting).
   meetingId:       varchar("meeting_id", { length: 36 }),
+  // A reunião na Google Agenda conectada da dona (H16c do plano do gravador).
+  // Nulo enquanto ela nunca foi mandada para lá (a dona não tinha a Google
+  // Agenda conectada), e de novo quando a conta Google sai ou muda: o estado é
+  // da conta conectada (server/google-agenda.ts). A reunião que já acabou não é
+  // criada lá e fica nula. "pendente" do momento em que o banco gravou até a Google
+  // responder; "ok" quando a Google tem a versão que está aqui; "falhou" quando
+  // não tem, e a tela mostra "Tentar de novo". O id do evento lá é o id daqui
+  // sem os hífens (server/google-agenda-eventos.ts): não há coluna para ele.
+  // Enum só no TypeScript, como em google_agenda_conexoes.falha.
+  google:          varchar("google", { length: 16, enum: ["pendente", "ok", "falhou"] }),
+  // A Google manda o convite (e os avisos de mudança e de cancelamento), pela
+  // conta da dona, a quem tem e-mail na lista. Falso por padrão: a WRW não faz
+  // a Google mandar nada em nome dela sem ela marcar.
+  googleConvites:  boolean("google_convites").default(false).notNull(),
   createdAt:       bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:       bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

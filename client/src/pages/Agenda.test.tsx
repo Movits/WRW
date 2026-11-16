@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { fusoDoAparelho } from "@shared/agenda";
 import { quandoDaReuniao } from "@shared/agenda-links";
-import Agenda, { entradaDoFormulario, mensagemDoErroDaAgenda, rotuloDaDuracao } from "./Agenda";
+import Agenda, { entradaDoFormulario, mensagemDoErroDaAgenda, mensagemDoErroDeTirarDaGoogle, motivoSemGoogleNaTela, rotuloDaDuracao } from "./Agenda";
 
 /**
  * A agenda de reuniões (H16a), com o tRPC dublado. Prova o que a dona vê e o
@@ -12,7 +12,9 @@ import Agenda, { entradaDoFormulario, mensagemDoErroDaAgenda, rotuloDaDuracao } 
  * "Gravar agora" abre o gravador com a reunião marcada, os convites abrem o app
  * dela com a mensagem pronta (os e-mails só no e-mail e no botão da Google
  * dela, nunca na mensagem), o .ics sai do navegador e o formulário manda a hora
- * do aparelho com o fuso dele.
+ * do aparelho com o fuso dele. Com a Google Agenda conectada (H16c), o cartão
+ * mostra o estado da reunião lá, com "Tentar de novo", e o formulário ganha o
+ * convite pela Google, desmarcado.
  */
 
 type Opcoes = { onSuccess?: (data: unknown, vars: unknown) => unknown; onError?: (erro: unknown, vars: unknown) => void };
@@ -27,10 +29,13 @@ const duble = vi.hoisted(() => {
       return { mutate: m.mutate, isPending: false, variables: undefined };
     },
   });
-  return { mutacao, registrar, listar: vi.fn(), utils: { agenda: { listar: { invalidate: vi.fn() } } } };
+  return {
+    mutacao, registrar, listar: vi.fn(), estadoGoogle: vi.fn(),
+    utils: { agenda: { listar: { invalidate: vi.fn() } }, googleAgenda: { estado: { invalidate: vi.fn() } } },
+  };
 });
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), message: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), message: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
@@ -39,6 +44,11 @@ vi.mock("@/lib/trpc", () => ({
       criar: duble.registrar("criar"),
       atualizar: duble.registrar("atualizar"),
       excluir: duble.registrar("excluir"),
+      mandarParaGoogle: duble.registrar("mandarParaGoogle"),
+      tirarDaGoogle: duble.registrar("tirarDaGoogle"),
+    },
+    googleAgenda: {
+      estado: { useQuery: (...args: unknown[]) => duble.estadoGoogle(...args) },
     },
   },
 }));
@@ -57,19 +67,27 @@ const reuniao = (extra: Record<string, unknown> = {}) => ({
   lembreteMinutos: 15,
   createdAt: 1,
   updatedAt: 2,
+  google: null,
+  googleConvites: false,
   gravacao: null,
   ...extra,
 });
 const lista = (proximas: unknown[], anteriores: unknown[] = []) => ({ data: { proximas, anteriores }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+/** O estado da Google Agenda (googleAgenda.estado, da H16b), como a consulta devolve. */
+const estadoGoogle = (data: unknown, extra: Record<string, unknown> = {}) => ({ data, isLoading: false, isError: false, error: null, refetch: vi.fn(), ...extra });
+const SEM_GOOGLE = { disponivel: false };
+const CONECTADA = { disponivel: true, origem: "https://wrwglobal.org", conectada: true, email: "dona@exemplo.com", falha: null };
 
 let criarUrl: ReturnType<typeof vi.fn>;
 let originais: { criar: unknown; revogar: unknown };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  for (const nome of ["criar", "atualizar", "excluir"]) duble.mutacao(nome).mutate.mockReset();
+  for (const nome of ["criar", "atualizar", "excluir", "mandarParaGoogle", "tirarDaGoogle"]) duble.mutacao(nome).mutate.mockReset();
   duble.utils.agenda.listar.invalidate.mockReset();
+  duble.utils.googleAgenda.estado.invalidate.mockReset();
   duble.listar.mockReturnValue(lista([reuniao()]));
+  duble.estadoGoogle.mockReturnValue(estadoGoogle(SEM_GOOGLE));
   window.history.replaceState(null, "", "/agenda");
   originais = { criar: URL.createObjectURL, revogar: URL.revokeObjectURL };
   criarUrl = vi.fn(() => "blob:agenda");
@@ -264,6 +282,7 @@ describe("Agenda — marcar, editar e excluir", () => {
       local: "Av. Paulista, 1000",
       participantes: [{ nome: "Ana", email: "ana@exemplo.com" }],
       lembreteMinutos: 15,
+      googleConvites: false,
     });
   });
 
@@ -366,5 +385,180 @@ describe("Agenda — funções da tela", () => {
     expect(entradaDoFormulario(base, t)).toEqual({ erro: "Escolha a data e a hora." });
     expect(entradaDoFormulario({ ...base, data: "2026-11-20", hora: "" }, t)).toEqual({ erro: "Escolha a data e a hora." });
     expect(entradaDoFormulario({ ...base, data: "2026-11-20" }, t, "Europe/Lisbon")).toMatchObject({ entrada: { fuso: "Europe/Lisbon", lembreteMinutos: null } });
+  });
+});
+
+describe("Agenda — a Google Agenda conectada (H16c)", () => {
+  const ANTEONTEM = Date.now() - 2 * 24 * 60 * 60_000;
+  const cartao = () => screen.getByRole("article", { name: "Conversa com a Bia" });
+
+  it("sem a Google Agenda: o link de criar evento da H16a, e nada de estado nem de convite pela Google", () => {
+    render(<Agenda/>);
+    expect(within(cartao()).getByRole("link", { name: /Google Agenda/ })).toBeInTheDocument();
+    expect(screen.queryByText("Na sua Google Agenda")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
+    expect(screen.queryByLabelText("A Google manda o convite pela sua conta")).not.toBeInTheDocument();
+  });
+
+  it("enquanto o estado da Google carrega, nem o link (criaria o evento em dobro) nem o estado", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(undefined, { isLoading: true }));
+    render(<Agenda/>);
+    expect(within(cartao()).queryByRole("link", { name: /Google Agenda/ })).not.toBeInTheDocument();
+    expect(within(cartao()).queryByText("Na sua Google Agenda")).not.toBeInTheDocument();
+  });
+
+  it("a consulta da Google com erro é erro com Tentar de novo, nunca 'não conectada'", () => {
+    const refetch = vi.fn();
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(undefined, {
+      isError: true, refetch, error: { message: "Banco de dados indisponível; tente de novo em instantes", data: { code: "INTERNAL_SERVER_ERROR" } },
+    }));
+    render(<Agenda/>);
+    const alerta = screen.getByRole("alert");
+    expect(within(alerta).getByText(/Não deu para saber se a sua Google Agenda está conectada/)).toBeInTheDocument();
+    fireEvent.click(within(alerta).getByRole("button"));
+    expect(refetch).toHaveBeenCalled();
+    expect(within(cartao()).queryByRole("link", { name: /Google Agenda/ })).not.toBeInTheDocument();
+  });
+
+  it("conectada e a reunião lá: 'Na sua Google Agenda', no lugar do link", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(CONECTADA));
+    duble.listar.mockReturnValue(lista([reuniao({ google: "ok" })]));
+    render(<Agenda/>);
+    expect(within(cartao()).getByText("Na sua Google Agenda")).toBeInTheDocument();
+    expect(within(cartao()).queryByRole("link", { name: /Google Agenda/ })).not.toBeInTheDocument();
+    expect(within(cartao()).queryByRole("button", { name: /Tentar de novo/ })).not.toBeInTheDocument();
+  });
+
+  it.each([["falhou"], ["pendente"]])("conectada e a reunião '%s': 'Ainda não está' e Tentar de novo manda a reunião", estado => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(CONECTADA));
+    duble.listar.mockReturnValue(lista([reuniao({ google: estado })]));
+    render(<Agenda/>);
+    expect(within(cartao()).getByText("Ainda não está na sua Google Agenda")).toBeInTheDocument();
+    fireEvent.click(within(cartao()).getByRole("button", { name: /Tentar de novo/ }));
+    expect(duble.mutacao("mandarParaGoogle").mutate).toHaveBeenCalledWith({ id: ID });
+  });
+
+  it("a reunião marcada antes de conectar: 'Pôr na Google Agenda' nas que vão acontecer; nas que já foram, nada", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(CONECTADA));
+    duble.listar.mockReturnValue(lista([reuniao()], [reuniao({ id: GRAVACAO, titulo: "Reunião de ontem", inicioEm: ANTEONTEM })]));
+    render(<Agenda/>);
+    fireEvent.click(within(cartao()).getByRole("button", { name: /Pôr na Google Agenda/ }));
+    expect(duble.mutacao("mandarParaGoogle").mutate).toHaveBeenCalledWith({ id: ID });
+    const deOntem = screen.getByRole("article", { name: "Reunião de ontem" });
+    expect(within(deOntem).queryByRole("button", { name: /Pôr na Google Agenda/ })).not.toBeInTheDocument();
+    expect(within(deOntem).queryByRole("link", { name: /Google Agenda/ })).not.toBeInTheDocument();
+  });
+
+  it("a conexão que parou de funcionar: o aviso no topo leva ao Perfil", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle({ ...CONECTADA, falha: "revogada" }));
+    render(<Agenda/>);
+    expect(screen.getByText(/A conexão com a Google Agenda parou de funcionar/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir o Perfil" }));
+    expect(window.location.pathname).toBe("/profile");
+  });
+
+  it("o formulário: a reunião vai para a Google, e o convite pela Google vem desmarcado; marcado, vai junto", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(CONECTADA));
+    render(<Agenda/>);
+    fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
+    expect(screen.getByText("A reunião vai também para a sua Google Agenda.")).toBeInTheDocument();
+    const convite = screen.getByLabelText("A Google manda o convite pela sua conta");
+    expect(convite).not.toBeChecked();
+    expect(convite).toHaveAccessibleDescription(/a Google não manda o convite por e-mail/);
+    fireEvent.change(screen.getByLabelText("Título"), { target: { value: "Reunião com investidor" } });
+    fireEvent.click(convite);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacao("criar").mutate).toHaveBeenCalledWith(expect.objectContaining({ titulo: "Reunião com investidor", googleConvites: true }));
+  });
+
+  it("editar traz o convite como estava", () => {
+    duble.estadoGoogle.mockReturnValue(estadoGoogle(CONECTADA));
+    duble.listar.mockReturnValue(lista([reuniao({ google: "ok", googleConvites: true })]));
+    render(<Agenda/>);
+    fireEvent.click(screen.getByRole("button", { name: /Editar/ }));
+    expect(screen.getByLabelText("A Google manda o convite pela sua conta")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacao("atualizar").mutate).toHaveBeenCalledWith(expect.objectContaining({ id: ID, googleConvites: true }));
+  });
+
+  it("salvou na WRW e a Google falhou: o aviso de sempre e outro com o porquê", async () => {
+    render(<Agenda/>);
+    fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
+    await act(async () => { await duble.mutacao("criar").opcoes.onSuccess?.({ id: ID, naGoogle: "falhou", motivo: "revogada" }, {}); });
+    expect(toast.success).toHaveBeenCalledWith("Reunião marcada.");
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", expect.anything());
+    // Deu certo na Google, ou nada foi tentado: só o aviso de sempre.
+    vi.mocked(toast.warning).mockClear();
+    await act(async () => { await duble.mutacao("atualizar").opcoes.onSuccess?.({ id: ID, naGoogle: "ok" }, {}); });
+    await act(async () => { await duble.mutacao("atualizar").opcoes.onSuccess?.({ id: ID, naGoogle: null }, {}); });
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("excluiu e o evento ficou na Google: o aviso traz Tentar de novo, que tira o evento com o convite que a reunião tinha", async () => {
+    render(<Agenda/>);
+    await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: true, naGoogle: "falhou", motivo: "google" }, { id: ID }); });
+    expect(toast.success).toHaveBeenCalledWith("Reunião tirada da agenda.");
+    const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, { action: { label: string; onClick: () => void } }];
+    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
+    expect(opcoes.action.label).toBe("Tentar de novo");
+    opcoes.action.onClick();
+    expect(duble.mutacao("tirarDaGoogle").mutate).toHaveBeenCalledWith({ id: ID, avisarConvidados: true });
+  });
+
+  it("excluiu, e só reconectar resolveria: o aviso manda apagar o evento por lá, sem Tentar de novo", async () => {
+    render(<Agenda/>);
+    await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "revogada" }, { id: ID }); });
+    const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. Se quiser, apague o evento por lá.");
+    expect(opcoes).not.toHaveProperty("action");
+  });
+
+  it("Tentar de novo: deu certo, o aviso de sucesso; não deu, o porquê; e a lista é relida", async () => {
+    render(<Agenda/>);
+    await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "ok" }, { id: ID }); });
+    expect(toast.success).toHaveBeenCalledWith("A reunião está na sua Google Agenda.");
+    await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "falhou", motivo: "nao-conectada" }, { id: ID }); });
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Conecte a Google Agenda no Perfil.", expect.anything());
+    expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("Tentar de novo na reunião que já acabou e não está na Google: o aviso de que ela fica só na WRW, nunca 'está na sua Google Agenda'", async () => {
+    render(<Agenda/>);
+    await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: null }, { id: ID }); });
+    expect(toast.info).toHaveBeenCalledWith("Esta reunião já aconteceu e fica só na agenda da WRW.");
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalled();
+  });
+
+  it("a Google recusou a conexão, ou ela saiu em outra aba: o estado da conexão é relido, e o aviso do topo vem sem recarregar a página", async () => {
+    render(<Agenda/>);
+    const relido = duble.utils.googleAgenda.estado.invalidate;
+    await act(async () => { await duble.mutacao("atualizar").opcoes.onSuccess?.({ id: ID, naGoogle: "falhou", motivo: "revogada" }, {}); });
+    expect(relido).toHaveBeenCalledTimes(1);
+    await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "falhou", motivo: "nao-conectada" }, { id: ID }); });
+    await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "revogada" }, { id: ID }); });
+    await act(async () => { await duble.mutacao("tirarDaGoogle").opcoes.onSuccess?.({ naGoogle: "falhou", motivo: "nao-conectada" }, {}); });
+    expect(relido).toHaveBeenCalledTimes(4);
+    // A Google fora do ar, ou tudo certo: a conexão é a mesma, e nada é relido.
+    await act(async () => { await duble.mutacao("criar").opcoes.onSuccess?.({ id: ID, naGoogle: "falhou", motivo: "google" }, {}); });
+    await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "ok" }, { id: ID }); });
+    await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: false, naGoogle: null }, { id: ID }); });
+    expect(relido).toHaveBeenCalledTimes(4);
+  });
+
+  it("tirar da Google: deu certo, o aviso; a reunião que ainda está na agenda, a frase própria", async () => {
+    render(<Agenda/>);
+    await act(async () => { await duble.mutacao("tirarDaGoogle").opcoes.onSuccess?.({ naGoogle: "ok" }, {}); });
+    expect(toast.success).toHaveBeenCalledWith("A reunião saiu da sua Google Agenda.");
+    await act(async () => { await duble.mutacao("tirarDaGoogle").opcoes.onError?.({ message: "x", data: { code: "CONFLICT" } }, {}); });
+    expect(toast.error).toHaveBeenCalledWith("Esta reunião ainda está na sua agenda. Atualize a tela.");
+  });
+
+  it("as frases da Google no idioma da tela", () => {
+    const en = i18n.getFixedT("en");
+    expect(motivoSemGoogleNaTela(en, "revogada")).toBe("Reconnect Google Calendar in your Profile.");
+    expect(motivoSemGoogleNaTela(en, "google")).toBe("Google didn't respond. Try again in a moment.");
+    expect(mensagemDoErroDeTirarDaGoogle(en, { data: { code: "CONFLICT" } })).toBe("This meeting is still in your schedule. Refresh the page.");
+    expect(mensagemDoErroDeTirarDaGoogle(en, { data: { code: "NOT_FOUND" } })).toBe("This meeting is no longer in your schedule. Refresh the page.");
   });
 });

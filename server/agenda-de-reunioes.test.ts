@@ -95,8 +95,14 @@ const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const REUNIAO = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const dados = {
   titulo: "Reunião com a Bia", inicioEm: Date.UTC(2026, 10, 20, 17, 0), duracaoMinutos: 90, fuso: "America/Sao_Paulo",
-  local: null, participantes: [{ nome: "Ana", email: "ana@exemplo.com" }], lembreteMinutos: 15,
+  local: null, participantes: [{ nome: "Ana", email: "ana@exemplo.com" }], lembreteMinutos: 15, googleConvites: false,
 };
+/** O valor gravado na coluna google: texto, ou a expressão SQL renderizada. */
+async function valorDaGoogle(valor: unknown) {
+  if (typeof valor === "string" || valor === null) return valor;
+  const { MySqlDialect } = await import("drizzle-orm/mysql-core");
+  return new MySqlDialect().sqlToQuery(valor as SQL);
+}
 const operacoes = () => estado.operacoes as unknown as Operacao[];
 const daTabela = (tabela: unknown, tipo?: Operacao["tipo"]) => operacoes().filter(o => o.tabela === tabela && (!tipo || o.tipo === tipo));
 const fila = (tabela: unknown, ...respostas: Array<Array<Record<string, unknown>>>) => estado.linhasPorTabela.set(tabela, respostas);
@@ -107,8 +113,8 @@ const JUNCAO_ESPERADA = {
 };
 const linhaDoBanco = (extra: Record<string, unknown> = {}) => ({
   id: ID, titulo: "Reunião com a Bia", inicioEm: dados.inicioEm, duracaoMinutos: 90, fuso: "America/Sao_Paulo", local: null,
-  participantes: [{ nome: "Ana", email: "ana@exemplo.com" }], lembreteMinutos: 15, createdAt: 1, updatedAt: 2,
-  gravacaoId: null, gravacaoStatus: null, ...extra,
+  participantes: [{ nome: "Ana", email: "ana@exemplo.com" }], lembreteMinutos: 15, google: null, googleConvites: false,
+  createdAt: 1, updatedAt: 2, gravacaoId: null, gravacaoStatus: null, ...extra,
 });
 
 beforeEach(() => {
@@ -150,6 +156,17 @@ describe("listarAgendaDaDona", () => {
     expect(agenda.proximas[0]).not.toHaveProperty("meetingId");
   });
 
+  it("o estado na Google e o convite (H16c): só os estados conhecidos passam, e o tinyint vira booleano", async () => {
+    fila(schema.agendaReunioes, [
+      linhaDoBanco({ google: "ok", googleConvites: 1 }),
+      linhaDoBanco({ id: "b", google: "falhou", googleConvites: 0 }),
+      linhaDoBanco({ id: "c", google: "outro", googleConvites: null }),
+      linhaDoBanco({ id: "d", google: null, googleConvites: true }),
+    ], []);
+    const agenda = await servico.listarAgendaDaDona("dona-1");
+    expect(agenda.proximas.map(r => [r.google, r.googleConvites])).toEqual([["ok", true], ["falhou", false], [null, false], [null, true]]);
+  });
+
   it("os participantes chegam como texto no MariaDB ou com lixo: só passa o que tem a forma certa", async () => {
     fila(schema.agendaReunioes, [linhaDoBanco({ participantes: [{ nome: "Ana", email: null }, { nome: "", email: "" }, null, "x", { nome: 3, email: "bia@exemplo.com" }] }), linhaDoBanco({ participantes: null })], []);
     const agenda = await servico.listarAgendaDaDona("dona-1");
@@ -175,15 +192,24 @@ describe("obterDaAgenda", () => {
 });
 
 describe("criarNaAgenda", () => {
-  it("conta só as da dona, grava com a dona, sem gravação, e devolve a id nova", async () => {
+  it("conta só as da dona, grava com a dona, sem gravação, e devolve a id nova e a ficha", async () => {
     fila(schema.agendaReunioes, [{ total: 3 }]);
-    const { id } = await servico.criarNaAgenda("dona-1", dados);
+    const { id, updatedAt } = await servico.criarNaAgenda("dona-1", dados);
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
     const [contagem] = daTabela(schema.agendaReunioes, "select");
     expect({ sql: contagem.sql, params: contagem.params }).toEqual({ sql: "`agenda_reunioes`.`owner_id` = ?", params: ["dona-1"] });
     const [insercao] = daTabela(schema.agendaReunioes, "insert");
-    expect(insercao.valores).toMatchObject({ ...dados, id, ownerId: "dona-1", meetingId: null });
+    // Sem a Google Agenda, a reunião não vai para lá: o estado nasce nulo.
+    expect(insercao.valores).toMatchObject({ ...dados, id, ownerId: "dona-1", meetingId: null, google: null, googleConvites: false });
     expect(typeof insercao.valores!.createdAt).toBe("number");
+    expect(updatedAt).toBe(insercao.valores!.updatedAt);
+  });
+
+  it("com a Google Agenda conectada, nasce 'pendente' na Google (primeiro o banco), com o convite escolhido", async () => {
+    fila(schema.agendaReunioes, [{ total: 0 }]);
+    await servico.criarNaAgenda("dona-1", { ...dados, googleConvites: true }, { naGoogle: true });
+    const [insercao] = daTabela(schema.agendaReunioes, "insert");
+    expect(insercao.valores).toMatchObject({ google: "pendente", googleConvites: true });
   });
 
   it("no teto, recusa sem gravar (PRECONDITION_FAILED)", async () => {
@@ -195,6 +221,7 @@ describe("criarNaAgenda", () => {
 
 describe("atualizarNaAgenda e excluirDaAgenda", () => {
   it("mudam só a da dona (id E owner_id); zero linhas é NOT_FOUND", async () => {
+    fila(schema.agendaReunioes, [{ google: null, googleConvites: false }]);
     await servico.atualizarNaAgenda("dona-1", ID, dados);
     await servico.excluirDaAgenda("dona-1", ID);
     const esperado = { sql: "(`agenda_reunioes`.`id` = ? and `agenda_reunioes`.`owner_id` = ?)", params: [ID, "dona-1"] };
@@ -202,11 +229,37 @@ describe("atualizarNaAgenda e excluirDaAgenda", () => {
     expect({ sql: atualizacao.sql, params: atualizacao.params }).toEqual(esperado);
     // A gravação ligada não muda ao editar.
     expect(atualizacao.valores).not.toHaveProperty("meetingId");
+    const [leitura] = daTabela(schema.agendaReunioes, "select");
+    expect({ sql: leitura.sql, params: leitura.params }).toEqual(esperado);
     const [exclusao] = daTabela(schema.agendaReunioes, "delete");
     expect({ sql: exclusao.sql, params: exclusao.params }).toEqual(esperado);
     estado.afetadas = 0;
     await expect(servico.atualizarNaAgenda("dona-2", ID, dados)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // A linha de outra dona: o select (com a dona no WHERE) não a acha, e nada é apagado.
+    const apagadasAntes = daTabela(schema.agendaReunioes, "delete").length;
     await expect(servico.excluirDaAgenda("dona-2", ID)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(daTabela(schema.agendaReunioes, "delete")).toHaveLength(apagadasAntes);
+  });
+
+  it("mudar com a Google Agenda conectada grava 'pendente' na mesma escrita e devolve a ficha", async () => {
+    const { updatedAt } = await servico.atualizarNaAgenda("dona-1", ID, { ...dados, googleConvites: true }, { naGoogle: true });
+    const [atualizacao] = daTabela(schema.agendaReunioes, "update");
+    expect(atualizacao.valores).toMatchObject({ google: "pendente", googleConvites: true, updatedAt });
+  });
+
+  it("mudar sem a Google Agenda: a que já foi para lá vira 'falhou' (a Google ficou com a versão antiga), a que nunca foi continua nula", async () => {
+    await servico.atualizarNaAgenda("dona-1", ID, dados);
+    const [atualizacao] = daTabela(schema.agendaReunioes, "update");
+    expect(await valorDaGoogle(atualizacao.valores!.google)).toMatchObject({
+      sql: "CASE WHEN `agenda_reunioes`.`google` IS NULL THEN NULL ELSE ? END", params: ["falhou"],
+    });
+  });
+
+  it("excluir devolve o estado na Google e o convite da linha que saiu, para a rota tirar o evento depois", async () => {
+    fila(schema.agendaReunioes, [{ google: "ok", googleConvites: 1 }]);
+    expect(await servico.excluirDaAgenda("dona-1", ID)).toEqual({ google: "ok", googleConvites: true });
+    fila(schema.agendaReunioes, [{ google: null, googleConvites: false }]);
+    expect(await servico.excluirDaAgenda("dona-1", ID)).toEqual({ google: null, googleConvites: false });
   });
 });
 
@@ -242,6 +295,8 @@ describe("o lembrete no sino (H15) anda com a reunião da agenda", () => {
   });
 
   it("tirar da agenda esquece o lembrete e os avisos dela, na transação da exclusão; a de outra dona, não", async () => {
+    // A exclusão lê antes o estado na Google da linha (H16c), na mesma transação.
+    fila(schema.agendaReunioes, [{ google: null, googleConvites: false }]);
     await servico.excluirDaAgenda("dona-1", ID);
     expect(estado.transacoes).toBe(1);
     expect(lembretes.esquecerLembrete).toHaveBeenCalledWith(expect.anything(), "dona-1", "agenda", ID);

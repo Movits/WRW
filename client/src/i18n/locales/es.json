@@ -2030,6 +2030,35 @@
       "notFound": "Esta reunión ya no está en tu agenda. La grabación sigue sin vínculo.",
       "loadError": "No se pudo leer la reunión de la agenda. La grabación sigue sin vínculo.",
       "sendInvite": "Enviar la invitación"
+    },
+    "google": {
+      "formNote": "La reunión también va a tu Google Calendar.",
+      "invitesLabel": "Google envía la invitación desde tu cuenta",
+      "invitesHint": "Sin marcar, los invitados quedan en el evento, pero Google no les envía la invitación por correo. Marcado, Google envía la invitación, y después los avisos de cambio y de cancelación, desde tu cuenta a quienes tienen correo en la lista.",
+      "onCalendar": "En tu Google Calendar",
+      "notOnCalendar": "Todavía no está en tu Google Calendar",
+      "send": "Añadir a Google Calendar",
+      "retry": "Intentar de nuevo",
+      "sending": "Enviando…",
+      "broken": "La conexión con Google Calendar dejó de funcionar, y las reuniones no están llegando allí. Vuelve a conectarla en tu Perfil.",
+      "openProfile": "Abrir el Perfil",
+      "statusError": "No se pudo comprobar si tu Google Calendar está conectado.",
+      "toast": {
+        "sent": "La reunión está en tu Google Calendar.",
+        "notSent": "La reunión está guardada en WRW, pero no llegó a tu Google Calendar.",
+        "removed": "La reunión se quitó de tu Google Calendar.",
+        "notRemoved": "La reunión se quitó de la agenda de WRW, pero sigue en tu Google Calendar.",
+        "removeThere": "Si quieres, borra el evento allí.",
+        "pastNotSent": "Esta reunión ya ocurrió, así que se queda solo en la agenda de WRW."
+      },
+      "reason": {
+        "notConnected": "Conecta Google Calendar en tu Perfil.",
+        "revoked": "Vuelve a conectar Google Calendar en tu Perfil.",
+        "google": "Google no respondió. Inténtalo de nuevo en unos instantes."
+      },
+      "errors": {
+        "stillInAgenda": "Esta reunión sigue en tu agenda. Actualiza la página."
+      }
     }
   },
   "googleAgenda": {

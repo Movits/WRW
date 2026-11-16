@@ -69,6 +69,16 @@ export function fusoDoAparelho(): string {
   }
 }
 
+/**
+ * A reunião já acabou (o início mais a duração já passou)? A mesma conta do
+ * cartão da agenda, que só oferece "Pôr na Google Agenda" à que ainda vai
+ * acontecer. Na Google Agenda (H16c), a reunião que já acabou nunca é criada,
+ * e mudá-la ou excluí-la não manda aviso a ninguém (server/agenda-na-google.ts).
+ */
+export function reuniaoJaAcabou(reuniao: { inicioEm: number; duracaoMinutos: number }, agora: number): boolean {
+  return reuniao.inicioEm + reuniao.duracaoMinutos * 60_000 <= agora;
+}
+
 /** Endereço web inteiro (o link da chamada), e não um endereço de rua com um link no meio. */
 export function ehLinkDaChamada(local: string | null | undefined): boolean {
   return typeof local === "string" && /^https?:\/\/[^\s<>"]+$/i.test(local.trim());

@@ -253,6 +253,18 @@ localhost precisa de um projeto próprio do Google Cloud**: no mesmo projeto, de
 no computador de quem desenvolve derrubaria a conexão de produção da mesma conta
 Google.
 
+**Os eventos (H16c) não pedem variável nova.** Com a conexão de pé, marcar, mudar e
+excluir uma reunião na agenda da WRW criam, mudam e tiram o evento na agenda principal
+da conta Google da dona (`server/google-agenda-eventos.ts`): primeiro o banco, depois a
+Google, e o estado fica em `agenda_reunioes.google`. Sem a Calendar API ligada no
+projeto do Google Cloud, a Google recusa toda chamada de evento (403), e as reuniões
+ficam "Ainda não está na sua Google Agenda", com "Tentar de novo". Desconectar e excluir
+a conta da WRW não apagam os eventos que já estão na agenda da dona. O estado é da conta
+Google conectada: desconectar, ou conectar outra conta Google, o zera, e as reuniões que
+vão acontecer voltam a oferecer "Pôr na Google Agenda". A reunião que já acabou nunca é
+criada lá: mudá-la só muda o evento que já existe, sem aviso aos convidados, e excluí-la
+deixa o evento na Google como histórico.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

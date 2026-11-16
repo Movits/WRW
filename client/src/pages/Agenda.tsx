@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import type { inferRouterOutputs } from "@trpc/server";
-import { CalendarDays, CalendarPlus, Download, FileText, Loader2, Mail, MessageCircle, Mic, Pencil, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CalendarDays, CalendarPlus, Download, FileText, Loader2, Mail, MessageCircle, Mic, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
@@ -24,6 +24,8 @@ import {
 import { montarIcs, nomeDoArquivoIcs, revisaoDoIcs } from "@shared/agenda-ics";
 import { linkDaGoogleAgenda, quandoDaReuniao } from "@shared/agenda-links";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { ROTA_DO_PERFIL } from "@shared/google-agenda";
+import type { MotivoSemGoogle, ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ROTA_DAS_REUNIOES, rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
 import { conviteDaReuniao } from "@/lib/convite-da-agenda";
 
@@ -38,6 +40,12 @@ import { conviteDaReuniao } from "@/lib/convite-da-agenda";
  * Os cartões mostram a hora no fuso em que a reunião foi marcada, com o nome do
  * fuso. Falha na leitura da agenda é erro na tela (ErroDeConsulta), nunca
  * "nenhuma reunião".
+ *
+ * Com a Google Agenda conectada no Perfil (H16c), marcar, mudar e excluir
+ * também criam, mudam e tiram o evento lá, e o cartão diz se a reunião está na
+ * Google Agenda da dona, com "Tentar de novo" quando não está. No lugar do link
+ * "Google Agenda" da H16a, que criaria o evento em dobro, fica esse estado. O
+ * formulário ganha "A Google manda o convite pela sua conta", desmarcado.
  */
 
 type ReuniaoDaAgenda = inferRouterOutputs<AppRouter>["agenda"]["listar"]["proximas"][number];
@@ -52,6 +60,22 @@ export function mensagemDoErroDaAgenda(t: TranslateFn, erro: unknown): string {
     case "CONFLICT": return t("agenda.errors.conflict");
     default: return mensagemDeErroParaTela(erro, t);
   }
+}
+
+// Cada ramo chama t() com a chave literal, para o teste de chaves usadas conferir que todas existem.
+/** Por que a reunião não foi para a Google Agenda (ou não saiu dela), no idioma da tela. */
+export function motivoSemGoogleNaTela(t: TranslateFn, motivo: MotivoSemGoogle): string {
+  switch (motivo) {
+    case "nao-conectada": return t("agenda.google.reason.notConnected");
+    case "revogada": return t("agenda.google.reason.revoked");
+    case "google": return t("agenda.google.reason.google");
+  }
+}
+
+/** O erro do "Tentar de novo" de tirar da Google: a reunião que ainda está na agenda tem frase própria. */
+export function mensagemDoErroDeTirarDaGoogle(t: TranslateFn, erro: unknown): string {
+  if ((erro as { data?: { code?: string } } | null)?.data?.code === "CONFLICT") return t("agenda.google.errors.stillInAgenda");
+  return mensagemDoErroDaAgenda(t, erro);
 }
 
 /** "15 min", "1 h", "1 h 30 min", no idioma de quem lê. */
@@ -109,6 +133,8 @@ type Formulario = {
   participantes: Array<{ nome: string; email: string }>;
   /** "" é sem lembrete. */
   lembrete: string;
+  /** "A Google manda o convite pela sua conta" (H16c): desmarcado por padrão. */
+  googleConvites: boolean;
 };
 
 /** A próxima hora cheia, hoje (ou amanhã, perto da meia-noite). */
@@ -124,6 +150,7 @@ function formularioNovo(agora = new Date()): Formulario {
     local: "",
     participantes: [],
     lembrete: String(LEMBRETE_PADRAO),
+    googleConvites: false,
   };
 }
 
@@ -137,6 +164,7 @@ function formularioDe(reuniao: ReuniaoDaAgenda): Formulario {
     local: reuniao.local ?? "",
     participantes: reuniao.participantes.map(p => ({ nome: p.nome ?? "", email: p.email ?? "" })),
     lembrete: reuniao.lembreteMinutos === null ? "" : String(reuniao.lembreteMinutos),
+    googleConvites: reuniao.googleConvites === true,
   };
 }
 
@@ -174,6 +202,7 @@ export function entradaDoFormulario(formulario: Formulario, t: TranslateFn, fuso
       local: formulario.local.trim() || null,
       participantes: participantes.map(p => ({ nome: p.nome || null, email: p.email || null })),
       lembreteMinutos: formulario.lembrete === "" ? null : Number(formulario.lembrete),
+      googleConvites: formulario.googleConvites === true,
     },
   } as const;
 }
@@ -210,6 +239,16 @@ export default function Agenda() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const consulta = trpc.agenda.listar.useQuery();
+  // A mesma consulta da seção do Perfil (H16b): a agenda só fala da Google
+  // quando a dona a conectou. As mesmas opções, para as duas telas dividirem o cache.
+  const estadoGoogle = trpc.googleAgenda.estado.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const google = estadoGoogle.data;
+  const googleLigada = google?.disponivel === true && google.conectada === true;
+  const googleQuebrada = google?.disponivel === true && google.conectada === true && Boolean(google.falha);
+  // Só com a resposta "não conectada" o link de criar evento da H16a aparece:
+  // carregando ou com a consulta em erro, ele criaria o evento em dobro na
+  // agenda de quem está conectada.
+  const googleDesligada = Boolean(google) && !googleLigada;
   // null: formulário fechado; com id: editando aquela reunião.
   const [formulario, setFormulario] = useState<{ id: string | null; valores: Formulario } | null>(null);
   const topo = useRef<HTMLDivElement>(null);
@@ -220,22 +259,75 @@ export default function Agenda() {
     return () => window.clearInterval(relogio);
   }, []);
 
-  const aoSalvar = (mensagem: string) => {
+  // A conexão que a Google recusou (revogada) ou que saiu em outra aba (não
+  // conectada): o estado guardado da consulta ficou velho, e o aviso do topo,
+  // com "Abrir o Perfil", e o formulário dependem dele. A consulta não relê
+  // sozinha ao voltar à aba (refetchOnWindowFocus falso), então relê aqui.
+  const releAConexaoSeMudou = (resultado: ResultadoNaGoogle | undefined) => {
+    if (resultado?.naGoogle === "falhou" && (resultado.motivo === "revogada" || resultado.motivo === "nao-conectada")) {
+      void utils.googleAgenda.estado.invalidate();
+    }
+  };
+  // O que a dona salvou está salvo; a falha da Google vem num aviso à parte,
+  // com o porquê, e o cartão mostra "Tentar de novo".
+  const avisarSeNaoFoi = (resultado: ResultadoNaGoogle | undefined) => {
+    if (resultado?.naGoogle === "falhou") toast.warning(`${t("agenda.google.toast.notSent")} ${motivoSemGoogleNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+    releAConexaoSeMudou(resultado);
+  };
+  const aoSalvar = (mensagem: string, resultado?: ResultadoNaGoogle) => {
     toast.success(mensagem);
+    avisarSeNaoFoi(resultado);
     setFormulario(null);
     void utils.agenda.listar.invalidate();
   };
   const criar = trpc.agenda.criar.useMutation({
-    onSuccess: () => aoSalvar(t("agenda.toast.created")),
+    onSuccess: resultado => aoSalvar(t("agenda.toast.created"), resultado),
     onError: erro => toast.error(mensagemDoErroDaAgenda(t, erro)),
   });
   const atualizar = trpc.agenda.atualizar.useMutation({
-    onSuccess: () => aoSalvar(t("agenda.toast.updated")),
+    onSuccess: resultado => aoSalvar(t("agenda.toast.updated"), resultado),
     onError: erro => toast.error(mensagemDoErroDaAgenda(t, erro)),
   });
+  const tirarDaGoogle = trpc.agenda.tirarDaGoogle.useMutation({
+    onSuccess: resultado => {
+      if (resultado.naGoogle === "falhou") avisarQueFicouNaGoogle(resultado.motivo);
+      else toast.success(t("agenda.google.toast.removed"));
+      releAConexaoSeMudou(resultado);
+    },
+    onError: erro => toast.error(mensagemDoErroDeTirarDaGoogle(t, erro)),
+  });
+  // A reunião saiu da WRW, e o evento ficou na Google: o "Tentar de novo" vai
+  // no próprio aviso, porque o cartão já sumiu. Quando só reconectar resolve,
+  // o aviso diz para apagar por lá.
+  function avisarQueFicouNaGoogle(motivo: MotivoSemGoogle, novaTentativa?: () => void) {
+    const texto = `${t("agenda.google.toast.notRemoved")} ${motivo === "google" ? motivoSemGoogleNaTela(t, motivo) : t("agenda.google.toast.removeThere")}`;
+    if (motivo === "google" && novaTentativa) toast.warning(texto, { duration: 15_000, action: { label: t("agenda.google.retry"), onClick: novaTentativa } });
+    else toast.warning(texto, { duration: 15_000 });
+  }
   const excluir = trpc.agenda.excluir.useMutation({
-    onSuccess: () => {
+    onSuccess: (resultado, variaveis) => {
       toast.success(t("agenda.toast.deleted"));
+      if (resultado.naGoogle === "falhou") {
+        const { avisarConvidados } = resultado;
+        avisarQueFicouNaGoogle(resultado.motivo, () => tirarDaGoogle.mutate({ id: variaveis.id, avisarConvidados }));
+      }
+      releAConexaoSeMudou(resultado);
+      void utils.agenda.listar.invalidate();
+    },
+    onError: erro => {
+      toast.error(mensagemDoErroDaAgenda(t, erro));
+      void utils.agenda.listar.invalidate();
+    },
+  });
+  // "Tentar de novo" e "Pôr na Google Agenda" no cartão. A reunião que já
+  // acabou e não está na Google fica só na WRW: o servidor não a cria lá, e a
+  // resposta é nula.
+  const mandarParaGoogle = trpc.agenda.mandarParaGoogle.useMutation({
+    onSuccess: resultado => {
+      if (resultado.naGoogle === "falhou") toast.warning(`${t("agenda.google.toast.notSent")} ${motivoSemGoogleNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+      else if (resultado.naGoogle === null) toast.info(t("agenda.google.toast.pastNotSent"));
+      else toast.success(t("agenda.google.toast.sent"));
+      releAConexaoSeMudou(resultado);
       void utils.agenda.listar.invalidate();
     },
     onError: erro => {
@@ -271,10 +363,14 @@ export default function Agenda() {
   const dados = consulta.data;
   const salvando = criar.isPending || atualizar.isPending;
   const cartao = (reuniao: ReuniaoDaAgenda) => <CartaoDaAgendada key={reuniao.id} reuniao={reuniao} agora={agora} idioma={idioma}
+    googleLigada={googleLigada}
+    googleDesligada={googleDesligada}
     aoGravar={() => gravar(reuniao.id)}
     aoAbrirGravacao={id => navigate(rotaDaReuniao(id))}
     aoEditar={() => abrir(formularioDe(reuniao), reuniao.id)}
     aoExcluir={() => excluir.mutate({ id: reuniao.id })}
+    aoMandarParaGoogle={() => mandarParaGoogle.mutate({ id: reuniao.id })}
+    mandandoParaGoogle={mandarParaGoogle.isPending && mandarParaGoogle.variables?.id === reuniao.id}
     excluindo={excluir.isPending && excluir.variables?.id === reuniao.id}/>;
 
   return <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
@@ -291,11 +387,26 @@ export default function Agenda() {
         </button>}
       </div>
 
+      {googleQuebrada && <div role="status" className="mb-6 flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="flex gap-2 text-sm text-amber-200">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true"/> {t("agenda.google.broken")}
+        </p>
+        <button type="button" onClick={() => navigate(ROTA_DO_PERFIL)} className={`shrink-0 ${CLASSE_DO_BOTAO}`}>{t("agenda.google.openProfile")}</button>
+      </div>}
+
+      {/* A consulta da Google com erro é erro, nunca "não conectada"; a lista
+          com erro já mostra o dela, e um basta. */}
+      {estadoGoogle.isError && !consulta.isError && <div role="alert" className="mb-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-white/70">{t("agenda.google.statusError")} <span className="text-white/45">{mensagemDeErroParaTela(estadoGoogle.error, t)}</span></p>
+        <button type="button" onClick={() => void estadoGoogle.refetch()} className={`shrink-0 ${CLASSE_DO_BOTAO}`}>{t("errorBoundary.retryButton")}</button>
+      </div>}
+
       {formulario && <FormularioDaAgendada
         key={formulario.id ?? "nova"}
         inicial={formulario.valores}
         editando={formulario.id !== null}
         salvando={salvando}
+        googleLigada={googleLigada}
         aoSalvar={valores => salvar(valores, formulario.id)}
         aoCancelar={() => setFormulario(null)}
       />}
@@ -326,10 +437,12 @@ export default function Agenda() {
 const CLASSE_DO_CAMPO = "mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300";
 const CLASSE_DO_BOTAO = "inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/85 hover:bg-white/5";
 
-function FormularioDaAgendada({ inicial, editando, salvando, aoSalvar, aoCancelar }: {
+function FormularioDaAgendada({ inicial, editando, salvando, googleLigada, aoSalvar, aoCancelar }: {
   inicial: Formulario;
   editando: boolean;
   salvando: boolean;
+  /** A Google Agenda conectada (H16c): a reunião vai para lá, e o convite pela Google aparece. */
+  googleLigada: boolean;
   aoSalvar: (valores: Formulario) => void;
   aoCancelar: () => void;
 }) {
@@ -410,6 +523,19 @@ function FormularioDaAgendada({ inicial, editando, salvando, aoSalvar, aoCancela
           onClick={() => setValores(atual => ({ ...atual, participantes: [...atual.participantes, { nome: "", email: "" }] }))}
           className={`mt-2 ${CLASSE_DO_BOTAO}`}><Plus size={15}/> {t("agenda.form.addParticipant")}</button>}
       </fieldset>
+      {googleLigada && <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <p className="flex gap-2 text-xs text-white/55">
+          <CalendarCheck size={14} className="mt-0.5 shrink-0 text-amber-300" aria-hidden="true"/> {t("agenda.google.formNote")}
+        </p>
+        <div className="mt-3 flex items-start gap-3">
+          <input id={`${id}-convites`} type="checkbox" checked={valores.googleConvites} onChange={e => mudar("googleConvites", e.target.checked)}
+            aria-describedby={`${id}-convites-dica`} className="mt-0.5 h-4 w-4 shrink-0 accent-[#c98f70]"/>
+          <div>
+            <label htmlFor={`${id}-convites`} className="text-sm text-white/85">{t("agenda.google.invitesLabel")}</label>
+            <p id={`${id}-convites-dica`} className="mt-1 text-xs text-white/40">{t("agenda.google.invitesHint")}</p>
+          </div>
+        </div>
+      </div>}
     </div>
     <div className="mt-7 flex flex-wrap gap-2">
       <button type="submit" disabled={salvando}
@@ -424,14 +550,20 @@ function FormularioDaAgendada({ inicial, editando, salvando, aoSalvar, aoCancela
   </form>;
 }
 
-function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, aoEditar, aoExcluir, excluindo }: {
+function CartaoDaAgendada({ reuniao, agora, idioma, googleLigada, googleDesligada, aoGravar, aoAbrirGravacao, aoEditar, aoExcluir, aoMandarParaGoogle, mandandoParaGoogle, excluindo }: {
   reuniao: ReuniaoDaAgenda;
   agora: number;
   idioma: string;
+  /** A dona tem a Google Agenda conectada: o cartão mostra o estado da reunião lá. */
+  googleLigada: boolean;
+  /** A resposta foi "não conectada": o link de criar evento da H16a aparece. */
+  googleDesligada: boolean;
   aoGravar: () => void;
   aoAbrirGravacao: (meetingId: string) => void;
   aoEditar: () => void;
   aoExcluir: () => void;
+  aoMandarParaGoogle: () => void;
+  mandandoParaGoogle: boolean;
   excluindo: boolean;
 }) {
   const { t } = useTranslation();
@@ -484,9 +616,10 @@ function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, a
       <a href={email} className={CLASSE_DO_BOTAO}>
         <Mail size={15}/> {t("agenda.card.inviteEmail")}
       </a>
-      <a href={linkDaGoogleAgenda({ ...evento, convidados: emails })} target="_blank" rel="noopener noreferrer" className={CLASSE_DO_BOTAO}>
+      {googleDesligada && <a href={linkDaGoogleAgenda({ ...evento, convidados: emails })} target="_blank" rel="noopener noreferrer" className={CLASSE_DO_BOTAO}>
         <CalendarPlus size={15}/> {t("agenda.card.googleCalendar")}
-      </a>
+      </a>}
+      {googleLigada && <NaGoogleAgenda estado={reuniao.google} futura={agora < fim} mandando={mandandoParaGoogle} aoMandar={aoMandarParaGoogle}/>}
       <button type="button" onClick={() => baixarIcs(reuniao)} className={CLASSE_DO_BOTAO}>
         <Download size={15}/> {t("agenda.card.downloadIcs")}
       </button>
@@ -507,4 +640,40 @@ function CartaoDaAgendada({ reuniao, agora, idioma, aoGravar, aoAbrirGravacao, a
       </div>
     </div>}
   </article>;
+}
+
+/**
+ * O estado da reunião na Google Agenda da dona (H16c), no lugar do link de
+ * criar evento: "Na sua Google Agenda" quando a Google tem esta versão;
+ * "Ainda não está" com "Tentar de novo" quando o envio falhou ou não terminou;
+ * e, na reunião que nunca foi para lá (marcada antes de conectar, ou antes de
+ * desconectar ou de trocar de conta Google, que zeram o estado), "Pôr na
+ * Google Agenda", só nas que ainda vão acontecer.
+ */
+function NaGoogleAgenda({ estado, futura, mandando, aoMandar }: {
+  estado: ReuniaoDaAgenda["google"];
+  futura: boolean;
+  mandando: boolean;
+  aoMandar: () => void;
+}) {
+  const { t } = useTranslation();
+  if (estado === "ok") {
+    return <p className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-sm text-emerald-200/90">
+      <CalendarCheck size={15} aria-hidden="true"/> {t("agenda.google.onCalendar")}
+    </p>;
+  }
+  if (estado === "pendente" || estado === "falhou") {
+    return <div className="flex flex-wrap items-center gap-2">
+      <p className="inline-flex items-center gap-2 text-sm text-amber-200/90"><AlertTriangle size={15} aria-hidden="true"/> {t("agenda.google.notOnCalendar")}</p>
+      <button type="button" onClick={aoMandar} disabled={mandando} className={`${CLASSE_DO_BOTAO} disabled:opacity-50`}>
+        {mandando ? <Loader2 size={15} className="animate-spin" aria-hidden="true"/> : <RefreshCw size={15} aria-hidden="true"/>}
+        {mandando ? t("agenda.google.sending") : t("agenda.google.retry")}
+      </button>
+    </div>;
+  }
+  if (!futura) return null;
+  return <button type="button" onClick={aoMandar} disabled={mandando} className={`${CLASSE_DO_BOTAO} disabled:opacity-50`}>
+    {mandando ? <Loader2 size={15} className="animate-spin" aria-hidden="true"/> : <CalendarPlus size={15} aria-hidden="true"/>}
+    {mandando ? t("agenda.google.sending") : t("agenda.google.send")}
+  </button>;
 }

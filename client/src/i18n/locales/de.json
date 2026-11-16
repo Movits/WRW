@@ -2030,6 +2030,35 @@
       "notFound": "Dieses Meeting ist nicht mehr in Ihren Terminen. Die Aufnahme läuft ohne Verknüpfung weiter.",
       "loadError": "Das geplante Meeting konnte nicht gelesen werden. Die Aufnahme läuft ohne Verknüpfung weiter.",
       "sendInvite": "Einladung senden"
+    },
+    "google": {
+      "formNote": "Das Meeting wird auch in Ihren Google Kalender eingetragen.",
+      "invitesLabel": "Google verschickt die Einladung über Ihr Konto",
+      "invitesHint": "Nicht angehakt: Die Gäste stehen im Termin, aber Google schickt ihnen keine Einladung per E-Mail. Angehakt: Google verschickt über Ihr Konto die Einladung und später die Hinweise zu Änderungen und Absagen an alle mit E-Mail-Adresse in der Liste.",
+      "onCalendar": "In Ihrem Google Kalender",
+      "notOnCalendar": "Noch nicht in Ihrem Google Kalender",
+      "send": "In Google Kalender eintragen",
+      "retry": "Erneut versuchen",
+      "sending": "Wird gesendet…",
+      "broken": "Die Verbindung mit Google Kalender funktioniert nicht mehr, deshalb kommen die Meetings dort nicht an. Verbinden Sie sie in Ihrem Profil erneut.",
+      "openProfile": "Profil öffnen",
+      "statusError": "Es ließ sich nicht prüfen, ob Ihr Google Kalender verbunden ist.",
+      "toast": {
+        "sent": "Das Meeting steht in Ihrem Google Kalender.",
+        "notSent": "Das Meeting ist in WRW gespeichert, wurde aber nicht in Ihren Google Kalender eingetragen.",
+        "removed": "Das Meeting wurde aus Ihrem Google Kalender entfernt.",
+        "notRemoved": "Das Meeting wurde aus Ihren Terminen in WRW entfernt, steht aber noch in Ihrem Google Kalender.",
+        "removeThere": "Wenn Sie möchten, löschen Sie den Termin dort.",
+        "pastNotSent": "Dieses Meeting hat bereits stattgefunden und bleibt nur in Ihren Terminen in WRW."
+      },
+      "reason": {
+        "notConnected": "Verbinden Sie Google Kalender in Ihrem Profil.",
+        "revoked": "Verbinden Sie Google Kalender in Ihrem Profil erneut.",
+        "google": "Google hat nicht geantwortet. Versuchen Sie es gleich noch einmal."
+      },
+      "errors": {
+        "stillInAgenda": "Dieses Meeting ist noch in Ihren Terminen. Laden Sie die Seite neu."
+      }
     }
   },
   "googleAgenda": {

@@ -2030,6 +2030,35 @@
       "notFound": "This meeting is no longer in your schedule. The recording goes on without the link.",
       "loadError": "Could not read the scheduled meeting. The recording goes on without the link.",
       "sendInvite": "Send the invitation"
+    },
+    "google": {
+      "formNote": "This meeting also goes to your Google Calendar.",
+      "invitesLabel": "Google sends the invitation from your account",
+      "invitesHint": "Unchecked, the guests are added to the event, but Google doesn't email them the invitation. Checked, Google emails the invitation, and later the change and cancellation notices, from your account to everyone with an email on the list.",
+      "onCalendar": "In your Google Calendar",
+      "notOnCalendar": "Not in your Google Calendar yet",
+      "send": "Add to Google Calendar",
+      "retry": "Try again",
+      "sending": "Sending…",
+      "broken": "The Google Calendar connection has stopped working, so your meetings aren't going there. Reconnect it in your Profile.",
+      "openProfile": "Open Profile",
+      "statusError": "We couldn't check whether your Google Calendar is connected.",
+      "toast": {
+        "sent": "The meeting is in your Google Calendar.",
+        "notSent": "The meeting is saved in WRW, but it didn't go to your Google Calendar.",
+        "removed": "The meeting was removed from your Google Calendar.",
+        "notRemoved": "The meeting was removed from your WRW schedule, but it's still in your Google Calendar.",
+        "removeThere": "If you want, delete the event there.",
+        "pastNotSent": "This meeting has already happened, so it stays only in your WRW schedule."
+      },
+      "reason": {
+        "notConnected": "Connect Google Calendar in your Profile.",
+        "revoked": "Reconnect Google Calendar in your Profile.",
+        "google": "Google didn't respond. Try again in a moment."
+      },
+      "errors": {
+        "stillInAgenda": "This meeting is still in your schedule. Refresh the page."
+      }
     }
   },
   "googleAgenda": {

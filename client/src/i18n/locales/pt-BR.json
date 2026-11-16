@@ -2030,6 +2030,35 @@
       "notFound": "Esta reunião não está mais na sua agenda. A gravação segue sem ligação.",
       "loadError": "Não deu para ler a reunião da agenda. A gravação segue sem ligação.",
       "sendInvite": "Mandar o convite"
+    },
+    "google": {
+      "formNote": "A reunião vai também para a sua Google Agenda.",
+      "invitesLabel": "A Google manda o convite pela sua conta",
+      "invitesHint": "Desmarcado, os convidados ficam no evento, mas a Google não manda o convite por e-mail. Marcado, a Google manda o convite, e depois os avisos de mudança e de cancelamento, pela sua conta, a quem tem e-mail na lista.",
+      "onCalendar": "Na sua Google Agenda",
+      "notOnCalendar": "Ainda não está na sua Google Agenda",
+      "send": "Pôr na Google Agenda",
+      "retry": "Tentar de novo",
+      "sending": "Enviando…",
+      "broken": "A conexão com a Google Agenda parou de funcionar, e as reuniões não estão indo para lá. Reconecte no Perfil.",
+      "openProfile": "Abrir o Perfil",
+      "statusError": "Não deu para saber se a sua Google Agenda está conectada.",
+      "toast": {
+        "sent": "A reunião está na sua Google Agenda.",
+        "notSent": "A reunião está salva na WRW, mas não foi para a sua Google Agenda.",
+        "removed": "A reunião saiu da sua Google Agenda.",
+        "notRemoved": "A reunião saiu da agenda da WRW, mas continua na sua Google Agenda.",
+        "removeThere": "Se quiser, apague o evento por lá.",
+        "pastNotSent": "Esta reunião já aconteceu e fica só na agenda da WRW."
+      },
+      "reason": {
+        "notConnected": "Conecte a Google Agenda no Perfil.",
+        "revoked": "Reconecte a Google Agenda no Perfil.",
+        "google": "A Google não respondeu. Tente de novo em instantes."
+      },
+      "errors": {
+        "stillInAgenda": "Esta reunião ainda está na sua agenda. Atualize a tela."
+      }
     }
   },
   "googleAgenda": {
