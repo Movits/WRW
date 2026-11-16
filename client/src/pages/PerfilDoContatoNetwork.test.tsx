@@ -17,7 +17,9 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
  *   corrigido pela dona) e ignorar chamam o servidor — nada é gravado pela tela;
  * - completar por texto chama a interpretação; por voz, avisa que o áudio não
  *   é guardado;
- * - reuniões vinculadas e a linha do tempo;
+ * - reuniões vinculadas e a linha do tempo, com o link que abre a reunião;
+ * - as próximas ações ligadas ao contato (H5b): a lista, o "Nova ação" já
+ *   ligado a ele e os eventos da ação na linha do tempo;
  * - contato de outra dona (NOT_FOUND) é "não encontrado", não erro genérico;
  * - na reunião, o que a transcrição não sustentou aparece como FALTANDO.
  */
@@ -41,6 +43,8 @@ vi.mock("@/lib/trpc", () => {
         networkInteligente: {
           contato: { invalidate: vi.fn() }, resumo: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
         },
+        proximasAcoes: { invalidate: vi.fn() },
+        meetings: { resumoGuardado: { invalidate: vi.fn() } },
       }),
       networkInteligente: {
         contato: { useQuery: (...args: unknown[]) => duble.contato(...args) },
@@ -52,6 +56,14 @@ vi.mock("@/lib/trpc", () => {
         procurarNaRedeGlobal: mutacao("procurarNaRedeGlobal"),
         avancarConexao: mutacao("avancarConexao"),
       },
+      proximasAcoes: {
+        criar: mutacao("criar"),
+        marcarFeita: mutacao("marcarFeita"),
+        ligarContato: mutacao("ligarContato"),
+        editar: mutacao("editar"),
+        apagar: mutacao("apagar"),
+      },
+      network: { list: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }) } },
     },
   };
 });
@@ -70,6 +82,7 @@ function perfil(parcial: Record<string, unknown> = {}) {
       { id: "p-1", contactId: 5, meetingId: "m-1", meetingSuggestionId: "s-1", origem: "reuniao", campo: "preciso", valor: "Fornecedores internacionais", categoria: null, trecho: "procurando novos fornecedores internacionais", confianca: 0.85, criadaEm: 1 },
     ],
     reunioes: [{ id: "m-1", titulo: "Café na feira", status: "ready", em: Date.UTC(2026, 8, 1), assuntos: ["Distribuição", "Fornecedores"] }],
+    proximasAcoes: { lista: [], limite: 100 },
     conexoes: { termoAceito: true, lista: [] },
     linhaDoTempo: [
       { tipo: "reuniao", em: Date.UTC(2026, 8, 1), meetingId: "m-1", titulo: "Café na feira", assuntos: [] },
@@ -306,6 +319,105 @@ describe("perfil do contato — reuniões, conexões e memória de relacionament
     render(<PerfilDoContatoNetwork />);
     fireEvent.click(screen.getByRole("button", { name: "Procurar conexões deste contato na rede global" }));
     expect(duble.mutacoes.procurarNaRedeGlobal).toHaveBeenCalledWith({ contactId: 5 });
+  });
+});
+
+describe("perfil do contato — próximas ações e o link das reuniões (H5b)", () => {
+  const acao = (extra: Record<string, unknown> = {}) => ({
+    id: "acao-1", texto: "{F2} envia a proposta revisada", detalhe: null, responsavel: "{F2}", prazo: null, prazoDito: null,
+    origem: "reuniao", feita: false, feitaEm: null, trecho: null, createdAt: 1,
+    reuniao: { id: "m-1", titulo: "Café na feira", itemId: "item-1" }, vozes: { F2: "Carla" }, contato: { id: 5, nome: "Maria Silva" },
+    ...extra,
+  });
+  const secaoDasAcoes = () => screen.getByRole("heading", { name: "Próximas ações" }).closest("section")!;
+
+  it("o título da reunião vinculada abre a reunião, e a reunião da linha do tempo também", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const reunioes = screen.getByRole("heading", { name: "Reuniões vinculadas" }).closest("section")!;
+    expect(within(reunioes).getByRole("link", { name: "Café na feira" })).toHaveAttribute("href", "/meetings/m-1");
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByRole("link", { name: "Reunião: Café na feira" })).toHaveAttribute("href", "/meetings/m-1");
+    // O que não é reunião continua texto.
+    expect(within(linha).queryByRole("link", { name: "Contato cadastrado" })).not.toBeInTheDocument();
+  });
+
+  it("sem ação ligada: o convite a anotar aqui ou a vincular em Próximas ações, e o caminho para a lista inteira", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    expect(within(secao).getByText(/^Nenhuma próxima ação ligada a este contato\./)).toBeInTheDocument();
+    expect(within(secao).getByRole("link", { name: "Ver todas as suas próximas ações" })).toHaveAttribute("href", "/proximas-acoes");
+  });
+
+  it("'Nova ação' anota uma ação já ligada a este contato; Cancelar fecha sem gravar", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.click(within(secao).getByRole("button", { name: "Cancelar" }));
+    expect(within(secao).queryByLabelText("O que fazer")).not.toBeInTheDocument();
+    expect(duble.mutacoes.criar).not.toHaveBeenCalled();
+
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.change(within(secao).getByLabelText("O que fazer"), { target: { value: "Mandar o catálogo" } });
+    fireEvent.change(within(secao).getByLabelText("Prazo (opcional)"), { target: { value: "2026-11-30" } });
+    fireEvent.click(within(secao).getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacoes.criar).toHaveBeenCalledWith(
+      { texto: "Mandar o catálogo", detalhe: "", responsavel: "", prazo: "2026-11-30", contactId: 5 },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("as ações ligadas: o nome da voz no lugar do rótulo, a caixa marca pela ação, o link do item na reunião e nenhum link para o próprio contato", () => {
+    responde(perfil({ proximasAcoes: { lista: [
+      acao(),
+      acao({ id: "acao-2", texto: "Revisar o contrato", origem: "manual", reuniao: null, vozes: {}, responsavel: null, feita: true, feitaEm: 9 }),
+    ], limite: 100 } }));
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    expect(within(secao).getByText("Abertas: 1")).toBeInTheDocument();
+    expect(within(secao).queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    expect(within(secao).getByRole("link", { name: "Da reunião: Café na feira" })).toHaveAttribute("href", "/meetings/m-1?item=item-1");
+    expect(within(secao).queryByRole("link", { name: "Contato: Maria Silva" })).not.toBeInTheDocument();
+    expect(within(secao).queryByText(/Nenhuma próxima ação ligada/)).not.toBeInTheDocument();
+    expect(within(secao).getByRole("checkbox", { name: "Revisar o contrato" })).toBeChecked();
+    fireEvent.click(within(secao).getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
+    expect(duble.mutacoes.marcarFeita).toHaveBeenCalledWith({ id: "acao-1", feita: true });
+    // Tirar o vínculo daqui manda null: a ação sai deste perfil.
+    const primeira = within(secao).getByText("Carla envia a proposta revisada").closest("li")!;
+    fireEvent.click(within(primeira).getByRole("button", { name: "Tirar o vínculo" }));
+    expect(duble.mutacoes.ligarContato).toHaveBeenCalledWith({ id: "acao-1", contactId: null });
+  });
+
+  it("no teto da leitura, avisa que mostra só as primeiras", () => {
+    responde(perfil({ proximasAcoes: { lista: [acao(), acao({ id: "acao-2" })], limite: 2 } }));
+    render(<PerfilDoContatoNetwork />);
+    expect(within(secaoDasAcoes()).getByText("Mostrando as primeiras 2.")).toBeInTheDocument();
+  });
+
+  it("a linha do tempo mostra a ação anotada e a feita, com o nome dado à voz ou 'Falante n', nunca o rótulo cru", () => {
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "proxima_acao_feita", em: Date.UTC(2026, 10, 12), acaoId: "a-2", texto: "{F3} liga para o importador", vozes: {} },
+      { tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "a-1", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } },
+      { tipo: "contato_criado", em: Date.UTC(2026, 0, 10) },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText("Próxima ação feita: Falante 3 liga para o importador")).toBeInTheDocument();
+    expect(within(linha).getByText("Próxima ação: Carla envia a proposta")).toBeInTheDocument();
+    expect(within(linha).queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+  });
+
+  it("em inglês, os textos novos saem traduzidos", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "a-1", texto: "{F2} sends the proposal", vozes: { F2: "Carla" } },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    expect(screen.getByText("Next action: Carla sends the proposal")).toBeInTheDocument();
+    expect(screen.getByText(/^No next actions linked to this contact\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See all your next actions" })).toBeInTheDocument();
   });
 });
 

@@ -20,7 +20,10 @@ const duble = vi.hoisted(() => {
   return {
     chamadas, registrar, respostas, entradas,
     trpc: {
-      useUtils: () => ({ proximasAcoes: { invalidate: () => Promise.resolve() }, meetings: { resumoGuardado: { invalidate: () => Promise.resolve() } } }),
+      useUtils: () => ({
+        proximasAcoes: { invalidate: () => Promise.resolve() }, meetings: { resumoGuardado: { invalidate: () => Promise.resolve() } },
+        networkInteligente: { contato: { invalidate: () => Promise.resolve() } },
+      }),
       proximasAcoes: {
         listar: { useQuery: (entrada: unknown) => { entradas.push(entrada); return { data: undefined, isError: false, error: null, refetch: () => undefined, ...(respostas.listar ?? {}) }; } },
         criar: registrar("criar"),

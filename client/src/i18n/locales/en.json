@@ -2098,7 +2098,9 @@
       "topics": "Topics: {{lista}}",
       "connectionsTitle": "Connections and introductions",
       "connectionsNoConsent": "Turn on Smart Connections to see this contact's connections.",
-      "searchGlobal": "Search this contact's connections in the global network"
+      "searchGlobal": "Search this contact's connections in the global network",
+      "actionsEmpty": "No next actions linked to this contact. Add one here, or link an action to this contact in Next actions.",
+      "actionsAll": "See all your next actions"
     },
     "availability": {
       "title": "Make this contact available for network opportunities",
@@ -2155,7 +2157,9 @@
       "availableYes": "Made available for network opportunities",
       "availableNo": "Network permission withdrawn",
       "connection": "Connection recorded by the platform",
-      "stage": "Connection stage: {{etapa}}"
+      "stage": "Connection stage: {{etapa}}",
+      "nextAction": "Next action: {{texto}}",
+      "nextActionDone": "Next action done: {{texto}}"
     },
     "connections": {
       "title": "Recorded connections",

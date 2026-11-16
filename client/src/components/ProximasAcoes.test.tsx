@@ -35,6 +35,7 @@ const duble = vi.hoisted(() => {
     utils: {
       proximasAcoes: { invalidate: () => { invalidados.push("proximasAcoes"); return Promise.resolve(); } },
       meetings: { resumoGuardado: { invalidate: () => { invalidados.push("resumoGuardado"); return Promise.resolve(); } } },
+      networkInteligente: { contato: { invalidate: () => { invalidados.push("perfilDoContato"); return Promise.resolve(); } } },
     },
   };
 });
@@ -112,11 +113,11 @@ describe("o cartão do Dashboard", () => {
     expect(screen.queryByRole("button", { name: /Editar|Apagar|Vincular/ })).not.toBeInTheDocument();
   });
 
-  it("marcar relê as ações e o resumo (o item muda junto)", async () => {
+  it("marcar relê as ações, o resumo (o item muda junto) e o perfil do contato (a seção e a linha do tempo da H5b)", async () => {
     duble.consultas.doPainel = { data: { acoes: [acao()], abertas: 1 } };
     render(<CartaoDeProximasAcoes/>);
     await duble.mutacoes.marcarFeita.opcoes.onSettled?.();
-    expect(duble.invalidados.sort()).toEqual(["proximasAcoes", "resumoGuardado"]);
+    expect(duble.invalidados.sort()).toEqual(["perfilDoContato", "proximasAcoes", "resumoGuardado"]);
   });
 });
 
@@ -144,6 +145,17 @@ describe("a lista da página", () => {
     render(<ProximasAcoes acoes={[acao({ contato: { id: 5, nome: "Bia Lima" } })]}/>);
     expect(screen.getByRole("link", { name: "Contato: Bia Lima" })).toHaveAttribute("href", "/meu-network-inteligente/contatos/5");
     fireEvent.click(screen.getByRole("button", { name: "Tirar o vínculo" }));
+    expect(chamadas("ligarContato")).toEqual([[{ id: "acao-1", contactId: null }]]);
+  });
+
+  it("no perfil do próprio contato (H5b), o link para ele mesmo some; o de outro contato e o 'Tirar o vínculo' ficam", () => {
+    render(<ProximasAcoes contatoDaPagina={5} acoes={[
+      acao({ contato: { id: 5, nome: "Bia Lima" } }),
+      acao({ id: "acao-2", texto: "Ligar para a Ana", contato: { id: 6, nome: "Ana Prado" } }),
+    ]}/>);
+    expect(screen.queryByRole("link", { name: "Contato: Bia Lima" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Contato: Ana Prado" })).toHaveAttribute("href", "/meu-network-inteligente/contatos/6");
+    fireEvent.click(within(itemDoTexto("Carla envia a proposta revisada")).getByRole("button", { name: "Tirar o vínculo" }));
     expect(chamadas("ligarContato")).toEqual([[{ id: "acao-1", contactId: null }]]);
   });
 

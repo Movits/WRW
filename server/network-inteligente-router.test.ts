@@ -399,6 +399,7 @@ describe("memória de relacionamento — a linha do tempo", () => {
         id: "c-1", origem: "PRIVATE_NETWORK_MATCH", motivo: "", itens: [], pontuacao: 100, status: "negociacao",
         apresentacaoEm: 800, negociacaoEm: 900, fechamentoEm: null, descartadaEm: null, statusComissao: "sem_negocio", criadaEm: 600, lados: [],
       }],
+      acoes: [],
     });
     expect(eventos.map(e => e.tipo)).toEqual([
       "conexao_etapa", "conexao_etapa", "disponibilidade", "conexao_registrada", "quem_sou_confirmado",
@@ -406,5 +407,87 @@ describe("memória de relacionamento — a linha do tempo", () => {
     ]);
     // a confirmação de "tenho" não duplica o item que ela gravou
     expect(eventos.filter(e => e.tipo === "tenho_adicionado")).toHaveLength(1);
+  });
+
+  const semNada = {
+    contato: { createdAt: 100, disponivelRedeGlobal: false, disponibilidadeAlteradaEm: null },
+    reunioes: [], contextos: [], tenho: [], preciso: [], confirmacoes: [], conexoes: [],
+  };
+
+  it("as próximas ações ligadas ao contato (H5b): a anotada na criação e a feita na hora da caixa, com os rótulos e os nomes das vozes", () => {
+    const eventos = montarLinhaDoTempo({
+      ...semNada,
+      acoes: [
+        { id: "aberta", texto: "{F2} envia a proposta", vozes: { F2: "Carla" }, createdAt: 300, feita: false, feitaEm: null },
+        { id: "feita", texto: "Mandar o catálogo", vozes: {}, createdAt: 200, feita: true, feitaEm: 500 },
+      ],
+    });
+    expect(eventos).toEqual([
+      { tipo: "proxima_acao_feita", em: 500, acaoId: "feita", texto: "Mandar o catálogo", vozes: {} },
+      // O servidor não troca o rótulo pelo nome: manda os dois, e a tela troca.
+      { tipo: "proxima_acao", em: 300, acaoId: "aberta", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } },
+      { tipo: "proxima_acao", em: 200, acaoId: "feita", texto: "Mandar o catálogo", vozes: {} },
+      { tipo: "contato_criado", em: 100 },
+    ]);
+  });
+
+  it("a ação que nasceu já feita (a caixa marcada no resumo antes de virar ação) não fica anotada depois de feita", () => {
+    const eventos = montarLinhaDoTempo({
+      ...semNada,
+      acoes: [{ id: "antiga", texto: "Reservar a sala", vozes: {}, createdAt: 900, feita: true, feitaEm: 400 }],
+    });
+    // Mesma hora: a feita fica acima da anotada, e as duas na hora real da caixa.
+    expect(eventos.map(e => [e.tipo, e.em])).toEqual([["proxima_acao_feita", 400], ["proxima_acao", 400], ["contato_criado", 100]]);
+  });
+
+  it("desmarcada (feita false) não tem evento de feita, mesmo com uma data velha", () => {
+    const eventos = montarLinhaDoTempo({ ...semNada, acoes: [{ id: "a", texto: "Ligar", vozes: {}, createdAt: 300, feita: false, feitaEm: 250 }] });
+    expect(eventos.map(e => e.tipo)).toEqual(["proxima_acao", "contato_criado"]);
+    expect(eventos[0].em).toBe(300);
+  });
+});
+
+describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () => {
+  it("a seção e a linha do tempo vêm das ações da dona com este contato, numa leitura com a dona e o contato no WHERE", async () => {
+    hasValidConsent.mockResolvedValue(false);
+    estado.responder = sql => {
+      if (/from `private_contacts`/.test(sql)) {
+        // A conferência de posse (id e código) e o Quem Sou (11 colunas).
+        return /`fullName`/.test(sql)
+          ? [[5, "Maria Silva", null, null, null, null, null, "NW-1", 0, null, 100]]
+          : [[5, "NW-1"]];
+      }
+      if (/from `proximas_acoes`/.test(sql)) {
+        // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, createdAt,
+        // meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
+        return [
+          ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", 300,
+            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva"],
+          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, 200, null, 5, null, null, null, "Maria Silva"],
+        ];
+      }
+      return [];
+    };
+    const perfil = await chamar().contato({ contactId: 5 });
+
+    const leitura = estado.consultas.find(c => /from `proximas_acoes`/.test(c.sql))!;
+    expect(leitura.sql).toContain("where (`proximas_acoes`.`owner_id` = ? and `proximas_acoes`.`contact_id` = ?)");
+    expect(leitura.params).toEqual(expect.arrayContaining(["dona-9", 5]));
+    // Só lê: nenhuma escrita, e nada da lista inteira da dona (o backfill dos itens).
+    expect(estado.consultas.filter(c => /^\s*(insert|update|delete)/i.test(c.sql))).toEqual([]);
+    expect(estado.consultas.filter(c => /from `meeting_summary_items`/.test(c.sql))).toEqual([]);
+
+    expect(perfil.proximasAcoes.limite).toBe(100);
+    expect(perfil.proximasAcoes.lista.map(a => [a.id, a.feita, a.contato])).toEqual([
+      ["acao-1", false, { id: 5, nome: "Maria Silva" }],
+      ["acao-2", true, { id: 5, nome: "Maria Silva" }],
+    ]);
+    expect(perfil.proximasAcoes.lista[0]).toMatchObject({
+      reuniao: { id: "reuniao-1", titulo: "Café na feira", itemId: "item-1" }, vozes: { F2: "Carla" }, prazo: "2026-11-20",
+    });
+    expect(perfil.linhaDoTempo.map(e => [e.tipo, e.em])).toEqual([
+      ["proxima_acao_feita", 500], ["proxima_acao", 300], ["proxima_acao", 200], ["contato_criado", 100],
+    ]);
+    expect(perfil.linhaDoTempo[1]).toMatchObject({ acaoId: "acao-1", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } });
   });
 });
