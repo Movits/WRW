@@ -1,5 +1,6 @@
 import { ENV } from "./env";
 import { modeloDeTexto, type FuncaoDeTexto } from "./modelos-de-ia";
+import { ehNivelDeRaciocinio, NIVEIS_DE_RACIOCINIO, type NivelDeRaciocinio } from "./raciocinio-de-ia";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -72,10 +73,22 @@ export type InvokeParams = {
    * da função > LLM_MODEL > o padrão (server/_core/modelos-de-ia.ts). Sem
    * ela, vale o LLM_MODEL. Quem chama não passa o id: o `model` herdado do
    * proxy Manus saiu, porque o LLM_MODEL ganhava dele e nenhum caminho o usava.
+   * O raciocínio não sai daqui: vai em `raciocinio`, abaixo.
    */
   funcao?: FuncaoDeTexto;
-  thinking?: Record<string, unknown>;
-  reasoning?: Record<string, unknown>;
+  /**
+   * Quanto o modelo raciocina antes de responder. Sobe no corpo como
+   * `reasoning_effort`, no nível de cima, o campo que o endpoint do Gemini
+   * compatível com a OpenAI aceita (no Gemini 3 vira o thinking_level de mesmo
+   * nome; no 2.5, um thinking_budget). Sem ele, o corpo sai sem o campo e o
+   * modelo raciocina no padrão dele: é o que todo chamador faz hoje. Quem
+   * decide o nível de cada função é server/_core/raciocinio-de-ia.ts.
+   *
+   * Os campos `thinking` e `reasoning` que havia aqui, herança do proxy Manus,
+   * saíram: o endpoint recusa os dois com 400 INVALID_ARGUMENT ("Unknown name
+   * \"reasoning\": Cannot find field."), na sondagem da bancada de 16/11/2026.
+   */
+  raciocinio?: NivelDeRaciocinio;
   /**
    * Temperatura da amostragem. Sem ela, o provedor usa o padrão dele e a mesma
    * pergunta volta com respostas diferentes — foi o que fez o mesmo anúncio
@@ -455,8 +468,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     responseFormat,
     response_format,
     funcao,
-    thinking,
-    reasoning,
+    raciocinio,
     temperature,
     seed,
     maxTokens,
@@ -497,11 +509,26 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.max_tokens = resolvedMaxTokens;
   }
 
-  if (thinking) {
-    payload.thinking = thinking;
+  // Os campos antigos (`reasoning` e `thinking`, que o endpoint recusa com 400)
+  // e o nome do campo no corpo (`reasoning_effort`) não existem no tipo. Passados
+  // por fora dele, de um script em JS como a sondagem da bancada, seriam
+  // descartados em silêncio: o pedido voltaria 200, com o raciocínio padrão, e a
+  // medida pareceria a do nível pedido. Falham aqui, antes do fetch.
+  for (const campo of ["reasoning", "thinking", "reasoning_effort"]) {
+    if ((params as Record<string, unknown>)[campo] !== undefined) {
+      throw new Error(`O invokeLLM não aceita "${campo}": o raciocínio vai em raciocinio (${NIVEIS_DE_RACIOCINIO.join(", ")}).`);
+    }
   }
-  if (reasoning) {
-    payload.reasoning = reasoning;
+
+  // Só sobe quando pedido, e sozinho: a documentação do Gemini proíbe
+  // `reasoning_effort` e o extra_body.google.thinking_config na mesma chamada.
+  // Nível fora da lista falha aqui, antes do fetch: no endpoint seria um 400,
+  // retentado até o orçamento acabar.
+  if (raciocinio !== undefined) {
+    if (!ehNivelDeRaciocinio(raciocinio)) {
+      throw new Error(`Nível de raciocínio inválido: use ${NIVEIS_DE_RACIOCINIO.join(", ")}.`);
+    }
+    payload.reasoning_effort = raciocinio;
   }
 
   // `typeof === "number"` e não um truthy: temperature 0 e seed 0 são os

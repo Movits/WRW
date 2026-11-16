@@ -249,8 +249,8 @@ sem ele).
   origem e valor e também cai no padrão. O boot imprime `[IA] áudio … · reserva … · texto …
   · extração … · resumo … · pergunta …` sem a chave (id de outro provedor no texto sai como
   "fora do log", porque a guarda do texto não o distingue de uma chave colada no campo
-  errado). Os ids que a chave do Gemini enxerga saem de
-  `node scripts/listar-modelos-gemini.mjs`.
+  errado), e logo depois `[IA] raciocínio · extração … · resumo … · pergunta …`. Os ids que
+  a chave do Gemini enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
 - **Modelo de texto por função:** quem chama `invokeLLM` (ou `pedirJsonAIA`, de
   `server/ia-em-json.ts`, onde a função é obrigatória) passa a `funcao`, e não o id. A
   ordem é `LLM_MODEL_<FUNÇÃO>` > o padrão da função no código > `LLM_MODEL` > o padrão
@@ -262,6 +262,21 @@ sem ele).
   leia o `docs/deploy.md` antes de trocar. Chamada nova de texto sem função fica no
   `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example` (um
   teste confere os dois).
+- **Raciocínio:** o `invokeLLM` manda `reasoning_effort`, no nível de cima do corpo, só
+  quando recebe `raciocinio`. Os campos `reasoning` e `thinking` saíram: o endpoint do
+  Gemini compatível com a OpenAI recusa os dois com 400. Passados por fora do tipo (de um
+  script em JS), eles e o `reasoning_effort` falham antes do fetch, em vez de sumirem em
+  silêncio. A extração, o resumo guardado e o Pergunte pedem o nível da variável da
+  própria função (`LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e
+  `LLM_RACIOCINIO_PERGUNTA`, guarda em `_core/raciocinio-de-ia.ts`, lidas a cada chamada);
+  sem ela, nada vai e o modelo raciocina no padrão dele. As funções do raciocínio são as
+  mesmas do modelo (`FuncaoDeTexto`, um tipo só).
+- **Função que a bancada não mediu** (o mapa mental, a tradução do resumo, o e-mail de
+  retorno) passa `funcao: null` ao `pedirJsonAIA`: fica no `LLM_MODEL`, sem raciocínio, e
+  não lê nenhuma das variáveis de função. Rotulá-la com uma das três a faria seguir as
+  variáveis de outra. A `funcao` é obrigatória justamente para isso: num merge que
+  reescreva quem chama, o `pnpm check` acusa a função que sumiu, em vez de o pedido voltar
+  ao `LLM_MODEL` em silêncio enquanto as linhas `[IA]` do boot mostram o da função.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas

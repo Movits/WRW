@@ -18,6 +18,7 @@ import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco,
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
+import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
@@ -275,12 +276,16 @@ export const REGRAS_DA_PESSOA_NA_REUNIAO = `Em "contacts", fullName, phone e ema
 - presence diz se a pessoa participou da reunião: "present" quando ela fala, se apresenta ou é dada como presente ("a Ana e o Bruno estão aqui com a gente"); "mentioned" quando alguém só fala dela e ela não está na reunião ("a Carla não pôde vir", "vou te apresentar a Denise"). Empresa é "present" só se alguém dela participou. Na dúvida, "mentioned".`;
 
 async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
+  // O raciocínio só vai com LLM_RACIOCINIO_EXTRACAO (server/_core/raciocinio-de-ia.ts);
+  // sem ela, o pedido sai sem o campo, como sempre saiu.
+  const raciocinio = raciocinioDaFuncao("extracao");
   const response = await invokeLLM({
     // Segue o LLM_MODEL; LLM_MODEL_EXTRACAO troca sem deploy (FUNCOES_DE_TEXTO,
     // em _core/modelos-de-ia.ts, diz por que o Lite ainda não é o padrão).
     funcao: "extracao",
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
+    ...(raciocinio ? { raciocinio } : {}),
     messages: [
       {
         role: "system",

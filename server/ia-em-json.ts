@@ -1,5 +1,6 @@
 import { invokeLLM } from "./_core/llm";
 import type { FuncaoDeTexto } from "./_core/modelos-de-ia";
+import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
 
 /**
  * O pedido à IA de texto que responde em JSON (schema strict), usado no que a
@@ -26,19 +27,30 @@ export async function pedirJsonAIA(pedido: {
   timeoutMs: number;
   orcamentoMs: number;
   /**
-   * A função escolhe o modelo (LLM_MODEL_RESUMO, LLM_MODEL_PERGUNTA...).
-   * Obrigatória: num merge que reescreva quem chama, o pnpm check acusa a
-   * função que sumiu, em vez de o pedido voltar ao LLM_MODEL em silêncio
-   * enquanto a linha [IA] do boot mostra o modelo da função.
+   * Quem pede, entre as funções que a bancada de texto mede: o resumo guardado
+   * ("resumo") ou o Pergunte ("pergunta"). Escolhe o modelo, o da variável
+   * LLM_MODEL_<FUNÇÃO> (server/_core/modelos-de-ia.ts), e o raciocínio, o da
+   * LLM_RACIOCINIO_<FUNÇÃO> (server/_core/raciocinio-de-ia.ts).
+   *
+   * Obrigatória: num merge que reescreva quem chama (a H6 reescreve o
+   * pedirJsonDaTela), o pnpm check acusa a função que sumiu, em vez de o
+   * pedido voltar ao LLM_MODEL e ao raciocínio padrão em silêncio enquanto as
+   * linhas [IA] do boot mostram os da função. Função que a bancada não mediu
+   * (o mapa mental, a tradução do resumo, o e-mail de retorno) declara null:
+   * fica no LLM_MODEL e sai sem o campo de raciocínio, como sempre saiu.
+   * Rotulá-la com uma das três a faria seguir as variáveis de outra função.
    */
-  funcao: FuncaoDeTexto;
+  funcao: FuncaoDeTexto | null;
 }): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
+  const funcao = pedido.funcao ?? undefined;
+  const raciocinio = raciocinioDaFuncao(funcao);
   let resposta: Awaited<ReturnType<typeof invokeLLM>>;
   try {
     resposta = await invokeLLM({
-      funcao: pedido.funcao,
+      funcao,
       timeoutMs: pedido.timeoutMs,
       orcamentoMs: pedido.orcamentoMs,
+      ...(raciocinio ? { raciocinio } : {}),
       messages: [{ role: "system", content: pedido.sistema }, { role: "user", content: pedido.usuario }],
       response_format: { type: "json_schema", json_schema: { name: pedido.nome, strict: true, schema: pedido.schema } },
     });

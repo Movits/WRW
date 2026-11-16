@@ -69,7 +69,8 @@ async function transcricaoDaReuniaoPronta(ownerId: string, meetingId: string): P
  */
 async function pedirJsonDaTela(sistema: string, usuario: string, nome: string, schema: Record<string, unknown>): Promise<Record<string, unknown>> {
   try {
-    // Só o Pergunte usa este pedido: LLM_MODEL_PERGUNTA escolhe o modelo dele.
+    // Só o Pergunte usa este pedido: LLM_MODEL_PERGUNTA escolhe o modelo dele,
+    // e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
     return (await pedirJsonAIA({ sistema, usuario, nome, schema, timeoutMs: TIMEOUT_DA_IA_MS, orcamentoMs: ORCAMENTO_DA_IA_MS, funcao: "pergunta" })).dados;
   } catch (erro) {
     if (erro instanceof FalhaDaIA) throw new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", MENSAGEM_IA_INDISPONIVEL);

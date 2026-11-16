@@ -160,6 +160,7 @@ código conseguia assinar uma sessão válida.
 | `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL`. Antes de pôr o `gemini-3.5-flash-lite` aqui, leia o parágrafo abaixo da tabela: ele não devolve todas as entidades da reunião |
 | `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
+| `LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA` | opcionais: quanto o modelo raciocina na extração da reunião, no resumo guardado e no Pergunte à reunião, cada função com a sua | sem valor (o padrão), o pedido sai sem o campo e o modelo raciocina no padrão dele, como sempre; `minimal`, `low`, `medium` ou `high` sobem como `reasoning_effort`; outro valor (inclusive `none`, que só desliga o raciocínio no Gemini 2.5) é recusado, avisa no log e não manda nada. Defina só depois de a bancada rodar o braço b, e só na função que usa o Flash: o Flash-Lite não raciocinou na bancada, e `low` pode fazê-lo raciocinar (não medido) |
 
 A transcrição e os embeddings (`server/gemini.ts`) não usam o `LLM_API_URL`:
 vão sempre à API do Gemini, com o id na URL e a mesma chave (`LLM_API_KEY` ou,
@@ -199,6 +200,10 @@ resumo … · pergunta …` com os modelos que valem depois da guarda, sem a cha
 do Gemini enxerga saem de
 `node scripts/listar-modelos-gemini.mjs --conferir id1,id2` (ver
 `scripts/README.md`); existir na lista não prova que o id é concreto.
+
+Logo abaixo, `[IA] raciocínio · extração … · resumo … · pergunta …` mostra o
+nível que cada função pede, depois da guarda das variáveis `LLM_RACIOCINIO_*`
+("padrão do modelo" quando a variável está vazia ou foi recusada).
 
 `PORT` a hospedagem injeta sozinha (o Render e o Railway fazem isso). Não defina na mão.
 
