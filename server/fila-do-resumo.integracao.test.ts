@@ -347,7 +347,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.estado).toBe("pronto");
-    // O idioma em que o resumo foi escrito, para a página do link traduzir (H11).
+    // O idioma em que o resumo foi escrito: a página do link o traduz (H11), e
+    // "Ouvir o resumo" (H19) escolhe a voz por ele.
     expect(visto.idioma).toBe("pt-BR");
     expect(visto.itens).toEqual([{
       section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,

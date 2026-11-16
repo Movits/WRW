@@ -10,7 +10,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * vaga do teto volta. Erro que não é chave repetida sobe, e a vaga fica.
  */
 const estado = vi.hoisted(() => ({
-  resumo: undefined as undefined | { id: string; status: string; lockedUntil: number | null; lockToken: string | null; emoji: null; language: null; lastError: null; template?: string },
+  resumo: undefined as undefined | { id: string; status: string; lockedUntil: number | null; lockToken: string | null; emoji: string | null; language: string | null; lastError: null; template?: string },
   erroNoInsert: null as unknown,
   linhasNoUpdate: 1,
   // O que o serviço mandou gravar, para os testes dos modelos (H4d).
@@ -38,7 +38,14 @@ vi.mock("./db", async () => {
   };
 });
 
-const { pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } = await import("./resumo-guardado");
+// O link aberto: o token sempre acha a reunião da dona (a recusa do link está
+// nos testes de link-aberto-da-reuniao).
+vi.mock("./link-aberto-da-reuniao", async importOriginal => ({
+  ...(await importOriginal<typeof import("./link-aberto-da-reuniao")>()),
+  exigirReuniaoDoLink: async () => ({ id: "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b", ownerId: "dona-1" }),
+}));
+
+const { pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona, resumoGuardadoPeloLink } = await import("./resumo-guardado");
 const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 
@@ -152,5 +159,21 @@ describe("os modelos do resumo (H4d): pedir e refazer", () => {
   it("refazer sem resumo nenhum cria o trabalho no modelo pedido", async () => {
     await refazerResumoDaDona("dona-1", ID, "networking", () => undefined);
     expect(estado.inseridos).toEqual([expect.objectContaining({ status: "pending", template: "networking" })]);
+  });
+});
+
+/**
+ * "Ouvir o resumo" (H19) lê com a voz do aparelho no idioma em que a IA
+ * escreveu o resumo: o idioma vai à dona e também ao link aberto.
+ */
+describe("o idioma do resumo vai à tela, pela dona e pelo link", () => {
+  it("pronto: o idioma gravado vai junto, nas duas leituras", async () => {
+    estado.resumo = { id: "resumo-1", status: "ready", lockedUntil: null, lockToken: null, emoji: "☕", language: "en", lastError: null };
+    await expect(resumoGuardadoPeloLink("t".repeat(32))).resolves.toEqual({ estado: "pronto", emoji: "☕", idioma: "en", versaoAnterior: false, itens: [] });
+    await expect(resumoGuardadoDaDona("dona-1", ID)).resolves.toMatchObject({ estado: "pronto", idioma: "en" });
+  });
+
+  it("sem resumo, o idioma é null (a tela nem mostra o botão de ouvir)", async () => {
+    await expect(resumoGuardadoPeloLink("t".repeat(32))).resolves.toEqual({ estado: "sem_resumo", emoji: null, idioma: null, versaoAnterior: false, itens: [] });
   });
 });

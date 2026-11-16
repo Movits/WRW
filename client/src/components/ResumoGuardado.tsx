@@ -7,6 +7,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/ModeloDoResumo";
+import { OuvirOResumo } from "@/components/OuvirOResumo";
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
@@ -14,7 +15,7 @@ import { LANGUAGES } from "@/i18n";
 import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
-import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -48,6 +49,12 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * mental usa a mesma: aqui ficam a escolha do idioma e o aviso, e os textos
  * traduzidos entram no lugar dos originais. O trecho fica sempre no original:
  * é por ele que se confere o item.
+ *
+ * "Ouvir o resumo" (H19, components/OuvirOResumo.tsx) lê nas duas telas o que
+ * está à vista, na ordem da tela, com a voz do aparelho no idioma em que a IA
+ * escreveu o resumo (ou no da tradução pronta, que é o texto à vista): os
+ * títulos, os rótulos e o "Falante n" também saem nesse idioma, e não no da
+ * tela, para a voz não ler uma língua com a pronúncia de outra.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -129,11 +136,38 @@ function mensagemDaTraducao(t: TranslateFn, erro: unknown, peloLink: boolean) {
 
 const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
 
+/**
+ * O que "Ouvir o resumo" lê, fala por fala, com o `t` do idioma do resumo:
+ * cada seção com o título e os itens, o responsável e o prazo. O item ainda
+ * não conferido não pode soar como conferido: com todos pendentes, um aviso
+ * no começo basta; com alguns, o aviso explica e cada pendente começa com
+ * "Para conferir", o selo que a dona vê na tela.
+ */
+function falasDoResumo(t: TranslateFn, itens: ItemNaTela[], nomes: Readonly<Record<string, string>>): string[] {
+  const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
+  const pendentes = itens.filter(item => item.status === "pending").length;
+  const todosPendentes = pendentes === itens.length;
+  const falas: string[] = [];
+  if (pendentes) falas.push(todosPendentes ? t("meetings.summary.listenNoneReviewed") : t("meetings.summary.listenSomeToReview"));
+  for (const secao of ORDEM_DAS_SECOES) {
+    const daSecao = itens.filter(item => item.section === secao);
+    if (!daSecao.length) continue;
+    falas.push(tituloDaSecao(t, secao));
+    for (const item of daSecao) {
+      if (item.status === "pending" && !todosPendentes) falas.push(t("meetings.summary.toReview"));
+      falas.push(item.subject ? `${comVozes(item.subject)}: ${comVozes(item.text)}` : comVozes(item.text));
+      if (item.assignee) falas.push(t("meetings.summary.assignee", { nome: comVozes(item.assignee) }));
+      if (item.due) falas.push(t("meetings.summary.due", { prazo: item.due }));
+    }
+  }
+  return falas;
+}
+
 const idDoItem = (id: string) => `item-do-resumo-${id}`;
 const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 export function ResumoGuardado(props: DaDona | DoLink) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   const peloLink = props.token !== undefined;
   const meetingId = props.meetingId ?? "";
@@ -217,6 +251,14 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   }, [itemDestacado, !!alvo, alvoIgnorado, verIgnorados]);
 
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
+
+  // Ouvir o resumo: o pronto com algo à vista, no idioma em que a IA o
+  // escreveu (o resumo sem idioma gravado é de reunião antiga, em pt-BR).
+  const podeOuvir = dados?.estado === "pronto" && visiveis.length > 0;
+  // Com a tradução pronta (H11), o texto à vista é o traduzido: a voz, os
+  // títulos e os rótulos vão no idioma dela.
+  const idiomaDoResumo = idiomaDaReuniao(traducao?.estado === "pronta" ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDoResumo), visiveis, nomes) : [];
 
   // Erro de consulta é erro, nunca "sem resumo" nem "gerando". Pelo link,
   // NOT_FOUND ou BAD_REQUEST é o link desligado (ou cortado) no meio da visita:
@@ -322,7 +364,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
-      {(comEscolhaDoIdioma || podeRefazer) && <div className="flex flex-wrap items-center gap-3">
+      {(comEscolhaDoIdioma || podeRefazer || podeOuvir) && <div className="flex flex-wrap items-center gap-3">
         {/* O idioma do resumo (H11): começa no da tela, e o original fica marcado. */}
         {traducao && comEscolhaDoIdioma && <label className="inline-flex items-center gap-2 text-xs text-amber-100/70">
           {t("meetings.summary.translation.language")}
@@ -337,6 +379,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-300/10">
           <RefreshCw size={13}/> {t("meetings.summary.redoAs")}
         </button>}
+        {/* "Ouvir o resumo" (H19), nas duas telas. */}
+        {podeOuvir && <OuvirOResumo falas={falas} idioma={idiomaDoResumo}/>}
       </div>}
     </div>
     {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={modeloAtual} aoFechar={() => setRefazerAberto(false)}/>}

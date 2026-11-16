@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
+import { instalarSinteseFalsa } from "@/test/sintese-falsa";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { ResumoGuardado } from "./ResumoGuardado";
 
@@ -197,10 +198,12 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(tempo.closest("button")).toBeNull();
     expect(screen.queryByLabelText(/Ouvir a partir de/)).not.toBeInTheDocument();
     unmount();
-    // Pelo link sem gravação não sobra botão nenhum: nem de decidir, nem de ouvir.
+    // Pelo link sem gravação não sobra botão de decidir nem de ouvir a
+    // gravação: só o "Ouvir o resumo" (H19), que lê com a voz do aparelho e não
+    // depende dela.
     doLink(pronto(ITENS_DO_LINK));
     expect(screen.getByText("03:20")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Ouvir o resumo" })]);
   });
 
   it("o trecho fica aberto nos pendentes e recolhível nos outros", () => {
@@ -354,15 +357,15 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     expect(within(itemDoTexto("A reunião tratou da exportação de café para a Alemanha.")).queryByText(/a dona da reunião ainda não conferiu/)).not.toBeInTheDocument();
   });
 
-  it("sem os botões de decidir: nem caixa, nem Confirmar, Ignorar, Confirmar todos ou os ignorados; só o '▶'", () => {
+  it("sem os botões de decidir: nem caixa, nem Confirmar, Ignorar, Confirmar todos ou os ignorados; só o '▶' e o 'Ouvir o resumo'", () => {
     const aoIrPara = vi.fn();
     doLink(pronto(ITENS_DO_LINK), aoIrPara);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByText("Para conferir")).not.toBeInTheDocument();
     expect(screen.queryByText(/Escrito pela IA/)).not.toBeInTheDocument();
     const botoes = screen.getAllByRole("button");
-    expect(botoes.length).toBeGreaterThan(0);
-    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^Ouvir a partir de /);
+    expect(botoes.length).toBeGreaterThan(1);
+    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^(Ouvir a partir de |Ouvir o resumo$)/);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 03:20" }));
     expect(aoIrPara).toHaveBeenCalledWith(200);
   });
@@ -525,5 +528,126 @@ describe("Resumo guardado — a tradução (H11)", () => {
     expect(screen.getByText("Prazo: by Friday")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirmar" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Idioma do resumo" })).toBeInTheDocument();
+  });
+});
+
+describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () => {
+  // O tocar, pausar e continuar estão em OuvirOResumo.test.tsx; aqui, o que o
+  // resumo manda ler, em que idioma e quando o botão aparece.
+  const VOZES = [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }];
+  const ouvir = () => fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a dona ouve o que está à vista, na ordem da tela e com os nomes das vozes; o ignorado não, e o pendente começa com 'Para conferir'", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    daDona(pronto(), { nomes: { F2: "Carla" } });
+    ouvir();
+    expect(voz.lerAteOFim()).toEqual([
+      "Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.",
+      "Ações",
+      "Para conferir", "Carla envia a proposta revisada", "Responsável: Carla", "Prazo: até sexta-feira",
+      "Reservar a sala de reunião",
+      "Foco do trabalho",
+      "A reunião tratou da exportação de café para a Alemanha.",
+      "Tarefas e arranjos de trabalho",
+      "Para conferir", "Contrato com o importador: Falante 1 fecha o contrato com o importador.", "Responsável: Falante 1", "Prazo: sexta-feira",
+      "Decisões e mudanças de escopo",
+      "Para conferir", "Não renovar com a transportadora antiga.",
+      "Bloqueios, dependências e restrições",
+      "A licença de exportação ainda não saiu.",
+      "Questões pendentes",
+      "Para conferir", "Quem paga o seguro da carga?",
+    ]);
+    expect(voz.pedidas.every(fala => fala.voice?.name === "Luciana" && fala.lang === "pt-BR")).toBe(true);
+  });
+
+  it("todos pendentes: um aviso no começo basta, sem 'Para conferir' em cada item; nenhum pendente: nem aviso, nem selo", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    const { unmount } = daDona(pronto(ITENS.filter(item => item.status === "pending")), { nomes: { F2: "Carla" } });
+    ouvir();
+    expect(voz.lerAteOFim()).toEqual([
+      "Este resumo foi escrito pela IA, e nenhum item foi conferido ainda.",
+      "Ações", "Carla envia a proposta revisada", "Responsável: Carla", "Prazo: até sexta-feira",
+      "Tarefas e arranjos de trabalho", "Contrato com o importador: Falante 1 fecha o contrato com o importador.", "Responsável: Falante 1", "Prazo: sexta-feira",
+      "Decisões e mudanças de escopo", "Não renovar com a transportadora antiga.",
+      "Questões pendentes", "Quem paga o seguro da carga?",
+    ]);
+    unmount();
+    daDona(pronto(ITENS.filter(item => item.status === "confirmed")));
+    ouvir();
+    expect(voz.lerAteOFim()).toEqual([
+      "Ações", "Reservar a sala de reunião",
+      "Foco do trabalho", "A reunião tratou da exportação de café para a Alemanha.",
+      "Bloqueios, dependências e restrições", "A licença de exportação ainda não saiu.",
+    ]);
+  });
+
+  it("resumo em inglês numa tela em português: a voz inglesa, e os títulos, os rótulos e o 'Falante n' também em inglês; a tela não muda", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    const itens = [
+      { id: "a", section: "action", position: 0, subject: null, text: "{F2} sends the revised proposal", assignee: "{F2}", due: "by Friday", excerpt: "I'll send the revised proposal by Friday", startSeconds: 75, status: "confirmed", done: false },
+      { id: "q", section: "question", position: 1, subject: "Insurance", text: "Who pays for the cargo insurance?", assignee: null, due: null, excerpt: "who pays for the cargo insurance", startSeconds: 90, status: "confirmed", done: false },
+    ];
+    daDona(consulta({ estado: "pronto", emoji: null, idioma: "en", erro: null, itens }));
+    ouvir();
+    expect(voz.lerAteOFim()).toEqual([
+      "Actions", "Speaker 2 sends the revised proposal", "Assigned to: Speaker 2", "Due: by Friday",
+      "Open questions", "Insurance: Who pays for the cargo insurance?",
+    ]);
+    expect(voz.pedidas.every(fala => fala.voice?.name === "Samantha" && fala.lang === "en-US")).toBe(true);
+    expect(screen.getByText("Falante 2 sends the revised proposal")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ações" })).toBeInTheDocument();
+  });
+
+  it("resumo sem idioma gravado (ou com o 'pt' das reuniões antigas) é lido em português do Brasil", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    for (const idioma of [null, "pt"]) {
+      const { unmount } = daDona(consulta({ estado: "pronto", emoji: null, idioma, erro: null, itens: ITENS.filter(item => item.id === "i-foco") }));
+      ouvir();
+      expect(voz.lerAteOFim()).toEqual(["Foco do trabalho", "A reunião tratou da exportação de café para a Alemanha."]);
+      expect(voz.pedidas.at(-1)?.voice?.name).toBe("Luciana");
+      unmount();
+    }
+  });
+
+  it("pelo link: 'Falante n', porque o link não leva os nomes, e o idioma que o link manda", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    const { unmount } = render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} {...({ nomes: { F2: "Carla" } } as never)}/>);
+    ouvir();
+    const lidas = voz.lerAteOFim();
+    expect(lidas[0]).toBe("Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.");
+    expect(lidas).toContain("Falante 2 envia a proposta revisada");
+    expect(lidas).toContain("Responsável: Falante 2");
+    expect(lidas.join(" ")).not.toMatch(/Carla/);
+    unmount();
+    const acao = ITENS_DO_LINK.find(item => item.section === "action")!;
+    doLink(consulta({ estado: "pronto", emoji: null, idioma: "en", itens: [{ ...acao, status: "confirmed" }] }));
+    ouvir();
+    expect(voz.lerAteOFim()).toEqual(["Actions", "Speaker 2 envia a proposta revisada", "Assigned to: Speaker 2", "Due: até sexta-feira"]);
+    expect(voz.pedidas.at(-1)?.voice?.name).toBe("Samantha");
+  });
+
+  it("o botão só aparece com o resumo pronto e algo à vista", () => {
+    instalarSinteseFalsa({ vozes: VOZES });
+    const soIgnorados = ITENS.filter(item => item.status === "ignored");
+    for (const c of [consulta(undefined), comEstado("sem_resumo"), comEstado("pendente"), comEstado("gerando"), comEstado("falhou"), pronto([]), pronto(soIgnorados)]) {
+      const { unmount } = daDona(c);
+      expect(screen.queryByRole("button", { name: "Ouvir o resumo" })).not.toBeInTheDocument();
+      unmount();
+    }
+    doLink(pronto(ITENS_DO_LINK));
+    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+  });
+
+  it("o resumo que volta a ser gerado no meio da leitura cala a voz", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    const { rerender } = daDona(pronto());
+    ouvir();
+    expect(voz.fila().length).toBeGreaterThan(0);
+    rerender(<ResumoGuardado meetingId={REUNIAO} consulta={comEstado("gerando") as never}/>);
+    expect(voz.fila()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /leitura/ })).not.toBeInTheDocument();
   });
 });

@@ -1598,7 +1598,16 @@
       "decisionError": "Impossible d'enregistrer. Réessayez.",
       "errorRegenerating": "Le résumé de cette réunion est en cours de régénération. Attendez la fin pour décider.",
       "errorItemGone": "Cet élément du résumé n'existe plus. Actualisez la page.",
-      "errorOnlyActions": "Seules les actions du résumé ont une case à cocher."
+      "errorOnlyActions": "Seules les actions du résumé ont une case à cocher.",
+      "listen": "Écouter le résumé",
+      "listenPause": "Mettre la lecture en pause",
+      "listenResume": "Reprendre la lecture",
+      "listenStop": "Arrêter la lecture",
+      "listenNoVoice": "Cet appareil n'a pas de voix dans la langue du résumé ({{idioma}}). Installez une voix dans cette langue depuis les réglages de l'appareil pour l'écouter.",
+      "listenUnsupported": "Ce navigateur ne lit pas le texte à voix haute. Pour écouter le résumé, ouvrez cette page dans un autre navigateur.",
+      "listenError": "Impossible de lire le résumé à voix haute. Réessayez.",
+      "listenNoneReviewed": "Ce résumé a été rédigé par l'IA, et aucun élément n'a encore été vérifié.",
+      "listenSomeToReview": "Les éléments qui commencent par « À vérifier » ont été rédigés par l'IA et n'ont pas encore été vérifiés."
     },
     "mindMap": {
       "title": "Carte mentale de la réunion",
