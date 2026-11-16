@@ -211,13 +211,10 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
 }
 
 /**
- * URL assinada de leitura, válida por 5 minutos. Curta de propósito: a URL em
- * si dispensa autenticação, então quanto menos tempo viver, menor a janela para
- * um link colado num chat continuar funcionando.
- */
-/**
- * Prazo da URL assinada. Cinco minutos servem para abrir um documento ou uma
- * foto, mas NÃO para tocar uma gravação: o áudio de reunião chega a 10
+ * Prazo da URL assinada de leitura. A URL em si dispensa autenticação, então o
+ * prazo é a janela em que um link colado num chat continua abrindo. Ele já foi
+ * de cinco minutos, que servem para abrir um documento ou uma foto, mas NÃO
+ * para tocar uma gravação: o áudio de reunião chega a 10
  * minutos, e toda requisição nova depois do prazo — arrastar a barra, ou
  * pausar e retomar quando o navegador já fechou a conexão — bateria num 403
  * do bucket, deixando o player travado sem explicação. Uma hora cobre a
@@ -231,8 +228,11 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
  * já tinha a gravação carregada segue ouvindo até ela vencer. Quem mudar este
  * valor atualiza o "até 1 hora" de docs/arquitetura/decisoes-tomadas.md, de
  * docs/arquitetura/gravador-de-reunioes.md e do texto meetings.share.turnOffConfirm.
+ * O cofre de URLs do proxy acompanha sozinho: a janela em que ele repete a mesma
+ * URL (MS_DE_REUSO_DA_URL, em server/_core/storageProxy.ts) é calculada a partir
+ * deste valor, para nunca entregar uma URL já vencida.
  */
-const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
+export const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const config = getStorageConfig();

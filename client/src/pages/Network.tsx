@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { EnrichmentChat } from "@/components/EnrichmentChat";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { trpc } from "@/lib/trpc";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import {
   prepararImagemParaEnvio,
   LADO_MAXIMO_FOTO_DE_CONTATO,
@@ -253,7 +254,11 @@ function ContactForm({ initial, onSave, onClose, loading }: {
   // Reduzir uma foto de celular leva alguns décimos de segundo, e nesse
   // intervalo a mutação ainda não começou: sem este estado o campo continuaria
   // dizendo "enviar foto" e aceitaria um segundo arquivo por cima do primeiro.
-  const [preparandoImagem, setPreparandoImagem] = useState<"photoUrl" | "cardImageUrl" | null>(null);
+  // Um estado POR CAMPO: com um só, escolher o cartão no meio da redução da
+  // foto destravava a foto, e a primeira a terminar destravava a outra ainda em
+  // preparo — um segundo arquivo ali disparava dois envios, e um deles ficava
+  // órfão no bucket.
+  const [preparandoImagem, setPreparandoImagem] = useState({ photoUrl: false, cardImageUrl: false });
   const enviarImagem = async (
     e: React.ChangeEvent<HTMLInputElement>,
     campo: "photoUrl" | "cardImageUrl",
@@ -272,20 +277,22 @@ function ContactForm({ initial, onSave, onClose, loading }: {
       return;
     }
     let imagem: ImagemParaEnviar;
-    setPreparandoImagem(campo);
+    setPreparandoImagem(p => ({ ...p, [campo]: true }));
     try {
       imagem = await prepararImagemParaEnvio(file, ladoMaximo);
     } catch {
       toast.error(t("network.uploadErroLerArquivo"));
       return;
     } finally {
-      setPreparandoImagem(null);
+      setPreparandoImagem(p => ({ ...p, [campo]: false }));
     }
     mut.mutate(
       { fileName: file.name, mimeType: imagem.mimeType, dataBase64: imagem.dataBase64 },
       {
         onSuccess: res => set(campo, res.url),
-        onError: err => toast.error(err.message || t("network.uploadErroEnviarImagem")),
+        // Sessão vencida e limite de requisições chegam com a mensagem fixa do
+        // servidor (a de sessão, em inglês): a tela a mostra no idioma de quem lê.
+        onError: err => toast.error(traduzirMensagemDoServidor(err.message, t) || t("network.uploadErroEnviarImagem")),
       },
     );
   };
@@ -431,9 +438,9 @@ function ContactForm({ initial, onSave, onClose, loading }: {
                     </div>
                   ) : (
                     <label className="flex flex-col items-center justify-center h-24 rounded-xl border border-dashed border-white/15 bg-white/5 cursor-pointer hover:border-amber-500/40 text-white/40 text-xs gap-1">
-                      {uploadPhotoMut.isPending || preparandoImagem === "photoUrl" ? t("network.enviandoImagem") : t("network.enviarFoto")}
+                      {uploadPhotoMut.isPending || preparandoImagem.photoUrl ? t("network.enviandoImagem") : t("network.enviarFoto")}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-                        disabled={uploadPhotoMut.isPending || preparandoImagem === "photoUrl"}
+                        disabled={uploadPhotoMut.isPending || preparandoImagem.photoUrl}
                         onChange={e => void enviarImagem(e, "photoUrl", uploadPhotoMut, LADO_MAXIMO_FOTO_DE_CONTATO)} />
                     </label>
                   )}
@@ -450,9 +457,9 @@ function ContactForm({ initial, onSave, onClose, loading }: {
                     </div>
                   ) : (
                     <label className="flex flex-col items-center justify-center h-24 rounded-xl border border-dashed border-white/15 bg-white/5 cursor-pointer hover:border-amber-500/40 text-white/40 text-xs gap-1">
-                      {uploadCardMut.isPending || preparandoImagem === "cardImageUrl" ? t("network.enviandoImagem") : t("network.enviarCartao")}
+                      {uploadCardMut.isPending || preparandoImagem.cardImageUrl ? t("network.enviandoImagem") : t("network.enviarCartao")}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-                        disabled={uploadCardMut.isPending || preparandoImagem === "cardImageUrl"}
+                        disabled={uploadCardMut.isPending || preparandoImagem.cardImageUrl}
                         onChange={e => void enviarImagem(e, "cardImageUrl", uploadCardMut, LADO_MAXIMO_CARTAO_DE_VISITA)} />
                     </label>
                   )}

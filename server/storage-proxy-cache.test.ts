@@ -50,7 +50,14 @@ const {
   politicaDeCacheDaChave,
   criarCofreDeUrls,
   SEGUNDOS_DE_CACHE_NO_NAVEGADOR,
+  MS_DE_REUSO_DA_URL,
+  MS_DE_FOLGA_ANTES_DE_VENCER,
+  TETO_DE_URLS_GUARDADAS,
 } = await import("./_core/storageProxy");
+const { SEGUNDOS_DA_URL_ASSINADA, CACHE_DE_ARQUIVO_PRIVADO } = await import("./storage");
+// O exame de produção é .mjs sem declaração de tipos (ver exame-de-producao.test.ts).
+// @ts-expect-error módulo .mjs sem tipos
+const { CACHE_DO_307_DE_IMAGEM_DA_DONA } = await import("../scripts/exame/relatorio.mjs");
 
 // ─── Política por prefixo ────────────────────────────────────────────────────
 
@@ -87,6 +94,37 @@ describe("política de cache por prefixo de chave", () => {
   it("prefixo desconhecido não ganha cache — e a posse já o nega antes disso", () => {
     expect(politicaDeCacheDaChave("outra-coisa/arquivo.pdf").reaproveitarUrl).toBe(false);
     expect(politicaDeCacheDaChave("").reaproveitarUrl).toBe(false);
+  });
+
+  it("PDF anexado ao contexto NÃO ganha cache: não aparece em lista, e o preço do max-age seria só custo", () => {
+    for (const chave of ["contexts/x/ctx-1/doc_ab12cd34.pdf", "contexts/x/ctx-1/proposta_ab12cd34.PDF", "contexts/x/ctx-1/sem-extensao"]) {
+      expect(politicaDeCacheDaChave(chave), chave).toEqual({ reaproveitarUrl: false, cacheControl: "no-store" });
+    }
+  });
+
+  it("imagem de contexto ganha cache em qualquer das extensões que o upload grava, maiúscula ou não", () => {
+    for (const chave of ["contexts/x/ctx-1/a_ab12cd34.jpg", "contexts/x/ctx-1/b_ab12cd34.JPEG", "contexts/x/ctx-1/c_ab12cd34.png", "contexts/x/ctx-1/d_ab12cd34.webp"]) {
+      expect(politicaDeCacheDaChave(chave).reaproveitarUrl, chave).toBe(true);
+    }
+  });
+
+  it("o exame de produção exige exatamente o cabeçalho que o proxy grava para a imagem dele", () => {
+    // O exame sobe exame.png por contexts.uploadMedia; a chave sai assim.
+    expect(politicaDeCacheDaChave("contexts/qa_exame_p/ctx-1/exame_ab12cd34.png").cacheControl).toBe(CACHE_DO_307_DE_IMAGEM_DA_DONA);
+  });
+});
+
+describe("a janela do cofre sai do prazo da assinatura", () => {
+  it("a URL guardada, mais o cache do 307, mais a folga, cabem no prazo da assinatura", () => {
+    expect(MS_DE_REUSO_DA_URL).toBeGreaterThan(0);
+    expect(MS_DE_REUSO_DA_URL + SEGUNDOS_DE_CACHE_NO_NAVEGADOR * 1000 + MS_DE_FOLGA_ANTES_DE_VENCER)
+      .toBeLessThanOrEqual(SEGUNDOS_DA_URL_ASSINADA * 1000);
+    // Com a assinatura de 1 hora, a janela é a de sempre: 50 minutos.
+    expect(MS_DE_REUSO_DA_URL).toBe(50 * 60 * 1000);
+  });
+
+  it("o cache gravado no objeto casa com a janela do cofre, e é privado", () => {
+    expect(CACHE_DE_ARQUIVO_PRIVADO).toBe(`private, max-age=${MS_DE_REUSO_DA_URL / 1000}`);
   });
 });
 
@@ -162,6 +200,31 @@ describe("cofre de URLs assinadas", () => {
     // E a mais nova continua guardada.
     await cofre.obter("contacts/d.jpg", comCache);
     expect(assinar).toHaveBeenCalledTimes(5);
+  });
+
+  it("quem sai pelo teto é a MENOS USADA: a foto aberta de novo não perde a URL", async () => {
+    const assinar = vi.fn(async (chave: string) => `https://bucket/${chave}`);
+    const cofre = criarCofreDeUrls(assinar, () => 1_000_000, 50 * 60 * 1000, 3);
+
+    for (const chave of ["contacts/a.jpg", "contacts/b.jpg", "contacts/c.jpg"]) await cofre.obter(chave, comCache);
+    await cofre.obter("contacts/a.jpg", comCache); // acerto: a passa a ser a mais recente
+    await cofre.obter("contacts/d.jpg", comCache); // teto: sai b, não a
+    expect(assinar).toHaveBeenCalledTimes(4);
+
+    await cofre.obter("contacts/a.jpg", comCache);
+    expect(assinar).toHaveBeenCalledTimes(4);
+    await cofre.obter("contacts/b.jpg", comCache);
+    expect(assinar).toHaveBeenCalledTimes(5);
+  });
+
+  it("o teto padrão aguenta um dia de evento (30 usuárias, 20 fotos cada) sem expulsar URL em uso", async () => {
+    const assinar = vi.fn(async (chave: string) => `https://bucket/${chave}`);
+    const cofre = criarCofreDeUrls(assinar, () => 1_000_000);
+    expect(TETO_DE_URLS_GUARDADAS).toBeGreaterThanOrEqual(600);
+
+    for (let i = 0; i < 600; i++) await cofre.obter(`contacts/dona-${i % 30}/foto-${i}.jpg`, comCache);
+    await cofre.obter("contacts/dona-0/foto-0.jpg", comCache);
+    expect(assinar).toHaveBeenCalledTimes(600);
   });
 });
 

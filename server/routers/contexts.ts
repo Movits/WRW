@@ -192,7 +192,10 @@ export const contextsRouter = router({
         `contexts/${ctx.user.openId}/${input.contextId}/${nome}.${extensao}`,
         dados,
         input.mimeType,
-        { cacheControl: CACHE_DE_ARQUIVO_PRIVADO },
+        // Só a imagem leva cache no objeto: é ela que a tela pede em lista e que
+        // o proxy repete com a mesma URL (storageProxy.ts). O PDF não aparece
+        // em lista e segue sem cache, como no proxy.
+        input.mimeType.startsWith("image/") ? { cacheControl: CACHE_DE_ARQUIVO_PRIVADO } : {},
       );
       const id = await addContextMedia(ctx.user.openId, {
         contextId: input.contextId,

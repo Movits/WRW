@@ -10,7 +10,8 @@
 // A ordem das checagens importa:
 //   1. sessão válida (senão 401) — anônimo não descobre nem se a chave existe
 //   2. posse da chave (senão 403) — regra por prefixo, DENY por padrão
-//   3. só então a URL assinada de 5 minutos, com 307
+//   3. só então a URL assinada (vale 1 hora: SEGUNDOS_DA_URL_ASSINADA, em
+//      server/storage.ts), com 307
 //
 // As regras por prefixo espelham as políticas dos routers que criam cada tipo
 // de arquivo — o proxy não inventa política, repete a que já existe no tRPC.
@@ -21,7 +22,7 @@ import { sdk } from "./sdk";
 import { exigirDb } from "../db";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "../banco-indisponivel";
 import { dealRooms } from "../../drizzle/schema";
-import { storageGetSignedUrl } from "../storage";
+import { storageGetSignedUrl, SEGUNDOS_DA_URL_ASSINADA } from "../storage";
 
 type Usuaria = { id: number; openId: string; role: string | null };
 type Sala = { ownerId: number; interestedId: number } | null;
@@ -119,18 +120,41 @@ export async function podeBaixarChave(
 // novo a cada abertura, e é onde a fatura dói. O áudio de reunião fica de fora
 // por um segundo motivo — ele dura até 10 minutos, e reaproveitar uma URL com
 // 11 minutos de vida restante poderia cortar a escuta no meio.
+//
+// E só IMAGEM (jpg, png, webp), pela extensão da chave: contexts/ também guarda
+// o PDF anexado à Linha do Tempo (uma proposta, um contrato), e ele não aparece
+// em lista — a grade mostra um ícone e o arquivo só abre pelo link. Cachear o
+// PDF não economizaria nada e ainda pagaria o preço do `max-age` acima.
 const PREFIXOS_COM_CACHE_NO_NAVEGADOR = new Set(["contacts", "contexts", "generated"]);
+const EXTENSAO_DE_IMAGEM = /\.(jpe?g|png|webp)$/i;
 
 export const SEGUNDOS_DE_CACHE_NO_NAVEGADOR = 300;
-export const MS_DE_REUSO_DA_URL = 50 * 60 * 1000;
-/** Teto de chaves guardadas: ~500 entradas curtas, memória desprezível. */
-export const TETO_DE_URLS_GUARDADAS = 500;
+/** Margem para o download terminar antes de a assinatura vencer. */
+export const MS_DE_FOLGA_ANTES_DE_VENCER = 5 * 60 * 1000;
+/**
+ * Por quanto tempo o cofre repete a mesma URL. Sai do prazo da assinatura, e
+ * não de um número escrito à mão: se alguém encurtar SEGUNDOS_DA_URL_ASSINADA,
+ * a janela encurta junto, em vez de entregar URL vencida (403 do bucket em toda
+ * foto, cartão e mídia de contexto). A conta: a URL sai do cofre no máximo ao
+ * fim da janela, o navegador pode repetir o 307 por mais
+ * SEGUNDOS_DE_CACHE_NO_NAVEGADOR, e ainda sobra a folga. Com a assinatura de
+ * 1 hora, são 50 minutos.
+ */
+export const MS_DE_REUSO_DA_URL =
+  SEGUNDOS_DA_URL_ASSINADA * 1000 - SEGUNDOS_DE_CACHE_NO_NAVEGADOR * 1000 - MS_DE_FOLGA_ANTES_DE_VENCER;
+/**
+ * Teto de chaves guardadas, para TODAS as usuárias juntas. Cada entrada é uma
+ * URL assinada (~1 KB): 5.000 dão ~5 MB. Com 500, um dia de evento (30 usuárias
+ * abrindo 20 fotos cada) já expulsava URLs ainda em uso, e cada expulsa voltava
+ * como URL nova: download novo.
+ */
+export const TETO_DE_URLS_GUARDADAS = 5000;
 
 export type PoliticaDeCache = { reaproveitarUrl: boolean; cacheControl: string };
 
 export function politicaDeCacheDaChave(chave: string): PoliticaDeCache {
   const prefixo = chave.split("/")[0];
-  if (PREFIXOS_COM_CACHE_NO_NAVEGADOR.has(prefixo)) {
+  if (PREFIXOS_COM_CACHE_NO_NAVEGADOR.has(prefixo) && EXTENSAO_DE_IMAGEM.test(chave)) {
     return {
       reaproveitarUrl: true,
       cacheControl: `private, max-age=${SEGUNDOS_DE_CACHE_NO_NAVEGADOR}`,
@@ -161,10 +185,18 @@ export function criarCofreDeUrls(
       if (!politica.reaproveitarUrl) return assinar(chave);
       const agora = relogio();
       const guardada = guardadas.get(chave);
-      if (guardada && guardada.validaAte > agora) return guardada.url;
+      if (guardada && guardada.validaAte > agora) {
+        // Acerto: a chave vai para o fim da ordem do Map. Assim quem sai pelo
+        // teto é a MENOS USADA, e não a primeira que chegou — a foto aberta a
+        // toda hora não perde a URL para uma que ninguém mais pediu.
+        guardadas.delete(chave);
+        guardadas.set(chave, guardada);
+        return guardada.url;
+      }
       const url = await assinar(chave);
       // Reinserir move a chave para o fim da ordem do Map, que é a ordem de
-      // inserção: a primeira chave é sempre a mais antiga, e é ela que sai.
+      // inserção renovada a cada acerto: a primeira chave é sempre a menos
+      // usada, e é ela que sai.
       guardadas.delete(chave);
       while (guardadas.size >= teto) {
         const maisAntiga = guardadas.keys().next().value;

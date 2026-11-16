@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import {
   prepararImagemParaEnvio,
   lerArquivoComoDataUrl,
@@ -411,13 +412,15 @@ function ContextDetail({ contextId, onEdit, onClose, onRefresh }: {
   const deleteMut = trpc.contexts.delete.useMutation({
     onSuccess: () => { toast.success(t("contexts.toastContextoExcluido")); onClose(); onRefresh(); },
   });
+  // Sessão vencida e limite de requisições chegam com a mensagem fixa do
+  // servidor (a de sessão, em inglês): a tela a mostra no idioma de quem lê.
   const uploadMut = trpc.contexts.uploadMedia.useMutation({
     onSuccess: () => { toast.success(t("contexts.toastArquivoAnexado")); refetch(); },
-    onError: err => toast.error(err.message || t("contexts.toastErroAnexar")),
+    onError: err => toast.error(traduzirMensagemDoServidor(err.message, t) || t("contexts.toastErroAnexar")),
   });
   const deleteMediaMut = trpc.contexts.deleteMedia.useMutation({
     onSuccess: () => { toast.success(t("contexts.toastArquivoRemovido")); refetch(); },
-    onError: err => toast.error(err.message || t("contexts.toastErroRemoverArquivo")),
+    onError: err => toast.error(traduzirMensagemDoServidor(err.message, t) || t("contexts.toastErroRemoverArquivo")),
   });
 
   const TIPOS_DE_MIDIA = ["image/jpeg", "image/png", "image/webp", "application/pdf"] as const;

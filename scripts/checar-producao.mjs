@@ -53,7 +53,7 @@ import { randomBytes } from "node:crypto";
 import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { parse as analisarEnv } from "dotenv";
-import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente } from "./exame/relatorio.mjs";
+import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente, avaliarRedirecionamentoComCache } from "./exame/relatorio.mjs";
 import { planejarLimpeza, planejarFaxinaDuravel, planejarColetaDeConexoes } from "./exame/limpeza.mjs";
 
 // ── Argumentos e ambiente ────────────────────────────────────────────────────
@@ -545,9 +545,17 @@ async function blocoContextosEStorage() {
   if (!checar("upload para o storage (contexts.uploadMedia)", up, d => typeof d?.storagePath === "string" && d.storagePath.startsWith("/manus-storage/contexts/"))) return;
 
   pararSeInterrompido();
-  const proxy = await fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const abrirComoDona = () => fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const proxy = await abrirComoDona();
   const location = proxy.headers.get("location") || "";
-  rel.ok("proxy autenticado redireciona a dona (307 + no-store)", proxy.status === 307 && /no-store/.test(proxy.headers.get("cache-control") || "") && !!location, `status ${proxy.status}`);
+  // Segunda abertura, como a tela reaberta: imagem da dona volta com a MESMA URL
+  // assinada e o mesmo cache curto (ver avaliarRedirecionamentoComCache).
+  const proxyDeNovo = await abrirComoDona();
+  const redirecionamento = avaliarRedirecionamentoComCache(
+    { status: proxy.status, cacheControl: proxy.headers.get("cache-control"), location },
+    { status: proxyDeNovo.status, location: proxyDeNovo.headers.get("location") },
+  );
+  rel.ok("proxy autenticado redireciona a dona (307 + private, max-age=300) e repete a URL assinada", redirecionamento.ok, redirecionamento.detalhe);
   if (location) {
     const objeto = await fetch(location, { signal: AbortSignal.timeout(30_000) });
     const bytes = Buffer.from(await objeto.arrayBuffer());

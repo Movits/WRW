@@ -65,6 +65,7 @@ vi.mock("./db", async () => ({
 
 const { contextsRouter } = await import("./routers/contexts");
 const { decodeContextMedia, MAX_CONTEXT_MEDIA_BYTES } = await import("./context-media");
+const { CACHE_DE_ARQUIVO_PRIVADO } = await import("./storage");
 
 const ctx = {
   user: { id: 1, openId: "email_teste", email: "t@local", role: "silver" },
@@ -91,16 +92,30 @@ describe("Mídia de contexto — upload e remoção pelo caminho do storage", ()
     });
 
     expect(storagePut).toHaveBeenCalledTimes(1);
-    const [chave, dados, mime] = storagePut.mock.calls[0] as unknown as [string, Buffer, string];
+    const [chave, dados, mime, opcoes] = storagePut.mock.calls[0] as unknown as [string, Buffer, string, unknown];
     expect(chave).toBe("contexts/email_teste/ctx-1/Foto-da-Feira.png");
     expect(Buffer.isBuffer(dados)).toBe(true);
     expect(mime).toBe("image/png");
+    // Imagem leva o cache gravado no objeto (#149), o par do 307 do proxy.
+    expect(opcoes).toEqual({ cacheControl: CACHE_DE_ARQUIVO_PRIVADO });
 
     const registro = addContextMedia.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(registro[0]).toBe("email_teste");
     expect(registro[1].storagePath).toBe("/manus-storage/contexts/email_teste/ctx-1/Foto-da-Feira.png_ab12cd34");
     expect(registro[1].originalName).toBe("Foto da Feira.png");
     expect(r.id).toBe("midia-1");
+  });
+
+  it("PDF sobe SEM cache no objeto: não aparece em lista, e o proxy também o serve com no-store", async () => {
+    await caller.uploadMedia({
+      contextId: "ctx-1", fileName: "Proposta.pdf",
+      mimeType: "application/pdf", dataBase64: `data:application/pdf;base64,${umPng}`,
+    });
+
+    const [chave, , mime, opcoes] = storagePut.mock.calls[0] as unknown as [string, Buffer, string, unknown];
+    expect(chave).toBe("contexts/email_teste/ctx-1/Proposta.pdf");
+    expect(mime).toBe("application/pdf");
+    expect(opcoes).toEqual({});
   });
 
   it("contexto invisível para a dona: nega antes de tocar o storage", async () => {
