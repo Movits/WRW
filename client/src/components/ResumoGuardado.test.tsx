@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { instalarSinteseFalsa } from "@/test/sintese-falsa";
-import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { ResumoGuardado } from "./ResumoGuardado";
 
 /**
@@ -45,6 +45,9 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      // As do formulário do item (H4f), que só monta quando a dona o abre.
+      editarItemDoResumo: duble.registrar("editarItemDoResumo"),
+      acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink") },
   },
@@ -75,7 +78,7 @@ const comEstado = (estado: string) => consulta({ estado, emoji: null, idioma: nu
 const comErro = (c: ReturnType<typeof consulta>, error: unknown) => ({ ...c, isError: true, error });
 const ERRO_DO_BANCO = { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } };
 
-type PropsDaDona = Partial<{ nomes: Record<string, string>; aoIrPara: (segundo: number) => void; itemDestacado: string | null }>;
+type PropsDaDona = Partial<{ nomes: Record<string, string>; falantes: readonly string[]; aoIrPara: (segundo: number) => void; itemDestacado: string | null }>;
 const daDona = (c: ReturnType<typeof consulta>, props: PropsDaDona = {}) =>
   render(<ResumoGuardado meetingId={REUNIAO} consulta={c as never} {...props}/>);
 const doLink = (c: ReturnType<typeof consulta>, aoIrPara?: (segundo: number) => void) =>
@@ -243,6 +246,126 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(toast.error).toHaveBeenLastCalledWith("Database unavailable; please try again in a moment");
     act(() => onError!(new Error("Failed to fetch")));
     expect(toast.error).toHaveBeenLastCalledWith("Could not save. Please try again.");
+  });
+});
+
+describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
+  // O item que a dona acrescentou (sem trecho e sem tempo) e o foco que ela editou.
+  const DA_DONA = { id: "i-da-dona", section: "action", position: 8, subject: null, text: "Ligar para o importador", assignee: null, due: "amanhã", excerpt: "", startSeconds: null, status: "confirmed", done: false, origin: "owner", editedAt: null };
+  const COM_ORIGEM = [...ITENS.map(item => ({ ...item, origin: "ai", editedAt: item.id === "i-foco" ? 1_800_000_000_000 : null })), DA_DONA];
+  const opcoesDaLista = () => Array.from(document.getElementById(screen.getByLabelText("Responsável").getAttribute("list") ?? "")?.querySelectorAll("option") ?? [])
+    .map(opcao => opcao.getAttribute("value"));
+
+  it("todo item visível tem 'Editar', descrito pelo texto do item; o ignorado, não", () => {
+    daDona(pronto(COM_ORIGEM), { nomes: { F2: "Carla" } });
+    expect(screen.getAllByRole("button", { name: "Editar" })).toHaveLength(8);
+    expect(screen.getByRole("button", { name: "Editar", description: "Não renovar com a transportadora antiga." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar", description: "Ligar para o importador" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ignorados (1)" }));
+    expect(within(itemDoTexto("Abrir um escritório em Berlim.")).queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+  });
+
+  it("o item que a dona acrescentou leva 'Acrescentado por você' e não tem trecho; o editado leva 'Editado por você'", () => {
+    daDona(pronto(COM_ORIGEM));
+    const acrescentado = itemDoTexto("Ligar para o importador");
+    expect(within(acrescentado).getByText("Acrescentado por você")).toBeInTheDocument();
+    expect(within(acrescentado).getByText("Prazo: amanhã")).toBeInTheDocument();
+    expect(acrescentado.querySelector("details, q")).toBeNull();
+    expect(within(acrescentado).queryByText("Para conferir")).not.toBeInTheDocument();
+    const editado = itemDoTexto("A reunião tratou da exportação de café para a Alemanha.");
+    expect(within(editado).getByText("Editado por você")).toBeInTheDocument();
+    expect(within(editado).getByText("Trecho da transcrição")).toBeInTheDocument();
+    expect(screen.getAllByText(/ por você$/)).toHaveLength(2);
+  });
+
+  it("pelo link, o que a dona escreveu aparece como confirmado: sem o aviso da IA, sem marca, sem trecho vazio e sem botões", () => {
+    const peloLink = COM_ORIGEM.filter(item => item.status !== "ignored").map(({ id: _i, position: _p, done: _d, origin: _o, editedAt: _e, ...item }) => item);
+    doLink(pronto(peloLink));
+    const acrescentado = itemDoTexto("Ligar para o importador");
+    expect(within(acrescentado).queryByText(/ainda não conferiu/)).not.toBeInTheDocument();
+    expect(acrescentado.querySelector("details, q")).toBeNull();
+    expect(screen.queryByText(/ por você$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("Editar abre o formulário no lugar do item, com o texto como a tela mostra; Cancelar fecha e devolve o foco ao Editar", () => {
+    daDona(pronto(), { nomes: { F2: "Carla" } });
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Carla envia a proposta revisada" }));
+    const formulario = screen.getByRole("form", { name: "Editar" });
+    expect(within(formulario).getByLabelText("Texto")).toHaveValue("Carla envia a proposta revisada");
+    expect(within(formulario).getByLabelText("Responsável")).toHaveValue("Carla");
+    // O formulário mora no lugar do item: o ?item=<id> ainda o acha.
+    expect(formulario.closest("li")).toHaveAttribute("id", "item-do-resumo-i-acao");
+    expect(screen.queryByRole("checkbox", { name: "Carla envia a proposta revisada" })).not.toBeInTheDocument();
+    fireEvent.click(within(formulario).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("form", { name: "Editar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar", description: "Carla envia a proposta revisada" })).toHaveFocus();
+  });
+
+  it("salvar a edição manda o rótulo de volta pelo id; o Ignorar do formulário decide pelo id", () => {
+    daDona(pronto(), { nomes: { F2: "Carla" } });
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Carla envia a proposta revisada" }));
+    fireEvent.change(screen.getByLabelText("Texto"), { target: { value: "Carla envia a proposta final" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(mutacao("editarItemDoResumo").mutate).toHaveBeenCalledWith({
+      itemId: "i-acao", texto: "{F2} envia a proposta final", assunto: null, responsavel: "{F2}", prazo: "até sexta-feira",
+    });
+    fireEvent.click(within(screen.getByRole("form", { name: "Editar" })).getByRole("button", { name: "Ignorar" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao", status: "ignored" });
+  });
+
+  it("as vozes sugeridas no responsável: as que a dona nomeou e as que o resumo cita, na ordem do número", () => {
+    daDona(pronto(), { nomes: { F2: "Carla", F5: "Bia" } });
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Carla envia a proposta revisada" }));
+    expect(opcoesDaLista()).toEqual(["Falante 1", "Carla", "Bia"]);
+  });
+
+  it("a voz que falou, sem nome e sem citação no resumo, também entra no responsável e volta como rótulo", () => {
+    // O resumo cita F1 e F2; F3 só falou. A lacuna da transcrição vem sem falante.
+    daDona(pronto(), { falantes: ["F1", "F3", "F2", "F3", ""] });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(opcoesDaLista()).toEqual(["Falante 1", "Falante 2", "Falante 3"]);
+    fireEvent.change(screen.getByLabelText("Texto"), { target: { value: "Ligar para o importador" } });
+    fireEvent.change(screen.getByLabelText("Responsável"), { target: { value: "Falante 3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(mutacao("acrescentarItemDoResumo").mutate).toHaveBeenLastCalledWith({
+      meetingId: REUNIAO, secao: "action", texto: "Ligar para o importador", assunto: null, responsavel: "{F3}", prazo: null,
+    });
+  });
+
+  it("'Acrescentar item' abre o formulário com a seção; Cancelar devolve o foco ao botão; o resumo vazio também tem o botão", () => {
+    const { unmount } = daDona(pronto([]));
+    expect(screen.getByText("Nenhum item para mostrar neste resumo.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acrescentar item" })).toBeInTheDocument();
+    unmount();
+    daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    const formulario = screen.getByRole("form", { name: "Acrescentar item" });
+    expect(within(formulario).getByLabelText("Seção")).toHaveValue("action");
+    fireEvent.change(within(formulario).getByLabelText("Texto"), { target: { value: "Reservar o voo" } });
+    fireEvent.click(within(formulario).getByRole("button", { name: "Salvar" }));
+    expect(mutacao("acrescentarItemDoResumo").mutate).toHaveBeenCalledWith({
+      meetingId: REUNIAO, secao: "action", texto: "Reservar o voo", assunto: null, responsavel: null, prazo: null,
+    });
+    fireEvent.click(within(formulario).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("form", { name: "Acrescentar item" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acrescentar item" })).toHaveFocus();
+  });
+
+  it("salvo o item novo, o resumo é relido e o formulário fecha; a recusa do teto vira a frase traduzida e o deixa aberto", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.utils.meetings.resumoGuardado.invalidate.mockReturnValue(Promise.resolve());
+    daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Add item" }));
+    const { onError, onSettled } = mutacao("acrescentarItemDoResumo").opcoes as { onError: (erro: unknown) => void; onSettled: (dados: unknown, erro: unknown) => Promise<unknown> };
+    const recusa = { message: MENSAGEM_RESUMO_CHEIO, data: { code: "PRECONDITION_FAILED" } };
+    act(() => onError(recusa));
+    expect(toast.error).toHaveBeenLastCalledWith("This summary has reached the maximum number of items.");
+    await act(async () => { await onSettled(undefined, recusa); });
+    expect(screen.getByRole("form", { name: "Add item" })).toBeInTheDocument();
+    await act(async () => { await onSettled({ id: "item-novo" }, null); });
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    expect(screen.queryByRole("form", { name: "Add item" })).not.toBeInTheDocument();
   });
 });
 

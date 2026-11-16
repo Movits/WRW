@@ -73,6 +73,8 @@ export const TITULO_DA_REUNIAO_MAX = 200;
 export const MENSAGEM_RESUMO_SENDO_GERADO = "O resumo desta reunião está sendo refeito. Espere terminar para decidir.";
 export const MENSAGEM_ITEM_NAO_ENCONTRADO = "Este item do resumo não existe mais. Atualize a tela.";
 export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa de marcar.";
+/** O item que a dona acrescenta passaria do teto (ITENS_DO_RESUMO_MAX, shared/item-do-resumo.ts). */
+export const MENSAGEM_RESUMO_CHEIO = "Este resumo já chegou ao máximo de itens.";
 
 /** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
 export const NOME_DO_FALANTE_MAX = 60;

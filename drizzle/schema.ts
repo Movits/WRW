@@ -1259,8 +1259,9 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   emoji: varchar("emoji", { length: 16 }),
   // O id do modelo de IA que escreveu o resumo.
   model: varchar("model", { length: 80 }),
-  // Sobe a cada resumo gravado: a tradução do resumo (H11) guarda de qual
-  // versão saiu e é refeita quando ela muda.
+  // Sobe a cada resumo gravado e a cada item que a dona edita ou acrescenta
+  // (H4f): a tradução do resumo (H11) guarda de qual versão saiu e é refeita
+  // quando ela muda.
   version: int("version").default(0).notNull(),
   generatedAt: bigint("generated_at", { mode: "number" }),
   // Controle da fila do resumo; fica no servidor.
@@ -1299,6 +1300,8 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
 // transcrição que o sustenta, e só vale como dado da dona quando ela confirma.
 // Quem falou aparece como o rótulo da voz ({F2}), que a tela troca pelo nome
 // que a dona deu (meetings.speaker_names); o servidor nunca escreve o nome.
+// A dona também edita o item e acrescenta item à mão (H4f): o que ela escreve
+// vale como confirmado, e a origem diz quem escreveu o item.
 export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   id: varchar("id", { length: 36 }).primaryKey(),
   summaryId: varchar("summary_id", { length: 36 }).notNull(),
@@ -1314,6 +1317,7 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   assignee: varchar("assignee", { length: 120 }),
   // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
   due: varchar("due", { length: 120 }),
+  // Vazio no item que a dona acrescentou: ele não sai de um trecho.
   excerpt: text("excerpt").notNull(),
   // O segundo da reunião em que o trecho começa; nulo sem tempo (envio único).
   startSeconds: int("start_seconds"),
@@ -1323,6 +1327,24 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   done: boolean("done").default(false).notNull(),
   decidedAt: bigint("decided_at", { mode: "number" }),
   doneAt: bigint("done_at", { mode: "number" }),
+  // Quem escreveu o item (H4f): a IA, a partir da transcrição, ou a dona, à
+  // mão. O item da dona nasce confirmado, sem trecho, sem tempo e sem
+  // confiança. Não muda quando a dona edita: o item da IA editado continua
+  // vindo da reunião, com o trecho e o tempo, e o edited_at marca a edição.
+  // Varchar com o enum só no TypeScript: a origem que vier depois (a busca na
+  // web da H4i) não pede migração.
+  origin: varchar("origin", { length: 12, enum: ["ai", "owner"] }).default("ai").notNull(),
+  // Quando a dona mudou por último o texto, o assunto, o responsável ou o
+  // prazo do item. Nulo: o item está como foi escrito. O item escrito pela
+  // dona (acrescentado ou editado) não volta a "para conferir".
+  editedAt: bigint("edited_at", { mode: "number" }),
+  // O estado de antes do Ignorar (H4f), para o Desfazer voltar a ele: o
+  // status (pending ou confirmed) e a hora em que a ação foi marcada feita
+  // (nula: não estava feita). Gravado ao ignorar e só lido enquanto o item
+  // está ignorado. Nulo no item ignorado antes destas colunas, quando só o
+  // item pendente tinha Ignorar: o Desfazer o devolve pendente.
+  statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
+  doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

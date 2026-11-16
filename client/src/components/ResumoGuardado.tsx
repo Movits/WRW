@@ -1,21 +1,23 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Loader2, Play, RefreshCw, RotateCcw, Sparkles, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/ModeloDoResumo";
+import { FormularioDoItemDoResumo } from "@/components/FormularioDoItemDoResumo";
 import { OuvirOResumo } from "@/components/OuvirOResumo";
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { LANGUAGES } from "@/i18n";
 import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
-import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { vozesCitadas } from "@shared/vozes-na-edicao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -29,7 +31,9 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * Nada extraído por IA entra sozinho: cada item nasce "para conferir", com o
  * trecho da transcrição que o sustenta, e a dona confirma ou ignora. Os
  * ignorados ficam recolhidos, com Desfazer. O "▶ mm:ss" leva o player da barra
- * do rodapé ao ponto do trecho.
+ * do rodapé ao ponto do trecho. A dona também edita um item e acrescenta item
+ * à mão (H4f, components/FormularioDoItemDoResumo.tsx): o que ela escreve vale
+ * como confirmado, e a tela marca o que é dela.
  *
  * Serve às duas telas: o detalhe da dona (pages/Meetings.tsx), que decide, e o
  * link aberto (pages/ReuniaoAberta.tsx), só de leitura: sem os botões de
@@ -61,8 +65,10 @@ type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 type Saidas = inferRouterOutputs<AppRouter>;
 type ResumoDaDona = Saidas["meetings"]["resumoGuardado"];
 type ResumoDoLink = Saidas["reuniaoAberta"]["resumoGuardado"];
-// O link não recebe o id nem a caixa de feito (server/resumo-guardado.ts).
-type ItemNaTela = ResumoDoLink["itens"][number] & { id?: string; done?: boolean };
+// O link não recebe o id, a caixa de feito, a origem nem a marca da edição
+// (server/resumo-guardado.ts).
+type ItemDaDona = ResumoDaDona["itens"][number];
+type ItemNaTela = ResumoDoLink["itens"][number] & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt">>;
 type Secao = ItemNaTela["section"];
 type ConsultaDoResumo<T> = { data?: T; isError: boolean; error: unknown; refetch: () => unknown };
 
@@ -72,6 +78,11 @@ type DaDona = {
   consulta: ConsultaDoResumo<ResumoDaDona>;
   /** Os nomes que a dona deu às vozes (nomesDosFalantes(meeting.speakerNames)). */
   nomes?: Readonly<Record<string, string>>;
+  /**
+   * Quem falou na reunião (o falante de cada fala da transcrição: F1, F2...):
+   * a voz sem nome que o resumo não cita também entra no responsável.
+   */
+  falantes?: readonly string[];
   aoIrPara?: (segundo: number) => void;
   /** O item pedido pelo link (?item=<id>): a tela rola até ele e o destaca. */
   itemDestacado?: string | null;
@@ -107,9 +118,9 @@ function tituloDaSecao(t: TranslateFn, secao: Secao) {
 }
 
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
-const MENSAGENS_DO_RESUMO = new Set([MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_SO_ACAO_TEM_CAIXA]);
+const MENSAGENS_DO_RESUMO = new Set([MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_SO_ACAO_TEM_CAIXA, MENSAGEM_RESUMO_CHEIO]);
 
-// As três recusas do resumo vêm com frase própria do servidor, que a tabela
+// As recusas do resumo vêm com frase própria do servidor, que a tabela
 // de lib/mensagem-de-erro.ts traduz; as outras mensagens do servidor vêm em
 // português, e a tela decide pelo código.
 function mensagemDaDecisao(t: TranslateFn, erro: unknown) {
@@ -166,6 +177,25 @@ function falasDoResumo(t: TranslateFn, itens: ItemNaTela[], nomes: Readonly<Reco
 const idDoItem = (id: string) => `item-do-resumo-${id}`;
 const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
+// O falante no formato do rótulo de voz ({F1} a {F99}, shared/vozes-no-texto.ts);
+// a lacuna da transcrição vem sem falante.
+const FALANTE = /^F[1-9][0-9]?$/;
+
+/**
+ * As vozes que a dona pode pôr como responsável num item (H4f): as que ela
+ * nomeou, as que falaram na reunião e as que o resumo cita, uma vez cada, na
+ * ordem do número.
+ */
+function vozesDoResumo(itens: readonly ItemNaTela[], nomes: Readonly<Record<string, string>>, falantes: readonly string[]): string[] {
+  const vozes = new Set([...Object.keys(nomes), ...falantes.filter(falante => FALANTE.test(falante))]);
+  for (const item of itens) {
+    for (const campo of [item.text, item.subject, item.assignee]) {
+      for (const falante of vozesCitadas(campo)) vozes.add(falante);
+    }
+  }
+  return Array.from(vozes).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+}
+
 export function ResumoGuardado(props: DaDona | DoLink) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
@@ -174,6 +204,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const token = props.token ?? "";
   // O link nunca mostra nomes: as vozes são sempre "Falante n".
   const nomes = props.token === undefined ? props.nomes ?? {} : {};
+  const falantes = props.token === undefined ? props.falantes ?? [] : [];
   const itemDestacado = props.token === undefined ? props.itemDestacado ?? null : null;
   const traducao = props.traducao;
   // Com a tradução pronta, os textos dos itens vêm no idioma escolhido.
@@ -260,6 +291,30 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const idiomaDoResumo = idiomaDaReuniao(traducao?.estado === "pronta" ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDoResumo), visiveis, nomes) : [];
 
+  // Editar e acrescentar (H4f), só para a dona. O formulário recebe o que a
+  // tela mostra no lugar de cada voz, para a dona editar o texto como o lê.
+  const exibir = (falante: string) => comVozes(`{${falante}}`);
+  const vozes = vozesDoResumo(itens, nomes, falantes);
+  // Com a tradução pronta (H11), a tela mostra o texto traduzido, mas o item
+  // guardado está no idioma do resumo: o formulário edita o original, para a
+  // edição não gravar a tradução no lugar dele.
+  const noOriginal = (item: ItemNaTela) => (original?.itens as ItemNaTela[] | undefined)?.find(daConsulta => daConsulta.id === item.id) ?? item;
+  const formularioDoItem = (item: ItemNaTela, fechar: () => void) => item.id
+    ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
+        item={{ id: item.id, section: item.section, subject: noOriginal(item).subject, text: noOriginal(item).text, assignee: noOriginal(item).assignee, due: noOriginal(item).due }}
+        reler={reler} aoFalhar={aoFalharDecisao} aoFechar={fechar} decidindo={decidindo}
+        aoIgnorar={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "ignored" }); }}/>
+    : null;
+  const [acrescentando, setAcrescentando] = useState(false);
+  // Fechado o formulário de acrescentar, o foco volta ao botão que o abriu.
+  const botaoDeAcrescentar = useRef<HTMLButtonElement>(null);
+  const focarAcrescentar = useRef(false);
+  useEffect(() => {
+    if (acrescentando || !focarAcrescentar.current) return;
+    focarAcrescentar.current = false;
+    botaoDeAcrescentar.current?.focus();
+  }, [acrescentando]);
+
   // Erro de consulta é erro, nunca "sem resumo" nem "gerando". Pelo link,
   // NOT_FOUND ou BAD_REQUEST é o link desligado (ou cortado) no meio da visita:
   // definitivo, como em pages/ReuniaoAberta.tsx, sem tentar de novo.
@@ -337,10 +392,19 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
               aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
-              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}/>)}
+              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}
+              formularioDeEdicao={!peloLink && !somenteLeitura && item.id ? fechar => formularioDoItem(item, fechar) : undefined}/>)}
           </ul>
         </section>;
       })}
+      {/* Editar e acrescentar (H4f) somem, como as decisões, enquanto o resumo é refeito (H4d). */}
+      {!peloLink && !somenteLeitura && (acrescentando
+        ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
+            reler={reler} aoFalhar={aoFalharDecisao} aoFechar={() => { focarAcrescentar.current = true; setAcrescentando(false); }}/>
+        : <button ref={botaoDeAcrescentar} type="button" onClick={() => setAcrescentando(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-dashed border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10">
+            <Plus size={15}/> {t("meetings.summary.addItem")}
+          </button>)}
       {!peloLink && ignorados.length > 0 && <div className="border-t border-white/10 pt-4">
         <button type="button" aria-expanded={verIgnorados} onClick={() => setVerIgnorados(aberta => !aberta)}
           className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white">
@@ -403,7 +467,7 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar }: {
+function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
   item: ItemNaTela;
   peloLink: boolean;
   comVozes: (texto: string) => string;
@@ -416,15 +480,40 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
   somenteLeitura: boolean;
   aoDecidir: (status: "confirmed" | "ignored") => void;
   aoMarcar: (feito: boolean) => void;
+  /** Só para a dona (H4f): o formulário que edita o item, no lugar dele. */
+  formularioDeEdicao?: (fechar: () => void) => ReactNode;
 }) {
   const { t } = useTranslation();
   const pendente = item.status === "pending";
   // A caixa é só da dona: o link não recebe o feito, e não decide nada.
   const comCaixa = item.section === "action" && !peloLink;
-  // Confirmar e Ignorar se repetem em todo item: o texto do item os descreve.
+  // Confirmar, Ignorar e Editar se repetem em todo item: o texto do item os descreve.
   const idDoTexto = useId();
+  const [editando, setEditando] = useState(false);
+  // Fechado o formulário, o foco volta ao Editar do item.
+  const botaoDeEditar = useRef<HTMLButtonElement>(null);
+  const focarEditar = useRef(false);
+  useEffect(() => {
+    if (editando || !focarEditar.current) return;
+    focarEditar.current = false;
+    botaoDeEditar.current?.focus();
+  }, [editando]);
+  const atributos = {
+    id: item.id ? idDoItem(item.id) : undefined,
+    tabIndex: destacado ? -1 : undefined,
+    "data-destacado": destacado ? "true" : undefined,
+  };
+  if (editando && formularioDeEdicao) {
+    return <li {...atributos} className={`rounded-xl outline-none ${destacado ? "ring-2 ring-amber-300/60" : ""}`}>
+      {formularioDeEdicao(() => { focarEditar.current = true; setEditando(false); })}
+    </li>;
+  }
+  const editar = formularioDeEdicao && <button ref={botaoDeEditar} type="button" aria-describedby={idDoTexto} onClick={() => setEditando(true)}
+    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white/55 hover:bg-white/5 hover:text-white">
+    <Pencil size={13}/> {t("meetings.summary.edit")}
+  </button>;
   const texto = <>{item.subject && <strong className="font-semibold text-white/90">{comVozes(item.subject)}: </strong>}{comVozes(item.text)}</>;
-  return <li id={item.id ? idDoItem(item.id) : undefined} tabIndex={destacado ? -1 : undefined} data-destacado={destacado ? "true" : undefined}
+  return <li {...atributos}
     className={`rounded-xl border p-3 outline-none ${destacado ? "border-amber-300/70 ring-2 ring-amber-300/60" : pendente ? "border-amber-300/20 bg-black/10" : "border-white/10 bg-black/5"}`}>
     {comCaixa
       ? <label className="flex cursor-pointer items-start gap-3">
@@ -447,20 +536,26 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
           </button>
         : <span className="px-1.5 py-0.5 font-mono text-xs text-white/40">{mmss(item.startSeconds)}</span>)}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
+      {/* O que a dona escreveu (H4f), marcado só para ela. */}
+      {!peloLink && item.origin === "owner" && <span className="text-[11px] text-white/45">{t("meetings.summary.addedByOwner")}</span>}
+      {!peloLink && item.origin !== "owner" && item.editedAt != null && <span className="text-[11px] text-white/45">{t("meetings.summary.editedByOwner")}</span>}
+      {!pendente && editar && <span className="ms-auto">{editar}</span>}
     </div>
-    {/* O trecho fica aberto enquanto o item espera a conferência; depois, recolhido. */}
-    {pendente
+    {/* O trecho fica aberto enquanto o item espera a conferência; depois,
+        recolhido. O item que a dona acrescentou não tem trecho. */}
+    {item.excerpt ? (pendente
       ? <Trecho texto={item.excerpt}/>
       : <details className="mt-2">
           <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.ai.excerptLabel")}</summary>
           <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
-        </details>}
+        </details>) : null}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
     {pendente && !peloLink && !somenteLeitura && <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("confirmed")}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50"><Check size={14}/> {t("meetings.summary.confirm")}</button>
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("ignored")}
         className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/65 disabled:opacity-50"><X size={14}/> {t("meetings.summary.ignore")}</button>
+      {editar}
     </div>}
   </li>;
 }

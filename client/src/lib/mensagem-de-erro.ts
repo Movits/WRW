@@ -3,6 +3,7 @@ import {
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
@@ -60,6 +61,8 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do rascunho de e-mail de retorno (server/email-de-retorno.ts).
   [MENSAGEM_EMAIL_SEM_RESUMO_PRONTO]: "meetings.followUp.summaryNotReady",
   [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO]: "meetings.followUp.needsConfirmed",
+  // O item que a dona acrescenta passaria do teto do resumo (H4f).
+  [MENSAGEM_RESUMO_CHEIO]: "meetings.summary.errorFull",
 };
 
 /**

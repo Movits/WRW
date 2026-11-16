@@ -789,7 +789,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
-        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
+        falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}

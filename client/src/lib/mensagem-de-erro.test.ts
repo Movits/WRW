@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { TRPCClientError } from "@trpc/client";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
@@ -97,6 +97,8 @@ describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da 
     ["CONFLICT", MENSAGEM_RESUMO_SENDO_GERADO, "meetings.summary.errorRegenerating", "This meeting's summary is being regenerated. Wait for it to finish before deciding."],
     ["NOT_FOUND", MENSAGEM_ITEM_NAO_ENCONTRADO, "meetings.summary.errorItemGone", "This summary item no longer exists. Refresh the page."],
     ["BAD_REQUEST", MENSAGEM_SO_ACAO_TEM_CAIXA, "meetings.summary.errorOnlyActions", "Only the summary's actions have a checkbox."],
+    // O item que a dona acrescenta passaria do teto do resumo (H4f).
+    ["PRECONDITION_FAILED", MENSAGEM_RESUMO_CHEIO, "meetings.summary.errorFull", "This summary has reached the maximum number of items."],
   ];
 
   afterEach(async () => {
