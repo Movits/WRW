@@ -47,11 +47,32 @@ export async function setupVite(app: Express, server: Server) {
   });
 }
 
-export function serveStatic(app: Express) {
-  const distPath =
-    process.env.NODE_ENV === "development"
-      ? path.resolve(import.meta.dirname, "../..", "dist", "public")
-      : path.resolve(import.meta.dirname, "public");
+/**
+ * O Cache-Control dos arquivos de dist/public fora de /assets, servidos pelo
+ * segundo express.static de serveStatic. Sem valor, vale o max-age de 1 h.
+ */
+export function cacheDoEstatico(caminho: string): "no-cache" | undefined {
+  if (caminho.endsWith(".html")) return "no-cache";
+  // O manifest do app instalável (client/public/manifest.webmanifest) diz
+  // onde o app abre e quais ícones ele usa. Com 1 h de cache, uma mudança
+  // nele só chegaria uma hora depois a quem já abriu o site.
+  if (caminho.endsWith(".webmanifest")) return "no-cache";
+  // /brand e /images não levam hash no nome: um logo trocado com o mesmo
+  // nome ficaria até 1 h velho no navegador de quem já abriu o site.
+  // no-cache revalida pelo ETag a cada visita (304 quando não mudou, sem
+  // baixar de novo); só os bundles em /assets merecem o cache de 1 ano.
+  if (/[\\/](brand|images)[\\/]/.test(caminho)) return "no-cache";
+  return undefined;
+}
+
+export function serveStatic(
+  app: Express,
+  // Só os testes passam a pasta (server/cabecalhos-dos-estaticos.test.ts):
+  // eles servem uma pasta temporária, sem depender do build.
+  distPath = process.env.NODE_ENV === "development"
+    ? path.resolve(import.meta.dirname, "../..", "dist", "public")
+    : path.resolve(import.meta.dirname, "public")
+) {
   if (!fs.existsSync(distPath)) {
     console.error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`
@@ -77,23 +98,14 @@ export function serveStatic(app: Express) {
   // Demais estáticos (favicon, /images): cache curto revalidável. index: false
   // impede o static de servir "/" com o header errado — o index.html só sai
   // pelo fallback abaixo, sempre com no-cache, para nunca prender as usuárias
-  // numa versão antiga do app.
+  // numa versão antiga do app. O que sai sem cache está em cacheDoEstatico.
   app.use(
     express.static(distPath, {
       maxAge: "1h",
       index: false,
       setHeaders(res, filePath) {
-        if (filePath.endsWith(".html")) {
-          res.setHeader("Cache-Control", "no-cache");
-          return;
-        }
-        // /brand e /images não levam hash no nome: um logo trocado com o mesmo
-        // nome ficaria até 1 h velho no navegador de quem já abriu o site.
-        // no-cache revalida pelo ETag a cada visita (304 quando não mudou, sem
-        // baixar de novo); só os bundles em /assets merecem o cache de 1 ano.
-        if (/[\\/](brand|images)[\\/]/.test(filePath)) {
-          res.setHeader("Cache-Control", "no-cache");
-        }
+        const cache = cacheDoEstatico(filePath);
+        if (cache) res.setHeader("Cache-Control", cache);
       },
     })
   );

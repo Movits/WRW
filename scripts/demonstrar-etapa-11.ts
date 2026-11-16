@@ -4,7 +4,7 @@
 // servidor chama e mostra o que elas responderam agora, contra este banco.
 //
 // Uso:
-//   DATABASE_URL='mysql://root:root@127.0.0.1:3306/mmm_os' npx tsx scripts/demonstrar-etapa-11.ts
+//   DATABASE_URL='mysql://root:root@127.0.0.1:3306/wrw_dev' npx tsx scripts/demonstrar-etapa-11.ts
 //   ...mesma coisa com --exercitar para revogar e reaceitar de verdade, provando
 //      que a trava fecha e abre. O estado é devolvido como estava ao final.
 

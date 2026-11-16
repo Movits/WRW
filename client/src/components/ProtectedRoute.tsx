@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -30,6 +31,17 @@ interface ProtectedRouteProps {
  */
 const cadastroIncompleto = (user?: { onboardingCompleted?: boolean | null } | null) =>
   user?.onboardingCompleted === false;
+
+/**
+ * A tela pedida vai junto para o login, que devolve a pessoa a ela depois de
+ * entrar: quem abre deslogada o link de uma reunião volta a ela, e não ao
+ * gravador. No dublê de location dos testes ({ href: "" }) não há pathname, e
+ * o destino segue sendo /login.
+ */
+const caminhoAtual = () => {
+  const { pathname, search } = window.location;
+  return pathname ? pathname + (search ?? "") : undefined;
+};
 
 // Hierarquia de acesso
 const isGoldOrAbove = (role?: string) =>
@@ -71,7 +83,7 @@ export default function ProtectedRoute({
     if (verificacaoFalhou) return;
 
     if (!isAuthenticated) {
-      window.location.href = redirectTo ?? getLoginUrl();
+      window.location.href = redirectTo ?? getLoginUrl(caminhoAtual());
       return;
     }
 
@@ -121,7 +133,10 @@ export default function ProtectedRoute({
       <div className="min-h-screen flex items-center justify-center bg-[#1B1714] p-4">
         <div role="alert" className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow-lg">
           <h1 className="text-lg font-semibold text-[#1A120C]">{t("protectedRoute.checkFailedTitle")}</h1>
-          <p className="mt-2 text-sm text-gray-600">{error.message}</p>
+          {/* Pela tela, e não error.message cru: um 502/503 em HTML do Render
+              chegava como o SyntaxError do navegador ("Unexpected token '<'…"),
+              em inglês, e a queda do banco saía em português em todo idioma. */}
+          <p className="mt-2 text-sm text-gray-600">{mensagemDeErroParaTela(error, t)}</p>
           <button
             type="button"
             onClick={tentarDeNovo}

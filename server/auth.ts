@@ -1,15 +1,11 @@
 import bcrypt from "bcryptjs";
-import * as jose from "jose";
 import { eq } from "drizzle-orm";
 import { exigirDb } from "./db";
 import { users, sessions } from "../drizzle/schema";
 import { checkLoginRateLimit, recordLoginAttempt } from "./security";
-import { requireSecret } from "./_core/env";
 import { filaDoBcrypt } from "./fila-do-bcrypt";
+import { abrirSessao, ipGravadoNaSessao } from "./sessao";
 import crypto from "crypto";
-
-const JWT_SECRET = new TextEncoder().encode(requireSecret("JWT_SECRET"));
-const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
 // ─── Gerar openId único para usuários de email ───────────────
 function generateOpenId(): string {
@@ -89,27 +85,9 @@ export async function registerUser(params: {
 }
 
 // ─── Login com email + senha ──────────────────────────────────
-/**
- * O `appId` que vai no JWT. NUNCA vazio: `sdk.verifySession` exige
- * `isNonEmptyString(appId)` (server/_core/sdk.ts) e recusa a sessão inteira
- * sem ele — a pessoa loga, a sessão é criada no banco, e no request seguinte
- * já está deslogada, com "[Auth] Session payload missing required fields" no
- * log.
- *
- * O defeito que isto fecha (achado pelo Gabryel na #139): o código usava
- * `process.env.VITE_APP_ID ?? "mmm-os"`, e `??` só cai no padrão com
- * null/undefined. O `.env.example` traz `VITE_APP_ID=` — vazio —, o dotenv
- * entrega string VAZIA, que não é nullish, e o appId ia vazio. Ou seja: quem
- * seguisse o README ("cp .env.example .env") não conseguia ficar logado.
- *
- * É a mesma cautela que o `safeName` logo abaixo já tinha. Fica como função
- * exportada para o teste poder prendê-la (server/auth.identificador-do-aplicativo.test.ts):
- * a troca de `??` por `||` é de um caractere e volta sem ninguém ver.
- */
-export function identificadorDoAplicativo(): string {
-  return process.env.VITE_APP_ID?.trim() || "mmm-os";
-}
-
+// A sessão nasce em abrirSessao (server/sessao.ts), o caminho que a passkey
+// também vai usar; o token (JWT), o cookie e o appId (identificadorDoAplicativo)
+// foram junto para lá.
 export async function loginUser(params: {
   email: string;
   password: string;
@@ -125,7 +103,7 @@ export async function loginUser(params: {
 }) {
   const db = await exigirDb();
 
-  const safeIp = params.ip ? params.ip.split(",")[0].trim().substring(0, 45) : "unknown";
+  const safeIp = ipGravadoNaSessao(params.ip);
   const chaveDoBloqueio = params.chaveDoBloqueio ? params.chaveDoBloqueio.substring(0, 45) : safeIp;
   const identifier = params.email.toLowerCase().trim();
 
@@ -177,48 +155,29 @@ export async function loginUser(params: {
   // Atualizar lastSignedIn
   await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
 
-  // Criar sessão no banco
-  const sessionToken = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+  // Criar sessão no banco: a linha e o token, pelo caminho único da sessão
+  // (abrirSessao, server/sessao.ts), com a sessão de 90 dias desde o último uso.
+  const { token, expiresAt, sessionToken } = await abrirSessao({
+    usuaria: user,
+    ip: params.ip,
+    userAgent: params.userAgent,
+  });
 
-  // Truncar userAgent para caber no campo (text, mas por segurança limitamos a 500 chars)
-  const safeUserAgent = params.userAgent ? params.userAgent.substring(0, 500) : null;
-  // safeIp já declarado acima (reutilizado aqui para o insert de sessão)
-
-  console.log("[Auth] Criando sessão no banco para userId:", user.id, "token:", sessionToken.substring(0, 8) + "...");
-  try {
-    await db.insert(sessions).values({
-      userId: user.id,
-      sessionToken,
-      ipAddress: safeIp,
-      userAgent: safeUserAgent,
-      expiresAt,
-      isActive: true,
-    });
-    console.log("[Auth] Sessão criada com sucesso para userId:", user.id);
-  } catch (sessionErr: any) {
-    console.error("[Auth] ERRO ao criar sessão no banco:", sessionErr?.message, "| userId:", user.id, "| expiresAt:", expiresAt.toISOString());
-    throw new Error("Erro interno ao criar sessão. Tente novamente.");
+  // A redefinição de senha só derruba as sessões que já existem, e este login
+  // pode ter conferido a senha antiga antes dela (a espera na fila do bcrypt
+  // chega a 1 min). Por isso a conta é relida DEPOIS de gravar a sessão: se a
+  // senha mudou, a sessão cai e o login é recusado como senha errada; se o
+  // reset gravar a senha depois desta leitura, a revogação dele alcança a sessão.
+  // O token já assinado só sai desta função depois da releitura.
+  const [contaAgora] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+  if (contaAgora?.passwordHash !== passwordHash) {
+    await invalidateSessionByToken(sessionToken);
+    throw new Error("E-mail ou senha incorretos.");
   }
-
-  // Gerar JWT compatível com sdk.verifySession (campos: openId, appId, name)
-  // IMPORTANTE: name deve ser string não-vazia (sdk.verifySession usa isNonEmptyString)
-  const safeName = (user.name && user.name.trim().length > 0)
-    ? user.name.trim()
-    : (user.email ? user.email.split("@")[0] : "usuario");
-
-  const safeAppId = identificadorDoAplicativo();
-
-  const token = await new jose.SignJWT({
-    openId: user.openId,                          // campo esperado pelo sdk.verifySession
-    appId: safeAppId,                             // NUNCA vazio — sdk exige isNonEmptyString
-    name: safeName,                               // NUNCA vazio — sdk exige isNonEmptyString
-    sessionToken,                                  // para validação no banco (validateSessionToken)
-  })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setIssuedAt()
-    .setExpirationTime("8h")
-    .sign(JWT_SECRET);
 
   return { token, user, expiresAt };
 }

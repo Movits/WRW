@@ -149,10 +149,10 @@ describe("avisosDoBanco", () => {
     ]);
   });
 
-  it("sem DATABASE_URL_TESTES diz que o teste de integração se pula", () => {
+  it("sem DATABASE_URL_TESTES diz que os testes de integração se pulam", () => {
     const [linha] = avisosDoBanco({ DATABASE_URL: URL_LOCAL });
     expect(linha).toContain(
-      "DATABASE_URL_TESTES ausente (o teste de integração se pula)"
+      "DATABASE_URL_TESTES ausente (os testes de integração se pulam)"
     );
   });
 

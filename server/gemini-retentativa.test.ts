@@ -21,7 +21,10 @@ const carregarGemini = async (reservaNoAmbiente?: string) => {
   // a guarda de igualdade a pulava — a reserva nunca disparava. Estes testes
   // agora só passam se a reserva tiver variável e padrão PRÓPRIOS.
   vi.stubEnv("LLM_MODEL", "gemini-3.5-flash");
-  if (reservaNoAmbiente !== undefined) vi.stubEnv("LLM_AUDIO_MODEL_RESERVA", reservaNoAmbiente);
+  // Principal e reserva saem do ambiente: o .env de quem roda a suíte não pode
+  // decidir qual modelo assume (sem valor, a variável é apagada e vale o padrão).
+  vi.stubEnv("LLM_AUDIO_MODEL", undefined);
+  vi.stubEnv("LLM_AUDIO_MODEL_RESERVA", reservaNoAmbiente);
   return import("./gemini");
 };
 

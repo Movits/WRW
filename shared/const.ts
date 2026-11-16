@@ -23,6 +23,13 @@ export const MENSAGEM_BANCO_INDISPONIVEL = "Banco de dados indisponível; tente 
 export const MENSAGEM_ERRO_DE_CONSULTA = "Erro ao consultar o banco de dados";
 
 /**
+ * O 429 do limite geral da API (server/_core/limite-de-requisicoes.ts, que a
+ * reexporta). Mora aqui pelo mesmo motivo das duas acima: chega à tela no
+ * envelope do tRPC, em português, e a tela a traduz (`errors.tooManyRequests`).
+ */
+export const MENSAGEM_DO_LIMITE = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
+
+/**
  * Código (não frase) que a varredura de reuniões presas grava em
  * `meetings.processing_error`. Mora em shared/ porque os dois lados o leem:
  * o servidor escreve sem saber o idioma da dona, e a tela de Reuniões traduz
@@ -47,3 +54,26 @@ export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
  * para traduzi-la e para não oferecer de novo um reprocessamento sem áudio.
  */
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
+
+/**
+ * O título da reunião, depois do trim: o servidor recusa fora disso
+ * (server/routers/meetings.ts), e o gravador confere o mesmo antes de enviar,
+ * para a dona ver o aviso no idioma dela, e não o BAD_REQUEST do zod.
+ */
+export const TITULO_DA_REUNIAO_MIN = 2;
+export const TITULO_DA_REUNIAO_MAX = 200;
+
+/** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
+export const NOME_DO_FALANTE_MAX = 60;
+/** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */
+export const FORMATO_DO_FALANTE = /^F[1-9][0-9]?$/;
+
+/** Os nomes guardados, só os pares válidos (a coluna é JSON livre). */
+export function nomesDosFalantes(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const saida: Record<string, string> = {};
+  for (const [falante, nome] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(falante) && typeof nome === "string" && nome.trim()) saida[falante] = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
+  }
+  return saida;
+}

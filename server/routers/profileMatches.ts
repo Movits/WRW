@@ -4,7 +4,7 @@ import { hasValidConsent, usersComConsentimento } from "./consent";
 import { insightParaExibir } from "../vocabulario-da-conexao";
 
 // ============================================================
-// MATCHES DE PERFIS (sistema original MMM)
+// MATCHES DE PERFIS (sistema original da plataforma)
 // ============================================================
 export const profileMatchesRouter = router({
   list: protectedProcedure

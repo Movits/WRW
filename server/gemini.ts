@@ -1,23 +1,12 @@
 import { ENV } from "./_core/env";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const EMBEDDING_MODEL = "gemini-embedding-001";
-// Alias ativo listado pela API Gemini; evita o modelo 2.5 Flash descontinuado
-// para novas chaves e recebe as atualizações compatíveis da família Flash.
-const AUDIO_MODEL = "gemini-3.5-flash";
-// Reserva para quando o modelo de áudio está lotado (503) ou com a cota do dia
-// esgotada (429 do plano gratuito). Duas regras aprendidas a dor:
-//  1. Modelo CONCRETO, nunca alias -latest — um alias já apontou para modelo
-//     com cota gratuita de 20/dia e derrubou a IA em produção (CLAUDE.md).
-//  2. DIFERENTE do principal — a versão anterior lia LLM_MODEL, que em
-//     produção é exatamente o gemini-3.5-flash principal, e a guarda de
-//     igualdade lá embaixo pulava a reserva: ela NUNCA disparou na prática.
-// gemini-3.5-flash-lite aceita áudio (entradas: texto, imagem, vídeo, áudio e
-// PDF — docs oficiais do Gemini) e tem cota separada da do principal.
-// LLM_AUDIO_MODEL_RESERVA permite trocar sem deploy; se o valor apontado não
-// existir, o catch da reserva registra e devolve o erro original — nunca pior
-// do que não ter reserva.
-const AUDIO_MODEL_RESERVA = () => process.env.LLM_AUDIO_MODEL_RESERVA || "gemini-3.5-flash-lite";
+// Os modelos da transcrição, o principal (LLM_AUDIO_MODEL) e a reserva
+// (LLM_AUDIO_MODEL_RESERVA), vêm de _core/modelos-de-ia.ts, já passados pela
+// guarda do modelo concreto. Os padrões e o porquê de cada um estão lá.
 
 // "High demand" (503), rate limit (429) e soluço interno (500) são passageiros
 // por definição — o Google manda literalmente "try again later". Desistir na
@@ -71,7 +60,11 @@ function getGeminiKey() {
   return key;
 }
 
-async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1): Promise<T> {
+type OpcoesDaChamada = { timeoutMs?: number; orcamentoMs?: number };
+
+async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
+  const timeoutMs = opcoes.timeoutMs ?? TIMEOUT_POR_CHAMADA_MS;
+  const orcamentoMs = opcoes.orcamentoMs ?? ORCAMENTO_RETENTATIVAS_MS;
   // Falta de chave é erro de configuração, não de rede: sai antes do laço —
   // retentar não faria a chave aparecer.
   const chave = getGeminiKey();
@@ -79,7 +72,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
   let ultimoStatus = 503;
   for (let tentativa = 0; tentativa < tentativas; tentativa++) {
     if (tentativa > 0) {
-      if (Date.now() - inicio > ORCAMENTO_RETENTATIVAS_MS) break;
+      if (Date.now() - inicio > orcamentoMs) break;
       await espera(ESPERAS_MS[Math.min(tentativa - 1, ESPERAS_MS.length - 1)]);
     }
     let response: Response;
@@ -88,7 +81,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": chave },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(TIMEOUT_POR_CHAMADA_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (erro) {
       // Chamada que estourou o teto ou caiu na rede conta como passageira —
@@ -154,8 +147,15 @@ export async function embedManyWithGemini(texts: string[], taskType: "RETRIEVAL_
 
 type RespostaGeracao = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
 
+/**
+ * `language` é o código que veio da tela ou do banco ('pt', 'pt-BR', 'en-US'...).
+ * O prompt leva o NOME do idioma (nomeDoIdioma), e a resposta devolve o código
+ * normalizado, que é o que se grava. Sem idioma, ou com um fora da lista, o
+ * prompt não pede idioma e o código devolvido é o padrão (pt-BR).
+ */
 export async function transcribeWithGemini(input: { audio: Buffer; mimeType: string; language?: string }) {
-  const languageInstruction = input.language ? ` O idioma predominante esperado é ${input.language}.` : "";
+  const idioma = idiomaDaReuniao(input.language);
+  const languageInstruction = idioma ? ` O idioma predominante esperado é ${nomeDoIdioma(idioma)}.` : "";
   const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
   const corpo = {
     contents: [{ parts: [
@@ -165,20 +165,21 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
     generationConfig: { temperature: 0 },
   };
 
+  const modelo = modeloDeAudio();
   let payload: RespostaGeracao;
   try {
-    payload = await geminiPost<RespostaGeracao>(`/models/${AUDIO_MODEL}:generateContent`, corpo);
+    payload = await geminiPost<RespostaGeracao>(`/models/${modelo}:generateContent`, corpo);
   } catch (erro) {
     // O modelo de áudio seguiu lotado depois das retentativas: uma última
     // cartada no modelo reserva antes de devolver o erro para a usuária.
     // Recusa (4xx) não é lotação: a reserva receberia a mesma chave inválida
     // ou o mesmo payload recusado — sai na hora, sem o upload inútil.
     if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
-    const reserva = AUDIO_MODEL_RESERVA();
+    const reserva = modeloDeAudioReserva();
     // Reserva igual ao principal seria um 4º upload idêntico no mesmo modelo
     // lotado — sem valor nenhum.
-    if (reserva === AUDIO_MODEL) throw erro;
-    console.warn(`[Gemini] ${AUDIO_MODEL} sobrecarregado; tentando a reserva ${reserva}`);
+    if (reserva === modelo) throw erro;
+    console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
     try {
       payload = await geminiPost<RespostaGeracao>(`/models/${reserva}:generateContent`, corpo, 1);
     } catch (erroDaReserva) {
@@ -189,5 +190,88 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
 
   const text = payload.candidates?.flatMap(candidate => candidate.content?.parts ?? []).map(part => part.text ?? "").join("\n").trim();
   if (!text) throw new Error("O Gemini não retornou uma transcrição válida.");
-  return { text, language: input.language ?? "pt", segments: [] as Array<unknown> };
+  return { text, language: idioma ?? IDIOMA_DA_REUNIAO_PADRAO, segments: [] as Array<unknown> };
+}
+
+/**
+ * A resposta do modelo parou antes do fim (MAX_TOKENS, SAFETY, RECITATION...).
+ * Na transcrição, texto cortado gravado como se fosse inteiro seria perda
+ * silenciosa: quem chama trata como falha e tenta de novo. O motivo vai no log;
+ * a mensagem é para a tela da dona.
+ */
+export class GeminiRespostaCortadaError extends Error {
+  constructor(readonly motivo: string) {
+    super("A transcrição de uma parte do áudio saiu incompleta. Tente de novo em instantes.");
+  }
+}
+
+type RespostaComFim = {
+  candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+};
+
+// O raciocínio conta DENTRO do teto de saída: num áudio de 38 min o
+// gemini-3.5-flash gastou 62,9 mil tokens pensando, só 2,6 mil escrevendo, e
+// parou em MAX_TOKENS (14/11/2026). Transcrever não pede raciocínio: o
+// orçamento é fixo e baixo. A família 3 usa o nível; a 2.x, o orçamento em
+// tokens (que a 3 ainda aceita, mas o nível é o caminho documentado).
+export function raciocinioBaixo(modelo: string): Record<string, string | number> {
+  return /^gemini-[3-9]/.test(modelo) ? { thinkingLevel: "low" } : { thinkingBudget: 512 };
+}
+
+// Uma parte de ~10 min sai em segundo plano (a fila da reunião em partes), sem
+// o proxy de 100 s do Render na frente: cada chamada tem até 5 min, e as
+// retentativas até 8.
+const TIMEOUT_DA_PARTE_MS = 5 * 60_000;
+const ORCAMENTO_DA_PARTE_MS = 8 * 60_000;
+const SAIDA_MAXIMA_DA_PARTE = 32_768;
+
+/**
+ * Uma chamada com áudio inline e resposta (opcionalmente) em JSON, no modelo de
+ * áudio e, se ele estiver lotado, no reserva — a mesma cartada do
+ * transcribeWithGemini. Devolve o texto das partes que não são raciocínio.
+ * Resposta que não terminou em STOP lança GeminiRespostaCortadaError.
+ */
+export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
+  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+  const corpo = (modelo: string) => ({
+    contents: [{ parts: [
+      { text: input.prompt },
+      { inline_data: { mime_type: geminiMimeType, data: input.audio.toString("base64") } },
+    ] }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: SAIDA_MAXIMA_DA_PARTE,
+      thinkingConfig: raciocinioBaixo(modelo),
+      ...(input.esquemaJson ? { responseMimeType: "application/json", responseSchema: input.esquemaJson } : {}),
+    },
+  });
+  const opcoes = { timeoutMs: TIMEOUT_DA_PARTE_MS, orcamentoMs: ORCAMENTO_DA_PARTE_MS };
+  let modelo = modeloDeAudio();
+  let payload: RespostaComFim;
+  try {
+    payload = await geminiPost<RespostaComFim>(`/models/${modelo}:generateContent`, corpo(modelo), undefined, opcoes);
+  } catch (erro) {
+    if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
+    const reserva = modeloDeAudioReserva();
+    if (reserva === modelo) throw erro;
+    console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
+    try {
+      payload = await geminiPost<RespostaComFim>(`/models/${reserva}:generateContent`, corpo(reserva), 1, opcoes);
+      modelo = reserva;
+    } catch (erroDaReserva) {
+      console.warn(`[Gemini] a reserva ${reserva} também falhou:`, erroDaReserva instanceof Error ? erroDaReserva.message : erroDaReserva);
+      throw erro;
+    }
+  }
+  const candidato = payload.candidates?.[0];
+  const motivo = candidato?.finishReason ?? "SEM_MOTIVO";
+  const uso = payload.usageMetadata ?? {};
+  if (motivo !== "STOP") {
+    console.error(`[Gemini] ${modelo} parou em ${motivo} (saída ${uso.candidatesTokenCount ?? "?"}, raciocínio ${uso.thoughtsTokenCount ?? 0})`);
+    throw new GeminiRespostaCortadaError(motivo);
+  }
+  const texto = (candidato?.content?.parts ?? []).filter(parte => !parte.thought).map(parte => parte.text ?? "").join("").trim();
+  if (!texto) throw new Error("O Gemini não retornou uma transcrição válida.");
+  return { texto, modelo };
 }

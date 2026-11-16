@@ -13,25 +13,37 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
   const prevLocation = useRef(location);
 
   useEffect(() => {
-    if (location === prevLocation.current) return;
+    // A URL voltou à tela anterior antes de o escurecer terminar (A → B → A no
+    // mesmo instante, como o gravador faz ao devolver a URL para /gravar): a
+    // limpeza já cancelou o timer da troca, então a fase volta a ocioso aqui.
+    // Sem isto, o véu preto ficava por cima de tudo, bloqueando todo toque.
+    if (location === prevLocation.current) {
+      setPhase("idle");
+      return;
+    }
 
     // Start fade-out
     setPhase("out");
 
+    // O clarear também é cancelado na troca seguinte. O retorno do callback do
+    // setTimeout era descartado, e o timer do clarear da troca anterior cortava
+    // no meio o escurecer da nova.
+    let inTimer: ReturnType<typeof setTimeout> | undefined;
     const outTimer = setTimeout(() => {
       // At peak black, swap content
       setDisplayLocation(location);
       prevLocation.current = location;
       setPhase("in");
 
-      const inTimer = setTimeout(() => {
+      inTimer = setTimeout(() => {
         setPhase("idle");
       }, 350); // fade-in duration
-
-      return () => clearTimeout(inTimer);
     }, 280); // fade-out duration
 
-    return () => clearTimeout(outTimer);
+    return () => {
+      clearTimeout(outTimer);
+      clearTimeout(inTimer);
+    };
   }, [location]);
 
   const overlayOpacity =

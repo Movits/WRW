@@ -245,6 +245,7 @@ describe("o que chega ao navegador (errorFormatter, pelo adaptador HTTP)", () =>
     consultaQuebrada: publicProcedure.query(async () => { throw tabelaAusente(); }),
     bancoCaiu: publicProcedure.query(async () => { throw quedaDoBanco(); }),
     proibido: publicProcedure.query(async () => { throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito a membras com Status Ouro." }); }),
+    limitado: publicProcedure.query(async () => { throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Muitos pedidos." }); }),
     comum: publicProcedure.query(async () => { throw new Error("outra coisa"); }),
   });
 
@@ -284,6 +285,16 @@ describe("o que chega ao navegador (errorFormatter, pelo adaptador HTTP)", () =>
     const { status, erro } = await chamar("proibido");
     expect(status).toBe(403);
     expect(erro.message).toBe("Acesso restrito a membras com Status Ouro.");
+    expect(erro.data.path).toBe("proibido");
+  });
+
+  it("o limite lançado pela rota chega com o path dela", async () => {
+    // As telas do esqueci a senha e da redefinição separam por ele o limite da
+    // rota do limite geral da API, que vem SEM path (limite-de-requisicoes.test.ts).
+    const { status, erro } = await chamar("limitado");
+    expect(status).toBe(429);
+    expect(erro.data.code).toBe("TOO_MANY_REQUESTS");
+    expect(erro.data.path).toBe("limitado");
   });
 
   it("erro comum, que não é do banco, mantém a própria mensagem", async () => {

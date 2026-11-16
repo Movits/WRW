@@ -37,7 +37,7 @@ export function PessoaSugeridaNaReuniao({ sugestao, pendencias }: { sugestao: Su
 
   return (
     <div className="min-w-0 flex-1">
-      <h2 className="font-semibold">{sugestao.fullName}</h2>
+      <h2 className="text-base font-semibold">{sugestao.fullName}</h2>
       {(sugestao.jobTitle || sugestao.company) && <p className="text-sm text-white/55">{[sugestao.jobTitle, sugestao.company].filter(Boolean).join(" · ")}</p>}
 
       <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">

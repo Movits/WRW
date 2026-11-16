@@ -101,10 +101,15 @@ export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
-  opcoes: { cacheControl?: string } = {},
+  // A parte da reunião gravada em partes (server/fatias-de-reuniao.ts) grava a
+  // linha que aponta para o objeto ANTES do upload: a chave tem de ser a que ela
+  // já guardou, sem o sufixo aleatório. Quem pede a chave exata garante que ela
+  // é única (a da parte leva o id da linha). O cacheControl vai gravado no
+  // próprio objeto (ver CACHE_DE_ARQUIVO_PRIVADO, acima).
+  opcoes: { chaveExata?: boolean; cacheControl?: string } = {},
 ): Promise<{ key: string; url: string }> {
   const config = getStorageConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+  const key = opcoes.chaveExata ? normalizeKey(relKey) : appendHashSuffix(normalizeKey(relKey));
 
   await getClient(config).send(
     new PutObjectCommand({
@@ -218,8 +223,14 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
  * do bucket, deixando o player travado sem explicação. Uma hora cobre a
  * sessão de escuta inteira e continua muito abaixo de uma URL permanente.
  *
- * O prazo não é a proteção: quem protege é o proxy, que exige sessão e
- * confere posse ANTES de assinar qualquer coisa.
+ * O prazo não decide quem lê: cada caminho confere antes de assinar. O proxy
+ * /manus-storage/ (server/_core/storageProxy.ts) exige sessão e posse; a rota
+ * do link aberto, /reuniao-aberta/{token}/audio (server/link-aberto-da-reuniao.ts),
+ * confere só o token que a dona ligou, sem sessão. Mas o prazo É quanto tempo
+ * uma URL já entregue continua abrindo: depois de a dona desligar o link, quem
+ * já tinha a gravação carregada segue ouvindo até ela vencer. Quem mudar este
+ * valor atualiza o "até 1 hora" de docs/arquitetura/decisoes-tomadas.md, de
+ * docs/arquitetura/gravador-de-reunioes.md e do texto meetings.share.turnOffConfirm.
  */
 const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
 

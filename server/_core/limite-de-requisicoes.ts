@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import { parse as parseCookieHeader } from "cookie";
 import { jwtVerify } from "jose";
 import { TRPC_ERROR_CODES_BY_KEY } from "@trpc/server/rpc";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, MENSAGEM_DO_LIMITE } from "@shared/const";
 import { ENV } from "./env";
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 
@@ -35,7 +35,9 @@ export const LIMITES_DA_API: Limites = { usuaria: 300, ip: 1200 };
 /** Geral (index.html, /manus-storage, cron): os estáticos e a API ficam fora. */
 export const LIMITES_GERAIS: Limites = { usuaria: 600, ip: 600 };
 
-export const MENSAGEM_DO_LIMITE = "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente de novo.";
+// A frase mora em shared/const.ts, para a tela traduzi-la; quem a importa
+// daqui segue valendo.
+export { MENSAGEM_DO_LIMITE };
 
 type TipoDeChave = "usuaria" | "ip";
 
@@ -70,17 +72,22 @@ export function ehRotaDaApi(caminho: string): boolean {
 }
 
 const PREFIXOS_ESTATICOS = ["/assets/", "/brand/", "/images/"];
+// O manifest do app instalável mora na raiz de client/public. O Chrome o
+// busca ao abrir o site, e sem cookie, porque o link não pede credenciais:
+// ele contaria no limite do IP, o mesmo de uma sala inteira no mesmo wi-fi.
+const ARQUIVOS_ESTATICOS_NA_RAIZ = ["/manifest.webmanifest"];
 
 /**
- * Arquivos do build (/assets, com hash) e de client/public (/brand, /images):
- * é tudo o que dist/public tem além do index.html. Uma primeira visita pede 10
- * a 15 deles; contados no limite geral, uma sala no mesmo wi-fi estourava só
- * abrindo a home. Servi-los é barato e a Cloudflare guarda /assets em cache.
- * Caminho que não existe ali (/favicon.ico, /robots.txt) cai no index.html e
- * conta como página.
+ * Arquivos do build (/assets, com hash) e de client/public (/brand, /images e
+ * o manifest do app instalável): é tudo o que dist/public tem além do
+ * index.html. Uma primeira visita pede 10 a 15 deles; contados no limite
+ * geral, uma sala no mesmo wi-fi estourava só abrindo a home. Servi-los é
+ * barato e a Cloudflare guarda /assets em cache. Caminho que não existe ali
+ * (/favicon.ico, /robots.txt) cai no index.html e conta como página.
  */
 export function ehArquivoEstatico(req: Pick<Request, "method" | "path">): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
+  if (ARQUIVOS_ESTATICOS_NA_RAIZ.includes(req.path)) return true;
   return PREFIXOS_ESTATICOS.some(prefixo => req.path.startsWith(prefixo));
 }
 

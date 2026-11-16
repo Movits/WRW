@@ -4,7 +4,6 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
-import InactivityGuard from "./components/InactivityGuard";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { PageTransition } from "./components/PageTransition";
 import { PrivacyPage, TermsPage } from "@/pages/LegalPage";
@@ -34,6 +33,7 @@ const Memory = lazy(() => import("./pages/Memory"));
 const IntelligentMatches = lazy(() => import("./pages/IntelligentMatches"));
 const MeuNetworkInteligente = lazy(() => import("./pages/MeuNetworkInteligente"));
 const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork"));
+const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -56,8 +56,10 @@ function PageLoader() {
 }
 
 /**
- * Uma tela autenticada: a guarda de acesso, o corte por inatividade e o
- * cabeçalho com o menu global, montado UMA vez, aqui.
+ * Uma tela autenticada: a guarda de acesso e o cabeçalho com o menu global,
+ * montado UMA vez, aqui. Não há mais corte por inatividade (saiu em 10/11/2026,
+ * pedido do Roberto): a sessão dura 90 dias desde o último uso, e quem decide
+ * quando ela acaba é o servidor (server/duracao-da-sessao.ts).
  *
  * Pedido do Rosber em 14/09/2026: "o ideal é que o menu fique sempre visível na
  * página. Entra em oportunidades: o menu some. Para acessar o menu de novo ele
@@ -88,10 +90,8 @@ export function TelaAutenticada({
 }) {
   return (
     <ProtectedRoute {...guarda}>
-      <InactivityGuard>
-        {!cabecalhoProprio && <AppHeader />}
-        {children}
-      </InactivityGuard>
+      {!cabecalhoProprio && <AppHeader />}
+      {children}
     </ProtectedRoute>
   );
 }
@@ -113,7 +113,11 @@ function Router() {
         <Route path={"/forgot-password"} component={ForgotPassword} />
         <Route path={"/reset-password"} component={ResetPassword} />
 
-        {/* Rota de onboarding — protegida, mas sem InactivityGuard e, de
+        {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
+            caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
+        <Route path="/r/:token" component={ReuniaoAberta} />
+
+        {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra
             rota protegida devolve a pessoa para cá (ver ProtectedRoute), e um
             menu aqui seria um beco sem saída. */}
@@ -210,7 +214,25 @@ function Router() {
         {/* Assistente de Reuniões — gravação e transcrição privada. A isenção
             vale para a tela inteira: a página monta o cabeçalho ACIMA dos seus
             três ramos (lista, nova reunião, detalhe), e não dentro de um deles
-            — montado só na lista, os outros dois ficavam sem menu nenhum. */}
+            — montado só na lista, os outros dois ficavam sem menu nenhum.
+            A URL escolhe o ramo (shared/rotas.ts): /gravar é o gravador, o
+            link exclusivo e a primeira tela depois do login (pedido da cliente
+            de 20/10/2026); /meetings/:id é o detalhe; /meetings, a lista.
+            Os três blocos ficam idênticos, sem key: assim montam a MESMA
+            instância da página, e a gravação em curso não se perde entre eles
+            (App.cabecalho-de-todas-as-telas.test.ts confere). */}
+        <Route path="/gravar">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/meetings/:id">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/meetings">
           <TelaAutenticada cabecalhoProprio>
             <Meetings />

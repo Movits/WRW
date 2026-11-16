@@ -386,8 +386,13 @@
     background: rgba(201,143,112, 0.6);
   }
 
-  /* Focus visible ring */
-  :focus-visible {
+  /* Anel de foco da marca. Fora de camada, esta regra vence as utilitárias do
+     Tailwind, inclusive a que tira o contorno; por isso ela pula tabindex="-1",
+     quem só recebe foco por script: o título que a tela foca ao trocar de passo
+     (Onboarding, esqueci a senha) e os internos do Radix, que têm o próprio
+     realce. Sem a exceção, quem avançava com Enter via o título dentro de uma
+     caixa, como um campo. Tudo o que o Tab alcança segue com o anel. */
+  :focus-visible:not([tabindex="-1"]) {
     outline: 2px solid #C98F70;
     outline-offset: 2px;
   }

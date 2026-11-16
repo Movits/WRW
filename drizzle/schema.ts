@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   float,
   tinyint,
+  mediumtext,
 } from "drizzle-orm/mysql-core";
 import { decimal } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
@@ -986,16 +987,58 @@ export const meetings = mysqlTable("meetings", {
   title: varchar("title", { length: 200 }).notNull(),
   contactId: bigint("contact_id", { mode: "number" }),
   contextId: varchar("context_id", { length: 36 }),
-  status: mysqlEnum("status", ["draft", "recording", "processing", "ready", "failed", "deleted"]).default("draft").notNull(),
+  // 'uploading' é o "enviando" da spec da etapa 5: a gravação terminou e as
+  // partes do áudio ainda estão chegando. Fica no FIM da lista de propósito:
+  // acrescentar valor no fim de um enum é alteração instantânea no MySQL 8,
+  // e mudar a ordem reconstruiria a tabela.
+  status: mysqlEnum("status", ["draft", "recording", "processing", "ready", "failed", "deleted", "uploading"]).default("draft").notNull(),
   consentGranted: boolean("consent_granted").default(false).notNull(),
   consentAt: bigint("consent_at", { mode: "number" }),
   language: varchar("language", { length: 12 }).default("pt").notNull(),
   processingError: text("processing_error"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  // Como o áudio chegou: 'single' é o envio único em base64 (meetings.submitRecording);
+  // 'slices' é a gravação enviada em partes, uma linha de meeting_audio_slices
+  // por parte. As partes são internas: para quem grava, a gravação é contínua e
+  // não tem teto de tempo.
+  audioPipeline: mysqlEnum("audio_pipeline", ["single", "slices"]).default("single").notNull(),
+  // De onde a reunião veio. Varchar com o enum só no TypeScript: valor novo não
+  // pede migração. Nula no envio único, que recebe tanto a gravação do
+  // microfone quanto um arquivo escolhido sem dizer qual dos dois: a coluna é
+  // preenchida por quem cria a reunião sabendo de onde ela vem.
+  origem: varchar("origem", { length: 16, enum: ["gravacao", "arquivo", "aba", "pdf", "youtube"] }),
+  // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
+  // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
+  consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
+  // Os nomes que a dona deu às vozes da transcrição por falante (H3 do desenho
+  // do gravador): { "F1": "Ana", "F2": "Bia" }. Nulo: nenhuma voz nomeada, e a
+  // tela mostra "Falante n". Só a dona vê: o link aberto não leva os nomes.
+  speakerNames: jsonCompat("speaker_names").$type<Record<string, string>>(),
+  // Quantas partes a gravação teve, informado quando ela termina. Nulo
+  // enquanto grava e no envio único.
+  expectedSlices: int("expected_slices"),
+  // Controle da fila de transcrição no passo final da reunião em partes:
+  // tentativas, até quando vale a reserva e de quem ela é. Ficam no servidor;
+  // a lista e o detalhe escolhem as colunas que vão ao navegador
+  // (COLUNAS_DA_REUNIAO_NA_TELA, em server/meeting-service.ts).
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // O link aberto da reunião (pedido do Roberto em 12/11/2026, "por enquanto"):
+  // quem tem o endereço /r/{shareToken} ouve a gravação, lê a transcrição e
+  // pergunta à IA sobre a reunião, sem conta na WRW. Nulo: a reunião não está
+  // compartilhada. Desligar o link volta a nulo, e um link novo tem outro valor.
+  // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
+  // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
+  shareToken: varchar("share_token", { length: 64 }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
+  // A fila acha as reuniões em partes pelo estado, sem varrer as do envio único.
+  pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
+  // O link aberto acha a reunião pelo token; o MySQL aceita vários nulos.
+  shareTokenUnique: uniqueIndex("meetings_share_token_unique").on(table.shareToken),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
@@ -1014,11 +1057,70 @@ export const meetingRecordings = mysqlTable("meeting_recordings", {
   ownerExpiresIdx: index("meeting_recordings_owner_expires_idx").on(table.ownerId, table.expiresAt),
 }));
 
+// Partes do áudio de uma reunião gravada em partes (audio_pipeline 'slices').
+// São internas: quem grava aperta começar e encerrar, e o app manda o áudio em
+// partes por baixo para não perder a gravação se a rede cair; as partes se
+// emendam na transcrição. Nenhuma coluna supõe teto de tempo da reunião.
+// Estados: 'uploading' (a linha nasce ANTES de o objeto subir ao bucket, porque
+// é ela o ponteiro para ele), 'received' (o objeto subiu), 'transcribed' (a IA
+// devolveu o resultado) e 'failed'. Nomes em inglês, como as irmãs meeting_*.
+export const meetingAudioSlices = mysqlTable("meeting_audio_slices", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // Posição da parte na gravação, a partir de 0.
+  seq: int("seq").notNull(),
+  status: mysqlEnum("status", ["uploading", "received", "transcribed", "failed"]).default("uploading").notNull(),
+  // A chave é montada pelo servidor (meetings/<openId>/...), e é ela que prova
+  // a posse na exclusão da conta. A url é o caminho do proxy autenticado
+  // (/manus-storage/...), nunca o endereço do bucket.
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  storageUrl: varchar("storage_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  // Do conteúdo recebido: o reenvio da mesma parte é reconhecido, e um
+  // conteúdo diferente na mesma posição, recusado.
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  // Duração medida desta parte e o ponto em que ela começa na reunião, em
+  // milissegundos. O início é a soma das partes anteriores, gravado quando a
+  // parte é transcrita; bigint para nenhuma duração de reunião ter teto.
+  durationMs: int("duration_ms").notNull(),
+  offsetMs: bigint("offset_ms", { mode: "number" }),
+  // Controle da fila de transcrição desta parte; fica no servidor.
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // Código ou frase nossa, nunca o texto do driver ou da IA.
+  lastError: varchar("last_error", { length: 500 }),
+  // O que a IA devolveu para esta parte (as falas, com falante e tempo), que a
+  // montagem da transcrição da reunião lê. É fala de quem participou: na
+  // exclusão da conta, a linha que fica como ponteiro para o objeto perde esta
+  // coluna (server/exclusao-de-conta.ts).
+  result: jsonCompat("result"),
+  // O id do modelo de IA que transcreveu a parte.
+  model: varchar("model", { length: 80 }),
+  // Prazo do áudio desta parte, pela mesma regra do áudio das gravações.
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma linha por posição: a mesma parte enviada duas vezes não duplica.
+  meetingSeqUnique: uniqueIndex("meeting_audio_slices_meeting_seq_unique").on(table.meetingId, table.seq),
+  // A fila reserva pelo estado e pela reserva vencida.
+  statusLockedIdx: index("meeting_audio_slices_status_locked_idx").on(table.status, table.lockedUntil),
+  ownerMeetingIdx: index("meeting_audio_slices_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // A faxina acha o áudio vencido.
+  expiresIdx: index("meeting_audio_slices_expires_idx").on(table.expiresAt),
+}));
+
 export const meetingTranscripts = mysqlTable("meeting_transcripts", {
   id: varchar("id", { length: 36 }).primaryKey(),
   meetingId: varchar("meeting_id", { length: 36 }).notNull().unique(),
   ownerId: varchar("owner_id", { length: 128 }).notNull(),
-  transcript: text("transcript").notNull(),
+  // MEDIUMTEXT (até 16 MiB): o TEXT para em 64 KiB, menos que a transcrição de
+  // uma reunião longa, e no modo estrito o banco recusa o que passa. 16 MiB dão
+  // mais de 100 horas de fala, mesmo traduzidas para escrita de 3 bytes por letra.
+  transcript: mediumtext("transcript").notNull(),
   segments: jsonCompat("segments"),
   language: varchar("language", { length: 12 }),
   durationSeconds: int("duration_seconds"),
@@ -1033,7 +1135,8 @@ export const meetingTranscriptTranslations = mysqlTable("meeting_transcript_tran
   meetingId: varchar("meeting_id", { length: 36 }).notNull(),
   ownerId: varchar("owner_id", { length: 128 }).notNull(),
   language: varchar("language", { length: 12 }).notNull(),
-  translatedText: text("translated_text").notNull(),
+  // MEDIUMTEXT pelo mesmo motivo da transcrição (meeting_transcripts.transcript).
+  translatedText: mediumtext("translated_text").notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1074,6 +1177,85 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
 }, (table) => ({
   ownerMeetingIdx: index("meeting_contact_suggestions_owner_meeting_idx").on(table.ownerId, table.meetingId),
   statusIdx: index("meeting_contact_suggestions_status_idx").on(table.ownerId, table.status),
+}));
+
+// O resumo GUARDADO da reunião (H4 do desenho do gravador,
+// docs/arquitetura/gravador-de-reunioes.md), no formato que a cliente pediu:
+// ações com caixa de marcar, foco, tarefas por assunto, decisões, bloqueios e
+// questões pendentes. Uma linha por reunião, gerada em segundo plano pela fila
+// do resumo; os itens ficam em meeting_summary_items. Varchar com o enum só no
+// TypeScript, como em network_sugestoes: valor novo não pede migração.
+export const meetingSummaries = mysqlTable("meeting_summaries", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // A transcrição de que o resumo saiu: o reprocessamento troca a transcrição,
+  // e o resumo da anterior não é gravado.
+  transcriptId: varchar("transcript_id", { length: 36 }),
+  status: varchar("status", { length: 12, enum: ["pending", "ready", "failed"] }).default("pending").notNull(),
+  // O modelo de resumo; só 'general' até a PR dos modelos (H4d).
+  template: varchar("template", { length: 16, enum: ["general", "networking", "mentoring", "sales", "one_on_one"] }).default("general").notNull(),
+  // O idioma em que o resumo foi escrito: o da reunião.
+  language: varchar("language", { length: 12 }),
+  // O emoji do título, como no app de referência da cliente. Nulo: sem emoji.
+  emoji: varchar("emoji", { length: 16 }),
+  // O id do modelo de IA que escreveu o resumo.
+  model: varchar("model", { length: 80 }),
+  // Sobe a cada resumo gravado: a tradução do resumo (H11) guarda de qual
+  // versão saiu e é refeita quando ela muda.
+  version: int("version").default(0).notNull(),
+  generatedAt: bigint("generated_at", { mode: "number" }),
+  // Controle da fila do resumo; fica no servidor.
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // Código nosso, nunca o texto da IA ou do driver.
+  lastError: varchar("last_error", { length: 40 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  meetingUnique: uniqueIndex("meeting_summaries_meeting_unique").on(table.meetingId),
+  ownerMeetingIdx: index("meeting_summaries_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // A fila reserva pelo estado e pela reserva vencida.
+  statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
+}));
+
+// Cada item do resumo guardado. Nada extraído por IA entra sozinho
+// (CLAUDE.md): o item nasce 'pending', com a confiança e o TRECHO literal da
+// transcrição que o sustenta, e só vale como dado da dona quando ela confirma.
+// Quem falou aparece como o rótulo da voz ({F2}), que a tela troca pelo nome
+// que a dona deu (meetings.speaker_names); o servidor nunca escreve o nome.
+export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  section: varchar("section", { length: 12, enum: ["action", "focus", "task", "decision", "blocker", "question"] }).notNull(),
+  position: int("position").notNull(),
+  // O assunto das tarefas ("Publicação nas lojas"); nulo nas outras seções.
+  subject: varchar("subject", { length: 120 }),
+  text: text("text").notNull(),
+  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito.
+  // Nulo quando a transcrição não sustenta ninguém perto do trecho.
+  assignee: varchar("assignee", { length: 120 }),
+  // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
+  due: varchar("due", { length: 120 }),
+  excerpt: text("excerpt").notNull(),
+  // O segundo da reunião em que o trecho começa; nulo sem tempo (envio único).
+  startSeconds: int("start_seconds"),
+  confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
+  status: varchar("status", { length: 12, enum: ["pending", "confirmed", "ignored"] }).default("pending").notNull(),
+  // A caixa de marcar das ações.
+  done: boolean("done").default(false).notNull(),
+  decidedAt: bigint("decided_at", { mode: "number" }),
+  doneAt: bigint("done_at", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  summaryPositionIdx: index("meeting_summary_items_summary_position_idx").on(table.summaryId, table.position),
+  ownerMeetingIdx: index("meeting_summary_items_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // As próximas ações (H5) leem os itens confirmados de todas as reuniões da dona.
+  ownerSectionStatusIdx: index("meeting_summary_items_owner_section_status_idx").on(table.ownerId, table.section, table.status),
 }));
 
 // ============================================================

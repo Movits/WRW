@@ -27,10 +27,13 @@ vi.mock("./security", () => ({
 vi.mock("./db", () => ({
   getUserByOpenId: vi.fn(async () => ({ id: 7, openId: "email_x", isActive: true })),
   upsertUser: vi.fn(async () => undefined),
+  // abrirSessao grava a linha da sessão; aqui o INSERT só é aceito.
+  exigirDb: async () => ({ insert: () => ({ values: async () => undefined }) }),
 }));
 
 import { COOKIE_NAME } from "@shared/const";
 import { sdk } from "./_core/sdk";
+import { abrirSessao } from "./sessao";
 
 describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava", () => {
   beforeEach(() => {
@@ -42,7 +45,14 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
   });
 
   it("no Render, usa o CF-Connecting-IP, não o primeiro item do X-Forwarded-For", async () => {
-    const cookie = await sdk.signSession({ openId: "email_x", appId: "mmm-os", name: "Membra" });
+    // O token que o login entrega (abrirSessao), com o sessionToken que o sdk
+    // confere no banco: token de usuária sem ele é recusado antes de chegar à
+    // detecção de anomalia.
+    const { token: cookie, sessionToken } = await abrirSessao({
+      usuaria: { id: 7, openId: "email_x", name: "Membra", email: null },
+      ip: "198.51.100.23",
+      userAgent: "vitest",
+    });
     const req = {
       headers: {
         cookie: `${COOKIE_NAME}=${cookie}`,
@@ -56,6 +66,35 @@ describe("sdk.authenticateRequest: o IP da anomalia é o mesmo que o login grava
 
     await sdk.authenticateRequest(req as never);
 
-    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest");
+    // O quarto argumento é o sessionToken da sessão aberta.
+    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, "198.51.100.23", "vitest", sessionToken);
+  });
+});
+
+/**
+ * Revisão da PR #179: o sdk entrega à detecção de anomalia o sessionToken do
+ * token do login, e é com ele que a sessão passa a conhecer o IP novo depois
+ * do alerta (server/security.ts). Sem este fio, o alerta de IP novo voltaria
+ * a sair em toda requisição de quem trocou de rede, pelos 90 dias da sessão.
+ */
+describe("sdk.authenticateRequest: o sessionToken do login chega à detecção de anomalia", () => {
+  beforeEach(() => dubles.detectSessionAnomaly.mockClear());
+
+  it("token com sessionToken: o quarto argumento é ele", async () => {
+    const { SignJWT } = await import("jose");
+    const token = await new SignJWT({ openId: "email_x", appId: "mmm-os", name: "Membra", sessionToken: "s".repeat(64) })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode(process.env.JWT_SECRET));
+    const req = {
+      headers: { cookie: `${COOKIE_NAME}=${token}`, "user-agent": "vitest" },
+      ip: "203.0.113.9",
+      socket: { remoteAddress: "203.0.113.9" },
+    };
+
+    await sdk.authenticateRequest(req as never);
+
+    expect(dubles.detectSessionAnomaly).toHaveBeenCalledWith(7, expect.any(String), "vitest", "s".repeat(64));
   });
 });

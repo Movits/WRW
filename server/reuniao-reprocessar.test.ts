@@ -178,8 +178,8 @@ const primeira = (filtro: (o: Operacao) => boolean) => estado.operacoes.findInde
 const ultima = (filtro: (o: Operacao) => boolean) => estado.operacoes.reduce((achada, o, i) => (filtro(o) ? i : achada), -1);
 const linhasInseridas = (tabela: unknown) => de("insert", tabela).flatMap(o => o.linhas ?? []);
 const falhasGravadas = () => de("update", schema.meetings).filter(o => o.valores?.status === "failed");
-const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations"];
-const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations];
+const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations", "meeting_summary_items", "meeting_summaries"];
+const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations, schema.meetingSummaryItems, schema.meetingSummaries];
 
 async function reprocessar() {
   const { trabalho } = await servico.iniciarReprocessamento(DONA, REUNIAO);
@@ -441,7 +441,7 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     });
     await reprocessar();
     expect(de("insert")).toEqual([]);
-    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
+    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings, schema.meetingAudioSlices]);
     expect(storageDelete).toHaveBeenCalledWith(CHAVE);
     expect(falhasGravadas()).toEqual([]);
   });

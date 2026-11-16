@@ -1,18 +1,24 @@
 import crypto from "crypto";
-import { and, desc, eq, inArray, lt, lte, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
+  meetingAudioSlices,
   meetingContactSuggestions,
   meetingEntities,
   meetingRecordings,
   meetings,
   meetingTranscripts,
   meetingTranscriptTranslations,
+  meetingSummaries,
+  meetingSummaryItems,
 } from "../drizzle/schema";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
+import { dividirEmJanelas } from "./janelas-de-texto";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
@@ -113,20 +119,10 @@ export type MeetingExtraction = {
   }>;
 };
 
-export const MEETING_TRANSCRIPT_LANGUAGES = ["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"] as const;
-
-const MEETING_LANGUAGES: Record<(typeof MEETING_TRANSCRIPT_LANGUAGES)[number], string> = {
-  "pt-BR": "português do Brasil",
-  en: "inglês",
-  es: "espanhol",
-  fr: "francês",
-  de: "alemão",
-  ar: "árabe",
-  zh: "chinês simplificado",
-  hi: "hindi",
-  ja: "japonês",
-  ru: "russo",
-};
+// Os idiomas da reunião e os nomes que vão no prompt moram em
+// shared/idioma-da-reuniao.ts (uma função só, nomeDoIdioma). Os nomes antigos
+// seguem exportados para quem já os importa.
+export const MEETING_TRANSCRIPT_LANGUAGES = IDIOMAS_DA_REUNIAO;
 
 function now() {
   return Date.now();
@@ -179,7 +175,84 @@ const ITEM_DO_PERFIL = {
 } as const;
 const ORCAMENTO_DA_EXTRACAO_MS = 60_000;
 
+// O que uma chamada de extração lê. Uma reunião longa (em partes) passa disso e
+// é lida inteira, em janelas (G8), em vez de cortada aos 24 mil caracteres.
+export const JANELA_DA_EXTRACAO = 24_000;
+// Tetos da reunião inteira, depois de juntar as janelas: os de uma janela só
+// (80 e 20) multiplicados por elas encheriam a tela de pendências repetidas.
+const TETO_DE_ENTIDADES = 200;
+const TETO_DE_PESSOAS = 40;
+
+/**
+ * Extrai da transcrição INTEIRA: uma chamada por janela (dividirEmJanelas), uma
+ * depois da outra, e a junção tira as repetidas. Entidade repetida (mesmo tipo e
+ * mesmo valor normalizado) fica com a maior confiança; pessoa repetida (mesmo
+ * e-mail, telefone ou nome) junta o que tem e o que precisa das duas janelas.
+ * Uma janela que falha derruba a extração inteira: meia reunião extraída
+ * passaria por inteira.
+ */
 export async function extractMeetingData(transcript: string): Promise<MeetingExtraction> {
+  const janelas = dividirEmJanelas(transcript, JANELA_DA_EXTRACAO);
+  if (janelas.length <= 1) return extrairDeUmaJanela(transcript);
+  const partes: MeetingExtraction[] = [];
+  for (const janela of janelas) partes.push(await extrairDeUmaJanela(janela));
+  return juntarExtracoes(partes);
+}
+
+export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction {
+  const entidades = new Map<string, MeetingExtraction["entities"][number]>();
+  for (const entidade of partes.flatMap(p => p.entities)) {
+    const chave = `${entidade.type}|${(entidade.normalizedValue || entidade.value).trim().toLocaleLowerCase()}`;
+    const atual = entidades.get(chave);
+    if (!atual || entidade.confidence > atual.confidence) entidades.set(chave, entidade);
+  }
+  const pessoas: MeetingExtraction["contacts"] = [];
+  for (const pessoa of partes.flatMap(p => p.contacts)) {
+    const mesma = pessoas.find(outra => mesmaPessoa(outra, pessoa));
+    if (!mesma) {
+      pessoas.push({ ...pessoa });
+      continue;
+    }
+    mesma.jobTitle ??= pessoa.jobTitle;
+    mesma.company ??= pessoa.company;
+    mesma.phone ??= pessoa.phone;
+    mesma.email ??= pessoa.email;
+    mesma.confidence = Math.max(mesma.confidence, pessoa.confidence);
+    if (!mesma.tipoPessoa || mesma.tipoPessoa === "nao_informado") mesma.tipoPessoa = pessoa.tipoPessoa;
+    mesma.oQueTenho = semItensRepetidos([...(mesma.oQueTenho ?? []), ...(pessoa.oQueTenho ?? [])]);
+    mesma.oQuePreciso = semItensRepetidos([...(mesma.oQuePreciso ?? []), ...(pessoa.oQuePreciso ?? [])]);
+  }
+  // Acima do teto, ficam as de maior confiança (e não as do começo da reunião).
+  const porConfianca = <T extends { confidence: number }>(lista: T[]) => [...lista].sort((a, b) => b.confidence - a.confidence);
+  return {
+    entities: porConfianca(Array.from(entidades.values())).slice(0, TETO_DE_ENTIDADES),
+    contacts: porConfianca(pessoas).slice(0, TETO_DE_PESSOAS),
+  };
+}
+
+function semItensRepetidos<T extends { texto: string }>(itens: T[]): T[] {
+  const vistos = new Set<string>();
+  return itens.filter(item => {
+    const chave = item.texto.trim().toLocaleLowerCase();
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
+
+function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtraction["contacts"][number]) {
+  const igual = (x: string | null | undefined, y: string | null | undefined) => !!x && !!y && x.trim().toLocaleLowerCase() === y.trim().toLocaleLowerCase();
+  const soDigitos = (x: string | null | undefined) => (x ?? "").replace(/\D/g, "");
+  if (igual(a.email, b.email)) return true;
+  if (soDigitos(a.phone).length >= 8 && soDigitos(a.phone) === soDigitos(b.phone)) return true;
+  // Pelo nome, só quando nada as distingue: o mesmo nome com e-mail ou telefone
+  // diferente são duas pessoas (homônimas), e juntar perderia o contato de uma.
+  const conflita = (x: string | null | undefined, y: string | null | undefined, norm: (v: string | null | undefined) => string) => !!norm(x) && !!norm(y) && norm(x) !== norm(y);
+  const email = (v: string | null | undefined) => (v ?? "").trim().toLocaleLowerCase();
+  return igual(a.fullName, b.fullName) && !conflita(a.email, b.email, email) && !conflita(a.phone, b.phone, soDigitos);
+}
+
+async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
@@ -190,7 +263,7 @@ export async function extractMeetingData(transcript: string): Promise<MeetingExt
       },
       {
         role: "user",
-        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, 24000)}`,
+        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, JANELA_DA_EXTRACAO)}`,
       },
     ],
     response_format: {
@@ -286,7 +359,7 @@ export function ajustarSugestaoAosLimites(contato: MeetingExtraction["contacts"]
 }
 
 /** Escritas sem espaço entre as palavras: nelas o nome aparece colado ao resto da fala. */
-const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
+export const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
 
 /**
  * O nome da pessoa sugerida reduzido às palavras que a transcrição sustenta.
@@ -334,15 +407,25 @@ export function nomeSustentadoPelaTranscricao(nome: string, transcricao: string)
 const TIMEOUT_DA_TRADUCAO_MS = 180_000;
 const ORCAMENTO_DA_TRADUCAO_MS = 200_000;
 
-export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string) {
-  const normalizedLanguage = language === "pt" ? "pt-BR" : language;
-  if (!(normalizedLanguage in MEETING_LANGUAGES)) throw new Error("Idioma de tradução não suportado.");
-  const targetLanguage = MEETING_LANGUAGES[normalizedLanguage as keyof typeof MEETING_LANGUAGES];
+/**
+ * `antesDeChamarAIA` roda só quando a tradução não está guardada, logo antes
+ * do pedido à IA, e pode recusar lançando: é o teto do link aberto, que assim
+ * não gasta vaga com a tradução que já está no banco.
+ */
+export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string, antesDeChamarAIA?: () => void) {
+  const normalizedLanguage = idiomaDaReuniao(language);
+  if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
+  const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
   const [transcript] = await db.select().from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
-  if (normalizedLanguage === "pt-BR" || transcript.language === normalizedLanguage) {
+  // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
+  // reunião em inglês "traduzida" para pt-BR voltava em inglês. Reunião antiga
+  // guarda 'pt', e idioma gravado fora da lista conta como pt-BR, o padrão de
+  // quando ela foi gravada.
+  const idiomaOriginal = idiomaDaReuniao(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  if (normalizedLanguage === idiomaOriginal) {
     return { language: normalizedLanguage, text: transcript.transcript, cached: true };
   }
   const [cached] = await db.select().from(meetingTranscriptTranslations)
@@ -353,16 +436,95 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     )).limit(1);
   if (cached) return { language: normalizedLanguage, text: cached.translatedText, cached: true };
 
-  const response = await invokeLLM({
-    timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
-    orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
-    messages: [
-      { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.` },
-      { role: "user", content: transcript.transcript.slice(0, 48_000) },
-    ],
-  });
-  const translatedText = String(response.choices?.[0]?.message?.content ?? "").trim();
-  if (!translatedText) throw new Error("Não foi possível traduzir a transcrição.");
+  // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
+  // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
+  // por ela, sem pagar outra chamada nem gastar vaga do teto.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
+  const longa = janelas.length > 1;
+  const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
+  const emCurso = traducoesEmCurso.get(chave);
+  if (emCurso) return longa ? emAndamento : emCurso;
+  // A tradução longa que falhou em segundo plano: o próximo pedido recebe o
+  // erro (uma vez), em vez de recomeçar a tradução em silêncio a cada 5 s.
+  const falha = falhasDaTraducaoLonga.get(chave);
+  if (falha) {
+    falhasDaTraducaoLonga.delete(chave);
+    if (Date.now() - falha.quando < VALIDADE_DA_FALHA_MS) throw falha.erro;
+  }
+  antesDeChamarAIA?.();
+  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas });
+  traducoesEmCurso.set(chave, trabalho);
+  if (longa) {
+    // Reunião longa: uma chamada por janela leva minutos, mais que o proxy do
+    // Render aguenta. A tradução segue em segundo plano, e a tela pergunta de
+    // novo até ela estar guardada. O trabalho nunca rejeita solto (derrubaria o
+    // processo): a falha fica guardada para o próximo pedido.
+    trabalho.then(
+      () => traducoesEmCurso.delete(chave),
+      erro => {
+        traducoesEmCurso.delete(chave);
+        // descreverErroDeBanco: a mensagem crua do driver traz o SQL com os
+        // valores, e o valor aqui é a tradução da reunião.
+        console.error("[Reuniões] a tradução longa falhou:", descreverErroDeBanco(erro));
+        if (falhasDaTraducaoLonga.size >= TETO_DE_FALHAS_GUARDADAS) falhasDaTraducaoLonga.clear();
+        falhasDaTraducaoLonga.set(chave, { erro: erro instanceof Error ? erro : new Error("Não foi possível traduzir a transcrição."), quando: Date.now() });
+      },
+    );
+    return emAndamento;
+  }
+  try {
+    return await trabalho;
+  } finally {
+    traducoesEmCurso.delete(chave);
+  }
+}
+
+// O que uma chamada de tradução lê e devolve. Mais que isso não cabe com folga
+// na saída do modelo: a reunião longa é traduzida em janelas, uma por chamada.
+export const JANELA_DA_TRADUCAO = 20_000;
+
+type TraducaoPronta = { language: string; text: string; cached: boolean; emAndamento?: false };
+type TraducaoEmAndamento = { language: string; text: null; cached: false; emAndamento: true };
+export type TraducaoDaTranscricao = TraducaoPronta | TraducaoEmAndamento;
+
+// As traduções que estão na IA agora, por dona, reunião, idioma e transcrição.
+// Em memória, como os tetos: basta à instância única do Render. Um deploy no
+// meio perde a tradução longa em curso, e o próximo pedido a recomeça.
+const traducoesEmCurso = new Map<string, Promise<TraducaoPronta>>();
+// A falha da tradução longa vale para o próximo pedido por pouco tempo: quem
+// volta horas depois recomeça, sem receber um erro velho. O teto protege a
+// memória do processo de falhas que ninguém veio buscar.
+const falhasDaTraducaoLonga = new Map<string, { erro: Error; quando: number }>();
+const VALIDADE_DA_FALHA_MS = 2 * 60_000;
+const TETO_DE_FALHAS_GUARDADAS = 200;
+
+async function traduzirEGuardar(db: Banco, alvo: {
+  ownerId: string;
+  meetingId: string;
+  normalizedLanguage: string;
+  targetLanguage: string;
+  transcript: { id: string; transcript: string };
+  janelas: string[];
+}): Promise<TraducaoPronta> {
+  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
+  // Uma janela por vez, na ordem: o texto traduzido é a junção delas. Janela
+  // que volta vazia derruba a tradução inteira, em vez de guardar um buraco.
+  const traduzidas: string[] = [];
+  for (const janela of janelas) {
+    const response = await invokeLLM({
+      timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
+      orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
+      messages: [
+        { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.${janelas.length > 1 ? " O texto é um trecho de uma reunião maior: traduza só ele, sem introdução nem fecho." : ""}` },
+        { role: "user", content: janela },
+      ],
+    });
+    const traduzida = String(response.choices?.[0]?.message?.content ?? "").trim();
+    if (!traduzida) throw new Error("Não foi possível traduzir a transcrição.");
+    traduzidas.push(traduzida);
+  }
+  const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
   // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE
@@ -372,15 +534,22 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
   const timestamp = now();
-  await db.insert(meetingTranscriptTranslations).values({
-    id: crypto.randomUUID(),
-    meetingId,
-    ownerId,
-    language: normalizedLanguage,
-    translatedText,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
+  try {
+    await db.insert(meetingTranscriptTranslations).values({
+      id: crypto.randomUUID(),
+      meetingId,
+      ownerId,
+      language: normalizedLanguage,
+      translatedText,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (erro) {
+    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
+    if (!ehColisaoDeChave(erro)) throw erro;
+  }
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -431,7 +600,7 @@ export function processingErrorSeguro(processingError: string | null): string | 
 }
 
 /** A dona excluiu a reunião no meio: não é falha a registrar, é trabalho a descartar. */
-class ReuniaoExcluidaDuranteProcessamento extends Error {
+export class ReuniaoExcluidaDuranteProcessamento extends Error {
   constructor() {
     super(MENSAGEM_EXCLUIDA_DURANTE_PROCESSAMENTO);
     this.name = "ReuniaoExcluidaDuranteProcessamento";
@@ -668,13 +837,43 @@ async function processarAudioGuardado(db: Banco, execucao: {
     throw new Error("Não foi possível transcrever o áudio.", { cause: erro });
   }
 
-  let extraction: MeetingExtraction;
+  const extraction = await extrairDadosDaReuniao(transcription.text);
+  return gravarResultadoDaReuniao(db, {
+    meetingId, ownerId, ficha,
+    limparAntes: execucao.limparAntes,
+    durationSeconds: execucao.durationSeconds,
+    transcription,
+    extraction,
+  });
+}
+
+/** A extração da transcrição, com frase neutra na falha (o original vai ao log e a `cause`). */
+export async function extrairDadosDaReuniao(texto: string): Promise<MeetingExtraction> {
   try {
-    extraction = await extractMeetingData(transcription.text);
+    return await extractMeetingData(texto);
   } catch (erro) {
     console.error("[Reuniões] a extração falhou:", erro instanceof Error ? erro.message : erro);
     throw new Error("O serviço de IA não conseguiu extrair os dados da transcrição.", { cause: erro });
   }
+}
+
+/**
+ * O fim do processamento, com a transcrição e a extração prontas: releitura,
+ * escritas e promoção a 'ready', tudo arbitrado pela FICHA (o updated_at que a
+ * execução gravou ao tomar a reunião para 'processing'). Serve ao envio único
+ * (processarAudioGuardado, logo depois da IA) e à fila da reunião em partes
+ * (server/fila-de-transcricao.ts, depois de montar a transcrição das partes).
+ */
+export async function gravarResultadoDaReuniao(db: Banco, execucao: {
+  meetingId: string;
+  ownerId: string;
+  ficha: number;
+  limparAntes: boolean;
+  durationSeconds: number;
+  transcription: { text: string; segments: unknown; language: string };
+  extraction: MeetingExtraction;
+}) {
+  const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
 
   // Entre a tomada e aqui passaram 1–2 minutos de Gemini e LLM: tempo de sobra
   // para a dona ter clicado em Excluir, para um reprocessamento novo ou para a
@@ -771,7 +970,9 @@ async function processarAudioGuardado(db: Banco, execucao: {
   // o banco arbitrar. Zero linhas: relê para saber quem venceu. Excluída, o
   // que acabou de ser gravado sai. Viva com outra ficha, nada é apagado aqui —
   // a execução dona da reunião limpa antes de gravar o resultado dela.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt })
+  // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
+  // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
+  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(execucao.limparAntes ? { speakerNames: null } : {}) })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
@@ -822,6 +1023,34 @@ function chaveReprocessavel(gravacao: Gravacao | undefined, ownerId: string, mee
 }
 
 /**
+ * O reprocessar da reunião gravada em partes: quem refaz é a fila
+ * (server/fila-de-transcricao.ts). A reunião volta a 'uploading' com as
+ * tentativas zeradas, e as partes que falharam por causa passageira (IA, banco,
+ * tentativas esgotadas) voltam a 'received'. As que não têm áudio (sumiu do
+ * bucket ou nunca subiu) seguem como lacuna. Sem parte nenhuma, não há o que
+ * reprocessar. Responde na hora: a tela acompanha pelo status.
+ */
+async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string): Promise<{ trabalho: Promise<void> }> {
+  const [partes] = await db.select({ quantas: sql<number>`count(*)`, maiorSeq: sql<number | null>`max(${meetingAudioSlices.seq})` })
+    .from(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  if (!Number(partes?.quantas ?? 0)) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
+  const tomada = await db.update(meetings).set({
+    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(),
+    expectedSlices: sql`coalesce(${meetings.expectedSlices}, ${Number(partes!.maiorSeq) + 1})`,
+  }).where(and(
+    eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"),
+    eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+  ));
+  if (!linhasAfetadas(tomada)) throw new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
+  await db.update(meetingAudioSlices).set({ status: "received", attempts: 0, lastError: null, lockToken: null, lockedUntil: null, updatedAt: now() })
+    .where(and(
+      eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), eq(meetingAudioSlices.status, "failed"),
+      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, ["AUDIO_AUSENTE", "NAO_RECEBIDA"])),
+    ));
+  return { trabalho: Promise.resolve() };
+}
+
+/**
  * Pede o reprocessamento de uma reunião com falha, a partir do áudio que ficou
  * guardado. Só LÊ até tomar a reunião ('failed' → 'processing', com a ficha) e
  * devolve logo: o trabalho — ler os bytes do bucket, IA, escritas — segue em
@@ -841,6 +1070,7 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
+  if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
   // unicidade por reunião no banco.
@@ -926,9 +1156,63 @@ async function executarReprocessamento(db: Banco, execucao: {
   }
 }
 
+/**
+ * As colunas de `meetings` que a lista e o detalhe mandam ao navegador,
+ * escolhidas uma a uma em vez da linha inteira. Privacidade é regra de
+ * consulta, não de tela: coluna nova da tabela só chega à tela entrando aqui.
+ *
+ * Ficam no servidor as colunas de controle da fila de transcrição (attempts,
+ * lockedUntil e lockToken): a reserva de quem está processando a reunião não é
+ * dado da dona e não tem uso na tela. As outras colunas da migração 0014
+ * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
+ * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
+ */
+const COLUNAS_DA_REUNIAO_NA_TELA = {
+  id: meetings.id,
+  ownerId: meetings.ownerId,
+  title: meetings.title,
+  contactId: meetings.contactId,
+  contextId: meetings.contextId,
+  status: meetings.status,
+  consentGranted: meetings.consentGranted,
+  consentAt: meetings.consentAt,
+  language: meetings.language,
+  processingError: meetings.processingError,
+  createdAt: meetings.createdAt,
+  updatedAt: meetings.updatedAt,
+  // Como o áudio chegou (envio único ou partes) e quantas partes a gravação
+  // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
+  audioPipeline: meetings.audioPipeline,
+  expectedSlices: meetings.expectedSlices,
+  // Os nomes das vozes (H3): só a dona lê esta lista e este detalhe.
+  speakerNames: meetings.speakerNames,
+};
+
+/**
+ * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
+ * Só a dona: a reunião de outra conta é "não encontrada". Devolve os nomes
+ * como ficaram, ou null sem a reunião. A leitura e a gravação vão na mesma
+ * transação com a linha travada: dois nomes salvos juntos não se apagam.
+ */
+export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
+  if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
+  const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
+  const db = await exigirDb();
+  return db.transaction(async tx => {
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
+    if (!reuniao) return null;
+    const nomes = nomesDosFalantes(reuniao.speakerNames);
+    if (limpo) nomes[falante] = limpo;
+    else delete nomes[falante];
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: Date.now() }).where(daDona);
+    return nomes;
+  });
+}
+
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select().from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
+  const lista = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
   return lista.map(meeting => ({ ...meeting, processingError: processingErrorSeguro(meeting.processingError) }));
 }
 
@@ -966,12 +1250,60 @@ async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
  * caminho do proxy autenticado (/manus-storage/...), que confere sessão e
  * posse a cada requisição; não é endereço público do bucket.
  */
-async function gravacaoParaOuvir(
+/** Uma parte do áudio para o player: o contrato `recording.partes` do desenho. */
+export type ParteParaOuvir = { seq: number; url: string; mimeType: string; inicioSegundos: number; duracaoSegundos: number; expiresAt: number };
+
+/**
+ * As partes da reunião gravada em partes que dá para ouvir agora: recebidas ou
+ * transcritas, ainda no prazo. O início é o gravado pela fila (offset) ou, antes
+ * de ela transcrever, a soma das anteriores. A url é a do proxy autenticado.
+ */
+async function partesParaOuvir(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string): Promise<ParteParaOuvir[]> {
+  const linhas = await db.select({
+    seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, storageUrl: meetingAudioSlices.storageUrl,
+    mimeType: meetingAudioSlices.mimeType, durationMs: meetingAudioSlices.durationMs, offsetMs: meetingAudioSlices.offsetMs,
+    expiresAt: meetingAudioSlices.expiresAt,
+  }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)))
+    .orderBy(meetingAudioSlices.seq);
+  const agora = now();
+  let acumulado = 0;
+  const partes: ParteParaOuvir[] = [];
+  for (const linha of linhas) {
+    const inicio = linha.offsetMs !== null ? Number(linha.offsetMs) : acumulado;
+    acumulado = inicio + linha.durationMs;
+    if ((linha.status !== "received" && linha.status !== "transcribed") || linha.expiresAt <= agora) continue;
+    partes.push({
+      seq: linha.seq, url: linha.storageUrl, mimeType: linha.mimeType,
+      inicioSegundos: inicio / 1000, duracaoSegundos: linha.durationMs / 1000, expiresAt: linha.expiresAt,
+    });
+  }
+  return partes;
+}
+
+export async function gravacaoParaOuvir(
   db: Awaited<ReturnType<typeof exigirDb>>,
   ownerId: string,
   meetingId: string,
   criadaEm: number,
+  emPartes = false,
 ) {
+  // A reunião gravada em partes toca as partes em sequência; o resumo em
+  // `recording` (url da primeira, duração total, o prazo mais curto) mantém a
+  // tela de antes funcionando.
+  if (emPartes) {
+    const partes = await partesParaOuvir(db, ownerId, meetingId);
+    if (!partes.length) return { recording: null, recordingExpired: criadaEm + MEETING_AUDIO_TTL_MS <= now() };
+    const ultima = partes[partes.length - 1];
+    return {
+      recording: {
+        url: partes[0].url, mimeType: partes[0].mimeType,
+        durationSeconds: Math.round(ultima.inicioSegundos + ultima.duracaoSegundos),
+        sizeBytes: 0, expiresAt: Math.min(...partes.map(p => p.expiresAt)), partes,
+      },
+      recordingExpired: false,
+    };
+  }
   // Sem unicidade por reunião no banco: `orderBy` torna a escolha determinista
   // (a mais recente), em vez de depender da ordem que o MySQL devolver.
   const [gravacao] = await db.select().from(meetingRecordings)
@@ -995,6 +1327,11 @@ async function gravacaoParaOuvir(
     return { recording: null, recordingExpired: true };
   }
 
+  // O envio único é uma parte só, no mesmo contrato.
+  const partes: ParteParaOuvir[] = [{
+    seq: 0, url: gravacao.storageUrl, mimeType: gravacao.mimeType, inicioSegundos: 0,
+    duracaoSegundos: gravacao.durationSeconds, expiresAt: gravacao.expiresAt,
+  }];
   return {
     recording: {
       url: gravacao.storageUrl,
@@ -1002,8 +1339,24 @@ async function gravacaoParaOuvir(
       durationSeconds: gravacao.durationSeconds,
       sizeBytes: gravacao.sizeBytes,
       expiresAt: gravacao.expiresAt,
+      partes,
     },
     recordingExpired: false,
+  };
+}
+
+/**
+ * O andamento da reunião gravada em partes, para a tela dizer o que está
+ * acontecendo: quantas partes chegaram, quantas a IA já transcreveu e quantas a
+ * gravação teve (nulo enquanto grava). Nulo no envio único.
+ */
+async function andamentoDaReuniao(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string, esperadas: number | null) {
+  const linhas = await db.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  return {
+    recebidas: linhas.filter(l => l.status !== "uploading").length,
+    transcritas: linhas.filter(l => l.status === "transcribed").length,
+    esperadas,
   };
 }
 
@@ -1029,20 +1382,35 @@ export async function limparGravacoesVencidas(limite = 200) {
     await db.delete(meetingRecordings).where(eq(meetingRecordings.id, gravacao.id));
     apagadas += 1;
   }
-  return { encontradas: vencidas.length, apagadas };
+  // As partes da reunião gravada em partes (G5) seguem o mesmo prazo: o objeto
+  // sai do bucket e a linha sai do banco. A transcrição montada fica.
+  const partesVencidas = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey })
+    .from(meetingAudioSlices)
+    .where(lte(meetingAudioSlices.expiresAt, now()))
+    .limit(limite);
+  for (const parte of partesVencidas) {
+    if (!(await apagarArquivoDaGravacao(parte.storageKey))) continue;
+    await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, parte.id));
+    apagadas += 1;
+  }
+  return { encontradas: vencidas.length + partesVencidas.length, apagadas };
 }
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  const [meeting] = await db.select().from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
+  // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
+  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const suggestions = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
-  const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt);
+  const emPartes = meeting.audioPipeline === "slices";
+  const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt, emPartes);
+  const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
   return {
     meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError) },
-    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired,
+    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, andamento,
   };
 }
 
@@ -1064,14 +1432,23 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .from(meetingRecordings)
     .where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
   for (const gravacao of gravacoes) await apagarArquivoDaGravacao(gravacao.storageKey);
+  // As partes da reunião gravada em partes (G5) são áudio também: objeto e linha
+  // saem junto. A linha 'uploading' cujo objeto ainda não subiu sai igual (o
+  // delete de chave inexistente não é erro no S3), e receberParte confere a
+  // reunião de novo depois do upload, para não deixar objeto de reunião apagada.
+  const partes = await db.select({ storageKey: meetingAudioSlices.storageKey })
+    .from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  for (const parte of partes) await apagarArquivoDaGravacao(parte.storageKey);
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId);
   await db.delete(meetingRecordings).where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
+  await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 }
 
 /**
- * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição e
- * traduções —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
+ * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição,
+ * traduções e resumo guardado —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
  * fica, porque é dele que sai o resultado novo. Mora dentro da lista única de
  * apagarDerivadosDaReuniao para as duas nunca divergirem.
  */
@@ -1085,6 +1462,10 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   // As TRADUÇÕES são cópias da transcrição em outros idiomas: apagar só o
   // original deixaria o mesmo conteúdo vivo em até nove línguas.
   await db.delete(meetingTranscriptTranslations).where(and(eq(meetingTranscriptTranslations.meetingId, meetingId), eq(meetingTranscriptTranslations.ownerId, ownerId)));
+  // O resumo guardado (H4) foi escrito a partir da transcrição e cita trechos
+  // dela: sai com ela. Os itens antes do resumo, que é a linha de que eles saem.
+  await db.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.meetingId, meetingId), eq(meetingSummaryItems.ownerId, ownerId)));
+  await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
 }
 
 export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
@@ -1119,8 +1500,12 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   const db = await exigirDb();
   const agora = now();
   const corte = agora - limiteMs;
+  // Só o envio único: a reunião em partes em 'processing' é da fila
+  // (server/fila-de-transcricao.ts), que tem a própria reserva com prazo e a
+  // retoma quando ela vence — marcá-la como falha aqui perderia uma montagem
+  // longa que ainda está em curso.
   const presas = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.status, "processing"), lt(meetings.updatedAt, corte)))
+    .where(and(eq(meetings.status, "processing"), eq(meetings.audioPipeline, "single"), lt(meetings.updatedAt, corte)))
     .limit(limite);
   if (!presas.length) return { encontradas: 0, marcadas: 0 };
 
@@ -1133,6 +1518,7 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   }).where(and(
     inArray(meetings.id, presas.map(reuniao => reuniao.id)),
     eq(meetings.status, "processing"),
+    eq(meetings.audioPipeline, "single"),
     lt(meetings.updatedAt, corte),
   ));
   return { encontradas: presas.length, marcadas: linhasAfetadas(resultado) };

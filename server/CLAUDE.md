@@ -23,6 +23,12 @@ Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
 nenhum recorte por caminho). Upload novo entra nos dois lugares.
 
+A exceção é binária: as partes da reunião gravada em partes chegam por
+`POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
+cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por
+`server/agendados-autenticacao.test.ts`. A linha da parte é gravada antes do upload, com a
+chave exata do objeto (`storagePut(..., { chaveExata: true })`).
+
 ## tRPC, procedures e papéis
 
 Cada área de negócio tem um router em `server/routers/`, agregados em `server/routers.ts`
@@ -222,20 +228,37 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
 
 `server/_core/` é a infraestrutura herdada do Manus (o projeto nasceu na plataforma Manus
 e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie HttpOnly
-(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev.
+(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev. A sessão de
+usuária nasce só por `abrirSessao` (`server/sessao.ts`: a linha em `sessions` e o JWT com o
+`sessionToken` dela, 90 dias desde o último uso), e o `sdk.authenticateRequest` recusa JWT
+de usuária sem `sessionToken`, que escaparia da revogação (só o cron, openId `cron_`, passa
+sem ele).
 
-- **IA:** as chamadas passam por `server/_core/llm.ts`, que aceita qualquer endpoint
-  compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto), configurado por
-  `LLM_API_URL`, `LLM_API_KEY` e `LLM_MODEL`; retenta 4 vezes com backoff. `LLM_API_URL`
-  não tem fallback; o modelo é sempre concreto (regra da raiz). `server/gemini.ts`
-  (transcrição e embeddings) distingue cota esgotada (`GeminiCotaEsgotadaError`) de
-  sobrecarga e cai para um modelo reserva.
+- **IA:** as chamadas de texto passam por `server/_core/llm.ts`, que aceita qualquer
+  endpoint compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto),
+  configurado por `LLM_API_URL`, `LLM_API_KEY` e `LLM_MODEL`; retenta 4 vezes com backoff.
+  `LLM_API_URL` não tem fallback. `server/gemini.ts` (transcrição e embeddings) não usa o
+  `LLM_API_URL`: fala direto com a API do Gemini, com a mesma chave, distingue cota esgotada
+  (`GeminiCotaEsgotadaError`) de sobrecarga e cai para um modelo reserva.
+- **Modelo concreto (regra da raiz):** todo id passa pela guarda de
+  `server/_core/modelos-de-ia.ts`, lido do ambiente a cada chamada. O do áudio
+  (`LLM_AUDIO_MODEL` e `LLM_AUDIO_MODEL_RESERVA`) só passa no formato `gemini-<versão>`,
+  porque vai sempre ao Gemini, com o id na URL. O do texto (`LLM_MODEL`) não fica preso ao
+  Gemini: recusa só `latest` e id sem número de versão, e aceita id de outro provedor
+  (`gpt-4o-2024-08-06`). Vazio usa o padrão em silêncio; recusado avisa no log uma vez por
+  origem e valor e também cai no padrão. O boot imprime `[IA] áudio … · reserva … · texto …`
+  sem a chave (id de outro provedor no texto sai como "fora do log", porque a guarda do
+  texto não o distingue de uma chave colada no campo errado). Os ids que a chave do Gemini
+  enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas
-  URLs do banco: não renomeie sem migração de dados.
+  URLs do banco: não renomeie sem migração de dados. A única exceção é o áudio da reunião
+  com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
+  `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
+  (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
-  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/auth.ts`).
+  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
   `server/security.ts` e `server/matching.ts` derivam a chave do cofre do `JWT_SECRET`.
 
@@ -256,7 +279,7 @@ saem depois de a IA dar certo, e decidir sobre sugestão ou entidade com a reuni
 
 ## Testes do servidor
 
-- Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os dois
+- Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os
   `*.integracao.test.ts`). Padrão: `vi.mock` das dependências; credencial ausente (ex.:
   Resend) se auto-pula com `skipIf`.
 - A suíte NUNCA lê `DATABASE_URL`: `server/test/setup-banco.ts` a troca por

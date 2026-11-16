@@ -67,6 +67,10 @@ const registros = () => JSON.stringify(vi.mocked(console.error).mock.calls);
 beforeEach(() => {
   atualizacoes.length = 0;
   ambiente.ENV.llmApiKey = "chave-somente-para-testes";
+  // Principal e reserva saem do ambiente: o .env de quem roda a suíte não pode
+  // decidir se a reserva dispara (o gemini.ts lê os dois a cada chamada).
+  vi.stubEnv("LLM_AUDIO_MODEL", undefined);
+  vi.stubEnv("LLM_AUDIO_MODEL_RESERVA", undefined);
   fetchFalso = vi.fn();
   vi.stubGlobal("fetch", fetchFalso);
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -74,6 +78,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 

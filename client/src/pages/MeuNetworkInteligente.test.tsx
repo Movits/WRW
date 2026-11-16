@@ -215,7 +215,8 @@ describe("Meu Network Inteligente — nada é simulado", () => {
     render(<MeuNetworkInteligente />);
     const aviso = screen.getByText("Antes de gravar, você é responsável por obter o consentimento de todas as pessoas participantes e por cumprir as regras de privacidade aplicáveis.");
     const atalho = aviso.closest("a")!;
-    expect(atalho).toHaveAttribute("href", "/meetings");
+    // O atalho de gravar abre o gravador direto; o indicador de reuniões segue na lista.
+    expect(atalho).toHaveAttribute("href", "/gravar");
     expect(within(atalho).getByText("Até 10 minutos por reunião, com transcrição e sugestão dos contatos citados.")).toBeInTheDocument();
     expect(screen.getByText("Pesquisar meu network").closest("a")).toHaveAttribute("href", "/memory");
   });

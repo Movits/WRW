@@ -1,5 +1,5 @@
 /**
- * MMM - Módulo de Segurança Corporativa (Cofre Digital)
+ * WRW - Módulo de Segurança Corporativa (Cofre Digital)
  * Camada de segurança de nível bancário com:
  * - Criptografia AES-256-GCM
  * - Rate limiting e proteção contra brute force
@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { eq, and, desc, gt, gte, notInArray, sql, count } from "drizzle-orm";
 import { exigirDb } from "./db";
 import { requireSecret } from "./_core/env";
+import { DURACAO_DA_SESSAO_MS } from "./duracao-da-sessao";
 import {
   auditLogs,
   loginAttempts,
@@ -280,8 +281,11 @@ const TIPOS_FORA_DO_BLOQUEIO_AUTOMATICO: TipoDeEventoDeSeguranca[] = [
  * conta a linha que o WHERE ENCONTROU, e não a que mudou de valor — é o que uma
  * trava otimista quer. Sem cabeçalho reconhecível, zero: quem não consegue
  * provar que escreveu não age como se tivesse escrito.
+ *
+ * Exportada para a mesma trava fora deste arquivo (o consumo do link de
+ * redefinir a senha, em routers/auth.ts), em vez de outra cópia.
  */
-function linhasAlcancadas(resultado: unknown) {
+export function linhasAlcancadas(resultado: unknown): number {
   const cabecalho = Array.isArray(resultado) ? resultado[0] : resultado;
   return (cabecalho as { affectedRows?: number } | null | undefined)?.affectedRows ?? 0;
 }
@@ -339,8 +343,11 @@ export async function createSecurityEvent(
   ipAddress?: string,
   details?: Record<string, unknown>,
   opcoes?: { naoRepetirPorMs?: number }
-): Promise<void> {
+): Promise<boolean> {
   const db = await exigirDb();
+
+  // Devolve se o evento foi gravado: false quando a dedupe o barrou. Quem usa
+  // é detectSessionAnomaly, que só passa a conhecer um IP depois de alertar.
 
   // Repetição do MESMO alerta, para a MESMA conta, dentro da janela: não grava.
   // Só quem pede (`naoRepetirPorMs`) é dedupado — evento de tentativa de força
@@ -357,7 +364,7 @@ export async function createSecurityEvent(
       details ?? null,
       opcoes.naoRepetirPorMs
     );
-    if (!gravou) return;
+    if (!gravou) return false;
   } else {
     await db.insert(securityEvents).values({
       userId,
@@ -396,6 +403,7 @@ export async function createSecurityEvent(
   if (userId && severity === "critical" && !TIPOS_FORA_DO_BLOQUEIO_AUTOMATICO.includes(eventType)) {
     await checkAutoLockThreshold(userId, ipAddress).catch(() => false);
   }
+  return true;
 }
 
 // ============================================================
@@ -650,7 +658,16 @@ const LIMITE_CRITICO_DE_SESSOES = 20;
 export async function detectSessionAnomaly(
   userId: number,
   currentIp: string,
-  currentUserAgent: string
+  currentUserAgent: string,
+  /**
+   * O sessionToken desta requisição. Com ele, depois de alertar sobre IP novo,
+   * a sessão passa a guardar esse IP: o alerta sai UMA vez por troca de rede.
+   * Sem isso, como o IP da sessão só era gravado no login e a sessão agora
+   * dura 90 dias desde o último uso (server/duracao-da-sessao.ts), toda
+   * requisição depois de trocar de wi-fi para 4G gravava um SUSPICIOUS_ACCESS
+   * de risco alto, por meses.
+   */
+  sessionToken?: string | null
 ): Promise<void> {
   const db = await exigirDb();
 
@@ -704,8 +721,9 @@ export async function detectSessionAnomaly(
   }
 
   // Alertar sobre novo IP (possível acesso de localização diferente)
+  let alertouIpNovo = false;
   if (isNewIp && recentSessions.length > 0) {
-    await createSecurityEvent(
+    alertouIpNovo = await createSecurityEvent(
       userId,
       "suspicious_ip",
       "warning",
@@ -716,7 +734,7 @@ export async function detectSessionAnomaly(
         message: "Acesso detectado de endereço IP diferente dos registros anteriores",
       },
       { naoRepetirPorMs: JANELA_DE_REPETICAO_MS }
-    ).catch(() => {});
+    ).catch(() => false);
   }
 
   // Alertar sobre múltiplas sessões simultâneas apenas em volume muito alto
@@ -735,8 +753,13 @@ export async function detectSessionAnomaly(
     ).catch(() => {});
   }
 
-  // Alertar sobre novo dispositivo com IP diferente (alta suspeita)
-  if (isNewIp && isNewDevice && recentSessions.length > 0) {
+  // Novo dispositivo com IP diferente (alta suspeita), só junto com o alerta de
+  // IP novo que a dedupe deixou passar: no máximo um por conta a cada 30 min.
+  // Com a sessão de 90 dias, olhar só o IP gravava uma linha de risco alto por
+  // requisição de um IP ainda não aprendido (cada foto do storageProxy, inclusive)
+  // enquanto a dedupe barrava o suspicious_ip. "Novo dispositivo" hoje é sempre
+  // verdadeiro: o login não grava deviceFingerprint na sessão.
+  if (alertouIpNovo && isNewDevice) {
     await createAuditLog({
       userId,
       action: "SUSPICIOUS_ACCESS",
@@ -750,6 +773,18 @@ export async function detectSessionAnomaly(
         knownIpsCount: knownIps.size,
       },
     }).catch(() => {});
+  }
+
+  // Alertado o IP novo, a sessão passa a conhecê-lo (ver `sessionToken` acima).
+  // SÓ se o alerta foi gravado: a dedupe de 30 min não olha o IP, então um
+  // terceiro IP dentro da janela (o de quem copiou o token, por exemplo) seria
+  // "conhecido" sem nunca ter virado evento. Barrado, ele segue novo e alerta
+  // quando a janela fechar. A coluna tem 45 caracteres, como no insert do login.
+  if (alertouIpNovo && sessionToken) {
+    await db
+      .update(sessions)
+      .set({ ipAddress: currentIp.slice(0, 45) })
+      .where(eq(sessions.sessionToken, sessionToken));
   }
 }
 
@@ -880,8 +915,13 @@ export async function validateSessionToken(sessionToken: string): Promise<number
     return null;
   }
 
-  // Atualizar lastActivityAt
-  await db.update(sessions).set({ lastActivityAt: new Date() }).where(eq(sessions.sessionToken, sessionToken));
+  // Sessão deslizante (server/duracao-da-sessao.ts): o uso empurra o prazo no
+  // mesmo UPDATE que grava a última atividade, sem consulta a mais.
+  const agora = Date.now();
+  await db
+    .update(sessions)
+    .set({ lastActivityAt: new Date(agora), expiresAt: new Date(agora + DURACAO_DA_SESSAO_MS) })
+    .where(eq(sessions.sessionToken, sessionToken));
 
   return session.userId;
 }

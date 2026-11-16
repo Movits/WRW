@@ -1,6 +1,7 @@
 {
-  "name": "mmm-site",
+  "name": "wrw-site",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {

@@ -9,7 +9,7 @@
 // padrão embutida, nem senha escrita neste arquivo.
 //
 // Uso:
-//   DATABASE_URL='mysql://root:root@127.0.0.1:3306/mmm_os' \
+//   DATABASE_URL='mysql://root:root@127.0.0.1:3306/wrw_dev' \
 //     node scripts/definir-senha-local.mjs nicolas.demo@local.test 'a-senha-que-voce-escolher'
 //
 // TRAVA: recusa a rodar contra qualquer banco que não seja local. Trocar a senha

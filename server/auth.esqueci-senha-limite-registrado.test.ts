@@ -41,7 +41,8 @@ vi.mock("./db", () => ({
 }));
 
 import { appRouter } from "./routers";
-import { tetoDeRecuperacaoPorEmail, tetoDeRecuperacaoPorRede } from "./routers/auth";
+import { TRPCError } from "@trpc/server";
+import { MENSAGEM_DO_LIMITE_POR_REDE, tetoDeRecuperacaoPorEmail, tetoDeRecuperacaoPorRede } from "./routers/auth";
 import { PASSWORD_RESET_GENERIC_MESSAGE, PASSWORD_RESET_RATE_LIMIT } from "./password-reset-security";
 import type { TrpcContext } from "./_core/context";
 
@@ -57,15 +58,15 @@ const pedirRecuperacao = () =>
   appRouter.createCaller(contexto()).auth.forgotPassword({ email: E_MAIL_CADASTRADO });
 
 /**
- * O LIMITE POR IP NÃO PODE SER INVISÍVEL PARA QUEM MANTÉM O SISTEMA.
+ * O LIMITE POR IP NÃO PODE SER INVISÍVEL.
  *
- * A resposta ao usuário é sempre a mesma, de propósito, e isso continua: quem
- * pede a recuperação nunca descobre se o e-mail existe nem se bateu no limite.
- * O problema é que, do nosso lado, o pedido recusado sumia sem rastro — nenhum
- * e-mail sai, e o log do Render não registra nada. Quem testa tenta de novo, que
- * é o que qualquer pessoa faz ao não receber o e-mail, e a partir da quarta
- * tentativa em 15 minutos o fluxo fica mudo. Foi exatamente o relato "o esqueci
- * a senha não chega" do reteste de 15/09.
+ * Quem pede a recuperação nunca descobre se o e-mail existe: a recusa por rede
+ * vem antes de buscar a conta. Mas ela não pode ser muda. Do nosso lado, o
+ * pedido recusado sumia sem rastro (nenhum e-mail sai, e o log do Render não
+ * registrava nada); do lado de quem pede, a tela dizia "Pedido recebido". Quem
+ * testa tenta de novo, que é o que qualquer pessoa faz ao não receber o e-mail.
+ * Foi o relato "o esqueci a senha não chega" do reteste de 15/09. Esta é a
+ * contagem do banco, que vale quando a memória perdeu a conta (deploy, reinício).
  */
 describe("esqueci a senha — o limite por IP deixa registro no log", () => {
   beforeEach(() => {
@@ -89,15 +90,17 @@ describe("esqueci a senha — o limite por IP deixa registro no log", () => {
     aviso.mockRestore();
   });
 
-  it("no limite, recusa em silêncio para quem pede e registra para quem mantém", async () => {
+  it("no limite do banco (a memória zerou num deploy), recusa com a frase do teto por rede e registra para quem mantém", async () => {
     pedidosNaJanela.valor = PASSWORD_RESET_RATE_LIMIT;
     const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const resposta = await pedirRecuperacao();
+    const erro = await pedirRecuperacao().catch((e: unknown) => e);
 
-    // Nada sai, e a resposta é a mesma de sempre: o fluxo não vira oráculo.
+    // A mesma recusa do teto em memória, que a tela mostra, e nada sai.
+    expect(erro).toBeInstanceOf(TRPCError);
+    expect((erro as TRPCError).code).toBe("TOO_MANY_REQUESTS");
+    expect((erro as TRPCError).message).toBe(MENSAGEM_DO_LIMITE_POR_REDE);
     expect(sendEmailMock).not.toHaveBeenCalled();
-    expect(resposta).toEqual({ success: true, message: PASSWORD_RESET_GENERIC_MESSAGE });
 
     // Mas agora existe rastro, e ele diz por que o e-mail não saiu.
     expect(aviso).toHaveBeenCalledTimes(1);
@@ -112,7 +115,7 @@ describe("esqueci a senha — o limite por IP deixa registro no log", () => {
     pedidosNaJanela.valor = PASSWORD_RESET_RATE_LIMIT + 5;
     const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await pedirRecuperacao();
+    await pedirRecuperacao().catch(() => undefined);
 
     const registrado = String(aviso.mock.calls[0]?.[0] ?? "");
     expect(registrado).not.toContain(E_MAIL_CADASTRADO);

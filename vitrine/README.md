@@ -1,8 +1,7 @@
 # Vitrine pública
 
 Página estática de apresentação da WRW — Women Rocking the World (a marca desde
-15/09/2026; MMM segue só como nome do repositório e do endereço), publicada no GitHub
-Pages.
+15/09/2026), publicada no GitHub Pages.
 
 Não é a aplicação. O Pages entrega apenas arquivos prontos ao navegador — não roda
 servidor nem banco — e login, matches por IA, cofre e upload dependem dos dois. Esta
@@ -17,7 +16,7 @@ Só uma vez, e são dois cliques:
 2. Em **Build and deployment** → **Source**, escolher **GitHub Actions**
 
 Pronto. O fluxo em `.github/workflows/pages.yml` publica sozinho a cada mudança em
-`vitrine/`, e o site fica em **https://movits.github.io/MMM/**.
+`vitrine/`, e o site fica em **https://movits.github.io/WRW/**.
 
 Esse passo não dá para automatizar: foi tentado com o parâmetro `enablement` da
 ação `configure-pages`, e o token do fluxo recebe *Resource not accessible by
@@ -25,6 +24,14 @@ integration*. Criar o site exige acesso de administrador de verdade.
 
 Para publicar sem esperar uma alteração: aba **Actions** → *Publicar vitrine no
 GitHub Pages* → **Run workflow**.
+
+## Endereço
+
+O endereço segue o nome do repositório. Quando o repositório passou de `Movits/MMM`
+a `Movits/WRW`, o antigo **https://movits.github.io/MMM/** deixou de responder: o
+GitHub redireciona links do repositório e o remote do git, mas não o endereço do
+Pages. Se o repositório mudar de nome de novo ou passar para uma organização, troque
+junto os links e o `og:image` de `index.html`.
 
 ## Editar
 

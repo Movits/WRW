@@ -45,7 +45,12 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
       reprocess: duble.mutacao(),
+      resumir: duble.mutacao(),
+      perguntar: duble.mutacao(),
+      ligarLinkAberto: duble.mutacao(),
+      desligarLinkAberto: duble.mutacao(),
     },
+    reuniaoAberta: { resumir: duble.mutacao(), perguntar: duble.mutacao() },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
 }));
@@ -63,6 +68,8 @@ beforeEach(() => {
     isLoading: false, isError: false, error: null, refetch: vi.fn(),
   });
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // A URL escolhe o ramo; o setup limpa só o state do histórico.
+  window.history.replaceState(null, "", "/meetings");
 });
 
 describe("Reuniões — o menu fica visível nos três ramos", () => {
@@ -97,6 +104,8 @@ describe("Reuniões — o menu fica visível nos três ramos", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
     expect(cabecalhos()).toHaveLength(1);
     unmount();
+    // O clique deixou a URL no detalhe: a segunda montagem volta a partir da lista.
+    window.history.replaceState(null, "", "/meetings");
 
     duble.get.mockReturnValue({
       data: undefined, isLoading: false, isError: true,

@@ -1,4 +1,4 @@
-# Imagem de produção do MMM. Vale para Railway, Render, Fly.io ou qualquer
+# Imagem de produção da WRW. Vale para Railway, Render, Fly.io ou qualquer
 # host que rode container. O app é um processo Node único: serve a API tRPC
 # em /api/trpc e o front-end compilado na mesma origem.
 

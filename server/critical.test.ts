@@ -1,5 +1,5 @@
 /**
- * Testes críticos para as procedures principais do MMM
+ * Testes críticos para as procedures principais da WRW
  * Cobre: auth.register, auth.login, opportunities.create, admin.grantGold
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";

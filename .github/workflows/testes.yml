@@ -46,7 +46,7 @@ jobs:
         image: mariadb:11.4
         env:
           MARIADB_ROOT_PASSWORD: root
-          MARIADB_DATABASE: mmm_ci
+          MARIADB_DATABASE: wrw_ci
         ports:
           - 3306:3306
         options: >-
@@ -56,10 +56,10 @@ jobs:
           --health-retries=24
 
     env:
-      DATABASE_URL: mysql://root:root@127.0.0.1:3306/mmm_ci
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/wrw_ci
       # A suíte nunca lê DATABASE_URL (server/test/setup-banco.ts); o teste de
       # integração usa esta, que aqui é o mesmo MariaDB descartável.
-      DATABASE_URL_TESTES: mysql://root:root@127.0.0.1:3306/mmm_ci
+      DATABASE_URL_TESTES: mysql://root:root@127.0.0.1:3306/wrw_ci
       # Só para o processo subir nos testes; não é segredo de nada.
       JWT_SECRET: segredo-de-integracao-continua-sem-valor
 

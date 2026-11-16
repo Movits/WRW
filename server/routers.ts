@@ -20,6 +20,7 @@ import { enrichmentRouter } from "./routers/enrichment";
 import { dealRoomRouter } from "./routers/dealRoom";
 import { sivcRouter } from "./routers/sivc";
 import { meetingsRouter } from "./routers/meetings";
+import { reuniaoAbertaRouter } from "./routers/reuniaoAberta";
 import { memoryRouter } from "./routers/memory";
 import { intelligentMatchesRouter } from "./routers/matches";
 import { distribuicaoRouter } from "./routers/distribuicao";
@@ -51,6 +52,8 @@ export const appRouter = router({
   contexts: contextsRouter,
   enrichment: enrichmentRouter,
   meetings: meetingsRouter,
+  // O link aberto da reunião: público, sem sessão (12/11/2026).
+  reuniaoAberta: reuniaoAbertaRouter,
   memory: memoryRouter,
   intelligentMatches: intelligentMatchesRouter,
   distribuicao: distribuicaoRouter,

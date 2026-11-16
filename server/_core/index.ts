@@ -7,6 +7,7 @@ import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
+import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -14,7 +15,9 @@ import { montarDiretivasCsp } from "./csp";
 import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
+import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
+import { linhaDosModelosDeIa } from "./modelos-de-ia";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -81,6 +84,11 @@ function antiScanMiddleware(req: Request, res: Response, next: NextFunction) {
 }
 
 async function startServer() {
+  // Os modelos de IA em uso, já depois da guarda do modelo concreto: um id
+  // recusado aparece no log do boot, e não só na primeira chamada à IA. Sem a
+  // chave, de propósito.
+  console.log(linhaDosModelosDeIa());
+
   // Migrações no boot, ANTES de aceitar tráfego — só em produção. O deploy do
   // Render publica o código na hora, mas ninguém no time roda migração na mão:
   // a 0003 ficou dias pendente na produção, e a 0004 sem este passo derrubaria
@@ -187,6 +195,13 @@ async function startServer() {
   if (process.env.RENDER === "true") app.use("/api/trpc", criarDiagnosticoDoIp());
   app.use("/api/trpc", apiLimiter);
 
+  // As partes da reunião gravada em partes chegam em binário (G5): a rota tem o
+  // próprio leitor de corpo (express.raw, até 16 MB) e PRECISA vir antes do
+  // express.json e do urlencoded, que senão leriam o corpo primeiro. Guarda:
+  // server/agendados-autenticacao.test.ts confere a ordem no index.ts real.
+  registrarRotaDasPartes(app);
+  app.use(tratarCorpoGrandeDasPartes);
+
   // Uploads dentro de um LOTE do tRPC ("/api/trpc/a,b"): os recortes por
   // caminho abaixo não casam com a lista; este middleware reconhece cada
   // procedimento da URL (ver server/_core/corpo-grande-para-uploads.ts).
@@ -220,6 +235,9 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
   registerStorageProxy(app);
+  // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
+  // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
+  registrarRotasDoLinkAberto(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
@@ -366,6 +384,43 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
+  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas.
+  // As duas rodam no próprio processo, a cada poucos segundos, cada uma com o
+  // seu laço. Sem banco (dev sem DATABASE_URL), não ligam.
+  if (process.env.DATABASE_URL) {
+    const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
+    const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
+    const { descreverErroDeBanco } = await import("../banco-indisponivel");
+    iniciarFila();
+    iniciarFilaDoResumo();
+    // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
+    // SIGINT. As duas filas param de reservar e devolvem as reservas desta
+    // instância ANTES de o processo sair, para o próximo retomar na hora (e não
+    // depois de a reserva vencer); a falha de uma não segura a outra. Depois, o
+    // servidor fecha e o processo sai.
+    let saindo = false;
+    const desligar = (sinal: string) => {
+      if (saindo) return;
+      saindo = true;
+      console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
+      Promise.allSettled([
+        pararFila()
+          .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))
+          .catch(erro => console.error("[Fila] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararFilaDoResumo()
+          .then(r => console.log(`[Resumo] devolvidos: ${r.resumos} resumo(s).`))
+          .catch(erro => console.error("[Resumo] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+      ]).finally(() => {
+          server.close(() => process.exit(0));
+          // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.
+          setTimeout(() => process.exit(0), 10_000).unref();
+        });
+    };
+    process.once("SIGTERM", () => desligar("SIGTERM"));
+    process.once("SIGINT", () => desligar("SIGINT"));
+  }
 }
 
 startServer().catch(console.error);
