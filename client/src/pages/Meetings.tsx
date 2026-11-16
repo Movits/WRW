@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Trash2, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, Square, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -11,6 +11,8 @@ import { mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensa
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
+import { MapaMentalDaReuniao } from "@/components/MapaMental";
+import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
@@ -28,6 +30,7 @@ import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
@@ -721,6 +724,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     },
     retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
   });
+  // A tradução do resumo (H11) para o idioma de quem lê: mora aqui, e não no
+  // resumo, porque o mapa mental usa a mesma. Só com a reunião pronta: em
+  // processamento, o resumo é da tentativa anterior e está para ser trocado.
+  // Os rótulos do mapa mental pronto (H10), que a aba do mapa informa: a
+  // tradução os traduz junto com o resumo, e o mapa que fica pronto depois
+  // pede de novo.
+  const [rotulosDoMapa, setRotulosDoMapa] = useState<string[]>();
+  const traducaoDoResumo = useTraducaoDoResumo({ meetingId }, data?.meeting.status === "ready" ? resumoGuardado.data : undefined, rotulosDoMapa);
   // true só com este detalhe montado e visível: a exclusão que termina depois
   // de a pessoa sair dele não a puxa de volta para a lista. Efeito de layout
   // pelo mesmo motivo do noGravadorAgora: escondido pelo Suspense (a ida a uma
@@ -746,8 +757,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // O item até o qual a aba Resumo já rolou: trocar de aba e voltar não rola de
   // novo até ele (como o ?t, que pula uma vez por link).
   const itemJaDestacado = useRef<string | null>(null);
+  // O e-mail de retorno (H20): as escolhas, o rascunho e o pedido à IA ficam
+  // aqui, e não na aba Resumo, que desmonta na troca de aba. Quem volta antes
+  // da resposta ainda vê o "escrevendo", e a resposta acha a tela. O rascunho
+  // não vai ao servidor; sair da reunião o descarta.
+  const emailDeRetorno = useGuardaDoEmailDeRetorno();
   const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
-  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
+  const [tab, setTab] = useState<"summary" | "transcript" | "mindmap" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
@@ -917,6 +933,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
   // O emoji do resumo vai antes do título, como no app de referência da cliente.
   const emojiDoResumo = meeting.status === "ready" ? resumoGuardado.data?.emoji ?? null : null;
+  // Quem participou primeiro; quem só foi citada, à parte. Sugestão sem a marca
+  // (anterior a ela) fica com as participantes, como sempre ficou.
+  const citadas = suggestions.filter(suggestion => suggestion.presence === "mentioned");
+  const participantes = suggestions.filter(suggestion => suggestion.presence !== "mentioned");
+  const cartaoDaSugestao = (suggestion: (typeof suggestions)[number]) => <section key={suggestion.id} className={suggestion.presence === "mentioned" ? "rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-4" : "rounded-2xl border border-white/10 bg-white/[0.035] p-5"}><div className="flex flex-col md:flex-row gap-4 justify-between"><PessoaSugeridaNaReuniao sugestao={suggestion} pendencias={pendenciasDaReuniao.data} />{suggestion.status === "pending" && emProcessamento ? <span className="text-sm text-amber-200/70">{t("meetings.decisionsPaused")}</span> : suggestion.status === "pending" ? <div className="flex flex-wrap gap-2"><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "create" })} className="rounded-lg bg-amber-400 text-[#1a120c] px-3 py-2 text-sm font-bold disabled:opacity-50"><Check size={15} className="inline mr-1"/>{t("meetings.createContactButton")}</button><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "ignore" })} className="rounded-lg border border-white/15 px-3 py-2 text-sm text-white/65 disabled:opacity-50"><X size={15} className="inline mr-1"/>{t("meetings.ignoreButton")}</button></div> : <span className="text-sm text-white/45">{suggestion.status === "created" ? t("meetings.contactCreatedStatus") : t("meetings.ignoredStatus")}</span>}</div></section>;
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
@@ -946,10 +967,15 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
     </div>}
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
-    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
+    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
-        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}
+        comLinkAberto={!!meeting.shareToken}/>
+      {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
+      {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
+        confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}
+        nomes={nomesDosFalantes(meeting.speakerNames)} guarda={emailDeRetorno}/>}
       <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
     </div>}
@@ -1007,13 +1033,26 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>}
+    {/* O mapa mental (H10) lê a transcrição, como o resumo: só com a reunião
+        pronta e com texto. A raiz é o título, com o emoji do resumo. */}
+    {tab === "mindmap" && (prontaComTranscricao
+      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
+      : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>)}
     {tab === "contacts" && <div className="space-y-3">
       {/* Pendências ainda não lidas: carregando, ou erro com tentar de novo —
           nunca "FALTANDO" nos cartões, que afirmaria que a IA não achou nada. */}
       {suggestions.length > 0 && !pendenciasDaReuniao.data && (pendenciasDaReuniao.isError
         ? <ErroDeConsulta erro={pendenciasDaReuniao.error} aoTentarDeNovo={() => void pendenciasDaReuniao.refetch()} />
         : <p className="text-sm text-white/45"><Loader2 className="inline animate-spin mr-2" size={14}/>{t("networkPanel.loading")}</p>)}
-      {suggestions.length ? suggestions.map(suggestion => <section key={suggestion.id} className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><div className="flex flex-col md:flex-row gap-4 justify-between"><PessoaSugeridaNaReuniao sugestao={suggestion} pendencias={pendenciasDaReuniao.data} />{suggestion.status === "pending" && emProcessamento ? <span className="text-sm text-amber-200/70">{t("meetings.decisionsPaused")}</span> : suggestion.status === "pending" ? <div className="flex flex-wrap gap-2"><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "create" })} className="rounded-lg bg-amber-400 text-[#1a120c] px-3 py-2 text-sm font-bold disabled:opacity-50"><Check size={15} className="inline mr-1"/>{t("meetings.createContactButton")}</button><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "ignore" })} className="rounded-lg border border-white/15 px-3 py-2 text-sm text-white/65 disabled:opacity-50"><X size={15} className="inline mr-1"/>{t("meetings.ignoreButton")}</button></div> : <span className="text-sm text-white/45">{suggestion.status === "created" ? t("meetings.contactCreatedStatus") : t("meetings.ignoredStatus")}</span>}</div></section>) : <div className="rounded-2xl border border-dashed border-white/15 py-14 text-center text-white/45">{t("meetings.noContactSuggestions")}</div>}</div>}
+      {suggestions.length ? <>
+        {participantes.map(cartaoDaSugestao)}
+        {/* Quem só foi citada na conversa (achado 7 da bancada de 16/11): à parte e
+            compacta, nunca um cartão igual ao das participantes. */}
+        {citadas.length > 0 && <section aria-labelledby="pessoas-citadas" className="space-y-3 pt-2">
+          <div><h2 id="pessoas-citadas" className="text-sm font-semibold text-white/75">{t("meetings.mentionedHeading")}</h2><p className="mt-1 text-xs text-white/45">{t("meetings.mentionedHelp")}</p></div>
+          {citadas.map(cartaoDaSugestao)}
+        </section>}
+      </> : <div className="rounded-2xl border border-dashed border-white/15 py-14 text-center text-white/45">{t("meetings.noContactSuggestions")}</div>}</div>}
 
     {/* Confirmação de exclusão — molde de Network.tsx; o texto nomeia tudo que some. */}
     {confirmarExclusao && (

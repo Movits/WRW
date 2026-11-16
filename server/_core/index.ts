@@ -18,6 +18,7 @@ import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
+import { linhaDoRaciocinioDeIa } from "./raciocinio-de-ia";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -88,6 +89,9 @@ async function startServer() {
   // recusado aparece no log do boot, e não só na primeira chamada à IA. Sem a
   // chave, de propósito.
   console.log(linhaDosModelosDeIa());
+  // E o raciocínio que cada função pede: "padrão do modelo" enquanto nenhuma
+  // LLM_RACIOCINIO_* estiver definida, e o aviso de recusa sai aqui também.
+  console.log(linhaDoRaciocinioDeIa());
 
   // Migrações no boot, ANTES de aceitar tráfego — só em produção. O deploy do
   // Render publica o código na hora, mas ninguém no time roda migração na mão:

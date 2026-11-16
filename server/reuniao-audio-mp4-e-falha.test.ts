@@ -432,6 +432,8 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
         email: `${"a".repeat(330)}@vinhosdosul.com`,
       }],
     };
+    // Cargo e empresa só ficam se a reunião os diz (achado 6 da bancada de 16/11): aqui ela diz, e o corte é o da coluna.
+    textoDaTranscricao = `transcrição: conversa com a Ana Souza, ${"j".repeat(269)} da ${"c".repeat(250)}`;
 
     await expect(processMeetingRecording(entradaValida)).resolves.toBeTruthy();
 
@@ -459,7 +461,7 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
 
   it("telefone e e-mail dentro do teto passam inteiros — o corte não é 'sempre null'", async () => {
     respostaDaIA = { entities: [], contacts: [ana] };
-    textoDaTranscricao = `Sou a Ana Souza, meu telefone é ${ana.phone} e o e-mail ${ana.email}.`;
+    textoDaTranscricao = `Sou a Ana Souza, diretora da Vinhos do Sul, meu telefone é ${ana.phone} e o e-mail ${ana.email}.`;
     await processMeetingRecording(entradaValida);
     const [sugestao] = insercoes.find(operacao => operacao.tabela === schema.meetingContactSuggestions)!.valores;
     expect(sugestao).toMatchObject({ phone: ana.phone, email: ana.email, jobTitle: "Diretora", company: "Vinhos do Sul" });
@@ -501,7 +503,7 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
       { ...ana, company: empresaNoTeto, email: emailNoTeto },
       { ...ana, fullName: "Bia", company: `${empresaNoTeto}X`, email: `a${emailNoTeto}` },
     ] };
-    textoDaTranscricao = `Contatos da Ana Souza e da Bia: ${emailNoTeto} e a${emailNoTeto}.`;
+    textoDaTranscricao = `Contatos da Ana Souza, da ${empresaNoTeto}, e da Bia, da ${empresaNoTeto}X: ${emailNoTeto} e a${emailNoTeto}.`;
 
     await processMeetingRecording(entradaValida);
 
@@ -553,7 +555,10 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     expect(apagarAudio).toHaveBeenCalledWith("k");
     expect(tabelasApagadas()).toEqual(expect.arrayContaining([schema.meetingRecordings, schema.meetingTranscripts, schema.meetingContactSuggestions]));
     // Sem 'failed' (não há linha viva para marcar) e sem 'ready'.
-    expect(atualizacoes.map(a => a.status)).toEqual(["processing"]);
+    expect(atualizacoes.filter(a => "status" in a).map(a => a.status)).toEqual(["processing"]);
+    // A outra escrita é a das pendências que já são de um contato e não citam
+    // a transcrição: ficam com ele, desligadas da reunião (revisão do pacote P2B).
+    expect(atualizacoes.filter(a => !("status" in a))).toEqual([expect.objectContaining({ meetingId: null, meetingSuggestionId: null })]);
   });
 
   it("o bucket recusa na compensação: a linha da gravação FICA, vencida, como ponteiro para a varredura", async () => {
@@ -646,7 +651,7 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     const derivadas = {
       meeting_contact_suggestions: schema.meetingContactSuggestions, network_sugestoes: schema.networkSugestoes,
       meeting_entities: schema.meetingEntities, meeting_transcripts: schema.meetingTranscripts, meeting_transcript_translations: schema.meetingTranscriptTranslations,
-      meeting_summary_items: schema.meetingSummaryItems, meeting_summaries: schema.meetingSummaries,
+      meeting_summary_translations: schema.meetingSummaryTranslations, meeting_summary_items: schema.meetingSummaryItems, meeting_summaries: schema.meetingSummaries,
     };
     for (const [nome, tabela] of Object.entries(derivadas)) {
       const delecao = delecoes.find(operacao => operacao.tabela === tabela);
@@ -695,7 +700,7 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     // A gravação desta execução sai depois do arquivo; sem partes, não há DELETE de partes.
     expect(tabelasApagadas()).toEqual([
       schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts,
-      schema.meetingTranscriptTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingRecordings,
+      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingRecordings,
     ]);
     expect(apagarAudio).toHaveBeenCalledWith("k");
     expect(atualizacoes.map(a => a.status)).not.toContain("failed");

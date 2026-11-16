@@ -191,6 +191,33 @@ describe("completar por voz — gravar, transcrever, interpretar, sugerir", () =
     expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
   });
 
+  it("completar por texto: a empresa que a reunião deu ao contato, ainda não gravada nele, não entra no item (revisão da IA3)", async () => {
+    estado.responder = (sql, params) => {
+      // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company: criado pela reunião, sem empresa
+      if (/from `private_contacts`/.test(sql)) return params.includes(5) ? [[5, "Camila Duarte", null, null, null, null, null, null]] : [];
+      // fullName, company, phone da pessoa da reunião que virou o contato
+      if (/from `meeting_contact_suggestions`/.test(sql)) return [["Camila Duarte", "Cacau Tupinã", null]];
+      return undefined;
+    };
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({
+      quemSou: { tipoPessoa: "nao_informado", nome: null, telefone: null, email: null },
+      oQueTenho: [
+        { texto: "Chocolate da Cacau Tupinã em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+        { texto: "Chocolate em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+      ],
+      oQuePreciso: [],
+    }) } }] });
+
+    const r = await chamar().complementarPorTexto({ contactId: 5, texto: "A Camila vende chocolate da Cacau Tupinã em barras." });
+
+    expect(r).toEqual({ pendenciasCriadas: 1 });
+    const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
+    expect(insert.params).toContain("Chocolate em barras");
+    expect(insert.params).not.toContain("Chocolate da Cacau Tupinã em barras");
+    const leitura = estado.consultas.find(c => /from `meeting_contact_suggestions`/.test(c.sql))!;
+    expect(leitura.params).toEqual(expect.arrayContaining(["dona-9", 5]));
+  });
+
   it("teto brando: a 11ª interpretação em 10 minutos é recusada", async () => {
     contatoDaDona();
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ quemSou: { tipoPessoa: "nao_informado", nome: null, telefone: null, email: null }, oQueTenho: [], oQuePreciso: [] }) } }] });
@@ -406,5 +433,24 @@ describe("memória de relacionamento — a linha do tempo", () => {
     ]);
     // a confirmação de "tenho" não duplica o item que ela gravou
     expect(eventos.filter(e => e.tipo === "tenho_adicionado")).toHaveLength(1);
+  });
+
+  it("cargo e empresa confirmados têm evento próprio: não são Quem Sou (revisão da IA3)", () => {
+    const eventos = montarLinhaDoTempo({
+      contato: { createdAt: 100, disponivelRedeGlobal: false, disponibilidadeAlteradaEm: null },
+      reunioes: [], contextos: [], tenho: [], preciso: [],
+      confirmacoes: [
+        { campo: "cargo", valor: "gerente de compras", origem: "reuniao", decididaEm: 300 },
+        { campo: "empresa", valor: "Farmabras", origem: "reuniao", decididaEm: 200 },
+        { campo: "nome", valor: "Maria Silva", origem: "reuniao", decididaEm: 150 },
+      ],
+      conexoes: [],
+    });
+    expect(eventos).toEqual([
+      { tipo: "apoio_confirmado", em: 300, campo: "cargo", valor: "gerente de compras", origem: "reuniao" },
+      { tipo: "apoio_confirmado", em: 200, campo: "empresa", valor: "Farmabras", origem: "reuniao" },
+      { tipo: "quem_sou_confirmado", em: 150, campo: "nome", valor: "Maria Silva", origem: "reuniao" },
+      { tipo: "contato_criado", em: 100 },
+    ]);
   });
 });

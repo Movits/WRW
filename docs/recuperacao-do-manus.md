@@ -23,8 +23,10 @@ o projeto saiu de lá.
 **Chamadas de IA.** Passavam por um proxy do Manus (`forge.manus.im`) que injetava
 as credenciais. Agora `server/_core/llm.ts` aceita qualquer endpoint compatível com
 a API da OpenAI — por padrão o Google Gemini, configurado por `LLM_API_URL` e
-`LLM_API_KEY` (ou `GOOGLE_API_KEY`). A variável `LLM_MODEL` define o modelo usado em
-todas as chamadas.
+`LLM_API_KEY` (ou `GOOGLE_API_KEY`). O modelo de cada chamada sai do `LLM_MODEL` e das
+variáveis por função (`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO` e `LLM_MODEL_PERGUNTA`),
+que vencem o `LLM_MODEL` quando definidas: a ordem está na tabela de variáveis do
+`docs/deploy.md`. Trocar só o `LLM_MODEL` não muda uma função que tenha a sua variável.
 
 **Imagens da página inicial.** Estavam num CloudFront do Manus que hoje devolve 403,
 e o backup não trouxe nenhuma cópia local. As referências mortas foram removidas.

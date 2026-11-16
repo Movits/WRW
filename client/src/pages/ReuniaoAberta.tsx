@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "wouter";
-import { Clock3, FileText, Loader2 } from "lucide-react";
+import { Clock3, FileText, Loader2, Network } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
@@ -15,12 +16,13 @@ import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
+import { MapaMentalDaReuniao } from "@/components/MapaMental";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
  * quem recebeu o endereço /r/{token} ouve a gravação, lê e traduz a
- * transcrição, lê o resumo guardado (e pede o que a reunião ainda não tem) e
- * faz perguntas à IA, sem conta na WRW. Só leitura:
+ * transcrição, lê o resumo guardado e o mapa mental (e pede o que a reunião
+ * ainda não tem) e faz perguntas à IA, sem conta na WRW. Só leitura:
  * excluir, reprocessar e o que é da rede particular da dona (contatos e
  * entidades) ficam no detalhe dela, em Meetings.tsx, e o servidor nem manda
  * esses dados para cá (server/link-aberto-da-reuniao.ts). Os nomes que a dona
@@ -92,13 +94,20 @@ export default function ReuniaoAberta() {
       return (estado === "pendente" || estado === "gerando") && !consulta.state.error ? 5_000 : false;
     },
   });
+  // A tradução do resumo (H11) para o idioma de quem lê, como no detalhe da
+  // dona: sem ids e sem os ignorados, e só gasta vaga do teto quando a IA
+  // traduz de fato.
+  // Os rótulos do mapa mental pronto (H10), que a aba do mapa informa: a
+  // tradução os traduz junto com o resumo.
+  const [rotulosDoMapa, setRotulosDoMapa] = useState<string[]>();
+  const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined, rotulosDoMapa);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
   // As abas, como no app de referência da cliente (H4c): o resumo abre
-  // primeiro, e a transcrição fica na outra aba. O player é um só, na barra do
-  // rodapé, fora das abas: trocar de aba não corta o áudio. A tradução mora
-  // aqui em cima e também sobrevive à troca.
-  const [aba, setAba] = useState<"summary" | "transcript">("summary");
+  // primeiro, e a transcrição e o mapa mental (H10) ficam nas outras. O player
+  // é um só, na barra do rodapé, fora das abas: trocar de aba não corta o
+  // áudio. A tradução mora aqui em cima e também sobrevive à troca.
+  const [aba, setAba] = useState<"summary" | "transcript" | "mindmap">("summary");
   // Como no detalhe da dona: a tradução começa no idioma da tela, e o idioma
   // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
@@ -159,12 +168,12 @@ export default function ReuniaoAberta() {
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
     <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
 
-    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3]] as const).map(([id, rotulo, Icone]) =>
+    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
       <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
         {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
         <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
       </div>}
@@ -209,6 +218,13 @@ export default function ReuniaoAberta() {
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>}
+
+    {/* O mapa mental (H10), como no detalhe da dona: a raiz é o título, com o emoji do resumo. */}
+    {aba === "mindmap" && <div className="mt-6">
+      {temTextoParaResumir
+        ? <MapaMentalDaReuniao token={token} titulo={titulo} emoji={resumoGuardado.data?.emoji ?? null} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
+        : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>}
+    </div>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>}

@@ -1,12 +1,16 @@
 import crypto from "crypto";
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
+import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
+import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
+import { gerarMapaMental } from "./mapa-mental";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
+import { numeracaoDoResumoRefeito } from "./resumo-refeito";
 
 /**
  * A fila do resumo guardado da reunião (H4 do desenho do gravador,
@@ -20,11 +24,20 @@ import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
  * acha zero linhas e descarta tudo, sem item órfão. Um deploy no meio não perde
  * o trabalho: a reserva vence e outra rodada o retoma. Laço e temporizador
  * próprios: o resumo nunca segura a fila de transcrição.
+ *
+ * O mapa mental (H10) é o mesmo trabalho, em duas fases da mesma linha:
+ * gravado o resumo, ela fica 'ready' com o mapa 'pending', e a mesma rodada a
+ * reserva de novo e pede o mapa, numa chamada à parte. O resumo já está
+ * gravado: o mapa que falha não o derruba. O mapa tem as próprias tentativas
+ * (as mesmas 3, com a mesma espera) e o próprio código de erro; a dona pede
+ * de novo pela aba do mapa (server/mapa-mental-guardado.ts), que também serve
+ * às reuniões resumidas antes de o mapa existir.
  */
 
 const INTERVALO_DA_RODADA_MS = 5_000;
 // Cobre a pior geração (gerarResumoDaReuniao: 180 s por chamada, 200 s de
 // orçamento, e na reunião longa uma chamada por janela mais a junção) com folga.
+// O mapa mental tem reserva própria, com 150 s de orçamento por chamada.
 const DURACAO_DA_RESERVA_MS = 15 * 60_000;
 export const TENTATIVAS_DO_RESUMO = 3;
 
@@ -48,30 +61,48 @@ function codigoDoErro(erro: unknown): string {
   return erro instanceof FalhaDaIA ? erro.codigo : "ERRO";
 }
 
+// As duas fases do trabalho de uma linha: o resumo, e depois o mapa mental.
+// O modelo do resumo (H4d) vai junto: a fase do resumo escreve nele.
+type Fase = "resumo" | "mapa";
+type Alvo = { id: string; meetingId: string; ownerId: string; template: string };
+
+/** A linha que é trabalho da fase: o resumo pendente, ou o mapa pendente de um resumo pronto. */
+function naFila(fase: Fase) {
+  return fase === "resumo"
+    ? eq(meetingSummaries.status, "pending")
+    : and(eq(meetingSummaries.status, "ready"), eq(meetingSummaries.mindMapStatus, "pending"));
+}
+
+const semReservaViva = (agora: number) => or(isNull(meetingSummaries.lockedUntil), lt(meetingSummaries.lockedUntil, agora));
+
 /**
  * Resumo pendente vencido o prazo das tentativas, sem reserva viva (o processo
  * caiu em todas, sem o SIGTERM): ninguém mais o reservaria. Vira falha, e a
- * tela oferece tentar de novo.
+ * tela oferece tentar de novo. O mapa esgotado falha sozinho: o resumo
+ * continua pronto.
  */
 async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
+  const esgotado = (fase: Fase) => and(
+    naFila(fase),
+    sql`${meetingSummaries.attempts} >= ${TENTATIVAS_DO_RESUMO}`,
+    semReservaViva(agora),
+    escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
+  );
   await db.update(meetingSummaries).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(and(
-      eq(meetingSummaries.status, "pending"),
-      sql`${meetingSummaries.attempts} >= ${TENTATIVAS_DO_RESUMO}`,
-      or(isNull(meetingSummaries.lockedUntil), lt(meetingSummaries.lockedUntil, agora)),
-      escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
-    ));
+    .where(esgotado("resumo"));
+  await db.update(meetingSummaries).set({ mindMapStatus: "failed", mindMapError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
+    .where(esgotado("mapa"));
 }
 
-/** O resumo pendente mais antigo, sem reserva viva, de reunião pronta de conta ativa. */
-async function proximoResumo(db: Banco, agora: number, escopo: Escopo) {
-  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId })
+/** O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta ativa. */
+async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) {
+  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template, updatedAt: meetingSummaries.updatedAt })
     .from(meetingSummaries)
     .innerJoin(meetings, and(eq(meetings.id, meetingSummaries.meetingId), eq(meetings.ownerId, meetingSummaries.ownerId)))
     .innerJoin(users, eq(users.openId, meetingSummaries.ownerId))
     .where(and(
-      eq(meetingSummaries.status, "pending"),
-      or(isNull(meetingSummaries.lockedUntil), lt(meetingSummaries.lockedUntil, agora)),
+      naFila(fase),
+      semReservaViva(agora),
       lt(meetingSummaries.attempts, TENTATIVAS_DO_RESUMO),
       eq(meetings.status, "ready"),
       eq(users.isActive, true),
@@ -79,18 +110,31 @@ async function proximoResumo(db: Banco, agora: number, escopo: Escopo) {
     ))
     .orderBy(asc(meetingSummaries.updatedAt))
     .limit(1);
-  return alvo;
+  return alvo ? { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, updatedAt: Number(alvo.updatedAt), fase } : undefined;
 }
 
-async function reservar(db: Banco, id: string, agora: number): Promise<string | null> {
+/**
+ * O trabalho mais antigo das duas fases: um resumo pendente ou o mapa
+ * pendente de um resumo pronto. Uma consulta por fase, cada uma pelo índice
+ * do seu estado: juntas num OR, o banco varreria todos os resumos prontos a
+ * cada rodada.
+ */
+async function proximoTrabalho(db: Banco, agora: number, escopo: Escopo): Promise<(Alvo & { fase: Fase }) | undefined> {
+  const resumo = await maisAntigo(db, agora, escopo, "resumo");
+  const mapa = await maisAntigo(db, agora, escopo, "mapa");
+  const alvo = resumo && mapa ? (mapa.updatedAt < resumo.updatedAt ? mapa : resumo) : resumo ?? mapa;
+  return alvo && { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, fase: alvo.fase };
+}
+
+async function reservar(db: Banco, id: string, agora: number, fase: Fase): Promise<string | null> {
   const token = crypto.randomUUID();
   tokensVivos.add(token);
   const r = await db.update(meetingSummaries).set({
     lockToken: token, lockedUntil: agora + DURACAO_DA_RESERVA_MS,
     attempts: sql`${meetingSummaries.attempts} + 1`, updatedAt: agora,
   }).where(and(
-    eq(meetingSummaries.id, id), eq(meetingSummaries.status, "pending"),
-    or(isNull(meetingSummaries.lockedUntil), lt(meetingSummaries.lockedUntil, agora)),
+    eq(meetingSummaries.id, id), naFila(fase),
+    semReservaViva(agora),
     lt(meetingSummaries.attempts, TENTATIVAS_DO_RESUMO),
   ));
   if (linhas(r)) return token;
@@ -108,40 +152,77 @@ async function devolverReserva(db: Banco, id: string, token: string) {
     .where(and(eq(meetingSummaries.id, id), eq(meetingSummaries.lockToken, token)));
 }
 
-/** Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez. */
-async function registrarFalha(db: Banco, alvo: { id: string }, token: string, codigo: string, definitiva: boolean) {
+/**
+ * Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez.
+ * Na fase do mapa, quem falha é só o mapa: o resumo continua pronto.
+ */
+async function registrarFalha(db: Banco, alvo: { id: string }, token: string, codigo: string, definitiva: boolean, fase: Fase = "resumo") {
   const [linha] = await db.select({ attempts: meetingSummaries.attempts }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).limit(1);
   if (!linha) return;
   const deVez = definitiva || linha.attempts >= TENTATIVAS_DO_RESUMO;
+  const desfecho = fase === "resumo"
+    ? { status: deVez ? "failed" as const : "pending" as const, lastError: codigo }
+    : { mindMapStatus: deVez ? "failed" as const : "pending" as const, mindMapError: codigo };
   await db.update(meetingSummaries).set({
-    status: deVez ? "failed" : "pending", lastError: codigo, lockToken: null,
+    ...desfecho, lockToken: null,
     lockedUntil: deVez ? null : Date.now() + linha.attempts * 60_000, updatedAt: Date.now(),
   }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
 }
 
-async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string) {
+/**
+ * O item que fica quando o resumo é refeito com outro modelo (H4d, "Refazer
+ * como…"): o que a dona confirmou, a ação que ela marcou como feita e o item
+ * que ela escreveu (H4f: acrescentado à mão ou editado), mesmo ignorado, para
+ * a palavra dela não sumir com uma geração da IA e o Desfazer continuar
+ * valendo. Os pendentes e os ignorados da IA são trocados pelos novos.
+ */
+type ItemAtual = { status: string; done: boolean; origin: string; editedAt: number | null };
+const escritoPelaDona = (item: ItemAtual) => item.origin === "owner" || item.editedAt !== null;
+const itemQueFica = (item: ItemAtual) => item.status === "confirmed" || item.done || escritoPelaDona(item);
+
+/** A fase do resumo; true quando ele foi gravado (e o mapa vem em seguida). */
+async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const [transcricao] = await db.select({
     id: meetingTranscripts.id, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
   }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-  if (!transcricao) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true);
+  if (!transcricao) {
+    await registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true);
+    return false;
+  }
   const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O resumo refeito (H4d) leva à IA os itens que ficam, para ela não os
+  // escrever de novo. No primeiro resumo não há item nenhum. O item da dona
+  // que ela ignorou fica no resumo, recolhido, mas não vai à IA como
+  // "confirmado".
+  const itensAtuais = await db.select({
+    section: meetingSummaryItems.section, subject: meetingSummaryItems.subject, text: meetingSummaryItems.text,
+    status: meetingSummaryItems.status, done: meetingSummaryItems.done, origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
+  }).from(meetingSummaryItems)
+    .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)))
+    .orderBy(asc(meetingSummaryItems.position));
+  const itensQueFicam = itensAtuais.filter(item => itemQueFica(item) && item.status !== "ignored")
+    .map(({ section, subject, text }) => ({ section, subject, text }));
 
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
-    resumo = await gerarResumoDaReuniao({ transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma });
+    resumo = await gerarResumoDaReuniao({
+      transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma,
+      modelo: modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO, itensQueFicam,
+    });
   } catch (erro) {
     // Resposta cortada no teto de saída se repetiria com a mesma entrada: é
     // falha de vez. O resto (IA fora, JSON inválido) tenta de novo.
     const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
     // Erro que não é da IA é bug ou banco: vai a pilha ao log, não só o código.
     console.error(`[Resumo] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
-    return registrarFalha(db, alvo, token, codigoDoErro(erro), definitiva);
+    await registrarFalha(db, alvo, token, codigoDoErro(erro), definitiva);
+    return false;
   }
   // O desligamento chegou durante a chamada à IA: as reservas já foram
   // devolvidas, e o próximo processo refaz o resumo.
-  if (parada) return;
+  if (parada) return false;
 
   const agora = Date.now();
   let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
@@ -156,7 +237,7 @@ async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId
     } catch (erroAoRegistrar) {
       console.error("[Resumo] nem a falha foi registrada; a reserva vence sozinha:", descreverErroDeBanco(erroAoRegistrar));
     }
-    return;
+    return false;
   }
   if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
     console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
@@ -164,12 +245,17 @@ async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId
   } else if (resultado === "sem_reserva") {
     console.warn("[Resumo] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
   }
+  return resultado === "gravou";
 }
 
 /**
  * Grava os itens e marca o resumo como pronto, numa transação. A reunião fica
  * travada até o fim: a exclusão (que marca 'deleted' antes de apagar) espera
- * esta transação, e o que ela gravar sai junto.
+ * esta transação, e o que ela gravar sai junto. No resumo refeito (H4d), os
+ * itens que a dona confirmou, as ações feitas e os itens que ela escreveu
+ * (H4f) ficam, renumerados, e só os pendentes e os ignorados da IA são
+ * trocados. O mapa mental pronto (H10) também fica: ele sai só da
+ * transcrição, que é a mesma, e não do modelo do resumo.
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
@@ -180,7 +266,7 @@ async function gravarResumo(
     // apagar) espera esta transação, e o que ela gravar sai junto.
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
-    const [ainda] = await tx.select({ id: meetingSummaries.id }).from(meetingSummaries)
+    const [ainda] = await tx.select({ id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     // Sem a linha com o meu token: a reunião foi reprocessada ou excluída, ou a
     // reserva venceu e outra rodada a tomou.
@@ -190,11 +276,37 @@ async function gravarResumo(
     const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
     if (atual?.id !== transcricao.id) return "transcricao_trocada";
-    await tx.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
-    if (resumo.itens.length) {
-      await tx.insert(meetingSummaryItems).values(resumo.itens.map((item, position) => ({
+    // Os itens de agora, lidos sem trava, e os que saem apagados pela chave:
+    // travar a faixa do resumo no índice prende também o vão vizinho, e duas
+    // gravações de resumos vizinhos se travam uma à outra (deadlock). A linha
+    // do resumo, travada acima, já faz desta a única gravação dele, e a dona
+    // não decide nem edita enquanto ele está na fila; mesmo assim, o item que
+    // alguém confirmou, marcou como feito ou escreveu no meio não é apagado.
+    const itensAtuais = await tx.select({
+      id: meetingSummaryItems.id, section: meetingSummaryItems.section, position: meetingSummaryItems.position,
+      text: meetingSummaryItems.text, status: meetingSummaryItems.status, done: meetingSummaryItems.done,
+      origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
+    }).from(meetingSummaryItems)
+      .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
+    const queFicam = itensAtuais.filter(itemQueFica);
+    const queSaem = itensAtuais.filter(item => !itemQueFica(item)).map(item => item.id);
+    if (queSaem.length) {
+      await tx.delete(meetingSummaryItems).where(and(
+        inArray(meetingSummaryItems.id, queSaem), eq(meetingSummaryItems.ownerId, alvo.ownerId),
+        ne(meetingSummaryItems.status, "confirmed"), eq(meetingSummaryItems.done, false),
+        eq(meetingSummaryItems.origin, "ai"), isNull(meetingSummaryItems.editedAt),
+      ));
+    }
+    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens);
+    for (const { id, position } of numeracao.queFicam) {
+      if (queFicam.find(item => item.id === id)?.position === position) continue;
+      await tx.update(meetingSummaryItems).set({ position })
+        .where(and(eq(meetingSummaryItems.id, id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
+    }
+    if (numeracao.novos.length) {
+      await tx.insert(meetingSummaryItems).values(numeracao.novos.map(item => ({
         id: crypto.randomUUID(), summaryId: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId,
-        section: item.section, position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
+        section: item.section, position: item.position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
         excerpt: item.excerpt, startSeconds: item.startSeconds, confidence: item.confidence.toFixed(3),
         status: "pending" as const, done: false, createdAt: agora, updatedAt: agora,
       })));
@@ -205,6 +317,14 @@ async function gravarResumo(
       // A IA devolveu itens e a conferência tirou todos: fica registrado, e a
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
+      // A fase seguinte do mesmo trabalho (H10): o mapa entra na fila, do zero
+      // e com as tentativas dele. O mapa pronto que ainda passa na conferência
+      // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
+      // que ele saiu.
+      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap)
+        ? {}
+        : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
+      attempts: 0,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";
@@ -212,26 +332,116 @@ async function gravarResumo(
 }
 
 /**
- * Uma rodada: desiste dos esgotados, reserva o resumo pendente mais antigo e o
- * gera. Exportada para os testes; em produção é o laço de iniciarFilaDoResumo.
+ * A fase do mapa mental (H10), com o resumo já pronto. Lê a transcrição de
+ * novo, porque o mapa pode vir bem depois do resumo (a reunião antiga, o
+ * pedido depois de uma falha). O mapa que a conferência não aceita (menos de
+ * 2 ramos válidos) falha de vez: a mesma entrada daria o mesmo, e a dona pode
+ * pedir de novo.
+ */
+async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
+  const [transcricao] = await db.select({ id: meetingTranscripts.id, texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
+    .from(meetingTranscripts)
+    .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
+  if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
+  const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+
+  let mapa: MapaMental | null;
+  try {
+    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma });
+  } catch (erro) {
+    const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
+    console.error(`[Mapa] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
+    return registrarFalha(db, alvo, token, codigoDoErro(erro), definitiva, "mapa");
+  }
+  // O desligamento chegou durante a chamada à IA: a reserva já voltou.
+  if (parada) return;
+  if (!mapa) return registrarFalha(db, alvo, token, "MAPA_INVALIDO", true, "mapa");
+
+  let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
+  try {
+    resultado = await gravarMapa(db, alvo, token, transcricao, mapa, Date.now());
+  } catch (erro) {
+    console.error("[Mapa] o mapa não foi gravado:", descreverErroDeBanco(erro));
+    try {
+      await registrarFalha(db, alvo, token, "ERRO_GRAVACAO", false, "mapa");
+    } catch (erroAoRegistrar) {
+      console.error("[Mapa] nem a falha foi registrada; a reserva vence sozinha:", descreverErroDeBanco(erroAoRegistrar));
+    }
+    return;
+  }
+  if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
+    console.warn(`[Mapa] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    await devolverReserva(db, alvo.id, token);
+  } else if (resultado === "sem_reserva") {
+    console.warn("[Mapa] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
+  }
+}
+
+/**
+ * Grava o mapa no resumo pronto, numa transação, com as mesmas conferências
+ * do resumo: a reunião travada e pronta, a reserva ainda minha e a mesma
+ * transcrição que a IA leu.
+ */
+async function gravarMapa(
+  db: Banco, alvo: Alvo, token: string, transcricao: { id: string }, mapa: MapaMental, agora: number,
+): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
+  return db.transaction(async tx => {
+    const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
+      .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
+    const [ainda] = await tx.select({ id: meetingSummaries.id }).from(meetingSummaries)
+      .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
+    if (!ainda) return "sem_reserva";
+    if (reuniao?.status !== "ready") return "reuniao_fora";
+    const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
+      .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
+    if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    const r = await tx.update(meetingSummaries).set({
+      mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: agora, mindMapError: null,
+      lockToken: null, lockedUntil: null, updatedAt: agora,
+    }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
+    return linhas(r) > 0 ? "gravou" : "sem_reserva";
+  });
+}
+
+/**
+ * Reserva uma fase do trabalho e a executa. Devolve true só quando a fase era
+ * o resumo e ele foi gravado: aí o mapa vem em seguida.
+ */
+async function executar(db: Banco, alvo: Alvo, fase: Fase, agora: number): Promise<boolean> {
+  const token = await reservar(db, alvo.id, agora, fase);
+  if (!token) return false;
+  try {
+    // O desligamento pode ter tirado a foto das reservas antes desta: devolve
+    // na hora, sem chamar a IA.
+    if (parada) {
+      await devolverReserva(db, alvo.id, token);
+      return false;
+    }
+    if (fase === "mapa") {
+      await gerarMapa(db, alvo, token);
+      return false;
+    }
+    return await gerarUm(db, alvo, token);
+  } finally {
+    tokensVivos.delete(token);
+  }
+}
+
+/**
+ * Uma rodada: desiste dos esgotados, reserva o trabalho pendente mais antigo e
+ * o gera. Gravado o resumo, o mapa mental segue na mesma rodada, numa reserva
+ * nova: é o mesmo trabalho, e a reunião não espera a fila dar a volta.
+ * Exportada para os testes; em produção é o laço de iniciarFilaDoResumo.
  */
 export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   if (parada) return;
   const db = await exigirDb();
   const agora = Date.now();
   await desistirDosEsgotados(db, agora, escopo);
-  const alvo = await proximoResumo(db, agora, escopo);
+  const alvo = await proximoTrabalho(db, agora, escopo);
   if (!alvo || parada) return;
-  const token = await reservar(db, alvo.id, agora);
-  if (!token) return;
-  try {
-    // O desligamento pode ter tirado a foto das reservas antes desta: devolve
-    // na hora, sem chamar a IA.
-    if (parada) return await devolverReserva(db, alvo.id, token);
-    await gerarUm(db, alvo, token);
-  } finally {
-    tokensVivos.delete(token);
-  }
+  const resumoGravado = await executar(db, alvo, alvo.fase, agora);
+  if (resumoGravado && !parada) await executar(db, alvo, "mapa", Date.now());
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -271,8 +481,9 @@ export async function pararFilaDoResumo(): Promise<{ resumos: number }> {
     console.error("[Resumo] sem banco no desligamento; as reservas vencem sozinhas:", descreverErroDeBanco(erro));
     return { resumos: 0 };
   }
+  // As duas fases: o resumo pendente e o mapa pendente de um resumo pronto.
   const r = await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
-    .where(and(inArray(meetingSummaries.lockToken, tokens), eq(meetingSummaries.status, "pending")));
+    .where(and(inArray(meetingSummaries.lockToken, tokens), or(naFila("resumo"), naFila("mapa"))));
   tokensVivos.clear();
   return { resumos: linhas(r) };
 }

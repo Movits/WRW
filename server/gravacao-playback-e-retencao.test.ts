@@ -523,7 +523,8 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       [schema.meetingEntities, derivadaDaReuniaoDaDona("meeting_entities")],
       [schema.meetingTranscripts, derivadaDaReuniaoDaDona("meeting_transcripts")],
       [schema.meetingTranscriptTranslations, derivadaDaReuniaoDaDona("meeting_transcript_translations")],
-      // O resumo guardado (H4) cita trechos da transcrição.
+      // O resumo guardado (H4) cita trechos da transcrição; as traduções dele (H11) também saem.
+      [schema.meetingSummaryTranslations, derivadaDaReuniaoDaDona("meeting_summary_translations")],
       [schema.meetingSummaryItems, derivadaDaReuniaoDaDona("meeting_summary_items")],
       [schema.meetingSummaries, derivadaDaReuniaoDaDona("meeting_summaries")],
       // A linha do áudio sai pelo id (e pela dona), e só a do arquivo que saiu.
@@ -557,7 +558,7 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(posicaoDoDelete(schema.meetings)).toBeGreaterThan(bucket);
     const derivados = [
       schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts,
-      schema.meetingTranscriptTranslations, schema.meetingSummaryItems, schema.meetingSummaries,
+      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries,
     ];
     for (const tabela of derivados) expect(posicaoDoDelete(tabela)).toBeLessThan(bucket);
   });
@@ -577,10 +578,10 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(typeof atualizacoes[0].valores.updatedAt).toBe("number");
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
-    // e a linha da reunião só sai por último, depois dos derivados (9: os sete
-    // derivados da IA, a gravação cujo arquivo saiu e a reunião; sem partes,
-    // não há DELETE de partes)
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(9);
+    // e a linha da reunião só sai por último, depois dos derivados (10: os oito
+    // derivados da IA, com as traduções do resumo da H11, a gravação cujo
+    // arquivo saiu e a reunião; sem partes, não há DELETE de partes)
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(10);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 

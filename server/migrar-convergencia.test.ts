@@ -177,3 +177,64 @@ describe("migrar: a migração que caiu depois de um CREATE TABLE se refaz no de
     expect(anotou(tag)).toBe(false);
   });
 });
+
+describe("migrar: a 0019 do pacote Resumo e IA chega ao banco que recebeu a 0019 de uma das branches", () => {
+  // Antes da junção, duas 0019 rodaram em bancos locais: a do P2 (5bd80aa,
+  // 0019_resumo-e-ia), com tudo menos a coluna presence, e a do P2B (6b8d690,
+  // 0019_qualidade-da-ia), só com ela. O migrar.mjs compara só a tag: a 0019
+  // final com a tag de uma delas seria dada como aplicada no banco que recebeu
+  // aquela, e ele ficaria sem o que a outra trouxe. Com a do P2, sem a presence,
+  // o detalhe da reunião quebra em "Unknown column 'presence'", e o db:migrate e
+  // o nivelar-banco dizem que está tudo em dia. Com tag própria, a 0019 final
+  // roda nos dois, e o que o banco já tem converge (comandoJaValiaNoBanco).
+  const DAS_BRANCHES = [
+    { tag: "0019_resumo-e-ia", criou: (comando: string) => !comando.includes("`presence`") },
+    { tag: "0019_qualidade-da-ia", criou: (comando: string) => comando.includes("`presence`") },
+  ];
+  const indice = tags.findIndex(t => t.startsWith("0019_"));
+  const final = tags[indice];
+  const comandos = comandosDe(lerSql(final));
+  // O erro que o MySQL dá ao comando que cria o que o banco já tem.
+  const erroDeQuemJaTem = (comando: string) =>
+    erroMysql(/^CREATE TABLE/i.test(comando) ? "ER_TABLE_EXISTS_ERROR" : /^CREATE (UNIQUE )?INDEX/i.test(comando) ? "ER_DUP_KEYNAME" : "ER_DUP_FIELDNAME");
+
+  let espioes: { mockRestore: () => void }[] = [];
+  beforeEach(() => {
+    espioes = [
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true),
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+    ];
+    conexaoFalsa.query.mockReset();
+  });
+  afterEach(() => espioes.forEach(e => e.mockRestore()));
+
+  it("a 0019 final tem tag própria e leva a coluna presence", () => {
+    expect(DAS_BRANCHES.map(d => d.tag)).not.toContain(final);
+    expect(comandos.filter(c => c.includes("`presence`"))).toHaveLength(1);
+  });
+
+  it.each(DAS_BRANCHES)("banco com a $tag: roda a 0019 final, cria só o que faltava e a anota", async ({ tag: daBranch, criou }) => {
+    const executados: string[] = [];
+    conexaoFalsa.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.startsWith("SELECT tag FROM")) return [[...tags.slice(0, indice), daBranch].map(t => ({ tag: t }))];
+      if (comandos.includes(sql)) {
+        if (criou(sql)) throw erroDeQuemJaTem(sql);
+        executados.push(sql);
+        return [[]];
+      }
+      // A tabela que a 0019 da branch criou, com as colunas do mesmo CREATE.
+      if (sql.includes("information_schema.COLUMNS")) {
+        const criacao = comandos.map(c => lerCreateTable(c)).find(c => c?.tabela === params?.[1]);
+        return [criacao ? linhasDasColunas(criacao.colunas) : []];
+      }
+      return [[]];
+    });
+
+    const resultado = await migrar("mysql://u:p@localhost:3306/banco_teste");
+
+    expect(resultado.ok).toBe(true);
+    expect(executados).toEqual(comandos.filter(c => !criou(c)));
+    expect(conexaoFalsa.query.mock.calls.some(([sql, params]) => String(sql).startsWith("INSERT INTO `_migracoes`") && params?.[0] === final)).toBe(true);
+  });
+});

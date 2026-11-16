@@ -12,6 +12,12 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+// O mapa mental (H10) é a segunda fase do mesmo trabalho e segue na mesma
+// rodada: dublado aqui, para a rodada nunca chamar a IA de verdade. O que é
+// do mapa está em mapa-mental.integracao.test.ts.
+const gerarMapaMental = vi.hoisted(() => vi.fn());
+vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("./mapa-mental")>()), gerarMapaMental: (...a: unknown[]) => gerarMapaMental(...a) }));
+const MAPA = { ramos: [{ rotulo: "Exportação de café", folhas: [] }, { rotulo: "Transportadora", folhas: [] }] };
 
 const { getDb } = await import("./db");
 const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
@@ -83,6 +89,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     fila.religarParaTestes();
     gerarResumoDaReuniao.mockReset();
     gerarResumoDaReuniao.mockResolvedValue(RESUMO);
+    gerarMapaMental.mockReset();
+    gerarMapaMental.mockResolvedValue(MAPA);
     vaga.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -95,7 +103,9 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     await rodar();
 
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR" });
+    // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
+    // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [] });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);
     expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
     expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
@@ -103,6 +113,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       ["decision", 1, "pending", false, 5, null],
     ]);
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, model: "gemini-teste-1" });
+    // O mapa mental (H10) veio na mesma rodada, sem mexer no resumo.
+    expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMapError: null });
   });
 
   it("pedir de novo o que já está na fila, ou pronto, não gasta vaga nem duplica", async () => {
@@ -335,9 +347,12 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.estado).toBe("pronto");
+    // O idioma em que o resumo foi escrito: a página do link o traduz (H11), e
+    // "Ouvir o resumo" (H19) escolhe a voz por ele.
+    expect(visto.idioma).toBe("pt-BR");
     expect(visto.itens).toEqual([{
       section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,
-      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending",
+      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending", escritoPelaDona: false,
     }]);
     await expect(servico.resumoGuardadoPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
   });
@@ -345,7 +360,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("o link de reunião sem resumo diz 'sem_resumo'; sem transcrição, não pede", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     await reuniaoPronta({ shareToken: token }, false);
-    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, itens: [] });
+    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, idioma: null, versaoAnterior: false, itens: [] });
     await expect(servico.pedirResumoPeloLink(token, vi.fn())).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

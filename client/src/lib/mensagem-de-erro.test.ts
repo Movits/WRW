@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { TRPCClientError } from "@trpc/client";
 import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
@@ -96,6 +97,8 @@ describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da 
     ["CONFLICT", MENSAGEM_RESUMO_SENDO_GERADO, "meetings.summary.errorRegenerating", "This meeting's summary is being regenerated. Wait for it to finish before deciding."],
     ["NOT_FOUND", MENSAGEM_ITEM_NAO_ENCONTRADO, "meetings.summary.errorItemGone", "This summary item no longer exists. Refresh the page."],
     ["BAD_REQUEST", MENSAGEM_SO_ACAO_TEM_CAIXA, "meetings.summary.errorOnlyActions", "Only the summary's actions have a checkbox."],
+    // O item que a dona acrescenta passaria do teto do resumo (H4f).
+    ["PRECONDITION_FAILED", MENSAGEM_RESUMO_CHEIO, "meetings.summary.errorFull", "This summary has reached the maximum number of items."],
   ];
 
   afterEach(async () => {
@@ -111,6 +114,31 @@ describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da 
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
     expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// As recusas do rascunho de e-mail de retorno (H20, server/email-de-retorno.ts)
+// seguem o mesmo caminho: a frase do servidor em português, traduzida pela tabela.
+describe("mensagemDeErroParaTela — as recusas do e-mail de retorno no idioma da tela", () => {
+  const recusa = (mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: "PRECONDITION_FAILED", httpStatus: 412 } } });
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_EMAIL_SEM_RESUMO_PRONTO, "meetings.followUp.summaryNotReady", "This meeting's summary is not ready. Wait for it to finish to write the email."],
+    [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, "meetings.followUp.needsConfirmed", "Confirm at least one summary item to write the email."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("'%s': em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("'%s': em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
   });
 });
 

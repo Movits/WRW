@@ -154,6 +154,10 @@ describe("o appRouter inteiro", () => {
     "reuniaoAberta.resumoGuardado", "reuniaoAberta.pedirResumo",
     // As chaves de acesso (A6): o estado e a entrada são de quem ainda não entrou.
     "chavesDeAcesso.estado", "chavesDeAcesso.opcoesDeEntrada", "chavesDeAcesso.entrar",
+    // O mapa mental (H10), só leitura, e o pedido dele pelo link.
+    "reuniaoAberta.mapaMental", "reuniaoAberta.pedirMapa",
+    // A tradução do resumo guardado (H11), pelo link.
+    "reuniaoAberta.traduzirResumo",
   ]);
   let caminhos: string[] = [];
 
