@@ -1493,6 +1493,7 @@
     "deleteConfirmButton": "Supprimer la réunion",
     "summaryTab": "Résumé",
     "transcriptTab": "Transcription",
+    "mindMapTab": "Carte mentale",
     "contactsTab": "Contacts ({{count}})",
     "entitiesHeading": "Noms et entreprises cités dans la conversation",
     "noEntities": "Aucune entité en attente.",
@@ -1573,6 +1574,22 @@
       "errorRegenerating": "Le résumé de cette réunion est en cours de régénération. Attendez la fin pour décider.",
       "errorItemGone": "Cet élément du résumé n'existe plus. Actualisez la page.",
       "errorOnlyActions": "Seules les actions du résumé ont une case à cocher."
+    },
+    "mindMap": {
+      "title": "Carte mentale de la réunion",
+      "loading": "Chargement de la carte mentale…",
+      "none": "Cette réunion n'a pas encore de carte mentale.",
+      "generate": "Générer la carte mentale",
+      "requestLink": "Demander la carte mentale",
+      "generating": "L'IA construit la carte mentale de cette réunion. Elle s'affichera ici dès qu'elle sera prête.",
+      "failed": "Impossible de générer la carte mentale de cette réunion.",
+      "notEnough": "L'IA n'a pas trouvé assez de sujets dans cette réunion pour construire une carte mentale.",
+      "retry": "Réessayer",
+      "requestError": "Impossible de demander la carte mentale.",
+      "notice": "Construite par l'IA à partir de la transcription. Vérifiez-la dans la transcription avant de l'utiliser.",
+      "expandAll": "Déplier toutes les branches",
+      "collapseAll": "Replier toutes les branches",
+      "waitTranscript": "La carte mentale s'affichera ici dès que la transcription de la réunion sera prête."
     },
     "entity": {
       "person": "Personne",

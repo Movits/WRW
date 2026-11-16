@@ -61,6 +61,13 @@ vi.mock("@/components/ResumoGuardado", () => ({
     <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>
   ),
 }));
+// O mapa mental (H10) vira um marcador que mostra o que recebeu; o
+// comportamento dele está em components/MapaMental.test.tsx.
+vi.mock("@/components/MapaMental", () => ({
+  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji }: { token?: string; meetingId?: string; titulo: string; emoji?: string | null }) => (
+    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}</div>
+  ),
+}));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
 const VISTA = {
@@ -416,5 +423,42 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     abrir();
     expect(screen.getByTestId("resumo")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "▶ do resumo" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Reunião aberta pelo link — a aba Mapa mental (H10)", () => {
+  const abaDoMapa = () => screen.getByRole("button", { name: "Mapa mental" });
+
+  it("é a terceira aba, como no app de referência; mostra o mapa pelo token, com o título e o emoji do resumo", () => {
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🍷", itens: [] }, isError: false, error: null, refetch: vi.fn() });
+    abrir();
+    const abas = screen.getAllByRole("button").filter(botao => botao.hasAttribute("aria-pressed")).map(aba => aba.textContent);
+    expect(abas).toEqual(["Resumo", "Transcrição", "Mapa mental"]);
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+
+    fireEvent.click(abaDoMapa());
+
+    expect(abaDoMapa()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("mapa-mental")).toHaveTextContent(`${TOKEN} | sem id | Reunião com a Ana | 🍷`);
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+  });
+
+  it("trocar para o mapa e voltar não corta o áudio", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const audio = document.querySelector("audio");
+    fireEvent.click(abaDoMapa());
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: "Resumo" }));
+    expect(document.querySelector("audio")).toBe(audio);
+  });
+
+  it("sem texto na transcrição, a aba diz que o mapa vem com a transcrição, sem pedir nada", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "  ", idioma: "pt-BR" } }));
+    abrir();
+    fireEvent.click(abaDoMapa());
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+    expect(screen.getByText("O mapa mental aparece aqui quando a transcrição da reunião estiver pronta.")).toBeInTheDocument();
   });
 });

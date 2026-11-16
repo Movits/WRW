@@ -1493,6 +1493,7 @@
     "deleteConfirmButton": "Eliminar reunión",
     "summaryTab": "Resumen",
     "transcriptTab": "Transcripción",
+    "mindMapTab": "Mapa mental",
     "contactsTab": "Contactos ({{count}})",
     "entitiesHeading": "Nombres y empresas mencionados en la conversación",
     "noEntities": "No hay entidades pendientes.",
@@ -1573,6 +1574,22 @@
       "errorRegenerating": "El resumen de esta reunión se está rehaciendo. Espera a que termine para decidir.",
       "errorItemGone": "Este elemento del resumen ya no existe. Actualiza la página.",
       "errorOnlyActions": "Solo las acciones del resumen tienen casilla para marcar."
+    },
+    "mindMap": {
+      "title": "Mapa mental de la reunión",
+      "loading": "Cargando el mapa mental…",
+      "none": "Esta reunión todavía no tiene mapa mental.",
+      "generate": "Generar mapa mental",
+      "requestLink": "Pedir mapa mental",
+      "generating": "La IA está armando el mapa mental de esta reunión. Aparecerá aquí cuando esté listo.",
+      "failed": "No se pudo generar el mapa mental de esta reunión.",
+      "notEnough": "La IA no encontró suficientes temas en esta reunión para armar un mapa mental.",
+      "retry": "Intentar de nuevo",
+      "requestError": "No se pudo pedir el mapa mental.",
+      "notice": "Armado por la IA a partir de la transcripción. Revísalo con la transcripción antes de usarlo.",
+      "expandAll": "Abrir todas las ramas",
+      "collapseAll": "Contraer todas las ramas",
+      "waitTranscript": "El mapa mental aparecerá aquí cuando la transcripción de la reunión esté lista."
     },
     "entity": {
       "person": "Persona",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, Square, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -11,6 +11,7 @@ import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
+import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
@@ -577,7 +578,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // novo até ele (como o ?t, que pula uma vez por link).
   const itemJaDestacado = useRef<string | null>(null);
   const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
-  const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
+  const [tab, setTab] = useState<"summary" | "transcript" | "mindmap" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
@@ -774,7 +775,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
     </div>}
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
-    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
+    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
@@ -831,6 +832,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
     </section>}
+    {/* O mapa mental (H10) lê a transcrição, como o resumo: só com a reunião
+        pronta e com texto. A raiz é o título, com o emoji do resumo. */}
+    {tab === "mindmap" && (prontaComTranscricao
+      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo}/>
+      : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>)}
     {tab === "contacts" && <div className="space-y-3">
       {/* Pendências ainda não lidas: carregando, ou erro com tentar de novo —
           nunca "FALTANDO" nos cartões, que afirmaria que a IA não achou nada. */}

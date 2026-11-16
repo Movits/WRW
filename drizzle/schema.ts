@@ -1211,6 +1211,20 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   lockToken: varchar("lock_token", { length: 36 }),
   // Código nosso, nunca o texto da IA ou do driver.
   lastError: varchar("last_error", { length: 40 }),
+  // O mapa mental (H10): o mesmo trabalho da fila, numa chamada à IA depois
+  // do resumo, com as mesmas colunas de reserva. O mapa que falha não derruba
+  // o resumo pronto. A árvore guardada já passou pela conferência de
+  // shared/mapa-mental.ts (de 2 a 12 ramos, até 8 folhas por ramo, até 4
+  // filhos por folha, até 150 nós, rótulos de até 60 caracteres e nenhum
+  // rótulo de voz); a raiz é o título da reunião e não fica guardada.
+  mindMap: jsonCompat("mind_map"),
+  // Nulo: o resumo é de antes do mapa, e a dona o pede na aba do mapa.
+  mindMapStatus: varchar("mind_map_status", { length: 12, enum: ["pending", "ready", "failed"] }),
+  // Quando o mapa foi gravado: a tradução do resumo (H11) refaz a do mapa
+  // quando ela muda (a `version` sobe só com o resumo).
+  mindMapGeneratedAt: bigint("mind_map_generated_at", { mode: "number" }),
+  // Código nosso, como o last_error.
+  mindMapError: varchar("mind_map_error", { length: 40 }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1218,6 +1232,8 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   ownerMeetingIdx: index("meeting_summaries_owner_meeting_idx").on(table.ownerId, table.meetingId),
   // A fila reserva pelo estado e pela reserva vencida.
   statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
+  // E o mapa pendente (H10) pelo estado dele, sem varrer os resumos prontos.
+  mindMapStatusLockedIdx: index("meeting_summaries_mind_map_status_locked_idx").on(table.mindMapStatus, table.lockedUntil),
 }));
 
 // Cada item do resumo guardado. Nada extraído por IA entra sozinho

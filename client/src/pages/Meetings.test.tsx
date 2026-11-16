@@ -93,6 +93,13 @@ vi.mock("@/lib/trpc", () => ({
 // O jsdom não carrega mídia: a leitura da duração pelo navegador é dublada
 // (e provada em lib/duracao-no-navegador.test.ts).
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: unknown[]) => duble.duracao(...args) }));
+// O mapa mental (H10) vira um marcador que mostra o que recebeu; o
+// comportamento dele está em components/MapaMental.test.tsx.
+vi.mock("@/components/MapaMental", () => ({
+  MapaMentalDaReuniao: ({ meetingId, titulo, emoji }: { meetingId: string; titulo: string; emoji?: string | null }) => (
+    <div data-testid="mapa-mental">{meetingId} | {titulo} | {emoji ?? "sem emoji"}</div>
+  ),
+}));
 
 beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
@@ -1088,5 +1095,36 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
   it.each(["processing", "failed"])("reunião %s: não há o que compartilhar ainda", (status) => {
     abrirDetalhe({ status });
     expect(screen.queryByRole("heading", { name: /Compartilhar por link|Compartilhada por link/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Detalhe da reunião — a aba Mapa mental (H10)", () => {
+  const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "Vamos fechar o contrato até sexta-feira.", language: "pt-BR" };
+  const abaDoMapa = () => screen.getByRole("button", { name: "Mapa mental" });
+
+  it("fica entre a Transcrição e os Contatos, e mostra o mapa da reunião com o título e o emoji do resumo", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🍷", idioma: "pt-BR", erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const abas = screen.getAllByRole("button").filter(botao => botao.hasAttribute("aria-pressed")).map(aba => aba.textContent);
+    expect(abas).toEqual(["Resumo", "Transcrição", "Mapa mental", "Contatos (0)"]);
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+
+    fireEvent.click(abaDoMapa());
+
+    expect(abaDoMapa()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("mapa-mental")).toHaveTextContent(`${REUNIAO.id} | Reunião com a vinícola | 🍷`);
+    // A aba do mapa não leva o resumo nem a pergunta junto.
+    expect(screen.queryByRole("heading", { name: "Resumo da reunião" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["pronta sem transcrição", "ready", null],
+    ["em processamento", "processing", TRANSCRICAO],
+    ["com falha", "failed", TRANSCRICAO],
+  ])("reunião %s: a aba diz que o mapa vem com a transcrição, sem pedir nada", (_caso, status, transcript) => {
+    abrirDetalhe({ status }, { transcript });
+    fireEvent.click(abaDoMapa());
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+    expect(screen.getByText("O mapa mental aparece aqui quando a transcrição da reunião estiver pronta.")).toBeInTheDocument();
   });
 });

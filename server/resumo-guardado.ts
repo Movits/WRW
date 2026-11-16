@@ -42,8 +42,8 @@ const COLUNAS_DO_RESUMO = {
   lastError: meetingSummaries.lastError,
 };
 
-/** A reunião da dona, não apagada, ou NOT_FOUND. */
-async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
+/** A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental (server/mapa-mental-guardado.ts) usa a mesma. */
+export async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
   const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
@@ -91,9 +91,11 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * quando há trabalho novo (é o teto de pedidos à IA, que pode recusar
  * lançando, e devolve como soltar a vaga): pedir de novo o que já está na fila
  * não gasta vaga, e o pedido que perdeu a corrida para outro igual a devolve.
+ * O pedido do mapa mental passa por aqui quando ainda não há resumo pronto: o
+ * mapa vem com ele.
  */
-type AntesDeCriar = () => (() => void) | void;
-async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
+export type AntesDeCriar = () => (() => void) | void;
+export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });

@@ -12,6 +12,12 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+// O mapa mental (H10) é a segunda fase do mesmo trabalho e segue na mesma
+// rodada: dublado aqui, para a rodada nunca chamar a IA de verdade. O que é
+// do mapa está em mapa-mental.integracao.test.ts.
+const gerarMapaMental = vi.hoisted(() => vi.fn());
+vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("./mapa-mental")>()), gerarMapaMental: (...a: unknown[]) => gerarMapaMental(...a) }));
+const MAPA = { ramos: [{ rotulo: "Exportação de café", folhas: [] }, { rotulo: "Transportadora", folhas: [] }] };
 
 const { getDb } = await import("./db");
 const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
@@ -83,6 +89,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     fila.religarParaTestes();
     gerarResumoDaReuniao.mockReset();
     gerarResumoDaReuniao.mockResolvedValue(RESUMO);
+    gerarMapaMental.mockReset();
+    gerarMapaMental.mockResolvedValue(MAPA);
     vaga.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -103,6 +111,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       ["decision", 1, "pending", false, 5, null],
     ]);
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, model: "gemini-teste-1" });
+    // O mapa mental (H10) veio na mesma rodada, sem mexer no resumo.
+    expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMapError: null });
   });
 
   it("pedir de novo o que já está na fila, ou pronto, não gasta vaga nem duplica", async () => {

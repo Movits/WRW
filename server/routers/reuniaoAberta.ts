@@ -8,6 +8,7 @@ import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuni
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
 import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
+import { mapaMentalPeloLink, pedirMapaPeloLink } from "../mapa-mental-guardado";
 import { comRecusaTraduzida } from "./meetings";
 
 /**
@@ -96,6 +97,17 @@ export const reuniaoAbertaRouter = router({
   pedirResumo: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
+
+  // O mapa mental (H10), só leitura, como o resumo. Pedir o mapa que a
+  // reunião ainda não tem (ou que falhou) gasta uma vaga dos dois tetos;
+  // pedir o que já está na fila, ou pronto, não.
+  mapaMental: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .query(({ input }) => comRecusaTraduzida(() => mapaMentalPeloLink(input.token))),
+
+  pedirMapa: publicProcedure
+    .input(z.object({ token: tokenDoLink }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirMapaPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
 
   perguntar: publicProcedure
     .input(z.object({
