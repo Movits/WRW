@@ -1963,7 +1963,8 @@
         "notSent": "A reunião está salva na WRW, mas não foi para a sua Google Agenda.",
         "removed": "A reunião saiu da sua Google Agenda.",
         "notRemoved": "A reunião saiu da agenda da WRW, mas continua na sua Google Agenda.",
-        "removeThere": "Se quiser, apague o evento por lá."
+        "removeThere": "Se quiser, apague o evento por lá.",
+        "pastNotSent": "Esta reunião já aconteceu e fica só na agenda da WRW."
       },
       "reason": {
         "notConnected": "Conecte a Google Agenda no Perfil.",

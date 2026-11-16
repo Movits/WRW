@@ -10,6 +10,7 @@ import {
   NOME_DO_PARTICIPANTE_MAX,
   PARTICIPANTES_DA_AGENDADA_MAX,
   FUSO_MAX,
+  reuniaoJaAcabou,
 } from "@shared/agenda";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
@@ -18,13 +19,14 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   atualizarNaAgenda,
   criarNaAgenda,
-  excluirDaAgenda,
   ligarGravacaoNaAgenda,
   listarAgendaDaDona,
   obterDaAgenda,
 } from "../agenda-de-reunioes";
 import {
+  acessoDaGoogle,
   enviarParaGoogle,
+  excluirComAGoogle,
   existeNaAgenda,
   lerParaGoogle,
   MENSAGEM_AINDA_NA_AGENDA,
@@ -42,7 +44,9 @@ import { googleAgendaConectada } from "../google-agenda";
  * mudam e tiram o evento lá: primeiro o banco, depois a Google
  * (server/agenda-na-google.ts). A falha da Google não desfaz o que a dona
  * salvou: a resposta diz `naGoogle: "falhou"` com o motivo, e a tela mostra
- * "Tentar de novo".
+ * "Tentar de novo". O token da Google é lido antes de gravar (acessoDaGoogle):
+ * o banco fora do ar nessa leitura é erro com nada salvo, e salvar de novo não
+ * duplica a reunião.
  */
 
 const contaDa = (usuaria: { id: number; openId: string }): ContaDaAgenda => ({ id: usuaria.id, openId: usuaria.openId });
@@ -94,43 +98,44 @@ export const agendaRouter = router({
     .query(({ ctx, input }) => obterDaAgenda(ctx.user.openId, input.id)),
 
   // Com a Google Agenda conectada, a reunião nasce "pendente" na Google, e o
-  // evento é criado logo depois de o banco gravar.
+  // evento é criado logo depois de o banco gravar. A que já acabou fica só na
+  // WRW: na Google, nem evento nem convite para uma reunião que já houve.
   criar: protectedProcedure
     .input(entradaDaAgendada)
     .mutation(async ({ ctx, input }): Promise<{ id: string } & ResultadoNaGoogle> => {
       const conta = contaDa(ctx.user);
-      const naGoogle = await googleAgendaConectada(conta.id);
+      const naGoogle = !reuniaoJaAcabou(input, Date.now()) && await googleAgendaConectada(conta.id);
+      const acesso = naGoogle ? await acessoDaGoogle(conta) : null;
       const { id, updatedAt } = await criarNaAgenda(conta.openId, input, { naGoogle });
-      if (!naGoogle) return { id, naGoogle: null };
-      return { id, ...(await enviarParaGoogle(conta, { ...input, id, google: "pendente", updatedAt })) };
+      if (!acesso) return { id, naGoogle: null };
+      return { id, ...(await enviarParaGoogle(conta, { ...input, id, google: "pendente", updatedAt }, { acesso })) };
     }),
 
+  // A que já acabou só muda o evento que já está na Google, sem avisar os
+  // convidados (enviarParaGoogle).
   atualizar: protectedProcedure
     .input(entradaDaAgendada.extend({ id: idDaAgendada }))
     .mutation(async ({ ctx, input }): Promise<{ id: string } & ResultadoNaGoogle> => {
       const { id, ...dados } = input;
       const conta = contaDa(ctx.user);
       const naGoogle = await googleAgendaConectada(conta.id);
+      const acesso = naGoogle ? await acessoDaGoogle(conta) : null;
       const { updatedAt } = await atualizarNaAgenda(conta.openId, id, dados, { naGoogle });
-      if (!naGoogle) return { id, naGoogle: null };
-      return { id, ...(await enviarParaGoogle(conta, { ...dados, id, google: "pendente", updatedAt })) };
+      if (!acesso) return { id, naGoogle: null };
+      return { id, ...(await enviarParaGoogle(conta, { ...dados, id, google: "pendente", updatedAt }, { acesso })) };
     }),
 
-  // Primeiro a linha sai; depois o evento, se a reunião foi para a Google.
-  // Sem a Google Agenda conectada agora, o evento fica lá (nada é tentado):
-  // é o que o Perfil avisa ao desconectar. A escolha do convite volta à tela
-  // para o "Tentar de novo" (tirarDaGoogle), já que a linha não existe mais.
+  // A linha sai, e depois o evento (excluirComAGoogle): a reunião que já
+  // acabou fica na Google como histórico; a que foi para lá, sem a Google
+  // Agenda conectada agora, volta "falhou" com o motivo, e a tela avisa que o
+  // evento continua lá. A escolha do convite volta à tela para o "Tentar de
+  // novo" (tirarDaGoogle), já que a linha não existe mais.
   excluir: protectedProcedure
     .input(z.object({ id: idDaAgendada }))
-    .mutation(async ({ ctx, input }): Promise<{ ok: true; avisarConvidados: boolean } & ResultadoNaGoogle> => {
-      const conta = contaDa(ctx.user);
-      const { google, googleConvites } = await excluirDaAgenda(conta.openId, input.id);
-      const avisarConvidados = googleConvites;
-      if (google === null) return { ok: true, avisarConvidados, naGoogle: null };
-      const resultado = await tirarEventoDaGoogle(conta, input.id, googleConvites);
-      if (resultado.naGoogle === "falhou" && resultado.motivo === "nao-conectada") return { ok: true, avisarConvidados, naGoogle: null };
-      return { ok: true, avisarConvidados, ...resultado };
-    }),
+    .mutation(async ({ ctx, input }): Promise<{ ok: true; avisarConvidados: boolean } & ResultadoNaGoogle> => ({
+      ok: true,
+      ...(await excluirComAGoogle(contaDa(ctx.user), input.id)),
+    })),
 
   // "Tentar de novo" e "Pôr na Google Agenda": manda a versão que está no banco.
   mandarParaGoogle: protectedProcedure

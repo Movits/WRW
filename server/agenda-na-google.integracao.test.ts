@@ -22,7 +22,12 @@ const { appRouter } = await import("./routers");
  * estado na Google é gravado de verdade pela rota (pendente, ok, falhou); o
  * CASE da mudança sem a Google Agenda deixa "falhou" só a reunião que já foi
  * para lá; a ficha (updated_at) segura o "ok" quando a gravação é ligada no
- * meio do envio; e a exclusão tira o evento depois de apagar a linha.
+ * meio do envio; e a exclusão tira o evento depois de apagar a linha. E mais:
+ * o estado é da conta Google conectada (desconectar e conectar outra conta o
+ * zeram, pela subconsulta do openId; reconectar a mesma conta não); a
+ * reunião que já acabou não é criada na Google, a mudança dela não avisa
+ * ninguém, e a exclusão dela não chama a Google; sem a Google Agenda, a
+ * exclusão da que foi para lá volta "falhou".
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-agenda-google-${crypto.randomUUID()}`;
@@ -70,13 +75,18 @@ async function linhaDaAgenda(id: string) {
   return linha;
 }
 
-async function conectar() {
+async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
   // Grava a conexão de verdade; o token de acesso dela fica em memória, e a Google só é chamada para os eventos.
   await conexaoGoogle.gravarConexaoGoogle(idDaDona, {
-    refreshToken: "refresh-da-dona", sub: "sub-da-dona", email: "dona@exemplo.com",
+    refreshToken, sub, email: "dona@exemplo.com",
     escopos: ["openid", "https://www.googleapis.com/auth/calendar.events"],
     acesso: { token: "acesso-da-dona", expiraEm: Date.now() + HORA },
   }, PROVA);
+}
+
+/** A reunião passa a ser de ontem, com o evento ainda na Google (o tempo passou). */
+async function jaAcabou(id: string) {
+  await (await getDb())!.update(agendaReunioes).set({ inicioEm: Date.now() - 24 * HORA }).where(eq(agendaReunioes.id, id));
 }
 
 async function desconectarNoBanco() {
@@ -207,12 +217,86 @@ describe.skipIf(!temBanco)("Agenda na Google Agenda (integração)", () => {
     await expect(rota().agenda.tirarDaGoogle({ id: naAgenda, avisarConvidados: false })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("excluir a reunião que nunca foi para a Google não chama a Google", async () => {
+  it("excluir a reunião que nunca foi para a Google: com a Google conectada, o DELETE é tentado (404 conta como tirado), e a resposta é nula", async () => {
     await desconectarNoBanco();
     const { id } = await rota().agenda.criar(entrada());
     await conectar();
-    google();
+    google(erroDaGoogle(404, "notFound"));
     expect(await rota().agenda.excluir({ id })).toEqual({ ok: true, avisarConvidados: false, naGoogle: null });
+    expect(chamadas).toEqual([expect.objectContaining({ metodo: "DELETE", url: `${URL_DOS_EVENTOS}/${hex(id)}?sendUpdates=none` })]);
+  });
+
+  it("a conta Google é outra: desconectar zera o estado, e com a conta B a lista mostra a reunião fora da Google ('Pôr na Google Agenda' de volta)", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada({ googleConvites: true }));
+    expect((await linhaDaAgenda(id)).google).toBe("ok");
+    await conexaoGoogle.desconectarGoogleAgenda(idDaDona, PROVA, vi.fn(async () => new Response(null, { status: 200 })));
+    expect((await linhaDaAgenda(id)).google).toBeNull();
+    await conectar("sub-da-conta-b", "refresh-da-conta-b");
+    const { proximas } = await rota().agenda.listar();
+    expect(proximas.find(r => r.id === id)).toMatchObject({ google: null, googleConvites: true });
+  });
+
+  it("reconectar a MESMA conta mantém o estado; o Reconectar da conexão revogada escolhendo outra conta o zera", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada());
+    await conectar();
+    expect((await linhaDaAgenda(id)).google).toBe("ok");
+    await (await getDb())!.update(googleAgendaConexoes).set({ falha: "revogada" }).where(eq(googleAgendaConexoes.userId, idDaDona));
+    await conectar("sub-da-conta-b", "refresh-da-conta-b");
+    expect((await linhaDaAgenda(id)).google).toBeNull();
+  });
+
+  it("desconectar e reconectar a MESMA conta: o estado zerado não impede a exclusão de tirar o evento, com o cancelamento aos convidados", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada({ googleConvites: true }));
+    await conexaoGoogle.desconectarGoogleAgenda(idDaDona, PROVA, vi.fn(async () => new Response(null, { status: 200 })));
+    await conectar();
+    google(new Response(null, { status: 204 }));
+    const antes = chamadas.length;
+    expect(await rota().agenda.excluir({ id })).toEqual({ ok: true, avisarConvidados: true, naGoogle: null });
+    expect(chamadas.slice(antes)).toEqual([expect.objectContaining({ metodo: "DELETE", url: `${URL_DOS_EVENTOS}/${hex(id)}?sendUpdates=all` })]);
+  });
+
+  it("marcar uma reunião que já acabou: fica só na WRW, sem evento nem convite na Google", async () => {
+    google();
+    const { id, naGoogle } = await rota().agenda.criar(entrada({ inicioEm: Date.now() - 24 * HORA, googleConvites: true }));
+    expect(naGoogle).toBeNull();
+    expect(await linhaDaAgenda(id)).toMatchObject({ google: null, googleConvites: true });
     expect(chamadas).toEqual([]);
+  });
+
+  it("mudar a reunião que já acabou: só o PATCH, com sendUpdates=none, mesmo com o convite marcado", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada({ googleConvites: true }));
+    await jaAcabou(id);
+    google(json({ id: "evento" }));
+    const antes = chamadas.length;
+    const ontem = (await linhaDaAgenda(id)).inicioEm;
+    expect(await rota().agenda.atualizar({ ...entrada({ titulo: "Ata da conversa", inicioEm: ontem }), googleConvites: true, id })).toEqual({ id, naGoogle: "ok" });
+    expect(chamadas.slice(antes).map(c => [c.metodo, c.url])).toEqual([["PATCH", `${URL_DOS_EVENTOS}/${hex(id)}?sendUpdates=none`]]);
+    expect((await linhaDaAgenda(id)).google).toBe("ok");
+  });
+
+  it("excluir a reunião que já acabou não chama a Google: o evento fica como histórico, e ninguém recebe o cancelamento", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada({ googleConvites: true }));
+    await jaAcabou(id);
+    google();
+    const antes = chamadas.length;
+    expect(await rota().agenda.excluir({ id })).toEqual({ ok: true, avisarConvidados: false, naGoogle: null });
+    expect(await linhaDaAgenda(id)).toBeUndefined();
+    expect(chamadas.slice(antes)).toEqual([]);
+  });
+
+  it("excluir a que foi para a Google, sem a Google Agenda agora (a conta saiu da lista do modo Teste): 'falhou' com o motivo", async () => {
+    google(json({ id: "evento" }));
+    const { id } = await rota().agenda.criar(entrada());
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "");
+    google();
+    const antes = chamadas.length;
+    expect(await rota().agenda.excluir({ id })).toEqual({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "nao-conectada" });
+    expect(await linhaDaAgenda(id)).toBeUndefined();
+    expect(chamadas.slice(antes)).toEqual([]);
   });
 });

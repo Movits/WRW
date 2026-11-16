@@ -1963,7 +1963,8 @@
         "notSent": "La réunion est enregistrée dans WRW, mais elle n’a pas été ajoutée à votre Google Agenda.",
         "removed": "La réunion a été retirée de votre Google Agenda.",
         "notRemoved": "La réunion a été retirée de l’agenda de WRW, mais elle est toujours dans votre Google Agenda.",
-        "removeThere": "Si vous le souhaitez, supprimez l’événement là-bas."
+        "removeThere": "Si vous le souhaitez, supprimez l’événement là-bas.",
+        "pastNotSent": "Cette réunion a déjà eu lieu : elle reste uniquement dans l’agenda de WRW."
       },
       "reason": {
         "notConnected": "Connectez Google Agenda depuis votre Profil.",

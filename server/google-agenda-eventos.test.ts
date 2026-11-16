@@ -10,7 +10,9 @@ const { RecusaDaGoogle } = await import("./google-oauth");
  * da Google. Prova o que vai na chamada (o id do evento, o corpo, o convite e o
  * token no cabeçalho) e o que cada resposta faz: 409 na criação vira PATCH, 401
  * renova o token UMA vez, 404 e 410 na exclusão contam como sucesso, e o resto
- * vira recusa com o motivo da Google, sem token nem título na mensagem.
+ * vira recusa com o motivo da Google, sem token nem título na mensagem. Sem
+ * criar (a reunião que já acabou), só o PATCH, e o evento que não está lá é
+ * "ausente", nunca criado.
  */
 
 const AGENDA_ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -145,6 +147,34 @@ describe("gravar o evento", () => {
   it("o motivo da Google só passa quando é uma palavra; o resto vira o status", async () => {
     const google = dubleDaGoogle(json({ error: { errors: [{ reason: "x'; DROP TABLE" }] } }, 400));
     await expect(eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false)).rejects.toMatchObject({ codigo: "http_400" });
+  });
+
+  it("a criação e o PATCH depois do 409 respondem 'gravado'", async () => {
+    expect(await eventos.gravarEventoNaGoogle(sessao(dubleDaGoogle(json({ id: EVENTO_ID }))).sessao, reuniao(), false)).toBe("gravado");
+    const google = dubleDaGoogle(erroDaGoogle(409, "duplicate"), json({ id: EVENTO_ID }));
+    expect(await eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false)).toBe("gravado");
+  });
+});
+
+describe("gravar sem criar (a reunião que já acabou)", () => {
+  it("só o PATCH no evento, nunca o POST, com o corpo sem o id e o convite escolhido", async () => {
+    const google = dubleDaGoogle(json({ id: EVENTO_ID }));
+    expect(await eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false, false)).toBe("gravado");
+    expect(google.chamadas.map(c => [c.metodo, c.url])).toEqual([["PATCH", `${eventos.URL_DOS_EVENTOS}/${EVENTO_ID}?sendUpdates=none`]]);
+    expect(google.chamadas[0].corpo).toEqual(eventos.corpoDoEvento(reuniao()));
+  });
+
+  it.each([[404, "notFound"], [410, "deleted"]])("o evento que não está lá (%i) é 'ausente': não é criado", async (status, reason) => {
+    const google = dubleDaGoogle(erroDaGoogle(status, reason));
+    expect(await eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false, false)).toBe("ausente");
+    expect(google.chamadas).toHaveLength(1);
+  });
+
+  it("outra recusa sobe como recusa, e o 404 do PATCH depois do 409 (criando) também", async () => {
+    await expect(eventos.gravarEventoNaGoogle(sessao(dubleDaGoogle(erroDaGoogle(403, "forbidden"))).sessao, reuniao(), false, false))
+      .rejects.toMatchObject({ codigo: "forbidden", status: 403 });
+    const google = dubleDaGoogle(erroDaGoogle(409, "duplicate"), erroDaGoogle(404, "notFound"));
+    await expect(eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false)).rejects.toMatchObject({ codigo: "notFound", status: 404 });
   });
 });
 

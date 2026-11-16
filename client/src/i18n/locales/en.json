@@ -1963,7 +1963,8 @@
         "notSent": "The meeting is saved in WRW, but it didn't go to your Google Calendar.",
         "removed": "The meeting was removed from your Google Calendar.",
         "notRemoved": "The meeting was removed from your WRW schedule, but it's still in your Google Calendar.",
-        "removeThere": "If you want, delete the event there."
+        "removeThere": "If you want, delete the event there.",
+        "pastNotSent": "This meeting has already happened, so it stays only in your WRW schedule."
       },
       "reason": {
         "notConnected": "Connect Google Calendar in your Profile.",

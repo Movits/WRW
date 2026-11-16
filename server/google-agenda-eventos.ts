@@ -156,19 +156,31 @@ const urlDoEvento = (id: string, avisarConvidados: boolean) => `${URL_DOS_EVENTO
 
 /**
  * Cria o evento da reunião, ou o muda quando ele já existe (409 vira PATCH).
- * Lança RecusaDaGoogle quando a Google recusa ou não responde, e o que o
- * `renovar` da sessão lançar (ConexaoGoogleRevogada, por exemplo).
+ * Com `criar` falso (a reunião que já acabou, em server/agenda-na-google.ts),
+ * só muda o evento que já está lá: o que não existe (404 ou 410) não é criado,
+ * e a resposta é "ausente". Lança RecusaDaGoogle quando a Google recusa ou não
+ * responde, e o que o `renovar` da sessão lançar (ConexaoGoogleRevogada, por
+ * exemplo).
  */
-export async function gravarEventoNaGoogle(sessao: SessaoDaGoogle, reuniao: ReuniaoParaGoogle, avisarConvidados: boolean): Promise<void> {
+export async function gravarEventoNaGoogle(
+  sessao: SessaoDaGoogle,
+  reuniao: ReuniaoParaGoogle,
+  avisarConvidados: boolean,
+  criar = true,
+): Promise<"gravado" | "ausente"> {
   const id = idDoEventoNaGoogle(reuniao.id);
   const corpo = corpoDoEvento(reuniao);
-  const criacao = await sessao.chamar("POST", `${URL_DOS_EVENTOS}?${envio(avisarConvidados)}`, { id, ...corpo });
-  if (deuCerto(criacao.status)) return;
-  if (criacao.status !== 409) throw new RecusaDaGoogle(criacao.motivo, criacao.status);
+  if (criar) {
+    const criacao = await sessao.chamar("POST", `${URL_DOS_EVENTOS}?${envio(avisarConvidados)}`, { id, ...corpo });
+    if (deuCerto(criacao.status)) return "gravado";
+    if (criacao.status !== 409) throw new RecusaDaGoogle(criacao.motivo, criacao.status);
+  }
   // O id já existe: o evento foi criado antes (a reunião mudou, ou a resposta
   // da criação se perdeu). Muda o que está lá.
   const mudanca = await sessao.chamar("PATCH", urlDoEvento(id, avisarConvidados), corpo);
-  if (!deuCerto(mudanca.status)) throw new RecusaDaGoogle(mudanca.motivo, mudanca.status);
+  if (deuCerto(mudanca.status)) return "gravado";
+  if (!criar && (mudanca.status === 404 || mudanca.status === 410)) return "ausente";
+  throw new RecusaDaGoogle(mudanca.motivo, mudanca.status);
 }
 
 /** Tira o evento da reunião. O evento que já não existe (404 ou 410) conta como tirado. */

@@ -1963,7 +1963,8 @@
         "notSent": "Das Meeting ist in WRW gespeichert, wurde aber nicht in Ihren Google Kalender eingetragen.",
         "removed": "Das Meeting wurde aus Ihrem Google Kalender entfernt.",
         "notRemoved": "Das Meeting wurde aus Ihren Terminen in WRW entfernt, steht aber noch in Ihrem Google Kalender.",
-        "removeThere": "Wenn Sie möchten, löschen Sie den Termin dort."
+        "removeThere": "Wenn Sie möchten, löschen Sie den Termin dort.",
+        "pastNotSent": "Dieses Meeting hat bereits stattgefunden und bleibt nur in Ihren Terminen in WRW."
       },
       "reason": {
         "notConnected": "Verbinden Sie Google Kalender in Ihrem Profil.",

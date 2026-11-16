@@ -8,7 +8,9 @@
 
 /**
  * O estado da reunião na Google; nulo (fora da lista) quando ela nunca foi
- * mandada para lá, porque a dona não tinha a Google Agenda conectada.
+ * mandada para lá, porque a dona não tinha a Google Agenda conectada, quando a
+ * conta Google saiu ou mudou depois (o estado é da conta conectada), ou quando
+ * a reunião já acabou e não estava lá.
  * - `pendente`: o banco gravou, e a Google ainda não respondeu (ou a resposta
  *   se perdeu);
  * - `ok`: a Google tem a versão que está no banco;
@@ -33,8 +35,10 @@ export const MOTIVOS_SEM_GOOGLE = ["nao-conectada", "revogada", "google"] as con
 export type MotivoSemGoogle = (typeof MOTIVOS_SEM_GOOGLE)[number];
 
 /**
- * O que aconteceu na Google nesta chamada. `null` quando nada foi tentado: a
- * dona não tem a Google Agenda conectada, ou a reunião nunca foi para lá.
+ * O que aconteceu na Google nesta chamada. `null` quando a reunião não está
+ * nem vai para lá: a dona não tem a Google Agenda conectada, a reunião nunca
+ * foi para lá, ou já acabou (a que já acabou não é criada na Google, e a
+ * exclusão dela não chama a Google).
  */
 export type ResultadoNaGoogle =
   | { naGoogle: null }

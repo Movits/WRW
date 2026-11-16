@@ -1287,7 +1287,9 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   meetingId:       varchar("meeting_id", { length: 36 }),
   // A reunião na Google Agenda conectada da dona (H16c do plano do gravador).
   // Nulo enquanto ela nunca foi mandada para lá (a dona não tinha a Google
-  // Agenda conectada); "pendente" do momento em que o banco gravou até a Google
+  // Agenda conectada), e de novo quando a conta Google sai ou muda: o estado é
+  // da conta conectada (server/google-agenda.ts). A reunião que já acabou não é
+  // criada lá e fica nula. "pendente" do momento em que o banco gravou até a Google
   // responder; "ok" quando a Google tem a versão que está aqui; "falhou" quando
   // não tem, e a tela mostra "Tentar de novo". O id do evento lá é o id daqui
   // sem os hífens (server/google-agenda-eventos.ts): não há coluna para ele.

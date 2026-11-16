@@ -259,10 +259,20 @@ export default function Agenda() {
     return () => window.clearInterval(relogio);
   }, []);
 
+  // A conexão que a Google recusou (revogada) ou que saiu em outra aba (não
+  // conectada): o estado guardado da consulta ficou velho, e o aviso do topo,
+  // com "Abrir o Perfil", e o formulário dependem dele. A consulta não relê
+  // sozinha ao voltar à aba (refetchOnWindowFocus falso), então relê aqui.
+  const releAConexaoSeMudou = (resultado: ResultadoNaGoogle | undefined) => {
+    if (resultado?.naGoogle === "falhou" && (resultado.motivo === "revogada" || resultado.motivo === "nao-conectada")) {
+      void utils.googleAgenda.estado.invalidate();
+    }
+  };
   // O que a dona salvou está salvo; a falha da Google vem num aviso à parte,
   // com o porquê, e o cartão mostra "Tentar de novo".
   const avisarSeNaoFoi = (resultado: ResultadoNaGoogle | undefined) => {
     if (resultado?.naGoogle === "falhou") toast.warning(`${t("agenda.google.toast.notSent")} ${motivoSemGoogleNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+    releAConexaoSeMudou(resultado);
   };
   const aoSalvar = (mensagem: string, resultado?: ResultadoNaGoogle) => {
     toast.success(mensagem);
@@ -282,6 +292,7 @@ export default function Agenda() {
     onSuccess: resultado => {
       if (resultado.naGoogle === "falhou") avisarQueFicouNaGoogle(resultado.motivo);
       else toast.success(t("agenda.google.toast.removed"));
+      releAConexaoSeMudou(resultado);
     },
     onError: erro => toast.error(mensagemDoErroDeTirarDaGoogle(t, erro)),
   });
@@ -300,6 +311,7 @@ export default function Agenda() {
         const { avisarConvidados } = resultado;
         avisarQueFicouNaGoogle(resultado.motivo, () => tirarDaGoogle.mutate({ id: variaveis.id, avisarConvidados }));
       }
+      releAConexaoSeMudou(resultado);
       void utils.agenda.listar.invalidate();
     },
     onError: erro => {
@@ -307,11 +319,15 @@ export default function Agenda() {
       void utils.agenda.listar.invalidate();
     },
   });
-  // "Tentar de novo" e "Pôr na Google Agenda" no cartão.
+  // "Tentar de novo" e "Pôr na Google Agenda" no cartão. A reunião que já
+  // acabou e não está na Google fica só na WRW: o servidor não a cria lá, e a
+  // resposta é nula.
   const mandarParaGoogle = trpc.agenda.mandarParaGoogle.useMutation({
     onSuccess: resultado => {
       if (resultado.naGoogle === "falhou") toast.warning(`${t("agenda.google.toast.notSent")} ${motivoSemGoogleNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+      else if (resultado.naGoogle === null) toast.info(t("agenda.google.toast.pastNotSent"));
       else toast.success(t("agenda.google.toast.sent"));
+      releAConexaoSeMudou(resultado);
       void utils.agenda.listar.invalidate();
     },
     onError: erro => {
@@ -630,7 +646,8 @@ function CartaoDaAgendada({ reuniao, agora, idioma, googleLigada, googleDesligad
  * O estado da reunião na Google Agenda da dona (H16c), no lugar do link de
  * criar evento: "Na sua Google Agenda" quando a Google tem esta versão;
  * "Ainda não está" com "Tentar de novo" quando o envio falhou ou não terminou;
- * e, na reunião que nunca foi para lá (marcada antes de conectar), "Pôr na
+ * e, na reunião que nunca foi para lá (marcada antes de conectar, ou antes de
+ * desconectar ou de trocar de conta Google, que zeram o estado), "Pôr na
  * Google Agenda", só nas que ainda vão acontecer.
  */
 function NaGoogleAgenda({ estado, futura, mandando, aoMandar }: {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core";
-import { auditLogs, googleAgendaConexoes } from "../drizzle/schema";
+import { agendaReunioes, auditLogs, googleAgendaConexoes } from "../drizzle/schema";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -20,7 +20,10 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  *   autorização inteira da conta no projeto: reconectar com a mesma conta não
  *   revoga nada, e nada se revoga enquanto outra conta da WRW usa a mesma conta
  *   Google;
- * - fora de GOOGLE_AGENDA_LIBERADA_PARA (modo Teste), a função some.
+ * - fora de GOOGLE_AGENDA_LIBERADA_PARA (modo Teste), a função some;
+ * - o estado das reuniões na Google (H16c) é da conta Google conectada:
+ *   desconectar, a primeira conexão e a troca de conta Google o zeram, na
+ *   transação da conexão; reconectar a mesma conta não.
  * O banco de verdade está em google-agenda.integracao.test.ts.
  */
 
@@ -125,6 +128,9 @@ afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 const linhaDa = (refreshToken: string, sub = "sub-da-dona", userId = 7) => ({ versao: encryptData(refreshToken), sub, userId, falha: null });
 /** As consultas pela conta Google (o sub), não pela conta da WRW. */
 const consultasPeloSub = () => efeitos.filter(e => e.tipo === "select" && renderizar(e.condicao).sql.includes("`google_sub` = ?"));
+/** O estado das reuniões na Google voltando a nulo: as da conta (a agenda é pelo openId, achado pela subconsulta) que têm estado. */
+const ZERAR_ESTADO = "(`agenda_reunioes`.`owner_id` in (select `users`.`openId` from `users` where `users`.`id` = ?) and `agenda_reunioes`.`google` is not null)";
+const zeramentos = () => efeitos.filter(e => e.tipo === "update" && e.tabela === agendaReunioes);
 
 describe("o estado para o Perfil", () => {
   it("sem as variáveis, só 'indisponível', sem perguntar ao banco", async () => {
@@ -168,7 +174,8 @@ describe("gravar a conexão que voltou da Google", () => {
 
   it("o token entra cifrado (e se lê de volta), com a conta Google, e a prova entra na mesma transação", async () => {
     expect(await servico.gravarConexaoGoogle(7, conexao, PROVA, 1_000)).toEqual({ anterior: null });
-    expect(tipos()).toEqual(["transacao", "select", "insert", "insert", "fim-da-transacao"]);
+    // A conexão, o estado das reuniões na Google zerado (ver abaixo) e a prova.
+    expect(tipos()).toEqual(["transacao", "select", "insert", "update", "insert", "fim-da-transacao"]);
 
     const conexaoGravada = efeitos[2];
     expect(conexaoGravada.tabela).toBe(googleAgendaConexoes);
@@ -184,7 +191,7 @@ describe("gravar a conexão que voltou da Google", () => {
       refreshTokenCifrado: valores.refreshTokenCifrado, googleSub: "sub-da-dona", falha: null, emailGoogle: "dona@exemplo.com", updatedAt: 1_000,
     });
 
-    const prova = efeitos[3];
+    const prova = efeitos[4];
     expect(prova.tabela).toBe(auditLogs);
     expect(prova.valores).toMatchObject({
       userId: 7, action: servico.ACAO_GOOGLE_CONECTADA, resource: "google_agenda", status: "success",
@@ -203,6 +210,27 @@ describe("gravar a conexão que voltou da Google", () => {
     expect(await servico.gravarConexaoGoogle(7, conexao, PROVA)).toEqual({ anterior: null });
     expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toMatchObject({ reconexao: true, trocouDeContaGoogle: false });
     expect(consultasPeloSub()).toEqual([]);
+  });
+
+  it("o estado das reuniões na Google é da conta Google: a primeira conexão e a troca de conta o zeram na transação; a mesma conta, não", async () => {
+    // A primeira conexão: um estado que sobrou não é desta conta Google.
+    await servico.gravarConexaoGoogle(7, conexao, PROVA);
+    expect(zeramentos()).toHaveLength(1);
+    const [zerar] = zeramentos();
+    expect(zerar.valores).toEqual({ google: null });
+    expect(renderizar(zerar.condicao)).toMatchObject({ sql: ZERAR_ESTADO, params: [7] });
+    expect(efeitos.indexOf(zerar)).toBeLessThan(tipos().indexOf("fim-da-transacao"));
+    // Reconectar a mesma conta Google: os eventos são os dela, e o estado fica.
+    efeitos = [];
+    linhas = [linhaDa("refresh-antigo", "sub-da-dona")];
+    await servico.gravarConexaoGoogle(7, conexao, PROVA);
+    expect(zeramentos()).toEqual([]);
+    // Outra conta Google, também pelo "Reconectar" da conexão que parou de funcionar: zera.
+    efeitos = [];
+    linhas = [{ ...linhaDa("refresh-antigo", "sub-de-outra-conta-google"), falha: "revogada" }];
+    await servico.gravarConexaoGoogle(7, conexao, PROVA);
+    expect(zeramentos()).toHaveLength(1);
+    expect(renderizar(zeramentos()[0].condicao).params).toEqual([7]);
   });
 
   it("reconectar com OUTRA conta Google devolve o anterior decifrado, para a rota revogá-lo", async () => {
@@ -258,12 +286,15 @@ describe("desconectar", () => {
     const google = dubleDaGoogle(new Response(null, { status: 200 }));
     expect(await servico.desconectarGoogleAgenda(7, PROVA, google)).toEqual({ googleNaoConfirmou: false });
     // A conta da WRW, depois a conta Google (quem mais a usa), depois a Google.
-    expect(tipos()).toEqual(["select", "select", "google", "transacao", "delete", "insert", "fim-da-transacao"]);
+    expect(tipos()).toEqual(["select", "select", "google", "transacao", "delete", "update", "insert", "fim-da-transacao"]);
     expect(renderizar(efeitos[1].condicao).params).toEqual(["sub-da-dona"]);
     expect(corpoDe(efeitos[2]).get("token")).toBe("refresh-1");
     expect(efeitos[4].tabela).toBe(googleAgendaConexoes);
     expect(renderizar(efeitos[4].condicao).params).toEqual([7]);
-    expect(efeitos[5].valores).toMatchObject({
+    // Sem a conta Google, o estado das reuniões lá volta a nulo, na mesma transação.
+    expect(efeitos[5]).toMatchObject({ tabela: agendaReunioes, valores: { google: null } });
+    expect(renderizar(efeitos[5].condicao)).toMatchObject({ sql: ZERAR_ESTADO, params: [7] });
+    expect(efeitos[6].valores).toMatchObject({
       userId: 7, action: servico.ACAO_GOOGLE_DESCONECTADA, details: { revogadaNaGoogle: true, mantidaParaOutraConta: false },
     });
   });
@@ -276,6 +307,8 @@ describe("desconectar", () => {
     expect(google).not.toHaveBeenCalled();
     expect(efeitos.find(e => e.tipo === "delete")?.tabela).toBe(googleAgendaConexoes);
     expect(efeitos.find(e => e.tabela === auditLogs)?.valores?.details).toEqual({ revogadaNaGoogle: false, mantidaParaOutraConta: true });
+    // A conexão desta conta saiu: o estado das reuniões dela também.
+    expect(zeramentos()).toHaveLength(1);
   });
 
   it("a Google fora do ar não segura a desconexão: a linha sai, e a tela é avisada", async () => {

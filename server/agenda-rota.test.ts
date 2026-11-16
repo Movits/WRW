@@ -9,7 +9,9 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * router: a dona é sempre a da sessão; a entrada é conferida e limpa antes de
  * chegar ao serviço (título, início, duração, fuso, local, participantes,
  * lembrete e o convite pela Google); e, com a Google Agenda conectada, primeiro
- * o banco, depois a Google.
+ * o banco, depois a Google, com o token lido ANTES de gravar (o banco fora do
+ * ar nessa leitura não deixa nada salvo). A reunião marcada que já acabou fica
+ * fora da Google, e a exclusão é a de server/agenda-na-google.ts.
  */
 const FICHA = 1_700_000_000_000;
 const servico = vi.hoisted(() => ({
@@ -22,7 +24,9 @@ const servico = vi.hoisted(() => ({
 }));
 const naGoogle = vi.hoisted(() => ({
   conectada: vi.fn(async () => false),
+  acessoDaGoogle: vi.fn(async (): Promise<Record<string, unknown>> => ({ token: "token-1" })),
   enviarParaGoogle: vi.fn(async (): Promise<Record<string, unknown>> => ({ naGoogle: "ok" })),
+  excluirComAGoogle: vi.fn(async (): Promise<Record<string, unknown>> => ({ avisarConvidados: false, naGoogle: null })),
   tirarEventoDaGoogle: vi.fn(async (): Promise<Record<string, unknown>> => ({ naGoogle: "ok" })),
   lerParaGoogle: vi.fn(async (_dona: string, id: string) => ({ id, google: "falhou", googleConvites: false, updatedAt: 5 })),
   existeNaAgenda: vi.fn(async () => false),
@@ -30,7 +34,9 @@ const naGoogle = vi.hoisted(() => ({
 vi.mock("./agenda-de-reunioes", () => servico);
 vi.mock("./google-agenda", () => ({ googleAgendaConectada: naGoogle.conectada }));
 vi.mock("./agenda-na-google", () => ({
+  acessoDaGoogle: naGoogle.acessoDaGoogle,
   enviarParaGoogle: naGoogle.enviarParaGoogle,
+  excluirComAGoogle: naGoogle.excluirComAGoogle,
   tirarEventoDaGoogle: naGoogle.tirarEventoDaGoogle,
   lerParaGoogle: naGoogle.lerParaGoogle,
   existeNaAgenda: naGoogle.existeNaAgenda,
@@ -49,9 +55,12 @@ const contexto = (openId: string) => ({
 }) as never;
 const daDona = (openId = "dona-1") => agendaRouter.createCaller(contexto(openId));
 
+// Sempre no futuro: a reunião que já acabou não vai para a Google, e uma data
+// fixa viraria passado com o tempo.
+const DAQUI_A_UMA_SEMANA = Date.now() + 7 * 24 * 60 * 60_000;
 const valida = {
   titulo: "  Reunião com a Bia  ",
-  inicioEm: Date.UTC(2026, 10, 20, 17, 0),
+  inicioEm: DAQUI_A_UMA_SEMANA,
   duracaoMinutos: 90,
   fuso: "america/sao_paulo",
   local: "  ",
@@ -63,7 +72,9 @@ beforeEach(() => {
   for (const f of Object.values(servico)) f.mockClear();
   for (const f of Object.values(naGoogle)) f.mockClear();
   naGoogle.conectada.mockResolvedValue(false);
+  naGoogle.acessoDaGoogle.mockResolvedValue({ token: "token-1" });
   naGoogle.enviarParaGoogle.mockResolvedValue({ naGoogle: "ok" });
+  naGoogle.excluirComAGoogle.mockResolvedValue({ avisarConvidados: false, naGoogle: null });
   naGoogle.tirarEventoDaGoogle.mockResolvedValue({ naGoogle: "ok" });
   naGoogle.existeNaAgenda.mockResolvedValue(false);
   servico.excluirDaAgenda.mockResolvedValue({ google: null, googleConvites: false });
@@ -82,7 +93,7 @@ describe("rotas da agenda", () => {
     expect(servico.obterDaAgenda).toHaveBeenCalledWith("dona-1", ID);
     expect(servico.criarNaAgenda).toHaveBeenCalledWith("dona-1", expect.any(Object), { naGoogle: false });
     expect(servico.atualizarNaAgenda).toHaveBeenCalledWith("dona-1", ID, expect.not.objectContaining({ id: ID }), { naGoogle: false });
-    expect(servico.excluirDaAgenda).toHaveBeenCalledWith("dona-1", ID);
+    expect(naGoogle.excluirComAGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, ID);
     // A conexão Google é a da conta da sessão (o id), não do openId.
     expect(naGoogle.conectada).toHaveBeenCalledWith(7);
     expect(servico.ligarGravacaoNaAgenda).toHaveBeenCalledWith("dona-1", ID, REUNIAO);
@@ -139,7 +150,7 @@ describe("rotas da agenda", () => {
     await expect(daDona().excluir({ id: "nao-e-uuid" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(daDona().ligarGravacao({ id: ID, meetingId: "nao-e-uuid" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(servico.obterDaAgenda).not.toHaveBeenCalled();
-    expect(servico.excluirDaAgenda).not.toHaveBeenCalled();
+    expect(naGoogle.excluirComAGoogle).not.toHaveBeenCalled();
     expect(servico.ligarGravacaoNaAgenda).not.toHaveBeenCalled();
   });
 
@@ -172,16 +183,52 @@ describe("rotas da agenda", () => {
 describe("rotas da agenda com a Google Agenda (H16c)", () => {
   const ordem = (f: { mock: { invocationCallOrder: number[] } }) => f.mock.invocationCallOrder[0];
 
-  it("marcar com a Google Agenda conectada: primeiro o banco ('pendente'), depois a Google, com a versão gravada e a ficha", async () => {
+  it("marcar com a Google Agenda conectada: o token antes de gravar, o banco ('pendente') e depois a Google, com a versão gravada, a ficha e o token lido", async () => {
     naGoogle.conectada.mockResolvedValue(true);
     naGoogle.enviarParaGoogle.mockResolvedValue({ naGoogle: "falhou", motivo: "google" });
     const resultado = await daDona().criar({ ...valida, googleConvites: true });
     expect(resultado).toEqual({ id: "nova", naGoogle: "falhou", motivo: "google" });
+    expect(naGoogle.acessoDaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" });
     expect(servico.criarNaAgenda).toHaveBeenCalledWith("dona-1", expect.objectContaining({ googleConvites: true }), { naGoogle: true });
     expect(naGoogle.enviarParaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, expect.objectContaining({
       id: "nova", titulo: "Reunião com a Bia", fuso: "America/Sao_Paulo", googleConvites: true, google: "pendente", updatedAt: FICHA,
-    }));
+    }), { acesso: { token: "token-1" } });
+    expect(ordem(naGoogle.acessoDaGoogle)).toBeLessThan(ordem(servico.criarNaAgenda));
     expect(ordem(servico.criarNaAgenda)).toBeLessThan(ordem(naGoogle.enviarParaGoogle));
+  });
+
+  it("o banco fora do ar ao ler o token: marcar e mudar não gravam nada (salvar de novo não duplica), e o erro sobe", async () => {
+    naGoogle.conectada.mockResolvedValue(true);
+    const queda = Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+    naGoogle.acessoDaGoogle.mockRejectedValue(queda);
+    // O middleware do tRPC anota a queda no log; aqui ela é de propósito.
+    const erros = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(daDona().criar(valida)).rejects.toThrow();
+    await expect(daDona().atualizar({ ...valida, id: ID })).rejects.toThrow();
+    expect(erros).toHaveBeenCalled();
+    erros.mockRestore();
+    expect(servico.criarNaAgenda).not.toHaveBeenCalled();
+    expect(servico.atualizarNaAgenda).not.toHaveBeenCalled();
+    expect(naGoogle.enviarParaGoogle).not.toHaveBeenCalled();
+  });
+
+  it("a conexão que não serve (revogada) não impede salvar: o motivo lido antes vai ao envio, que o devolve", async () => {
+    naGoogle.conectada.mockResolvedValue(true);
+    naGoogle.acessoDaGoogle.mockResolvedValue({ motivo: "revogada" });
+    naGoogle.enviarParaGoogle.mockResolvedValue({ naGoogle: "falhou", motivo: "revogada" });
+    expect(await daDona().criar(valida)).toEqual({ id: "nova", naGoogle: "falhou", motivo: "revogada" });
+    expect(servico.criarNaAgenda).toHaveBeenCalledWith("dona-1", expect.any(Object), { naGoogle: true });
+    expect(naGoogle.enviarParaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, expect.any(Object), { acesso: { motivo: "revogada" } });
+  });
+
+  it("marcar uma reunião que já acabou: fica só na WRW, sem ler a conexão nem o token, e nada vai à Google", async () => {
+    naGoogle.conectada.mockResolvedValue(true);
+    const ontem = { ...valida, inicioEm: Date.now() - 24 * 60 * 60_000, duracaoMinutos: 60, googleConvites: true };
+    expect(await daDona().criar(ontem)).toEqual({ id: "nova", naGoogle: null });
+    expect(servico.criarNaAgenda).toHaveBeenCalledWith("dona-1", expect.objectContaining({ googleConvites: true }), { naGoogle: false });
+    expect(naGoogle.conectada).not.toHaveBeenCalled();
+    expect(naGoogle.acessoDaGoogle).not.toHaveBeenCalled();
+    expect(naGoogle.enviarParaGoogle).not.toHaveBeenCalled();
   });
 
   it("marcar sem a Google Agenda: nada vai à Google", async () => {
@@ -189,15 +236,18 @@ describe("rotas da agenda com a Google Agenda (H16c)", () => {
     expect(naGoogle.enviarParaGoogle).not.toHaveBeenCalled();
   });
 
-  it("mudar com a Google Agenda conectada: o banco e depois a Google; sem ela, só o banco", async () => {
+  it("mudar com a Google Agenda conectada: o token, o banco e depois a Google; sem ela, só o banco", async () => {
     naGoogle.conectada.mockResolvedValue(true);
     expect(await daDona().atualizar({ ...valida, id: ID })).toEqual({ id: ID, naGoogle: "ok" });
     expect(servico.atualizarNaAgenda).toHaveBeenCalledWith("dona-1", ID, expect.any(Object), { naGoogle: true });
-    expect(naGoogle.enviarParaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, expect.objectContaining({ id: ID, google: "pendente", updatedAt: FICHA }));
+    expect(naGoogle.enviarParaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, expect.objectContaining({ id: ID, google: "pendente", updatedAt: FICHA }), { acesso: { token: "token-1" } });
+    expect(ordem(naGoogle.acessoDaGoogle)).toBeLessThan(ordem(servico.atualizarNaAgenda));
     expect(ordem(servico.atualizarNaAgenda)).toBeLessThan(ordem(naGoogle.enviarParaGoogle));
     naGoogle.conectada.mockResolvedValue(false);
     naGoogle.enviarParaGoogle.mockClear();
+    naGoogle.acessoDaGoogle.mockClear();
     expect(await daDona().atualizar({ ...valida, id: ID })).toEqual({ id: ID, naGoogle: null });
+    expect(naGoogle.acessoDaGoogle).not.toHaveBeenCalled();
     expect(naGoogle.enviarParaGoogle).not.toHaveBeenCalled();
   });
 
@@ -208,24 +258,15 @@ describe("rotas da agenda com a Google Agenda (H16c)", () => {
     expect(naGoogle.enviarParaGoogle).not.toHaveBeenCalled();
   });
 
-  it("excluir: a reunião que nunca foi para a Google não chama a Google", async () => {
-    expect(await daDona().excluir({ id: ID })).toEqual({ ok: true, avisarConvidados: false, naGoogle: null });
-    expect(naGoogle.tirarEventoDaGoogle).not.toHaveBeenCalled();
-  });
-
-  it("excluir: a que foi sai da Google depois do banco, com o convite que ela tinha", async () => {
-    servico.excluirDaAgenda.mockResolvedValue({ google: "ok", googleConvites: true });
+  it("excluir: a conta da sessão vai à exclusão com a Google (server/agenda-na-google.ts), e a resposta dela volta inteira", async () => {
+    naGoogle.excluirComAGoogle.mockResolvedValueOnce({ avisarConvidados: true, naGoogle: "ok" });
     expect(await daDona().excluir({ id: ID })).toEqual({ ok: true, avisarConvidados: true, naGoogle: "ok" });
-    expect(naGoogle.tirarEventoDaGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, ID, true);
-    expect(ordem(servico.excluirDaAgenda)).toBeLessThan(ordem(naGoogle.tirarEventoDaGoogle));
-  });
-
-  it("excluir: a Google que falhou volta com o motivo; sem a Google Agenda conectada agora, nada foi tentado", async () => {
-    servico.excluirDaAgenda.mockResolvedValue({ google: "falhou", googleConvites: false });
-    naGoogle.tirarEventoDaGoogle.mockResolvedValueOnce({ naGoogle: "falhou", motivo: "revogada" });
-    expect(await daDona().excluir({ id: ID })).toEqual({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "revogada" });
-    naGoogle.tirarEventoDaGoogle.mockResolvedValueOnce({ naGoogle: "falhou", motivo: "nao-conectada" });
-    expect(await daDona().excluir({ id: ID })).toEqual({ ok: true, avisarConvidados: false, naGoogle: null });
+    expect(naGoogle.excluirComAGoogle).toHaveBeenCalledWith({ id: 7, openId: "dona-1" }, ID);
+    // A que foi para a Google, sem a Google Agenda agora: o "falhou" chega à tela, que avisa que o evento continua lá.
+    naGoogle.excluirComAGoogle.mockResolvedValueOnce({ avisarConvidados: false, naGoogle: "falhou", motivo: "nao-conectada" });
+    expect(await daDona().excluir({ id: ID })).toEqual({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "nao-conectada" });
+    expect(servico.excluirDaAgenda).not.toHaveBeenCalled();
+    expect(naGoogle.tirarEventoDaGoogle).not.toHaveBeenCalled();
   });
 
   it("Tentar de novo: lê a reunião da dona e manda a versão do banco", async () => {

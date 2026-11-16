@@ -1963,7 +1963,8 @@
         "notSent": "会议已保存在 WRW，但没有添加到您的 Google 日历。",
         "removed": "会议已从您的 Google 日历中移除。",
         "notRemoved": "会议已从 WRW 日程中移除，但仍在您的 Google 日历中。",
-        "removeThere": "如有需要，请在那里删除该活动。"
+        "removeThere": "如有需要，请在那里删除该活动。",
+        "pastNotSent": "这场会议已经结束，因此只保留在 WRW 日程中。"
       },
       "reason": {
         "notConnected": "请在个人资料中关联 Google 日历。",
