@@ -76,7 +76,7 @@ const comEstado = (estado: string) => consulta({ estado, emoji: null, idioma: nu
 const comErro = (c: ReturnType<typeof consulta>, error: unknown) => ({ ...c, isError: true, error });
 const ERRO_DO_BANCO = { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } };
 
-type PropsDaDona = Partial<{ nomes: Record<string, string>; aoIrPara: (segundo: number) => void; itemDestacado: string | null }>;
+type PropsDaDona = Partial<{ nomes: Record<string, string>; falantes: readonly string[]; aoIrPara: (segundo: number) => void; itemDestacado: string | null }>;
 const daDona = (c: ReturnType<typeof consulta>, props: PropsDaDona = {}) =>
   render(<ResumoGuardado meetingId={REUNIAO} consulta={c as never} {...props}/>);
 const doLink = (c: ReturnType<typeof consulta>, aoIrPara?: (segundo: number) => void) =>
@@ -314,6 +314,19 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     daDona(pronto(), { nomes: { F2: "Carla", F5: "Bia" } });
     fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Carla envia a proposta revisada" }));
     expect(opcoesDaLista()).toEqual(["Falante 1", "Carla", "Bia"]);
+  });
+
+  it("a voz que falou, sem nome e sem citação no resumo, também entra no responsável e volta como rótulo", () => {
+    // O resumo cita F1 e F2; F3 só falou. A lacuna da transcrição vem sem falante.
+    daDona(pronto(), { falantes: ["F1", "F3", "F2", "F3", ""] });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(opcoesDaLista()).toEqual(["Falante 1", "Falante 2", "Falante 3"]);
+    fireEvent.change(screen.getByLabelText("Texto"), { target: { value: "Ligar para o importador" } });
+    fireEvent.change(screen.getByLabelText("Responsável"), { target: { value: "Falante 3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(mutacao("acrescentarItemDoResumo").mutate).toHaveBeenLastCalledWith({
+      meetingId: REUNIAO, secao: "action", texto: "Ligar para o importador", assunto: null, responsavel: "{F3}", prazo: null,
+    });
   });
 
   it("'Acrescentar item' abre o formulário com a seção; Cancelar devolve o foco ao botão; o resumo vazio também tem o botão", () => {

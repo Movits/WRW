@@ -1264,6 +1264,13 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // prazo do item. Nulo: o item está como foi escrito. O item escrito pela
   // dona (acrescentado ou editado) não volta a "para conferir".
   editedAt: bigint("edited_at", { mode: "number" }),
+  // O estado de antes do Ignorar (H4f), para o Desfazer voltar a ele: o
+  // status (pending ou confirmed) e a hora em que a ação foi marcada feita
+  // (nula: não estava feita). Gravado ao ignorar e só lido enquanto o item
+  // está ignorado. Nulo no item ignorado antes destas colunas, quando só o
+  // item pendente tinha Ignorar: o Desfazer o devolve pendente.
+  statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
+  doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

@@ -7,7 +7,8 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 /**
  * A dona edita e acrescenta itens do resumo guardado (H4f) contra um banco real
  * DE TESTE (sem DATABASE_URL_TESTES, se pula). Prova o que só o banco prova:
- * as colunas novas (origin e edited_at) com o padrão nas linhas da IA, a
+ * as colunas novas (origin e edited_at, e as do estado de antes do Ignorar)
+ * com o padrão nas linhas da IA, a
  * transação que trava a reunião e o resumo (duas inclusões ao mesmo tempo não
  * repetem a posição), o teto, a dona no WHERE, o que o link aberto vê e que
  * excluir a reunião leva junto o que a dona escreveu. A lógica fina está em
@@ -155,6 +156,22 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     const itens = await itensDe(id);
     expect(itens.find(item => item.id === novoId)?.status).toBe("confirmed");
     expect(itens.find(item => item.id === acao.id)?.status).toBe("pending");
+  });
+
+  it("a ação confirmada e feita: o Ignorar guarda o estado nas colunas, e o Desfazer a devolve confirmada e feita", async () => {
+    const { id } = await reuniaoComResumo();
+    const [acao] = await itensDe(id);
+    expect(acao).toMatchObject({ statusBeforeIgnore: null, doneAtBeforeIgnore: null });
+    await servico.marcarAcaoFeita(DONA, acao.id, true);
+    const [feita] = await itensDe(id);
+    await servico.decidirItemDoResumo(DONA, acao.id, "ignored");
+    const [ignorada] = await itensDe(id);
+    expect(ignorada).toMatchObject({ status: "ignored", done: false, doneAt: null, statusBeforeIgnore: "confirmed" });
+    expect(Number(ignorada.doneAtBeforeIgnore)).toBe(Number(feita.doneAt));
+    await servico.decidirItemDoResumo(DONA, acao.id, "pending");
+    const [desfeita] = await itensDe(id);
+    expect(desfeita).toMatchObject({ status: "confirmed", done: true, statusBeforeIgnore: null, doneAtBeforeIgnore: null });
+    expect(Number(desfeita.doneAt)).toBe(Number(feita.doneAt));
   });
 
   it("o link aberto vê o que a dona escreveu como confirmado, sem ids, sem a origem e sem a marca da edição", async () => {

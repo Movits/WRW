@@ -76,6 +76,9 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      // As do formulário do item do resumo (H4f), que só monta quando a dona o abre.
+      editarItemDoResumo: duble.registrar("editarItemDoResumo"),
+      acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
       perguntar: duble.registrar("perguntar"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
@@ -999,6 +1002,19 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
     expect(screen.getByRole("checkbox", { name: "Ana manda a minuta do contrato" })).toBeInTheDocument();
     expect(screen.getByText("Responsável: Ana")).toBeInTheDocument();
+  });
+
+  it("o responsável sugere também quem falou na transcrição, sem nome e sem citação no resumo (H4f)", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    // O resumo cita só F1; F3 só falou.
+    const segments = [
+      { inicio: 5, fim: 20, falante: "F1", texto: "Eu mando a minuta do contrato." },
+      { inicio: 30, fim: 45, falante: "F3", texto: "Eu ligo para o importador." },
+    ];
+    abrirDetalhe({ status: "ready" }, { transcript: { ...TRANSCRICAO, segments } });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    const lista = document.getElementById(screen.getByLabelText("Responsável").getAttribute("list") ?? "");
+    expect(Array.from(lista?.querySelectorAll("option") ?? []).map(opcao => opcao.getAttribute("value"))).toEqual(["Falante 1", "Falante 3"]);
   });
 
   it("o '▶ mm:ss' de um item do resumo leva o player da barra ao ponto do item, na parte certa", () => {

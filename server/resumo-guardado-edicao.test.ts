@@ -162,6 +162,7 @@ function item(extra: Linha = {}): Linha {
     subject: null, text: "{F2} envia a proposta", assignee: "{F2}", due: "até sexta-feira",
     excerpt: "eu mando a proposta até sexta-feira", startSeconds: 75, confidence: "0.900",
     status: "pending", done: false, decidedAt: null, doneAt: null, origin: "ai", editedAt: null,
+    statusBeforeIgnore: null, doneAtBeforeIgnore: null,
     createdAt: ANTES, updatedAt: ANTES, ...extra,
   };
 }
@@ -366,6 +367,70 @@ describe("decidirItemDoResumo: o item escrito pela dona não volta a 'para confe
     await servico.decidirItemDoResumo(DONA, daIA.id as string, "pending");
     await servico.decidirItemDoResumo(DONA, daDona.id as string, "ignored");
     expect(itens().map(l => [l.origin, l.status, l.decidedAt])).toEqual([["ai", "pending", null], ["owner", "ignored", AGORA]]);
+  });
+});
+
+describe("decidirItemDoResumo: o Desfazer volta ao estado de antes do Ignorar", () => {
+  // O Ignorar do formulário (H4f) vale também para o item já confirmado: o
+  // Desfazer da tela pede 'pending' e tem de devolver o que havia.
+  const decidir = (linha: Linha, pedido: "pending" | "confirmed" | "ignored") => servico.decidirItemDoResumo(DONA, linha.id as string, pedido);
+
+  it("a ação da IA confirmada e feita: Ignorar guarda o estado, e Desfazer a devolve confirmada e feita, com a hora do feito", async () => {
+    const feita = item({ status: "confirmed", decidedAt: ANTES, done: true, doneAt: ANTES });
+    montar({ itens: [feita] });
+    await decidir(feita, "ignored");
+    expect(itens()[0]).toMatchObject({ status: "ignored", done: false, doneAt: null, statusBeforeIgnore: "confirmed", doneAtBeforeIgnore: ANTES });
+    await decidir(feita, "pending");
+    expect(itens()[0]).toMatchObject({ status: "confirmed", done: true, doneAt: ANTES, decidedAt: AGORA, statusBeforeIgnore: null, doneAtBeforeIgnore: null });
+  });
+
+  it("o item da dona confirmado e feito também volta feito; o confirmado sem feito volta sem feito", async () => {
+    const daDona = item({ origin: "owner", status: "confirmed", decidedAt: ANTES, done: true, doneAt: ANTES, excerpt: "", startSeconds: null });
+    const semFeito = item({ status: "confirmed", decidedAt: ANTES });
+    montar({ itens: [daDona, semFeito] });
+    for (const linha of [daDona, semFeito]) await decidir(linha, "ignored");
+    for (const linha of [daDona, semFeito]) await decidir(linha, "pending");
+    expect(itens().map(l => [l.status, l.done, l.doneAt])).toEqual([["confirmed", true, ANTES], ["confirmed", false, null]]);
+  });
+
+  it("o pendente ignorado volta pendente, sem a data da decisão", async () => {
+    const pendente = item();
+    montar({ itens: [pendente] });
+    await decidir(pendente, "ignored");
+    expect(itens()[0]).toMatchObject({ statusBeforeIgnore: "pending", doneAtBeforeIgnore: null });
+    await decidir(pendente, "pending");
+    expect(itens()[0]).toMatchObject({ status: "pending", decidedAt: null, done: false, statusBeforeIgnore: null });
+  });
+
+  it("ignorar o que já está ignorado não apaga o estado guardado", async () => {
+    const feita = item({ status: "confirmed", done: true, doneAt: ANTES });
+    montar({ itens: [feita] });
+    await decidir(feita, "ignored");
+    await decidir(feita, "ignored");
+    expect(itens()[0]).toMatchObject({ status: "ignored", statusBeforeIgnore: "confirmed", doneAtBeforeIgnore: ANTES });
+    await decidir(feita, "pending");
+    expect(itens()[0]).toMatchObject({ status: "confirmed", done: true, doneAt: ANTES });
+  });
+
+  it("feita sem a hora gravada: o Desfazer a devolve feita, com a hora do Ignorar", async () => {
+    const feita = item({ status: "confirmed", done: true, doneAt: null });
+    montar({ itens: [feita] });
+    await decidir(feita, "ignored");
+    await decidir(feita, "pending");
+    expect(itens()[0]).toMatchObject({ status: "confirmed", done: true, doneAt: AGORA });
+  });
+
+  it("fora do Desfazer nada muda: confirmar o ignorado não devolve o feito, e voltar a pendente o confirmado tira o feito", async () => {
+    const ignorada = item({ status: "confirmed", done: true, doneAt: ANTES });
+    const confirmada = item({ status: "confirmed", done: true, doneAt: ANTES });
+    montar({ itens: [ignorada, confirmada] });
+    await decidir(ignorada, "ignored");
+    await decidir(ignorada, "confirmed");
+    await decidir(confirmada, "pending");
+    expect(itens().map(l => [l.status, l.done, l.doneAt, l.statusBeforeIgnore, l.doneAtBeforeIgnore])).toEqual([
+      ["confirmed", false, null, null, null],
+      ["pending", false, null, null, null],
+    ]);
   });
 });
 

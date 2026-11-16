@@ -150,6 +150,11 @@ async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
     status: meetingSummaryItems.status,
     origin: meetingSummaryItems.origin,
     editedAt: meetingSummaryItems.editedAt,
+    // O feito e o estado de antes do Ignorar: o Desfazer volta a ele.
+    done: meetingSummaryItems.done,
+    doneAt: meetingSummaryItems.doneAt,
+    statusBeforeIgnore: meetingSummaryItems.statusBeforeIgnore,
+    doneAtBeforeIgnore: meetingSummaryItems.doneAtBeforeIgnore,
     statusDoResumo: meetingSummaries.status,
     statusDaReuniao: meetings.status,
   }).from(meetingSummaryItems)
@@ -177,21 +182,51 @@ function escritoPelaDona(item: { origin: string; editedAt: number | null }): boo
   return item.origin === "owner" || item.editedAt !== null;
 }
 
+type DecisaoDoItem = "pending" | "confirmed" | "ignored";
+
 /**
- * Confirma, ignora ou volta a pendente um item do resumo. Item que deixa de
- * estar confirmado perde também a marca de feito: só ação confirmada se marca.
+ * O que a decisão grava no item. Ignorar guarda o estado de antes (o status e
+ * a hora do feito; ignorar de novo não o apaga). O Desfazer da tela pede
+ * 'pending' para o item ignorado e volta a esse estado: a ação confirmada e
+ * feita volta confirmada e feita (H4f: o Ignorar do formulário vale também
+ * para o item já confirmado). O ignorado sem estado guardado volta pendente.
+ * O item escrito pela dona nunca volta a "para conferir". Fora do Desfazer,
+ * item que deixa de estar confirmado perde a marca de feito: só ação
+ * confirmada se marca.
  */
-export async function decidirItemDoResumo(ownerId: string, itemId: string, pedido: "pending" | "confirmed" | "ignored") {
-  const db = await exigirDb();
-  const item = await itemParaDecidir(db, ownerId, itemId);
-  const status = pedido === "pending" && escritoPelaDona(item) ? "confirmed" : pedido;
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({
+function estadoDaDecisao(item: Awaited<ReturnType<typeof itemParaDecidir>>, pedido: DecisaoDoItem, agora: number) {
+  if (pedido === "ignored") {
+    return {
+      status: pedido,
+      decidedAt: agora,
+      done: false,
+      doneAt: null,
+      ...(item.status === "ignored" ? {} : { statusBeforeIgnore: item.status, doneAtBeforeIgnore: item.done ? item.doneAt ?? agora : null }),
+    };
+  }
+  const desfazer = pedido === "pending" && item.status === "ignored";
+  const voltaPara = desfazer ? item.statusBeforeIgnore ?? "pending" : pedido;
+  const status = voltaPara === "pending" && escritoPelaDona(item) ? "confirmed" : voltaPara;
+  const feitoEm = desfazer && status === "confirmed" ? item.doneAtBeforeIgnore ?? null : null;
+  return {
     status,
     decidedAt: status === "pending" ? null : agora,
-    ...(status === "confirmed" ? {} : { done: false, doneAt: null }),
-    updatedAt: agora,
-  }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+    ...(status !== "confirmed" ? { done: false, doneAt: null } : feitoEm !== null ? { done: true, doneAt: feitoEm } : {}),
+    statusBeforeIgnore: null,
+    doneAtBeforeIgnore: null,
+  };
+}
+
+/**
+ * Confirma, ignora ou volta a pendente um item do resumo (o estado gravado
+ * está em estadoDaDecisao).
+ */
+export async function decidirItemDoResumo(ownerId: string, itemId: string, pedido: DecisaoDoItem) {
+  const db = await exigirDb();
+  const item = await itemParaDecidir(db, ownerId, itemId);
+  const agora = Date.now();
+  const r = await db.update(meetingSummaryItems).set({ ...estadoDaDecisao(item, pedido, agora), updatedAt: agora })
+    .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
   if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
 }
 

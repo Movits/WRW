@@ -54,6 +54,11 @@ type DaDona = {
   consulta: ConsultaDoResumo<ResumoDaDona>;
   /** Os nomes que a dona deu às vozes (nomesDosFalantes(meeting.speakerNames)). */
   nomes?: Readonly<Record<string, string>>;
+  /**
+   * Quem falou na reunião (o falante de cada fala da transcrição: F1, F2...):
+   * a voz sem nome que o resumo não cita também entra no responsável.
+   */
+  falantes?: readonly string[];
   aoIrPara?: (segundo: number) => void;
   /** O item pedido pelo link (?item=<id>): a tela rola até ele e o destaca. */
   itemDestacado?: string | null;
@@ -107,18 +112,23 @@ function mensagemDaDecisao(t: TranslateFn, erro: unknown) {
 const idDoItem = (id: string) => `item-do-resumo-${id}`;
 const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
+// O falante no formato do rótulo de voz ({F1} a {F99}, shared/vozes-no-texto.ts);
+// a lacuna da transcrição vem sem falante.
+const FALANTE = /^F[1-9][0-9]?$/;
+
 /**
  * As vozes que a dona pode pôr como responsável num item (H4f): as que ela
- * nomeou e as que o resumo cita, na ordem do número.
+ * nomeou, as que falaram na reunião e as que o resumo cita, uma vez cada, na
+ * ordem do número.
  */
-function vozesDoResumo(itens: readonly ItemNaTela[], nomes: Readonly<Record<string, string>>): string[] {
-  const vozes = Object.keys(nomes);
+function vozesDoResumo(itens: readonly ItemNaTela[], nomes: Readonly<Record<string, string>>, falantes: readonly string[]): string[] {
+  const vozes = new Set([...Object.keys(nomes), ...falantes.filter(falante => FALANTE.test(falante))]);
   for (const item of itens) {
     for (const campo of [item.text, item.subject, item.assignee]) {
-      for (const falante of vozesCitadas(campo)) if (!vozes.includes(falante)) vozes.push(falante);
+      for (const falante of vozesCitadas(campo)) vozes.add(falante);
     }
   }
-  return vozes.sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+  return Array.from(vozes).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 }
 
 export function ResumoGuardado(props: DaDona | DoLink) {
@@ -129,6 +139,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const token = props.token ?? "";
   // O link nunca mostra nomes: as vozes são sempre "Falante n".
   const nomes = props.token === undefined ? props.nomes ?? {} : {};
+  const falantes = props.token === undefined ? props.falantes ?? [] : [];
   const itemDestacado = props.token === undefined ? props.itemDestacado ?? null : null;
   const dados = props.consulta.data as ResumoDaDona | ResumoDoLink | undefined;
 
@@ -184,7 +195,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // Editar e acrescentar (H4f), só para a dona. O formulário recebe o que a
   // tela mostra no lugar de cada voz, para a dona editar o texto como o lê.
   const exibir = (falante: string) => comVozes(`{${falante}}`);
-  const vozes = vozesDoResumo(itens, nomes);
+  const vozes = vozesDoResumo(itens, nomes, falantes);
   const formularioDoItem = (item: ItemNaTela, fechar: () => void) => item.id
     ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
         item={{ id: item.id, section: item.section, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due }}
