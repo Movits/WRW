@@ -1544,6 +1544,12 @@
     "summary": {
       "title": "Meeting summary",
       "loading": "Loading the summary…",
+      "translation": {
+        "language": "Summary language",
+        "translating": "Translating the summary…",
+        "notice": "Automatic AI translation. Original: {{idioma}}. Quoted excerpts stay in the original language.",
+        "error": "Could not translate the summary right now. It is shown in the original language."
+      },
       "noSummary": "This meeting does not have a summary yet.",
       "generate": "Generate summary",
       "requestLink": "Request summary",

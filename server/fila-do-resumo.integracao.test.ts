@@ -335,6 +335,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.estado).toBe("pronto");
+    // O idioma em que o resumo foi escrito, para a página do link traduzir (H11).
+    expect(visto.idioma).toBe("pt-BR");
     expect(visto.itens).toEqual([{
       section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,
       excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending",
@@ -345,7 +347,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("o link de reunião sem resumo diz 'sem_resumo'; sem transcrição, não pede", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     await reuniaoPronta({ shareToken: token }, false);
-    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, itens: [] });
+    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, idioma: null, itens: [] });
     await expect(servico.pedirResumoPeloLink(token, vi.fn())).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

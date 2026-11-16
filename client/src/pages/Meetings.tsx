@@ -21,6 +21,7 @@ import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
@@ -551,6 +552,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     },
     retry: (tentativas, erro) => !erroDefinitivoDaReuniao(erro) && tentativas < 3,
   });
+  // A tradução do resumo (H11) para o idioma de quem lê: mora aqui, e não no
+  // resumo, porque o mapa mental usa a mesma. Só com a reunião pronta: em
+  // processamento, o resumo é da tentativa anterior e está para ser trocado.
+  const traducaoDoResumo = useTraducaoDoResumo({ meetingId }, data?.meeting.status === "ready" ? resumoGuardado.data : undefined);
   // true só com este detalhe montado e visível: a exclusão que termina depois
   // de a pessoa sair dele não a puxa de volta para a lista. Efeito de layout
   // pelo mesmo motivo do noGravadorAgora: escondido pelo Suspense (a ida a uma
@@ -777,7 +782,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
-        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
       <PergunteAReuniao meetingId={meetingId}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>

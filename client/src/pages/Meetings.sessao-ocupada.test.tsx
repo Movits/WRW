@@ -91,9 +91,10 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
     },
-    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink") },
+    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink"), traduzirResumo: duble.registrar("traduzirResumoPeloLink") },
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
     },

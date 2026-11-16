@@ -14,7 +14,7 @@ const servico = vi.hoisted(() => ({
   decidirItemDoResumo: vi.fn(async () => undefined),
   confirmarItensDoResumo: vi.fn(async () => 2),
   marcarAcaoFeita: vi.fn(async () => undefined),
-  resumoGuardadoPeloLink: vi.fn(async () => ({ estado: "sem_resumo", emoji: null, itens: [] })),
+  resumoGuardadoPeloLink: vi.fn(async () => ({ estado: "sem_resumo", emoji: null, idioma: null, itens: [] })),
   pedirResumoPeloLink: vi.fn(),
 }));
 vi.mock("./resumo-guardado", () => servico);

@@ -195,8 +195,8 @@ const primeira = (filtro: (o: Operacao) => boolean) => estado.operacoes.findInde
 const ultima = (filtro: (o: Operacao) => boolean) => estado.operacoes.reduce((achada, o, i) => (filtro(o) ? i : achada), -1);
 const linhasInseridas = (tabela: unknown) => de("insert", tabela).flatMap(o => o.linhas ?? []);
 const falhasGravadas = () => de("update", schema.meetings).filter(o => o.valores?.status === "failed");
-const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations", "meeting_summary_items", "meeting_summaries"];
-const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations, schema.meetingSummaryItems, schema.meetingSummaries];
+const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations", "meeting_summary_translations", "meeting_summary_items", "meeting_summaries"];
+const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries];
 
 async function reprocessar() {
   const { trabalho } = await servico.iniciarReprocessamento(DONA, REUNIAO);

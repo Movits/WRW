@@ -5,6 +5,7 @@ import { Clock3, FileText, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
@@ -92,6 +93,10 @@ export default function ReuniaoAberta() {
       return (estado === "pendente" || estado === "gerando") && !consulta.state.error ? 5_000 : false;
     },
   });
+  // A tradução do resumo (H11) para o idioma de quem lê, como no detalhe da
+  // dona: sem ids e sem os ignorados, e só gasta vaga do teto quando a IA
+  // traduz de fato.
+  const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
   // As abas, como no app de referência da cliente (H4c): o resumo abre
@@ -161,7 +166,7 @@ export default function ReuniaoAberta() {
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
         <PergunteAReuniao token={token}/>
       </div>}
 
