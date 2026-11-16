@@ -151,3 +151,30 @@ describe("os avisos do gravador no sino (H15)", () => {
     expect(screen.queryByText("Nenhuma notificação ainda")).not.toBeInTheDocument();
   });
 });
+
+// É no painel do sino que os lembretes da H15 aparecem, e a conferência de
+// tela do P3 o viu sair da tela: ancorado no sino pelo lado físico (a
+// direita), ele cortava uns 60 px a 375 px, porque o idioma e o avatar vêm
+// depois do sino, e em árabe saía quase todo pela esquerda. O jsdom não mede
+// layout, então o teste fixa as classes que fazem o painel caber.
+describe("o painel do sino cabe na tela, a 375 px e em árabe", () => {
+  it.each(["pt-BR", "ar"])("em %s: lado lógico, largura limitada à tela e, no celular, a barra do topo como referência", async idioma => {
+    await i18n.changeLanguage(idioma);
+    abrirSino();
+    expect(document.documentElement.dir).toBe(idioma === "ar" ? "rtl" : "ltr");
+    // O painel abre logo abaixo do sino e tem o título da lista.
+    const painel = screen.getByText(i18n.t("notifications.title")).closest<HTMLElement>(".top-full")!;
+    // No celular, 0,5rem antes do fim da barra do topo; do sm para cima, no fim
+    // do sino. O fim é a direita em português e a esquerda em árabe.
+    expect(painel).toHaveClass("end-2", "sm:end-0");
+    // Nenhum lado físico, em nenhuma largura: ele não espelharia em árabe.
+    expect(painel.className).not.toMatch(/(^|\s)([a-z]+:)*-?(left|right)-/);
+    // A largura nunca passa da tela menos 1rem.
+    expect(painel).toHaveClass("w-80", "max-w-[calc(100vw-1rem)]");
+    // O embrulho do sino só é a referência do painel do sm para cima; no
+    // celular, a referência é a barra do topo, que ocupa a largura da tela.
+    const embrulho = painel.parentElement!;
+    expect(embrulho).toHaveClass("sm:relative");
+    expect(embrulho).not.toHaveClass("relative");
+  });
+});

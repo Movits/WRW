@@ -115,7 +115,11 @@ export function NotificationBell() {
   };
 
   return (
-    <div ref={dropdownRef} className="relative">
+    // O embrulho só é a referência do painel do sm para cima. No celular, a
+    // referência é a barra do topo (sticky, em AppHeader e no Dashboard), e o
+    // painel se ancora no fim dela: ancorado no sino, que não fica na borda (o
+    // idioma e o avatar vêm depois), ele cortava uns 60 px a 375 px.
+    <div ref={dropdownRef} className="sm:relative">
       {/* Botão sino */}
       <button
         onClick={handleOpen}
@@ -156,8 +160,12 @@ export function NotificationBell() {
           {/* Overlay para fechar */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
 
+          {/* Lado lógico (end), que espelha em árabe: com o lado físico, o
+              painel saía quase todo da tela em RTL. No celular, 0,5rem antes
+              do fim da barra do topo; do sm para cima, no fim do sino, como
+              antes. A largura nunca passa da tela menos 1rem. */}
           <div
-            className="absolute right-0 top-full mt-2 z-50 w-80 rounded-2xl overflow-hidden shadow-2xl shadow-black/50"
+            className="absolute end-2 sm:end-0 top-full mt-2 z-50 w-80 max-w-[calc(100vw-1rem)] rounded-2xl overflow-hidden shadow-2xl shadow-black/50"
             style={{
               background: "linear-gradient(180deg, #211e1b 0%, #211e1b 100%)",
               border: "1px solid rgba(255,255,255,0.1)",
