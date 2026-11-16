@@ -20,6 +20,7 @@ import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
 import { dividirEmJanelas } from "./janelas-de-texto";
+import { limparRotulos } from "./trecho-da-transcricao";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
@@ -119,13 +120,20 @@ export type MeetingExtraction = {
     oQuePreciso?: ItemProposto[];
     // Participou da reunião ou só foi citada nela (achado 7 da bancada de
     // 16/11): a citada não vira cartão igual ao das participantes. Ausente
-    // numa resposta antiga, a sugestão fica sem a marca, como antes.
+    // numa resposta antiga, ou "unknown", a sugestão fica sem a marca, como antes.
     presence?: PresencaNaReuniao;
   }>;
 };
 
-/** "present": participou da reunião; "mentioned": só foi citada por quem participou. */
-export const PRESENCAS_NA_REUNIAO = ["present", "mentioned"] as const;
+/**
+ * "present": participou da reunião; "mentioned": a reunião disse que ela não
+ * estava (não veio, vai ser procurada depois); "unknown": só se falou dela,
+ * sem dizer se estava — a dúvida, que se grava sem marca (null) e a tela
+ * mostra com as participantes. Afirmar a ausência na dúvida punha quem
+ * participou em "Pessoas citadas", com o selo "Não participou" (revisão do
+ * pacote P2B).
+ */
+export const PRESENCAS_NA_REUNIAO = ["present", "mentioned", "unknown"] as const;
 export type PresencaNaReuniao = (typeof PRESENCAS_NA_REUNIAO)[number];
 
 // Os idiomas da reunião e os nomes que vão no prompt moram em
@@ -199,13 +207,45 @@ const TETO_DE_PESSOAS = 40;
  * e-mail, telefone ou nome) junta o que tem e o que precisa das duas janelas.
  * Uma janela que falha derruba a extração inteira: meia reunião extraída
  * passaria por inteira.
+ *
+ * `rotulada`: cada linha começa pelo rótulo da voz ("{F1}: fala"), como a
+ * fila da reunião em partes monta (entradaDoResumo); sem rótulos (envio
+ * único), o texto corrido. Com eles, a IA vê quem fala, e a presença de quem
+ * só fala sem dizer o nome deixa de ser chute (revisão do pacote P2B).
  */
-export async function extractMeetingData(transcript: string): Promise<MeetingExtraction> {
+export async function extractMeetingData(transcript: string, opcoes: { rotulada?: boolean } = {}): Promise<MeetingExtraction> {
+  const rotulada = opcoes.rotulada === true;
   const janelas = dividirEmJanelas(transcript, JANELA_DA_EXTRACAO);
-  if (janelas.length <= 1) return extrairDeUmaJanela(transcript);
+  if (janelas.length <= 1) {
+    const extracao = await extrairDeUmaJanela(transcript, rotulada);
+    return { ...extracao, contacts: semAusenciaDuvidosa(extracao.contacts) };
+  }
   const partes: MeetingExtraction[] = [];
-  for (const janela of janelas) partes.push(await extrairDeUmaJanela(janela));
+  for (const janela of janelas) partes.push(await extrairDeUmaJanela(janela, rotulada));
   return juntarExtracoes(partes);
+}
+
+/** A ordem da presença na junção: quem falou em alguma janela participou; a ausência dita vale mais que a dúvida. */
+const PESO_DA_PRESENCA: Record<PresencaNaReuniao, number> = { present: 3, mentioned: 2, unknown: 1 };
+const pesoDaPresenca = (presenca: unknown) => PESO_DA_PRESENCA[presenca as PresencaNaReuniao] ?? 0;
+
+/**
+ * A ausência só fica se nada a desmente. A citada ("mentioned") cujo nome é
+ * parte do nome de quem participou, ou o contém ("Ana" e "Ana Ribeiro"), é
+ * provavelmente a mesma pessoa vista numa janela sem a apresentação dela: na
+ * reunião longa, a janela 2 não vê o "Eu sou a Ana Ribeiro" da janela 1. Ela
+ * fica com "unknown" (sem marca, com as participantes), e a tela não afirma
+ * que faltou quem estava lá (revisão do pacote P2B). As duas não se juntam:
+ * juntar pelo primeiro nome fundiria duas Anas diferentes.
+ */
+export function semAusenciaDuvidosa<T extends { fullName: string; presence?: PresencaNaReuniao }>(pessoas: T[]): T[] {
+  const nomesPresentes = pessoas.filter(p => p.presence === "present").map(p => tokensDoTermo(p.fullName ?? ""));
+  const contido = (parte: string[], todo: string[]) => parte.length > 0 && parte.every(palavra => todo.includes(palavra));
+  return pessoas.map(pessoa => {
+    if (pessoa.presence !== "mentioned") return pessoa;
+    const nome = tokensDoTermo(pessoa.fullName ?? "");
+    return nomesPresentes.some(presente => contido(nome, presente) || contido(presente, nome)) ? { ...pessoa, presence: "unknown" } : pessoa;
+  });
 }
 
 export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction {
@@ -222,15 +262,19 @@ export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction 
       pessoas.push({ ...pessoa });
       continue;
     }
-    mesma.jobTitle ??= pessoa.jobTitle;
-    mesma.company ??= pessoa.company;
+    // Cargo e empresa já vêm conferidos pela janela (conferirAJanela): fica o
+    // primeiro dito, ou o mais completo ("Ponte Sul Consultoria" no lugar de
+    // "Ponte Sul", que é o começo dele).
+    mesma.jobTitle = maisCompleto(mesma.jobTitle, pessoa.jobTitle);
+    mesma.company = maisCompleto(mesma.company, pessoa.company);
     mesma.phone ??= pessoa.phone;
     mesma.email ??= pessoa.email;
     mesma.confidence = Math.max(mesma.confidence, pessoa.confidence);
     if (!mesma.tipoPessoa || mesma.tipoPessoa === "nao_informado") mesma.tipoPessoa = pessoa.tipoPessoa;
-    // Quem participou em alguma janela participou da reunião (citada no começo, chegou depois).
-    if (pessoa.presence === "present") mesma.presence = "present";
-    else mesma.presence ??= pessoa.presence;
+    // Quem participou em alguma janela participou da reunião (citada no
+    // começo, chegou depois); a ausência dita numa janela vale mais que a
+    // dúvida de outra.
+    if (pesoDaPresenca(pessoa.presence) > pesoDaPresenca(mesma.presence)) mesma.presence = pessoa.presence;
     mesma.oQueTenho = semItensRepetidos([...(mesma.oQueTenho ?? []), ...(pessoa.oQueTenho ?? [])]);
     mesma.oQuePreciso = semItensRepetidos([...(mesma.oQuePreciso ?? []), ...(pessoa.oQuePreciso ?? [])]);
   }
@@ -238,8 +282,17 @@ export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction 
   const porConfianca = <T extends { confidence: number }>(lista: T[]) => [...lista].sort((a, b) => b.confidence - a.confidence);
   return {
     entities: porConfianca(Array.from(entidades.values())).slice(0, TETO_DE_ENTIDADES),
-    contacts: porConfianca(pessoas).slice(0, TETO_DE_PESSOAS),
+    contacts: porConfianca(semAusenciaDuvidosa(pessoas)).slice(0, TETO_DE_PESSOAS),
   };
+}
+
+/** O primeiro valor, salvo quando o outro é ele mesmo com mais palavras no fim ("Ponte Sul" → "Ponte Sul Consultoria"). */
+function maisCompleto(atual: string | null | undefined, outro: string | null | undefined): string | null {
+  if (!atual) return outro ?? null;
+  if (!outro) return atual;
+  const palavras = tokensDoTermo(atual);
+  const outras = tokensDoTermo(outro);
+  return outras.length > palavras.length && palavras.every((palavra, i) => outras[i] === palavra) ? outro : atual;
 }
 
 function semItensRepetidos<T extends { texto: string }>(itens: T[]): T[] {
@@ -266,16 +319,58 @@ function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtract
 
 /**
  * O que o prompt da extração pede sobre cada pessoa, além das três dimensões.
- * Cargo e empresa passam pela conferência de gravarResultadoDaReuniao
- * (expressaoEstaNaFonte) e a presença separa, na tela, quem participou de
- * quem só foi citado (achados 6 e 7 da bancada de 16/11). Os exemplos não
- * são os da reunião sintética da bancada, para não ensinar a prova ao modelo.
+ * Cargo e empresa passam pela conferência da janela (conferirAJanela) e de
+ * gravarResultadoDaReuniao (expressaoEstaNaFonte), e a presença separa, na
+ * tela, quem participou de quem a reunião disse que não estava (achados 6 e 7
+ * da bancada de 16/11). "mentioned" só com a ausência dita; na dúvida,
+ * "unknown", que a tela mostra com as participantes (revisão do pacote P2B).
+ * Os exemplos não são os da reunião sintética da bancada nem os do roteiro do
+ * teste manual, para não ensinar a prova ao modelo.
  */
 export const REGRAS_DA_PESSOA_NA_REUNIAO = `Em "contacts", fullName, phone e email são o QUEM SOU; jobTitle e company ficam só como apoio e nunca substituem O QUE TENHO.
 - jobTitle e company só com as palavras ditas na reunião sobre aquela pessoa, copiadas como foram ditas ("diretora comercial", "Vinícola Serra Alta"). Não deduza cargo pelo que a pessoa faz ("fundadora", "consultor") nem complete o nome da empresa. Se não foi dito, null.
-- presence diz se a pessoa participou da reunião: "present" quando ela fala, se apresenta ou é dada como presente ("a Ana e o Bruno estão aqui com a gente"); "mentioned" quando alguém só fala dela e ela não está na reunião ("a Carla não pôde vir", "vou te apresentar a Denise"). Empresa é "present" só se alguém dela participou. Na dúvida, "mentioned".`;
+- presence diz se a pessoa participou da reunião. "present": ela fala, se apresenta ou é dada como presente ("a Ana e o Bruno estão aqui com a gente"). "mentioned": SÓ quando a reunião diz que ela não está ali: não veio, está fora, ou vai ser procurada ou apresentada depois ("a Carla está viajando", "vou te apresentar a Denise"). "unknown": falam dela, mas ninguém diz se ela está na reunião ("a Luíza cuida do caixa"). Empresa é "present" só se alguém dela participou. Na dúvida, "unknown": nunca diga que alguém não participou sem que isso tenha sido dito.`;
 
-async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
+/** Com a transcrição rotulada (a fila da reunião em partes), o que o prompt diz dos rótulos das vozes. */
+export const REGRA_DOS_ROTULOS_NA_EXTRACAO = `Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). O rótulo não é nome: nunca o escreva em fullName, em entities, nos itens nem no trecho, que é só a fala. A voz que diz o próprio nome ("{F2}: Meu nome é Paula") é essa pessoa em todas as linhas dela, e quem tem voz na reunião é "present".`;
+
+/** Entidade que é só o rótulo de uma voz ("{F2}", "F2:", "Falante 2"): não é nome de ninguém. */
+const SO_ROTULO_DE_VOZ = /^\s*(?:\{?\s*F[1-9]\d?\s*\}?\s*:?|falante\s+\d+)\s*$/i;
+
+/** O texto da janela sem os rótulos das vozes, linha a linha: é contra ele que cargo e empresa se conferem. */
+function semRotulosDeVoz(texto: string): string {
+  return texto.split("\n").map(limparRotulos).join("\n");
+}
+
+/**
+ * O que a janela diz, antes da junção das janelas (revisão do pacote P2B):
+ * - cargo e empresa só se a própria janela os diz como estão escritos. Na
+ *   reunião longa, a junção fica com o primeiro valor que acha (`??=`): um
+ *   cargo deduzido na janela 1 ("Consultor") tomava o lugar do dito na
+ *   janela 2 ("mentor convidado") e depois caía na conferência de
+ *   gravarResultadoDaReuniao, sem deixar nenhum;
+ * - com a transcrição rotulada, o rótulo da voz sai do trecho dos itens (a
+ *   conferência é contra a transcrição sem rótulos), e a entidade que é só um
+ *   rótulo não entra.
+ */
+export function conferirAJanela(extracao: MeetingExtraction, janela: string, rotulada: boolean): MeetingExtraction {
+  const fonte = rotulada ? semRotulosDeVoz(janela) : janela;
+  const semRotulo = (itens: ItemProposto[] | undefined) => (rotulada && Array.isArray(itens)
+    ? itens.map(item => (item && typeof item.trecho === "string" ? { ...item, trecho: limparRotulos(item.trecho) } : item))
+    : itens);
+  return {
+    entities: rotulada ? extracao.entities.filter(entidade => !SO_ROTULO_DE_VOZ.test(String(entidade?.value ?? ""))) : extracao.entities,
+    contacts: extracao.contacts.map(pessoa => ({
+      ...pessoa,
+      jobTitle: typeof pessoa?.jobTitle === "string" && expressaoEstaNaFonte(pessoa.jobTitle, fonte) ? pessoa.jobTitle : null,
+      company: typeof pessoa?.company === "string" && expressaoEstaNaFonte(pessoa.company, fonte) ? pessoa.company : null,
+      oQueTenho: semRotulo(pessoa?.oQueTenho),
+      oQuePreciso: semRotulo(pessoa?.oQuePreciso),
+    })),
+  };
+}
+
+async function extrairDeUmaJanela(transcript: string, rotulada = false): Promise<MeetingExtraction> {
   // O raciocínio só vai com LLM_RACIOCINIO_EXTRACAO (server/_core/raciocinio-de-ia.ts);
   // sem ela, o pedido sai sem o campo, como sempre saiu.
   const raciocinio = raciocinioDaFuncao("extracao");
@@ -289,7 +384,7 @@ async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction
     messages: [
       {
         role: "system",
-        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\n${REGRAS_DA_PESSOA_NA_REUNIAO}`,
+        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\n${REGRAS_DA_PESSOA_NA_REUNIAO}${rotulada ? `\n${REGRA_DOS_ROTULOS_NA_EXTRACAO}` : ""}`,
       },
       {
         role: "user",
@@ -351,10 +446,10 @@ async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction
   const content = response.choices?.[0]?.message?.content;
   if (typeof content !== "string") throw new Error("A IA não retornou uma extração válida.");
   const parsed = JSON.parse(content) as MeetingExtraction;
-  return {
+  return conferirAJanela({
     entities: Array.isArray(parsed.entities) ? parsed.entities.slice(0, 80) : [],
     contacts: Array.isArray(parsed.contacts) ? parsed.contacts.slice(0, 20) : [],
-  };
+  }, transcript, rotulada);
 }
 
 /** Texto cortado no tamanho da coluna; vazio ou ausente vira null. */
@@ -879,9 +974,9 @@ async function processarAudioGuardado(db: Banco, execucao: {
 }
 
 /** A extração da transcrição, com frase neutra na falha (o original vai ao log e a `cause`). */
-export async function extrairDadosDaReuniao(texto: string): Promise<MeetingExtraction> {
+export async function extrairDadosDaReuniao(texto: string, opcoes: { rotulada?: boolean } = {}): Promise<MeetingExtraction> {
   try {
-    return await extractMeetingData(texto);
+    return await extractMeetingData(texto, opcoes);
   } catch (erro) {
     console.error("[Reuniões] a extração falhou:", erro instanceof Error ? erro.message : erro);
     throw new Error("O serviço de IA não conseguiu extrair os dados da transcrição.", { cause: erro });

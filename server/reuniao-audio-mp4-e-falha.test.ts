@@ -542,7 +542,10 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     // …e a compensação a leva junto com as outras tabelas derivadas.
     expect(tabelasApagadas()).toEqual(expect.arrayContaining([schema.meetingRecordings, schema.meetingTranscripts, schema.meetingContactSuggestions]));
     // Sem 'failed' (não há linha viva para marcar) e sem 'ready'.
-    expect(atualizacoes.map(a => a.status)).toEqual(["processing"]);
+    expect(atualizacoes.filter(a => "status" in a).map(a => a.status)).toEqual(["processing"]);
+    // A outra escrita é a das pendências que já são de um contato e não citam
+    // a transcrição: ficam com ele, desligadas da reunião (revisão do pacote P2B).
+    expect(atualizacoes.filter(a => !("status" in a))).toEqual([expect.objectContaining({ meetingId: null, meetingSuggestionId: null })]);
   });
 
   it("toda leitura é da reunião DA dona: a de entrada, a releitura antes das escritas e a das gravações na compensação", async () => {

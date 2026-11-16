@@ -482,12 +482,14 @@ describe("a pessoa sugerida pela reunião — criar, vincular, ignorar", () => {
     const db = await exigirDb();
     await decidirPendenciasDaPessoaSugerida(db, {
       ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "link", contactId: 7,
-      quemSouDaSugestao: { fullName: "Maria Silva", phone: "(11) 98765-4321", email: "maria@farmabras.com.br" },
+      quemSouDaSugestao: { fullName: "Maria Silva", phone: "(11) 98765-4321", email: "maria@farmabras.com.br", confianca: "0.870" },
     });
     const [vinculo] = estado.consultas;
     expect(vinculo.sql).toMatch(/^update `network_sugestoes` set `contact_id` = \?/);
     const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
     expect(insert.params).toContain("maria@farmabras.com.br");
+    // a confiança é a que a extração deu à pessoa, e não um número fixo
+    expect(insert.params).toContain("0.870");
     expect(insert.params).not.toContain("Maria Silva");
     expect(insert.params).not.toContain("(11) 98765-4321");
   });
@@ -499,23 +501,37 @@ describe("a pessoa sugerida pela reunião — criar, vincular, ignorar", () => {
  * pendências do contato — criado ou vinculado — e só entram com a dona.
  */
 describe("cargo e empresa da pessoa da reunião — pendência, nunca dado direto", () => {
-  const PESSOA = { fullName: "Fernando Okada", phone: null, email: null, jobTitle: "mentor convidado", company: "Ponte Sul Consultoria" };
+  // A confiança como a coluna meeting_contact_suggestions.confidence a devolve.
+  const PESSOA = { fullName: "Fernando Okada", phone: null, email: null, jobTitle: "mentor convidado", company: "Ponte Sul Consultoria", confianca: "0.930" };
+  const DA_REUNIAO = "Boa noite. Eu sou o Fernando Okada, da Ponte Sul Consultoria, e vim como mentor convidado.";
+  // A transcrição da reunião, lida pela dona e pela reunião da sugestão.
+  const comTranscricao = (texto: string | null, contato?: unknown[]) => (sql: string) => {
+    if (/from `meeting_transcripts`/.test(sql)) return texto === null ? [] : [[texto]];
+    if (contato && /from `private_contacts`/.test(sql)) return [contato];
+    return [];
+  };
 
-  it("criar a pessoa: cargo e empresa viram pendências do contato novo, com origem e confiança; o QUEM SOU não volta", async () => {
+  it("criar a pessoa: cargo e empresa ditos viram pendências do contato novo, com origem e a confiança da sugestão; o QUEM SOU não volta", async () => {
+    estado.responder = comTranscricao(DA_REUNIAO);
     const db = await exigirDb();
     await decidirPendenciasDaPessoaSugerida(db, {
       ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9, quemSouDaSugestao: PESSOA,
     });
     const [vinculo] = estado.consultas;
     expect(vinculo.sql).toMatch(/^update `network_sugestoes` set `contact_id` = \?/);
+    // a transcrição é a da reunião da sugestão, e da dona
+    const leitura = estado.consultas.find(c => /from `meeting_transcripts`/.test(c.sql))!;
+    expect(leitura.params).toEqual(expect.arrayContaining(["m-1", "dona-1"]));
     const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
     expect(insert.params).toEqual(expect.arrayContaining([
-      "dona-1", 9, "m-1", "s-1", "reuniao", "cargo", "mentor convidado", "empresa", "Ponte Sul Consultoria", "0.800", "pendente",
+      "dona-1", 9, "m-1", "s-1", "reuniao", "cargo", "mentor convidado", "empresa", "Ponte Sul Consultoria", "0.930", "pendente",
     ]));
+    // nenhum número que o modelo não deu
+    expect(insert.params).not.toContain("0.800");
     expect(insert.params).not.toContain("Fernando Okada");
   });
 
-  it("criar a pessoa sem cargo nem empresa: só o vínculo das pendências, nada inserido", async () => {
+  it("criar a pessoa sem cargo nem empresa: só o vínculo das pendências, nada lido nem inserido", async () => {
     const db = await exigirDb();
     await decidirPendenciasDaPessoaSugerida(db, {
       ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9,
@@ -524,19 +540,40 @@ describe("cargo e empresa da pessoa da reunião — pendência, nunca dado diret
     expect(estado.consultas.map(c => c.sql.split(" ")[0])).toEqual(["update"]);
   });
 
+  // Revisão do pacote P2B: a sugestão gravada antes do portão da IA3 pode ter
+  // um cargo que ninguém disse, e criar o contato o punha na fila da dona.
+  it("sugestão de antes do portão: o cargo que a transcrição não diz ('fundadora') não vira pendência; a empresa dita, sim", async () => {
+    estado.responder = comTranscricao(DA_REUNIAO);
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, {
+      ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9,
+      quemSouDaSugestao: { ...PESSOA, jobTitle: "fundadora" },
+    });
+    const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
+    expect(insert.params).toEqual(expect.arrayContaining(["empresa", "Ponte Sul Consultoria"]));
+    expect(insert.params).not.toContain("cargo");
+    expect(insert.params).not.toContain("fundadora");
+  });
+
+  it("sem a transcrição da reunião não há como conferir: nem cargo nem empresa viram pendência", async () => {
+    estado.responder = comTranscricao(null);
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, {
+      ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9, quemSouDaSugestao: PESSOA,
+    });
+    expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
+  });
+
   it("vincular: o cargo que difere do contato vira pendência; a empresa igual (sem caixa nem acento), não", async () => {
-    estado.responder = sql => {
-      // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company
-      if (/from `private_contacts`/.test(sql)) return [[7, "Fernando Okada", null, null, null, null, null, "Ponte Sul Consultoria"]];
-      return [];
-    };
+    // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company
+    estado.responder = comTranscricao(DA_REUNIAO, [7, "Fernando Okada", null, null, null, null, null, "Ponte Sul Consultoria"]);
     const db = await exigirDb();
     await decidirPendenciasDaPessoaSugerida(db, {
       ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "link", contactId: 7,
       quemSouDaSugestao: { ...PESSOA, company: "PONTE SUL CONSULTÓRIA" },
     });
     const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
-    expect(insert.params).toEqual(expect.arrayContaining(["cargo", "mentor convidado"]));
+    expect(insert.params).toEqual(expect.arrayContaining(["cargo", "mentor convidado", "0.930"]));
     expect(insert.params).not.toContain("empresa");
     expect(insert.params).not.toContain("Fernando Okada");
   });

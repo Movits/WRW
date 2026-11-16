@@ -21,7 +21,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *   'pending' no WHERE, e o duplo clique ou a aba velha dão CONFLICT sem
  *   duplicar o contato nem mexer nas pendências do Meu Network Inteligente;
  * - "Criar contato" grava só o Quem Sou: cargo e empresa da IA viram
- *   pendências do contato novo (achado 6 da bancada de 16/11).
+ *   pendências do contato novo (achado 6 da bancada de 16/11);
+ * - a decisão é uma transação só (revisão do pacote P2B): falha depois da
+ *   tomada desfaz a tomada, o contato e as pendências. O banco falso desfaz
+ *   só o que a própria transação fez, como o MySQL; a prova com o banco de
+ *   verdade está em reuniao-decidir-pessoa.integracao.test.ts.
  */
 
 const iniciarReprocessamento = vi.fn();
@@ -33,6 +37,10 @@ const banco = {
   entidade: null as Record<string, unknown> | null,
   sugestao: null as Record<string, unknown> | null,
   statusDaReuniao: "ready",
+  // A transcrição da reunião da sugestão: cargo e empresa só viram pendência se ela os diz.
+  transcricao: "Eu sou o Fernando Okada, da Ponte Sul Consultoria, e vim como mentor convidado.",
+  // Recusa o INSERT das pendências (a conexão caiu depois do contato).
+  falhaNasPendencias: null as Error | null,
   atualizacoes: [] as Array<{ tabela: unknown; valores: Record<string, unknown>; sql: string; params: unknown[] }>,
   leituras: [] as Array<{ tabela: unknown; sql: string; params: unknown[] }>,
   insercoes: [] as Array<{ tabela: unknown; valores: unknown }>,
@@ -56,30 +64,58 @@ const schema = await import("../drizzle/schema");
 // O WHERE de cada leitura, renderizado pelo dialeto do MySQL: prova QUAL reunião
 // a trava das decisões consultou (a da sugestão ou da entidade, e da dona).
 const dialeto = new MySqlDialect();
-vi.mock("./db", () => ({
-  getDb: async () => null,
-  exigirDb: async () => ({
+// O que uma transação do banco falso fez, para o rollback desfazer só isso.
+type FeitoNaTransacao = { registros: object[]; sugestaoAntes: Record<string, unknown> | null; mexeuNaSugestao: boolean };
+function bancoFalso(transacao?: FeitoNaTransacao) {
+  const falso = {
     select: () => ({ from: (tabela: unknown) => ({ where: (condicao?: SQL) => {
       const { sql, params } = condicao ? dialeto.sqlToQuery(condicao) : { sql: "", params: [] as unknown[] };
       banco.leituras.push({ tabela, sql, params });
       const linhas = tabela === schema.meetingEntities ? (banco.entidade ? [banco.entidade] : [])
         : tabela === schema.meetingContactSuggestions ? (banco.sugestao ? [{ ...banco.sugestao }] : [])
           : tabela === schema.meetings ? [{ status: banco.statusDaReuniao }]
-            : [];
+            : tabela === schema.meetingTranscripts ? [{ texto: banco.transcricao }]
+              : [];
       // Lida com `.limit` ou direto (as pendências abertas do contato, em gravarPendencias).
       return Object.assign(Promise.resolve(linhas), { limit: async () => linhas });
     } }) }),
     update: (tabela: unknown) => ({ set: (valores: Record<string, unknown>) => ({ where: async (condicao?: SQL) => {
       const { sql, params } = condicao ? dialeto.sqlToQuery(condicao) : { sql: "", params: [] as unknown[] };
-      banco.atualizacoes.push({ tabela, valores, sql, params });
-      const affectedRows = tabela === schema.meetingContactSuggestions ? atualizarSugestao(valores, sql, params) : 1;
+      const registro = { tabela, valores, sql, params };
+      banco.atualizacoes.push(registro);
+      transacao?.registros.push(registro);
+      if (tabela !== schema.meetingContactSuggestions) return [{ affectedRows: 1 }];
+      const antes = banco.sugestao ? { ...banco.sugestao } : null;
+      const affectedRows = atualizarSugestao(valores, sql, params);
+      if (affectedRows && transacao && !transacao.mexeuNaSugestao) Object.assign(transacao, { mexeuNaSugestao: true, sugestaoAntes: antes });
       return [{ affectedRows }];
     } }) }),
     insert: (tabela: unknown) => ({ values: async (valores: unknown) => {
-      banco.insercoes.push({ tabela, valores });
+      if (tabela === schema.networkSugestoes && banco.falhaNasPendencias) throw banco.falhaNasPendencias;
+      const registro = { tabela, valores };
+      banco.insercoes.push(registro);
+      transacao?.registros.push(registro);
       return [{ affectedRows: 1 }];
     } }),
-  }),
+    // Como o MySQL: o erro dentro da transação desfaz o que ELA fez, e só isso
+    // (a outra requisição do duplo clique não é desfeita junto).
+    transaction: async <T>(corpo: (tx: ReturnType<typeof bancoFalso>) => Promise<T>): Promise<T> => {
+      const feito: FeitoNaTransacao = { registros: [], sugestaoAntes: null, mexeuNaSugestao: false };
+      try {
+        return await corpo(bancoFalso(feito));
+      } catch (erro) {
+        if (feito.mexeuNaSugestao) banco.sugestao = feito.sugestaoAntes;
+        banco.atualizacoes = banco.atualizacoes.filter(registro => !feito.registros.includes(registro));
+        banco.insercoes = banco.insercoes.filter(registro => !feito.registros.includes(registro));
+        throw erro;
+      }
+    },
+  };
+  return falso;
+}
+vi.mock("./db", () => ({
+  getDb: async () => null,
+  exigirDb: async () => bancoFalso(),
   createPrivateContact: (...args: unknown[]) => createPrivateContact(...(args as [])),
 }));
 vi.mock("./security", async importOriginal => ({
@@ -118,6 +154,8 @@ beforeEach(() => {
   banco.sugestao = { id: ID, meetingId: "reuniao-da-sugestao", status: "pending", existingContactId: null, fullName: "Ana Souza", jobTitle: null, company: null, phone: null, email: null };
   createPrivateContact.mockImplementation(async () => 99);
   banco.statusDaReuniao = "ready";
+  banco.transcricao = "Eu sou o Fernando Okada, da Ponte Sul Consultoria, e vim como mentor convidado.";
+  banco.falhaNasPendencias = null;
   banco.atualizacoes = [];
   banco.leituras = [];
   banco.insercoes = [];
@@ -323,12 +361,36 @@ describe("meetings.decideContactSuggestion — uma decisão só por sugestão", 
   it("criar: cargo e empresa da IA não vão para o contato — viram pendências dele, para a dona confirmar", async () => {
     banco.sugestao = { ...banco.sugestao!, fullName: "Fernando Okada", jobTitle: "mentor convidado", company: "Ponte Sul Consultoria", email: "fernando@exemplo.invalid" };
     await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "create" })).resolves.toEqual({ success: true, contactId: 99 });
-    expect(createPrivateContact).toHaveBeenCalledWith("dona-1", { fullName: "Fernando Okada", phone: null, email: "fernando@exemplo.invalid" });
+    // na transação da tomada
+    expect(createPrivateContact).toHaveBeenCalledWith("dona-1", { fullName: "Fernando Okada", phone: null, email: "fernando@exemplo.invalid" }, expect.objectContaining({ transaction: expect.any(Function) }));
     const pendencias = banco.insercoes.filter(({ tabela }) => tabela === schema.networkSugestoes)
       .flatMap(({ valores }) => valores as Array<Record<string, unknown>>);
     expect(pendencias.map(p => [p.campo, p.valor, p.contactId, p.status, p.origem])).toEqual([
       ["cargo", "mentor convidado", 99, "pendente", "reuniao"],
       ["empresa", "Ponte Sul Consultoria", 99, "pendente", "reuniao"],
     ]);
+  });
+
+  // Revisão do pacote P2B: com um commit por passo, a sugestão ficava 'created'
+  // e o contato sem cargo nem empresa, e a dona não podia repetir (CONFLICT).
+  it("a gravação das pendências falhou depois do contato: tudo é desfeito e a sugestão volta a pendente, sem o contato", async () => {
+    banco.sugestao = { ...banco.sugestao!, fullName: "Fernando Okada", jobTitle: "mentor convidado", company: "Ponte Sul Consultoria" };
+    banco.falhaNasPendencias = new Error("conexão perdida");
+    await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "create" })).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+    expect(createPrivateContact).toHaveBeenCalledTimes(1);
+    expect(banco.sugestao).toMatchObject({ status: "pending", existingContactId: null });
+    expect(atualizacoesDe(schema.networkSugestoes)).toEqual([]);
+    // e dá para decidir de novo
+    banco.falhaNasPendencias = null;
+    await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "create" })).resolves.toEqual({ success: true, contactId: 99 });
+    expect(banco.sugestao).toMatchObject({ status: "created", existingContactId: 99 });
+  });
+
+  it("criar: o cargo que a transcrição não diz (sugestão de antes do portão) não vira pendência", async () => {
+    banco.sugestao = { ...banco.sugestao!, fullName: "Fernando Okada", jobTitle: "fundadora", company: "Ponte Sul Consultoria", confidence: "0.910" };
+    await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "create" })).resolves.toEqual({ success: true, contactId: 99 });
+    const pendencias = banco.insercoes.filter(({ tabela }) => tabela === schema.networkSugestoes)
+      .flatMap(({ valores }) => valores as Array<Record<string, unknown>>);
+    expect(pendencias.map(p => [p.campo, p.valor, p.confianca])).toEqual([["empresa", "Ponte Sul Consultoria", "0.910"]]);
   });
 });

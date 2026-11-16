@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
-import { contactAssets, contactNeeds, meetingContactSuggestions, networkSugestoes, privateContacts } from "../drizzle/schema";
+import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { contactAssets, contactNeeds, meetingContactSuggestions, meetingTranscripts, networkSugestoes, privateContacts } from "../drizzle/schema";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
@@ -198,7 +198,7 @@ const COORDENACOES = new Set(["e", "ou", "and", "or"]);
 /** A preposição que abre outro complemento fecha o "sem": "produtos sem glúten | para hotéis". "De" não fecha: "sem adição de açúcar". */
 const FECHAM_O_SEM = new Set(["para", "em", "no", "na", "nos", "nas", "com", "for", "in", "with"]);
 
-type AlcanceDaNegacao = { negada: boolean[]; marca: boolean[]; complemento: boolean[]; abertaPor: number[] };
+type AlcanceDaNegacao = { negada: boolean[]; marca: boolean[]; complemento: boolean[]; complementoDe: number[]; abertaPor: number[] };
 
 /**
  * Até onde vai cada negação de um texto, da unidade `de` até antes da `ate`
@@ -215,8 +215,10 @@ type AlcanceDaNegacao = { negada: boolean[]; marca: boolean[]; complemento: bool
  * distribuidor" não pode virar "e um", outro item afirmado.
  * O que vem depois da preposição que fecha o "sem" é `complemento`: a fonte o
  * afirma, mas sozinho ele não faz um item ("estamos sem distribuidor | no
- * Chile" não sustenta o item "Chile"). `abertaPor` é a posição da marca cujo
- * alcance chega à palavra, ou -1. As listas devolvidas começam na unidade `de`.
+ * Chile" não sustenta o item "Chile"). `complementoDe` é a posição do "sem"
+ * de que a palavra é complemento (o primeiro da cadeia "sem X nem Y"), ou -1.
+ * `abertaPor` é a posição da marca cujo alcance chega à palavra, ou -1. As
+ * listas devolvidas começam na unidade `de`; as posições, não: são da lista.
  */
 function alcanceDaNegacao(
   lista: readonly string[],
@@ -224,32 +226,50 @@ function alcanceDaNegacao(
   faixa: { de: number; ate: number } = { de: 0, ate: lista.length },
   ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO),
 ): AlcanceDaNegacao {
-  const alcance: AlcanceDaNegacao = { negada: [], marca: [], complemento: [], abertaPor: [] };
-  // A asserção evita que o tsc estreite `aberta` para null no laço.
-  let aberta = null as { em: number; tipo: "sem" | "restricao" | "frase" } | null;
-  let complemento: number | null = null;
+  const alcance: AlcanceDaNegacao = { negada: [], marca: [], complemento: [], complementoDe: [], abertaPor: [] };
+  // A asserção evita que o tsc estreite `aberta` para null no laço. `cadeia` é
+  // a primeira marca de "sem X nem Y": o "nem" continua o "sem" de antes.
+  let aberta = null as { em: number; cadeia: number; tipo: "sem" | "restricao" | "frase" } | null;
+  let complemento = null as { oracao: number; de: number } | null;
   for (let k = faixa.de; k < faixa.ate; k += 1) {
     const outroItem = COORDENACOES.has(lista[k]) && DETERMINANTES.has(lista[k + 1]);
     if (aberta !== null && (oracao[aberta.em] !== oracao[k] || (outroItem && aberta.tipo !== "frase"))) aberta = null;
-    if (complemento !== null && (complemento !== oracao[k] || outroItem)) complemento = null;
+    if (complemento !== null && (complemento.oracao !== oracao[k] || outroItem)) complemento = null;
     if (aberta?.tipo === "sem" && FECHAM_O_SEM.has(lista[k])) {
+      complemento = { oracao: oracao[k], de: aberta.cadeia };
       aberta = null;
-      complemento = oracao[k];
     }
     const marca = ehMarca(k);
     alcance.negada.push(aberta !== null);
     alcance.abertaPor.push(aberta ? aberta.em : -1);
     alcance.complemento.push(complemento !== null);
+    alcance.complementoDe.push(complemento ? complemento.de : -1);
     alcance.marca.push(marca);
     if (marca) {
+      const continua = lista[k] === "nem" && aberta !== null;
       const tipo = lista[k] === "sem" || lista[k] === "without" ? "sem"
-        : lista[k] === "nem" && aberta ? aberta.tipo
+        : continua && aberta ? aberta.tipo
           : negacaoRestringeUmNome(lista, oracao, k) ? "restricao" : "frase";
-      aberta = { em: k, tipo };
+      aberta = { em: k, cadeia: continua && aberta ? aberta.cadeia : k, tipo };
       complemento = null;
     }
   }
   return alcance;
+}
+
+/**
+ * As palavras que o "sem" de um complemento negou: em "estamos sem
+ * distribuidor | no Chile", o "Chile" é complemento do "sem" que negou
+ * "distribuidor". `base` é a unidade em que as listas do alcance começam.
+ */
+function negadasPeloSemDoComplemento(lista: readonly string[], alcance: AlcanceDaNegacao, base: number, k: number): string[] {
+  const sem = alcance.complementoDe[k - base];
+  if (sem < base) return [];
+  const negadas: string[] = [];
+  for (let j = sem + 1; j < k; j += 1) {
+    if (alcance.negada[j - base] && !alcance.marca[j - base]) negadas.push(lista[j]);
+  }
+  return negadas;
 }
 
 /**
@@ -271,9 +291,11 @@ function fonteLida(fonte: string) {
  * `marca`: é essa negação. Negação de fora do trecho não entra aqui: a que
  * vem logo antes já derruba a ocorrência inteira. `complemento`: vem depois
  * do "sem X" e de uma preposição ("sem glúten para HOTÉIS"), seja o "sem" do
- * trecho ou de antes dele.
+ * trecho ou de antes dele; `negadasPeloSem` são as palavras que esse "sem"
+ * negou ("glúten"). `dentro`: a palavra é do próprio trecho, e não da janela
+ * em volta dele.
  */
-type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean; complemento: boolean };
+type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean; complemento: boolean; negadasPeloSem: string[]; dentro: boolean };
 
 /**
  * O que a fonte diz em volta do trecho citado, ou null se o trecho não a
@@ -311,11 +333,15 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
       const ate = Math.min(daFonte.length, fim + JANELA_DO_TRECHO);
       const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO));
       for (let k = de; k < ate; k += 1) {
+        const complementoDoTrecho = doTrecho.complemento[k - de];
         apoio.push({
           unidade: daFonte[k],
           negada: doTrecho.negada[k - de],
           marca: doTrecho.marca[k - de],
-          complemento: doTrecho.complemento[k - de] || lida.complemento[k],
+          complemento: complementoDoTrecho || lida.complemento[k],
+          negadasPeloSem: complementoDoTrecho ? negadasPeloSemDoComplemento(daFonte, doTrecho, de, k)
+            : lida.complemento[k] ? negadasPeloSemDoComplemento(daFonte, lida, 0, k) : [],
+          dentro: k >= inicio && k < fim,
         });
       }
     }
@@ -362,6 +388,15 @@ function mesmaRaiz(a: string, b: string): boolean {
  * estar sob a negação no trecho, a que fica fora, fora; e o item afirma
  * alguma coisa ("Sem distribuidor no Chile" não é item), que não seja só o
  * complemento do "sem" ("Chile", de "estamos sem distribuidor no Chile").
+ *
+ * O lado de cada palavra se lê no trecho (revisão do pacote P2B): a palavra
+ * que o trecho tem é julgada só pelas ocorrências de dentro dele, e a janela
+ * em volta sustenta só a que ele não tem ("em todo o Brasil"). Sem isso, "Temos
+ * um distribuidor em São Paulo." logo antes de "Estamos sem distribuidor no
+ * Chile" afirmava o "distribuidor" negado, e "Distribuidor no Chile" passava.
+ * E o complemento do "sem" pertence ao que o "sem" negou: o item que o usa
+ * não pode afirmar essa palavra ("Distribuidor no Chile" de um trecho que
+ * também diz "temos um distribuidor em São Paulo").
  */
 export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte: string): boolean {
   if (typeof texto !== "string") return false;
@@ -371,6 +406,14 @@ export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte
   if (!doTexto.some(ehConteudo)) return false;
   const { negada: sobNegacao, marca } = alcanceDaNegacao(doTexto, oracao);
   const casa = (unidade: string, daFonte: PalavraDoApoio) => (temDigito(unidade) ? daFonte.unidade === unidade : mesmaRaiz(unidade, daFonte.unidade));
+  const ocorrencias = (unidade: string) => {
+    const todas = apoio.filter(daFonte => casa(unidade, daFonte));
+    const doTrecho = todas.filter(daFonte => daFonte.dentro);
+    return doTrecho.length ? doTrecho : todas;
+  };
+  const afirmadasNoItem = doTexto.filter((unidade, k) => !marca[k] && !sobNegacao[k] && ehConteudo(unidade));
+  const doQueOSemNegou = (daFonte: PalavraDoApoio) =>
+    daFonte.negadasPeloSem.some(negada => afirmadasNoItem.some(doItem => mesmaRaiz(doItem, negada)));
   let afirma = false;
   for (let k = 0; k < doTexto.length; k += 1) {
     const unidade = doTexto[k];
@@ -381,12 +424,14 @@ export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte
       continue;
     }
     if (!temDigito(unidade) && !ehConteudo(unidade)) continue;
+    const lugares = ocorrencias(unidade);
     if (sobNegacao[k]) {
-      if (!apoio.some(daFonte => daFonte.negada && !daFonte.marca && casa(unidade, daFonte))) return false;
+      if (!lugares.some(daFonte => daFonte.negada && !daFonte.marca)) return false;
     } else {
-      const afirmadas = apoio.filter(daFonte => !daFonte.negada && !daFonte.marca && casa(unidade, daFonte));
+      const afirmadas = lugares.filter(daFonte => !daFonte.negada && !daFonte.marca);
       if (!afirmadas.length) return false;
       if (ehConteudo(unidade) && afirmadas.some(daFonte => !daFonte.complemento)) afirma = true;
+      else if (afirmadas.every(daFonte => daFonte.complemento && doQueOSemNegou(daFonte))) return false;
     }
   }
   return afirma;
@@ -621,6 +666,12 @@ export async function interpretarComplemento(
 // ─── Pendências ───────────────────────────────────────────────────────────────
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
+/**
+ * O banco ou a transação aberta por db.transaction: quem grava a pendência
+ * junto com outra escrita (meetings.decideContactSuggestion, que cria o
+ * contato) passa a transação, e as duas escritas caem ou ficam juntas.
+ */
+export type BancoOuTransacao = Banco | Parameters<Parameters<Banco["transaction"]>[0]>[0];
 
 export type PendenciaNova = {
   campo: CampoDaSugestao;
@@ -688,7 +739,7 @@ export function semRepeticao(
   });
 }
 
-export async function gravarPendencias(db: Banco, entrada: {
+export async function gravarPendencias(db: BancoOuTransacao, entrada: {
   ownerId: string;
   origem: OrigemDaSugestao;
   contactId?: number | null;
@@ -736,7 +787,7 @@ export async function gravarPendencias(db: Banco, entrada: {
 }
 
 /** O retrato atual do contato que a deduplicação precisa. Posse no WHERE. */
-export async function retratoDoContato(db: Banco, ownerId: string, contactId: number) {
+export async function retratoDoContato(db: BancoOuTransacao, ownerId: string, contactId: number) {
   const [contato] = await db.select({
     id: privateContacts.id, fullName: privateContacts.fullName, phone: privateContacts.phone,
     whatsapp: privateContacts.whatsapp, email: privateContacts.email, tipoPessoa: privateContacts.tipoPessoa,
@@ -922,14 +973,25 @@ export async function ignorarPendencia(ownerId: string, id: string) {
  *   empresa da sugestão que diferem do contato viram pendência (nada
  *   sobrescreve o que a dona gravou);
  * - ignorar: tudo que veio daquela pessoa é ignorado.
+ *
+ * As pendências novas levam a confiança que a extração deu à pessoa
+ * (meeting_contact_suggestions.confidence), e não um número fixo que nenhum
+ * modelo deu. Cargo e empresa só viram pendência se a transcrição da reunião
+ * os diz (expressaoEstaNaFonte): a sugestão gravada antes do portão da IA3
+ * pode trazer um cargo que ninguém disse ("fundadora"), e a dona o
+ * confirmaria guiada por uma confiança alta (revisão do pacote P2B).
  */
-export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
+export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, entrada: {
   ownerId: string;
   meetingSuggestionId: string;
   meetingId: string;
   acao: "create" | "link" | "ignore";
   contactId: number | null;
-  quemSouDaSugestao?: { fullName: string; phone: string | null; email: string | null; jobTitle?: string | null; company?: string | null };
+  quemSouDaSugestao?: {
+    fullName: string; phone: string | null; email: string | null; jobTitle?: string | null; company?: string | null;
+    /** A confiança da sugestão, como a coluna a guarda ("0.900"). */
+    confianca: unknown;
+  };
 }) {
   const agora = Date.now();
   const daPessoa = and(
@@ -944,9 +1006,12 @@ export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
   await db.update(networkSugestoes).set({ contactId: entrada.contactId, updatedAt: agora }).where(daPessoa);
   const sugestao = entrada.quemSouDaSugestao;
   if (!sugestao) return;
+  const confianca = confiancaValida(sugestao.confianca);
   const linha = (campo: CampoDaSugestao, valor: string | null | undefined): PendenciaNova[] =>
-    valor?.trim() ? [{ campo, valor: valor.trim(), categoria: null, trecho: null, confianca: 0.8 }] : [];
-  const apoio = [...linha("cargo", sugestao.jobTitle), ...linha("empresa", sugestao.company)];
+    valor?.trim() ? [{ campo, valor: valor.trim(), categoria: null, trecho: null, confianca }] : [];
+  const apoio = await ditosNaReuniao(db, entrada.ownerId, entrada.meetingId, [
+    ...linha("cargo", sugestao.jobTitle), ...linha("empresa", sugestao.company),
+  ]);
   const gravar = (linhas: PendenciaNova[]) => gravarPendencias(db, {
     ownerId: entrada.ownerId, origem: "reuniao", contactId: entrada.contactId,
     meetingId: entrada.meetingId, meetingSuggestionId: entrada.meetingSuggestionId, linhas,
@@ -960,6 +1025,19 @@ export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
   await gravar(semRepeticao([
     ...linha("nome", sugestao.fullName), ...linha("telefone", sugestao.phone), ...linha("email", sugestao.email), ...apoio,
   ], atual));
+}
+
+/**
+ * Das linhas de cargo e empresa, só as que a transcrição da reunião diz como
+ * estão escritas. Sem transcrição não há como conferir, e nenhuma fica: do
+ * lado de não inventar. Posse no WHERE.
+ */
+async function ditosNaReuniao(db: BancoOuTransacao, ownerId: string, meetingId: string, linhas: PendenciaNova[]): Promise<PendenciaNova[]> {
+  if (!linhas.length) return [];
+  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript }).from(meetingTranscripts)
+    .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  const fonte = transcricao?.texto ?? "";
+  return linhas.filter(linha => expressaoEstaNaFonte(linha.valor, fonte));
 }
 
 /**
@@ -979,7 +1057,20 @@ export function pendenciasDaPessoaNaReuniao(pessoa: {
   return pendenciasDaProposta(filtrada);
 }
 
-/** As pendências tiradas de uma reunião saem com os derivados dela (exclusão e reprocessamento). */
-export async function apagarPendenciasDaReuniao(db: Banco, ownerId: string, meetingId: string) {
-  await db.delete(networkSugestoes).where(and(eq(networkSugestoes.meetingId, meetingId), eq(networkSugestoes.ownerId, ownerId)));
+/**
+ * As pendências tiradas de uma reunião saem com os derivados dela (exclusão e
+ * reprocessamento), salvo as que já são de um contato e não citam a
+ * transcrição: cargo, empresa, tipo de pessoa e o QUEM SOU do vincular, que
+ * passaram a ser do contato quando a dona o criou ou vinculou. Essas ficam
+ * com o contato, desligadas da reunião (revisão do pacote P2B): apagá-las tirava do perfil,
+ * sem aviso, o cargo e a empresa que esperavam a dona, e a empresa saía da
+ * identificação do contato (identificacaoDoContato), reabrindo "Chocolate da
+ * Cacau Tupinã" no completar por texto ou voz. As que levam trecho (Tenho e
+ * Preciso) saem: o trecho é a transcrição.
+ */
+export async function apagarPendenciasDaReuniao(db: BancoOuTransacao, ownerId: string, meetingId: string) {
+  const daReuniao = and(eq(networkSugestoes.meetingId, meetingId), eq(networkSugestoes.ownerId, ownerId));
+  await db.update(networkSugestoes).set({ meetingId: null, meetingSuggestionId: null, updatedAt: Date.now() })
+    .where(and(daReuniao, isNotNull(networkSugestoes.contactId), isNull(networkSugestoes.trecho)));
+  await db.delete(networkSugestoes).where(daReuniao);
 }

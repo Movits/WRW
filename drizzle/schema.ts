@@ -1225,10 +1225,11 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   company: varchar("company", { length: 200 }),
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 320 }),
-  // Participou da reunião ('present') ou só foi citada nela ('mentioned'),
-  // como a extração disse (achado 7 da bancada de 16/11): a tela separa as
-  // citadas das participantes. Nula nas sugestões anteriores, que a tela mostra
-  // como sempre. Varchar com o enum só no TypeScript, como em network_sugestoes.
+  // Participou da reunião ('present') ou a reunião disse que ela não estava
+  // ('mentioned'), como a extração disse (achado 7 da bancada de 16/11): a tela
+  // separa as citadas das participantes. Nula nas sugestões anteriores e na
+  // dúvida (a extração diz 'unknown'), que a tela mostra com as participantes.
+  // Varchar com o enum só no TypeScript, como em network_sugestoes.
   presence: varchar("presence", { length: 12, enum: ["present", "mentioned"] }),
   sourceEntityIds: jsonCompat("source_entity_ids"),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),

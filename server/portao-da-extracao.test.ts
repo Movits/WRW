@@ -25,7 +25,9 @@ const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM }));
 
 const { expressaoEstaNaFonte, pendenciasDaPessoaNaReuniao, REGRAS_DAS_TRES_DIMENSOES, textoSustentadoPeloTrecho, trechoEstaNaFonte } = await import("./network-extracao");
-const { extractMeetingData, gravarResultadoDaReuniao, juntarExtracoes, REGRAS_DA_PESSOA_NA_REUNIAO } = await import("./meeting-service");
+const {
+  extractMeetingData, gravarResultadoDaReuniao, juntarExtracoes, JANELA_DA_EXTRACAO, REGRA_DOS_ROTULOS_NA_EXTRACAO, REGRAS_DA_PESSOA_NA_REUNIAO,
+} = await import("./meeting-service");
 const { meetingContactSuggestions, meetingTranscripts, networkSugestoes } = await import("../drizzle/schema");
 type MeetingExtraction = import("./meeting-service").MeetingExtraction;
 
@@ -235,6 +237,98 @@ describe("revisão da IA3 — a necessidade negada não vira item", () => {
   });
 });
 
+/**
+ * Revisão do pacote P2B: a janela de 5 palavras em volta do trecho afirmava a
+ * palavra que o PRÓPRIO trecho nega, quando ela aparecia na frase vizinha
+ * ("Temos um distribuidor em São Paulo." logo antes de "Estamos sem
+ * distribuidor no Chile"), e o item invertido passava — inclusive no
+ * completar por texto e por voz, que usam o mesmo portão.
+ */
+describe("revisão do pacote P2B — a frase vizinha não troca o lado da negação", () => {
+  it.each([
+    ["vizinha antes", "Distribuidor no Chile", "Estamos sem distribuidor no Chile", "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile."],
+    ["vizinha antes, item curto", "Distribuidor", "Estamos sem distribuidor no Chile", "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile."],
+    ["vizinha depois", "Distribuidor no Chile", "Estamos sem distribuidor no Chile", "Estamos sem distribuidor no Chile. O distribuidor de Lima atende."],
+    ["mesma oração", "Distribuidor no Chile", "estamos sem distribuidor no Chile", "Temos distribuidor em São Paulo mas estamos sem distribuidor no Chile."],
+    ["restrição, vizinha antes", "Embalagem de plástico", RESTRICAO, "Hoje usamos embalagem de plástico. Procuro uma embalagem que não seja de plástico."],
+    ["restrição, vizinha depois", "Embalagem de plástico", RESTRICAO, "Procuro uma embalagem que não seja de plástico. A de plástico sai."],
+    ["restrição, mesma oração", "Embalagem de plástico", RESTRICAO, "Usamos plástico mas procuro uma embalagem que não seja de plástico."],
+    ["'nem', vizinha depois", "Tecido de elastano", "um tecido que não tenha poliéster nem elastano", "Procuro um tecido que não tenha poliéster nem elastano. O elastano estraga."],
+    ["'sem', vizinha depois", "Produtos com glúten", "produtos sem glúten", "Vendemos produtos sem glúten. O glúten faz mal."],
+    // o trecho que cobre as duas frases tem o "distribuidor" afirmado, mas o
+    // "Chile" é complemento do "sem" que negou o distribuidor
+    ["trecho com as duas frases", "Distribuidor no Chile", "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile", "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile."],
+    ["trecho com a oração inteira", "Distribuidor no Chile", "Temos distribuidor em São Paulo mas estamos sem distribuidor no Chile", "Temos distribuidor em São Paulo mas estamos sem distribuidor no Chile."],
+    // o "sem" fica antes do trecho, e o trecho é só o complemento dele
+    ["trecho só com o complemento", "Distribuidor na Argentina", "no Chile e na Argentina", "Estamos sem distribuidor no Chile e na Argentina."],
+  ])("%s: '%s' não passa", (_caso, item, trecho, fonte) => {
+    expect(trechoEstaNaFonte(trecho, fonte)).toBe(true);
+    expect(textoSustentadoPeloTrecho(item, trecho, fonte)).toBe(false);
+  });
+
+  it("o que a fonte afirma continua passando, e a janela segue sustentando a palavra que o trecho não tem", () => {
+    const duas = "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile.";
+    expect(textoSustentadoPeloTrecho("Distribuidor em São Paulo", "Temos um distribuidor em São Paulo", duas)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Distribuidor em São Paulo", "Temos um distribuidor em São Paulo. Estamos sem distribuidor no Chile", duas)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Embalagem que não seja de plástico", RESTRICAO, "Hoje usamos embalagem de plástico. Procuro uma embalagem que não seja de plástico.")).toBe(true);
+    // "em todo o Brasil" vem logo depois do trecho: a palavra que ele não tem se lê na janela
+    expect(textoSustentadoPeloTrecho("Distribuição de medicamentos no Brasil", "distribuição de medicamentos", "A gente atua na distribuição de medicamentos em todo o Brasil.")).toBe(true);
+    // o "nem" continua o "sem": o complemento não afirma nenhuma das duas palavras negadas
+    const cadeia = "Procuro caixas sem plástico nem isopor para presentes.";
+    expect(textoSustentadoPeloTrecho("Caixas para presentes", cadeia, cadeia)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Caixas sem plástico nem isopor para presentes", cadeia, cadeia)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Isopor para presentes", cadeia, cadeia)).toBe(false);
+    expect(textoSustentadoPeloTrecho("Plástico para presentes", cadeia, cadeia)).toBe(false);
+    // o mesmo complemento dito fora do "sem" vale: a primeira frase afirma o distribuidor no Chile
+    const contraditoria = "Temos distribuidor no Chile. Estamos sem distribuidor no Chile.";
+    expect(textoSustentadoPeloTrecho("Distribuidor no Chile", contraditoria, contraditoria)).toBe(true);
+  });
+
+  it("o roteiro do teste manual, ponta a ponta, por pendenciasDaPessoaNaReuniao: o antigo e o novo", () => {
+    const item = (texto: string, trecho: string) => ({ texto, categoria: null, trecho, confianca: 1 });
+    const antigo = [
+      "Eu sou a Ana, diretora comercial da Vinícola Serra Alta.",
+      "Eu preciso de uma embalagem que não seja de plástico e um distribuidor em São Paulo.",
+      "Estamos sem distribuidor no Chile.",
+      "Acho que não precisamos de investidor.",
+    ].join("\n");
+    expect(pendenciasDaPessoaNaReuniao({
+      oQuePreciso: [
+        item("Embalagem que não seja de plástico", RESTRICAO),
+        item("Distribuidor em São Paulo", "um distribuidor em São Paulo"),
+        item("Distribuidor no Chile", "Estamos sem distribuidor no Chile"),
+        item("Distribuidor", "Estamos sem distribuidor no Chile"),
+        item("Embalagem de plástico", RESTRICAO),
+        item("Investidor", "Acho que não precisamos de investidor"),
+      ],
+    }, antigo).map(p => p.valor)).toEqual(["Embalagem que não seja de plástico", "Distribuidor em São Paulo"]);
+
+    // o roteiro novo, com frases que não estão no prompt nem na reunião da bancada
+    const novo = [
+      "Oi, aqui é o Rui Fontes, gerente de compras da Laticínios Boa Vista.",
+      "A gente procura um fornecedor que não use conservante e um transportador refrigerado para o Paraná.",
+      "Temos armazém em Londrina. Estamos sem armazém em Curitiba.",
+      "Acho que não precisamos de sócio agora.",
+    ].join("\n");
+    const pendencias = pendenciasDaPessoaNaReuniao({
+      oQueTenho: [item("Armazém em Londrina", "Temos armazém em Londrina")],
+      oQuePreciso: [
+        item("Fornecedor sem conservante", "um fornecedor que não use conservante"),
+        item("Transportador refrigerado para o Paraná", "um transportador refrigerado para o Paraná"),
+        item("Fornecedor que use conservante", "um fornecedor que não use conservante"),
+        item("Armazém em Curitiba", "Estamos sem armazém em Curitiba"),
+        item("Armazém", "Estamos sem armazém em Curitiba"),
+        item("Sócio", "Acho que não precisamos de sócio agora"),
+      ],
+    }, novo);
+    expect(pendencias.map(p => [p.campo, p.valor])).toEqual([
+      ["tenho", "Armazém em Londrina"],
+      ["preciso", "Fornecedor sem conservante"],
+      ["preciso", "Transportador refrigerado para o Paraná"],
+    ]);
+  });
+});
+
 describe("achado 6 — cargo e empresa só como a transcrição diz", () => {
   it("o que a reunião disse fica; o cargo deduzido cai", () => {
     for (const dito of ["mentor convidado", "Mentor convidado", "Ponte Sul Consultoria", "Cacau Tupinã", "CACAU TUPINA", "Tecelagem Aurora", "Embalagens Girassol"]) {
@@ -259,13 +353,18 @@ describe("achado 7 — participou ou só foi citada", () => {
     await extractMeetingData(REUNIAO_SINTETICA);
     const [{ messages, response_format }] = invokeLLM.mock.calls[0];
     const pessoa = response_format.json_schema.schema.properties.contacts.items;
-    expect(pessoa.properties.presence).toEqual({ type: "string", enum: ["present", "mentioned"] });
+    // "unknown" é a dúvida (revisão do pacote P2B): a linha a grava sem marca
+    expect(pessoa.properties.presence).toEqual({ type: "string", enum: ["present", "mentioned", "unknown"] });
     expect(pessoa.required).toContain("presence");
     expect(messages[0].content).toContain(REGRAS_DA_PESSOA_NA_REUNIAO);
-    expect(REGRAS_DA_PESSOA_NA_REUNIAO).toContain("\"mentioned\" quando alguém só fala dela e ela não está na reunião");
+    // sem rótulos de voz no texto, o prompt não fala deles
+    expect(messages[0].content).not.toContain(REGRA_DOS_ROTULOS_NA_EXTRACAO);
+    expect(REGRAS_DA_PESSOA_NA_REUNIAO).toContain("\"mentioned\": SÓ quando a reunião diz que ela não está ali");
+    expect(REGRAS_DA_PESSOA_NA_REUNIAO).toContain("Na dúvida, \"unknown\"");
+    expect(REGRAS_DA_PESSOA_NA_REUNIAO).not.toContain("Na dúvida, \"mentioned\"");
     expect(REGRAS_DA_PESSOA_NA_REUNIAO).toContain("Não deduza cargo");
-    // os exemplos não são as pessoas da reunião da bancada
-    expect(REGRAS_DA_PESSOA_NA_REUNIAO).not.toMatch(/Sônia|Camila|Fernando|Renata|Girassol/);
+    // os exemplos não são as pessoas da reunião da bancada nem as frases do roteiro do teste manual
+    expect(REGRAS_DA_PESSOA_NA_REUNIAO).not.toMatch(/Sônia|Camila|Fernando|Renata|Girassol|não pôde vir|Rui|Marcos|Patrícia|Joana|Laticínios/);
   });
 
   it("na junção das janelas, quem participou em alguma janela participou", () => {
@@ -277,6 +376,100 @@ describe("achado 7 — participou ou só foi citada", () => {
       { entities: [], contacts: [pessoa("Sônia Pacheco", "present"), pessoa("Bia Lima", "mentioned"), pessoa("Caio Reis", "mentioned")] },
     ]);
     expect(Object.fromEntries(r.contacts.map(c => [c.fullName, c.presence]))).toEqual({ "Sônia Pacheco": "present", "Bia Lima": "mentioned", "Caio Reis": "mentioned" });
+  });
+});
+
+/**
+ * Revisão do pacote P2B: a presença era decidida janela a janela, sem o
+ * rótulo de quem fala e com "na dúvida, 'mentioned'". Na reunião longa, a
+ * janela 2 não vê o "Eu sou a Ana Ribeiro" da janela 1, devolve "Ana" como
+ * citada, e a tela punha quem participou em "Pessoas citadas", com o selo
+ * "Não participou".
+ */
+describe("revisão do pacote P2B — a ausência só com o que foi dito", () => {
+  const pessoa = (fullName: string, presence?: "present" | "mentioned" | "unknown", extra: Record<string, unknown> = {}) => ({
+    fullName, jobTitle: null, company: null, phone: null, email: null, confidence: 0.9, tipoPessoa: "fisica" as const, oQueTenho: [], oQuePreciso: [], presence, ...extra,
+  });
+  const resposta = (contacts: unknown[], entities: unknown[] = []) => ({ choices: [{ message: { content: JSON.stringify({ entities, contacts }) } }] });
+
+  it("junção: a citada com o primeiro nome de quem participou em outra janela fica sem a marca, e as duas não se fundem", () => {
+    const r = juntarExtracoes([
+      { entities: [], contacts: [pessoa("Ana Ribeiro", "present")] },
+      { entities: [], contacts: [pessoa("Ana", "mentioned")] },
+    ]);
+    expect(r.contacts.map(c => [c.fullName, c.presence])).toEqual([["Ana Ribeiro", "present"], ["Ana", "unknown"]]);
+  });
+
+  it("junção: a ausência dita de OUTRA pessoa continua (outro sobrenome); a dita numa janela vale mais que a dúvida de outra", () => {
+    const r = juntarExtracoes([
+      { entities: [], contacts: [pessoa("Ana Ribeiro", "present"), pessoa("Otávio Lins", "unknown")] },
+      { entities: [], contacts: [pessoa("Ana Souza", "mentioned"), pessoa("Otávio Lins", "mentioned")] },
+    ]);
+    expect(Object.fromEntries(r.contacts.map(c => [c.fullName, c.presence]))).toEqual({ "Ana Ribeiro": "present", "Ana Souza": "mentioned", "Otávio Lins": "mentioned" });
+  });
+
+  it("uma janela só: a mesma regra vale para a resposta do modelo", async () => {
+    invokeLLM.mockResolvedValueOnce(resposta([pessoa("Ana Ribeiro", "present"), pessoa("Ana", "mentioned"), pessoa("Marcos Teles", "mentioned")]));
+    const r = await extractMeetingData("Eu sou a Ana Ribeiro. O Marcos Teles está de férias. A Ana manda a planilha.");
+    expect(r.contacts.map(c => [c.fullName, c.presence])).toEqual([["Ana Ribeiro", "present"], ["Ana", "unknown"], ["Marcos Teles", "mentioned"]]);
+  });
+
+  it("'unknown' vai ao banco sem marca: a tela mostra a pessoa com as participantes", async () => {
+    const ficha = 1_700_000_000_010;
+    const inseridos: Array<Record<string, unknown>> = [];
+    const resolvido = () => Promise.resolve([{ affectedRows: 1 }]);
+    const db = {
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ status: "processing", updatedAt: ficha }] }) }) }),
+      insert: (tabela: unknown) => ({
+        values: (valores: unknown) => {
+          if (tabela === meetingContactSuggestions) inseridos.push(...(valores as Array<Record<string, unknown>>));
+          return Object.assign(resolvido(), { onDuplicateKeyUpdate: resolvido });
+        },
+      }),
+      update: () => ({ set: () => ({ where: resolvido }) }),
+      delete: () => ({ where: resolvido }),
+    };
+    await gravarResultadoDaReuniao(db as never, {
+      meetingId: "reuniao-9", ownerId: "dona-1", ficha, limparAntes: false, durationSeconds: 60,
+      transcription: { text: "A Paula fica com o contrato. Fechado.", segments: [], language: "pt-BR" },
+      extraction: { entities: [], contacts: [pessoa("Paula", "unknown")] } as never,
+    });
+    expect(inseridos).toEqual([expect.objectContaining({ fullName: "Paula", presence: null })]);
+  });
+
+  it("com a transcrição rotulada, o prompt explica os rótulos; o rótulo sai do trecho, e a entidade que é só rótulo não entra", async () => {
+    const rotulada = [
+      "{F1}: Bom dia. Paula, você fica com o contrato?",
+      "{F2}: Fico, sim. A gente precisa de um transportador refrigerado para o Paraná.",
+    ].join("\n");
+    invokeLLM.mockResolvedValueOnce(resposta(
+      [pessoa("Paula", "present", { oQuePreciso: [{ texto: "Transportador refrigerado para o Paraná", trecho: "{F2}: A gente precisa de um transportador refrigerado para o Paraná", confianca: 0.9 }] })],
+      [{ type: "person", value: "{F2}", normalizedValue: null, confidence: 0.5 }, { type: "person", value: "Falante 1", normalizedValue: null, confidence: 0.5 }, { type: "person", value: "Paula", normalizedValue: null, confidence: 0.9 }],
+    ));
+    const r = await extractMeetingData(rotulada, { rotulada: true });
+    const [{ messages }] = invokeLLM.mock.calls[0];
+    expect(messages[0].content).toContain(REGRA_DOS_ROTULOS_NA_EXTRACAO);
+    expect(messages[1].content).toContain("{F2}: Fico, sim.");
+    expect(r.entities.map(e => e.value)).toEqual(["Paula"]);
+    expect(r.contacts[0].oQuePreciso).toEqual([expect.objectContaining({ trecho: "A gente precisa de um transportador refrigerado para o Paraná" })]);
+    // e o item, com o trecho limpo, passa pelo portão contra a transcrição sem rótulos
+    const semRotulos = "Bom dia. Paula, você fica com o contrato?\nFico, sim. A gente precisa de um transportador refrigerado para o Paraná.";
+    expect(pendenciasDaPessoaNaReuniao(r.contacts[0], semRotulos).filter(p => p.campo === "preciso").map(p => p.valor)).toEqual(["Transportador refrigerado para o Paraná"]);
+  });
+
+  // A reunião longa em duas janelas: o cargo deduzido na janela 1 ("Consultor")
+  // tomava o lugar do dito na janela 2 e caía depois, sem deixar nenhum.
+  it("cargo e empresa conferidos na própria janela: fica o primeiro DITO, e a empresa mais completa", async () => {
+    const enchimento = (n: number, de: number) => Array.from({ length: n }, (_, i) => `Fala ${de + i} da reunião longa, sem corte.`).join("\n");
+    const transcricao = `Boa noite, eu sou o Fernando Okada, da Ponte Sul Consultoria.\n${enchimento(800, 0)}\nNa Ponte Sul Consultoria, eu vim aqui hoje como mentor convidado.`;
+    // a apresentação cai na janela 1, e o "mentor convidado", só na 2
+    expect(transcricao.indexOf("mentor convidado")).toBeGreaterThan(JANELA_DA_EXTRACAO);
+    invokeLLM
+      .mockResolvedValueOnce(resposta([pessoa("Fernando Okada", "present", { jobTitle: "Consultor", company: "Ponte Sul" })]))
+      .mockResolvedValueOnce(resposta([pessoa("Fernando Okada", "present", { jobTitle: "mentor convidado", company: "Ponte Sul Consultoria" })]));
+    const r = await extractMeetingData(transcricao);
+    expect(invokeLLM).toHaveBeenCalledTimes(2);
+    expect(r.contacts).toEqual([expect.objectContaining({ fullName: "Fernando Okada", jobTitle: "mentor convidado", company: "Ponte Sul Consultoria" })]);
   });
 });
 
