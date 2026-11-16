@@ -117,12 +117,18 @@ vi.mock("./db", () => ({
 const storageGetBytes = vi.fn();
 const storagePut = vi.fn(async () => ({ key: "k", url: "/manus-storage/k" }));
 const storageDelete = vi.fn(async () => {});
+// O áudio de reunião sai do bucket com todas as versões (storageApagarTodasAsVersoes).
+const apagarAudio = vi.fn(async (_chave: string) => {});
 // As classes de erro e chaveDoStorageDaDona vêm do módulo real: o serviço faz
 // instanceof e confere a chave com elas.
 vi.mock("./storage", async importOriginal => ({
   ...await importOriginal<typeof import("./storage")>(),
   storagePut: (...args: unknown[]) => storagePut(...(args as [])),
   storageDelete: (...args: unknown[]) => storageDelete(...(args as [])),
+  storageApagarTodasAsVersoes: (...args: unknown[]) => {
+    estado.operacoes.push({ tipo: "bucket", tabela: "expurgo", sql: "", params: args });
+    return apagarAudio(...(args as [string]));
+  },
   storageGetBytes: (...args: unknown[]) => {
     estado.operacoes.push({ tipo: "bucket", tabela: "leitura", sql: "", params: args });
     return storageGetBytes(...(args as []));
@@ -209,6 +215,8 @@ beforeEach(() => {
   storageGetBytes.mockResolvedValue(AUDIO);
   storagePut.mockClear();
   storageDelete.mockClear();
+  apagarAudio.mockReset();
+  apagarAudio.mockImplementation(async () => {});
   transcribeWithGemini.mockReset();
   // O nome da sugestão precisa estar na fala (nomeSustentadoPelaTranscricao).
   transcribeWithGemini.mockResolvedValue({ text: "Transcrição nova da conversa com a Ana Souza.", segments: [], language: "pt" });
@@ -441,8 +449,15 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     });
     await reprocessar();
     expect(de("insert")).toEqual([]);
-    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings, schema.meetingAudioSlices]);
-    expect(storageDelete).toHaveBeenCalledWith(CHAVE);
+    // O arquivo sai do bucket com todas as versões, e só então a linha da
+    // gravação, pelo id; sem partes, não há DELETE de partes.
+    expect(apagarAudio).toHaveBeenCalledWith(CHAVE);
+    expect(storageDelete).not.toHaveBeenCalled();
+    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
+    expect(soPredicado(de("delete", schema.meetingRecordings)[0])).toEqual({
+      sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: [DONA, "gravacao-1"],
+    });
+    expect(primeira(o => o.tipo === "bucket" && o.tabela === "expurgo")).toBeLessThan(primeira(o => o.tipo === "delete"));
     expect(falhasGravadas()).toEqual([]);
   });
 
@@ -453,6 +468,7 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     await reprocessar();
     const depoisDasEscritas = estado.operacoes.slice(primeira(o => o.tipo === "insert"));
     expect(depoisDasEscritas.filter(o => o.tipo === "delete")).toEqual([]);
+    expect(apagarAudio).not.toHaveBeenCalled();
     expect(storageDelete).not.toHaveBeenCalled();
     expect(falhasGravadas()).toEqual([]);
     expect(estado.reuniao!.status).toBe("processing");

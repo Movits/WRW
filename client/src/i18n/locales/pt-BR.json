@@ -1501,6 +1501,7 @@
     "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página; se a sessão tiver expirado, entre de novo.",
     "availableUntil": "· disponível até",
     "recordingExpiredNotice": "Esta gravação passou dos 30 dias e foi apagada, como o app promete. A transcrição continua aqui.",
+    "recordingDeletionPending": "Esta gravação passou dos 30 dias e já não pode ser ouvida. O app ainda está apagando o áudio do armazenamento.",
     "noRecordingStored": "Nenhum áudio guardado para esta reunião.",
     "privacyNotice": "O áudio e a transcrição ficam só na sua conta, a menos que você ligue um link de compartilhamento. O áudio expira automaticamente após 30 dias.",
     "translateHeading": "Traduzir o que foi dito nesta reunião",

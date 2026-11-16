@@ -1501,6 +1501,7 @@
     "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu; falls die Sitzung abgelaufen ist, melden Sie sich erneut an.",
     "availableUntil": "· verfügbar bis",
     "recordingExpiredNotice": "Diese Aufnahme ist älter als 30 Tage und wurde, wie von der App zugesichert, gelöscht. Die Transkription bleibt weiterhin hier verfügbar.",
+    "recordingDeletionPending": "Diese Aufnahme ist älter als 30 Tage und kann nicht mehr angehört werden. Die App löscht das Audio gerade noch aus dem Speicher.",
     "noRecordingStored": "Für dieses Meeting ist kein Audio gespeichert.",
     "privacyNotice": "Audio und Transkription bleiben nur in Ihrem Konto, es sei denn, Sie aktivieren einen Freigabelink. Das Audio läuft automatisch nach 30 Tagen ab.",
     "translateHeading": "Übersetzen, was in diesem Meeting gesagt wurde",

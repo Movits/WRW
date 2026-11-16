@@ -9,6 +9,19 @@ import { fileURLToPath } from "node:url";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
+// O bucket do apagador PADRÃO de excluirConta (os outros testes injetam o
+// próprio apagador): o áudio de reunião sai com todas as versões, o resto com o
+// DELETE simples. chaveDoStorageDaDona e o resto vêm do módulo real.
+const bucketDublado = vi.hoisted(() => ({
+  apagarTodasAsVersoes: vi.fn(async (_chave: string) => {}),
+  apagarSimples: vi.fn(async (_chave: string) => {}),
+}));
+vi.mock("./storage", async original => ({
+  ...(await original<typeof import("./storage")>()),
+  storageApagarTodasAsVersoes: (chave: string) => bucketDublado.apagarTodasAsVersoes(chave),
+  storageDelete: (chave: string) => bucketDublado.apagarSimples(chave),
+}));
+
 /**
  * Cartão "Não existe caminho para excluir os dados de uma usuária": o caminho
  * agora existe (server/exclusao-de-conta.ts + server/routers/conta.ts) e este
@@ -215,6 +228,8 @@ const apagarArquivo = async (chave: string) => {
 const CONTA = { id: 7, openId: "open-7", email: "Dona@Exemplo.com " };
 
 beforeEach(() => {
+  bucketDublado.apagarTodasAsVersoes.mockClear();
+  bucketDublado.apagarSimples.mockClear();
   delecoes = [];
   atualizacoes = [];
   apagadosNoBucket = [];
@@ -226,7 +241,7 @@ beforeEach(() => {
     [sivcVerifications, [{ id: 9 }]],
     [privateContacts, [{ foto: "/manus-storage/contacts/open-7/foto.jpg", cartao: null }]],
     [contextMedia, [{ caminho: "contexts/open-7/ctx/imagem.png", miniatura: "contexts/open-7/ctx/mini.png" }]],
-    [meetingRecordings, [{ chave: "meetings/open-7/reuniao-1/recording.webm" }]],
+    [meetingRecordings, [{ id: "gravacao-1", chave: "meetings/open-7/reuniao-1/recording.webm" }]],
     // A segunda parte vem com o prefixo do proxy: a chave conferida é a mesma
     // sem ele, e é por ela que o bucket é chamado.
     [meetingAudioSlices, [
@@ -543,6 +558,54 @@ describe("B6) a parte de áudio cujo objeto ficou no bucket fica, só como ponte
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     expect(atualizacoesDasPartes()).toEqual([]);
     expect(renderizar(delecaoDasPartes()[0].condicao).params).toEqual(["open-7"]);
+  });
+});
+
+// ═══ B7) a gravação inteira da reunião segue a mesma regra das partes ═══════
+// Antes, a linha de meeting_recordings saía mesmo com o objeto no bucket, e a
+// voz ficava lá sem ponteiro (a #134 propunha a regra; esta PR a aplica). Agora
+// ela fica como ponteiro, vencida, e a varredura das gravações tenta de novo.
+describe("B7) a gravação inteira cujo objeto ficou no bucket fica, só como ponteiro", () => {
+  const GRAVACAO = "meetings/open-7/reuniao-1/recording.webm";
+  const delecaoDasGravacoes = () => delecoes.filter(d => d.tabela === meetingRecordings);
+  const atualizacoesDasGravacoes = () => atualizacoes.filter(a => a.tabela === meetingRecordings);
+
+  it("o bucket recusou a gravação: o DELETE das gravações a deixa de fora, e ela vence na hora", async () => {
+    bucketFalha.add(GRAVACAO);
+    const antes = Date.now();
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([GRAVACAO]);
+    expect(renderizar(delecaoDasGravacoes()[0].condicao)).toEqual({
+      sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` not in (?))",
+      params: ["open-7", "gravacao-1"],
+    });
+    expect(atualizacoesDasGravacoes()).toHaveLength(1);
+    const [ponteiro] = atualizacoesDasGravacoes();
+    expect(Object.keys(ponteiro.valores)).toEqual(["expiresAt"]);
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(ponteiro.valores.expiresAt).toBeLessThanOrEqual(Date.now());
+    expect(renderizar(ponteiro.condicao)).toEqual({
+      sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))",
+      params: ["open-7", "gravacao-1"],
+    });
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_recordings (ponteiro, UPDATE)");
+  });
+
+  it("sem falha de áudio, todas as gravações saem e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(atualizacoesDasGravacoes()).toEqual([]);
+    expect(renderizar(delecaoDasGravacoes()[0].condicao)).toEqual({ sql: "`meeting_recordings`.`owner_id` = ?", params: ["open-7"] });
+  });
+
+  it("o apagador padrão tira o áudio de reunião (meetings/) com TODAS as versões, e os outros arquivos com o DELETE simples", async () => {
+    // Sem apagador injetado: vale o padrão, que importa ./storage (dublado no
+    // topo deste arquivo, sem bucket de verdade).
+    await excluirConta(fakeDb, CONTA);
+    const audios = [GRAVACAO, "meetings/open-7/reuniao-2/partes/0_aaaa.mp4", "meetings/open-7/reuniao-2/partes/1_bbbb.mp4"];
+    expect(bucketDublado.apagarTodasAsVersoes.mock.calls.map(([chave]) => chave).sort()).toEqual([...audios].sort());
+    const simples = bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave);
+    expect(simples).toContain("sivc/7/9/1234-rg.png");
+    expect(simples.filter(chave => chave.startsWith("meetings/"))).toEqual([]);
   });
 });
 

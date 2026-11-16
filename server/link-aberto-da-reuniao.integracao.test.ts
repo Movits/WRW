@@ -1,6 +1,14 @@
 import crypto from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+
+// O bucket é dublê: a leitura do áudio vencido o tira do bucket com todas as
+// versões, e este arquivo não pode falar com um bucket de verdade.
+const apagarAudio = vi.hoisted(() => vi.fn(async (_chave: string) => {}));
+vi.mock("./storage", async original => ({
+  ...(await original<typeof import("./storage")>()),
+  storageApagarTodasAsVersoes: (...args: unknown[]) => apagarAudio(...(args as [string])),
+}));
 import { getDb } from "./db";
 import { auditLogs, meetingAudioSlices, meetingContactSuggestions, meetingEntities, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import {
@@ -276,11 +284,18 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     }
   });
 
-  it("gravação vencida não é tocada pelo link, e a página diz que expirou", async () => {
+  it("gravação vencida não é tocada pelo link; com o bucket recusando, a página diz que ela está saindo, e só depois de sair, que expirou", async () => {
     const token = await ligarLinkAberto(DONA, PRONTA, PROVA);
     const db = (await getDb())!;
     await db.update(meetingRecordings).set({ expiresAt: AGORA - 1 }).where(eq(meetingRecordings.ownerId, DONA));
     expect(await chaveDoAudioDoLink(token)).toBeNull();
-    expect(await verReuniaoPeloLink(token)).toMatchObject({ gravacao: null, gravacaoExpirada: true });
+
+    apagarAudio.mockRejectedValueOnce(new Error("B2 fora do ar"));
+    const durante = await verReuniaoPeloLink(token);
+    expect(durante).toMatchObject({ gravacao: null, gravacaoExpirada: false, gravacaoSaindo: true });
+
+    expect(await verReuniaoPeloLink(token)).toMatchObject({ gravacao: null, gravacaoExpirada: true, gravacaoSaindo: false });
+    expect(apagarAudio).toHaveBeenLastCalledWith(CHAVE);
+    expect(await db.select().from(meetingRecordings).where(eq(meetingRecordings.meetingId, PRONTA))).toEqual([]);
   });
 });

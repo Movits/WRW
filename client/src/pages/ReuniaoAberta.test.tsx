@@ -115,6 +115,14 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText(/passou dos 30 dias/)).toBeInTheDocument();
   });
 
+  it("gravação vencida que ainda não saiu do bucket: diz que está saindo, não que 'foi apagada'", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: false, gravacaoSaindo: true }));
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(screen.getByText(/O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
+    expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
+  });
+
   it("sem transcrição: a IA não aparece e a tela diz que a transcrição não está disponível", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: null }));
     abrir();

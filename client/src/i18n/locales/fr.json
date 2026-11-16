@@ -1501,6 +1501,7 @@
     "audioLoadError": "Impossible de charger l'audio pour le moment. Rechargez la page ; si la session a expiré, reconnectez-vous.",
     "availableUntil": "· disponible jusqu'au",
     "recordingExpiredNotice": "Cet enregistrement a dépassé les 30 jours et a été supprimé, comme l'application le promet. La transcription reste disponible ici.",
+    "recordingDeletionPending": "Cet enregistrement a dépassé les 30 jours et ne peut plus être écouté. L'application est encore en train de supprimer l'audio du stockage.",
     "noRecordingStored": "Aucun audio conservé pour cette réunion.",
     "privacyNotice": "L'audio et la transcription restent uniquement dans votre compte, sauf si vous activez un lien de partage. L'audio expire automatiquement après 30 jours.",
     "translateHeading": "Traduire ce qui a été dit dans cette réunion",

@@ -143,7 +143,7 @@ const REUNIAO = {
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
-type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean };
+type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean };
 function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<Detalhe> = {}) {
   const meeting = { ...REUNIAO, ...reuniao };
   duble.list.mockReturnValue({ data: [meeting], isLoading: false });
@@ -349,6 +349,13 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     expect(screen.queryByText(/A transcrição continua aqui/)).not.toBeInTheDocument();
     expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
     expect(screen.getByText(/O áudio fica guardado por no máximo 30 dias/)).toBeInTheDocument();
+  });
+
+  it("áudio vencido que ainda não saiu do bucket: a tela diz que está saindo, e não que 'foi apagada' nem que não há áudio guardado", () => {
+    abrirDetalhe({}, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" }, recordingDeletionPending: true });
+    expect(screen.getByText(/passou dos 30 dias e já não pode ser ouvida\. O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
+    expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nenhum áudio guardado/)).not.toBeInTheDocument();
   });
 });
 

@@ -19,11 +19,16 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *     ninguém saberia que o objeto continuava lá.
  */
 
+// O áudio de reunião sai com TODAS as versões (no B2, que guarda versões, o
+// DELETE simples só esconderia a voz): é o expurgo que estes testes observam. O
+// DELETE simples fica dublado só para provar que o áudio nunca passa por ele.
 const storageDelete = vi.fn(async () => {});
+const apagarAudio = vi.fn(async (_chave: string) => {});
 vi.mock("./storage", async importOriginal => ({
   ...await importOriginal<typeof import("./storage")>(),
   storagePut: async () => ({ key: "k", url: "/manus-storage/k" }),
   storageDelete: (...args: unknown[]) => storageDelete(...(args as [string])),
+  storageApagarTodasAsVersoes: (...args: unknown[]) => { sequencia.push("bucket"); return apagarAudio(...(args as [string])); },
 }));
 vi.mock("./_core/llm", () => ({ invokeLLM: async () => ({ choices: [{ message: { content: "{}" } }] }) }));
 // As classes de erro vêm do módulo real: meeting-service faz instanceof nelas.
@@ -88,14 +93,21 @@ const projetar = (tabela: unknown, projecao: Record<string, unknown> | undefined
 };
 
 const fakeDb = {
-  select: (projecao?: Record<string, unknown>) => ({
-    from: (tabela: unknown) => ({
-      where: (condicao?: SQL) => {
-        leituras.push({ tabela, ...renderizar(condicao) });
-        return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
-      },
-    }),
-  }),
+  select: (projecao?: Record<string, unknown>) => {
+    const ondeDe = (tabela: unknown) => (condicao?: SQL) => {
+      leituras.push({ tabela, ...renderizar(condicao) });
+      return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
+    };
+    return {
+      from: (tabela: unknown) => ({
+        where: ondeDe(tabela),
+        // A varredura junta a reunião (LEFT JOIN) para pular a que está em
+        // 'processing'; o fake não executa o JOIN nem o predicado: devolve as
+        // linhas da tabela e guarda o WHERE renderizado, como nas outras leituras.
+        leftJoin: () => ({ where: ondeDe(tabela) }),
+      }),
+    };
+  },
   delete: (tabela: unknown) => ({
     where: async (condicao?: SQL) => { delecoes.push({ tabela, ...renderizar(condicao) }); sequencia.push("delete"); },
   }),
@@ -141,6 +153,8 @@ beforeEach(() => {
   // teste vazaria para o próximo e o faria falhar por motivo errado.
   storageDelete.mockReset();
   storageDelete.mockImplementation(async () => {});
+  apagarAudio.mockReset();
+  apagarAudio.mockImplementation(async () => {});
   tabelas.set(schema.meetings, [REUNIAO]);
   tabelas.set(schema.meetingTranscripts, []);
   tabelas.set(schema.meetingEntities, []);
@@ -174,6 +188,8 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     expect(dados?.recording).toBeNull();
     expect(dados?.recordingExpired).toBe(false);
+    expect(dados?.recordingDeletionPending).toBe(false);
+    expect(apagarAudio).not.toHaveBeenCalled();
     expect(storageDelete).not.toHaveBeenCalled();
   });
 
@@ -280,27 +296,40 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
 });
 
 describe("Retenção — os 30 dias deixam de ser promessa e viram ação", () => {
-  it("gravação vencida não é servida, e o arquivo é apagado do bucket", async () => {
+  it("gravação vencida não é servida, e o arquivo sai do bucket com todas as versões", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     expect(dados?.recording).toBeNull();
     expect(dados?.recordingExpired).toBe(true);
-    expect(storageDelete).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
+    expect(dados?.recordingDeletionPending).toBe(false);
+    expect(apagarAudio).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
+    expect(storageDelete).not.toHaveBeenCalled();
     expect(tabelasApagadas()).toContain(schema.meetingRecordings);
   });
 
-  it("o storage fora do ar não derruba a leitura da reunião", async () => {
+  it("o storage fora do ar não derruba a leitura da reunião, e a tela NÃO diz que o áudio foi apagado: diz que está saindo", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
-    storageDelete.mockRejectedValueOnce(new Error("bucket fora do ar"));
+    apagarAudio.mockRejectedValueOnce(new Error("bucket fora do ar"));
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
-    expect(dados?.recordingExpired).toBe(true);
     expect(dados?.meeting).toBeTruthy();
+    expect(dados?.recording).toBeNull();
+    expect(dados?.recordingExpired).toBe(false);
+    expect(dados?.recordingDeletionPending).toBe(true);
   });
 
   it("bucket falhou: a LINHA fica, senão o áudio some do banco e vive no bucket para sempre", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
-    storageDelete.mockRejectedValueOnce(new Error("bucket fora do ar"));
+    apagarAudio.mockRejectedValueOnce(new Error("bucket fora do ar"));
     await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(tabelasApagadas()).not.toContain(schema.meetingRecordings);
+  });
+
+  it("reunião em 'processing' (o reprocesso pode estar lendo o áudio): o vencido só deixa de ser servido, e a varredura o tira depois", async () => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, status: "processing" }]);
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados).toMatchObject({ recording: null, recordingExpired: false, recordingDeletionPending: true });
+    expect(apagarAudio).not.toHaveBeenCalled();
     expect(tabelasApagadas()).not.toContain(schema.meetingRecordings);
   });
 
@@ -324,41 +353,51 @@ describe("Retenção — os 30 dias deixam de ser promessa e viram ação", () =
   });
 });
 
+// O comportamento da varredura contra o banco (o LEFT JOIN, quais estados ela
+// pula, a paginação, as partes, o ponteiro sem reunião) está em
+// server/retencao-do-audio.integracao.test.ts. Aqui, sem banco, o que se prova
+// é o caminho de cada linha (expurgo antes da linha) e o WHERE que a protege.
 describe("Retenção — a varredura faz os 30 dias valerem sem depender de alguém abrir a tela", () => {
-  it("apaga arquivo e linha das gravações vencidas", async () => {
+  it("apaga o arquivo (todas as versões) e só então a linha das gravações vencidas", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
     const resultado = await servico.limparGravacoesVencidas();
     expect(resultado).toEqual({ encontradas: 1, apagadas: 1 });
-    expect(storageDelete).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
-    expect(tabelasApagadas()).toContain(schema.meetingRecordings);
+    expect(apagarAudio).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
+    expect(tabelasApagadas()).toEqual([schema.meetingRecordings]);
+    expect(delecoes[0]).toMatchObject({ sql: "`meeting_recordings`.`id` = ?", params: ["grav-1"] });
+    expect(sequencia).toEqual(["bucket", "delete"]);
   });
 
   it("bucket falhou: conta como não apagada e a linha permanece para a próxima rodada", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
-    storageDelete.mockRejectedValueOnce(new Error("bucket fora do ar"));
+    apagarAudio.mockRejectedValueOnce(new Error("bucket fora do ar"));
     const resultado = await servico.limparGravacoesVencidas();
     expect(resultado).toEqual({ encontradas: 1, apagadas: 0 });
     expect(tabelasApagadas()).not.toContain(schema.meetingRecordings);
   });
 
-  it("a varredura filtra por expiresAt <= agora — não sai apagando a base inteira, nem o que ainda vale", async () => {
+  it("o WHERE não sai apagando a base inteira: só o vencido (expires_at <= agora) e fora de 'processing', ou o áudio sem reunião", async () => {
     tabelas.set(schema.meetingRecordings, []);
     const antes = Date.now();
     await servico.limparGravacoesVencidas();
     const depois = Date.now();
     const leitura = leituras.find(operacao => operacao.tabela === schema.meetingRecordings);
-    expect(leitura?.sql).toBe("`meeting_recordings`.`expires_at` <= ?");
-    expect(leitura?.params).toHaveLength(1);
-    expect(Number(leitura?.params[0])).toBeGreaterThanOrEqual(antes);
-    expect(Number(leitura?.params[0])).toBeLessThanOrEqual(depois);
+    expect(leitura?.sql).toBe(
+      "(`meeting_recordings`.`id` > ? and (`meetings`.`id` is null or `meetings`.`status` = ? or (`meeting_recordings`.`expires_at` <= ? and `meetings`.`status` <> ?)))",
+    );
+    const [depoisDe, excluida, prazo, emProcessamento] = leitura!.params;
+    expect([depoisDe, excluida, emProcessamento]).toEqual(["", "deleted", "processing"]);
+    expect(Number(prazo)).toBeGreaterThanOrEqual(antes);
+    expect(Number(prazo)).toBeLessThanOrEqual(depois);
   });
 });
 
 describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => {
-  it("o arquivo de áudio sai do bucket", async () => {
+  it("o arquivo de áudio sai do bucket, com todas as versões", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     await servico.deletePrivateMeeting("dona-1", "reuniao-1");
-    expect(storageDelete).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
+    expect(apagarAudio).toHaveBeenCalledWith("meetings/dona-1/reuniao-1/recording_abc.webm");
+    expect(storageDelete).not.toHaveBeenCalled();
   });
 
   it("as TRADUÇÕES da transcrição também saem — senão o conteúdo sobrevive em nove idiomas", async () => {
@@ -366,14 +405,16 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(tabelasApagadas()).toContain(schema.meetingTranscriptTranslations);
   });
 
-  it("todo delete da exclusão — e a leitura das gravações — é da reunião DA dona: meeting_id E owner_id, em AND", async () => {
+  it("todo delete da exclusão — e a leitura do áudio — é da reunião DA dona: meeting_id E owner_id, em AND; a linha da gravação sai pelo id, só depois do arquivo", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     await servico.deletePrivateMeeting("dona-1", "reuniao-1");
 
-    // A leitura que diz onde o arquivo está: sem o owner_id, o áudio de uma
+    // As leituras que dizem onde o arquivo está: sem o owner_id, o áudio de uma
     // reunião com o mesmo id de outra dona sairia do bucket.
     expect(leituras.filter(operacao => operacao.tabela === schema.meetingRecordings).map(predicadoDe))
       .toEqual([derivadaDaReuniaoDaDona("meeting_recordings")]);
+    expect(leituras.filter(operacao => operacao.tabela === schema.meetingAudioSlices).map(predicadoDe))
+      .toEqual([derivadaDaReuniaoDaDona("meeting_audio_slices")]);
 
     const esperado = new Map<unknown, Predicado>([
       [schema.meetingContactSuggestions, derivadaDaReuniaoDaDona("meeting_contact_suggestions")],
@@ -385,9 +426,9 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       // O resumo guardado (H4) cita trechos da transcrição.
       [schema.meetingSummaryItems, derivadaDaReuniaoDaDona("meeting_summary_items")],
       [schema.meetingSummaries, derivadaDaReuniaoDaDona("meeting_summaries")],
-      [schema.meetingRecordings, derivadaDaReuniaoDaDona("meeting_recordings")],
-      // As partes da reunião gravada em partes (G5) são áudio também.
-      [schema.meetingAudioSlices, derivadaDaReuniaoDaDona("meeting_audio_slices")],
+      // A linha do áudio sai pelo id (e pela dona), e só a do arquivo que saiu.
+      // Sem partes nesta reunião, não há DELETE em meeting_audio_slices.
+      [schema.meetingRecordings, { sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: ["dona-1", "grav-1"] }],
       [schema.meetings, REUNIAO_DA_DONA],
     ]);
     expect(delecoes).toHaveLength(esperado.size);
@@ -398,17 +439,12 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     }
   });
 
-  it("o áudio sai ANTES da linha: é ela que diz onde o arquivo está", () => {
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
-    const { join } = require("node:path") as typeof import("node:path");
-    const fonte = readFileSync(join(__dirname, "meeting-service.ts"), "utf8");
-    // A lista do que sai mora em apagarDerivadosDaReuniao, compartilhada com a
-    // compensação de processMeetingRecording.
-    const corpo = fonte.slice(fonte.indexOf("async function apagarDerivadosDaReuniao"));
-    const posicaoArquivo = corpo.indexOf("apagarArquivoDaGravacao");
-    const posicaoLinha = corpo.indexOf("delete(meetingRecordings)");
-    expect(posicaoArquivo).toBeGreaterThan(-1);
-    expect(posicaoArquivo).toBeLessThan(posicaoLinha);
+  it("o áudio sai do bucket ANTES de qualquer linha: é a linha que diz onde o arquivo está", async () => {
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
+    await servico.deletePrivateMeeting("dona-1", "reuniao-1");
+    // Depois do 'deleted' (o UPDATE), o primeiro efeito é o bucket.
+    expect(sequencia.slice(0, 2)).toEqual(["update", "bucket"]);
+    expect(sequencia.indexOf("bucket")).toBeLessThan(sequencia.indexOf("delete"));
   });
 
   it("a reunião é marcada 'deleted' ANTES do primeiro delete: é o sinal que um processamento em curso lê", async () => {
@@ -426,22 +462,30 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(typeof atualizacoes[0].valores.updatedAt).toBe("number");
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
-    // e a linha da reunião só sai por último, depois dos derivados (10: os
-    // itens e o resumo guardado, da H4, somaram dois)
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(10);
+    // e a linha da reunião só sai por último, depois dos derivados (9: os sete
+    // derivados da IA, a gravação cujo arquivo saiu e a reunião; sem partes,
+    // não há DELETE de partes)
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(9);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 
-  it("falha no bucket não impede a reunião de ser excluída", async () => {
+  it("falha no bucket não impede a reunião de ser excluída, mas a linha da gravação FICA, vencida, como ponteiro para a varredura", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
-    storageDelete.mockRejectedValueOnce(new Error("bucket fora do ar"));
+    apagarAudio.mockRejectedValueOnce(new Error("bucket fora do ar"));
+    const antes = Date.now();
     await expect(servico.deletePrivateMeeting("dona-1", "reuniao-1")).resolves.toBe(true);
     expect(tabelasApagadas()).toContain(schema.meetings);
+    expect(tabelasApagadas()).not.toContain(schema.meetingRecordings);
+    const ponteiro = atualizacoes.find(operacao => operacao.tabela === schema.meetingRecordings);
+    expect(predicadoDe(ponteiro!)).toEqual({ sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: ["dona-1", "grav-1"] });
+    expect(Number(ponteiro!.valores.expiresAt)).toBeGreaterThanOrEqual(antes);
+    expect(Number(ponteiro!.valores.expiresAt)).toBeLessThanOrEqual(Date.now());
   });
 
   it("reunião de outra dona não apaga nada", async () => {
     tabelas.set(schema.meetings, []);
     expect(await servico.deletePrivateMeeting("dona-2", "reuniao-1")).toBe(false);
+    expect(apagarAudio).not.toHaveBeenCalled();
     expect(storageDelete).not.toHaveBeenCalled();
     expect(tabelasApagadas()).toHaveLength(0);
   });

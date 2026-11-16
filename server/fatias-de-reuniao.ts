@@ -1,8 +1,8 @@
 import crypto from "crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
-import { storageDelete, storagePut } from "./storage";
+import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { ALLOWED_MEETING_AUDIO_TYPES, MAX_MEETING_DURATION_SECONDS, MEETING_AUDIO_TTL_MS } from "./meeting-service";
 
@@ -52,6 +52,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
   const db = await exigirDb();
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
   const agora = Date.now();
+  // O prazo do áudio da reunião em partes: 30 dias depois da chegada da ÚLTIMA
+  // parte, a mesma regra do envio único (30 dias contados do envio, que lá manda
+  // o áudio inteiro de uma vez no fim). Todas as partes da reunião ficam com o
+  // prazo da que chegou por último, para vencerem e saírem juntas: a gravação é
+  // uma só para quem a ouve, e não pode perder o começo antes do fim.
+  const prazo = agora + MEETING_AUDIO_TTL_MS;
 
   // A decisão (a reunião aceita esta parte? cabe no teto? a posição é nova?) e o
   // INSERT correm numa transação com a linha da reunião TRAVADA (FOR UPDATE):
@@ -72,7 +78,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
 
     const existente = await lerParte(tx, meetingId, seq);
     if (existente && existente.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
-    if (existente) return existente.status === "uploading" ? { linha: existente } : { repetida: true as const };
+    if (existente?.status === "uploading") {
+      // O reenvio da parte que não subiu é uma chegada também: renova o prazo.
+      await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
+      return { linha: existente };
+    }
+    if (existente) return { repetida: true as const };
 
     // O teto de tempo da reunião em partes segue o do envio único até a G13.
     const [soma] = await tx.select({ ms: sql<number>`coalesce(sum(${meetingAudioSlices.durationMs}), 0)` })
@@ -88,11 +99,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     const nova = {
       id, meetingId, ownerId, seq, status: "uploading" as const,
       storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType, sizeBytes: bytes.length, sha256,
-      durationMs: Math.round(duracao * 1000), expiresAt: agora + MEETING_AUDIO_TTL_MS, createdAt: agora, updatedAt: agora,
+      durationMs: Math.round(duracao * 1000), expiresAt: prazo, createdAt: agora, updatedAt: agora,
     };
     // Com a reunião travada, dois envios da mesma parte se enfileiram aqui: o
     // segundo já acha a linha acima. O UNIQUE (reunião, posição) segue de guarda.
     await tx.insert(meetingAudioSlices).values(nova);
+    await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
     return { linha: nova };
   });
   if ("repetida" in decisao) return { seq, repetida: true };
@@ -112,7 +124,8 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     // para nenhuma voz ficar no bucket sem ponteiro.
     const ainda = await lerParte(db, meetingId, seq);
     if (!ainda) {
-      await storageDelete(linha.storageKey).catch(erro => console.warn("[Reuniões] a parte de uma reunião excluída ficou no bucket:", erro instanceof Error ? erro.message : erro));
+      // Com todas as versões: o DELETE simples só esconderia a voz no B2.
+      await storageApagarTodasAsVersoes(linha.storageKey).catch(erro => console.warn("[Reuniões] a parte de uma reunião excluída ficou no bucket:", erro instanceof Error ? erro.message : erro));
       throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
     }
     return { seq, repetida: true };
@@ -121,6 +134,17 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
 }
 
 type LeitorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "select">;
+type EscritorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "update">;
+
+/**
+ * Leva o prazo de todas as partes da reunião ao da parte que acabou de chegar
+ * (ver o prazo em receberParte). Nunca encurta: só toca a parte com prazo
+ * menor. Corre na transação de receberParte, com a reunião travada.
+ */
+async function renovarPrazoDasPartes(db: EscritorDoBanco, ownerId: string, meetingId: string, prazo: number) {
+  await db.update(meetingAudioSlices).set({ expiresAt: prazo })
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), lt(meetingAudioSlices.expiresAt, prazo)));
+}
 
 async function lerParte(db: LeitorDoBanco, meetingId: string, seq: number) {
   const [linha] = await db.select({

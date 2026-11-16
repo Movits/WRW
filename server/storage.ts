@@ -20,7 +20,10 @@
 // agora exige sessão e posse antes de assinar o download.
 
 import crypto from "node:crypto";
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, type GetObjectCommandOutput } from "@aws-sdk/client-s3";
+import {
+  S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, ListObjectVersionsCommand,
+  type GetObjectCommandOutput,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 type StorageConfig = {
@@ -73,6 +76,20 @@ function normalizeKey(relKey: string): string {
   return relKey.replace(/^\/+/, "");
 }
 
+/**
+ * A chave do objeto no bucket a partir do que uma linha do banco guarda. Linha
+ * legada (a tabela veio do backup do Manus) pode trazer o caminho do proxy,
+ * "/manus-storage/<chave>", em vez da chave. Sem tirar esse prefixo, o HEAD, o
+ * DELETE e a listagem do expurgo iriam para "manus-storage/meetings/...", que
+ * não existe: tudo "daria certo", a linha sairia e a voz ficaria no bucket sem
+ * ponteiro. Um lugar só, usado pela prova de posse (chaveDoStorageDaDona) e
+ * pelo expurgo do áudio (storageApagarTodasAsVersoes), para as duas nunca
+ * divergirem sobre qual é a chave.
+ */
+function chaveDoBucket(caminho: string): string {
+  return normalizeKey(caminho.replace(/^\/manus-storage\//, ""));
+}
+
 // Sufixo aleatório para a chave nunca colidir com um upload anterior do mesmo
 // nome — comportamento herdado da versão anterior, que os chamadores esperam.
 function appendHashSuffix(relKey: string): string {
@@ -112,7 +129,15 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   return { key, url: `/manus-storage/${key}` };
 }
 
-/** Remove um objeto do bucket. Chave inexistente não é erro no protocolo S3. */
+/**
+ * Remove um objeto do bucket. Chave inexistente não é erro no protocolo S3.
+ *
+ * Num bucket com versões (o B2 guarda versões por padrão), este DELETE sem
+ * VersionId só põe um marcador por cima: o arquivo deixa de ser servido, mas a
+ * versão continua guardada e cobrada. O áudio de reunião sai por
+ * storageApagarTodasAsVersoes; os outros arquivos (fotos, contextos, Sala, SIVC)
+ * seguem por aqui.
+ */
 export async function storageDelete(relKey: string): Promise<void> {
   const config = getStorageConfig();
   const key = normalizeKey(relKey);
@@ -140,6 +165,16 @@ export class ObjetoGrandeDemaisError extends Error {
 function ehObjetoAusente(erro: unknown): boolean {
   const e = erro as { name?: unknown; Code?: unknown; $metadata?: { httpStatusCode?: unknown } } | null | undefined;
   return e?.name === "NoSuchKey" || e?.Code === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404;
+}
+
+/**
+ * A chamada foi cortada pelo prazo: AbortSignal.timeout rejeita com
+ * TimeoutError, e o SDK, conforme a versão do handler HTTP, relança o aborto
+ * como AbortError. As duas querem dizer bucket que não respondeu a tempo.
+ */
+function ehPrazoEsgotado(erro: unknown): boolean {
+  const nome = (erro as { name?: unknown } | null | undefined)?.name;
+  return nome === "TimeoutError" || nome === "AbortError";
 }
 
 /** Prazo da leitura de bytes: 10 MB de um bucket saudável chegam em poucos segundos. */
@@ -180,6 +215,90 @@ export async function storageGetBytes(relKey: string, limiteBytes: number, prazo
   return bytes;
 }
 
+/** Prazo de CADA chamada ao bucket no apagamento com todas as versões. */
+const PRAZO_DE_CADA_CHAMADA_DO_EXPURGO_MS = 30_000;
+
+/**
+ * Apaga um objeto do bucket com TODAS as versões. Hoje, só o áudio de reunião
+ * (a gravação do envio único e as partes da gravação em partes).
+ *
+ * O B2 guarda versões: o DeleteObject sem VersionId de storageDelete só põe um
+ * marcador de exclusão por cima, o GET passa a dar 404 e a versão com o áudio
+ * continua guardada e cobrada. Para a voz das participantes sair de verdade
+ * depois dos 30 dias, ou quando a dona exclui a reunião ou a conta, cada versão
+ * e cada marcador da chave saem pelo VersionId. Os outros arquivos seguem com
+ * storageDelete.
+ *
+ * O DELETE simples vem primeiro, e o arquivo deixa de ser servido na hora,
+ * mesmo que o resto falhe (chave sem permissão de listar, B2 fora). Falha na
+ * listagem ou numa versão LANÇA: quem chama (a varredura, a leitura vencida, a
+ * exclusão da reunião e a da conta) deixa a linha do áudio no banco, e a
+ * próxima varredura tenta de novo. Versão que já não existe (outra instância
+ * chegou antes) conta como apagada.
+ *
+ * O DELETE simples só vai se o arquivo ainda estiver visível. Num bucket com
+ * versões, cada DELETE sem VersionId põe mais um marcador por cima, mesmo que o
+ * atual já seja um marcador; com a listagem falhando, a varredura repetiria
+ * isto a cada 5 min, e cada marcador acumulado vira mais uma chamada quando a
+ * listagem voltar. Por isso um HEAD antes: 404 é chave já escondida, e o DELETE
+ * simples é pulado. HEAD cortado pelo prazo LANÇA na hora: é bucket travado, e
+ * o DELETE simples gastaria outro prazo inteiro para falhar igual. Qualquer
+ * outro erro do HEAD (sem permissão, por exemplo) segue para o DELETE, como
+ * sempre: tirar o arquivo do ar vem primeiro.
+ *
+ * Toda chamada tem prazo PRÓPRIO: o S3Client não tem timeout, e um bucket
+ * travado prenderia a varredura. Um prazo só para a função inteira cortaria as
+ * últimas versões de uma chave com muitas.
+ *
+ * Recebe a chave como a linha do banco a guarda e a normaliza aqui (ver
+ * chaveDoBucket). Trazida da PR #134 do Nicolas.
+ */
+export async function storageApagarTodasAsVersoes(relKey: string, prazoMs = PRAZO_DE_CADA_CHAMADA_DO_EXPURGO_MS): Promise<void> {
+  const config = getStorageConfig();
+  const key = chaveDoBucket(relKey);
+  const cliente = getClient(config);
+  const comPrazo = () => ({ abortSignal: AbortSignal.timeout(prazoMs) });
+
+  let visivel = true;
+  try {
+    await cliente.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }), comPrazo());
+  } catch (erro) {
+    if (ehPrazoEsgotado(erro)) throw erro;
+    if (ehObjetoAusente(erro)) visivel = false;
+  }
+  if (visivel) await cliente.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }), comPrazo());
+
+  // O Prefix também traz as chaves que só COMEÇAM igual (recording_abc.webm.bak,
+  // por exemplo): sai só o que tem exatamente esta chave.
+  const versoes: string[] = [];
+  let KeyMarker: string | undefined;
+  let VersionIdMarker: string | undefined;
+  for (;;) {
+    const pagina = await cliente.send(
+      new ListObjectVersionsCommand({ Bucket: config.bucket, Prefix: key, KeyMarker, VersionIdMarker }),
+      comPrazo(),
+    );
+    for (const item of [...(pagina.Versions ?? []), ...(pagina.DeleteMarkers ?? [])]) {
+      if (item.Key === key && item.VersionId) versoes.push(item.VersionId);
+    }
+    // Sem marcador de continuação não há como pedir a próxima página: parar é
+    // melhor que repetir a primeira para sempre.
+    if (!pagina.IsTruncated || (!pagina.NextKeyMarker && !pagina.NextVersionIdMarker)) break;
+    KeyMarker = pagina.NextKeyMarker;
+    VersionIdMarker = pagina.NextVersionIdMarker;
+  }
+
+  for (const VersionId of versoes) {
+    try {
+      await cliente.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key, VersionId }), comPrazo());
+    } catch (erro) {
+      const codigo = erro as { name?: unknown; Code?: unknown } | null | undefined;
+      const jaApagada = ehObjetoAusente(erro) || codigo?.name === "NoSuchVersion" || codigo?.Code === "NoSuchVersion";
+      if (!jaApagada) throw erro;
+    }
+  }
+}
+
 /**
  * Defesa em profundidade na hora de apagar do bucket: só sai objeto que está
  * no espaço da própria dona, sob o prefixo esperado (ex.: "contacts",
@@ -189,7 +308,7 @@ export async function storageGetBytes(relKey: string, limiteBytes: number, prazo
  * cópia por arquivo.
  */
 export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePath: string): string | null {
-  const chave = normalizeKey(storagePath.replace(/^\/manus-storage\//, ""));
+  const chave = chaveDoBucket(storagePath);
   return chave.startsWith(`${prefixo}/${openId}/`) ? chave : null;
 }
 

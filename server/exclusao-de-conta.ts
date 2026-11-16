@@ -38,12 +38,14 @@
 //    (`opportunity_documents.fileKey`, `user_profiles.avatarUrl`) não prova
 //    nada: apagar por ela transformaria a exclusão da própria conta numa
 //    exclusão de arquivo alheio. Essas linhas saem do banco e o objeto fica.
-// 6. A linha de uma PARTE do áudio de reunião (meeting_audio_slices) só sai
-//    quando o objeto dela saiu do bucket. Se o bucket recusou, a linha é o único
-//    ponteiro para a voz de quem participou: ela fica, sem a transcrição, com o
-//    prazo vencido e fora da fila (ver `fatiasComAudioNoBucket`). As gravações
-//    inteiras (meeting_recordings) ainda saem do banco mesmo com o objeto no
-//    bucket; a #134 aplica a elas a mesma regra.
+// 6. A linha do ÁUDIO de reunião, a parte (meeting_audio_slices) e a gravação
+//    inteira (meeting_recordings), só sai quando o objeto dela saiu do bucket,
+//    com todas as versões (`storageApagarTodasAsVersoes`: no B2, que guarda
+//    versões, o DELETE simples só esconderia a voz). Se o bucket recusou, a
+//    linha é o único ponteiro para a voz de quem participou: ela fica, com o
+//    prazo vencido e, na parte, sem a transcrição e fora da fila (ver
+//    `audiosQueFicaramNoBucket`). Sem a reunião, a varredura das gravações
+//    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -91,11 +93,13 @@ export type ChavesDaConta = {
 type Origem = "id" | "openId" | "email" | "oportunidades" | "salas" | "verificacoes";
 
 /**
- * O que só se sabe depois de passar pelo bucket: as partes do áudio de reunião
- * (ids de meeting_audio_slices) cujo objeto NÃO saiu. Essas linhas ficam.
+ * O que só se sabe depois de passar pelo bucket: o áudio de reunião cujo objeto
+ * NÃO saiu, as partes (ids de meeting_audio_slices) e as gravações inteiras
+ * (ids de meeting_recordings). Essas linhas ficam.
  */
 export type ContextoDaExclusao = {
   fatiasQueFicam: string[];
+  gravacoesQueFicam?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -164,7 +168,13 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a parte cujo áudio não saiu do bucket fica, sem a transcrição, como o único ponteiro para o objeto",
   },
-  { tabela: meetingRecordings, coluna: meetingRecordings.ownerId, origem: "openId" },
+  {
+    tabela: meetingRecordings, coluna: meetingRecordings.ownerId, origem: "openId",
+    filtro: (_chaves, contexto) => (contexto?.gravacoesQueFicam?.length
+      ? notInArray(meetingRecordings.id, contexto.gravacoesQueFicam)
+      : undefined),
+    motivo: "a gravação cujo áudio não saiu do bucket fica como o único ponteiro para o objeto",
+  },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
@@ -384,24 +394,29 @@ export async function tirarDosGruposAlheios(
 export const MOTIVO_DA_PARTE_QUE_FICOU = "conta excluída; o áudio desta parte não saiu do bucket";
 
 /**
- * As partes do áudio de reunião cujo objeto NÃO saiu do bucket (ids de
- * meeting_audio_slices). Casa pelo ID da linha, não pela chave: a chave de
- * `arquivosComFalha` passou por chaveDoStorageDaDona (sem "/manus-storage/",
- * sem barra no começo), e uma linha com a chave escrita de outro jeito não
- * bateria num filtro pela coluna. Só lê o banco quando algum áudio falhou.
+ * O áudio de reunião cujo objeto NÃO saiu do bucket: os ids das partes
+ * (meeting_audio_slices) e das gravações inteiras (meeting_recordings). Casa
+ * pelo ID da linha, não pela chave: a chave de `arquivosComFalha` passou por
+ * chaveDoStorageDaDona (sem "/manus-storage/", sem barra no começo), e uma
+ * linha com a chave escrita de outro jeito não bateria num filtro pela coluna.
+ * Só lê o banco quando algum áudio falhou.
  */
-async function fatiasComAudioNoBucket(
+async function audiosQueFicaramNoBucket(
   db: Db,
   chaves: ChavesDaConta,
   arquivosComFalha: string[],
-): Promise<string[]> {
+): Promise<{ fatias: string[]; gravacoes: string[] }> {
   const audiosComFalha = new Set(arquivosComFalha.filter(chave => chave.startsWith("meetings/")));
-  if (!audiosComFalha.size) return [];
+  if (!audiosComFalha.size) return { fatias: [], gravacoes: [] };
+  const ficou = (chave: string) => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, chave) ?? "");
   const partes = await db.select({ id: meetingAudioSlices.id, chave: meetingAudioSlices.storageKey })
     .from(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, chaves.openId));
-  return partes
-    .filter(parte => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, parte.chave) ?? ""))
-    .map(parte => parte.id);
+  const gravacoes = await db.select({ id: meetingRecordings.id, chave: meetingRecordings.storageKey })
+    .from(meetingRecordings).where(eq(meetingRecordings.ownerId, chaves.openId));
+  return {
+    fatias: partes.filter(parte => ficou(parte.chave)).map(parte => parte.id),
+    gravacoes: gravacoes.filter(gravacao => ficou(gravacao.chave)).map(gravacao => gravacao.id),
+  };
 }
 
 /**
@@ -426,6 +441,17 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
 }
 
 /**
+ * A gravação inteira que fica guarda só o ponteiro (a linha não tem fala de
+ * ninguém: chave, tipo, tamanho e duração) e vence na hora, para a varredura
+ * tentar o objeto de novo e só então apagar a linha.
+ */
+async function deixarSoOPonteiroDasGravacoes(db: Db, chaves: ChavesDaConta, gravacoesQueFicam: string[]): Promise<number> {
+  const [resultado] = await db.update(meetingRecordings).set({ expiresAt: Date.now() })
+    .where(and(eq(meetingRecordings.ownerId, chaves.openId), inArray(meetingRecordings.id, gravacoesQueFicam)));
+  return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+}
+
+/**
  * Apaga a conta e tudo que é dela. Recebe o `db` por parâmetro para o teste
  * executar a lógica de verdade, sem banco, como `apagarRastroDoContato`.
  *
@@ -433,8 +459,9 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
  * desenvolvimento não há `STORAGE_*`: sem bucket configurado, a exclusão do
  * banco não pode parar. Falha de arquivo nunca aborta o resto — ela volta no
  * relatório, em `arquivosComFalha`, e o chamador é obrigado a contá-la para a
- * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é parte do
- * áudio de uma reunião, a linha dela fica como ponteiro (regra 6 no topo).
+ * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é áudio de
+ * reunião (parte ou gravação inteira), a linha dele fica como ponteiro, e a
+ * varredura das gravações tenta de novo (regra 6 no topo).
  */
 export async function excluirConta(
   db: Db,
@@ -443,8 +470,13 @@ export async function excluirConta(
 ): Promise<RelatorioDeExclusao> {
   // Import tardio do bucket: sem ele, importar este módulo puxaria o SDK da AWS
   // para dentro do teste, que injeta o próprio apagador e nunca fala com o B2.
+  // O áudio de reunião (chaves meetings/) sai com todas as versões; os outros
+  // arquivos (fotos, contextos, Sala, SIVC) seguem com o DELETE simples.
   const apagarArquivo = opcoes.apagarArquivo
-    ?? (async (chave: string) => (await import("./storage")).storageDelete(chave));
+    ?? (async (chave: string) => {
+      const bucket = await import("./storage");
+      return chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave);
+    });
   const chaves = await lerChavesDaConta(db, conta);
   const arquivos = await chavesDeArquivosDaConta(db, chaves);
 
@@ -473,9 +505,9 @@ export async function excluirConta(
   }
   if (arquivosComFalha.length) {
     // Uma linha com a LISTA das chaves, e não só a contagem: daqui a pouco as
-    // linhas que citavam esses objetos não existem mais (fora a das partes de
-    // áudio, regra 6), e este log é o único lugar em que ainda está escrito o
-    // que precisa de remoção manual no bucket.
+    // linhas que citavam esses objetos não existem mais (fora as do áudio de
+    // reunião, regra 6, que a varredura retenta), e este log é o único lugar em
+    // que ainda está escrito o que precisa de remoção manual no bucket.
     console.error(
       `[ExclusãoDeConta] ${arquivosComFalha.length} objeto(s) ficaram no bucket e a conta foi apagada assim mesmo (userId ${conta.id}). ` +
       `Precisam de remoção manual: ${arquivosComFalha.join(", ")}`,
@@ -485,13 +517,18 @@ export async function excluirConta(
   const passos: { nome: string; linhas: number }[] = [];
   let linhasApagadas = 0;
 
-  // A parte do áudio cujo objeto ficou no bucket não sai (regra 6 no topo):
-  // fica só como ponteiro, e o passo dela no plano deixa essas linhas de fora.
-  const fatiasQueFicam = await fatiasComAudioNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam };
-  if (fatiasQueFicam.length) {
-    const linhas = await deixarSoOPonteiro(db, chaves, fatiasQueFicam);
+  // O áudio cujo objeto ficou no bucket não sai (regra 6 no topo): a parte e a
+  // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
+  // essas linhas de fora.
+  const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
+  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes };
+  if (ficaram.fatias.length) {
+    const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
+  }
+  if (ficaram.gravacoes.length) {
+    const linhas = await deixarSoOPonteiroDasGravacoes(db, chaves, ficaram.gravacoes);
+    if (linhas > 0) passos.push({ nome: "meeting_recordings (ponteiro, UPDATE)", linhas });
   }
 
   for (const passo of PLANO_DE_EXCLUSAO) {

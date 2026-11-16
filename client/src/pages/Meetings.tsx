@@ -692,7 +692,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} />
   </div></main>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
-  const { meeting, transcript, entities, suggestions, recording, recordingExpired, andamento } = data;
+  const { meeting, transcript, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento } = data;
   const partesParaOuvir = recording?.partes ?? (recording ? [{ seq: 0, url: recording.url, mimeType: recording.mimeType, inicioSegundos: 0, duracaoSegundos: recording.durationSeconds }] : []);
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
@@ -754,6 +754,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         // "A transcrição continua aqui" só é verdade com transcrição, e numa
         // reunião que falhou antes de guardar o áudio não houve gravação apagada.
         <p className="text-sm text-white/50 mt-3">{transcript ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript")}</p>
+      ) : recordingDeletionPending ? (
+        // Venceu e ainda não saiu do bucket: "foi apagada" só depois que saiu.
+        <p className="text-sm text-white/50 mt-3">{t("meetings.recordingDeletionPending")}</p>
       ) : (
         <p className="text-sm text-white/50 mt-3">{t("meetings.noRecordingStored")}</p>
       )}

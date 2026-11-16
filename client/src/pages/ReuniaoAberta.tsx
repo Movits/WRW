@@ -116,7 +116,7 @@ export default function ReuniaoAberta() {
   if (isError && !data) return <Moldura><ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()}/></Moldura>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
-  const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada } = data;
+  const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
   const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
   const falas = segmentosValidos(transcricao?.segmentos);
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
@@ -140,7 +140,7 @@ export default function ReuniaoAberta() {
         <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
       </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
         ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
-        : t("meetings.noRecordingStored")}</p>}
+        : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}
     </section>
 
     <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
