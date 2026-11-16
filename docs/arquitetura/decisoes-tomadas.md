@@ -412,7 +412,12 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Onde:** `server/resumo-da-reuniao.ts` e a migração 0017 (#205),
   `server/fila-do-resumo.ts` e `server/resumo-guardado.ts` (#206) e
   `client/src/components/BarraDoPlayer.tsx` (#207). O `ResumoGuardado.tsx` vem na #208. A
-  H6 e a H8 ainda não estão no código.
+  H6 vem na PR da branch `feat/pergunte-com-tempos`, empilhada sobre a #208
+  (`server/reuniao-com-ia.ts` e `client/src/components/ReuniaoComIA.tsx`): a resposta
+  traz de 1 a 3 trechos, cada um com o "▶" do tempo. Nela, a pergunta sobre reunião longa
+  (mais de 100 mil caracteres na entrada da IA, cerca de 1h45 de fala) gasta duas vagas
+  do teto de pedidos à IA. O plano pedia o teto menor para o link aberto, por causa do
+  custo; a revisão da PR estendeu a regra ao teto da dona. A H8 ainda não está no código.
 
 ## 15/11/2026 — a agenda fala com a Google Agenda pela API (H16)
 

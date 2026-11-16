@@ -1539,7 +1539,9 @@
       "notAnswered": "这次会议的转录内容无法回答这个问题。",
       "askError": "无法回答这个问题。",
       "unavailable": "AI 服务暂时没有响应，请稍后再试。",
-      "needsTranscript": "这次会议还没有可供 AI 阅读的转录内容。"
+      "needsTranscript": "这次会议还没有可供 AI 阅读的转录内容。",
+      "tooLong": "这次会议太长，无法向 AI 提问：上限约为 7 小时的发言。",
+      "sourcesLabel": "原话出处"
     },
     "summary": {
       "title": "会议摘要",

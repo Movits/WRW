@@ -778,7 +778,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
-      <PergunteAReuniao meetingId={meetingId}/>
+      <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)}
+        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>

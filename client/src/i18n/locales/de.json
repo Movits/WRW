@@ -1528,10 +1528,10 @@
     "storedAudioMissing": "Das gespeicherte Audio dieses Meetings wurde nicht gefunden.",
     "audioDurationUnreadable": "Die Dauer dieser Audiodatei konnte nicht gelesen werden. Laden Sie die Datei als MP3 oder M4A hoch.",
     "ai": {
-      "reviewNotice": "KI-Vorschläge, die Sie anhand des Auszugs aus der Transkription prüfen sollten. Nichts davon wurde gespeichert oder automatisch in Ihr Netzwerk übernommen.",
+      "reviewNotice": "KI-Vorschläge, die Sie anhand der Auszüge aus der Transkription prüfen sollten. Nichts davon wurde gespeichert oder automatisch in Ihr Netzwerk übernommen.",
       "excerptLabel": "Auszug aus der Transkription",
       "askTitle": "Fragen Sie das Meeting",
-      "askIntro": "Die Antwort stammt nur aus dem, was im Meeting gesagt wurde, mit dem Auszug aus der Transkription, der sie belegt.",
+      "askIntro": "Die Antwort stammt nur aus dem, was im Meeting gesagt wurde, mit den Auszügen aus der Transkription, die sie belegen.",
       "askLabel": "Ihre Frage zum Meeting",
       "askPlaceholder": "z. B.: Welche Frist wurde vereinbart?",
       "askButton": "Fragen",
@@ -1539,7 +1539,9 @@
       "notAnswered": "Die Transkription dieses Meetings beantwortet diese Frage nicht.",
       "askError": "Die Frage konnte nicht beantwortet werden.",
       "unavailable": "Der KI-Dienst hat gerade nicht geantwortet. Versuchen Sie es in einem Moment erneut.",
-      "needsTranscript": "Für dieses Meeting liegt noch keine Transkription vor, die die KI lesen kann."
+      "needsTranscript": "Für dieses Meeting liegt noch keine Transkription vor, die die KI lesen kann.",
+      "tooLong": "Dieses Meeting ist zu lang für Fragen an die KI: Die Grenze liegt bei etwa 7 Stunden Gesprächszeit.",
+      "sourcesLabel": "Wo das gesagt wurde"
     },
     "summary": {
       "title": "Zusammenfassung des Meetings",
@@ -1617,7 +1619,7 @@
       "notFound": "Dieser Link existiert nicht oder ist nicht mehr verfügbar.",
       "goHome": "WRW kennenlernen",
       "audioLoadError": "Das Audio konnte gerade nicht geladen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
-      "reviewNotice": "Vorschläge der KI zum Abgleich mit dem Auszug aus der Transkription. Nichts davon wurde gespeichert.",
+      "reviewNotice": "Vorschläge der KI zum Abgleich mit den Auszügen aus der Transkription. Nichts davon wurde gespeichert.",
       "translateSubtext": "Wählen Sie die Sprache, in der Sie die Transkription lesen möchten."
     },
     "install": {

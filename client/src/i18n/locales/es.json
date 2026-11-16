@@ -1528,10 +1528,10 @@
     "storedAudioMissing": "No se encontró el audio guardado de esta reunión.",
     "audioDurationUnreadable": "No fue posible leer la duración de este audio. Envía el archivo en MP3 o M4A.",
     "ai": {
-      "reviewNotice": "Sugerencias de la IA para que las verifiques con el fragmento de la transcripción. Nada de esto se guardó ni entra en tu red por sí solo.",
+      "reviewNotice": "Sugerencias de la IA para que las verifiques con los fragmentos de la transcripción. Nada de esto se guardó ni entra en tu red por sí solo.",
       "excerptLabel": "Fragmento de la transcripción",
       "askTitle": "Pregúntale a la reunión",
-      "askIntro": "La respuesta sale solo de lo que se dijo en la reunión, con el fragmento de la transcripción que la respalda.",
+      "askIntro": "La respuesta sale solo de lo que se dijo en la reunión, con los fragmentos de la transcripción que la respaldan.",
       "askLabel": "Tu pregunta sobre la reunión",
       "askPlaceholder": "Ej.: ¿Qué plazo se acordó?",
       "askButton": "Preguntar",
@@ -1539,7 +1539,9 @@
       "notAnswered": "La transcripción de esta reunión no responde a esta pregunta.",
       "askError": "No se pudo responder a la pregunta.",
       "unavailable": "El servicio de IA no respondió ahora. Inténtalo de nuevo en unos instantes.",
-      "needsTranscript": "Esta reunión todavía no tiene una transcripción lista para que la IA la lea."
+      "needsTranscript": "Esta reunión todavía no tiene una transcripción lista para que la IA la lea.",
+      "tooLong": "Esta reunión es demasiado larga para hacerle preguntas a la IA: el límite es de unas 7 horas de conversación.",
+      "sourcesLabel": "Dónde se dijo"
     },
     "summary": {
       "title": "Resumen de la reunión",
@@ -1617,7 +1619,7 @@
       "notFound": "Este enlace no existe o ya no está disponible.",
       "goHome": "Conocer WRW",
       "audioLoadError": "No se pudo cargar el audio ahora. Recarga la página e inténtalo de nuevo.",
-      "reviewNotice": "Sugerencias de la IA para comprobar con el fragmento de la transcripción. Nada de esto se guardó.",
+      "reviewNotice": "Sugerencias de la IA para comprobar con los fragmentos de la transcripción. Nada de esto se guardó.",
       "translateSubtext": "Elige el idioma en el que quieres leer la transcripción."
     },
     "install": {

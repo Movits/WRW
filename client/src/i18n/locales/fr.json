@@ -1528,10 +1528,10 @@
     "storedAudioMissing": "L'audio conservé de cette réunion est introuvable.",
     "audioDurationUnreadable": "Impossible de lire la durée de cet audio. Envoyez le fichier en MP3 ou M4A.",
     "ai": {
-      "reviewNotice": "Suggestions de l'IA à vérifier avec l'extrait de la transcription. Rien de tout cela n'a été enregistré ni ajouté automatiquement à votre réseau.",
+      "reviewNotice": "Suggestions de l'IA à vérifier avec les extraits de la transcription. Rien de tout cela n'a été enregistré ni ajouté automatiquement à votre réseau.",
       "excerptLabel": "Extrait de la transcription",
       "askTitle": "Interrogez la réunion",
-      "askIntro": "La réponse vient uniquement de ce qui a été dit pendant la réunion, avec l'extrait de la transcription qui l'étaye.",
+      "askIntro": "La réponse vient uniquement de ce qui a été dit pendant la réunion, avec les extraits de la transcription qui l'étayent.",
       "askLabel": "Votre question sur la réunion",
       "askPlaceholder": "Ex. : Quel délai a été convenu ?",
       "askButton": "Demander",
@@ -1539,7 +1539,9 @@
       "notAnswered": "La transcription de cette réunion ne répond pas à cette question.",
       "askError": "Impossible de répondre à la question.",
       "unavailable": "Le service d'IA n'a pas répondu pour le moment. Réessayez dans quelques instants.",
-      "needsTranscript": "Cette réunion n'a pas encore de transcription prête à être lue par l'IA."
+      "needsTranscript": "Cette réunion n'a pas encore de transcription prête à être lue par l'IA.",
+      "tooLong": "Cette réunion est trop longue pour poser des questions à l'IA : la limite est d'environ 7 heures de parole.",
+      "sourcesLabel": "Où cela a été dit"
     },
     "summary": {
       "title": "Résumé de la réunion",
@@ -1617,7 +1619,7 @@
       "notFound": "Ce lien n'existe pas ou n'est plus disponible.",
       "goHome": "Découvrir WRW",
       "audioLoadError": "Impossible de charger l'audio pour le moment. Rechargez la page et réessayez.",
-      "reviewNotice": "Suggestions de l'IA à vérifier avec l'extrait de la transcription. Rien de tout cela n'a été enregistré.",
+      "reviewNotice": "Suggestions de l'IA à vérifier avec les extraits de la transcription. Rien de tout cela n'a été enregistré.",
       "translateSubtext": "Choisissez la langue dans laquelle vous voulez lire la transcription."
     },
     "install": {

@@ -58,6 +58,7 @@ const {
   tetoDaIADoVisitanteDoLink,
 } = await import("./routers/reuniaoAberta");
 const { LinkAbertoRecusado, MENSAGEM_LINK_NAO_ENCONTRADO } = await import("./link-aberto-da-reuniao");
+const { MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR, RecusaDaReuniaoComIA } = await import("./reuniao-com-ia");
 const { BancoIndisponivel } = await import("./banco-indisponivel");
 const { MENSAGEM_BANCO_INDISPONIVEL } = await import("@shared/const");
 
@@ -132,7 +133,8 @@ describe("reuniaoAberta — público, sem sessão", () => {
     await semSessao().reuniaoAberta.perguntar({ token: TOKEN, idioma: "ja", pergunta: "  Qual o prazo?  " });
     expect(pedirResumoPeloLink).toHaveBeenCalledWith(TOKEN, expect.any(Function));
     expect(exigirReuniaoDoLink).toHaveBeenCalledWith(TOKEN);
-    expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Qual o prazo?", "ja");
+    // O último argumento toma a vaga a mais da reunião longa (ver o teto, abaixo).
+    expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Qual o prazo?", "ja", expect.any(Function));
   });
 
   it("o resumo a pedido de antes (reuniaoAberta.resumir) saiu do router: pelo link, o resumo é o guardado", () => {
@@ -295,6 +297,71 @@ describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com audi
     await expect(daDona().meetings.desligarLinkAberto({ meetingId: ID })).resolves.toEqual({ success: true });
     expect(desligarLinkAberto).toHaveBeenCalledWith("dona-1", ID);
     expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, action: "MEETING_OPEN_LINK_OFF", resourceId: ID }));
+  });
+});
+
+describe("reuniaoAberta.perguntar — a pergunta sobre reunião longa gasta 2 vagas do teto da reunião (H6)", () => {
+  // Como o serviço real: lida a transcrição, avisa se a reunião é longa antes de chamar a IA.
+  const comReuniao = (longa: boolean) => perguntarAReuniao.mockImplementation(
+    async (_dona: string, _id: string, _pergunta: string, _idioma: string, antesDeChamarAIA?: (custo: { longa: boolean }) => void) => {
+      antesDeChamarAIA?.({ longa });
+      return NAO_RESPONDIDA;
+    });
+  // Visitantes diferentes, para o teto de cada uma (10) não ser o que recusa.
+  const ip = (n: number) => `203.0.113.${Math.floor(n / PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA) + 1}`;
+
+  it(`${PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / 2} perguntas longas enchem o teto da reunião; depois, nem a longa nem a curta passam`, async () => {
+    comReuniao(true);
+    const longas = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / 2;
+    for (let i = 0; i < longas; i++) await expect(perguntar(TOKEN, ip(i))).resolves.toEqual(NAO_RESPONDIDA);
+    await expect(perguntar(TOKEN, "198.51.100.20")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    comReuniao(false);
+    await expect(perguntar(TOKEN, "198.51.100.21")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(longas);
+  });
+
+  it(`a pergunta curta segue gastando uma vaga: ${PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA} por reunião`, async () => {
+    comReuniao(false);
+    for (let i = 0; i < PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA; i++) await expect(perguntar(TOKEN, ip(i))).resolves.toEqual(NAO_RESPONDIDA);
+    await expect(perguntar(TOKEN, "198.51.100.20")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("recusada a segunda vaga, a primeira volta: a recusa não gasta vaga", async () => {
+    comReuniao(true);
+    const longas = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / 2 - 1;
+    for (let i = 0; i < longas; i++) await perguntar(TOKEN, ip(i));
+    comReuniao(false);
+    await perguntar(TOKEN, "198.51.100.20");
+    // Sobra uma vaga: a pergunta longa toma a primeira, esbarra na segunda e a devolve.
+    comReuniao(true);
+    await expect(perguntar(TOKEN, "198.51.100.21")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // A vaga devolvida serve à pergunta curta, da mesma visitante.
+    comReuniao(false);
+    await expect(perguntar(TOKEN, "198.51.100.21")).resolves.toEqual(NAO_RESPONDIDA);
+    await expect(perguntar(TOKEN, "198.51.100.22")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it(`o teto da visitante conta uma por pergunta, longa ou não: ${PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA} por visitante`, async () => {
+    comReuniao(true);
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await expect(perguntar(TOKEN, "203.0.113.1")).resolves.toEqual(NAO_RESPONDIDA);
+    await expect(perguntar(TOKEN, "203.0.113.1")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(perguntar(TOKEN, "203.0.113.2")).resolves.toEqual(NAO_RESPONDIDA);
+  });
+
+  it("reunião longa demais para perguntar: PAYLOAD_TOO_LARGE, o código que a tela traduz, e a recusa gasta UMA vaga de cada teto (leu o banco, não chamou a IA)", async () => {
+    // Como o serviço real: a recusa vem antes do antesDeChamarAIA.
+    perguntarAReuniao.mockRejectedValue(new RecusaDaReuniaoComIA("PAYLOAD_TOO_LARGE", MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR));
+    // A visitante: as recusas dela enchem o teto dela (com zero vaga por recusa, a 11ª passaria).
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) {
+      await expect(perguntar(TOKEN, ip(i))).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE", message: MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR });
+    }
+    await expect(perguntar(TOKEN, ip(0))).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // A reunião: uma vaga por recusa, nem zero nem duas. Só a 61ª é recusada pelo teto.
+    for (let i = PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i < PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA; i++) {
+      await expect(perguntar(TOKEN, ip(i))).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+    }
+    await expect(perguntar(TOKEN, "198.51.100.40")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
   });
 });
 

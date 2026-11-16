@@ -11,7 +11,9 @@ import ReuniaoAberta from "./ReuniaoAberta";
  * o teste combina, e `traduzir` registra o mutate e as opções. O resumo
  * guardado e o "Pergunte à reunião" viram marcadores que mostram o que
  * receberam (o comportamento deles está em components/ResumoGuardado.test.tsx e
- * components/ReuniaoComIA.test.tsx).
+ * components/ReuniaoComIA.test.tsx). Um teste monta o "Pergunte à reunião" de
+ * verdade, para provar o elo da página com ele: as vozes como "Falante n" e o
+ * "▶" que leva o player da barra ao ponto.
  */
 
 type OpcoesDaConsulta = {
@@ -30,6 +32,12 @@ const duble = vi.hoisted(() => ({
   resumoGuardado: vi.fn(),
   opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
+  // As props que o "Pergunte à reunião" recebeu da página, na última vez.
+  propsDaPergunta: null as Record<string, unknown> | null,
+  // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
+  // resposta da pergunta pelo link daqui (o `data` da mutação).
+  perguntaDeVerdade: false,
+  respostaDaPergunta: undefined as unknown,
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -48,12 +56,25 @@ vi.mock("@/lib/trpc", () => ({
           return duble.resumoGuardado(entrada);
         },
       },
+      perguntar: { useMutation: () => ({ data: duble.respostaDaPergunta, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
     },
+    // O "Pergunte à reunião" de verdade pede as duas mutações a cada render.
+    meetings: { perguntar: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) } },
   },
 }));
-vi.mock("@/components/ReuniaoComIA", () => ({
-  PergunteAReuniao: ({ token }: { token: string }) => <div data-testid="pergunte">{token}</div>,
-}));
+// O marcador da pergunta mostra o token, e o "▶" de uma citação chama o
+// aoIrPara da página com 615 s (10:15). Com `perguntaDeVerdade`, a página
+// monta o componente de verdade.
+vi.mock("@/components/ReuniaoComIA", async importOriginal => {
+  const real = await importOriginal<typeof import("@/components/ReuniaoComIA")>();
+  return {
+    PergunteAReuniao: (props: { token: string; aoIrPara?: (segundo: number) => void }) => {
+      duble.propsDaPergunta = props;
+      if (duble.perguntaDeVerdade) return <real.PergunteAReuniao {...props}/>;
+      return <div data-testid="pergunte">{props.token}{props.aoIrPara && <button type="button" onClick={() => props.aoIrPara?.(615)}>▶ da pergunta</button>}</div>;
+    },
+  };
+});
 // O marcador do resumo mostra o token e o estado que recebeu, e o "▶" dele
 // chama o aoIrPara da página com 610 s (10:10).
 vi.mock("@/components/ResumoGuardado", () => ({
@@ -94,6 +115,9 @@ beforeEach(() => {
   duble.opcoesDoResumo = null;
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
+  duble.propsDaPergunta = null;
+  duble.perguntaDeVerdade = false;
+  duble.respostaDaPergunta = undefined;
 });
 afterEach(async () => {
   await act(async () => { await i18n.changeLanguage("pt-BR"); });
@@ -416,5 +440,52 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     abrir();
     expect(screen.getByTestId("resumo")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "▶ do resumo" })).not.toBeInTheDocument();
+  });
+
+  it("o '▶' de uma citação do Pergunte à reunião leva o mesmo player da barra ao ponto, na parte certa (H6)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "▶ da pergunta" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+  });
+
+  it("com o 'Pergunte à reunião' de verdade: as vozes da resposta são 'Falante n', e o '▶' da citação leva o player da barra à parte certa (H6)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.perguntaDeVerdade = true;
+    duble.respostaDaPergunta = {
+      respondida: true,
+      resposta: "{F1} propôs a entrega na sexta, e {F2} concordou.",
+      citacoes: [{ trecho: "Combinamos a entrega na sexta", inicioSegundos: 615 }],
+      trecho: "Combinamos a entrega na sexta",
+    };
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    expect(screen.getByText("Falante 1 propôs a entrega na sexta, e Falante 2 concordou.")).toBeInTheDocument();
+    expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:15" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+  });
+
+  it("sem gravação, a pergunta não ganha o '▶'; e o link nunca passa os nomes das vozes à pergunta", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: true }));
+    abrir();
+    expect(screen.getByTestId("pergunte")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "▶ da pergunta" })).not.toBeInTheDocument();
+    expect(duble.propsDaPergunta).not.toHaveProperty("nomes");
+    expect(duble.propsDaPergunta).not.toHaveProperty("meetingId");
   });
 });

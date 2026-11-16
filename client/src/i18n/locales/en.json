@@ -1528,10 +1528,10 @@
     "storedAudioMissing": "This meeting's stored audio was not found.",
     "audioDurationUnreadable": "We couldn't read this audio's duration. Upload the file as MP3 or M4A.",
     "ai": {
-      "reviewNotice": "AI suggestions for you to check against the transcript excerpt. None of this was saved or added to your network on its own.",
+      "reviewNotice": "AI suggestions for you to check against the transcript excerpts. None of this was saved or added to your network on its own.",
       "excerptLabel": "Transcript excerpt",
       "askTitle": "Ask the meeting",
-      "askIntro": "The answer comes only from what was said in the meeting, with the transcript excerpt that supports it.",
+      "askIntro": "The answer comes only from what was said in the meeting, with the transcript excerpts that support it.",
       "askLabel": "Your question about the meeting",
       "askPlaceholder": "E.g.: What deadline was agreed?",
       "askButton": "Ask",
@@ -1539,7 +1539,9 @@
       "notAnswered": "This meeting's transcript does not answer this question.",
       "askError": "Could not answer the question.",
       "unavailable": "The AI service did not respond just now. Please try again in a moment.",
-      "needsTranscript": "This meeting does not have a transcript ready for the AI to read yet."
+      "needsTranscript": "This meeting does not have a transcript ready for the AI to read yet.",
+      "tooLong": "This meeting is too long for questions to the AI: the limit is about 7 hours of speech.",
+      "sourcesLabel": "Where this was said"
     },
     "summary": {
       "title": "Meeting summary",
@@ -1617,7 +1619,7 @@
       "notFound": "This link doesn't exist or is no longer available.",
       "goHome": "Discover WRW",
       "audioLoadError": "Couldn't load the audio right now. Reload the page and try again.",
-      "reviewNotice": "AI suggestions to check against the transcript excerpt. None of this was saved.",
+      "reviewNotice": "AI suggestions to check against the transcript excerpts. None of this was saved.",
       "translateSubtext": "Choose the language you want to read the transcript in."
     },
     "install": {

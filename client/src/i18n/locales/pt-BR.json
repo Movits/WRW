@@ -1528,10 +1528,10 @@
     "storedAudioMissing": "O áudio guardado desta reunião não foi encontrado.",
     "audioDurationUnreadable": "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3 ou M4A.",
     "ai": {
-      "reviewNotice": "Sugestões da IA para você conferir com o trecho da transcrição. Nada disto foi gravado nem entra na sua rede sozinho.",
+      "reviewNotice": "Sugestões da IA para você conferir com os trechos da transcrição. Nada disto foi gravado nem entra na sua rede sozinho.",
       "excerptLabel": "Trecho da transcrição",
       "askTitle": "Pergunte à reunião",
-      "askIntro": "A resposta vem só do que foi dito na reunião, com o trecho da transcrição que a sustenta.",
+      "askIntro": "A resposta vem só do que foi dito na reunião, com os trechos da transcrição que a sustentam.",
       "askLabel": "Sua pergunta sobre a reunião",
       "askPlaceholder": "Ex.: Qual prazo ficou combinado?",
       "askButton": "Perguntar",
@@ -1539,7 +1539,9 @@
       "notAnswered": "A transcrição desta reunião não responde a esta pergunta.",
       "askError": "Não foi possível responder à pergunta.",
       "unavailable": "O serviço de IA não respondeu agora. Tente de novo em instantes.",
-      "needsTranscript": "Esta reunião ainda não tem transcrição pronta para a IA ler."
+      "needsTranscript": "Esta reunião ainda não tem transcrição pronta para a IA ler.",
+      "tooLong": "Esta reunião é longa demais para perguntas à IA: o limite é de cerca de 7 horas de fala.",
+      "sourcesLabel": "Onde isso foi dito"
     },
     "summary": {
       "title": "Resumo da reunião",
@@ -1617,7 +1619,7 @@
       "notFound": "Este link não existe ou não está mais disponível.",
       "goHome": "Conhecer a WRW",
       "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página e tente de novo.",
-      "reviewNotice": "Sugestões da IA para conferir com o trecho da transcrição. Nada disto foi gravado.",
+      "reviewNotice": "Sugestões da IA para conferir com os trechos da transcrição. Nada disto foi gravado.",
       "translateSubtext": "Escolha o idioma em que você quer ler a transcrição."
     },
     "install": {
