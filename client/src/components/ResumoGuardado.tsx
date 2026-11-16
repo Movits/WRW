@@ -1,15 +1,17 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Play, RefreshCw, RotateCcw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/ModeloDoResumo";
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -31,6 +33,10 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * vozes como "Falante n", porque o link não leva os nomes que a dona deu. A
  * consulta mora na página (que também lê o emoji e repete a consulta enquanto
  * o resumo é gerado); as mutações moram aqui e a relêem.
+ *
+ * Os modelos (H4d, components/ModeloDoResumo.tsx): a dona escolhe o modelo ao
+ * pedir o resumo e pode "Refazer como…" outro. Enquanto a versão nova é
+ * escrita (ou se ela falhou), a anterior fica na tela só para ler.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -124,14 +130,30 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const confirmarTodos = trpc.meetings.confirmarItensDoResumo.useMutation({ onError: aoFalharDecisao, onSettled: reler });
   const marcar = trpc.meetings.marcarAcaoFeita.useMutation({ onError: aoFalharDecisao, onSettled: reler });
   const pedir = peloLink ? pedirPeloLink : pedirDaDona;
-  const pedirResumo = () => {
+  // Sem modelo, o resumo que falhou reabre no modelo em que estava.
+  const pedirResumo = (modelo?: ModeloDeResumo) => {
     if (peloLink) pedirPeloLink.mutate({ token });
-    else pedirDaDona.mutate({ meetingId });
+    else pedirDaDona.mutate(modelo ? { meetingId, modelo } : { meetingId });
   };
   // Uma decisão por vez: a próxima espera a releitura da anterior.
   const decidindo = decidir.isPending || confirmarTodos.isPending || marcar.isPending;
 
-  const itens: ItemNaTela[] = dados?.estado === "pronto" ? dados.itens : [];
+  // O modelo do resumo (H4d) é só da dona: o link não o recebe.
+  const modeloAtual: ModeloDeResumo = (!peloLink ? (dados as ResumoDaDona | undefined)?.modelo : null) ?? MODELO_DE_RESUMO_PADRAO;
+  const [modeloDoPedido, setModeloDoPedido] = useState<ModeloDeResumo>(MODELO_DE_RESUMO_PADRAO);
+  const [refazerAberto, setRefazerAberto] = useState(false);
+  const idDoPainelDeRefazer = useId();
+  // Refazer o resumo pronto, ou o que falhou, em outro modelo; enquanto ele é
+  // gerado, não.
+  const podeRefazer = !peloLink && (dados?.estado === "pronto" || dados?.estado === "falhou");
+  // O resumo que voltou à fila por outro caminho (outra aba, a fila) fecha o painel.
+  useEffect(() => { if (!podeRefazer) setRefazerAberto(false); }, [podeRefazer]);
+
+  // A dona recebe os itens também enquanto o resumo é refeito, ou se a versão
+  // nova falhou: são os da versão anterior, mostrados só para ler. O link só
+  // recebe itens do resumo pronto.
+  const itens: ItemNaTela[] = dados && (dados.estado === "pronto" || !peloLink) ? dados.itens : [];
+  const refazendo = !!dados && dados.estado !== "pronto" && itens.length > 0;
   const visiveis = itens.filter(item => item.status !== "ignored");
   const ignorados = itens.filter(item => item.status === "ignored");
   const pendentes = visiveis.filter(item => item.status === "pending");
@@ -172,8 +194,9 @@ export function ResumoGuardado(props: DaDona | DoLink) {
       : <div className="mt-4"><ErroDeConsulta erro={props.consulta.error} aoTentarDeNovo={() => void props.consulta.refetch()}/></div>;
   // A releitura que falha deixa o dado velho no cache. Sem dado, ou com o
   // resumo ainda na fila, o erro toma o lugar do aviso, que senão giraria para
-  // sempre; com o resumo pronto, falho ou ausente, ele vai acima do conteúdo.
-  const esperando = !dados || dados.estado === "pendente" || dados.estado === "gerando";
+  // sempre; com o resumo pronto, falho ou ausente, ele vai acima do conteúdo
+  // (e também quando o resumo é refeito, porque a versão anterior está na tela).
+  const esperando = !dados || ((dados.estado === "pendente" || dados.estado === "gerando") && !refazendo);
   // O erro do pedido é do botão de pedir: quando o resumo anda por outro
   // caminho (a fila, outro pedido pelo link), ele sai da tela com o botão.
   const comBotaoDePedir = dados?.estado === "sem_resumo" || dados?.estado === "falhou";
@@ -183,21 +206,38 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     corpo = erroDaConsulta;
   } else if (!dados) {
     corpo = <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.loading")}</p>;
-  } else if (dados.estado === "sem_resumo") {
+  } else if (dados.estado === "sem_resumo" && peloLink) {
     corpo = <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-white/60">{t("meetings.summary.noSummary")}</p>
-      <BotaoDePedir aoClicar={pedirResumo} pedindo={pedir.isPending}>{peloLink ? t("meetings.summary.requestLink") : t("meetings.summary.generate")}</BotaoDePedir>
+      <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.requestLink")}</BotaoDePedir>
     </div>;
-  } else if (dados.estado === "pendente" || dados.estado === "gerando") {
+  } else if (dados.estado === "sem_resumo") {
+    // A dona escolhe o modelo (H4d) antes de pedir.
+    corpo = <div className="mt-4 space-y-3">
+      <p className="text-sm text-white/60">{t("meetings.summary.noSummary")}</p>
+      <EscolhaDoModelo valor={modeloDoPedido} aoMudar={setModeloDoPedido} desligado={pedir.isPending}>
+        <BotaoDePedir aoClicar={() => pedirResumo(modeloDoPedido)} pedindo={pedir.isPending}>{t("meetings.summary.generate")}</BotaoDePedir>
+      </EscolhaDoModelo>
+    </div>;
+  } else if ((dados.estado === "pendente" || dados.estado === "gerando") && !refazendo) {
     corpo = <p role="status" className="mt-4 text-sm text-white/60"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.generating")}</p>;
-  } else if (dados.estado === "falhou") {
+  } else if (dados.estado === "falhou" && !refazendo) {
     corpo = <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-red-200">{t("meetings.summary.failed")}</p>
-      <BotaoDePedir aoClicar={pedirResumo} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
+      <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
     </div>;
   } else {
     corpo = <div className="mt-4 space-y-5">
-      {!peloLink && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {/* O resumo refeito em outro modelo (H4d): a versão anterior fica na
+          tela, só para ler, até a nova chegar; se a nova falhou, também. */}
+      {refazendo && dados.estado !== "falhou" && <p role="status" className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+        <Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.redoing", { modelo: nomeDoModelo(t, modeloAtual) })}
+      </p>}
+      {refazendo && dados.estado === "falhou" && <div role="alert" className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-red-200">{t("meetings.summary.redoFailed", { modelo: nomeDoModelo(t, modeloAtual) })}</p>
+        <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
+      </div>}
+      {!peloLink && !refazendo && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <AvisoDeConferir>{t("meetings.summary.reviewNotice")}</AvisoDeConferir>
         <button type="button" disabled={decidindo} onClick={() => confirmarTodos.mutate({ meetingId })}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:opacity-50">
@@ -213,7 +253,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes}
-              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo}
+              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={refazendo}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}/>)}
           </ul>
@@ -229,10 +269,10 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             data-destacado={item.id === itemDestacado ? "true" : undefined}
             className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm text-white/45 ${item.id === itemDestacado ? "ring-2 ring-amber-300/70" : ""}`}>
             <span id={`${prefixoDosIgnorados}-${i}`} dir="auto" className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
-            <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
+            {!refazendo && <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
               className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50">
               <RotateCcw size={13}/> {t("meetings.summary.undo")}
-            </button>
+            </button>}
           </li>)}
         </ul>}
       </div>}
@@ -240,7 +280,17 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   }
 
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
-    <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
+      {podeRefazer && <div className="flex flex-wrap items-center gap-3">
+        {dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">{t("meetings.summary.currentTemplate", { modelo: nomeDoModelo(t, modeloAtual) })}</span>}
+        <button type="button" aria-expanded={refazerAberto} aria-controls={refazerAberto ? idDoPainelDeRefazer : undefined} onClick={() => setRefazerAberto(aberto => !aberto)}
+          className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-300/10">
+          <RefreshCw size={13}/> {t("meetings.summary.redoAs")}
+        </button>
+      </div>}
+    </div>
+    {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={modeloAtual} aoFechar={() => setRefazerAberto(false)}/>}
     {!esperando && erroDaConsulta}
     {corpo}
     {comBotaoDePedir && pedir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, pedir.error, t("meetings.summary.requestError"), peloLink)}</p>}
@@ -254,13 +304,15 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo, aoDecidir, aoMarcar }: {
+function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar }: {
   item: ItemNaTela;
   peloLink: boolean;
   comVozes: (texto: string) => string;
   aoIrPara?: (segundo: number) => void;
   destacado: boolean;
   decidindo: boolean;
+  /** A versão anterior do resumo que está sendo refeito (H4d): a caixa fica, travada, e não há botões de decidir. */
+  somenteLeitura: boolean;
   aoDecidir: (status: "confirmed" | "ignored") => void;
   aoMarcar: (feito: boolean) => void;
 }) {
@@ -275,7 +327,7 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
     className={`rounded-xl border p-3 outline-none ${destacado ? "border-amber-300/70 ring-2 ring-amber-300/60" : pendente ? "border-amber-300/20 bg-black/10" : "border-white/10 bg-black/5"}`}>
     {comCaixa
       ? <label className="flex cursor-pointer items-start gap-3">
-          <input type="checkbox" checked={!!item.done} disabled={decidindo} onChange={evento => aoMarcar(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
+          <input type="checkbox" checked={!!item.done} disabled={decidindo || somenteLeitura} onChange={evento => aoMarcar(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
           <span id={idDoTexto} dir="auto" className={`text-sm text-white/85 ${item.done ? "line-through text-white/50" : ""}`}>{texto}</span>
         </label>
       : <p id={idDoTexto} dir="auto" className="text-sm leading-6 text-white/85">{texto}</p>}
@@ -303,7 +355,7 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
           <q dir="auto" className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
-    {pendente && !peloLink && <div className="mt-3 flex flex-wrap gap-2">
+    {pendente && !peloLink && !somenteLeitura && <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("confirmed")}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50"><Check size={14}/> {t("meetings.summary.confirm")}</button>
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("ignored")}

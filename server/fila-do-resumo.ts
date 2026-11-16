@@ -1,12 +1,14 @@
 import crypto from "crypto";
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
+import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
+import { numeracaoDoResumoRefeito } from "./resumo-refeito";
 
 /**
  * A fila do resumo guardado da reunião (H4 do desenho do gravador,
@@ -65,7 +67,7 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
 
 /** O resumo pendente mais antigo, sem reserva viva, de reunião pronta de conta ativa. */
 async function proximoResumo(db: Banco, agora: number, escopo: Escopo) {
-  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId })
+  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template })
     .from(meetingSummaries)
     .innerJoin(meetings, and(eq(meetings.id, meetingSummaries.meetingId), eq(meetings.ownerId, meetingSummaries.ownerId)))
     .innerJoin(users, eq(users.openId, meetingSummaries.ownerId))
@@ -120,17 +122,36 @@ async function registrarFalha(db: Banco, alvo: { id: string }, token: string, co
   }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
 }
 
-async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string) {
+/**
+ * O item que fica quando o resumo é refeito com outro modelo (H4d, "Refazer
+ * como…"): o que a dona confirmou e a ação que ela marcou como feita. Os
+ * pendentes e os ignorados são trocados pelos novos.
+ */
+const itemQueFica = (item: { status: string; done: boolean }) => item.status === "confirmed" || item.done;
+
+async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId: string; template: string }, token: string) {
   const [transcricao] = await db.select({
     id: meetingTranscripts.id, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
   }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true);
   const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O resumo refeito (H4d) leva à IA os itens que ficam, para ela não os
+  // escrever de novo. No primeiro resumo não há item nenhum.
+  const itensAtuais = await db.select({
+    section: meetingSummaryItems.section, subject: meetingSummaryItems.subject, text: meetingSummaryItems.text,
+    status: meetingSummaryItems.status, done: meetingSummaryItems.done,
+  }).from(meetingSummaryItems)
+    .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)))
+    .orderBy(asc(meetingSummaryItems.position));
+  const itensQueFicam = itensAtuais.filter(itemQueFica).map(({ section, subject, text }) => ({ section, subject, text }));
 
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
-    resumo = await gerarResumoDaReuniao({ transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma });
+    resumo = await gerarResumoDaReuniao({
+      transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma,
+      modelo: modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO, itensQueFicam,
+    });
   } catch (erro) {
     // Resposta cortada no teto de saída se repetiria com a mesma entrada: é
     // falha de vez. O resto (IA fora, JSON inválido) tenta de novo.
@@ -169,7 +190,9 @@ async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId
 /**
  * Grava os itens e marca o resumo como pronto, numa transação. A reunião fica
  * travada até o fim: a exclusão (que marca 'deleted' antes de apagar) espera
- * esta transação, e o que ela gravar sai junto.
+ * esta transação, e o que ela gravar sai junto. No resumo refeito (H4d), os
+ * itens que a dona confirmou e as ações feitas ficam, renumerados, e só os
+ * pendentes e os ignorados são trocados.
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
@@ -190,11 +213,35 @@ async function gravarResumo(
     const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
     if (atual?.id !== transcricao.id) return "transcricao_trocada";
-    await tx.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
-    if (resumo.itens.length) {
-      await tx.insert(meetingSummaryItems).values(resumo.itens.map((item, position) => ({
+    // Os itens de agora, lidos sem trava, e os que saem apagados pela chave:
+    // travar a faixa do resumo no índice prende também o vão vizinho, e duas
+    // gravações de resumos vizinhos se travam uma à outra (deadlock). A linha
+    // do resumo, travada acima, já faz desta a única gravação dele, e a dona
+    // não decide enquanto ele está na fila; mesmo assim, o item que alguém
+    // confirmou ou marcou como feito no meio não é apagado.
+    const itensAtuais = await tx.select({
+      id: meetingSummaryItems.id, section: meetingSummaryItems.section, position: meetingSummaryItems.position,
+      text: meetingSummaryItems.text, status: meetingSummaryItems.status, done: meetingSummaryItems.done,
+    }).from(meetingSummaryItems)
+      .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
+    const queFicam = itensAtuais.filter(itemQueFica);
+    const queSaem = itensAtuais.filter(item => !itemQueFica(item)).map(item => item.id);
+    if (queSaem.length) {
+      await tx.delete(meetingSummaryItems).where(and(
+        inArray(meetingSummaryItems.id, queSaem), eq(meetingSummaryItems.ownerId, alvo.ownerId),
+        ne(meetingSummaryItems.status, "confirmed"), eq(meetingSummaryItems.done, false),
+      ));
+    }
+    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens);
+    for (const { id, position } of numeracao.queFicam) {
+      if (queFicam.find(item => item.id === id)?.position === position) continue;
+      await tx.update(meetingSummaryItems).set({ position })
+        .where(and(eq(meetingSummaryItems.id, id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
+    }
+    if (numeracao.novos.length) {
+      await tx.insert(meetingSummaryItems).values(numeracao.novos.map(item => ({
         id: crypto.randomUUID(), summaryId: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId,
-        section: item.section, position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
+        section: item.section, position: item.position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
         excerpt: item.excerpt, startSeconds: item.startSeconds, confidence: item.confidence.toFixed(3),
         status: "pending" as const, done: false, createdAt: agora, updatedAt: agora,
       })));

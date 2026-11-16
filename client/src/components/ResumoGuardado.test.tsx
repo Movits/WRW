@@ -40,6 +40,7 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     meetings: {
       pedirResumo: duble.registrar("pedirResumo"),
+      refazerResumo: duble.registrar("refazerResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
@@ -243,11 +244,11 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
 });
 
 describe("Resumo guardado — os estados", () => {
-  it("sem resumo: 'Gerar resumo' pede o resumo da reunião", () => {
+  it("sem resumo: 'Gerar resumo' pede o resumo da reunião, no modelo escolhido (o Geral, de início)", () => {
     daDona(comEstado("sem_resumo"));
     expect(screen.getByText("Esta reunião ainda não tem resumo.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
-    expect(mutacao("pedirResumo").mutate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    expect(mutacao("pedirResumo").mutate).toHaveBeenCalledWith({ meetingId: REUNIAO, modelo: "general" });
     expect(mutacao("pedirResumoPeloLink").mutate).not.toHaveBeenCalled();
   });
 

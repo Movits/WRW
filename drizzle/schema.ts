@@ -1193,7 +1193,9 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   // e o resumo da anterior não é gravado.
   transcriptId: varchar("transcript_id", { length: 36 }),
   status: varchar("status", { length: 12, enum: ["pending", "ready", "failed"] }).default("pending").notNull(),
-  // O modelo de resumo; só 'general' até a PR dos modelos (H4d).
+  // O modelo de resumo (H4d): o que a dona escolheu ao pedir o resumo ou no
+  // "Refazer como…". A lista da tela mora em shared/modelos-de-resumo.ts, e
+  // server/modelos-de-resumo.ts confere que é a mesma deste enum.
   template: varchar("template", { length: 16, enum: ["general", "networking", "mentoring", "sales", "one_on_one"] }).default("general").notNull(),
   // O idioma em que o resumo foi escrito: o da reunião.
   language: varchar("language", { length: 12 }),

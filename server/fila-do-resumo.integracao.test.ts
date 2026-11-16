@@ -95,7 +95,9 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     await rodar();
 
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR" });
+    // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
+    // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [] });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);
     expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
     expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
