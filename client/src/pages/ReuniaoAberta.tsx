@@ -158,7 +158,8 @@ export default function ReuniaoAberta() {
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
         <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
-        <PergunteAReuniao token={token}/>
+        {/* Sem os nomes das vozes: o link não os recebe. */}
+        <PergunteAReuniao token={token} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
       </div>}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">

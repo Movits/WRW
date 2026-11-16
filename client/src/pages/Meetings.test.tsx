@@ -31,12 +31,13 @@ type Opcoes = { onSuccess?: (data: unknown, vars: unknown) => void; onError?: (e
 // vi.mock é içado para o topo do arquivo; o que as fábricas usam precisa
 // nascer em vi.hoisted, senão é lido antes de existir.
 const duble = vi.hoisted(() => {
-  const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn>; mutateAsync: ReturnType<typeof vi.fn> }> = {};
+  // `data` é o que a mutação já respondeu (o Pergunte à reunião lê a resposta dali).
+  const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn>; mutateAsync: ReturnType<typeof vi.fn>; data?: unknown }> = {};
   const registrar = (nome: string) => ({
     useMutation: (opcoes: Opcoes = {}) => {
       const m = (mutacoes[nome] ??= { opcoes, mutate: vi.fn(), mutateAsync: vi.fn() });
       m.opcoes = opcoes;
-      return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false };
+      return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false, data: m.data };
     },
   });
   return {
@@ -105,7 +106,7 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: unknown[]) => duble.duracao(...args) }));
 
 beforeEach(() => {
-  for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
+  for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); m.data = undefined; }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
@@ -1079,6 +1080,45 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     } finally {
       window.history.replaceState(null, "", antes);
     }
+  });
+});
+
+describe("Detalhe da reunião — o Pergunte à reunião com os tempos e as vozes (H6)", () => {
+  const SEGMENTOS = [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ];
+  const TRANSCRICAO = { id: "t1", transcript: "Vamos fechar o contrato.\nO frete fica para sexta.", language: "pt-BR", segments: SEGMENTOS };
+  const PARTES = [
+    { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
+    { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
+  ];
+  const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
+  // A resposta que a pergunta já recebeu do servidor (server/reuniao-com-ia.ts).
+  const respondeu = () => {
+    (duble.mutacoes.perguntar ??= { opcoes: {}, mutate: vi.fn(), mutateAsync: vi.fn() }).data = {
+      respondida: true,
+      resposta: "{F1} quer fechar o contrato, e {F2} cuida do frete.",
+      citacoes: [{ trecho: "O frete fica para sexta", inicioSegundos: 620 }],
+      trecho: "O frete fica para sexta",
+    };
+  };
+
+  it("a resposta mostra o nome que a dona deu à voz, e o '▶' da citação leva o player da barra à parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    respondeu();
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO, recording: GRAVACAO });
+    expect(screen.getByText("Ana quer fechar o contrato, e Falante 2 cuida do frete.")).toBeInTheDocument();
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[0].url);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:20" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+  });
+
+  it("sem gravação guardada, o tempo da citação é só texto", () => {
+    respondeu();
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO, recording: null, recordingExpired: true });
+    expect(screen.getByText("10:20")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
   });
 });
 

@@ -59,8 +59,19 @@ describe("o que vai à IA", () => {
     expect(texto).toBe("{F1}: Bom dia. Vamos começar.\n{F2}: Pode falar.");
   });
 
-  it("sem falas (envio único), o texto corrido, sem rótulo", () => {
-    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false });
+  it("sem falas (envio único), o texto corrido, sem rótulo e sem vozes", () => {
+    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false, vozes: new Set() });
+  });
+
+  it("as vozes da entrada são as que ela rotulou: a voz que só tem fala vazia fica de fora", () => {
+    const { texto, vozes } = entradaDoResumo(TEXTO, [
+      { inicio: 0, fim: 2, falante: "F1", texto: "Bom dia." },
+      { inicio: 2, fim: 4, falante: "F2", texto: "  " },
+      { inicio: 4, fim: 9, falante: "", texto: "", lacuna: true },
+      { inicio: 9, fim: 12, falante: "F3", texto: "Pode falar." },
+    ]);
+    expect(texto).toBe("{F1}: Bom dia.\n{F3}: Pode falar.");
+    expect(vozes).toEqual(new Set(["F1", "F3"]));
   });
 
   it("o prompt pede o idioma da reunião, o formato e o JSON strict; a transcrição vai inteira", async () => {
@@ -129,6 +140,13 @@ describe("a conferência de cada item", () => {
   it("voz que não existe na reunião derruba o item", async () => {
     invokeLLM.mockResolvedValue(resposta({ ...VAZIO, questoes: [{ texto: "{F9} vai representar a empresa?", trecho: "Ainda não sabemos quem vai representar a empresa", confianca: 0.7 }] }));
     expect((await gerarResumoDaReuniao(ENTRADA)).itens).toEqual([]);
+  });
+
+  it("voz que só tem fala vazia não foi ao prompt: o item que a cita sai", async () => {
+    const comVozMuda = { ...ENTRADA, segmentos: [...FALAS, { inicio: 70, fim: 72, falante: "F4", texto: " " }] };
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, questoes: [{ texto: "{F4} vai representar a empresa?", trecho: "Ainda não sabemos quem vai representar a empresa", confianca: 0.7 }] }));
+    expect((await gerarResumoDaReuniao(comVozMuda)).itens).toEqual([]);
+    expect(pedido().messages[1].content).not.toContain("{F4}");
   });
 
   it("voz que existe fica no texto, como rótulo, para a tela trocar pelo nome", async () => {
