@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
@@ -493,45 +493,53 @@ export const meetingsRouter = router({
         if (!alvo) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
         linkedContactId = input.contactId;
       }
-      // Tomada: só UMA decisão tira a sugestão de 'pending', e antes de criar
-      // contato ou mexer nas pendências. Sem o status no WHERE, o duplo clique
-      // (ou a aba velha) criava um segundo contato e levava as pendências da IA
-      // para ele, e um 'ignorar' tardio ignorava as do contato já criado.
-      const [tomada] = await db.update(meetingContactSuggestions)
-        .set({ status, existingContactId: linkedContactId, updatedAt: Date.now() })
-        .where(and(daDona, eq(meetingContactSuggestions.status, "pending")));
-      if (!(tomada as { affectedRows?: number } | undefined)?.affectedRows) {
-        throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_SUGESTAO_JA_DECIDIDA });
-      }
-      if (input.action === "create") {
-        try {
-          linkedContactId = await createPrivateContact(ctx.user.openId, {
+      // Tudo numa transação só (revisão do pacote P2B): a tomada, o contato
+      // novo, o ponteiro da sugestão e as pendências. Com um commit por passo,
+      // a conexão que caía depois do contato e antes das pendências deixava a
+      // sugestão 'created', o contato sem cargo nem empresa e a dona sem como
+      // repetir (CONFLICT, "já decidida"). Agora qualquer falha desfaz tudo, e
+      // a sugestão continua pendente para ela tentar de novo.
+      linkedContactId = await db.transaction(async tx => {
+        // Tomada: só UMA decisão tira a sugestão de 'pending', e antes de criar
+        // contato ou mexer nas pendências. Sem o status no WHERE, o duplo clique
+        // (ou a aba velha) criava um segundo contato e levava as pendências da IA
+        // para ele, e um 'ignorar' tardio ignorava as do contato já criado.
+        const [tomada] = await tx.update(meetingContactSuggestions)
+          .set({ status, existingContactId: linkedContactId, updatedAt: Date.now() })
+          .where(and(daDona, eq(meetingContactSuggestions.status, "pending")));
+        if (!(tomada as { affectedRows?: number } | undefined)?.affectedRows) {
+          throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_SUGESTAO_JA_DECIDIDA });
+        }
+        let contactId = linkedContactId;
+        if (input.action === "create") {
+          // Só o QUEM SOU que a tela marcou: nome, telefone e e-mail, conferidos
+          // contra a transcrição. Cargo e empresa vieram da IA e não entram
+          // sozinhos (achado 6 da bancada de 16/11): viram pendências do contato
+          // novo, em decidirPendenciasDaPessoaSugerida, para a dona confirmar.
+          contactId = await createPrivateContact(ctx.user.openId, {
             fullName: suggestion.fullName,
-            jobTitle: suggestion.jobTitle,
-            company: suggestion.company,
             phone: suggestion.phone,
             email: suggestion.email,
-          });
-        } catch (erro) {
-          // O contato não nasceu: a sugestão volta a pendente para a dona tentar de novo.
-          await db.update(meetingContactSuggestions).set({ status: "pending", updatedAt: Date.now() })
-            .where(and(daDona, eq(meetingContactSuggestions.status, "created"), isNull(meetingContactSuggestions.existingContactId)))
-            .catch(erroAoDevolver => console.error("[meetings.decideContactSuggestion] a sugestão não voltou a pendente:", erroAoDevolver));
-          throw erro;
+          }, tx);
+          await tx.update(meetingContactSuggestions).set({ existingContactId: contactId, updatedAt: Date.now() }).where(daDona);
         }
-        await db.update(meetingContactSuggestions).set({ existingContactId: linkedContactId, updatedAt: Date.now() }).where(daDona);
-      }
-      // Meu Network Inteligente: O QUE TENHO / O QUE PRECISO que a IA tirou da
-      // reunião para esta pessoa passam a apontar para o contato, AINDA
-      // pendentes — criar o contato confirma o Quem Sou que a tela mostrou, não
-      // o resto. Ignorar a pessoa ignora tudo que veio dela.
-      await decidirPendenciasDaPessoaSugerida(db, {
-        ownerId: ctx.user.openId,
-        meetingSuggestionId: suggestion.id,
-        meetingId: suggestion.meetingId,
-        acao: input.action,
-        contactId: linkedContactId,
-        quemSouDaSugestao: { fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email },
+        // Meu Network Inteligente: O QUE TENHO / O QUE PRECISO que a IA tirou da
+        // reunião para esta pessoa passam a apontar para o contato, AINDA
+        // pendentes — criar o contato confirma o Quem Sou que a tela mostrou, não
+        // o resto; cargo e empresa viram pendências também, se a transcrição os
+        // diz, com a confiança da sugestão. Ignorar a pessoa ignora tudo que veio dela.
+        await decidirPendenciasDaPessoaSugerida(tx, {
+          ownerId: ctx.user.openId,
+          meetingSuggestionId: suggestion.id,
+          meetingId: suggestion.meetingId,
+          acao: input.action,
+          contactId,
+          quemSouDaSugestao: {
+            fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email,
+            jobTitle: suggestion.jobTitle, company: suggestion.company, confianca: suggestion.confidence,
+          },
+        });
+        return contactId;
       });
       return { success: true, contactId: linkedContactId };
     }),

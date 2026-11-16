@@ -430,6 +430,35 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
   });
 });
 
+// Achado 7 da bancada de 16/11: a pessoa só citada virava um cartão igual ao das participantes.
+describe("Detalhe da reunião — quem participou e quem só foi citada", () => {
+  const abaContatos = () => screen.getByRole("button", { name: /Contatos/ });
+
+  it("a citada sai à parte, compacta e marcada; as duas seguem com Criar contato", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [
+      { ...sugestaoPendente, presence: "present", phone: null, existingContactId: null },
+      { ...sugestaoPendente, id: "s2", fullName: "Sônia Pacheco", company: "Embalagens Girassol", presence: "mentioned", phone: null, existingContactId: null },
+    ] });
+    fireEvent.click(abaContatos());
+    const citadas = screen.getByRole("region", { name: "Pessoas citadas" });
+    expect(within(citadas).getByText("Foram mencionadas na conversa, mas não participaram da reunião.")).toBeInTheDocument();
+    expect(within(citadas).getByText("Sônia Pacheco")).toBeInTheDocument();
+    expect(within(citadas).getByText("Não participou")).toBeInTheDocument();
+    expect(within(citadas).queryByText("Ana Souza")).not.toBeInTheDocument();
+    expect(screen.getByText("Ana Souza")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Criar contato/ })).toHaveLength(2);
+    fireEvent.click(within(citadas).getByRole("button", { name: /Criar contato/ }));
+    expect(duble.mutacoes.decideContactSuggestion.mutate).toHaveBeenCalledWith({ suggestionId: "s2", action: "create" });
+  });
+
+  it("sugestão anterior à marca (sem presença) fica com as participantes, e a seção das citadas não aparece", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [sugestaoPendente] });
+    fireEvent.click(abaContatos());
+    expect(screen.getByRole("heading", { level: 2, name: "Ana Souza" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Pessoas citadas" })).not.toBeInTheDocument();
+  });
+});
+
 describe("Detalhe da reunião — enquanto processa", () => {
   const abaContatos = () => screen.getByRole("button", { name: /Contatos/ });
 

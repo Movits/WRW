@@ -1535,6 +1535,8 @@
     "contactCreatedStatus": "Contact créé",
     "ignoredStatus": "Ignorée",
     "noContactSuggestions": "Aucun contact suggéré pour cette réunion.",
+    "mentionedHeading": "Personnes citées",
+    "mentionedHelp": "Elles ont été mentionnées dans la conversation, mais n'ont pas participé à la réunion.",
     "reprocessButton": "Retraiter",
     "reprocessHint": "L'audio de cette réunion reste conservé jusqu'au {{date}}. Le retraitement utilise le même audio, sans nouvel enregistrement, et remplace la transcription et les suggestions précédentes.",
     "reprocessStarted": "Retraitement lancé. La réunion sera prête ici à la fin.",
@@ -1971,7 +1973,9 @@
       "telefone": "Téléphone",
       "email": "E-mail",
       "tenho": "Ce que j'ai",
-      "preciso": "Ce dont j'ai besoin"
+      "preciso": "Ce dont j'ai besoin",
+      "cargo": "Poste",
+      "empresa": "Entreprise"
     },
     "completeByText": "Compléter par texte",
     "completeHint": "Répondez à l'assistant ci-dessous : il n'enregistre que ce que vous confirmez. Le téléphone et l'e-mail peuvent aussi être saisis dans Modifier.",
@@ -2247,6 +2251,8 @@
       "have": "Ce Que J'ai : {{valor}}",
       "need": "Ce Dont J'ai Besoin : {{valor}}",
       "confirmed": "Qui Je Suis confirmé : {{valor}}",
+      "jobTitleConfirmed": "Poste confirmé : {{valor}}",
+      "companyConfirmed": "Entreprise confirmée : {{valor}}",
       "availableYes": "Rendu disponible pour les opportunités du réseau",
       "availableNo": "Autorisation pour le réseau retirée",
       "connection": "Connexion enregistrée par la plateforme",
@@ -2356,7 +2362,8 @@
       "open": "Ouvrir le profil, les suggestions de l'IA, compléter par la voix et l'historique"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "À la création du contact, Ce Que J'ai et Ce Dont J'ai Besoin attendent votre confirmation sur son profil.",
+      "pendingAfterCreate": "À la création du contact, le poste, l'entreprise, Ce Que J'ai et Ce Dont J'ai Besoin attendent votre confirmation sur son profil.",
+      "mentionedBadge": "N'a pas participé",
       "review": "Vérifier dans Mon Réseau Intelligent"
     },
     "dashboard": {

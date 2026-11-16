@@ -1535,6 +1535,8 @@
     "contactCreatedStatus": "連絡先を作成済み",
     "ignoredStatus": "無視済み",
     "noContactSuggestions": "このミーティングで提案された連絡先はありません。",
+    "mentionedHeading": "話題に出た人",
+    "mentionedHelp": "会話の中で名前が出ましたが、ミーティングには参加していません。",
     "reprocessButton": "再処理",
     "reprocessHint": "このミーティングの音声は{{date}}まで保存されています。再処理では同じ音声を使うため録音し直す必要はなく、以前の文字起こしと提案は置き換えられます。",
     "reprocessStarted": "再処理を開始しました。完了すると、ここでミーティングを確認できます。",
@@ -1971,7 +1973,9 @@
       "telefone": "電話番号",
       "email": "メールアドレス",
       "tenho": "持っているもの",
-      "preciso": "必要なもの"
+      "preciso": "必要なもの",
+      "cargo": "役職",
+      "empresa": "会社"
     },
     "completeByText": "テキストで補う",
     "completeHint": "下のアシスタントに答えてください。確認した内容だけが保存されます。電話番号とメールアドレスは「編集」でも入力できます。",
@@ -2247,6 +2251,8 @@
       "have": "持っているもの：{{valor}}",
       "need": "必要なもの：{{valor}}",
       "confirmed": "「私は誰か」を確認：{{valor}}",
+      "jobTitleConfirmed": "役職を確認：{{valor}}",
+      "companyConfirmed": "会社を確認：{{valor}}",
       "availableYes": "ネットワークの機会に公開",
       "availableNo": "ネットワークへの許可を取り消し",
       "connection": "プラットフォームがコネクションを記録",
@@ -2356,7 +2362,8 @@
       "open": "プロフィール、AI提案、音声での補完、履歴を開く"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "連絡先を作成すると、「持っているもの」と「必要なもの」はそのプロフィールであなたの確認を待ちます。",
+      "pendingAfterCreate": "連絡先を作成すると、役職・会社・「持っているもの」・「必要なもの」はそのプロフィールであなたの確認を待ちます。",
+      "mentionedBadge": "不参加",
       "review": "マイ・スマートネットワークで確認"
     },
     "dashboard": {

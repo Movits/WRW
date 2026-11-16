@@ -50,6 +50,10 @@ function rotuloDoEvento(t: Traduzir, evento: { tipo: string } & Record<string, u
     case "tenho_adicionado": return t("networkInteligente.timeline.have", { valor: evento.valor });
     case "preciso_adicionado": return t("networkInteligente.timeline.need", { valor: evento.valor });
     case "quem_sou_confirmado": return t("networkInteligente.timeline.confirmed", { valor: evento.valor });
+    // Cargo e empresa vindos da reunião não são Quem Sou: cada um com o nome dele.
+    case "apoio_confirmado": return evento.campo === "cargo"
+      ? t("networkInteligente.timeline.jobTitleConfirmed", { valor: evento.valor })
+      : t("networkInteligente.timeline.companyConfirmed", { valor: evento.valor });
     case "disponibilidade": return evento.disponivel ? t("networkInteligente.timeline.availableYes") : t("networkInteligente.timeline.availableNo");
     case "conexao_registrada": return t("networkInteligente.timeline.connection");
     case "conexao_etapa": return t("networkInteligente.timeline.stage", { etapa: t(`networkInteligente.connections.status.${String(evento.etapa)}`) });

@@ -110,6 +110,9 @@ describe("rascunharEmailDeRetorno — o que vai à IA", () => {
     expect(invokeLLM).toHaveBeenCalledTimes(1);
     const [pedido] = invokeLLM.mock.calls[0];
     expect(pedido.response_format.json_schema.name).toBe("email_de_retorno");
+    // Função que a bancada de texto não mediu (IA1): o LLM_MODEL, sem raciocínio.
+    expect(pedido.funcao).toBeUndefined();
+    expect(pedido.raciocinio).toBeUndefined();
     const lista = JSON.parse(usuario().slice(usuario().indexOf("[")));
     expect(lista).toEqual([
       { secao: "ação", texto: "{F1} manda a minuta do contrato", responsavel: "{F1}", prazo: "até sexta-feira", feita: true },

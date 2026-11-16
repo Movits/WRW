@@ -1535,6 +1535,8 @@
     "contactCreatedStatus": "Contacto creado",
     "ignoredStatus": "Ignorada",
     "noContactSuggestions": "No hay contactos sugeridos en esta reunión.",
+    "mentionedHeading": "Personas mencionadas",
+    "mentionedHelp": "Se mencionaron en la conversación, pero no participaron en la reunión.",
     "reprocessButton": "Reprocesar",
     "reprocessHint": "El audio de esta reunión sigue guardado hasta el {{date}}. Reprocesar usa el mismo audio, sin grabar de nuevo, y reemplaza la transcripción y las sugerencias anteriores.",
     "reprocessStarted": "Reprocesamiento iniciado. La reunión estará lista aquí cuando termine.",
@@ -1971,7 +1973,9 @@
       "telefone": "Teléfono",
       "email": "Correo electrónico",
       "tenho": "Qué Tengo",
-      "preciso": "Qué Necesito"
+      "preciso": "Qué Necesito",
+      "cargo": "Cargo",
+      "empresa": "Empresa"
     },
     "completeByText": "Completar por texto",
     "completeHint": "Responde al asistente de abajo: solo guarda lo que confirmes. El teléfono y el correo también se pueden escribir en Editar.",
@@ -2247,6 +2251,8 @@
       "have": "Lo Que Tengo: {{valor}}",
       "need": "Lo Que Necesito: {{valor}}",
       "confirmed": "Quién Soy confirmado: {{valor}}",
+      "jobTitleConfirmed": "Cargo confirmado: {{valor}}",
+      "companyConfirmed": "Empresa confirmada: {{valor}}",
       "availableYes": "Puesto a disposición de las oportunidades de la red",
       "availableNo": "Autorización para la red retirada",
       "connection": "Conexión registrada por la plataforma",
@@ -2356,7 +2362,8 @@
       "open": "Abrir perfil, sugerencias de la IA, completar por voz e historial"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "Al crear el contacto, Lo Que Tengo y Lo Que Necesito quedan esperando tu confirmación en su perfil.",
+      "pendingAfterCreate": "Al crear el contacto, el cargo, la empresa, Lo Que Tengo y Lo Que Necesito quedan esperando tu confirmación en su perfil.",
+      "mentionedBadge": "No participó",
       "review": "Revisar en Mi Network Inteligente"
     },
     "dashboard": {

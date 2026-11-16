@@ -202,6 +202,8 @@ export async function rascunharEmailDeRetorno(ownerId: string, meetingId: string
       schema: SCHEMA_DO_EMAIL,
       timeoutMs: TIMEOUT_DO_RASCUNHO_MS,
       orcamentoMs: ORCAMENTO_DO_RASCUNHO_MS,
+      // Função que a bancada de texto não mediu (IA1): fica no LLM_MODEL, sem raciocínio.
+      funcao: null,
     });
     return conferirRascunho(resposta.dados, vozes);
   } catch (erro) {

@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "c46ddb39-2455-4d30-b93e-43c232f1ccdf",
+  "id": "70301f3b-ef48-48da-a73c-532b1c79ba16",
   "prevId": "7dab505e-c9bb-4486-b8d3-32478b4dce03",
   "tables": {
     "ai_match_suggestions": {
@@ -3371,6 +3371,13 @@
         "email": {
           "name": "email",
           "type": "varchar(320)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "presence": {
+          "name": "presence",
+          "type": "varchar(12)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

@@ -5,6 +5,7 @@ import { exigirDb } from "./db";
 import { GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError } from "./gemini";
 import { extrairDadosDaReuniao, gravarResultadoDaReuniao, mensagemDaFalha, ReuniaoExcluidaDuranteProcessamento, ReuniaoTomadaPorOutraExecucao } from "./meeting-service";
 import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
+import { entradaDoResumo } from "./resumo-da-reuniao";
 import { TAMANHO_MAXIMO_DA_PARTE } from "./fatias-de-reuniao";
 import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento } from "./transcricao-de-fatia";
 
@@ -358,7 +359,12 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const { segmentos, texto } = montarTranscricao(transcritas, Math.max(reuniao.esperadas ?? 0, ...partes.map(p => p.seq + 1)));
     if (!texto.trim()) throw new Error("Não foi possível transcrever o áudio desta reunião.");
     const [r] = await db.select({ idioma: meetings.language }).from(meetings).where(eq(meetings.id, reuniao.id)).limit(1);
-    const extraction = await comVagaDeIA(() => extrairDadosDaReuniao(texto));
+    // A extração lê as falas com o rótulo da voz ("{F1}: fala"), a mesma
+    // entrada do resumo: sem ele, a IA não via quem fala e chutava a presença
+    // de quem fala sem dizer o próprio nome (revisão do pacote P2B). A
+    // transcrição gravada e a conferência continuam no texto sem rótulos.
+    const entrada = entradaDoResumo(texto, segmentos);
+    const extraction = await comVagaDeIA(() => extrairDadosDaReuniao(entrada.texto, { rotulada: entrada.rotulada }));
     // Só o que foi transcrito conta minutos: a lacuna não é cobrada.
     const durationSeconds = Math.round(partes.filter(p => p.status === "transcribed").reduce((total, p) => total + p.durationMs, 0) / 1000);
     await gravarResultadoDaReuniao(db, {

@@ -80,7 +80,8 @@ const SCHEMA_DO_MAPA_MENTAL = {
 };
 
 async function pedirMapa(sistema: string, usuario: string) {
-  return pedirJsonAIA({ sistema, usuario, nome: "mapa_mental", schema: SCHEMA_DO_MAPA_MENTAL, timeoutMs: TIMEOUT_DO_MAPA_MS, orcamentoMs: ORCAMENTO_DO_MAPA_MS });
+  // Função que a bancada de texto não mediu (IA1): fica no LLM_MODEL, sem raciocínio.
+  return pedirJsonAIA({ sistema, usuario, nome: "mapa_mental", schema: SCHEMA_DO_MAPA_MENTAL, timeoutMs: TIMEOUT_DO_MAPA_MS, orcamentoMs: ORCAMENTO_DO_MAPA_MS, funcao: null });
 }
 
 /**

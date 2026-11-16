@@ -174,6 +174,19 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     expect(gravacao.params).toEqual(expect.arrayContaining(["dona-1", "reuniao-1", "en", "Long talk from the meeting."]));
   });
 
+  it("a extração pede o modelo da função dela (LLM_MODEL_EXTRACAO; sem ela, o LLM_MODEL); a tradução fica no modelo geral", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] });
+    await extractMeetingData("Reunião com a Ana sobre a mina de lítio.");
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+    expect(invokeLLM.mock.calls[0][0]).toMatchObject({ funcao: "extracao" });
+
+    invokeLLM.mockReset();
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk from the meeting." } }] });
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+    expect((invokeLLM.mock.calls[0][0] as { funcao?: unknown }).funcao).toBeUndefined();
+  });
+
   it("a transcrição foi trocada por um reprocessamento enquanto o LLM traduzia: a tradução volta para quem pediu, mas NÃO vai para o cache", async () => {
     banco.transcricaoTrocada = true;
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Old talk from the meeting." } }] });
@@ -333,6 +346,8 @@ describe("Reunião longa em janelas (G8)", () => {
     const enviados = invokeLLM.mock.calls.map(c => (c[0] as { messages: Array<{ content: string }> }).messages[1].content);
     for (const enviado of enviados) expect(enviado.length).toBeLessThan(JANELA_DA_EXTRACAO + 200);
     expect(enviados[2]).toContain(texto.slice(-40));
+    // Toda janela é extração: nenhuma volta ao modelo geral.
+    for (const [pedido] of invokeLLM.mock.calls) expect(pedido).toMatchObject({ funcao: "extracao" });
   });
 
   it("uma janela que falha derruba a extração inteira (meia reunião não passa por inteira)", async () => {

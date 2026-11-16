@@ -269,6 +269,8 @@ function pedirTraducaoDoLote(lote: readonly EntradaDaTraducao[], destino: Idioma
     schema: SCHEMA_DA_TRADUCAO,
     timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
     orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
+    // Função que a bancada de texto não mediu (IA1): fica no LLM_MODEL, sem raciocínio.
+    funcao: null,
   });
 }
 

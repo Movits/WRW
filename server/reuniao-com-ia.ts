@@ -128,7 +128,9 @@ async function pedirJsonDaTela(
   tempo: { timeoutMs: number; orcamentoMs: number },
 ): Promise<Record<string, unknown>> {
   try {
-    return (await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo })).dados;
+    // Só o Pergunte usa este pedido: LLM_MODEL_PERGUNTA escolhe o modelo dele,
+    // e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
+    return (await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo, funcao: "pergunta" })).dados;
   } catch (erro) {
     if (erro instanceof FalhaDaIA) throw new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", MENSAGEM_IA_INDISPONIVEL);
     throw erro;

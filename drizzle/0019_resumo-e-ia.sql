@@ -13,6 +13,7 @@ CREATE TABLE `meeting_summary_translations` (
 	CONSTRAINT `meeting_summary_translations_owner_meeting_language_idx` UNIQUE(`owner_id`,`meeting_id`,`language`)
 );
 --> statement-breakpoint
+ALTER TABLE `meeting_contact_suggestions` ADD `presence` varchar(12);--> statement-breakpoint
 ALTER TABLE `meeting_summaries` ADD `mind_map` json;--> statement-breakpoint
 ALTER TABLE `meeting_summaries` ADD `mind_map_status` varchar(12);--> statement-breakpoint
 ALTER TABLE `meeting_summaries` ADD `mind_map_generated_at` bigint;--> statement-breakpoint
