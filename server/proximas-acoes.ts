@@ -269,12 +269,14 @@ export async function soltarAcoesDaReuniao(ex: Executor, ownerId: string, meetin
 export const LIMITE_DA_LISTA = 300;
 /** Quantas abertas o cartão do Dashboard mostra. */
 export const ABERTAS_NO_PAINEL = 5;
+/** Até quantas ações ligadas a um contato o perfil dele mostra (H5b). */
+export const ACOES_NO_PERFIL_DO_CONTATO = 100;
 /** Os nomes da rede que a sugestão de contato lê, no máximo (só id e nome, pelo índice). */
 export const CONTATOS_PARA_SUGERIR = 5000;
 
 export type FiltroDasAcoes = "abertas" | "todas";
 
-async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean; limite: number }) {
+async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean; limite: number; contactId?: number }) {
   const linhas = await db.select({
     id: proximasAcoes.id,
     texto: proximasAcoes.texto,
@@ -299,7 +301,11 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
     .leftJoin(meetings, and(eq(meetings.id, proximasAcoes.meetingId), eq(meetings.ownerId, proximasAcoes.ownerId), ne(meetings.status, "deleted")))
     .leftJoin(meetingSummaryItems, and(eq(meetingSummaryItems.id, proximasAcoes.itemId), eq(meetingSummaryItems.ownerId, proximasAcoes.ownerId)))
     .leftJoin(privateContacts, and(eq(privateContacts.id, proximasAcoes.contactId), eq(privateContacts.ownerId, proximasAcoes.ownerId)))
-    .where(and(eq(proximasAcoes.ownerId, ownerId), opcoes.soAbertas ? eq(proximasAcoes.feita, false) : undefined))
+    .where(and(
+      eq(proximasAcoes.ownerId, ownerId),
+      opcoes.soAbertas ? eq(proximasAcoes.feita, false) : undefined,
+      opcoes.contactId !== undefined ? eq(proximasAcoes.contactId, opcoes.contactId) : undefined,
+    ))
     // As abertas primeiro; entre elas, por prazo, e as sem prazo no fim. O id
     // desempata (as do mesmo INSERT têm a mesma data): a lista não troca de
     // ordem entre uma leitura e outra.
@@ -385,6 +391,22 @@ export async function proximasAcoesDoPainel(ownerId: string) {
   const db = await exigirDb();
   const acoes = await lerAcoes(db, ownerId, { soAbertas: true, limite: ABERTAS_NO_PAINEL });
   return { acoes, abertas: await contarAbertas(db, ownerId) };
+}
+
+/**
+ * As ações que a dona ligou a um contato da rede dela (H5b): a seção do perfil
+ * do contato e os eventos da linha do tempo
+ * (server/network-perfil-do-contato.ts). Todas, as abertas primeiro e por
+ * prazo, como na página. Quem chama já conferiu que o contato é da dona; o
+ * WHERE leva a dona de novo.
+ *
+ * Não completa as ações que faltam (garantirAcoesDaDona): a ação que nasce do
+ * item do resumo não tem contato, e só a dona a liga a um. Por isso o perfil
+ * só lê, e não escreve.
+ */
+export async function proximasAcoesDoContato(ownerId: string, contactId: number) {
+  const db = await exigirDb();
+  return lerAcoes(db, ownerId, { soAbertas: false, limite: ACOES_NO_PERFIL_DO_CONTATO, contactId });
 }
 
 // ── o que a dona faz na lista ───────────────────────────────────────────────

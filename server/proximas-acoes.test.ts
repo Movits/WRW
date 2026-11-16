@@ -419,6 +419,29 @@ describe("a lista: o que vai à tela", () => {
     expect(painel.acoes[0]).not.toHaveProperty("contatoSugerido");
     expect(de("select", schema.privateContacts)).toEqual([]);
   });
+
+  it("o perfil do contato (H5b): as ações da dona ligadas a ele, abertas e feitas, só lendo", async () => {
+    lerLista([
+      { ...LINHA, contactId: 5, nomeDoContato: "Carla Souza" },
+      { ...LINHA, id: "feita", contactId: 5, nomeDoContato: "Carla Souza", feita: true, feitaEm: 9 },
+    ]);
+    const acoes = await servico.proximasAcoesDoContato(DONA, 5);
+    // A dona e o contato no WHERE, sem o filtro de feita; o teto do perfil.
+    const leitura = de("select", schema.proximasAcoes)[0];
+    expect(leitura.sql).toBe("(`proximas_acoes`.`owner_id` = ? and `proximas_acoes`.`contact_id` = ?)");
+    expect(leitura.params).toEqual([DONA, 5]);
+    expect(leitura.limite).toBe(servico.ACOES_NO_PERFIL_DO_CONTATO);
+    // O que a tela recebe é o mesmo da lista: o link do item, os nomes das vozes e o contato.
+    expect(acoes.map(acao => [acao.id, acao.feita])).toEqual([["acao-1", false], ["feita", true]]);
+    expect(acoes[0]).toMatchObject({
+      reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1" }, vozes: { F2: "Carla" }, contato: { id: 5, nome: "Carla Souza" },
+    });
+    expect(acoes[0]).not.toHaveProperty("contatoSugerido");
+    // Só lê: nem o backfill dos itens confirmados (a ação do item nasce sem
+    // contato), nem a rede para sugerir, nem escrita ou transação.
+    expect(estado.operacoes.map(o => [o.tipo, o.tabela])).toEqual([["select", schema.proximasAcoes]]);
+    expect(estado.transacoes).toBe(0);
+  });
 });
 
 describe("o que a dona faz na lista", () => {

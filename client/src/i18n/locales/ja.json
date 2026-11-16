@@ -2258,7 +2258,9 @@
       "topics": "話題：{{lista}}",
       "connectionsTitle": "コネクションと仲介",
       "connectionsNoConsent": "この連絡先のコネクションを見るには、スマートコネクションを有効にしてください。",
-      "searchGlobal": "この連絡先のコネクションをグローバルネットワークで探す"
+      "searchGlobal": "この連絡先のコネクションをグローバルネットワークで探す",
+      "actionsEmpty": "この連絡先に紐づく次のアクションはありません。ここでメモするか、「次のアクション」でアクションをこの連絡先に紐づけてください。",
+      "actionsAll": "次のアクションをすべて表示"
     },
     "availability": {
       "title": "この連絡先をネットワークの機会に公開する",
@@ -2315,7 +2317,9 @@
       "availableYes": "ネットワークの機会に公開",
       "availableNo": "ネットワークへの許可を取り消し",
       "connection": "プラットフォームがコネクションを記録",
-      "stage": "コネクションの段階：{{etapa}}"
+      "stage": "コネクションの段階：{{etapa}}",
+      "nextAction": "次のアクション：{{texto}}",
+      "nextActionDone": "次のアクション完了：{{texto}}"
     },
     "connections": {
       "title": "記録されたコネクション",
