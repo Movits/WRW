@@ -45,8 +45,10 @@ import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
 import {
   contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingRecordings,
   opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
-  strategicGroups, users,
+  strategicGroups, users, googleAgendaConexoes,
 } from "../drizzle/schema";
+import { encryptData } from "./security";
+import { URL_DE_REVOGACAO } from "./google-oauth";
 
 const AQUI: string = (import.meta as { dirname?: string }).dirname ?? path.dirname(fileURLToPath(import.meta.url));
 const FONTE_SCHEMA = readFileSync(path.resolve(AQUI, "..", "drizzle", "schema.ts"), "utf8");
@@ -84,7 +86,9 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 66: o resumo guardado da reunião (H4) somou meeting_summaries.owner_id e
     // meeting_summary_items.owner_id.
     // 67: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
-    expect(PARES).toHaveLength(67);
+    // 68: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
+    expect(PARES).toHaveLength(68);
+    expect(PARES).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });
     expect(PARES).toContainEqual({ tabela: "agenda_reunioes", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
@@ -545,6 +549,67 @@ describe("B6) a parte de áudio cujo objeto ficou no bucket fica, só como ponte
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     expect(atualizacoesDasPartes()).toEqual([]);
     expect(renderizar(delecaoDasPartes()[0].condicao).params).toEqual(["open-7"]);
+  });
+});
+
+// ════════ B7) a Google Agenda: o token sai revogado antes de a linha sair ═════
+// H16b: a linha de google_agenda_conexoes guarda o refresh token cifrado. Depois
+// do passo dela não há mais o que revogar, por isso a revogação vem ANTES do
+// laço; e, como o bucket, a Google fora do ar não segura a exclusão.
+describe("B7) a conexão com a Google Agenda é revogada antes do laço, sem travar a exclusão", () => {
+  it("revoga uma vez, pelo id da conta, antes do primeiro DELETE; a linha sai pelo userId", async () => {
+    const revogarGoogle = vi.fn(async (_userId: number) => { ordemDosEfeitos.push("google"); return "revogada" as const; });
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo, revogarGoogle });
+    expect(revogarGoogle).toHaveBeenCalledTimes(1);
+    expect(revogarGoogle).toHaveBeenCalledWith(7);
+    expect(ordemDosEfeitos.indexOf("google")).toBeGreaterThanOrEqual(0);
+    expect(ordemDosEfeitos.indexOf("google")).toBeLessThan(ordemDosEfeitos.indexOf("delete"));
+    expect(relatorio.googleAgenda).toBe("revogada");
+    const daGoogle = delecoes.find(d => d.tabela === googleAgendaConexoes);
+    expect(daGoogle?.colunas).toEqual(["userId"]);
+    expect(renderizar(daGoogle!.condicao).params).toEqual([7]);
+  });
+
+  it("a Google não confirmou: o relatório diz 'falhou', e a linha e a conta saem assim mesmo", async () => {
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const relatorio = await excluirConta(fakeDb, CONTA, {
+      apagarArquivo,
+      revogarGoogle: async () => { throw new Error("A Google não confirmou a revogação do token da agenda."); },
+    });
+    expect(relatorio.googleAgenda).toBe("falhou");
+    expect(delecoes.some(d => d.tabela === googleAgendaConexoes)).toBe(true);
+    expect(delecoes[delecoes.length - 1].tabela).toBe(users);
+    expect(erro.mock.calls.some(chamada => String(chamada[0]).includes("Google Agenda"))).toBe(true);
+    erro.mockRestore();
+  });
+
+  it("o padrão lê a conexão pelo mesmo banco: sem linha, nada vai à Google", async () => {
+    const buscar = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", buscar);
+    try {
+      const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+      expect(relatorio.googleAgenda).toBe("sem-conexao");
+      expect(buscar).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("o padrão, com conexão: decifra o refresh token e o revoga na Google, no corpo do POST", async () => {
+    linhasPorTabela.set(googleAgendaConexoes, [{ versao: encryptData("refresh-da-dona") }]);
+    const buscar = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", buscar);
+    try {
+      const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+      expect(relatorio.googleAgenda).toBe("revogada");
+      expect(buscar).toHaveBeenCalledTimes(1);
+      const [url, init] = buscar.mock.calls[0];
+      expect(url).toBe(URL_DE_REVOGACAO);
+      expect(init?.method).toBe("POST");
+      expect(new URLSearchParams(String(init?.body)).get("token")).toBe("refresh-da-dona");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

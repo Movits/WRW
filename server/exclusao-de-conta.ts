@@ -61,6 +61,7 @@ import {
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
   strategicGroups, trustedDevices, userProfiles, users,
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
+  googleAgendaConexoes,
 } from "../drizzle/schema";
 
 /**
@@ -188,6 +189,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
 
   // ── módulo institucional: chave id ────────────────────────────────────────
   { tabela: consents, coluna: consents.userId, origem: "id" },
+  {
+    tabela: googleAgendaConexoes, coluna: googleAgendaConexoes.userId, origem: "id",
+    motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
+  },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
@@ -266,6 +271,12 @@ export type RelatorioDeExclusao = {
   arquivosApagados: number;
   arquivosComFalha: string[];
   linhasApagadas: number;
+  /**
+   * A conexão com a Google Agenda (H16b): o token revogado na Google, nenhuma
+   * conexão, ou a revogação falhou (a linha sai do banco assim mesmo, e a falha
+   * vai ao log e à auditoria da exclusão).
+   */
+  googleAgenda: "revogada" | "sem-conexao" | "falhou";
 };
 
 /** Descobre os ids que o plano precisa antes de apagar qualquer coisa. */
@@ -438,16 +449,27 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
  * relatório, em `arquivosComFalha`, e o chamador é obrigado a contá-la para a
  * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é parte do
  * áudio de uma reunião, a linha dela fica como ponteiro (regra 6 no topo).
+ *
+ * `revogarGoogle` é injetável pelo mesmo motivo: revoga na Google o token da
+ * Google Agenda da conta (H16b) antes de a linha dele sair no plano. Falha da
+ * Google também não aborta: vai ao log e ao relatório (`googleAgenda`).
  */
 export async function excluirConta(
   db: Db,
   conta: { id: number; openId: string; email: string | null },
-  opcoes: { apagarArquivo?: (chave: string) => Promise<void> } = {},
+  opcoes: {
+    apagarArquivo?: (chave: string) => Promise<void>;
+    revogarGoogle?: (userId: number) => Promise<"revogada" | "sem-conexao">;
+  } = {},
 ): Promise<RelatorioDeExclusao> {
   // Import tardio do bucket: sem ele, importar este módulo puxaria o SDK da AWS
   // para dentro do teste, que injeta o próprio apagador e nunca fala com o B2.
   const apagarArquivo = opcoes.apagarArquivo
     ?? (async (chave: string) => (await import("./storage")).storageDelete(chave));
+  // Import tardio pelo mesmo motivo: o módulo da Google Agenda só entra quando
+  // a exclusão roda de verdade.
+  const revogarGoogle = opcoes.revogarGoogle
+    ?? (async (userId: number) => (await import("./google-agenda")).revogarGoogleDaConta(db, userId));
   const chaves = await lerChavesDaConta(db, conta);
   const arquivos = await chavesDeArquivosDaConta(db, chaves);
 
@@ -497,6 +519,21 @@ export async function excluirConta(
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
   }
 
+  // A Google Agenda (H16b) antes do laço, enquanto a linha ainda guarda o
+  // token: depois do passo dela, não há mais o que revogar. Se a Google não
+  // confirmar, a exclusão segue (como no bucket), e a linha sai assim mesmo:
+  // a WRW esquece o token, e a dona ainda pode tirar o acesso pela conta Google.
+  let googleAgenda: RelatorioDeExclusao["googleAgenda"];
+  try {
+    googleAgenda = await revogarGoogle(conta.id);
+  } catch (erro) {
+    googleAgenda = "falhou";
+    console.error(
+      `[ExclusãoDeConta] o token da Google Agenda não foi revogado na Google (userId ${conta.id}); a conexão sai do banco assim mesmo:`,
+      erro instanceof Error ? erro.message : erro,
+    );
+  }
+
   for (const passo of PLANO_DE_EXCLUSAO) {
     const valores = valoresDaOrigem(chaves, passo.origem);
     if (!valores.length) continue;
@@ -543,5 +580,5 @@ export async function excluirConta(
   passos.push({ nome: "users.id + users.openId", linhas: linhasDaConta });
   linhasApagadas += linhasDaConta;
 
-  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas };
+  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas, googleAgenda };
 }

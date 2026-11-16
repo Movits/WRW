@@ -83,6 +83,10 @@ export const PLANO_DE_LIMPEZA = [
 
   // ── módulo institucional: chave id (int) ────────────────────────────────
   { tabela: "consents", coluna: "userId", chave: "id", acao: "apagar" },
+  // A conexão com a Google Agenda (H16b). O exame não conecta conta Google,
+  // então o DELETE não encontra nada; se um dia conectar, a linha sai com o
+  // resto (a revogação na Google fica com a exclusão de conta, não com o exame).
+  { tabela: "google_agenda_conexoes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "assinaturas_de_minutos", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_documents", coluna: "userId", chave: "id", acao: "apagar" },

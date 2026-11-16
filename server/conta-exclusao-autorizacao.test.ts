@@ -219,6 +219,28 @@ describe("o caminho feliz", () => {
     expect(resposta.arquivosComFalha).toBe(1);
     expect(auditoria.find(linha => linha.action === ACAO_EXCLUSAO)).toMatchObject({ status: "failure" });
   });
+
+  it("o token da Google Agenda que a Google não revogou também vira failure, e o registro diz isso (H16b)", async () => {
+    excluirContaFalso.mockResolvedValue({ ...RELATORIO, googleAgenda: "falhou" });
+    const { caller } = contexto();
+    const resposta = await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "dona@exemplo.com" });
+    expect(resposta.sucesso).toBe(true);
+    const registro = auditoria.find(linha => linha.action === ACAO_EXCLUSAO);
+    expect(registro).toMatchObject({ status: "failure" });
+    expect((registro!.details as Record<string, unknown>).googleAgenda).toBe("falhou");
+  });
+
+  it("a conexão revogada (ou nenhuma) não muda o sucesso do registro", async () => {
+    for (const googleAgenda of ["revogada", "sem-conexao"]) {
+      auditoria.length = 0;
+      excluirContaFalso.mockResolvedValue({ ...RELATORIO, googleAgenda });
+      const { caller } = contexto();
+      await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "dona@exemplo.com" });
+      const registro = auditoria.find(linha => linha.action === ACAO_EXCLUSAO);
+      expect(registro).toMatchObject({ status: "success" });
+      expect((registro!.details as Record<string, unknown>).googleAgenda).toBe(googleAgenda);
+    }
+  });
 });
 
 // ══ o que ficou no bucket precisa estar LOCALIZÁVEL, sem virar dado pessoal ══

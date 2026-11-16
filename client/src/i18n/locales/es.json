@@ -1947,6 +1947,39 @@
       "sendInvite": "Enviar la invitación"
     }
   },
+  "googleAgenda": {
+    "title": "Google Calendar",
+    "subtitle": "Conecta tu cuenta de Google para que WRW añada a tu Google Calendar las reuniones que programes.",
+    "notConnected": "No hay ninguna cuenta de Google conectada.",
+    "connect": "Conectar Google Calendar",
+    "connected": "Conectado a una cuenta de Google.",
+    "connectedAs": "Conectado a la cuenta de Google {{email}}.",
+    "broken": "Esta conexión dejó de funcionar. Vuelve a conectar para que WRW pueda usar de nuevo tu Google Calendar.",
+    "reconnect": "Volver a conectar",
+    "privacyNote": "WRW solo modifica los eventos de las reuniones que programes en la agenda de reuniones de WRW. Puedes desconectarlo cuando quieras.",
+    "wrongAddress": "Para conectar Google Calendar, entra en WRW desde la dirección {{address}}.",
+    "openAddress": "Abrir {{address}}",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando…",
+    "disconnectConfirm": "¿Desconectar Google Calendar? Los eventos que ya están en tu Google Calendar seguirán allí.",
+    "disconnectYes": "Desconectar",
+    "disconnectNo": "Mantener",
+    "result": {
+      "connected": "Google Calendar conectado.",
+      "denied": "No se autorizó la conexión con Google Calendar.",
+      "missingPermission": "Faltó el permiso del calendario. Vuelve a conectar y deja marcada la opción de Google Calendar.",
+      "expired": "La conexión tardó demasiado. Inténtalo de nuevo.",
+      "wrongAddress": "La conexión con Google Calendar solo funciona desde la dirección oficial de WRW.",
+      "error": "No se pudo conectar Google Calendar. Inténtalo de nuevo en unos instantes."
+    },
+    "toast": {
+      "disconnected": "Google Calendar desconectado.",
+      "disconnectedPending": "WRW borró la conexión, pero Google no lo confirmó. Si quieres, quita el acceso de WRW en la configuración de tu cuenta de Google."
+    },
+    "errors": {
+      "unavailable": "La conexión con Google Calendar no está disponible en este momento."
+    }
+  },
   "appHeader": {
     "menuButton": "Menú",
     "navigation": "Navegación",

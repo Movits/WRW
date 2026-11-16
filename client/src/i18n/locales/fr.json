@@ -1947,6 +1947,39 @@
       "sendInvite": "Envoyer l’invitation"
     }
   },
+  "googleAgenda": {
+    "title": "Google Agenda",
+    "subtitle": "Connectez votre compte Google pour que WRW ajoute à votre Google Agenda les réunions que vous planifiez.",
+    "notConnected": "Aucun compte Google connecté.",
+    "connect": "Connecter Google Agenda",
+    "connected": "Connecté à un compte Google.",
+    "connectedAs": "Connecté au compte Google {{email}}.",
+    "broken": "Cette connexion ne fonctionne plus. Reconnectez-vous pour que WRW puisse de nouveau utiliser votre Google Agenda.",
+    "reconnect": "Reconnecter",
+    "privacyNote": "WRW ne modifie que les événements des réunions que vous planifiez dans l’agenda des réunions de WRW. Vous pouvez vous déconnecter à tout moment.",
+    "wrongAddress": "Pour connecter Google Agenda, ouvrez WRW à l’adresse {{address}}.",
+    "openAddress": "Ouvrir {{address}}",
+    "disconnect": "Déconnecter",
+    "disconnecting": "Déconnexion…",
+    "disconnectConfirm": "Déconnecter Google Agenda ? Les événements déjà présents dans votre Google Agenda y resteront.",
+    "disconnectYes": "Déconnecter",
+    "disconnectNo": "Conserver",
+    "result": {
+      "connected": "Google Agenda connecté.",
+      "denied": "La connexion à Google Agenda n’a pas été autorisée.",
+      "missingPermission": "L’autorisation d’accès à l’agenda manquait. Reconnectez-vous et laissez cochée l’option Google Agenda.",
+      "expired": "La connexion a pris trop de temps. Réessayez.",
+      "wrongAddress": "La connexion à Google Agenda ne fonctionne que depuis l’adresse officielle de WRW.",
+      "error": "Impossible de connecter Google Agenda. Réessayez dans un instant."
+    },
+    "toast": {
+      "disconnected": "Google Agenda déconnecté.",
+      "disconnectedPending": "WRW a supprimé la connexion, mais Google ne l’a pas confirmé. Si vous le souhaitez, retirez l’accès de WRW dans les paramètres de votre compte Google."
+    },
+    "errors": {
+      "unavailable": "La connexion à Google Agenda n’est pas disponible pour le moment."
+    }
+  },
   "appHeader": {
     "menuButton": "Menu",
     "navigation": "Navigation",

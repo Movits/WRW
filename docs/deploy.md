@@ -172,6 +172,29 @@ como "fora do log"). Os ids que a chave do Gemini enxerga saem de
 
 `PORT` a hospedagem injeta sozinha (o Render e o Railway fazem isso). Não defina na mão.
 
+### Só para a Google Agenda (opcional)
+
+A conexão com a Google Agenda no Perfil (H16b) só existe com as quatro variáveis
+abaixo. Sem qualquer uma, a seção some do Perfil e `/api/google-agenda/conectar` e
+`/api/google-agenda/retorno` dão 404 (`configuracaoDaGoogleAgenda`, em
+`server/google-oauth.ts`). Só os nomes ficam no código; os valores, no painel do
+Render.
+
+| Variável | Para quê | Valor |
+|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | o cliente OAuth "Aplicativo da Web" do Google Cloud | o ID do cliente |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | o segredo do mesmo cliente | o segredo do cliente |
+| `FRONTEND_URL` | vira o URI de retorno, `<FRONTEND_URL>/api/google-agenda/retorno`, que precisa estar cadastrado no cliente exatamente assim | https; http só em `localhost` |
+| `VAULT_ENCRYPTION_KEY` | cifra o refresh token no banco | 32 caracteres ou mais; mais curta, a função some |
+
+A conexão só começa pelo host do `FRONTEND_URL`, porque o cookie da ida é do host:
+quem entra pelo endereço do Render vê no Perfil o caminho para o endereço certo. O
+que configurar no Google Cloud (Calendar API, branding, público em modo Teste, os
+escopos `openid`, `email` e `calendar.events`) está em
+`docs/arquitetura/decisoes-tomadas.md`, na decisão de 15/11/2026. No modo Teste, o
+refresh token vence em 7 dias: na primeira vez que a WRW tentar usá-lo depois disso,
+a conexão fica marcada e a seção pede "Reconectar".
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

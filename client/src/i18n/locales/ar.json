@@ -1947,6 +1947,39 @@
       "sendInvite": "أرسل الدعوة"
     }
   },
+  "googleAgenda": {
+    "title": "تقويم Google",
+    "subtitle": "اربط حساب Google الخاص بك لكي تضيف WRW الاجتماعات التي تحدّدها إلى تقويم Google.",
+    "notConnected": "لا يوجد حساب Google مرتبط.",
+    "connect": "ربط تقويم Google",
+    "connected": "مرتبط بحساب Google.",
+    "connectedAs": "مرتبط بحساب Google {{email}}.",
+    "broken": "توقّف هذا الربط عن العمل. اربطه من جديد لتعود WRW إلى استخدام تقويم Google الخاص بك.",
+    "reconnect": "إعادة الربط",
+    "privacyNote": "لا تعدّل WRW إلا أحداث الاجتماعات التي تحدّدها في جدول الاجتماعات في WRW. يمكنك إلغاء الربط في أي وقت.",
+    "wrongAddress": "لربط تقويم Google، افتح WRW من العنوان {{address}}.",
+    "openAddress": "فتح {{address}}",
+    "disconnect": "إلغاء الربط",
+    "disconnecting": "جارٍ إلغاء الربط…",
+    "disconnectConfirm": "هل تريد إلغاء ربط تقويم Google؟ ستبقى الأحداث الموجودة في تقويم Google الخاص بك كما هي.",
+    "disconnectYes": "إلغاء الربط",
+    "disconnectNo": "الإبقاء",
+    "result": {
+      "connected": "تم ربط تقويم Google.",
+      "denied": "لم يتم السماح بالربط مع تقويم Google.",
+      "missingPermission": "كان إذن التقويم ناقصًا. اربط من جديد واترك خيار تقويم Google محددًا.",
+      "expired": "استغرق الربط وقتًا طويلًا. حاول مرة أخرى.",
+      "wrongAddress": "لا يعمل الربط مع تقويم Google إلا من العنوان الرسمي لـ WRW.",
+      "error": "تعذّر ربط تقويم Google. حاول مرة أخرى بعد قليل."
+    },
+    "toast": {
+      "disconnected": "تم إلغاء ربط تقويم Google.",
+      "disconnectedPending": "حذفت WRW الربط، لكن Google لم تؤكد ذلك. إن أردت، أزل صلاحية وصول WRW من إعدادات حساب Google الخاص بك."
+    },
+    "errors": {
+      "unavailable": "الربط مع تقويم Google غير متاح الآن."
+    }
+  },
   "appHeader": {
     "menuButton": "القائمة",
     "navigation": "التنقل",

@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
+import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
@@ -691,6 +692,10 @@ export default function Profile() {
             )
           )}
         </Section>
+
+        {/* A Google Agenda (H16b): só aparece com a função disponível no
+            servidor; fora da edição, como a zona de risco abaixo. */}
+        {!editing && <ConexaoGoogleAgenda />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}
