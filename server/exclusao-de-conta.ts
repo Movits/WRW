@@ -50,7 +50,7 @@ import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
 import type { exigirDb } from "./db";
 import { chaveDoStorageDaDona } from "./storage";
 import {
-  aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
@@ -165,6 +165,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     motivo: "a parte cujo áudio não saiu do bucket fica, sem a transcrição, como o único ponteiro para o objeto",
   },
   { tabela: meetingRecordings, coluna: meetingRecordings.ownerId, origem: "openId" },
+  // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
+  // (nome e e-mail de terceiros) que a dona marcou.
+  { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },

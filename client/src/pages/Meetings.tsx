@@ -25,7 +25,8 @@ import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
-import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
@@ -138,6 +139,27 @@ export default function Meetings() {
   const [naGravacao] = useRoute(ROTA_GRAVAR);
   const [, reuniaoAberta] = useRoute<{ id: string }>(`${ROTA_DAS_REUNIOES}/:id`);
   const utils = trpc.useUtils();
+  // O "Gravar agora" da agenda (H16a) abre /gravar?agendada=<id>: o título vem
+  // da reunião marcada (ReuniaoDaAgendaNoGravador), e a gravação que nascer fica
+  // ligada a ela. Id fora do formato é ignorado, sem consulta.
+  const busca = useSearch();
+  const agendada = useMemo(() => {
+    const valor = new URLSearchParams(busca).get(PARAMETRO_DA_AGENDADA);
+    return valor && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valor) ? valor : null;
+  }, [busca]);
+  // A reunião da agenda lida na tela (nula sem ela, ou se não é mais da agenda), e
+  // a que valia quando a gravação começou: durante a gravação a URL volta a
+  // /gravar sem a busca (o efeito mais abaixo), e o envio único só cria a
+  // reunião no fim.
+  const agendaNaTela = useRef<string | null>(null);
+  const agendaDaGravacao = useRef<string | null>(null);
+  // Não trava nada: se ligar falhar, a gravação segue, e a dona é avisada.
+  const ligarAAgenda = useCallback((agendaId: string | null, meetingId: string) => {
+    if (!agendaId) return;
+    void utils.client.agenda.ligarGravacao.mutate({ id: agendaId, meetingId })
+      .then(() => utils.agenda.listar.invalidate())
+      .catch(() => toast.error(t("agenda.errors.linkFailed")));
+  }, [utils, t]);
   // Enquanto alguma reunião processa (o reprocessamento roda em segundo plano),
   // a lista se atualiza sozinha a cada 10 s; sem nada processando, não consulta.
   const { data: meetings, isLoading, isError, error, refetch } = trpc.meetings.list.useQuery(undefined, {
@@ -333,9 +355,11 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
+    agendaDaGravacao.current = agendaNaTela.current;
+    let reuniaoEmPartes: string | null = null;
     if (emPartes) {
       try {
-        await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+        reuniaoEmPartes = await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       } catch (error) {
         return toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
       }
@@ -343,6 +367,8 @@ export default function Meetings() {
     const comecou = await gravador.comecar();
     // O microfone não abriu (negado, ocupado): a reunião em partes vazia sai.
     if (emPartes && !comecou) await gravacaoEmPartes.cancelar();
+    // Em partes, a reunião nasce no Iniciar: é aqui que ela vai para a agenda.
+    else if (reuniaoEmPartes) ligarAAgenda(agendaDaGravacao.current, reuniaoEmPartes);
   }
 
   async function uploadAudio(file: File) {
@@ -352,6 +378,7 @@ export default function Meetings() {
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
     if (file.size > 10 * 1024 * 1024) return toast.error(t("meetings.fileTooLarge"));
+    const agendaId = agendaNaTela.current;
     let reuniaoCriada: string | undefined;
     // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
     const liberarEnvio = ocupar("enviando");
@@ -367,6 +394,7 @@ export default function Meetings() {
       if (durationSeconds > MAX_DURATION) return toast.error(t("meetings.audioTooLong"));
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
+      ligarAAgenda(agendaId, created.id);
       await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado });
     } catch (error) {
       // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
@@ -403,6 +431,8 @@ export default function Meetings() {
         readAsDataUrl(t, capturedAudio.blob),
       ]);
       reuniaoCriada = created.id;
+      // A agenda de quando a gravação começou; ou a que terminou de carregar depois.
+      ligarAAgenda(agendaDaGravacao.current ?? agendaNaTela.current, created.id);
       await submitRecording.mutateAsync({
         meetingId: created.id,
         audioBase64,
@@ -448,6 +478,11 @@ export default function Meetings() {
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
+      daAgenda={agendada && naGravacao ? (
+        // key: outra reunião da agenda lê e preenche de novo.
+        <ReuniaoDaAgendaNoGravador key={agendada} id={agendada} tituloAtual={title} aoPreencherTitulo={setTitle}
+          aoCarregar={id => { agendaNaTela.current = id; }} />
+      ) : null}
     />
   ) : screen === "detail" && reuniaoAberta ? (
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
@@ -475,7 +510,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; daAgenda?: React.ReactNode }) {
   const { t } = useTranslation();
   const locked = props.recording || props.processing;
   // G10: sem a tela acesa garantida (iPhone, ou navegador sem Wake Lock), a
@@ -487,7 +522,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <p className="text-amber-300 text-xs font-semibold tracking-wide mt-6">{t("meetings.newMeetingEyebrow")}</p>
       <h1 className="text-2xl font-bold mt-1">{t("meetings.recorderTitle")}</h1>
       <div className="mt-7 space-y-5">
-        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
+        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/>{props.daAgenda}</div>
         <div><label htmlFor="idioma-da-reuniao" className="text-sm text-white/70">{t("meetings.meetingLanguageLabel")}</label>
           <select id="idioma-da-reuniao" disabled={locked} value={props.idioma} onChange={e => props.setIdioma(idiomaDaReuniao(e.target.value) ?? IDIOMA_DA_REUNIAO_PADRAO)} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300">
             {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}
