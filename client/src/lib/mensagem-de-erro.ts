@@ -2,6 +2,9 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_RESUMO_SENDO_GERADO,
+  MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
   UNAUTHED_ERR_MSG,
 } from "@shared/const";
@@ -49,6 +52,10 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [UNAUTHED_ERR_MSG]: "errors.notAuthenticated",
   [NOT_ADMIN_ERR_MSG]: "errors.notAuthorized",
   [MENSAGEM_DO_LIMITE]: "errors.tooManyRequests",
+  // As recusas das decisões do resumo guardado (server/resumo-guardado.ts).
+  [MENSAGEM_RESUMO_SENDO_GERADO]: "meetings.summary.errorRegenerating",
+  [MENSAGEM_ITEM_NAO_ENCONTRADO]: "meetings.summary.errorItemGone",
+  [MENSAGEM_SO_ACAO_TEM_CAIXA]: "meetings.summary.errorOnlyActions",
 };
 
 /**

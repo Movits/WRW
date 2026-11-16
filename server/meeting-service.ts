@@ -893,8 +893,10 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId);
 
   const completedAt = now();
+  // O resumo guardado (mais abaixo) nasce apontando para esta transcrição.
+  const transcriptId = crypto.randomUUID();
   await db.insert(meetingTranscripts).values({
-    id: crypto.randomUUID(),
+    id: transcriptId,
     meetingId,
     ownerId,
     transcript: transcription.text,
@@ -965,6 +967,19 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
     if (ehErroDeBancoIndisponivel(erro)) throw erro;
     console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
   }
+  // O resumo guardado (H4): toda reunião que fica pronta ganha o pedido, e a
+  // fila do resumo (server/fila-do-resumo.ts) o gera em segundo plano. Serve ao
+  // envio único, às partes e ao reprocesso, que passam todos por aqui. Fica no
+  // bloco de escritas da ficha, antes do 'ready': a fila só pega resumo de
+  // reunião pronta, e a exclusão no meio leva a linha com os outros derivados
+  // (apagarDerivadosDaReuniao). No reprocesso, a linha antiga já saiu em
+  // apagarDerivadosSemGravacao. Idempotente pelo índice único da reunião: a
+  // linha que já existir fica como está, e a reunião não falha por causa dela
+  // (nenhum caminho de hoje a cria antes: pedir o resumo exige a reunião
+  // 'ready', e esta execução ainda está em 'processing').
+  await db.insert(meetingSummaries).values({
+    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", createdAt: completedAt, updatedAt: completedAt,
+  }).onDuplicateKeyUpdate({ set: { meetingId: sql`${meetingSummaries.meetingId}` } });
   // A releitura acima e este UPDATE não são atômicos: exclusão, reprocessamento
   // novo ou varredura podem ter entrado entre os dois. O WHERE com a ficha faz
   // o banco arbitrar. Zero linhas: relê para saber quem venceu. Excluída, o

@@ -25,7 +25,7 @@ import {
   translatePrivateMeetingTranscript,
   nomearFalante,
 } from "../meeting-service";
-import { perguntarAReuniao, RecusaDaReuniaoComIA, resumirReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { perguntarAReuniao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
@@ -46,10 +46,12 @@ export function esquecerTentativasDeReprocesso() {
   reprocessosPorDona.clear();
 }
 
-// Cada resumo e cada pergunta mandam até 24 mil caracteres da transcrição à
-// IA, e cada chamada é paga. Teto brando por dona, resumo e perguntas somados,
-// em memória como o do reprocesso. Conta todo pedido que passa da validação,
-// até o recusado: a recusa não chama a IA, e assim também não serve de sonda.
+// Cada pergunta manda até 24 mil caracteres da transcrição à IA, e cada
+// resumo pedido é uma geração paga na fila. Teto brando por dona, pedidos de
+// resumo e perguntas somados, em memória como o do reprocesso. A pergunta conta
+// todo pedido que passa da validação, até o recusado: a recusa não chama a IA,
+// e assim também não serve de sonda. O pedido de resumo só conta quando cria
+// trabalho novo (server/resumo-guardado.ts).
 export const PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA = 20;
 export const tetoDaIADaReuniao = criarTeto(
   PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA,
@@ -80,8 +82,8 @@ async function recusarSeReuniaoProcessando(db: Awaited<ReturnType<typeof exigirD
 }
 
 /**
- * As recusas do resumo, da pergunta e do link aberto saem com o código que a
- * tela traduz. O router do link aberto (reuniaoAberta.ts) usa a mesma.
+ * As recusas da pergunta e do link aberto saem com o código que a tela
+ * traduz. O router do link aberto (reuniaoAberta.ts) usa a mesma.
  */
 export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise<T> {
   try {
@@ -236,21 +238,12 @@ export const meetingsRouter = router({
       return translatePrivateMeetingTranscript(ctx.user.openId, input.meetingId, input.language);
     }),
 
-  // Resumo da reunião pela IA (tópicos, decisões e tarefas, cada um com o trecho
-  // que o sustenta) e perguntas sobre ela. Só a dona, só reunião pronta com
-  // transcrição. Nada é gravado: a resposta vai só para a tela, para conferir.
-  // Os dois dividem o teto de pedidos à IA (TOO_MANY_REQUESTS).
-  resumir: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES) }))
-    .mutation(async ({ ctx, input }) => {
-      tetoDaIADaReuniao.reservar(ctx.user.openId);
-      return comRecusaTraduzida(() => resumirReuniao(ctx.user.openId, input.meetingId, input.idioma));
-    }),
-
   // O resumo GUARDADO (H4): gerado em segundo plano pela fila do resumo, cada
-  // item pendente até a dona confirmar. Só a dona; a dona no WHERE de tudo
+  // item pendente até a dona confirmar. Toda reunião que fica pronta já ganha
+  // o pedido (gravarResultadoDaReuniao); pedir serve à reunião antiga e ao
+  // resumo que falhou. Só a dona; a dona no WHERE de tudo
   // (server/resumo-guardado.ts). Pedir o resumo que ainda não existe (ou que
-  // falhou) gasta uma vaga do mesmo teto de pedidos à IA.
+  // falhou) gasta uma vaga do teto de pedidos à IA, o mesmo das perguntas.
   resumoGuardado: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),

@@ -8,19 +8,27 @@ import ReuniaoAberta from "./ReuniaoAberta";
 /**
  * A página do link aberto, /r/{token} (pedido do Roberto em 12/11/2026): quem
  * recebeu o link vê a reunião sem conta. O tRPC é um dublê: `ver` devolve o que
- * o teste combina, e `traduzir` registra o mutate e as opções. O resumo e o
- * "Pergunte à reunião" viram marcadores que mostram o token que receberam (o
- * comportamento deles está em components/ReuniaoComIA.test.tsx).
+ * o teste combina, e `traduzir` registra o mutate e as opções. O resumo
+ * guardado e o "Pergunte à reunião" viram marcadores que mostram o que
+ * receberam (o comportamento deles está em components/ResumoGuardado.test.tsx e
+ * components/ReuniaoComIA.test.tsx).
  */
 
 type OpcoesDaConsulta = {
   retry: (tentativas: number, erro: unknown) => boolean;
   refetchOnReconnect: (consulta: { state: { error: unknown } }) => boolean;
 };
+type OpcoesDoResumo = {
+  enabled: boolean;
+  retry: (tentativas: number, erro: unknown) => boolean;
+  refetchInterval: (consulta: { state: { data?: { estado: string }; error: unknown } }) => number | false;
+};
 
 const duble = vi.hoisted(() => ({
   ver: vi.fn(),
   opcoesDaConsulta: null as OpcoesDaConsulta | null,
+  resumoGuardado: vi.fn(),
+  opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
 }));
 
@@ -34,12 +42,24 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
       traduzir: { useMutation: () => duble.traduzir },
+      resumoGuardado: {
+        useQuery: (entrada: unknown, opcoes: OpcoesDoResumo) => {
+          duble.opcoesDoResumo = opcoes;
+          return duble.resumoGuardado(entrada);
+        },
+      },
     },
   },
 }));
 vi.mock("@/components/ReuniaoComIA", () => ({
-  ResumoDaReuniaoPelaIA: ({ token }: { token: string }) => <div data-testid="resumo">{token}</div>,
   PergunteAReuniao: ({ token }: { token: string }) => <div data-testid="pergunte">{token}</div>,
+}));
+// O marcador do resumo mostra o token e o estado que recebeu, e o "▶" dele
+// chama o aoIrPara da página com 610 s (10:10).
+vi.mock("@/components/ResumoGuardado", () => ({
+  ResumoGuardado: ({ token, consulta, aoIrPara }: { token: string; consulta: { data?: { estado: string } }; aoIrPara?: (segundo: number) => void }) => (
+    <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>
+  ),
 }));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
@@ -60,9 +80,19 @@ function abrir() {
   return render(<Route path="/r/:token" component={ReuniaoAberta}/>);
 }
 
+// A página abre na aba Resumo (H4c); a transcrição e a tradução ficam na aba
+// Transcrição.
+function abrirNaTranscricao() {
+  const tela = abrir();
+  fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+  return tela;
+}
+
 beforeEach(() => {
   duble.ver.mockReset();
   duble.opcoesDaConsulta = null;
+  duble.opcoesDoResumo = null;
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
 });
 afterEach(async () => {
@@ -78,12 +108,46 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Reunião com a Ana" })).toBeInTheDocument();
     expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
     expect(screen.getByText(/01:35/)).toBeInTheDocument();
-    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
-    expect(screen.getByTestId("resumo")).toHaveTextContent(TOKEN);
+    expect(screen.getByTestId("resumo")).toHaveTextContent(`${TOKEN} sem_resumo`);
     expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
     // Nada do que é só da dona.
     expect(screen.queryByRole("button", { name: /Excluir/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Contatos/)).not.toBeInTheDocument();
+  });
+
+  it("abre na aba Resumo, como no app de referência; a Transcrição fica na outra aba", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const resumo = screen.getByRole("button", { name: "Resumo" });
+    const transcricao = screen.getByRole("button", { name: "Transcrição" });
+    expect(resumo).toHaveAttribute("aria-pressed", "true");
+    expect(transcricao).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("resumo")).toBeInTheDocument();
+    expect(screen.queryByText("Combinamos a entrega na sexta.")).not.toBeInTheDocument();
+    fireEvent.click(transcricao);
+    expect(transcricao).toHaveAttribute("aria-pressed", "true");
+    expect(resumo).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pergunte")).not.toBeInTheDocument();
+  });
+
+  it("trocar de aba não corta o áudio nem perde a tradução", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrirNaTranscricao();
+    const audio = document.querySelector("audio");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
+    const { onSuccess } = duble.traduzir.mutate.mock.calls[0][1] as { onSuccess: (r: { text: string }) => void };
+    act(() => onSuccess({ text: "Acordamos la entrega el viernes." }));
+    fireEvent.click(screen.getByRole("button", { name: "Resumo" }));
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(document.querySelector("audio")).toBe(audio);
+    expect(screen.getByText("Acordamos la entrega el viernes.")).toBeInTheDocument();
+    // A volta à aba não pede a tradução de novo.
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("link que não existe ou foi desligado: aviso traduzido, sem tentar de novo", () => {
@@ -119,7 +183,10 @@ describe("Reunião aberta pelo link", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: null }));
     abrir();
     expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+    // Sem texto para resumir, a consulta do resumo nem sai.
+    expect(duble.opcoesDoResumo!.enabled).toBe(false);
     expect(screen.queryByTestId("pergunte")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
     expect(screen.getByText("A transcrição ainda não está disponível.")).toBeInTheDocument();
   });
 
@@ -143,7 +210,7 @@ describe("Reunião aberta pelo link", () => {
 
   it("em pt-BR mostra o original sem pedir tradução; trocar o idioma traduz pelo token", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     expect(duble.traduzir.mutate).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
     expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "es" }, expect.anything());
@@ -158,7 +225,7 @@ describe("Reunião aberta pelo link", () => {
 
   it("reunião em inglês com a tela em pt-BR: traduz para o pt-BR, e o inglês é o original (G1b)", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "We agreed on Friday.", idioma: "en" } }));
-    abrir();
+    abrirNaTranscricao();
     expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "pt-BR" }, expect.anything());
     expect(screen.getByRole("option", { name: /English \(original\)/ })).toBeInTheDocument();
     duble.traduzir.mutate.mockClear();
@@ -171,7 +238,7 @@ describe("Reunião aberta pelo link", () => {
     vi.useFakeTimers();
     try {
       duble.ver.mockReturnValue(pronta());
-      abrir();
+      abrirNaTranscricao();
       fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
       const pedidos = duble.traduzir.mutate.mock.calls;
       act(() => (pedidos[0][1] as { onSuccess: (r: unknown) => void }).onSuccess({ language: "es", text: null, cached: false, emAndamento: true }));
@@ -198,7 +265,7 @@ describe("Reunião aberta pelo link", () => {
         { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
       ] },
     }));
-    abrir();
+    abrirNaTranscricao();
     expect(screen.getAllByText("Falante 2").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:10" }));
     expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
@@ -214,7 +281,7 @@ describe("Reunião aberta pelo link", () => {
   it("tradução que falhou: avisa e mostra o original", () => {
     duble.traduzir = { ...duble.traduzir, isError: true };
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
     expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível traduzir a transcrição.");
     expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
@@ -225,7 +292,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
   const comErro = (code: string, message = "frase do servidor") => {
     duble.traduzir = { ...duble.traduzir, isError: true, error: { message, data: { code } } } as typeof duble.traduzir;
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
     return screen.getByRole("alert");
   };
@@ -254,7 +321,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
 
   it("o texto da transcrição segue a direção dele mesmo, e o idioma dele vai para o leitor de tela", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     const original = screen.getByText("Combinamos a entrega na sexta.");
     expect(original).toHaveAttribute("dir", "auto");
     expect(original).toHaveAttribute("lang", "pt-BR");
@@ -262,7 +329,7 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
 
   it("o subtítulo da tradução fala com quem lê, não com a dona", () => {
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     expect(screen.getByText("Escolha o idioma em que você quer ler a transcrição.")).toBeInTheDocument();
   });
 
@@ -284,9 +351,70 @@ describe("Reunião aberta pelo link — direção e anúncios", () => {
   it("\"Traduzindo\" é anunciado ao leitor de tela", () => {
     duble.traduzir = { ...duble.traduzir, isPending: true };
     duble.ver.mockReturnValue(pronta());
-    abrir();
+    abrirNaTranscricao();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
     // Há também o status da barra do player (H4b): o anúncio é o status com este texto.
     expect(screen.getByText(/Traduzindo/).closest("[role=status]")).not.toBeNull();
+  });
+});
+
+describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
+  it("vem pelo token e pergunta de novo a cada 5 s enquanto é gerado; o link desligado para a consulta", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(duble.resumoGuardado).toHaveBeenCalledWith({ token: TOKEN });
+    const opcoes = duble.opcoesDoResumo!;
+    expect(opcoes.enabled).toBe(true);
+    const com = (estado: string, error: unknown = null) => opcoes.refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente")).toBe(5_000);
+    expect(com("gerando")).toBe(5_000);
+    expect(com("pronto")).toBe(false);
+    expect(com("falhou")).toBe(false);
+    expect(com("pendente", { data: { code: "NOT_FOUND" } })).toBe(false);
+    expect(opcoes.retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
+    expect(opcoes.retry(0, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(true);
+  });
+
+  it("o erro que persiste (500, banco fora do ar, rede) também para a repetição: nenhum visitante fica perguntando para sempre", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const { refetchInterval } = duble.opcoesDoResumo!;
+    const com = (estado: string, error: unknown) => refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente", { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    expect(com("gerando", { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    // O erro da rede chega sem código.
+    expect(com("pendente", new Error("Failed to fetch"))).toBe(false);
+    // A releitura que dá certo limpa o erro, e a repetição volta.
+    expect(com("pendente", null)).toBe(5_000);
+  });
+
+  it("o emoji do resumo vai antes do título, sem mudar o nome do título", () => {
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🚢", itens: [] }, isError: false, error: null, refetch: vi.fn() });
+    abrir();
+    const titulo = screen.getByRole("heading", { level: 1, name: "Reunião com a Ana" });
+    expect(titulo.textContent).toBe("🚢Reunião com a Ana");
+    expect(titulo).toHaveAttribute("dir", "auto");
+  });
+
+  it("o '▶' do resumo leva o player da barra ao ponto, na parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "▶ do resumo" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+  });
+
+  it("sem gravação, o resumo não ganha o '▶'", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: true }));
+    abrir();
+    expect(screen.getByTestId("resumo")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "▶ do resumo" })).not.toBeInTheDocument();
   });
 });

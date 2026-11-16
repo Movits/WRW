@@ -20,6 +20,7 @@ const duble = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   pendencias: vi.fn(),
+  resumoGuardado: vi.fn(),
   mutacao: () => ({ useMutation: () => ({ mutate: () => {}, mutateAsync: async () => {}, isPending: false }) }),
 }));
 
@@ -32,7 +33,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
     }),
     meetings: {
@@ -45,12 +47,16 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
       reprocess: duble.mutacao(),
-      resumir: duble.mutacao(),
+      resumoGuardado: { useQuery: () => duble.resumoGuardado() },
+      pedirResumo: duble.mutacao(),
+      decidirItemDoResumo: duble.mutacao(),
+      confirmarItensDoResumo: duble.mutacao(),
+      marcarAcaoFeita: duble.mutacao(),
       perguntar: duble.mutacao(),
       ligarLinkAberto: duble.mutacao(),
       desligarLinkAberto: duble.mutacao(),
     },
-    reuniaoAberta: { resumir: duble.mutacao(), perguntar: duble.mutacao() },
+    reuniaoAberta: { pedirResumo: duble.mutacao(), perguntar: duble.mutacao() },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
 }));
@@ -68,6 +74,8 @@ beforeEach(() => {
     isLoading: false, isError: false, error: null, refetch: vi.fn(),
   });
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // A URL escolhe o ramo; o setup limpa só o state do histórico.
   window.history.replaceState(null, "", "/meetings");
 });

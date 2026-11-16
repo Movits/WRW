@@ -46,8 +46,10 @@ const duble = vi.hoisted(() => {
     get: vi.fn(),
     pendencias: vi.fn(),
     duracao: vi.fn(),
+    resumoGuardado: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
     },
   };
@@ -69,13 +71,17 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
-      resumir: duble.registrar("resumir"),
+      resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      pedirResumo: duble.registrar("pedirResumo"),
+      decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
+      marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       perguntar: duble.registrar("perguntar"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
     },
     reuniaoAberta: {
-      resumir: duble.registrar("resumirPeloLink"),
+      pedirResumo: duble.registrar("pedirResumoPeloLink"),
       perguntar: duble.registrar("perguntarPeloLink"),
     },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
@@ -91,6 +97,8 @@ vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: 
 beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // A URL escolhe o ramo da tela (lista, gravador, detalhe), e o setup limpa só
   // o state do histórico: sem isto, o detalhe aberto num teste abriria o seguinte.
   window.history.replaceState(null, "", "/meetings");
@@ -155,6 +163,15 @@ function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<De
   fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
   return meeting;
 }
+
+// A gravação em duas partes (0 a 600 s e 600 a 900 s). O "▶ mm:ss" e o ?t do
+// link levam o player da barra à parte que cobre o segundo, e o src do único
+// <audio> diz em qual parte ele está (blocos D1 e H4c).
+const PARTES = [
+  { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
+  { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
+];
+const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
 
 const botaoExcluir = () => screen.getByRole("button", { name: /^Excluir$/ });
 const tituloDoModal = () => screen.queryByText("Excluir esta reunião?");
@@ -691,11 +708,6 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
     { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
   ];
-  const PARTES = [
-    { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
-    { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
-  ];
-  const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
 
   it("a transcrição em partes aparece por falante, e clicar no tempo leva o player à parte certa", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -886,26 +898,177 @@ describe("Detalhe da reunião — pendências de Tenho/Preciso na aba Contatos",
   });
 });
 
-describe("Detalhe da reunião — resumo e perguntas pela IA", () => {
+describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)", () => {
   const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "Ana: vamos fechar o contrato até sexta-feira.", language: "pt" };
+  const ITEM = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+  const ITENS = [
+    { id: "a0000000-0000-4000-8000-000000000001", section: "action", position: 0, subject: null, text: "{F1} manda a minuta do contrato", assignee: "{F1}", due: null, excerpt: "eu mando a minuta do contrato", startSeconds: 42, status: "pending", done: false },
+    { id: ITEM, section: "decision", position: 1, subject: null, text: "Fechar o contrato até sexta-feira.", assignee: null, due: null, excerpt: "vamos fechar o contrato até sexta-feira", startSeconds: 620, status: "confirmed", done: false },
+  ];
+  const resumoPronto = (emoji: string | null = "📄") => ({ data: { estado: "pronto", emoji, idioma: "pt-BR", erro: null, itens: ITENS }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  const opcoesDaConsulta = () => duble.resumoGuardado.mock.calls.at(-1)![1] as {
+    enabled: boolean;
+    refetchInterval: (consulta: { state: { data?: { estado: string }; error: unknown } }) => number | false;
+    retry: (tentativas: number, erro: unknown) => boolean;
+  };
 
-  it("reunião pronta com transcrição: o Gerar resumo e o Pergunte à reunião aparecem na aba Resumo", () => {
+  // O link para dentro da reunião chega direto ao endereço do detalhe.
+  function abrirPeloLink(busca: string, reuniao: Record<string, unknown> = {}, detalhe: Partial<Detalhe> = {}) {
+    const meeting = { ...REUNIAO, status: "ready", ...reuniao };
+    duble.list.mockReturnValue({ data: [meeting], isLoading: false });
+    duble.get.mockReturnValue({ data: { meeting, transcript: TRANSCRICAO, entities: [], suggestions: [], recording: null, recordingExpired: false, ...detalhe }, isLoading: false });
+    window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
+    render(<Meetings />);
+  }
+  // O <audio> do player fixo no rodapé, um só para todas as abas.
+  const audioDaBarra = () => screen.getByRole("region", { name: "Gravação" }).querySelector("audio")!;
+
+  it("reunião pronta com transcrição: o resumo guardado e o Pergunte à reunião aparecem na aba Resumo; sem resumo, 'Gerar resumo' o pede", () => {
     abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(duble.resumoGuardado).toHaveBeenCalledWith({ meetingId: REUNIAO.id }, expect.objectContaining({ enabled: true }));
+    expect(screen.getByRole("heading", { name: "Resumo da reunião" })).toBeInTheDocument();
     expect(screen.getByText("Pergunte à reunião")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
 
-    expect(duble.mutacoes.resumir.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, idioma: "pt-BR" });
+    expect(duble.mutacoes.pedirResumo.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
   });
 
   it.each([
     ["pronta sem transcrição", "ready", null],
     ["em processamento", "processing", TRANSCRICAO],
     ["com falha", "failed", TRANSCRICAO],
-  ])("reunião %s: nenhum dos dois aparece", (_caso, status, transcript) => {
+  ])("reunião %s: nem o resumo nem a pergunta aparecem", (_caso, status, transcript) => {
     abrirDetalhe({ status }, { transcript });
+    expect(screen.queryByRole("heading", { name: "Resumo da reunião" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Gerar resumo/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Pergunte à reunião")).not.toBeInTheDocument();
+  });
+
+  it.each(["processing", "failed", "recording"])("reunião em '%s': a consulta do resumo nem sai", status => {
+    abrirDetalhe({ status }, { transcript: TRANSCRICAO });
+    expect(opcoesDaConsulta().enabled).toBe(false);
+  });
+
+  it("a consulta pergunta de novo a cada 5 s enquanto o resumo está na fila ou sendo gerado, e para quando ele fica pronto ou falha", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const { refetchInterval } = opcoesDaConsulta();
+    const com = (estado: string, error: unknown = null) => refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente")).toBe(5_000);
+    expect(com("gerando")).toBe(5_000);
+    expect(com("pronto")).toBe(false);
+    expect(com("falhou")).toBe(false);
+    expect(com("sem_resumo")).toBe(false);
+    // A reunião excluída em outro lugar no meio da espera: para de perguntar.
+    expect(com("pendente", { data: { code: "NOT_FOUND" } })).toBe(false);
+    expect(refetchInterval({ state: { error: null } })).toBe(false);
+  });
+
+  it("o erro que persiste (500, banco fora do ar, rede) também para a repetição; a releitura que dá certo a religa", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const { refetchInterval } = opcoesDaConsulta();
+    const com = (estado: string, error: unknown) => refetchInterval({ state: { data: { estado }, error } });
+    expect(com("pendente", { message: MENSAGEM, data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    expect(com("gerando", { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    // O erro da rede chega sem código.
+    expect(com("pendente", new Error("Failed to fetch"))).toBe(false);
+    expect(com("pendente", null)).toBe(5_000);
+  });
+
+  it("a consulta não tenta de novo o erro definitivo (reunião que não existe, link cortado); o 500 tenta até a terceira vez", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const { retry } = opcoesDaConsulta();
+    expect(retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
+    expect(retry(0, { data: { code: "BAD_REQUEST" } })).toBe(false);
+    const erro500 = { message: MENSAGEM, data: { code: "INTERNAL_SERVER_ERROR" } };
+    expect(retry(0, erro500)).toBe(true);
+    expect(retry(2, erro500)).toBe(true);
+    expect(retry(3, erro500)).toBe(false);
+  });
+
+  it("o emoji do resumo vai antes do título da reunião, sem mudar o nome do título", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto("📄"));
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const titulo = screen.getByRole("heading", { level: 1, name: "Reunião com a vinícola" });
+    expect(titulo.textContent).toBe("📄Reunião com a vinícola");
+    expect(within(titulo).getByText("📄")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("os nomes das vozes vêm dos nomes que a dona deu (meeting.speakerNames)", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    expect(screen.getByRole("checkbox", { name: "Ana manda a minuta do contrato" })).toBeInTheDocument();
+    expect(screen.getByText("Responsável: Ana")).toBeInTheDocument();
+  });
+
+  it("o '▶ mm:ss' de um item do resumo leva o player da barra ao ponto do item, na parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO, recording: GRAVACAO });
+    expect(audioDaBarra().getAttribute("src")).toBe(PARTES[0].url);
+    // O item da decisão começa em 620 s (10:20), na segunda parte.
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    fireEvent.click(within(resumo).getByRole("button", { name: "Ouvir a partir de 10:20" }));
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+    expect(audioDaBarra().getAttribute("src")).toBe(PARTES[1].url);
+  });
+
+  it("?item abre a aba Resumo, mesmo com ?t, rola até o item e o destaca; o ?t ainda leva o player da barra ao ponto", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const rolados: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { rolados.push(this); };
+    const antes = window.location.href;
+    try {
+      duble.resumoGuardado.mockReturnValue(resumoPronto());
+      // O link da próxima ação ou do lembrete: o ?t é o segundo do item (10:20, na segunda parte).
+      abrirPeloLink(`?t=620&item=${ITEM}`, {}, { recording: GRAVACAO });
+      expect(screen.getByRole("heading", { name: "Resumo da reunião" })).toBeInTheDocument();
+      expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+      const item = screen.getByText("Fechar o contrato até sexta-feira.").closest("li")!;
+      expect(item).toHaveAttribute("data-destacado", "true");
+      expect(rolados).toEqual([item]);
+      expect(document.querySelectorAll("[data-destacado]")).toHaveLength(1);
+      // O ?item escolheu a aba; o ?t ainda levou o player, um só, à segunda parte.
+      expect(document.querySelectorAll("audio")).toHaveLength(1);
+      expect(audioDaBarra().getAttribute("src")).toBe(PARTES[1].url);
+      // Trocar de aba e voltar ao Resumo não rola de novo até o mesmo item.
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+      expect(screen.getByText("Fechar o contrato até sexta-feira.").closest("li")).toHaveAttribute("data-destacado", "true");
+      expect(rolados).toHaveLength(1);
+    } finally {
+      window.history.replaceState(null, "", antes);
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("um ?item novo para a mesma reunião, aberta em outra aba, volta ao Resumo sem remontar a tela", () => {
+    Element.prototype.scrollIntoView = function () {};
+    const antes = window.location.href;
+    try {
+      duble.resumoGuardado.mockReturnValue(resumoPronto());
+      abrirPeloLink("");
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      expect(screen.queryByRole("heading", { name: "Resumo da reunião" })).not.toBeInTheDocument();
+      act(() => { window.history.pushState(null, "", `/meetings/${REUNIAO.id}?item=${ITEM}`); });
+      expect(screen.getByRole("heading", { name: "Resumo da reunião" })).toBeInTheDocument();
+      expect(screen.getByText("Fechar o contrato até sexta-feira.").closest("li")).toHaveAttribute("data-destacado", "true");
+    } finally {
+      window.history.replaceState(null, "", antes);
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("?item de um item que não está mais no resumo: um aviso, e nada destacado", () => {
+    const antes = window.location.href;
+    try {
+      duble.resumoGuardado.mockReturnValue(resumoPronto());
+      abrirPeloLink("?item=9f9f9f9f-0000-4000-8000-000000000000");
+      expect(screen.getByText("O item deste link não está mais no resumo.")).toBeInTheDocument();
+      expect(document.querySelector("[data-destacado]")).toBeNull();
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
   });
 });
 

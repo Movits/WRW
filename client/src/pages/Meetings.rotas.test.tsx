@@ -41,8 +41,10 @@ const duble = vi.hoisted(() => {
     pendencias: vi.fn(),
     // A leitura da duração do arquivo pelo navegador (o jsdom não toca áudio).
     duracao: vi.fn(),
+    resumoGuardado: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
     },
   };
@@ -64,13 +66,17 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
-      resumir: duble.registrar("resumir"),
+      resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      pedirResumo: duble.registrar("pedirResumo"),
+      decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
+      marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       perguntar: duble.registrar("perguntar"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
     },
     reuniaoAberta: {
-      resumir: duble.registrar("resumirPeloLink"),
+      pedirResumo: duble.registrar("pedirResumoPeloLink"),
       perguntar: duble.registrar("perguntarPeloLink"),
     },
     networkInteligente: {
@@ -100,6 +106,8 @@ beforeEach(() => {
     isLoading: false, isError: false, error: null, refetch: vi.fn(),
   }));
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
 });
 
 afterEach(async () => {

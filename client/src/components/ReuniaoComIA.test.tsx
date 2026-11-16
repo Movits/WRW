@@ -2,13 +2,14 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
-import { PergunteAReuniao, ResumoDaReuniaoPelaIA } from "./ReuniaoComIA";
+import { PergunteAReuniao } from "./ReuniaoComIA";
 
 /**
- * O resumo da reunião e o "Pergunte à reunião" na tela. O tRPC vira um dublê
- * com estado de verdade: o mutate guarda a resposta combinada no teste e o
- * componente a lê em `data` ou `error`, como faz com o React Query. O que o
- * servidor faz com a IA está em server/reuniao-com-ia.test.ts.
+ * O "Pergunte à reunião" na tela. O tRPC vira um dublê com estado de verdade:
+ * o mutate guarda a resposta combinada no teste e o componente a lê em `data`
+ * ou `error`, como faz com o React Query. O que o servidor faz com a IA está em
+ * server/reuniao-com-ia.test.ts. O resumo é o guardado, com o teste dele em
+ * components/ResumoGuardado.test.tsx.
  */
 
 const duble = vi.hoisted(() => ({
@@ -36,9 +37,9 @@ vi.mock("@/lib/trpc", async () => {
   });
   return {
     trpc: {
-      meetings: { resumir: mutacao("resumir"), perguntar: mutacao("perguntar") },
+      meetings: { perguntar: mutacao("perguntar") },
       // A página do link aberto pede pelo token, num router público à parte.
-      reuniaoAberta: { resumir: mutacao("resumirPeloLink"), perguntar: mutacao("perguntarPeloLink") },
+      reuniaoAberta: { perguntar: mutacao("perguntarPeloLink") },
     },
   };
 });
@@ -53,63 +54,6 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => { await i18n.changeLanguage("pt-BR"); });
-});
-
-describe("Resumo da reunião", () => {
-  it("o botão gera o resumo e mostra as seções, com os trechos e o aviso de conferir", () => {
-    duble.respostas.resumir = {
-      topicos: [{ titulo: "Exportação de café", resumo: "Envio para a Alemanha em março.", trecho: "vamos falar da exportação de café para a Alemanha" }],
-      decisoes: [{ texto: "Não renovar com a transportadora antiga.", trecho: "Decidimos não renovar o contrato" }],
-      tarefas: [{ oQue: "Fechar o contrato com o importador", quem: "Carla", quando: "sexta-feira", trecho: "a Carla fecha o contrato com o importador até sexta-feira" }],
-    };
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    expect(screen.queryByText("Tópicos")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
-
-    expect(duble.chamadas.resumir).toEqual([{ meetingId: ID, idioma: "pt-BR" }]);
-    expect(screen.getByText("Tópicos")).toBeInTheDocument();
-    expect(screen.getByText("Exportação de café")).toBeInTheDocument();
-    expect(screen.getByText("Envio para a Alemanha em março.")).toBeInTheDocument();
-    expect(screen.getByText("Decisões")).toBeInTheDocument();
-    expect(screen.getByText("Não renovar com a transportadora antiga.")).toBeInTheDocument();
-    expect(screen.getByText("Tarefas e providências")).toBeInTheDocument();
-    expect(screen.getByText("Fechar o contrato com o importador")).toBeInTheDocument();
-    expect(screen.getByText("Quem: Carla")).toBeInTheDocument();
-    expect(screen.getByText("Quando: sexta-feira")).toBeInTheDocument();
-    expect(screen.getByText("a Carla fecha o contrato com o importador até sexta-feira")).toBeInTheDocument();
-    expect(screen.getAllByText("Trecho da transcrição")).toHaveLength(3);
-    expect(screen.getByText(/Sugestões da IA para você conferir/)).toBeInTheDocument();
-    // Depois de gerado, o botão oferece gerar de novo.
-    expect(screen.getByRole("button", { name: /Gerar de novo/ })).toBeInTheDocument();
-  });
-
-  it("seção sem itens diz que nada foi encontrado, em vez de sumir", () => {
-    duble.respostas.resumir = { topicos: [{ titulo: "Abertura", resumo: "Boas-vindas.", trecho: "Bom dia a todos, vamos começar" }], decisoes: [], tarefas: [] };
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
-    expect(screen.getAllByText("Nada encontrado na transcrição.")).toHaveLength(2);
-  });
-
-  it("pede no idioma da tela e, com a IA fora do ar, mostra o aviso traduzido, não uma tela vazia", async () => {
-    await act(async () => { await i18n.changeLanguage("en"); });
-    duble.respostas.resumir = erroDoServidor("SERVICE_UNAVAILABLE", "O serviço de IA não respondeu agora. Tente de novo em instantes.");
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Generate summary/ }));
-
-    expect(duble.chamadas.resumir).toEqual([{ meetingId: ID, idioma: "en" }]);
-    expect(screen.getByRole("alert")).toHaveTextContent("The AI service did not respond just now. Please try again in a moment.");
-  });
-
-  it("banco fora do ar é erro na tela, com a frase conhecida do servidor traduzida", async () => {
-    await act(async () => { await i18n.changeLanguage("en"); });
-    duble.respostas.resumir = erroDoServidor("INTERNAL_SERVER_ERROR", MENSAGEM_BANCO_INDISPONIVEL);
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    fireEvent.click(screen.getByRole("button", { name: /Generate summary/ }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Database unavailable; please try again in a moment");
-    expect(screen.queryByText("Topics")).not.toBeInTheDocument();
-  });
 });
 
 describe("Pergunte à reunião", () => {
@@ -159,15 +103,6 @@ describe("Pergunte à reunião", () => {
 describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
   const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
 
-  it("o resumo vai pelo token, no router público, e nunca pelo da dona", () => {
-    duble.respostas.resumirPeloLink = { topicos: [], decisoes: [], tarefas: [] };
-    render(<ResumoDaReuniaoPelaIA token={TOKEN} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
-    expect(duble.chamadas.resumirPeloLink).toEqual([{ token: TOKEN, idioma: "pt-BR" }]);
-    expect(duble.chamadas.resumir).toBeUndefined();
-    expect(screen.getByText("Tópicos")).toBeInTheDocument();
-  });
-
   it("a pergunta vai pelo token, aparada, e a resposta aparece com o trecho", () => {
     duble.respostas.perguntarPeloLink = { respondida: true, resposta: "Na sexta.", trecho: "a entrega fica para sexta" };
     render(<PergunteAReuniao token={TOKEN} />);
@@ -179,45 +114,47 @@ describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
   });
 
   it("link desligado no meio da visita: a tela diz isso, e não 'reunião não encontrada'", () => {
-    duble.respostas.resumirPeloLink = erroDoServidor("NOT_FOUND", "Este link de reunião não existe ou foi desligado.");
     duble.respostas.perguntarPeloLink = erroDoServidor("NOT_FOUND", "Este link de reunião não existe ou foi desligado.");
-    render(<><ResumoDaReuniaoPelaIA token={TOKEN} /><PergunteAReuniao token={TOKEN} /></>);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    render(<PergunteAReuniao token={TOKEN} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" }), { target: { value: "Quem falou?" } });
     fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
-    const alertas = screen.getAllByRole("alert");
-    expect(alertas).toHaveLength(2);
-    for (const alerta of alertas) expect(alerta).toHaveTextContent("Este link não existe ou não está mais disponível.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
   });
 
   it("pela dona, NOT_FOUND continua 'reunião não encontrada'", () => {
-    duble.respostas.resumir = erroDoServidor("NOT_FOUND", "Reunião não encontrada.");
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    duble.respostas.perguntar = erroDoServidor("NOT_FOUND", "Reunião não encontrada.");
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" }), { target: { value: "Quem falou?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
     expect(screen.getByRole("alert")).toHaveTextContent("Reunião não encontrada. Ela pode ter sido excluída, ou o link é de outra conta.");
   });
 });
 
 describe("O aviso de conferir fala com quem lê", () => {
+  const perguntarAgora = () => {
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" }), { target: { value: "Qual o prazo?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+  };
+
   it("pelo link: sem 'sua rede', que o visitante não tem", () => {
-    duble.respostas.resumirPeloLink = { topicos: [{ titulo: "T", resumo: "R", trecho: "t" }], decisoes: [], tarefas: [] };
-    render(<ResumoDaReuniaoPelaIA token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    duble.respostas.perguntarPeloLink = { respondida: true, resposta: "Sexta.", trecho: "a entrega fica para sexta" };
+    render(<PergunteAReuniao token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" />);
+    perguntarAgora();
     expect(screen.getByText("Sugestões da IA para conferir com o trecho da transcrição. Nada disto foi gravado.")).toBeInTheDocument();
     expect(screen.queryByText(/sua rede/)).not.toBeInTheDocument();
   });
 
   it("pela dona: o aviso dela continua", () => {
-    duble.respostas.resumir = { topicos: [{ titulo: "T", resumo: "R", trecho: "t" }], decisoes: [], tarefas: [] };
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
+    duble.respostas.perguntar = { respondida: true, resposta: "Sexta.", trecho: "a entrega fica para sexta" };
+    render(<PergunteAReuniao meetingId={ID} />);
+    perguntarAgora();
     expect(screen.getByText(/entra na sua rede sozinho/)).toBeInTheDocument();
   });
 
-  it("o texto da IA e o trecho seguem a direção deles mesmos", () => {
-    duble.respostas.resumir = { topicos: [{ titulo: "Título", resumo: "Resumo", trecho: "trecho citado" }], decisoes: [], tarefas: [] };
-    render(<ResumoDaReuniaoPelaIA meetingId={ID} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
-    for (const texto of ["Título", "Resumo", "trecho citado"]) expect(screen.getByText(texto)).toHaveAttribute("dir", "auto");
+  it("a resposta da IA, a pergunta e o trecho seguem a direção deles mesmos", () => {
+    duble.respostas.perguntar = { respondida: true, resposta: "Resposta", trecho: "trecho citado" };
+    render(<PergunteAReuniao meetingId={ID} />);
+    perguntarAgora();
+    for (const texto of ["Resposta", "Qual o prazo?", "trecho citado"]) expect(screen.getByText(texto)).toHaveAttribute("dir", "auto");
   });
 });

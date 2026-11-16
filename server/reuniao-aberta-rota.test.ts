@@ -5,7 +5,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 /**
  * O link aberto da reunião nos routers: reuniaoAberta.* (público, sem sessão)
  * e meetings.ligarLinkAberto / desligarLinkAberto (da dona). O módulo do link,
- * a IA e a tradução são dublados; as consultas de verdade estão em
+ * a IA, o resumo guardado (a leitura e o pedido) e a tradução são dublados; as consultas de verdade estão em
  * link-aberto-da-reuniao.integracao.test.ts, e o caminho da tradução até a IA
  * em meeting-service.test.ts.
  */
@@ -14,7 +14,8 @@ const exigirReuniaoDoLink = vi.fn();
 const verReuniaoPeloLink = vi.fn();
 const ligarLinkAberto = vi.fn();
 const desligarLinkAberto = vi.fn();
-const resumirReuniao = vi.fn();
+const pedirResumoPeloLink = vi.fn();
+const resumoGuardadoPeloLink = vi.fn();
 const perguntarAReuniao = vi.fn();
 const translatePrivateMeetingTranscript = vi.fn();
 const createAuditLog = vi.fn();
@@ -32,8 +33,12 @@ vi.mock("./link-aberto-da-reuniao", async importOriginal => ({
 }));
 vi.mock("./reuniao-com-ia", async importOriginal => ({
   ...await importOriginal<typeof import("./reuniao-com-ia")>(),
-  resumirReuniao: (...args: unknown[]) => resumirReuniao(...args),
   perguntarAReuniao: (...args: unknown[]) => perguntarAReuniao(...args),
+}));
+vi.mock("./resumo-guardado", async importOriginal => ({
+  ...await importOriginal<typeof import("./resumo-guardado")>(),
+  pedirResumoPeloLink: (...args: unknown[]) => pedirResumoPeloLink(...args),
+  resumoGuardadoPeloLink: (...args: unknown[]) => resumoGuardadoPeloLink(...args),
 }));
 vi.mock("./meeting-service", async importOriginal => ({
   ...await importOriginal<typeof import("./meeting-service")>(),
@@ -61,7 +66,8 @@ const OUTRO_TOKEN = "ZyXwVuTsRqPoNmLkJiHgFeDcBa987654";
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const OUTRA_REUNIAO = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 const REUNIAO = { id: ID, ownerId: "dona-1", title: "Reunião de teste", createdAt: 1_700_000_000_000 };
-const RESUMO_VAZIO = { topicos: [], decisoes: [], tarefas: [] };
+const PENDENTE = { estado: "pendente", emoji: null, itens: [] };
+const NAO_RESPONDIDA = { respondida: false };
 const LIGAR = {
   meetingId: ID, autorizacaoDasPessoas: true as const, idioma: "de" as const,
   textoExibido: "Ich bestätige, dass alle Personen, die in diesem Meeting gesprochen haben, zugestimmt haben.",
@@ -78,13 +84,13 @@ const daDona = (openId = "dona-1") => appRouter.createCaller({
 } as never);
 
 const linkNaoEncontrado = () => new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_LINK_NAO_ENCONTRADO);
-const resumir = (token = TOKEN, ip?: string) => semSessao(ip).reuniaoAberta.resumir({ token, idioma: "pt-BR" });
+const pedirResumo = (token = TOKEN, ip?: string) => semSessao(ip).reuniaoAberta.pedirResumo({ token });
 const perguntar = (token = TOKEN, ip?: string) => semSessao(ip).reuniaoAberta.perguntar({ token, idioma: "pt-BR", pergunta: "Quem falou?" });
 
 beforeEach(() => {
   tetoDaIADoLinkAberto.esquecer();
   tetoDaIADoVisitanteDoLink.esquecer();
-  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAberto, desligarLinkAberto, resumirReuniao, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
+  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAberto, desligarLinkAberto, pedirResumoPeloLink, resumoGuardadoPeloLink, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
     duble.mockReset();
   }
   // TOKEN e OUTRO_TOKEN abrem a MESMA reunião: é o caso da variação de caixa
@@ -94,8 +100,14 @@ beforeEach(() => {
     if (token === "token-de-outra-reuniao-0123456789") return { ...REUNIAO, id: OUTRA_REUNIAO };
     throw linkNaoEncontrado();
   });
-  resumirReuniao.mockResolvedValue(RESUMO_VAZIO);
-  perguntarAReuniao.mockResolvedValue({ respondida: false });
+  // Como o serviço real: acha a reunião pelo token e, para o resumo que ainda
+  // não existe, gasta a vaga dela antes de criar o trabalho.
+  pedirResumoPeloLink.mockImplementation(async (token: string, antesDeCriar: (reuniaoId: string) => void) => {
+    const reuniao = await exigirReuniaoDoLink(token);
+    antesDeCriar(reuniao.id);
+    return PENDENTE;
+  });
+  perguntarAReuniao.mockResolvedValue(NAO_RESPONDIDA);
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -110,16 +122,33 @@ describe("reuniaoAberta — público, sem sessão", () => {
   it("link que não existe ou foi desligado sai como NOT_FOUND, com a frase do serviço", async () => {
     verReuniaoPeloLink.mockRejectedValue(linkNaoEncontrado());
     await expect(semSessao().reuniaoAberta.ver({ token: "cortado" })).rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_LINK_NAO_ENCONTRADO });
-    await expect(resumir("cortado")).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(resumirReuniao).not.toHaveBeenCalled();
+    await expect(pedirResumo("cortado")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(perguntar("cortado")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(perguntarAReuniao).not.toHaveBeenCalled();
   });
 
-  it("resumo e pergunta vão ao serviço com a dona e a reunião DO LINK, nunca com algo vindo de quem pede", async () => {
-    await semSessao().reuniaoAberta.resumir({ token: TOKEN, idioma: "en" });
+  it("o pedido do resumo vai ao serviço com o token, e a pergunta com a dona e a reunião DO LINK, nunca com algo vindo de quem pede", async () => {
+    await expect(semSessao().reuniaoAberta.pedirResumo({ token: TOKEN })).resolves.toEqual(PENDENTE);
     await semSessao().reuniaoAberta.perguntar({ token: TOKEN, idioma: "ja", pergunta: "  Qual o prazo?  " });
+    expect(pedirResumoPeloLink).toHaveBeenCalledWith(TOKEN, expect.any(Function));
     expect(exigirReuniaoDoLink).toHaveBeenCalledWith(TOKEN);
-    expect(resumirReuniao).toHaveBeenCalledWith("dona-1", ID, "en");
     expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Qual o prazo?", "ja");
+  });
+
+  it("o resumo a pedido de antes (reuniaoAberta.resumir) saiu do router: pelo link, o resumo é o guardado", () => {
+    const procedimentos = appRouter._def.procedures;
+    // Os vizinhos estão no mesmo registro: a ausência é do procedimento, não da forma da chave.
+    expect("reuniaoAberta.resumoGuardado" in procedimentos).toBe(true);
+    expect("reuniaoAberta.pedirResumo" in procedimentos).toBe(true);
+    expect("reuniaoAberta.resumir" in procedimentos).toBe(false);
+  });
+
+  it("resumoGuardado aceita o token até 128 caracteres; acima disso é BAD_REQUEST, sem chegar ao serviço", async () => {
+    resumoGuardadoPeloLink.mockResolvedValue(PENDENTE);
+    await expect(semSessao().reuniaoAberta.resumoGuardado({ token: "x".repeat(129) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(resumoGuardadoPeloLink).not.toHaveBeenCalled();
+    await expect(semSessao().reuniaoAberta.resumoGuardado({ token: "x".repeat(128) })).resolves.toEqual(PENDENTE);
+    expect(resumoGuardadoPeloLink).toHaveBeenCalledWith("x".repeat(128));
   });
 
   it("a tradução vai com a dona e a reunião do link e leva o teto como antesDeChamarAIA", async () => {
@@ -169,63 +198,63 @@ describe("reuniaoAberta — público, sem sessão", () => {
 });
 
 describe(`reuniaoAberta — teto da IA: ${PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA} por visitante e ${PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA} por reunião, a cada 10 minutos`, () => {
-  it("visitante: resumo, pergunta e tradução nova somam; passado o teto, TOO_MANY_REQUESTS sem chamar a IA; outro visitante passa", async () => {
+  it("visitante: pedido de resumo novo, pergunta e tradução nova somam; passado o teto, TOO_MANY_REQUESTS sem chamar a IA; outro visitante passa", async () => {
     translatePrivateMeetingTranscript.mockImplementation(async (_d: string, _i: string, language: string, antes?: () => void) => {
       antes?.();
       return { language, text: "x", cached: false };
     });
-    await resumir();
-    await resumir();
+    await pedirResumo();
+    await pedirResumo();
     await semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "es" });
     for (let i = 3; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar();
 
-    await expect(resumir()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(pedirResumo()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     await expect(semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "fr" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-    expect(resumirReuniao).toHaveBeenCalledTimes(2);
     expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA - 3);
 
-    await expect(resumir(TOKEN, "203.0.113.11")).resolves.toEqual(RESUMO_VAZIO);
+    await expect(pedirResumo(TOKEN, "203.0.113.11")).resolves.toEqual(PENDENTE);
+    await expect(perguntar(TOKEN, "203.0.113.11")).resolves.toEqual(NAO_RESPONDIDA);
   });
 
   it("o balde é da REUNIÃO, não do token: outra grafia do token (ou o link religado) não abre balde novo", async () => {
-    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(i % 2 ? TOKEN : OUTRO_TOKEN);
-    await expect(resumir(OUTRO_TOKEN)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-    await expect(resumir(TOKEN)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar(i % 2 ? TOKEN : OUTRO_TOKEN);
+    await expect(perguntar(OUTRO_TOKEN)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(perguntar(TOKEN)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     // Outra reunião tem os próprios baldes.
-    await expect(resumir("token-de-outra-reuniao-0123456789")).resolves.toEqual(RESUMO_VAZIO);
+    await expect(perguntar("token-de-outra-reuniao-0123456789")).resolves.toEqual(NAO_RESPONDIDA);
   });
 
   it(`reunião: ${PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA} no total entre visitantes; depois, nem quem ainda não pediu passa`, async () => {
     const visitantes = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA;
     for (let v = 0; v < visitantes; v++) {
-      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(TOKEN, `203.0.113.${100 + v}`);
+      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar(TOKEN, `203.0.113.${100 + v}`);
     }
-    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
-    await expect(resumir(TOKEN, "198.51.100.200")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
+    await expect(perguntar(TOKEN, "198.51.100.200")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
   });
 
   it("tradução que já está guardada não gasta vaga", async () => {
     translatePrivateMeetingTranscript.mockResolvedValue({ language: "en", text: "x", cached: true });
     for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA + 5; i++) await semSessao().reuniaoAberta.traduzir({ token: TOKEN, language: "en" });
-    await expect(resumir()).resolves.toEqual(RESUMO_VAZIO);
+    await expect(perguntar()).resolves.toEqual(NAO_RESPONDIDA);
   });
 
   it("link que não abre não gasta vaga de quem tem o link certo", async () => {
     for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA + 5; i++) {
-      await expect(resumir("nenhuma-reuniao-tem-este-token-x")).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(perguntar("nenhuma-reuniao-tem-este-token-x")).rejects.toMatchObject({ code: "NOT_FOUND" });
     }
-    await expect(resumir()).resolves.toEqual(RESUMO_VAZIO);
+    await expect(perguntar()).resolves.toEqual(NAO_RESPONDIDA);
   });
 
   it("a janela é de 10 minutos", async () => {
     vi.useFakeTimers({ now: 1_700_000_000_000 });
-    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir();
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar();
     vi.setSystemTime(1_700_000_000_000 + 10 * 60_000 - 1);
-    await expect(resumir()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     vi.setSystemTime(1_700_000_000_000 + 10 * 60_000);
-    await expect(resumir()).resolves.toEqual(RESUMO_VAZIO);
+    await expect(perguntar()).resolves.toEqual(NAO_RESPONDIDA);
   });
 });
 
@@ -274,26 +303,26 @@ describe("reuniaoAberta — a recusa de um teto não gasta a vaga do outro", () 
     vi.useFakeTimers({ now: 1_700_000_000_000 });
     const visitantes = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA / PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA;
     for (let v = 0; v < visitantes; v++) {
-      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(TOKEN, `203.0.113.${100 + v}`);
+      for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar(TOKEN, `203.0.113.${100 + v}`);
     }
     // Aos 9 minutos, a visitante nova bate na reunião cheia, muitas vezes.
     vi.setSystemTime(1_700_000_000_000 + 9 * 60_000);
     for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) {
-      await expect(resumir(TOKEN, "198.51.100.50")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+      await expect(perguntar(TOKEN, "198.51.100.50")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     }
     // Aos 10 minutos a reunião esvazia, e o balde dela continua inteiro.
     vi.setSystemTime(1_700_000_000_000 + 10 * 60_000);
-    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await expect(resumir(TOKEN, "198.51.100.50")).resolves.toEqual(RESUMO_VAZIO);
-    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA + PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA);
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await expect(perguntar(TOKEN, "198.51.100.50")).resolves.toEqual(NAO_RESPONDIDA);
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA + PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA);
   });
 
   it("visitante no limite: as recusas dela não gastam a vaga comum da reunião", async () => {
-    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await resumir(TOKEN, "203.0.113.1");
-    for (let i = 0; i < 100; i++) await expect(resumir(TOKEN, "203.0.113.1")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    for (let i = 0; i < PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA; i++) await perguntar(TOKEN, "203.0.113.1");
+    for (let i = 0; i < 100; i++) await expect(perguntar(TOKEN, "203.0.113.1")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
     // Sobram as 50 vagas comuns para as outras visitantes.
     const restantes = PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA - PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA;
-    for (let i = 0; i < restantes; i++) await resumir(TOKEN, `198.51.100.${i % 50 + 1}`);
-    expect(resumirReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
+    for (let i = 0; i < restantes; i++) await perguntar(TOKEN, `198.51.100.${i % 50 + 1}`);
+    expect(perguntarAReuniao).toHaveBeenCalledTimes(PEDIDOS_A_IA_POR_REUNIAO_POR_JANELA);
   });
 });
 

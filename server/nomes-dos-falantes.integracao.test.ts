@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
 const { getDb } = await import("./db");
-const { meetings, meetingTranscripts, users } = await import("../drizzle/schema");
+const { meetings, meetingSummaries, meetingTranscripts, users } = await import("../drizzle/schema");
 const { getPrivateMeeting, gravarResultadoDaReuniao, nomearFalante } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 
@@ -28,6 +28,9 @@ describe.skipIf(!temBanco)("Nomes das vozes da reunião (integração)", () => {
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
+    // O reprocesso abaixo passa por gravarResultadoDaReuniao, que cria o pedido
+    // do resumo guardado da reunião (H4c).
+    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
     await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await db.delete(meetings).where(eq(meetings.ownerId, DONA));
     for (const dona of [DONA, OUTRA]) await db.delete(users).where(eq(users.openId, dona));
