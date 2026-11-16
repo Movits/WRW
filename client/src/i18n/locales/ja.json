@@ -1545,6 +1545,12 @@
     "summary": {
       "title": "ミーティングの要約",
       "loading": "要約を読み込んでいます…",
+      "translation": {
+        "language": "要約の言語",
+        "translating": "要約を翻訳中…",
+        "notice": "AIによる自動翻訳です。原文：{{idioma}}。引用箇所は原文の言語のままです。",
+        "error": "現在、要約を翻訳できませんでした。原文の言語で表示しています。"
+      },
       "noSummary": "このミーティングにはまだ要約がありません。",
       "generate": "要約を作成",
       "requestLink": "要約をリクエスト",

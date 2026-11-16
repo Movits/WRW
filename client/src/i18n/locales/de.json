@@ -1545,6 +1545,12 @@
     "summary": {
       "title": "Zusammenfassung des Meetings",
       "loading": "Zusammenfassung wird geladen…",
+      "translation": {
+        "language": "Sprache der Zusammenfassung",
+        "translating": "Zusammenfassung wird übersetzt…",
+        "notice": "Automatische Übersetzung durch die KI. Original: {{idioma}}. Zitierte Auszüge bleiben in der Originalsprache.",
+        "error": "Die Zusammenfassung konnte gerade nicht übersetzt werden. Sie wird in der Originalsprache angezeigt."
+      },
       "noSummary": "Für dieses Meeting gibt es noch keine Zusammenfassung.",
       "generate": "Zusammenfassung erstellen",
       "requestLink": "Zusammenfassung anfordern",

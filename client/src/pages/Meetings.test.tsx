@@ -76,6 +76,7 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
@@ -83,6 +84,7 @@ vi.mock("@/lib/trpc", () => ({
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
       perguntar: duble.registrar("perguntarPeloLink"),
+      traduzirResumo: duble.registrar("traduzirResumoPeloLink"),
     },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {

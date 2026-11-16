@@ -310,7 +310,9 @@ export async function resumoGuardadoPeloLink(token: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  return { estado, emoji: linha?.emoji ?? null, versaoAnterior, itens };
+  // O idioma em que o resumo foi escrito: a página do link o traduz (H11)
+  // quando quem lê escolhe outro.
+  return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 
 /**

@@ -382,7 +382,8 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       [schema.meetingEntities, derivadaDaReuniaoDaDona("meeting_entities")],
       [schema.meetingTranscripts, derivadaDaReuniaoDaDona("meeting_transcripts")],
       [schema.meetingTranscriptTranslations, derivadaDaReuniaoDaDona("meeting_transcript_translations")],
-      // O resumo guardado (H4) cita trechos da transcrição.
+      // O resumo guardado (H4) cita trechos da transcrição; as traduções dele (H11) também saem.
+      [schema.meetingSummaryTranslations, derivadaDaReuniaoDaDona("meeting_summary_translations")],
       [schema.meetingSummaryItems, derivadaDaReuniaoDaDona("meeting_summary_items")],
       [schema.meetingSummaries, derivadaDaReuniaoDaDona("meeting_summaries")],
       [schema.meetingRecordings, derivadaDaReuniaoDaDona("meeting_recordings")],
@@ -427,8 +428,9 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
     // e a linha da reunião só sai por último, depois dos derivados (10: os
-    // itens e o resumo guardado, da H4, somaram dois)
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(10);
+    // itens e o resumo guardado, da H4, somaram dois; 11: as traduções do
+    // resumo, da H11)
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(11);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 

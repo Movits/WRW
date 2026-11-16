@@ -1332,6 +1332,33 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   ownerSectionStatusIdx: index("meeting_summary_items_owner_section_status_idx").on(table.ownerId, table.section, table.status),
 }));
 
+// A tradução do resumo guardado (H11) para o idioma de quem lê: o resumo é
+// escrito no idioma da reunião, e a IA o traduz em segundo plano quando alguém
+// o lê em outro idioma. Uma linha por dona, reunião e idioma. O conteúdo vai
+// por id de item, com a impressão digital do texto de que saiu, mais os
+// rótulos do mapa mental (H10): item novo ou editado não acha a tradução e é
+// traduzido de novo, e a tradução de outra versão do resumo não vale. O trecho
+// nunca é traduzido (é a prova, no idioma original), e os rótulos de voz
+// ({F2}) vão como estão: a tela é que os troca pelo nome.
+export const meetingSummaryTranslations = mysqlTable("meeting_summary_translations", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  // O resumo de que a tradução saiu: reprocessar a reunião cria outro.
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  language: varchar("language", { length: 12 }).notNull(),
+  // A versão do resumo (meeting_summaries.version) de que a tradução saiu.
+  sourceVersion: int("source_version").notNull(),
+  // { itens: { [id do item]: { h, subject, text, due } }, mapa: { [rótulo]: tradução } }
+  content: jsonCompat("content").notNull(),
+  // O id do modelo de IA que traduziu.
+  model: varchar("model", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerMeetingLanguageIdx: uniqueIndex("meeting_summary_translations_owner_meeting_language_idx").on(table.ownerId, table.meetingId, table.language),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é

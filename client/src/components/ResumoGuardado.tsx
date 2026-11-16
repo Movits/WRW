@@ -10,8 +10,11 @@ import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/Mod
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { LANGUAGES } from "@/i18n";
+import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -40,6 +43,11 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * a nova falhou, a anterior segue valendo: a dona decide sobre ela (o próximo
  * refazer guarda o que ela confirmar), e o link a mostra sem pedir de novo,
  * porque refazer é da dona.
+ *
+ * A tradução (H11) também mora na página (useTraducaoDoResumo), porque o mapa
+ * mental usa a mesma: aqui ficam a escolha do idioma e o aviso, e os textos
+ * traduzidos entram no lugar dos originais. O trecho fica sempre no original:
+ * é por ele que se confere o item.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -65,12 +73,14 @@ type DaDona = {
    * aba Resumo (que remonta este componente) não rola de novo até o mesmo item.
    */
   registroDoDestaque?: { current: string | null };
+  traducao?: TraducaoDoResumoNaTela;
 };
 type DoLink = {
   token: string;
   meetingId?: undefined;
   consulta: ConsultaDoResumo<ResumoDoLink>;
   aoIrPara?: (segundo: number) => void;
+  traducao?: TraducaoDoResumoNaTela;
 };
 
 // A ordem do formato da cliente.
@@ -107,6 +117,18 @@ function mensagemDaDecisao(t: TranslateFn, erro: unknown) {
   }
 }
 
+// A falha da tradução do resumo: o resumo segue no original, e a frase diz por quê.
+function mensagemDaTraducao(t: TranslateFn, erro: unknown, peloLink: boolean) {
+  switch (codigoDoErro(erro)) {
+    case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
+    case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
+    case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
+    default: return t("meetings.summary.translation.error");
+  }
+}
+
+const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
+
 const idDoItem = (id: string) => `item-do-resumo-${id}`;
 const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -119,7 +141,14 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // O link nunca mostra nomes: as vozes são sempre "Falante n".
   const nomes = props.token === undefined ? props.nomes ?? {} : {};
   const itemDestacado = props.token === undefined ? props.itemDestacado ?? null : null;
-  const dados = props.consulta.data as ResumoDaDona | ResumoDoLink | undefined;
+  const traducao = props.traducao;
+  // Com a tradução pronta, os textos dos itens vêm no idioma escolhido.
+  const original = props.consulta.data as ResumoDaDona | ResumoDoLink | undefined;
+  const dados = traducao ? traducao.aplicar(original) : original;
+  // O idioma de cada texto, para o leitor de tela: o item no da tradução, o trecho sempre no original.
+  const idiomaDoTrecho = traducao?.idiomaOriginal ?? undefined;
+  const idiomaDoTexto = traducao?.estado === "pronta" ? traducao.idioma : idiomaDoTrecho;
+  const comEscolhaDoIdioma = !!traducao && traducao.estado !== "inativa";
 
   // Toda mutação relê o resumo; devolvida ao onSettled, a releitura segura o
   // botão até o estado novo chegar.
@@ -263,7 +292,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         return <section key={secao} aria-labelledby={`secao-do-resumo-${secao}`}>
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
-            {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes}
+            {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
               aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}/>)}
@@ -279,7 +308,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           {ignorados.map((item, i) => <li key={item.id ?? i} id={item.id ? idDoItem(item.id) : undefined} tabIndex={item.id === itemDestacado ? -1 : undefined}
             data-destacado={item.id === itemDestacado ? "true" : undefined}
             className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm text-white/45 ${item.id === itemDestacado ? "ring-2 ring-amber-300/70" : ""}`}>
-            <span id={`${prefixoDosIgnorados}-${i}`} dir="auto" className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
+            <span id={`${prefixoDosIgnorados}-${i}`} dir="auto" lang={idiomaDoTexto} className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
             {!somenteLeitura && <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
               className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50">
               <RotateCcw size={13}/> {t("meetings.summary.undo")}
@@ -293,15 +322,30 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
-      {podeRefazer && <div className="flex flex-wrap items-center gap-3">
-        {dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">{t("meetings.summary.currentTemplate", { modelo: nomeDoModelo(t, modeloAtual) })}</span>}
-        <button type="button" aria-expanded={refazerAberto} aria-controls={refazerAberto ? idDoPainelDeRefazer : undefined} onClick={() => setRefazerAberto(aberto => !aberto)}
+      {(comEscolhaDoIdioma || podeRefazer) && <div className="flex flex-wrap items-center gap-3">
+        {/* O idioma do resumo (H11): começa no da tela, e o original fica marcado. */}
+        {traducao && comEscolhaDoIdioma && <label className="inline-flex items-center gap-2 text-xs text-amber-100/70">
+          {t("meetings.summary.translation.language")}
+          <select value={traducao.idioma} onChange={evento => { const idioma = idiomaDaReuniao(evento.target.value); if (idioma) traducao.escolher(idioma); }}
+            className="rounded-lg border border-white/15 bg-[#211e1b] px-2 py-1 text-sm text-white">
+            {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === traducao.idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
+          </select>
+        </label>}
+        {/* O modelo (H4d) e o "Refazer como…", só da dona. */}
+        {podeRefazer && dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">{t("meetings.summary.currentTemplate", { modelo: nomeDoModelo(t, modeloAtual) })}</span>}
+        {podeRefazer && <button type="button" aria-expanded={refazerAberto} aria-controls={refazerAberto ? idDoPainelDeRefazer : undefined} onClick={() => setRefazerAberto(aberto => !aberto)}
           className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-300/10">
           <RefreshCw size={13}/> {t("meetings.summary.redoAs")}
-        </button>
+        </button>}
       </div>}
     </div>
     {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={modeloAtual} aoFechar={() => setRefazerAberto(false)}/>}
+    {traducao?.estado === "traduzindo" && <p role="status" className="mt-3 text-xs text-amber-100/70"><Loader2 size={13} className="mr-1.5 inline animate-spin"/>{t("meetings.summary.translation.translating")}</p>}
+    {traducao?.estado === "pronta" && <p className="mt-3 text-xs text-white/45">{t("meetings.summary.translation.notice", { idioma: nomeNaTela(traducao.idiomaOriginal) })}</p>}
+    {traducao?.estado === "erro" && <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-xs text-amber-200/80">
+      <span>{mensagemDaTraducao(t, traducao.erro, peloLink)}</span>
+      <button type="button" onClick={traducao.tentarDeNovo} className="rounded-lg border border-amber-300/30 px-3 py-1 font-semibold text-amber-200 hover:bg-amber-300/10">{t("meetings.summary.retry")}</button>
+    </div>}
     {!esperando && erroDaConsulta}
     {corpo}
     {comBotaoDePedir && pedir.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, pedir.error, t("meetings.summary.requestError"), peloLink)}</p>}
@@ -315,10 +359,12 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar }: {
+function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar }: {
   item: ItemNaTela;
   peloLink: boolean;
   comVozes: (texto: string) => string;
+  idiomaDoTexto?: string;
+  idiomaDoTrecho?: string;
   aoIrPara?: (segundo: number) => void;
   destacado: boolean;
   decidindo: boolean;
@@ -339,12 +385,12 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
     {comCaixa
       ? <label className="flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={!!item.done} disabled={decidindo || somenteLeitura} onChange={evento => aoMarcar(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-          <span id={idDoTexto} dir="auto" className={`text-sm text-white/85 ${item.done ? "line-through text-white/50" : ""}`}>{texto}</span>
+          <span id={idDoTexto} dir="auto" lang={idiomaDoTexto} className={`text-sm text-white/85 ${item.done ? "line-through text-white/50" : ""}`}>{texto}</span>
         </label>
-      : <p id={idDoTexto} dir="auto" className="text-sm leading-6 text-white/85">{texto}</p>}
+      : <p id={idDoTexto} dir="auto" lang={idiomaDoTexto} className="text-sm leading-6 text-white/85">{texto}</p>}
     {(item.assignee || item.due) && <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-100/70">
       {item.assignee && <span dir="auto">{t("meetings.summary.assignee", { nome: comVozes(item.assignee) })}</span>}
-      {item.due && <span dir="auto">{t("meetings.summary.due", { prazo: item.due })}</span>}
+      {item.due && <span dir="auto" lang={idiomaDoTexto}>{t("meetings.summary.due", { prazo: item.due })}</span>}
     </p>}
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {/* Sem player (a gravação venceu ou não existe), o tempo é só
@@ -363,7 +409,7 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
       ? <Trecho texto={item.excerpt}/>
       : <details className="mt-2">
           <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.ai.excerptLabel")}</summary>
-          <q dir="auto" className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
+          <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
     {pendente && !peloLink && !somenteLeitura && <div className="mt-3 flex flex-wrap gap-2">

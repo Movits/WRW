@@ -9,6 +9,7 @@ import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from 
 import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { mapaMentalPeloLink, pedirMapaPeloLink } from "../mapa-mental-guardado";
+import { traduzirResumoPeloLink } from "../traducao-do-resumo";
 import { comRecusaTraduzida } from "./meetings";
 
 /**
@@ -108,6 +109,26 @@ export const reuniaoAbertaRouter = router({
   pedirMapa: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirMapaPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
+
+  // A tradução do resumo guardado (H11): o resumo inteiro no idioma de quem lê,
+  // sem ids e sem os ignorados, como o resumoGuardado. Gasta uma vaga dos dois
+  // tetos só quando a IA é chamada de fato: a tradução guardada, e a que já
+  // está na IA, não contam.
+  traduzirResumo: publicProcedure
+    .input(z.object({ token: tokenDoLink, idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES) }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
+      const reuniao = await exigirReuniaoDoLink(input.token);
+      try {
+        return await traduzirResumoPeloLink(reuniao, input.idioma, () => { reservarVagaDaIA(reuniao.id, ctx.req); });
+      } catch (erro) {
+        // Como na tradução da transcrição: o teto e a IA fora saem com o código,
+        // e o erro do banco segue para o middleware. O resto não vai cru a quem
+        // não tem conta, e o log não leva o token.
+        if (erro instanceof TRPCError || erro instanceof BancoIndisponivel || ehErroDoDriverDeBanco(erro)) throw erro;
+        console.error(`[LinkAberto] a tradução do resumo da reunião ${reuniao.id} falhou: ${descreverErroDeBanco(erro)}`);
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_TRADUCAO_INDISPONIVEL });
+      }
+    })),
 
   perguntar: publicProcedure
     .input(z.object({

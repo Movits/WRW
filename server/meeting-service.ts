@@ -10,6 +10,7 @@ import {
   meetingTranscriptTranslations,
   meetingSummaries,
   meetingSummaryItems,
+  meetingSummaryTranslations,
 } from "../drizzle/schema";
 import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
@@ -1478,7 +1479,9 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   // original deixaria o mesmo conteúdo vivo em até nove línguas.
   await db.delete(meetingTranscriptTranslations).where(and(eq(meetingTranscriptTranslations.meetingId, meetingId), eq(meetingTranscriptTranslations.ownerId, ownerId)));
   // O resumo guardado (H4) foi escrito a partir da transcrição e cita trechos
-  // dela: sai com ela. Os itens antes do resumo, que é a linha de que eles saem.
+  // dela: sai com ela. As traduções dele (H11) e os itens antes do resumo, que
+  // é a linha de que eles saem.
+  await db.delete(meetingSummaryTranslations).where(and(eq(meetingSummaryTranslations.meetingId, meetingId), eq(meetingSummaryTranslations.ownerId, ownerId)));
   await db.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.meetingId, meetingId), eq(meetingSummaryItems.ownerId, ownerId)));
   await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
 }

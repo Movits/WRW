@@ -33,6 +33,7 @@ import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, Rec
 import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
 import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
+import { traduzirResumoDaDona } from "../traducao-do-resumo";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -292,6 +293,14 @@ export const meetingsRouter = router({
       await marcarAcaoFeita(ctx.user.openId, input.itemId, input.feito);
       return { ok: true as const };
     }),
+
+  // A tradução do resumo guardado (H11) para o idioma de quem lê, em segundo
+  // plano como a da transcrição: responde "traduzindo" enquanto a IA trabalha,
+  // e a tela pergunta de novo. A tradução guardada não chama a IA, e como a da
+  // transcrição não conta no teto de pedidos (server/traducao-do-resumo.ts).
+  traduzirResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(IDIOMAS_DA_REUNIAO) }))
+    .mutation(({ ctx, input }) => traduzirResumoDaDona(ctx.user.openId, input.meetingId, input.idioma)),
 
   perguntar: protectedProcedure
     .input(z.object({

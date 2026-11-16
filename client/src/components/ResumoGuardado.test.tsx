@@ -437,3 +437,93 @@ describe("Resumo guardado — o item pedido pelo link (?item)", () => {
     expect(screen.queryByText("O item deste link não está mais no resumo.")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * A tradução do resumo (H11). A página guarda a tradução (useTraducaoDoResumo,
+ * testado à parte) e a passa pronta; aqui se prova o que a tela faz com ela: a
+ * escolha do idioma, o aviso, os textos traduzidos no lugar dos originais, o
+ * trecho que fica no original e as decisões que seguem pelo id do item.
+ */
+describe("Resumo guardado — a tradução (H11)", () => {
+  type Dados = { estado: string; itens: Array<Record<string, unknown> & { text: string; subject: string | null; due: string | null }> };
+  const EM_INGLES: Record<string, string> = {
+    "{F2} envia a proposta revisada": "{F2} sends the revised proposal",
+    "até sexta-feira": "by Friday",
+    "Contrato com o importador": "Contract with the importer",
+    "{F1} fecha o contrato com o importador.": "{F1} closes the contract with the importer.",
+  };
+  const paraIngles = (texto: string | null) => (texto === null ? null : EM_INGLES[texto] ?? texto);
+  const traducao = (extra: Record<string, unknown> = {}) => ({
+    idioma: "en", idiomaOriginal: "pt-BR", estado: "pronta", erro: null,
+    escolher: vi.fn(), tentarDeNovo: vi.fn(), traduzirRotulo: (rotulo: string) => rotulo,
+    aplicar: (dados?: Dados) => dados && dados.estado === "pronto"
+      ? { ...dados, itens: dados.itens.map(item => ({ ...item, text: paraIngles(item.text)!, subject: paraIngles(item.subject), due: paraIngles(item.due) })) }
+      : dados,
+    ...extra,
+  });
+  const comTraducao = (c: ReturnType<typeof consulta>, t: ReturnType<typeof traducao>, nomes?: Record<string, string>) =>
+    render(<ResumoGuardado meetingId={REUNIAO} consulta={c as never} nomes={nomes} traducao={t as never}/>);
+
+  it("pronta: os textos vêm traduzidos, a voz vira o nome, o trecho fica no original e a decisão segue pelo id", () => {
+    comTraducao(pronto(), traducao(), { F2: "Carla" });
+    const acao = itemDoTexto("Carla sends the revised proposal");
+    expect(within(acao).getByText("Carla sends the revised proposal")).toHaveAttribute("lang", "en");
+    expect(within(acao).getByText("Prazo: by Friday")).toBeInTheDocument();
+    expect(within(acao).getByText("eu mando a proposta revisada até sexta-feira")).toBeInTheDocument();
+    expect(itemDoTexto(/Falante 1 closes the contract with the importer\./)).toHaveTextContent("Contract with the importer: Falante 1 closes the contract with the importer.");
+    // O trecho do item já conferido, recolhido, leva o idioma original.
+    expect(screen.getByText("hoje vamos falar da exportação de café")).toHaveAttribute("lang", "pt-BR");
+    expect(screen.getByText("Tradução automática pela IA. Original: Português. Os trechos citados ficam no idioma original.")).toBeInTheDocument();
+    fireEvent.click(within(acao).getByRole("button", { name: "Confirmar" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao", status: "confirmed" });
+  });
+
+  it("a escolha do idioma começa no da tradução, marca o original e passa o idioma escolhido", () => {
+    const t = traducao();
+    comTraducao(pronto(), t);
+    const escolha = screen.getByRole("combobox", { name: "Idioma do resumo" });
+    expect(escolha).toHaveValue("en");
+    expect(within(escolha).getByRole("option", { name: "🇧🇷 Português (original)" })).toBeInTheDocument();
+    expect(within(escolha).getAllByRole("option")).toHaveLength(10);
+    fireEvent.change(escolha, { target: { value: "ja" } });
+    expect(t.escolher).toHaveBeenCalledWith("ja");
+  });
+
+  it("traduzindo: o aviso é anunciado, e o resumo segue no original até a tradução chegar", () => {
+    comTraducao(pronto(), traducao({ estado: "traduzindo", aplicar: (dados: unknown) => dados }));
+    expect(screen.getByRole("status")).toHaveTextContent("Traduzindo o resumo…");
+    expect(screen.getByText("Falante 2 envia a proposta revisada")).toBeInTheDocument();
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+  });
+
+  it("erro: a frase sai pelo código, o resumo fica no original, e 'Tentar de novo' pede outra vez", () => {
+    const t = traducao({ estado: "erro", erro: { message: "A tradução do resumo não respondeu agora.", data: { code: "SERVICE_UNAVAILABLE" } }, aplicar: (dados: unknown) => dados });
+    const { unmount } = comTraducao(pronto(), t);
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível traduzir o resumo agora. Ele aparece no idioma original.");
+    expect(screen.getByText("Falante 2 envia a proposta revisada")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Tentar de novo" }));
+    expect(t.tentarDeNovo).toHaveBeenCalledTimes(1);
+    unmount();
+    comTraducao(pronto(), traducao({ estado: "erro", erro: { message: "x", data: { code: "TOO_MANY_REQUESTS" } }, aplicar: (dados: unknown) => dados }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Muitos pedidos em sequência. Aguarde alguns minutos e tente de novo.");
+  });
+
+  it("sem resumo pronto com itens, não há escolha de idioma; com o original escolhido, nem aviso", () => {
+    const { unmount } = comTraducao(comEstado("gerando"), traducao({ estado: "inativa", idiomaOriginal: null }));
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    unmount();
+    comTraducao(pronto(), traducao({ estado: "original", idioma: "pt-BR", aplicar: (dados: unknown) => dados }));
+    expect(screen.getByRole("combobox", { name: "Idioma do resumo" })).toHaveValue("pt-BR");
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("pelo link: o resumo traduzido entra inteiro, com 'Falante n' e sem os botões da dona", () => {
+    const t = traducao({ aplicar: (dados?: Dados) => dados && { ...dados, itens: [{ ...ITENS_DO_LINK[1], text: "{F2} sends the revised proposal", due: "by Friday" }] } });
+    render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} traducao={t as never}/>);
+    expect(screen.getByText("Falante 2 sends the revised proposal")).toBeInTheDocument();
+    expect(screen.getByText("Prazo: by Friday")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirmar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Idioma do resumo" })).toBeInTheDocument();
+  });
+});

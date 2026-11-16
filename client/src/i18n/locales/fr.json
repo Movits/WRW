@@ -1545,6 +1545,12 @@
     "summary": {
       "title": "Résumé de la réunion",
       "loading": "Chargement du résumé…",
+      "translation": {
+        "language": "Langue du résumé",
+        "translating": "Traduction du résumé…",
+        "notice": "Traduction automatique par l'IA. Original : {{idioma}}. Les extraits cités restent dans la langue d'origine.",
+        "error": "Impossible de traduire le résumé pour le moment. Il s'affiche dans la langue d'origine."
+      },
       "noSummary": "Cette réunion n'a pas encore de résumé.",
       "generate": "Générer le résumé",
       "requestLink": "Demander le résumé",
