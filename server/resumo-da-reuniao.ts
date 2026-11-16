@@ -4,7 +4,7 @@ import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { ESCRITA_SEM_ESPACO, nomeSustentadoPelaTranscricao } from "./meeting-service";
 import { REGRA_DO_TRECHO, TRANSCRICAO_E_DADO } from "./reuniao-com-ia";
-import { limparRotulos, normalizarParaComparar, ocorrenciasDoTrecho, trechoApareceNaTranscricao, type OcorrenciaDoTrecho } from "./trecho-da-transcricao";
+import { limparRotulos, normalizarParaComparar, ocorrenciasDoTrecho, trechoApareceNaTranscricao, trechoDentroDaRegra, type OcorrenciaDoTrecho } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
 /**
@@ -16,9 +16,10 @@ import type { Segmento } from "./transcricao-de-fatia";
  *
  * Este módulo só conversa com a IA e confere a resposta; quem lê e grava o
  * banco é a fila do resumo. Cada item fica só com o que a transcrição
- * sustenta: o trecho literal, o responsável (a voz ou o nome dito perto dele)
- * e o prazo dito perto dele. O nome que a dona deu a uma voz nunca vai ao
- * prompt: a IA escreve o rótulo ({F2}) e a tela troca pelo nome.
+ * sustenta: o trecho literal, o responsável (a voz que fala perto do trecho,
+ * ou um nome dito na reunião) e o prazo dito perto do trecho. O nome que a
+ * dona deu a uma voz nunca vai ao prompt: a IA escreve o rótulo ({F2}) e a
+ * tela troca pelo nome.
  */
 
 export type SecaoDoResumo = (typeof meetingSummaryItems.$inferSelect)["section"];
@@ -66,6 +67,25 @@ const UM_EMOJI = new RegExp("^(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20
 // novo: assim a janela da reunião longa nunca começa no meio de uma fala sem
 // saber de quem ela é.
 const LETRAS_POR_LINHA = 2_000;
+// O que separa as pessoas de um responsável composto ("{F2}, {F3}", "Ana e
+// Bia"): vírgula (também a árabe e a chinesa), ponto e vírgula, barra, "&",
+// "+" ou a conjunção solta entre espaços, nos 10 idiomas da reunião.
+const CONJUNCOES = "e|y|and|et|und|и|और|و|和|与|及|跟|と";
+const ENTRE_PESSOAS = new RegExp(`\\s*[,;/&+、،，；]\\s*|\\s+(?:${CONJUNCOES})\\s+`, "iu");
+const SO_A_CONJUNCAO = new RegExp(`^(?:${CONJUNCOES})$`, "iu");
+// Os dias da semana que o português escreve com "-feira": "sexta-feira" e
+// "até sexta" são o mesmo prazo.
+const DIAS_COM_FEIRA = new Set(["segunda", "terça", "terca", "quarta", "quinta", "sexta"]);
+// O que diz "a próxima": "próxima semana" e "semana que vem" são o mesmo
+// prazo. Português, espanhol, inglês, francês e alemão; o "que vem" e o "que
+// viene" são lidos à parte, por serem duas palavras. "Seguinte" fica de fora:
+// "é o seguinte" abre meia fala em português e casaria qualquer "próxima".
+const PROXIMO = new Set([
+  "próxima", "próximo", "proxima", "proximo",
+  "next",
+  "prochaine", "prochain",
+  "nächste", "nächsten", "nächster", "nächstes", "kommende", "kommenden", "kommender", "kommendes",
+]);
 
 /**
  * O que vai à IA: as falas com o rótulo da voz, uma linha por vez que a voz
@@ -92,13 +112,14 @@ function instrucoes(idioma: IdiomaDaReuniao, rotulada: boolean): string {
     TRANSCRICAO_E_DADO,
     `Escreva todo o texto em ${nomeDoIdioma(idioma)}.`,
     rotulada
-      ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). As vozes não têm nome: para dizer quem falou ou quem ficou responsável, quando o nome não foi dito na reunião, escreva o rótulo exatamente assim, entre chaves (\"{F2} ficou de enviar a proposta\"). Nunca invente um nome para uma voz."
+      ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). Quando quem falou ou quem ficou responsável é uma das vozes, escreva sempre o rótulo dela, exatamente assim, entre chaves (\"{F2} ficou de enviar a proposta\"), mesmo que o nome tenha sido dito na reunião: a tela troca o rótulo pelo nome. Use um nome só para quem não fala na reunião (alguém apenas citado), do jeito que foi dito. Nunca invente um nome para uma voz."
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
-    `Em cada item, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala.`,
+    `Em cada item, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala, e não emenda com reticências ("[...]") partes distantes da reunião.`,
     "- emoji: um único emoji que represente o assunto principal da reunião.",
-    "- acoes: os próximos passos concretos, de 3 a 5, cada um uma frase curta no imperativo (\"Enviar a proposta revisada\"). \"responsavel\" e \"prazo\" só se foram ditos; se não, null.",
+    "- acoes: todos os próximos passos concretos combinados, até 7 (com mais, os 7 mais importantes), cada um uma frase curta no imperativo (\"Enviar a proposta revisada\"). \"responsavel\" e \"prazo\" só se foram ditos; se não, null.",
     "- foco: um parágrafo de 2 a 4 frases sobre o foco do trabalho na reunião. Sem foco claro, texto e trecho vazios.",
     "- tarefas: um item por assunto tratado, na ordem da reunião: \"assunto\" curto (até 6 palavras) e \"texto\" com 2 a 4 frases sobre o que foi combinado, quem ficou responsável e os prazos ditos.",
+    `Com mais de uma pessoa responsável, escreva todas em "responsavel", separadas por vírgula${rotulada ? " (\"{F1}, {F3}\")" : ""}, e use "prazo" só se ele vale para todas; se cada uma tem o seu, faça uma ação por pessoa e, nas tarefas, deixe "prazo" null e diga os prazos no texto.`,
     "- decisoes: o que foi decidido ou mudou de escopo.",
     "- bloqueios: bloqueios, dependências e restrições citados.",
     "- questoes: o que ficou em aberto.",
@@ -158,32 +179,93 @@ function itensDe(valor: unknown): Array<Record<string, unknown>> {
 }
 
 /**
+ * As palavras de um texto já normalizado, sem a "feira" do dia da semana
+ * ("sexta-feira" vira "sexta"), e se ele diz "a próxima" ("próxima", "que
+ * vem"...), que fica de fora das palavras.
+ */
+function palavrasDoPrazo(normalizado: string): { palavras: string[]; proximo: boolean } {
+  const todas = normalizado.split(" ").filter(Boolean);
+  const palavras: string[] = [];
+  let proximo = false;
+  for (let i = 0; i < todas.length; i++) {
+    const palavra = todas[i];
+    if (palavra === "feira" && DIAS_COM_FEIRA.has(todas[i - 1])) continue;
+    if (PROXIMO.has(palavra)) proximo = true;
+    else if (palavra === "que" && (todas[i + 1] === "vem" || todas[i + 1] === "viene")) {
+      proximo = true;
+      i++;
+    } else palavras.push(palavra);
+  }
+  return { palavras, proximo };
+}
+
+/**
  * O prazo fica se foi dito perto do trecho: as palavras dele com número ou com
- * 4+ letras precisam estar lá. Em chinês, japonês e tailandês, que não separam
- * as palavras, o prazo inteiro precisa aparecer no texto em volta.
+ * 4+ letras precisam estar lá; sem nenhuma assim ("até o fim do mês"), todas
+ * as palavras. As formas do mesmo prazo valem: "sexta-feira" e "até sexta",
+ * "próxima semana" e "semana que vem", "segunda-feira" e "segunda que vem". Em
+ * chinês, japonês e tailandês, que não separam as palavras, o prazo inteiro
+ * precisa aparecer no texto em volta.
  */
 function prazoSustentado(prazo: string, emVolta: string): boolean {
   const normalizado = normalizarParaComparar(prazo);
+  const emVoltaNormalizado = normalizarParaComparar(emVolta);
   if (ESCRITA_SEM_ESPACO.test(normalizado)) {
     const corrido = (t: string) => t.replace(/ /g, "");
-    return corrido(normalizado).length >= 2 && corrido(normalizarParaComparar(emVolta)).includes(corrido(normalizado));
+    return corrido(normalizado).length >= 2 && corrido(emVoltaNormalizado).includes(corrido(normalizado));
   }
-  const palavras = normalizado.split(" ").filter(p => /\d/.test(p) || p.length >= 4);
-  if (!palavras.length) return false;
-  const ditas = new Set(normalizarParaComparar(emVolta).split(" "));
-  return palavras.every(p => ditas.has(p));
+  const doPrazo = palavrasDoPrazo(normalizado);
+  const longas = doPrazo.palavras.filter(p => /\d/.test(p) || p.length >= 4);
+  const exigidas = longas.length ? longas : doPrazo.palavras;
+  if (!exigidas.length) return false;
+  if (doPrazo.proximo && !palavrasDoPrazo(emVoltaNormalizado).proximo) return false;
+  const ditas = new Set(emVoltaNormalizado.split(" "));
+  return exigidas.every(p => ditas.has(p));
 }
 
 type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada: boolean; vozes: Set<string> };
 
 /**
- * O responsável fica se foi dito perto do trecho: o rótulo de uma voz que fala
- * ali, ou as palavras do nome que a transcrição sustenta ali.
+ * As pessoas de um responsável, cada rótulo ({F2}) ou nome à parte ("{F2},
+ * {F3}" e "Ana e Bia" são duas); null quando um rótulo vem colado a outro
+ * texto ("{F2} (Ana)") ou há chave fora de um rótulo ("{F}", "{Ana}").
  */
-function responsavelSustentado(dito: string, ocorrencia: OcorrenciaDoTrecho, contexto: Contexto): string | null {
-  const rotulo = dito.match(SO_O_ROTULO);
-  if (rotulo) return contexto.rotulada && ocorrencia.falantes.has(rotulo[1]) ? `{${rotulo[1]}}` : null;
-  return dito.includes("{") ? null : nomeSustentadoPelaTranscricao(dito, ocorrencia.texto) || null;
+function pessoasDoResponsavel(dito: string): string[] | null {
+  // Espaço em volta de cada rótulo: "{F2}和{F3}" e "{F1} و{F2}" se separam como "{F2} e {F3}".
+  const pessoas = dito.replace(ROTULO_DE_VOZ, " $& ").split(ENTRE_PESSOAS).map(parte => parte.trim()).filter(parte => parte && !SO_A_CONJUNCAO.test(parte));
+  return pessoas.length && pessoas.every(pessoa => SO_O_ROTULO.test(pessoa) || !/[{}]/.test(pessoa)) ? pessoas : null;
+}
+
+type ResponsavelSustentado = { valor: string; perto: boolean };
+
+/**
+ * O responsável que a transcrição sustenta em volta de uma ocorrência do
+ * trecho, ou null. O rótulo precisa ser de uma voz que fala ali. O nome
+ * precisa ter sido dito na reunião, em qualquer ponto dela: quem se apresenta
+ * na abertura não repete o próprio nome quando assume uma tarefa, e o nome
+ * fica só com as palavras ditas ("Carla Mendes" vira "Carla"). No responsável
+ * composto, ou todas as pessoas ficam, inteiras, ou nenhuma: tirar uma
+ * deixaria o prazo, que pode ser só dela, com quem sobrou. `perto` diz se os
+ * nomes também foram ditos em volta do trecho: é a ocorrência que o "▶" prefere.
+ */
+function responsavelSustentado(dito: string, ocorrencia: OcorrenciaDoTrecho, contexto: Contexto, nomeNaReuniao: (nome: string) => string): ResponsavelSustentado | null {
+  const pessoas = pessoasDoResponsavel(dito);
+  if (!pessoas) return null;
+  const valores: string[] = [];
+  let perto = true;
+  for (const pessoa of pessoas) {
+    const rotulo = pessoa.match(SO_O_ROTULO);
+    if (rotulo) {
+      if (!contexto.rotulada || !ocorrencia.falantes.has(rotulo[1])) return null;
+      valores.push(`{${rotulo[1]}}`);
+      continue;
+    }
+    const nome = nomeNaReuniao(pessoa);
+    if (!nome || (pessoas.length > 1 && nome !== pessoa)) return null;
+    valores.push(nome);
+    perto &&= !!nomeSustentadoPelaTranscricao(nome, ocorrencia.texto);
+  }
+  return { valor: pessoas.length === 1 ? valores[0] : dito, perto };
 }
 
 /** Os rótulos de voz citados num texto; null se algum não é uma voz desta reunião. */
@@ -196,11 +278,20 @@ function vozesCitadas(valor: string | null, contexto: Contexto): string[] | null
 
 /**
  * Confere a resposta da IA e devolve só o que a transcrição sustenta: item sem
- * trecho literal sai; item que cita uma voz que não existe sai; responsável e
- * prazo que não aparecem perto do trecho viram null. Também tira repetidos e
- * aplica o teto de cada seção.
+ * trecho literal sai; item que cita uma voz que não existe sai; o trecho com
+ * reticências que emenda falas distantes fica só com o começo que cabe na
+ * regra; responsável e prazo que a transcrição não sustenta viram null. Também
+ * tira repetidos e aplica o teto de cada seção.
  */
 export function conferirResumo(dados: Record<string, unknown>, contexto: Contexto): ItemDoResumo[] {
+  // O nome é conferido contra a reunião inteira, e os mesmos nomes voltam em
+  // vários itens: cada um é lido uma vez só.
+  const nomesNaReuniao = new Map<string, string>();
+  const nomeNaReuniao = (nome: string) => {
+    let sustentado = nomesNaReuniao.get(nome);
+    if (sustentado === undefined) nomesNaReuniao.set(nome, (sustentado = nomeSustentadoPelaTranscricao(nome, contexto.transcricao)));
+    return sustentado;
+  };
   const itens: ItemDoResumo[] = [];
   for (const { secao, campo, maximo } of SECOES) {
     const vistos = new Set<string>();
@@ -210,31 +301,37 @@ export function conferirResumo(dados: Record<string, unknown>, contexto: Context
       const limiteDoTexto = secao === "focus" ? 900 : secao === "task" ? 700 : secao === "action" ? 160 : 300;
       const textoDoItem = texto(bruto.texto, limiteDoTexto);
       const assunto = secao === "task" ? texto(bruto.assunto, 120) : null;
-      const trecho = texto(typeof bruto.trecho === "string" ? limparRotulos(bruto.trecho) : null, 400);
+      const citado = texto(typeof bruto.trecho === "string" ? limparRotulos(bruto.trecho) : null, 400);
+      const trecho = citado && trechoDentroDaRegra(citado, contexto.transcricao, contexto.segmentos);
       if (!textoDoItem || !trecho || !trechoApareceNaTranscricao(trecho, contexto.transcricao)) continue;
       if (vozesCitadas(textoDoItem, contexto) === null || vozesCitadas(assunto, contexto) === null) continue;
       const chave = normalizarParaComparar(textoDoItem);
       if (vistos.has(chave)) continue;
 
       // A mesma frase pode ter sido dita mais de uma vez: vale a ocorrência em
-      // volta da qual o responsável (ou, sem ele, o prazo) foi dito, e o "▶"
-      // aponta para ela. Sem nenhuma que os sustente, a primeira.
+      // volta da qual o responsável foi dito (com o prazo, se der), depois a
+      // do prazo, e o "▶" aponta para ela. Sem nenhuma que os sustente, a
+      // primeira. Responsável e prazo saem sempre da mesma ocorrência.
       const ocorrencias = ocorrenciasDoTrecho(trecho, contexto.transcricao, contexto.segmentos);
       const responsavelDito = secao === "action" || secao === "task" ? texto(bruto.responsavel, 120) : null;
       const prazoDito = secao === "action" || secao === "task" ? texto(bruto.prazo, 120) : null;
-      let escolhida: OcorrenciaDoTrecho | undefined;
-      let responsavel: string | null = null;
-      for (const ocorrencia of responsavelDito ? ocorrencias : []) {
-        responsavel = responsavelSustentado(responsavelDito as string, ocorrencia, contexto);
-        if (responsavel) { escolhida = ocorrencia; break; }
-      }
-      let prazo: string | null = null;
-      if (prazoDito) {
-        const onde = escolhida ? [escolhida] : ocorrencias;
-        const comPrazo = onde.find(ocorrencia => prazoSustentado(prazoDito, ocorrencia.texto));
-        if (comPrazo) { prazo = prazoDito; escolhida ??= comPrazo; }
-      }
-      escolhida ??= ocorrencias[0];
+      const avaliadas = ocorrencias.map(ocorrencia => ({
+        ocorrencia,
+        responsavel: responsavelDito ? responsavelSustentado(responsavelDito, ocorrencia, contexto, nomeNaReuniao) : null,
+        prazo: !!prazoDito && prazoSustentado(prazoDito, ocorrencia.texto),
+      }));
+      const comResponsavel = avaliadas.filter(avaliada => avaliada.responsavel);
+      const pertoDoResponsavel = comResponsavel.filter(avaliada => avaliada.responsavel?.perto);
+      const melhor =
+        pertoDoResponsavel.find(avaliada => avaliada.prazo) ??
+        pertoDoResponsavel[0] ??
+        comResponsavel.find(avaliada => avaliada.prazo) ??
+        comResponsavel[0] ??
+        avaliadas.find(avaliada => avaliada.prazo) ??
+        avaliadas[0];
+      const escolhida = melhor?.ocorrencia;
+      const responsavel = melhor?.responsavel?.valor ?? null;
+      const prazo = melhor?.prazo ? prazoDito : null;
       // Confiança fora do esperado vira 0 (não confia), nunca derruba o item:
       // o trecho literal é que o sustenta.
       const bruta = typeof bruto.confianca === "number" ? bruto.confianca : typeof bruto.confianca === "string" ? Number(bruto.confianca) : Number.NaN;

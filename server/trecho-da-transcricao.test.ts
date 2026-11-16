@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { limparRotulos, localizarTrecho, ocorrenciasDoTrecho, trechoApareceNaTranscricao, vizinhanca } from "./trecho-da-transcricao";
+import { FALAS_DA_REUNIAO_SINTETICA, TRANSCRICAO_DA_REUNIAO_SINTETICA } from "./test/reuniao-sintetica";
+import { limparRotulos, localizarTrecho, ocorrenciasDoTrecho, trechoApareceNaTranscricao, trechoDentroDaRegra, vizinhanca } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
 /**
@@ -117,5 +118,69 @@ describe("ocorrenciasDoTrecho", () => {
 
   it("no envio único, sem falas, sem tempo", () => {
     expect(ocorrenciasDoTrecho("Decidimos não renovar o contrato", TEXTO, []).map(o => o.inicio)).toEqual([null]);
+  });
+});
+
+/**
+ * A regra do prompt, "5 a 30 palavras seguidas", com as falas da reunião
+ * sintética da bancada de 16/11 (inventada; achado 9: um "[...]" emendava a
+ * fala 33 à 60 e esticava a vizinhança do item até lá).
+ */
+describe("trecho com reticências: 30 palavras seguidas", () => {
+  const FALAS = FALAS_DA_REUNIAO_SINTETICA;
+  const TEXTO = TRANSCRICAO_DA_REUNIAO_SINTETICA;
+  const KIT = "Fica decidido então: o kit de Natal vai ter 200 unidades, e não 500.";
+  const LONGE = `${KIT} [...] a embalagem do kit vai ser o saquinho de algodão da Tecelagem Aurora, e o acetato sai.`;
+
+  it("pedaços que só aparecem longe uns dos outros não são uma ocorrência, com falas ou no texto corrido", () => {
+    // Os dois pedaços estão na reunião, na ordem, mas a mais de 200 palavras:
+    // o Pergunte, que só confere a presença, não muda.
+    expect(trechoApareceNaTranscricao(LONGE, TEXTO)).toBe(true);
+    expect(ocorrenciasDoTrecho(LONGE, TEXTO, FALAS)).toEqual([]);
+    expect(ocorrenciasDoTrecho(LONGE, TEXTO, [])).toEqual([]);
+    expect(localizarTrecho(LONGE, FALAS)).toBeNull();
+  });
+
+  it("dentro de 30 palavras seguidas, mesmo cruzando falas, segue achado", () => {
+    expect(localizarTrecho("Eu te apresento … até sexta", FALAS)).toBe(489);
+    // Fala 41 ("Eu não conheço a Sônia.") e começo da 42: 12 palavras.
+    expect(localizarTrecho("Eu não conheço a Sônia … Mando um e-mail", FALAS)).toBe(487);
+  });
+
+  it("trechoDentroDaRegra corta antes das reticências que saem da regra, sem o resto do [...]", () => {
+    expect(trechoDentroDaRegra(LONGE, TEXTO, FALAS)).toBe(KIT);
+    expect(trechoDentroDaRegra(LONGE, TEXTO, [])).toBe(KIT);
+    // Três pedaços: os dois primeiros cabem (fala 42); o terceiro é a fala 117.
+    expect(trechoDentroDaRegra("Eu te apresento … até sexta … Faço isso até o fim do mês", TEXTO, FALAS)).toBe("Eu te apresento … até sexta");
+  });
+
+  it("trechoDentroDaRegra devolve como veio o trecho sem reticências (mesmo acima de 30 palavras), o que cabe e o que nem aparece", () => {
+    // A pauta (fala 1) tem 39 palavras seguidas: é cópia literal, não emenda nada.
+    const pauta = "A pauta de hoje tem quatro pontos. Primeiro, os números da Cacau Tupinã e o kit de Natal para empresas. Segundo, a embalagem desse kit. Terceiro, a venda para São Paulo. E por último, os eventos do primeiro semestre.";
+    expect(trechoDentroDaRegra(pauta, TEXTO, FALAS)).toBe(pauta);
+    expect(trechoDentroDaRegra("Eu te apresento … até sexta", TEXTO, FALAS)).toBe("Eu te apresento … até sexta");
+    // Quem chama recusa o que nem aparece (trechoApareceNaTranscricao).
+    expect(trechoDentroDaRegra("o kit vai ter 300 unidades … e o acetato fica", TEXTO, FALAS)).toBe("o kit vai ter 300 unidades … e o acetato fica");
+  });
+
+  it("trechoDentroDaRegra: com o começo abaixo de 5 palavras, fica a maior das outras partes; sem nenhuma de 5, null", () => {
+    // "Eu sei." é a fala 84; "Faço isso até o fim do mês.", a 117; "Coloco, sim.", a 119.
+    expect(trechoDentroDaRegra("Eu sei. [...] Faço isso até o fim do mês.", TEXTO, FALAS)).toBe("Faço isso até o fim do mês.");
+    expect(trechoDentroDaRegra("Eu sei. [...] Coloco, sim.", TEXTO, FALAS)).toBeNull();
+  });
+
+  it("em chinês e japonês, cada caractere conta como uma palavra", () => {
+    const falas: Segmento[] = [
+      { inicio: 0, fim: 6, falante: "F1", texto: "我们下周五之前完成报告。" },
+      { inicio: 6, fim: 9, falante: "F2", texto: "好的,我来负责。" },
+      { inicio: 9, fim: 20, falante: "F1", texto: "然后我们讨论一下明年的展会计划和预算安排以及参展人员名单和时间表的问题。" },
+      { inicio: 20, fim: 25, falante: "F2", texto: "我完全同意这个计划。" },
+    ];
+    const texto = falas.map(f => f.texto).join("\n");
+    // 11 + 2 + 4 caracteres: cabe.
+    expect(localizarTrecho("我们下周五之前完成报告……我来负责", falas)).toBe(0);
+    // Passa a fala de 35 caracteres: está na reunião, mas não em 30 seguidas.
+    expect(trechoApareceNaTranscricao("我们下周五之前完成报告……我完全同意", texto)).toBe(true);
+    expect(localizarTrecho("我们下周五之前完成报告……我完全同意", falas)).toBeNull();
   });
 });

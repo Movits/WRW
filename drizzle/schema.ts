@@ -1291,8 +1291,8 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // O assunto das tarefas ("Publicação nas lojas"); nulo nas outras seções.
   subject: varchar("subject", { length: 120 }),
   text: text("text").notNull(),
-  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito.
-  // Nulo quando a transcrição não sustenta ninguém perto do trecho.
+  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito, um
+  // ou mais ("{F2}, {F3}"). Nulo quando a transcrição não sustenta todos.
   assignee: varchar("assignee", { length: 120 }),
   // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
   due: varchar("due", { length: 120 }),

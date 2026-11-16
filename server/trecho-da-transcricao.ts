@@ -20,10 +20,33 @@ const LETRAS_EM_VOLTA = 400;
 // Uma frase comum ("vou mandar a proposta") pode se repetir na reunião: cada
 // vez é uma ocorrência, até este teto.
 const OCORRENCIAS_NO_MAXIMO = 20;
+// A regra do prompt (REGRA_DO_TRECHO, em reuniao-com-ia.ts): o trecho é cópia
+// de 5 a 30 palavras SEGUIDAS da transcrição. Com reticências, os pedaços
+// precisam caber nessas 30 palavras: um "[...]" que emenda falas distantes
+// alargaria a vizinhança em que o resumo procura responsável e prazo. O mínimo
+// vale para o trecho que o app encurta (trechoDentroDaRegra); o que a IA manda
+// segue o mínimo de letras de sempre.
+const PALAVRAS_SEGUIDAS_NO_MAXIMO = 30;
+const PALAVRAS_SEGUIDAS_NO_MINIMO = 5;
+// Só limita até onde se procuram os pedaços seguintes, para a busca não varrer
+// a reunião inteira a cada vez que o primeiro aparece; a regra é contada em
+// palavras. 30 palavras nunca chegam perto disso.
+const LETRAS_DA_JANELA = 2_000;
 
 // Pelo construtor, como ESCRITA_SEM_ESPACO em meeting-service.ts: o alvo do
 // tsconfig não aceita a flag u num literal.
 const FORA_DE_LETRAS_E_NUMEROS = new RegExp("[^\\p{L}\\p{M}\\p{N}]+", "gu");
+// Escritas que não separam as palavras por espaço (chinês, japonês e
+// tailandês): nelas cada caractere conta como uma palavra, o lado estrito da
+// conta. A mesma lista de ESCRITA_SEM_ESPACO (meeting-service.ts), copiada para
+// este módulo não carregar o serviço da reunião inteiro.
+const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
+const RETICENCIAS = /\.{3}|…/;
+const CADA_RETICENCIAS = /\.{3}|…/g;
+// O que sobra nas pontas de uma parte tirada de entre reticências: os
+// colchetes de "[...]", os parênteses de "(...)", a vírgula e o espaço.
+const SOBRA_NO_COMECO = /^[\s)\]},;:.–—-]+/;
+const SOBRA_NO_FIM = /[\s([{,;:–—-]+$/;
 // O rótulo que a IA às vezes copia junto da fala: "[12:34]", "[1:02:03]",
 // "{F2}:" ou "F2:".
 const ROTULO_DE_TEMPO = /\[\d{1,2}(?::\d{2}){1,2}\]/g;
@@ -43,10 +66,19 @@ export function limparRotulos(trecho: string): string {
   return trecho.replace(ROTULO_DE_TEMPO, " ").replace(ROTULO_DE_VOZ, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Quantas palavras tem um texto já normalizado; nas escritas sem espaço, cada caractere conta como uma. */
+function contarPalavras(normalizado: string): number {
+  let total = 0;
+  for (const palavra of normalizado.split(" ")) {
+    if (palavra) total += ESCRITA_SEM_ESPACO.test(palavra) ? Array.from(palavra).length : 1;
+  }
+  return total;
+}
+
 /** Os pedaços do trecho (separados por reticências), já normalizados, ou null se não provam nada. */
 function pedacosDoTrecho(trecho: unknown): string[] | null {
   if (typeof trecho !== "string") return null;
-  const pedacos = trecho.split(/\.{3}|…/).map(normalizarParaComparar).filter(Boolean);
+  const pedacos = trecho.split(RETICENCIAS).map(normalizarParaComparar).filter(Boolean);
   const letras = (pedaco: string) => pedaco.replace(/ /g, "").length;
   const tamanho = pedacos.reduce((soma, pedaco) => soma + letras(pedaco), 0);
   if (!pedacos.length || tamanho < TAMANHO_MINIMO_DO_TRECHO) return null;
@@ -55,12 +87,12 @@ function pedacosDoTrecho(trecho: unknown): string[] | null {
 }
 
 /**
- * Onde os pedaços aparecem em `fonte` (já normalizada), na ordem, com o
- * primeiro a partir de `desde`: [início, fim) ou null.
+ * Onde os pedaços aparecem em `fonte` (já normalizada), na ordem, na primeira
+ * vez: [início, fim) ou null.
  */
-function ondeNaFonte(pedacos: string[], fonte: string, desde = 0): [number, number] | null {
+function ondeNaFonte(pedacos: string[], fonte: string): [number, number] | null {
   // Cada pedaço é procurado depois do fim do anterior: fora de ordem não vale.
-  let cursor = desde;
+  let cursor = 0;
   let comeco = -1;
   for (const pedaco of pedacos) {
     const onde = fonte.indexOf(pedaco, cursor);
@@ -71,15 +103,22 @@ function ondeNaFonte(pedacos: string[], fonte: string, desde = 0): [number, numb
   return [comeco, cursor];
 }
 
-/** Todas as vezes em que o trecho aparece, até o teto. */
+/**
+ * Todas as vezes em que o trecho aparece, até o teto. Com reticências, só
+ * conta a vez em que os pedaços cabem em 30 palavras seguidas (a regra do
+ * prompt): pedaços que só aparecem longe uns dos outros não são uma
+ * ocorrência, e a vizinhança nunca se estica até uma fala distante.
+ */
 function todasAsOcorrencias(pedacos: string[], fonte: string): Array<[number, number]> {
   const achadas: Array<[number, number]> = [];
-  let desde = 0;
-  while (achadas.length < OCORRENCIAS_NO_MAXIMO) {
-    const onde = ondeNaFonte(pedacos, fonte, desde);
-    if (!onde) break;
-    achadas.push(onde);
-    desde = onde[0] + 1;
+  for (let comeco = fonte.indexOf(pedacos[0]); comeco >= 0 && achadas.length < OCORRENCIAS_NO_MAXIMO; comeco = fonte.indexOf(pedacos[0], comeco + 1)) {
+    if (pedacos.length === 1) {
+      achadas.push([comeco, comeco + pedacos[0].length]);
+      continue;
+    }
+    const janela = fonte.slice(comeco, comeco + LETRAS_DA_JANELA);
+    const onde = ondeNaFonte(pedacos, janela);
+    if (onde && contarPalavras(janela.slice(onde[0], onde[1])) <= PALAVRAS_SEGUIDAS_NO_MAXIMO) achadas.push([comeco + onde[0], comeco + onde[1]]);
   }
   return achadas;
 }
@@ -146,7 +185,8 @@ export type OcorrenciaDoTrecho = {
  * Cada vez em que o trecho aparece na reunião, com o segundo em que começa e o
  * que foi dito em volta: as falas dele e as de até 3 turnos de cada lado (no
  * envio único, sem falas, 400 letras de cada lado no texto corrido). Vazio
- * quando o trecho não está na transcrição.
+ * quando o trecho não está na transcrição — ou, com reticências, quando os
+ * pedaços só aparecem longe uns dos outros (ver trechoDentroDaRegra).
  */
 export function ocorrenciasDoTrecho(trecho: unknown, transcricao: string, segmentos: readonly Segmento[]): OcorrenciaDoTrecho[] {
   const pedacos = pedacosDoTrecho(trecho);
@@ -172,6 +212,52 @@ export function ocorrenciasDoTrecho(trecho: unknown, transcricao: string, segmen
     texto: fonte.slice(Math.max(0, comeco - LETRAS_EM_VOLTA), fim + LETRAS_EM_VOLTA),
     falantes: new Set<string>(),
   }));
+}
+
+/**
+ * O trecho como a regra do prompt pede: palavras seguidas da transcrição. Com
+ * reticências, os pedaços precisam caber em 30 palavras seguidas. Quando só
+ * aparecem longe uns dos outros (um "[...]" que emenda falas distantes), fica
+ * uma parte do trecho que cabe e tem as 5 palavras da regra: o começo dele, o
+ * mais longo que der (é para onde o "▶" já apontava); se o começo não chega a
+ * 5 palavras ("Eu sei. [...]"), a maior das outras partes. Sem nenhuma, null,
+ * e o item sai. Trecho sem reticências, e trecho que nem aparece na
+ * transcrição, voltam como vieram: quem chama confere a presença
+ * (trechoApareceNaTranscricao).
+ */
+export function trechoDentroDaRegra(trecho: string, transcricao: string, segmentos: readonly Segmento[]): string | null {
+  const pedacos = pedacosDoTrecho(trecho);
+  if (!pedacos || pedacos.length === 1) return trecho;
+  const emendadas = falasEmendadas(segmentos);
+  const fonte = emendadas.falas.length ? emendadas.fonte : normalizarParaComparar(transcricao);
+  if (!ondeNaFonte(pedacos, fonte) || todasAsOcorrencias(pedacos, fonte).length) return trecho;
+
+  // Os pedaços com a posição no trecho como veio, para devolver o texto dele.
+  const crus: Array<{ inicio: number; fim: number; normalizado: string }> = [];
+  let inicio = 0;
+  for (const reticencias of [...Array.from(trecho.matchAll(CADA_RETICENCIAS)), null]) {
+    const fim = reticencias ? reticencias.index ?? 0 : trecho.length;
+    const normalizado = normalizarParaComparar(trecho.slice(inicio, fim));
+    if (normalizado) crus.push({ inicio, fim, normalizado });
+    if (reticencias) inicio = fim + reticencias[0].length;
+  }
+  // Cada parte seguida de pedaços (menos o trecho inteiro, que não cabe): as
+  // que começam no começo do trecho primeiro, e entre elas a mais longa.
+  const partes: Array<{ primeiro: number; ultimo: number; palavras: number }> = [];
+  for (let primeiro = 0; primeiro < crus.length; primeiro++) {
+    for (let ultimo = primeiro; ultimo < crus.length; ultimo++) {
+      if (primeiro === 0 && ultimo === crus.length - 1) continue;
+      const palavras = contarPalavras(crus.slice(primeiro, ultimo + 1).map(cru => cru.normalizado).join(" "));
+      if (palavras >= PALAVRAS_SEGUIDAS_NO_MINIMO) partes.push({ primeiro, ultimo, palavras });
+    }
+  }
+  partes.sort((a, b) => Number(a.primeiro > 0) - Number(b.primeiro > 0) || b.palavras - a.palavras || a.primeiro - b.primeiro);
+  for (const { primeiro, ultimo } of partes) {
+    const parte = trecho.slice(crus[primeiro].inicio, crus[ultimo].fim).replace(SOBRA_NO_COMECO, "").replace(SOBRA_NO_FIM, "");
+    const pedacosDaParte = pedacosDoTrecho(parte);
+    if (pedacosDaParte && todasAsOcorrencias(pedacosDaParte, fonte).length) return parte;
+  }
+  return null;
 }
 
 /**
