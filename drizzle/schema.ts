@@ -1266,9 +1266,11 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   emoji: varchar("emoji", { length: 16 }),
   // O id do modelo de IA que escreveu o resumo.
   model: varchar("model", { length: 80 }),
-  // Sobe a cada resumo gravado e a cada item que a dona edita ou acrescenta
-  // (H4f): a tradução do resumo (H11) guarda de qual versão saiu e é refeita
-  // quando ela muda.
+  // Sobe a cada resumo que a fila grava, e só aí: editar ou acrescentar um item
+  // (H4f) não a muda. A tradução do resumo (H11) guarda de qual versão saiu e é
+  // refeita inteira quando ela muda; o item editado (a impressão digital do
+  // texto não bate) e o acrescentado (o id não tem tradução) são traduzidos
+  // sozinhos.
   version: int("version").default(0).notNull(),
   generatedAt: bigint("generated_at", { mode: "number" }),
   // Controle da fila do resumo; fica no servidor.

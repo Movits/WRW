@@ -156,9 +156,9 @@ código conseguia assinar uma sessão válida.
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
-| `LLM_MODEL` | opcional: modelo das chamadas de texto (tradução, FAQ, Memória, recomendações, complementos de contato), que vão ao `LLM_API_URL`; é também o da extração, o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
+| `LLM_MODEL` | opcional: modelo das chamadas de texto sem função (tradução, FAQ, Memória, recomendações, complementos de contato, mapa mental, tradução do resumo guardado e e-mail de retorno), que vão ao `LLM_API_URL`; é também o da extração, o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
 | `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL`. Antes de pôr o `gemini-3.5-flash-lite` aqui, leia o parágrafo abaixo da tabela: ele não devolve todas as entidades da reunião |
-| `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
+| `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião. O mapa mental, que sai da mesma fila logo depois do resumo, e a tradução do resumo não seguem esta variável: ficam no `LLM_MODEL` | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA` | opcionais: quanto o modelo raciocina na extração da reunião, no resumo guardado e no Pergunte à reunião, cada função com a sua | sem valor (o padrão), o pedido sai sem o campo e o modelo raciocina no padrão dele, como sempre; `minimal`, `low`, `medium` ou `high` sobem como `reasoning_effort`; outro valor (inclusive `none`, que só desliga o raciocínio no Gemini 2.5) é recusado, avisa no log e não manda nada. Defina só depois de a bancada rodar o braço b, e só na função que usa o Flash: o Flash-Lite não raciocinou na bancada, e `low` pode fazê-lo raciocinar (não medido) |
 
@@ -174,8 +174,13 @@ da função no código, quando houver e o `LLM_API_URL` for a API do Gemini
 (`generativelanguage.googleapis.com`) > `LLM_MODEL` > o padrão. Variável
 recusada cai no degrau seguinte. Hoje nenhuma função tem padrão no código: sem
 variável, as três seguem o `LLM_MODEL`, e o deploy não troca o modelo de
-nenhuma. Quem chama sem função (tradução, FAQ, Memória, recomendações,
-complementos de contato) fica no `LLM_MODEL`.
+nenhuma. Ficam no `LLM_MODEL` as chamadas sem função: a tradução, o FAQ, a
+Memória, as recomendações e os complementos de contato, que não passam função
+nenhuma, e o mapa mental, a tradução do resumo guardado e o e-mail de retorno,
+que passam `funcao: null`. Quem chama sem função não lê nenhuma variável de
+função, nem `LLM_MODEL_<FUNÇÃO>` nem `LLM_RACIOCINIO_<FUNÇÃO>`: trocar o
+`LLM_MODEL` troca o modelo de todos eles, e o `LLM_MODEL_RESUMO` não leva junto
+o mapa mental, embora ele saia da mesma fila, logo depois do resumo.
 
 A bancada A de texto (16/11/2026) indicou o `gemini-3.5-flash-lite` para a
 extração: nota melhor, 5 vezes mais rápido e 78% mais barato por chamada. Mas,

@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as listarModelosMod from "../scripts/listar-modelos-gemini.mjs";
 
@@ -517,6 +517,42 @@ describe("texto por função: LLM_MODEL_<FUNÇÃO> > o padrão da função > LLM
       expect(deploy, variavel).toContain(`| \`${variavel}\` |`);
       expect(exemplo, variavel).toMatch(new RegExp(`^${variavel}=$`, "m"));
     }
+  });
+
+  it("o docs/deploy.md diz que cada chamada com funcao null fica no LLM_MODEL, e que o mapa mental não segue o LLM_MODEL_RESUMO", () => {
+    // Quem passa funcao: null ao pedirJsonAIA fica no LLM_MODEL e não lê
+    // nenhuma variável de função (server/CLAUDE.md). O mapa mental sai da fila
+    // do resumo, logo depois dele: quem lê só o deploy.md e define o
+    // LLM_MODEL_RESUMO para baratear o resumo supõe que o mapa vai junto, e a
+    // conta de custo e de tempo sai errada. Chamada nova com funcao null entra
+    // nesta lista e no docs/deploy.md.
+    const NOME_NO_DEPLOY: Record<string, string> = {
+      "email-de-retorno.ts": "e-mail de retorno",
+      "mapa-mental.ts": "mapa mental",
+      "traducao-do-resumo.ts": "tradução do resumo",
+    };
+    const comFuncaoNull: string[] = [];
+    const varrer = (pasta: string) => {
+      for (const entrada of readdirSync(pasta, { withFileTypes: true })) {
+        const caminho = join(pasta, entrada.name);
+        if (entrada.isDirectory()) varrer(caminho);
+        else if (entrada.name.endsWith(".ts") && !entrada.name.endsWith(".test.ts") && /funcao:\s*null/.test(readFileSync(caminho, "utf8"))) {
+          comFuncaoNull.push(relative(__dirname, caminho).replace(/\\/g, "/"));
+        }
+      }
+    };
+    varrer(__dirname);
+    expect(comFuncaoNull.sort()).toEqual(Object.keys(NOME_NO_DEPLOY).sort());
+
+    // Sem o CR, como no teste de cima; o parágrafo quebra linha no meio do nome.
+    const deploy = readFileSync(join(__dirname, "..", "docs", "deploy.md"), "utf8").replace(/\r\n/g, "\n");
+    const linhaDa = (variavel: string) => deploy.split("\n").find(linha => linha.startsWith(`| \`${variavel}\` |`)) ?? "";
+    const paragrafo = (deploy.split(/\n\s*\n/).find(trecho => trecho.includes("Quem chama sem função")) ?? "").replace(/\s+/g, " ");
+    for (const nome of Object.values(NOME_NO_DEPLOY)) {
+      expect(linhaDa("LLM_MODEL"), nome).toContain(nome);
+      expect(paragrafo, nome).toContain(nome);
+    }
+    expect(linhaDa("LLM_MODEL_RESUMO")).toContain("mapa mental");
   });
 });
 
