@@ -960,8 +960,11 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
       return {
         ...ajustada,
         fullName: nomeSustentadoPelaTranscricao(ajustada.fullName, transcription.text),
-        jobTitle: expressaoEstaNaFonte(ajustada.jobTitle, transcription.text) ? ajustada.jobTitle : null,
-        company: expressaoEstaNaFonte(ajustada.company, transcription.text) ? ajustada.company : null,
+        // A conferência é do valor inteiro que a IA deu; o corte para a coluna vem
+        // depois. Conferido já cortado, o cargo ou a empresa acima do teto nunca
+        // estaria na transcrição e sumia.
+        jobTitle: ajustada.jobTitle && expressaoEstaNaFonte(contact.jobTitle, transcription.text) ? ajustada.jobTitle : null,
+        company: ajustada.company && expressaoEstaNaFonte(contact.company, transcription.text) ? ajustada.company : null,
         phone: telefoneEstaNaFonte(ajustada.phone, transcription.text) ? ajustada.phone : null,
         email: emailEstaNaFonte(ajustada.email, transcription.text) ? ajustada.email : null,
         // Valor fora dos dois (o modelo nem sempre obedece ao enum) fica sem marca, como a sugestão antiga.
