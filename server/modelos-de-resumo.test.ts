@@ -236,6 +236,17 @@ describe("a numeração do resumo refeito", () => {
     expect(numeracaoDoResumoRefeito(queFicam.filter(item => item.section !== "focus"), novos).novos.map(item => item.section)).toEqual(["action", "focus"]);
   });
 
+  it("o item da dona que fica ignorado (H4f) não ocupa o foco, mas o texto dele também não volta como novo", () => {
+    const queFicam = [
+      { id: "foco-da-dona-ignorado", section: "focus" as const, position: 2, text: "Foco escrito pela dona", status: "ignored" },
+      { id: "acao-da-dona-ignorada", section: "action" as const, position: 0, text: "Ligar para o despachante amanhã", status: "ignored" },
+    ];
+    const novos = [novo("focus", "Venda de café para a Alemanha"), novo("action", "ligar para o despachante amanhã"), novo("focus", "foco escrito pela dona")];
+    const numeracao = numeracaoDoResumoRefeito(queFicam, novos);
+    expect(numeracao.queFicam).toEqual([{ id: "acao-da-dona-ignorada", position: 0 }, { id: "foco-da-dona-ignorado", position: 1 }]);
+    expect(numeracao.novos.map(item => [item.position, item.section, item.text])).toEqual([[2, "focus", "Venda de café para a Alemanha"]]);
+  });
+
   it("primeiro resumo (nada fica): os novos, numerados de 0 na ordem do formato", () => {
     const numeracao = numeracaoDoResumoRefeito([], [novo("decision", "D"), novo("action", "A")]);
     expect(numeracao.queFicam).toEqual([]);

@@ -72,7 +72,9 @@ vi.mock("./db", async () => {
   };
   return { getDb: async () => db, exigirDb: async () => db };
 });
-vi.mock("./resumo-da-reuniao", () => ({ gerarResumoDaReuniao: (...a: unknown[]) => ia.gerarResumoDaReuniao(...a) }));
+// Parcial: a numeração do resumo refeito (H4d, server/resumo-refeito.ts) usa a ordem
+// e as seções do formato, que moram no mesmo módulo.
+vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => ia.gerarResumoDaReuniao(...a) }));
 vi.mock("./mapa-mental", () => ({ gerarMapaMental: (...a: unknown[]) => ia.gerarMapaMental(...a) }));
 vi.mock("./link-aberto-da-reuniao", () => ({ segmentosDoContrato: (bruto: unknown) => Array.isArray(bruto) ? bruto : [] }));
 

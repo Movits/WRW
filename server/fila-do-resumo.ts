@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
 import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
-import type { MapaMental } from "@shared/mapa-mental";
+import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
@@ -172,10 +172,14 @@ async function registrarFalha(db: Banco, alvo: { id: string }, token: string, co
 
 /**
  * O item que fica quando o resumo é refeito com outro modelo (H4d, "Refazer
- * como…"): o que a dona confirmou e a ação que ela marcou como feita. Os
- * pendentes e os ignorados são trocados pelos novos.
+ * como…"): o que a dona confirmou, a ação que ela marcou como feita e o item
+ * que ela escreveu (H4f: acrescentado à mão ou editado), mesmo ignorado, para
+ * a palavra dela não sumir com uma geração da IA e o Desfazer continuar
+ * valendo. Os pendentes e os ignorados da IA são trocados pelos novos.
  */
-const itemQueFica = (item: { status: string; done: boolean }) => item.status === "confirmed" || item.done;
+type ItemAtual = { status: string; done: boolean; origin: string; editedAt: number | null };
+const escritoPelaDona = (item: ItemAtual) => item.origin === "owner" || item.editedAt !== null;
+const itemQueFica = (item: ItemAtual) => item.status === "confirmed" || item.done || escritoPelaDona(item);
 
 /** A fase do resumo; true quando ele foi gravado (e o mapa vem em seguida). */
 async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
@@ -189,14 +193,17 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   }
   const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O resumo refeito (H4d) leva à IA os itens que ficam, para ela não os
-  // escrever de novo. No primeiro resumo não há item nenhum.
+  // escrever de novo. No primeiro resumo não há item nenhum. O item da dona
+  // que ela ignorou fica no resumo, recolhido, mas não vai à IA como
+  // "confirmado".
   const itensAtuais = await db.select({
     section: meetingSummaryItems.section, subject: meetingSummaryItems.subject, text: meetingSummaryItems.text,
-    status: meetingSummaryItems.status, done: meetingSummaryItems.done,
+    status: meetingSummaryItems.status, done: meetingSummaryItems.done, origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
   }).from(meetingSummaryItems)
     .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)))
     .orderBy(asc(meetingSummaryItems.position));
-  const itensQueFicam = itensAtuais.filter(itemQueFica).map(({ section, subject, text }) => ({ section, subject, text }));
+  const itensQueFicam = itensAtuais.filter(item => itemQueFica(item) && item.status !== "ignored")
+    .map(({ section, subject, text }) => ({ section, subject, text }));
 
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
@@ -245,8 +252,10 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
  * Grava os itens e marca o resumo como pronto, numa transação. A reunião fica
  * travada até o fim: a exclusão (que marca 'deleted' antes de apagar) espera
  * esta transação, e o que ela gravar sai junto. No resumo refeito (H4d), os
- * itens que a dona confirmou e as ações feitas ficam, renumerados, e só os
- * pendentes e os ignorados são trocados.
+ * itens que a dona confirmou, as ações feitas e os itens que ela escreveu
+ * (H4f) ficam, renumerados, e só os pendentes e os ignorados da IA são
+ * trocados. O mapa mental pronto (H10) também fica: ele sai só da
+ * transcrição, que é a mesma, e não do modelo do resumo.
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
@@ -257,7 +266,7 @@ async function gravarResumo(
     // apagar) espera esta transação, e o que ela gravar sai junto.
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
-    const [ainda] = await tx.select({ id: meetingSummaries.id }).from(meetingSummaries)
+    const [ainda] = await tx.select({ id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     // Sem a linha com o meu token: a reunião foi reprocessada ou excluída, ou a
     // reserva venceu e outra rodada a tomou.
@@ -271,11 +280,12 @@ async function gravarResumo(
     // travar a faixa do resumo no índice prende também o vão vizinho, e duas
     // gravações de resumos vizinhos se travam uma à outra (deadlock). A linha
     // do resumo, travada acima, já faz desta a única gravação dele, e a dona
-    // não decide enquanto ele está na fila; mesmo assim, o item que alguém
-    // confirmou ou marcou como feito no meio não é apagado.
+    // não decide nem edita enquanto ele está na fila; mesmo assim, o item que
+    // alguém confirmou, marcou como feito ou escreveu no meio não é apagado.
     const itensAtuais = await tx.select({
       id: meetingSummaryItems.id, section: meetingSummaryItems.section, position: meetingSummaryItems.position,
       text: meetingSummaryItems.text, status: meetingSummaryItems.status, done: meetingSummaryItems.done,
+      origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
     const queFicam = itensAtuais.filter(itemQueFica);
@@ -284,6 +294,7 @@ async function gravarResumo(
       await tx.delete(meetingSummaryItems).where(and(
         inArray(meetingSummaryItems.id, queSaem), eq(meetingSummaryItems.ownerId, alvo.ownerId),
         ne(meetingSummaryItems.status, "confirmed"), eq(meetingSummaryItems.done, false),
+        eq(meetingSummaryItems.origin, "ai"), isNull(meetingSummaryItems.editedAt),
       ));
     }
     const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens);
@@ -307,8 +318,13 @@ async function gravarResumo(
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
       // A fase seguinte do mesmo trabalho (H10): o mapa entra na fila, do zero
-      // e com as tentativas dele.
-      mindMap: null, mindMapStatus: "pending", mindMapGeneratedAt: null, mindMapError: null, attempts: 0,
+      // e com as tentativas dele. O mapa pronto que ainda passa na conferência
+      // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
+      // que ele saiu.
+      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap)
+        ? {}
+        : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
+      attempts: 0,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";

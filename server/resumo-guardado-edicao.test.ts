@@ -167,10 +167,10 @@ function item(extra: Linha = {}): Linha {
   };
 }
 
-function montar({ reuniao = "ready", resumo = "ready" as string | null, itens = [] as Linha[] } = {}) {
+function montar({ reuniao = "ready", resumo = "ready" as string | null, itens = [] as Linha[], versao = 1 } = {}) {
   banco.tabelas = {
     meetings: [{ id: REUNIAO, ownerId: DONA, status: reuniao }],
-    meeting_summaries: resumo ? [{ id: RESUMO, meetingId: REUNIAO, ownerId: DONA, status: resumo, version: 1, updatedAt: ANTES }] : [],
+    meeting_summaries: resumo ? [{ id: RESUMO, meetingId: REUNIAO, ownerId: DONA, status: resumo, version: versao, updatedAt: ANTES }] : [],
     meeting_summary_items: itens,
   };
   banco.travas = [];
@@ -248,14 +248,22 @@ describe("editarItemDoResumo (H4f)", () => {
 
   it.each([
     ["o resumo sendo refeito", { resumo: "pending" }],
-    ["o resumo que falhou", { resumo: "failed" }],
+    ["o primeiro resumo que falhou (sem versão gravada)", { resumo: "failed", versao: 0 }],
     ["a reunião fora de 'ready'", { reuniao: "processing" }],
   ])("%s: CONFLICT, com a frase traduzível, e nada muda", async (_caso, estado) => {
     const acao = item();
     montar({ ...estado, itens: [acao] });
     await expect(servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS)).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
     expect(itens()[0].status).toBe("pending");
-    expect(versao()).toBe(1);
+    expect(versao()).toBe((estado as { versao?: number }).versao ?? 1);
+  });
+
+  it("o refazer que falhou (H4d, com versão gravada): a versão anterior segue valendo, e a dona a edita", async () => {
+    const acao = item();
+    montar({ resumo: "failed", versao: 1, itens: [acao] });
+    await servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS);
+    expect(itens()[0]).toMatchObject({ status: "confirmed", text: CAMPOS.texto, editedAt: AGORA });
+    expect(versao()).toBe(2);
   });
 
   it("a reunião apagada: o item 'não existe'", async () => {
@@ -318,13 +326,20 @@ describe("acrescentarItemDoResumo (H4f)", () => {
   it.each([
     ["sem resumo", { resumo: null }],
     ["o resumo na fila", { resumo: "pending" }],
-    ["o resumo que falhou", { resumo: "failed" }],
+    ["o primeiro resumo que falhou (sem versão gravada)", { resumo: "failed", versao: 0 }],
     ["a reunião fora de 'ready'", { reuniao: "processing" }],
   ])("%s: CONFLICT, com a frase traduzível, e nada é gravado", async (_caso, estado) => {
     montar(estado as never);
     await expect(servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Novo", assunto: null, responsavel: null, prazo: null }))
       .rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
     expect(itens()).toEqual([]);
+  });
+
+  it("o refazer que falhou (H4d, com versão gravada): a dona acrescenta sobre a versão anterior", async () => {
+    montar({ resumo: "failed", versao: 1 });
+    await servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Novo", assunto: null, responsavel: null, prazo: null });
+    expect(itens()).toEqual([expect.objectContaining({ text: "Novo", status: "confirmed", origin: "owner" })]);
+    expect(versao()).toBe(2);
   });
 
   it("a reunião de outra dona, ou apagada: 'reunião não encontrada', e nada é gravado", async () => {

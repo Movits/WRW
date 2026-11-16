@@ -38,9 +38,15 @@ type LinhaDoMapa = {
  * mapa também está (ele vem logo depois). O resumo que falhou leva o mapa
  * junto: pedir de novo o refaz. "Gerando" só com uma reserva viva, como no
  * resumo: na espera depois de uma falha passageira, ninguém está gerando.
+ *
+ * A exceção é o resumo refeito em outro modelo (H4d): o mapa pronto da versão
+ * anterior segue valendo enquanto a nova é escrita, e se ela falhar. Ele sai
+ * só da transcrição, que é a mesma, e a fila o guarda ao gravar o resumo
+ * refeito (server/fila-do-resumo.ts).
  */
 export function estadoDoMapa(linha: LinhaDoMapa | undefined, agora: number): { estado: EstadoDoMapa; erro: string | null } {
   if (!linha) return { estado: "sem_mapa", erro: null };
+  if (linha.status !== "ready" && linha.mindMapStatus === "ready") return { estado: "pronto", erro: null };
   const reservaViva = !!linha.lockToken && linha.lockedUntil !== null && Number(linha.lockedUntil) > agora;
   if (linha.status === "pending") return { estado: reservaViva ? "gerando" : "pendente", erro: null };
   if (linha.status === "failed") return { estado: "falhou", erro: linha.lastError };
@@ -109,11 +115,19 @@ function linhasAfetadas(resultado: unknown): number {
  * corrida para outro igual devolve a vaga. O mapa pronto cuja árvore não passa
  * mais na conferência conta como falho: a tela o mostra como falha
  * (paraATela), e o "Tentar de novo" tem de refazê-lo.
+ *
+ * No refazer do resumo que falhou (H4d), o mapa pronto da versão anterior
+ * segue valendo e não há o que pedir. Pelo link (`peloLink`), o pedido do
+ * resumo segue a regra dele: o refazer que falhou é da dona, e quem tem o link
+ * não o reabre (server/resumo-guardado.ts).
  */
-async function pedirMapaDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
+async function pedirMapaDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, peloLink = false) {
   const linha = await linhaDoMapa(db, ownerId, meetingId);
-  if (!linha || linha.status === "failed") return pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar);
-  const prontoInvalido = linha.mindMapStatus === "ready" && !conferirMapaMental(linha.mindMap);
+  const prontoInvalido = linha?.mindMapStatus === "ready" && !conferirMapaMental(linha.mindMap);
+  if (!linha || linha.status === "failed") {
+    if (linha?.mindMapStatus === "ready" && !prontoInvalido) return;
+    return pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { peloLink });
+  }
   if (linha.status !== "ready" || linha.mindMapStatus === "pending" || (linha.mindMapStatus === "ready" && !prontoInvalido)) return;
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
@@ -155,6 +169,6 @@ export async function mapaMentalPeloLink(token: string) {
 export async function pedirMapaPeloLink(token: string, antesDeCriar: (reuniaoId: string) => (() => void) | void) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
-  await pedirMapaDaReuniao(db, reuniao.ownerId, reuniao.id, () => antesDeCriar(reuniao.id));
+  await pedirMapaDaReuniao(db, reuniao.ownerId, reuniao.id, () => antesDeCriar(reuniao.id), true);
   return mapaMentalPeloLink(token);
 }

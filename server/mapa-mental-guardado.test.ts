@@ -88,6 +88,14 @@ describe("o estado do mapa pela linha do resumo", () => {
     expect(estadoDoMapa(linha({ status: "failed", lastError: "IA_INDISPONIVEL" }), AGORA)).toEqual({ estado: "falhou", erro: "IA_INDISPONIVEL" });
   });
 
+  it("o resumo refeito em outro modelo (H4d): o mapa pronto da versão anterior segue valendo, na fila e na falha", () => {
+    expect(estadoDoMapa(linha({ status: "pending", mindMapStatus: "ready", ...viva }), AGORA)).toEqual({ estado: "pronto", erro: null });
+    expect(estadoDoMapa(linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: "ready" }), AGORA)).toEqual({ estado: "pronto", erro: null });
+    // Sem mapa pronto, o resumo na fila ou que falhou leva o mapa junto, como antes.
+    expect(estadoDoMapa(linha({ status: "pending", mindMapStatus: "failed" }), AGORA).estado).toBe("pendente");
+    expect(estadoDoMapa(linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: null }), AGORA)).toEqual({ estado: "falhou", erro: "RESPOSTA_CORTADA" });
+  });
+
   it("resumo pronto: o estado é o do mapa; nulo é o resumo de antes do mapa", () => {
     expect(estadoDoMapa(linha(), AGORA)).toEqual({ estado: "sem_mapa", erro: null });
     expect(estadoDoMapa(linha({ mindMapStatus: "pending" }), AGORA).estado).toBe("pendente");
@@ -115,6 +123,13 @@ describe("ler o mapa", () => {
   it("fora de 'pronto', a árvore não sai, mesmo se a coluna tiver uma", async () => {
     estado.linha = linha({ mindMapStatus: "pending", mindMap: MAPA });
     expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pendente", idioma: "pt-BR", erro: null, mapa: null });
+  });
+
+  it("enquanto o resumo é refeito (H4d), e se o refazer falhar, o mapa pronto sai para a dona e para o link", async () => {
+    estado.linha = linha({ status: "pending", mindMapStatus: "ready", mindMap: MAPA });
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
+    estado.linha = linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: "ready", mindMap: MAPA });
+    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
   });
 
   it("reunião de outra dona (ou apagada): NOT_FOUND", async () => {
@@ -220,5 +235,22 @@ describe("pedir o mapa", () => {
     await pedirMapaPeloLink("t".repeat(32), vaga);
     expect(vaga).toHaveBeenCalledWith("reuniao-do-link");
     expect(estado.updates[0].set).toMatchObject({ mindMapStatus: "pending" });
+  });
+
+  it("no refazer que falhou (H4d): com o mapa pronto, nada a pedir; sem ele, só a dona reabre o resumo, e o link nem gasta vaga", async () => {
+    const teto = vi.fn();
+    estado.linha = { ...linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: "ready", mindMap: MAPA }), version: 1, template: "sales" };
+    await pedirMapaDaDona("dona-1", ID, teto);
+    await pedirMapaPeloLink("t".repeat(32), teto);
+    expect(teto).not.toHaveBeenCalled();
+    expect(estado.updates).toEqual([]);
+
+    estado.linha = { ...linha({ status: "failed", lastError: "RESPOSTA_CORTADA" }), version: 1, template: "sales" };
+    await pedirMapaPeloLink("t".repeat(32), teto);
+    expect(teto).not.toHaveBeenCalled();
+    expect(estado.updates).toEqual([]);
+    await pedirMapaDaDona("dona-1", ID, teto);
+    expect(teto).toHaveBeenCalledTimes(1);
+    expect(estado.updates[0].set).toMatchObject({ status: "pending", attempts: 0 });
   });
 });

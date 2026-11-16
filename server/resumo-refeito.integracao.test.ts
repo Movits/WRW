@@ -16,6 +16,16 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+// O mapa mental (H10) vem na mesma rodada, logo depois do resumo: dublê
+// também, para nenhuma chamada sair para a IA de verdade.
+const gerarMapaMental = vi.hoisted(() => vi.fn());
+vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("./mapa-mental")>()), gerarMapaMental: (...a: unknown[]) => gerarMapaMental(...a) }));
+const MAPA = {
+  ramos: [
+    { rotulo: "Exportação de café", folhas: [{ rotulo: "Contêiner sai de Santos", filhos: [] }] },
+    { rotulo: "Transportadora", folhas: [{ rotulo: "Contrato não será renovado", filhos: [] }] },
+  ],
+};
 
 const { getDb } = await import("./db");
 const { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
@@ -115,6 +125,8 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     fila.religarParaTestes();
     gerarResumoDaReuniao.mockReset();
     gerarResumoDaReuniao.mockResolvedValue(GERAL);
+    gerarMapaMental.mockReset();
+    gerarMapaMental.mockResolvedValue(MAPA);
     vaga.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -305,6 +317,89 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     await expect(servico.refazerResumoDaDona(DONA, id, "sales", vaga)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     expect(vaga).not.toHaveBeenCalled();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "general" });
+  });
+
+  it("o refazer guarda o mapa mental pronto (H10): ele sai da transcrição, que é a mesma, e a IA do mapa não é chamada de novo", async () => {
+    const { id } = await resumoDecidido();
+    const antes = await linhaDoResumo(id);
+    expect(antes).toMatchObject({ mindMapStatus: "ready" });
+    gerarMapaMental.mockClear();
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    gerarResumoDaReuniao.mockResolvedValue(VENDAS);
+    await rodar();
+    const depois = await linhaDoResumo(id);
+    expect(depois).toMatchObject({ status: "ready", template: "sales", version: 2, mindMapStatus: "ready", mindMapGeneratedAt: antes.mindMapGeneratedAt, mindMapError: null });
+    expect(depois.mindMap).toEqual(antes.mindMap);
+    expect(gerarMapaMental).not.toHaveBeenCalled();
+  });
+
+  it("o refazer do resumo sem mapa pronto (de antes da H10, ou o mapa que falhou) põe o mapa na fila junto, e ele sai na mesma rodada", async () => {
+    const { id } = await resumoDecidido();
+    await (await db()).update(meetingSummaries).set({ mindMap: null, mindMapStatus: "failed", mindMapError: "MAPA_INVALIDO", mindMapGeneratedAt: null })
+      .where(eq(meetingSummaries.meetingId, id));
+    gerarMapaMental.mockClear();
+    await servico.refazerResumoDaDona(DONA, id, "mentoring", vaga);
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "mentoring", mindMapStatus: "ready", mindMapError: null });
+    expect(gerarMapaMental).toHaveBeenCalledTimes(1);
+  });
+
+  it("o item que a dona escreveu (H4f) fica no refazer, mesmo ignorado; o ignorado não vai à IA como confirmado nem ocupa o foco", async () => {
+    const { id, antes } = await resumoDecidido();
+    await servico.acrescentarItemDoResumo(DONA, id, "task", { texto: "Revisar o contrato", assunto: "Contrato", responsavel: null, prazo: null });
+    const focoDaDona = await servico.acrescentarItemDoResumo(DONA, id, "focus", { texto: "Foco escrito pela dona", assunto: null, responsavel: null, prazo: null });
+    await servico.decidirItemDoResumo(DONA, focoDaDona, "ignored");
+    const editado = antes["Ligar para o despachante"].id;
+    await servico.editarItemDoResumo(DONA, editado, { texto: "Ligar para o despachante amanhã", assunto: null, responsavel: null, prazo: null });
+    await servico.decidirItemDoResumo(DONA, editado, "ignored");
+
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    gerarResumoDaReuniao.mockResolvedValue(VENDAS);
+    await rodar();
+
+    // A IA recebe só os que ficam à vista: os confirmados, o feito e o acrescentado.
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith(expect.objectContaining({
+      itensQueFicam: [
+        { section: "action", subject: null, text: "Avisar a transportadora" },
+        { section: "action", subject: null, text: "Pedir três cotações de frete" },
+        { section: "task", subject: "Contrato", text: "Revisar o contrato" },
+      ],
+    }));
+    // Os ignorados da IA (a decisão) e os pendentes saem; os da dona ficam, e o
+    // foco que ela ignorou não impede o foco novo.
+    expect((await itensDe(id)).map(linha => [linha.position, linha.section, linha.text, linha.status, linha.origin])).toEqual([
+      [0, "action", "Avisar a transportadora", "confirmed", "ai"],
+      [1, "action", "Pedir três cotações de frete", "confirmed", "ai"],
+      [2, "action", "Ligar para o despachante amanhã", "ignored", "ai"],
+      [3, "action", "Enviar a proposta comercial", "pending", "ai"],
+      [4, "focus", "Foco escrito pela dona", "ignored", "owner"],
+      [5, "focus", "Venda de café para a Alemanha", "pending", "ai"],
+      [6, "task", "Revisar o contrato", "confirmed", "owner"],
+      [7, "decision", "Desconto de 5% no primeiro pedido", "pending", "ai"],
+    ]);
+    // E o Desfazer segue valendo: o item editado volta confirmado.
+    await servico.decidirItemDoResumo(DONA, editado, "pending");
+    expect((await porTexto(id))["Ligar para o despachante amanhã"]).toMatchObject({ status: "confirmed" });
+  });
+
+  it("no refazer que falhou, a dona também edita e acrescenta sobre a versão anterior (H4f); enquanto ele está na fila, não", async () => {
+    const { id, antes } = await resumoDecidido();
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    const campos = { texto: "Ligar para o despachante hoje", assunto: null, responsavel: null, prazo: null };
+    await expect(servico.editarItemDoResumo(DONA, antes["Ligar para o despachante"].id, campos)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(servico.acrescentarItemDoResumo(DONA, id, "action", campos)).rejects.toMatchObject({ code: "CONFLICT" });
+
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", version: 1 });
+    await servico.editarItemDoResumo(DONA, antes["Ligar para o despachante"].id, campos);
+    await servico.acrescentarItemDoResumo(DONA, id, "action", { ...campos, texto: "Mandar o contrato assinado" });
+    expect(await porTexto(id)).toMatchObject({
+      "Ligar para o despachante hoje": { status: "confirmed" },
+      "Mandar o contrato assinado": { status: "confirmed", origin: "owner" },
+    });
+    // A edição não tira o resumo de 'failed': o "Tentar de novo" segue no modelo pedido.
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", version: 3 });
   });
 
   it("o teto que recusa impede o refazer: o resumo pronto fica como estava", async () => {
