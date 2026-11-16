@@ -10,17 +10,24 @@ import { isoBase64URL, isoCBOR } from "@simplewebauthn/server/helpers";
 /**
  * Um autenticador de software, só para os testes das chaves de acesso
  * (server/chaves-de-acesso.ts). Ele faz o que o aparelho faz, sem aparelho: gera
- * um par de chaves ES256 (P-256) no próprio teste, responde ao cadastro com o
- * atestado "none" e à entrada com a asserção assinada pela chave privada dele.
- * A conferência do servidor (a @simplewebauthn/server) roda de verdade sobre
+ * um par de chaves no próprio teste (ES256, P-256, por padrão; RS256, a do
+ * Windows Hello em TPM antigo, por opção), responde ao cadastro com o atestado
+ * "none" e à entrada com a asserção assinada pela chave privada dele. A
+ * conferência do servidor (a @simplewebauthn/server) roda de verdade sobre
  * essas respostas. Cada campo que o servidor confere pode ser trocado por
  * parâmetro, para o teste provar a recusa: a origem, o domínio, o desafio, o
- * tipo, o contador, o identificador da conta e a verificação da pessoa.
+ * tipo, o contador, o identificador da conta, a verificação da pessoa e a
+ * própria assinatura (os dados trocados depois de assinar).
  */
+
+/** COSE: ES256 (EC2, P-256) e RS256 (RSASSA-PKCS1-v1_5 com SHA-256). */
+export type AlgoritmoDoAutenticador = "ES256" | "RS256";
 
 export type ConfiguracaoDoAutenticador = {
   /** A origem que o navegador escreveria no clientDataJSON. */
   origem: string;
+  /** O algoritmo da chave. Padrão: ES256. */
+  algoritmo?: AlgoritmoDoAutenticador;
   /** O RP ID cujo hash vai nos dados do autenticador. Padrão: o das opções. */
   rpId?: string;
   /** A chave fica numa cópia sincronizada (iCloud, Google): os bits BE e BS. */
@@ -45,6 +52,13 @@ export type Desvios = {
   semVerificarAPessoa?: boolean;
   /** O identificador da conta devolvido na entrada; null tira o campo. */
   identificadorDaConta?: string | null;
+  /**
+   * Na entrada: liga o bit mais alto do contador nos dados do autenticador
+   * DEPOIS de assinar. O contador sobe (2^31 a mais), então a biblioteca o
+   * aceita, e só a assinatura deixa de conferir: é a única falha que ela
+   * devolve como `verified: false`, sem lançar.
+   */
+  adulterarDepoisDeAssinar?: boolean;
 };
 
 const BIT_UP = 0x01;
@@ -76,19 +90,42 @@ function inteiro(valor: number, bytes: 2 | 4): Uint8Array {
   return saida;
 }
 
-export function criarAutenticador(configuracao: ConfiguracaoDoAutenticador) {
+/** O par de chaves e a chave pública no formato COSE, para o algoritmo pedido. */
+function gerarChaves(algoritmo: AlgoritmoDoAutenticador): { privateKey: crypto.KeyObject; chavePublicaCose: Uint8Array } {
+  if (algoritmo === "RS256") {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 0x10001 });
+    const jwk = publicKey.export({ format: "jwk" }) as { n: string; e: string };
+    // kty RSA (3), alg RS256 (-257), n e e.
+    return {
+      privateKey,
+      chavePublicaCose: isoCBOR.encode(new Map<number, number | Uint8Array>([
+        [1, 3],
+        [3, -257],
+        [-1, isoBase64URL.toBuffer(jwk.n)],
+        [-2, isoBase64URL.toBuffer(jwk.e)],
+      ])),
+    };
+  }
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+  // kty EC2 (2), alg ES256 (-7), crv P-256 (1), x e y.
+  return {
+    privateKey,
+    chavePublicaCose: isoCBOR.encode(new Map<number, number | Uint8Array>([
+      [1, 2],
+      [3, -7],
+      [-1, 1],
+      [-2, isoBase64URL.toBuffer(jwk.x)],
+      [-3, isoBase64URL.toBuffer(jwk.y)],
+    ])),
+  };
+}
+
+export function criarAutenticador(configuracao: ConfiguracaoDoAutenticador) {
+  // RS256: PKCS#1 v1.5, o padrão do crypto.sign para chave RSA; ES256: ECDSA em DER.
+  const { privateKey, chavePublicaCose } = gerarChaves(configuracao.algoritmo ?? "ES256");
   const idDaCredencial = new Uint8Array(crypto.randomBytes(32));
   const credencialId = b64(idDaCredencial);
-  // A chave pública no formato COSE: kty EC2 (2), alg ES256 (-7), crv P-256 (1), x e y.
-  const chavePublicaCose = isoCBOR.encode(new Map<number, number | Uint8Array>([
-    [1, 2],
-    [3, -7],
-    [-1, 1],
-    [-2, isoBase64URL.toBuffer(jwk.x)],
-    [-3, isoBase64URL.toBuffer(jwk.y)],
-  ]));
   const contaUsos = configuracao.contadorInicial !== undefined;
   let contador = configuracao.contadorInicial ?? 0;
   /** O identificador da conta que o servidor mandou no cadastro (user.id das opções). */
@@ -153,6 +190,9 @@ export function criarAutenticador(configuracao: ConfiguracaoDoAutenticador) {
       const dadosDoAutenticador = juntar(sha256(texto(rpId)), Uint8Array.of(bandeiras(desvios, 0)), inteiro(usado, 4));
       const cliente = dadosDoCliente("webauthn.get", opcoes.challenge, desvios);
       const assinatura = crypto.sign("sha256", juntar(dadosDoAutenticador, sha256(cliente)), privateKey);
+      // O contador são os bytes 33 a 36 (depois do hash do domínio e das
+      // bandeiras), em big-endian: o bit 0x80 do byte 33 soma 2^31.
+      if (desvios.adulterarDepoisDeAssinar) dadosDoAutenticador[33] ^= 0x80;
       const identificador = desvios.identificadorDaConta === undefined ? identificadorDaConta : desvios.identificadorDaConta;
       return {
         id: credencialId,

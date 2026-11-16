@@ -174,9 +174,10 @@ como "fora do log"). Os ids que a chave do Gemini enxerga saem de
 
 ### Para entrar com Face ID ou digital (chaves de acesso)
 
-Sem estas duas, o app sobe e a função não aparece: o botão some da tela, e os
-procedimentos `chavesDeAcesso.*` respondem `CHAVE_INDISPONIVEL`
-(`server/chaves-de-acesso.ts`).
+Sem estas duas, o app sobe e a função fica desligada: o `chavesDeAcesso.estado`
+responde `disponivel: false` (é por ele que a tela da A7, ainda por fazer, vai
+decidir se mostra o botão), e os outros procedimentos `chavesDeAcesso.*`
+respondem `CHAVE_INDISPONIVEL` (`server/chaves-de-acesso.ts`).
 
 | Variável | Para quê | Valor em produção |
 |---|---|---|
@@ -197,6 +198,14 @@ procedimentos `chavesDeAcesso.*` respondem `CHAVE_INDISPONIVEL`
   `https://` (http só em `localhost`), sem caminho, e o domínio dela é o RP ID ou
   um subdomínio dele. No desenvolvimento: `WEBAUTHN_RP_ID=localhost` e
   `WEBAUTHN_ORIGENS=http://localhost:3000`.
+- **Como conferir que ligou**, depois de pôr as duas e de o deploy subir: abra
+  `https://wrwglobal.org/api/trpc/chavesDeAcesso.estado` no navegador. A resposta
+  é `{"result":{"data":{"json":{"disponivel":true}}}}`. Com `false`, a função
+  segue desligada: ou as variáveis não chegaram ao serviço, ou uma delas tem um
+  valor errado, e aí o log do Render traz o aviso `[Chaves de acesso]` (o
+  primeiro pedido depois do deploy o escreve). O mesmo endereço em
+  `https://www.wrwglobal.org` também dá `true`, e em
+  `https://mmm-gud5.onrender.com` dá `false`, como deve.
 
 ### Só para o exame de produção
 

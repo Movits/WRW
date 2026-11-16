@@ -301,6 +301,15 @@ tela e a rota usam (`/gravar?emPartes=1` e `/api/reunioes/:id/partes/:seq`).
 - **Passkeys:**
   - redefinir a senha também apaga as chaves de acesso da conta, com auditoria. Sem
     isso, uma chave cadastrada por um invasor sobreviveria ao reset;
+  - cadastrar uma chave pede entrada recente: só a sessão aberta há até 10 minutos
+    (com a senha ou com outra chave) cadastra; depois disso, a tela pede a senha e entra
+    de novo. E a dona recebe um e-mail a cada chave cadastrada. Sem as duas coisas,
+    quem estivesse com a sessão de outra pessoa (o computador do evento esquecido
+    aberto, o cookie copiado) criaria uma credencial que sobrevive a "Sair" e à
+    revogação das sessões (revisão da A6, 16/11);
+  - o identificador da conta que vai para o aparelho é fixo por conta: cadastrar de
+    novo, depois de a conta ficar sem chaves, substitui a chave antiga no aparelho, em
+    vez de deixar duas;
   - o desafio de uso único fica numa tabela pequena, na mesma migração das chaves, e é
     consumido por um UPDATE condicional. Ele não fica no `audit_logs`, porque o insert
     de lá engole o erro: se falhasse, o mesmo desafio continuaria valendo;

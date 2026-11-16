@@ -101,9 +101,10 @@ export const chavesDeAcessoRouter = router({
   estado: publicProcedure.query(({ ctx }) => ({ disponivel: configuracaoParaOPedido(ctx.req) !== null })),
 
   // Mutação, e não consulta: grava o desafio (e o POST leva o cabeçalho Origin).
-  opcoesDeCadastro: logadaComChaves.mutation(({ ctx }) => {
+  // Só com a sessão recente; senão CHAVE_REAUTENTICAR (server/chaves-de-acesso.ts).
+  opcoesDeCadastro: logadaComChaves.mutation(async ({ ctx }) => {
     tetoDeCadastroDeChave.reservar(`conta:${ctx.user.id}`);
-    return gerarOpcoesDeCadastro(ctx.chaves, ctx.user);
+    return gerarOpcoesDeCadastro(ctx.chaves, ctx.user, { sessionToken: await sessionTokenDoPedido(ctx.req) });
   }),
 
   cadastrar: logadaComChaves

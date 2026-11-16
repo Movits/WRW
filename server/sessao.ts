@@ -6,7 +6,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { sessions, type User } from "../drizzle/schema";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { requireSecret } from "./_core/env";
-import { descreverErroDeBanco } from "./banco-indisponivel";
+import { BancoIndisponivel, descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { DURACAO_DA_SESSAO_MS, RENOVAR_O_TOKEN_A_CADA_MS } from "./duracao-da-sessao";
 
@@ -126,6 +126,12 @@ export async function abrirSessao(params: {
     // exemplo) sai cortado.
     const descricao = descreverErroDeBanco(sessionErr).replaceAll(sessionToken, inicioDoToken);
     console.error("[Auth] ERRO ao criar sessão no banco:", descricao, "| userId:", usuaria.id, "| expiresAt:", expiresAt.toISOString());
+    // Banco fora do ar é erro de banco, e não "erro interno": a frase genérica
+    // sem `cause` cortava a cadeia, e o middleware de _core/trpc.ts não
+    // reconhecia a queda (a tela recebia a frase em português, no login por
+    // senha e na entrada com chave de acesso). Sai uma BancoIndisponivel nova,
+    // e não o erro original: a mensagem do Drizzle leva o token nos parâmetros.
+    if (ehErroDeBancoIndisponivel(sessionErr)) throw new BancoIndisponivel();
     throw new Error("Erro interno ao criar sessão. Tente novamente.");
   }
 

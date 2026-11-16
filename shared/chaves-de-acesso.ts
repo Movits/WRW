@@ -42,6 +42,18 @@ export const ERRO_DA_CHAVE_DE_ACESSO = {
   limiteDaConta: "CHAVE_LIMITE_DA_CONTA",
   /** A chave não existe ou não é desta conta (renomear, remover). */
   naoEncontrada: "CHAVE_NAO_ENCONTRADA",
+  /**
+   * Cadastrar uma chave pede entrada recente: a sessão deste aparelho foi
+   * aberta há mais de MINUTOS_PARA_CADASTRAR_CHAVE minutos. A tela pede a senha,
+   * entra de novo por `auth.login` (o que abre uma sessão nova, com o bloqueio
+   * por tentativas do login) e repete o pedido. Sem isso, quem estivesse com a
+   * sessão de outra pessoa (o computador do evento esquecido aberto, o cookie
+   * copiado) criaria uma credencial que sobrevive a "Sair" e à revogação das
+   * sessões.
+   */
+  reautenticar: "CHAVE_REAUTENTICAR",
+  /** A sessão da entrada com a chave não pôde ser aberta, por um erro que não é o banco fora do ar. */
+  erroInterno: "CHAVE_ERRO_INTERNO",
 } as const;
 
 export type CodigoDeErroDaChaveDeAcesso =
@@ -52,3 +64,10 @@ export const CHAVES_POR_CONTA_MAX = 10;
 
 /** O apelido que a dona dá à chave ("iPhone da Glenda"), depois do trim. */
 export const APELIDO_DA_CHAVE_MAX = 60;
+
+/**
+ * Até quantos minutos depois de entrar (com a senha ou com uma chave) a sessão
+ * cadastra uma chave nova. Cabe o convite logo depois do login, da A7; depois
+ * disso, CHAVE_REAUTENTICAR.
+ */
+export const MINUTOS_PARA_CADASTRAR_CHAVE = 10;

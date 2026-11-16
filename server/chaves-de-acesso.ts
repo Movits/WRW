@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 import { TRPCError, type TRPC_ERROR_CODE_KEY } from "@trpc/server";
-import { and, asc, count, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, count, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -17,14 +17,18 @@ import {
   APELIDO_DA_CHAVE_MAX,
   CHAVES_POR_CONTA_MAX,
   ERRO_DA_CHAVE_DE_ACESSO,
+  MINUTOS_PARA_CADASTRAR_CHAVE,
   type CodigoDeErroDaChaveDeAcesso,
 } from "@shared/chaves-de-acesso";
 import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { auditLogs, chavesDeAcesso, desafiosDeChaveDeAcesso, sessions, users, type User } from "../drizzle/schema";
+import { escapeHtml, sendEmail } from "./_core/email";
+import { requireSecret } from "./_core/env";
+import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { checkLoginRateLimit, invalidateSession, linhasAlcancadas, recordLoginAttempt } from "./security";
-import { abrirSessao } from "./sessao";
+import { abrirSessao, type SessaoAberta } from "./sessao";
 
 // ─── As chaves de acesso (passkeys, WebAuthn) ─────────────────
 // A6 do desenho do gravador (docs/arquitetura/gravador-de-reunioes.md, "Passkeys"):
@@ -45,6 +49,13 @@ import { abrirSessao } from "./sessao";
 //   transação que grava o contador e a auditoria confirmar.
 // - Cadastrar, remover e entrar gravam a auditoria por `tx.insert(auditLogs)`,
 //   na mesma transação da escrita: se a auditoria falha, nada é gravado.
+// - Cadastrar pede entrada recente: só a sessão aberta há até
+//   MINUTOS_PARA_CADASTRAR_CHAVE minutos cadastra (as opções recusam antes do
+//   Face ID; o cadastro confere de novo, na transação que trava a sessão).
+//   Depois disso, CHAVE_REAUTENTICAR: a tela pede a senha e entra de novo
+//   (`auth.login`), que abre uma sessão nova. E a dona recebe um e-mail a cada
+//   chave cadastrada. Sem as duas coisas, uma sessão roubada virava uma
+//   credencial que sobrevive a "Sair" e à revogação das sessões.
 // - Os erros saem como CÓDIGO (shared/chaves-de-acesso.ts), e a tela traduz.
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -88,6 +99,14 @@ function avisarUmaVez(mensagem: string) {
   if (avisosDados.has(mensagem)) return;
   avisosDados.add(mensagem);
   console.warn(`[Chaves de acesso] ${mensagem}`);
+}
+
+/**
+ * Só para os testes: esquece os avisos já dados, para cada teste ver o próprio
+ * aviso em qualquer ordem (como o `esquecer()` dos tetos da rota).
+ */
+export function esquecerAvisosDasChaves(): void {
+  avisosDados.clear();
 }
 
 /** A origem de um endereço (esquema, host e porta), ou null se ele trouxer mais que isso. */
@@ -292,9 +311,21 @@ function linhaDeAuditoria(dados: {
   };
 }
 
-/** A chave como a dona a vê: nada do que serve para conferir assinatura sai daqui. */
+/**
+ * A chave como a dona a vê: nada do que serve para conferir assinatura sai daqui
+ * (a chave pública fica no servidor). O id da credencial e o identificador da
+ * conta no aparelho não são segredo (as opções de cadastro já os mandam à dona,
+ * em `excludeCredentials` e `user.id`): vão na lista para a tela da A7 avisar o
+ * aparelho (a Signal API do WebAuthn, `signalUnknownCredential` e
+ * `signalAllAcceptedCredentials`) da chave que a dona removeu, e ele parar de
+ * oferecê-la.
+ */
 export type ChaveDaLista = {
   id: string;
+  /** O id da credencial no aparelho, em base64url. */
+  credencialId: string;
+  /** O identificador da conta no aparelho (o user handle), em base64url. */
+  identificadorDaConta: string;
   apelido: string | null;
   tipoDoAparelho: "singleDevice" | "multiDevice";
   sincronizada: boolean;
@@ -306,6 +337,8 @@ export type ChaveDaLista = {
 
 const COLUNAS_DA_LISTA = {
   id: chavesDeAcesso.id,
+  credencialId: chavesDeAcesso.credencialId,
+  identificadorDaUsuaria: chavesDeAcesso.identificadorDaUsuaria,
   apelido: chavesDeAcesso.apelido,
   tipoDoAparelho: chavesDeAcesso.tipoDoAparelho,
   sincronizada: chavesDeAcesso.sincronizada,
@@ -317,6 +350,8 @@ const COLUNAS_DA_LISTA = {
 
 function chaveDaLista(linha: {
   id: string;
+  credencialId: string;
+  identificadorDaUsuaria: string;
   apelido: string | null;
   tipoDoAparelho: "singleDevice" | "multiDevice";
   sincronizada: boolean;
@@ -327,6 +362,8 @@ function chaveDaLista(linha: {
 }): ChaveDaLista {
   return {
     id: linha.id,
+    credencialId: linha.credencialId,
+    identificadorDaConta: linha.identificadorDaUsuaria,
     apelido: linha.apelido,
     tipoDoAparelho: linha.tipoDoAparelho,
     sincronizada: Boolean(linha.sincronizada),
@@ -340,18 +377,70 @@ function chaveDaLista(linha: {
 // ─── Cadastro (logada) ────────────────────────────────────────
 
 /**
+ * O identificador da conta que vai para o aparelho (o user handle do WebAuthn):
+ * fixo por conta, um HMAC do id com uma chave derivada do JWT_SECRET. Não
+ * revela o id nem o e-mail, e volta igual depois de a conta ficar sem chaves
+ * (todas removidas, ou apagadas pela redefinição da senha). É isso que faz o
+ * aparelho SUBSTITUIR a chave antiga ao cadastrar de novo: ele troca a que tem
+ * o mesmo domínio e o mesmo identificador. Com um identificador sorteado a cada
+ * vez, a antiga ficava no aparelho, e a pessoa via duas contas no Face ID, uma
+ * delas morta (CHAVE_DESCONHECIDA). Trocar o JWT_SECRET muda o identificador
+ * das contas que ficarem sem chaves; a conta que ainda tem chave continua com o
+ * da primeira (`gerarOpcoesDeCadastro`).
+ */
+export function identificadorFixoDaConta(userId: number): string {
+  const chave = crypto.createHmac("sha256", requireSecret("JWT_SECRET")).update("wrw/chaves-de-acesso/identificador-da-conta").digest();
+  return isoBase64URL.fromBuffer(new Uint8Array(crypto.createHmac("sha256", chave).update(String(userId)).digest()));
+}
+
+/**
+ * O que o cadastro lê da sessão do pedido. `recente` é calculado pelo relógio do
+ * BANCO: `createdAt` é gravado por ele (DEFAULT, no fuso dele) e a renovação da
+ * sessão não o muda; a comparação com uma data do Node erraria com o banco fora
+ * de UTC, como no bloqueio por tentativas (server/security.ts). Exportado para o
+ * teste prender o SQL: o MariaDB do CI roda em UTC, e lá a comparação errada
+ * também passaria.
+ */
+export const COLUNAS_DA_SESSAO_QUE_CADASTRA = {
+  userId: sessions.userId,
+  isActive: sessions.isActive,
+  expiresAt: sessions.expiresAt,
+  recente: sql<number>`(${sessions.createdAt} >= NOW() - INTERVAL ${MINUTOS_PARA_CADASTRAR_CHAVE} MINUTE)`,
+};
+
+type SessaoQueCadastra = { userId: number; isActive: boolean; expiresAt: Date; recente: number | string | boolean | null };
+
+/**
+ * A sessão do pedido pode cadastrar uma chave para esta conta? Sem sessão,
+ * derrubada, vencida ou de outra conta: UNAUTHED (a tela manda ao login). Aberta
+ * há mais de MINUTOS_PARA_CADASTRAR_CHAVE minutos: CHAVE_REAUTENTICAR.
+ */
+function exigirSessaoQueCadastra(sessao: SessaoQueCadastra | undefined, userId: number): void {
+  if (!sessao || !sessao.isActive || sessao.userId !== userId || sessao.expiresAt.getTime() <= Date.now()) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+  if (Number(sessao.recente) !== 1) throw erroDaChave("UNAUTHORIZED", ERRO_DA_CHAVE_DE_ACESSO.reautenticar);
+}
+
+/**
  * As opções para o aparelho criar a chave: chave residente (a entrada não pede
  * e-mail), a pessoa verificada pelo aparelho (Face ID, digital, PIN), sem
- * atestado e sem as chaves que a conta já tem. O identificador que vai para o
- * aparelho é o mesmo em todas as chaves da conta (o da primeira, ou um
- * aleatório novo), nunca o id nem o e-mail; ele fica guardado com o desafio até
- * o cadastro.
+ * atestado e sem as chaves que a conta já tem. Antes de tudo, a sessão do
+ * pedido tem de ser recente (`exigirSessaoQueCadastra`), para a recusa chegar
+ * antes do Face ID. O identificador que vai para o aparelho é o mesmo em todas
+ * as chaves da conta (o da primeira chave; sem chave, o fixo da conta), nunca o
+ * id nem o e-mail; ele fica guardado com o desafio até o cadastro.
  */
 export async function gerarOpcoesDeCadastro(
   configuracao: ConfiguracaoDasChaves,
   usuaria: Pick<User, "id" | "email" | "name">,
+  pedido: { sessionToken: string | null },
 ): Promise<PublicKeyCredentialCreationOptionsJSON> {
   const db = await exigirDb();
+  const [sessao] = pedido.sessionToken
+    ? await db.select(COLUNAS_DA_SESSAO_QUE_CADASTRA).from(sessions).where(eq(sessions.sessionToken, pedido.sessionToken)).limit(1)
+    : [];
+  exigirSessaoQueCadastra(sessao, usuaria.id);
   const existentes = await db
     .select({
       credencialId: chavesDeAcesso.credencialId,
@@ -364,8 +453,7 @@ export async function gerarOpcoesDeCadastro(
   if (existentes.length >= CHAVES_POR_CONTA_MAX) {
     throw erroDaChave("PRECONDITION_FAILED", ERRO_DA_CHAVE_DE_ACESSO.limiteDaConta);
   }
-  const identificador = existentes[0]?.identificadorDaUsuaria
-    ?? isoBase64URL.fromBuffer(new Uint8Array(crypto.randomBytes(32)));
+  const identificador = existentes[0]?.identificadorDaUsuaria ?? identificadorFixoDaConta(usuaria.id);
   const email = usuaria.email?.trim().toLowerCase() || null;
   const nome = usuaria.name?.trim() || null;
   const opcoes = await generateRegistrationOptions({
@@ -392,14 +480,16 @@ export async function gerarOpcoesDeCadastro(
 /**
  * Confere a resposta do aparelho e grava a chave na conta logada, com a
  * auditoria na mesma transação. O desafio é gasto antes da conferência. A
- * transação trava a linha da SESSÃO deste pedido e só grava enquanto ela vale:
- * a redefinição da senha derruba as sessões e apaga as chaves na mesma
- * transação dela (routers/auth.ts), então um cadastro em andamento ou termina
- * antes e a chave dele é apagada, ou encontra a sessão derrubada e é recusado.
+ * transação trava a linha da SESSÃO deste pedido e só grava enquanto ela vale e
+ * é recente (a conferência que vale; a das opções só adianta a recusa): a
+ * redefinição da senha derruba as sessões e apaga as chaves na mesma transação
+ * dela (routers/auth.ts), então um cadastro em andamento ou termina antes e a
+ * chave dele é apagada, ou encontra a sessão derrubada e é recusado. Depois da
+ * transação, a dona recebe o aviso por e-mail.
  */
 export async function cadastrarChave(
   configuracao: ConfiguracaoDasChaves,
-  usuaria: Pick<User, "id">,
+  usuaria: Pick<User, "id" | "email" | "name">,
   entrada: { resposta: RegistrationResponseJSON; apelido?: string | null },
   pedido: PedidoAuditado & { sessionToken: string | null },
 ): Promise<ChaveDaLista> {
@@ -463,15 +553,13 @@ export async function cadastrarChave(
     await db.transaction(async tx => {
       const [sessao] = pedido.sessionToken
         ? await tx
-          .select({ userId: sessions.userId, isActive: sessions.isActive, expiresAt: sessions.expiresAt })
+          .select(COLUNAS_DA_SESSAO_QUE_CADASTRA)
           .from(sessions)
           .where(eq(sessions.sessionToken, pedido.sessionToken))
           .limit(1)
           .for("update")
         : [];
-      if (!sessao || !sessao.isActive || sessao.userId !== usuaria.id || sessao.expiresAt.getTime() <= Date.now()) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-      }
+      exigirSessaoQueCadastra(sessao, usuaria.id);
       const [{ total }] = await tx.select({ total: count() }).from(chavesDeAcesso).where(eq(chavesDeAcesso.userId, usuaria.id));
       if (Number(total) >= CHAVES_POR_CONTA_MAX) {
         throw erroDaChave("PRECONDITION_FAILED", ERRO_DA_CHAVE_DE_ACESSO.limiteDaConta);
@@ -491,7 +579,71 @@ export async function cadastrarChave(
     if (ehColisaoDeChave(erro)) throw erroDaChave("CONFLICT", ERRO_DA_CHAVE_DE_ACESSO.jaCadastrada);
     throw erro;
   }
+  avisarChaveCadastrada(usuaria, chave);
   return chaveDaLista(chave);
+}
+
+/**
+ * O e-mail à dona a cada chave cadastrada: quando, o apelido e o que fazer se
+ * não foi ela (redefinir a senha derruba as sessões e apaga as chaves). Em
+ * português, como os outros e-mails do app. `site` é o FRONTEND_URL, a origem
+ * dos links; sem ele, o texto aponta o "Esqueci minha senha" sem link.
+ */
+export function montarAvisoDeChaveCadastrada(dados: {
+  nome: string | null;
+  apelido: string | null;
+  quando: Date;
+  site: string | null;
+}): { assunto: string; text: string; html: string } {
+  const nome = dados.nome?.trim() || "Membro";
+  const quando = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(dados.quando);
+  const linkDaSenha = dados.site ? `${dados.site.replace(/\/+$/, "")}/forgot-password` : null;
+  const assunto = "Nova chave de acesso na sua conta WRW";
+  const cadastrada = (apelido: string | null) =>
+    `Uma chave de acesso (Face ID, digital ou bloqueio de tela) foi cadastrada na sua conta WRW em ${quando}, no horário de Brasília${apelido ? `, com o nome "${apelido}"` : ""}.`;
+  const seNaoFoi = "Se não foi você, redefina a sua senha agora: isso encerra todas as sessões e apaga todas as chaves de acesso da conta.";
+  const text = [
+    `Olá, ${nome}.`,
+    cadastrada(dados.apelido),
+    "Se foi você, não precisa fazer nada.",
+    linkDaSenha ? `${seNaoFoi} ${linkDaSenha}` : `${seNaoFoi} Use o "Esqueci minha senha" na tela de entrada.`,
+  ].join("\n\n");
+  const html = [
+    `<p>Olá, <strong>${escapeHtml(nome)}</strong>.</p>`,
+    `<p>${escapeHtml(cadastrada(dados.apelido))}</p>`,
+    "<p>Se foi você, não precisa fazer nada.</p>",
+    linkDaSenha
+      ? `<p>${escapeHtml(seNaoFoi)} <a href="${escapeHtml(linkDaSenha)}">Redefinir a senha</a></p>`
+      : `<p>${escapeHtml(seNaoFoi)} Use o "Esqueci minha senha" na tela de entrada.</p>`,
+  ].join("\n");
+  return { assunto, text, html };
+}
+
+/**
+ * Manda o aviso da chave cadastrada sem segurar o cadastro: a chave já está
+ * gravada, e a Resend fora do ar (ou sem configuração) só vai para o log, com o
+ * userId e sem o e-mail. Nunca lança nem deixa promessa rejeitada solta.
+ */
+function avisarChaveCadastrada(usuaria: Pick<User, "id" | "email" | "name">, chave: { apelido: string | null; createdAt: number }): void {
+  const registrarFalha = (motivo: unknown) =>
+    console.error(`[Chaves de acesso] o aviso da chave cadastrada não saiu (userId ${usuaria.id}):`, motivo instanceof Error ? motivo.message : motivo);
+  try {
+    const email = usuaria.email?.trim();
+    if (!email) return;
+    const { assunto, text, html } = montarAvisoDeChaveCadastrada({
+      nome: usuaria.name ?? null,
+      apelido: chave.apelido,
+      quando: new Date(chave.createdAt),
+      site: process.env.FRONTEND_URL?.trim() || null,
+    });
+    void sendEmail({ to: email, subject: assunto, text, html })
+      .then(enviado => {
+        if (!enviado) registrarFalha("a Resend não aceitou o envio");
+      })
+      .catch(registrarFalha);
+  } catch (erro) {
+    registrarFalha(erro);
+  }
 }
 
 // ─── Entrada (pública) ────────────────────────────────────────
@@ -527,7 +679,8 @@ export type EntradaComChave = { token: string; expiresAt: Date; usuaria: Usuaria
  * 4. conta desativada: recusada, como no login por senha;
  * 5. a conferência: assinatura, origem, domínio, a pessoa verificada, o
  *    contador e o identificador da conta. Falha conta como tentativa errada;
- * 6. a sessão, por `abrirSessao`;
+ * 6. a sessão, por `abrirSessao` (banco fora do ar sobe como é; outra falha
+ *    dela é CHAVE_ERRO_INTERNO);
  * 7. numa transação: a conta ainda ativa, o contador gravado só se ele andou
  *    (UPDATE condicional: a chave removida ou usada ao mesmo tempo não alcança
  *    a linha), o último acesso e a auditoria. Se ela falha, a sessão do passo 6
@@ -574,7 +727,14 @@ export async function entrarComChave(
 
   const recusar = async (motivo: unknown): Promise<TRPCError> => {
     registrarRecusa("entrada", conta.id, motivo);
-    if (identificador) await recordLoginAttempt(identificador, pedido.rede, false).catch(() => {});
+    if (identificador) {
+      await recordLoginAttempt(identificador, pedido.rede, false).catch(erro => {
+        // Banco fora do ar é erro, e não "recusada": a tentativa não foi
+        // contada, e a tela diz "banco indisponível" (o middleware traduz).
+        if (ehErroDeBancoIndisponivel(erro)) throw erro;
+        console.warn(`[Chaves de acesso] a tentativa errada não foi registrada (userId ${conta.id}): ${descreverErroDeBanco(erro)}`);
+      });
+    }
     return erroDaChave("UNAUTHORIZED", ERRO_DA_CHAVE_DE_ACESSO.recusada);
   };
   // O identificador da conta que o aparelho devolve tem de ser o desta chave.
@@ -604,7 +764,15 @@ export async function entrarComChave(
   if (!verificacao.verified) throw await recusar("a assinatura não confere");
 
   const { newCounter, credentialBackedUp } = verificacao.authenticationInfo;
-  const sessao = await abrirSessao({ usuaria: conta, ip: pedido.ip, userAgent: pedido.userAgent });
+  let sessao: SessaoAberta;
+  try {
+    sessao = await abrirSessao({ usuaria: conta, ip: pedido.ip, userAgent: pedido.userAgent });
+  } catch (erro) {
+    // O banco fora do ar sobe como é (o middleware diz "banco indisponível");
+    // o resto vira código, e não a frase em português de `abrirSessao`.
+    if (ehErroDeBancoIndisponivel(erro)) throw erro;
+    throw erroDaChave("INTERNAL_SERVER_ERROR", ERRO_DA_CHAVE_DE_ACESSO.erroInterno);
+  }
   try {
     await db.transaction(async tx => {
       const [agora] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, conta.id)).limit(1);
@@ -640,7 +808,13 @@ export async function entrarComChave(
     });
     throw erro;
   }
-  if (identificador) await recordLoginAttempt(identificador, pedido.rede, true).catch(() => {});
+  if (identificador) {
+    await recordLoginAttempt(identificador, pedido.rede, true).catch(erro => {
+      // A sessão já foi confirmada: a entrada vale. Fica no log que as
+      // tentativas erradas desta rede não foram zeradas.
+      console.error(`[Chaves de acesso] as tentativas erradas não foram zeradas (userId ${conta.id}): ${descreverErroDeBanco(erro)}`);
+    });
+  }
   return {
     token: sessao.token,
     expiresAt: sessao.expiresAt,

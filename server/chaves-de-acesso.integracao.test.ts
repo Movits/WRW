@@ -1,12 +1,55 @@
 import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import * as jose from "jose";
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 });
 
+/**
+ * Os dublês daqui são transparentes por padrão: o e-mail nunca sai (a Resend de
+ * verdade não é chamada) e responde "enviado"; `recordLoginAttempt` e
+ * `abrirSessao` são os de verdade, até um teste pedir a falha deles em `falhas`.
+ */
+const dubles = vi.hoisted(() => ({
+  sendEmail: vi.fn(async (_opcoes: { to: string; subject: string; text?: string; html: string }) => true),
+}));
+const falhas = vi.hoisted(() => ({
+  /** O erro que `recordLoginAttempt` lança para este resultado (sucesso ou não); null segue para a de verdade. */
+  tentativa: null as null | ((sucesso: boolean) => Error | null),
+  /** O erro que a próxima `abrirSessao` lança, uma vez. */
+  abrirSessao: null as null | Error,
+}));
+vi.mock("./_core/email", async importOriginal => ({
+  ...(await importOriginal<typeof import("./_core/email")>()),
+  sendEmail: dubles.sendEmail,
+}));
+vi.mock("./security", async importOriginal => {
+  const original = await importOriginal<typeof import("./security")>();
+  return {
+    ...original,
+    recordLoginAttempt: async (identificador: string, rede: string, sucesso: boolean) => {
+      const erro = falhas.tentativa?.(sucesso);
+      if (erro) throw erro;
+      return original.recordLoginAttempt(identificador, rede, sucesso);
+    },
+  };
+});
+vi.mock("./sessao", async importOriginal => {
+  const original = await importOriginal<typeof import("./sessao")>();
+  return {
+    ...original,
+    abrirSessao: async (parametros: Parameters<typeof original.abrirSessao>[0]) => {
+      const erro = falhas.abrirSessao;
+      falhas.abrirSessao = null;
+      if (erro) throw erro;
+      return original.abrirSessao(parametros);
+    },
+  };
+});
+
+import bcrypt from "bcryptjs";
 import { getDb } from "./db";
 import {
   auditLogs,
@@ -28,9 +71,11 @@ import { authRouter } from "./routers/auth";
 import { abrirSessao } from "./sessao";
 import { excluirConta } from "./exclusao-de-conta";
 import { hashPasswordResetToken } from "./password-reset-security";
+import { BancoIndisponivel } from "./banco-indisponivel";
+import { identificadorFixoDaConta } from "./chaves-de-acesso";
 import { criarAutenticador, type AutenticadorDeSoftware, type Desvios } from "./test/autenticador-de-software";
-import { CHAVES_POR_CONTA_MAX, ERRO_DA_CHAVE_DE_ACESSO as ERRO } from "@shared/chaves-de-acesso";
-import { COOKIE_NAME, UNAUTHED_ERR_MSG } from "@shared/const";
+import { CHAVES_POR_CONTA_MAX, ERRO_DA_CHAVE_DE_ACESSO as ERRO, MINUTOS_PARA_CADASTRAR_CHAVE } from "@shared/chaves-de-acesso";
+import { COOKIE_NAME, MENSAGEM_BANCO_INDISPONIVEL, UNAUTHED_ERR_MSG } from "@shared/const";
 import type { TrpcContext } from "./_core/context";
 
 /**
@@ -59,7 +104,7 @@ async function db() {
   return (await getDb())!;
 }
 
-async function criarConta(nome: string): Promise<Conta> {
+async function criarConta(nome: string, senha?: string): Promise<Conta> {
   // openId tem até 64 caracteres.
   const openId = `tc-${nome.slice(0, 16)}-${crypto.randomUUID()}`;
   await (await db()).insert(users).values({
@@ -68,6 +113,8 @@ async function criarConta(nome: string): Promise<Conta> {
     name: `Teste ${nome}`,
     onboardingCompleted: true,
     isActive: true,
+    // Custo 4: só para o teste; o de verdade é 12.
+    passwordHash: senha ? bcrypt.hashSync(senha, 4) : null,
   });
   const [conta] = await (await db()).select().from(users).where(eq(users.openId, openId)).limit(1);
   contas.push(conta);
@@ -141,6 +188,45 @@ async function quebrarAAuditoria() {
     })), config as never)) as typeof banco.transaction);
 }
 
+/** A sessão passa a ter sido aberta há `minutos`, pelo relógio do banco (o mesmo que o cadastro lê). */
+async function envelhecerSessao(sessionToken: string, minutos: number) {
+  await (await db()).update(sessions).set({ createdAt: sql`NOW() - INTERVAL ${minutos} MINUTE` }).where(eq(sessions.sessionToken, sessionToken));
+}
+
+/**
+ * Roda `antes` logo antes da PRÓXIMA transação do banco, e só dela: o que
+ * acontece no meio de uma entrada, entre a conferência e a transação (outra
+ * entrada com a mesma chave, a chave removida, a conta desativada ou excluída).
+ */
+async function noMeioDaProximaTransacao(antes: () => Promise<unknown>) {
+  const banco = await db();
+  const original = banco.transaction.bind(banco);
+  return vi.spyOn(banco, "transaction").mockImplementationOnce(((tarefa: never, config?: never) =>
+    antes().then(() => original(tarefa, config))) as unknown as typeof banco.transaction);
+}
+
+/**
+ * Espera, com prazo, o cadastro parar na trava da linha da sessão (o SELECT ...
+ * FOR UPDATE de cadastrarChave). A leitura de uma linha pela chave única leva
+ * menos de um milissegundo: o comando parado há um segundo ou mais está
+ * esperando a trava. A espera se vê em information_schema.PROCESSLIST, e não em
+ * INNODB_TRX: no MariaDB ela acontece na otimização (estado "Statistics"),
+ * antes de a transação aparecer lá.
+ */
+async function esperarOCadastroNaTravaDaSessao() {
+  const banco = await db();
+  const prazo = Date.now() + 10_000;
+  while (Date.now() < prazo) {
+    const [linhas] = (await banco.execute(sql`
+      SELECT COUNT(*) AS esperando FROM information_schema.PROCESSLIST
+      WHERE ID <> CONNECTION_ID() AND COMMAND IN ('Query', 'Execute') AND TIME >= 1
+        AND INFO LIKE ${"%from `sessions`%for update%"}`)) as unknown as [Array<{ esperando: number | string }>, unknown];
+    if (Number(linhas[0]?.esperando ?? 0) > 0) return;
+    await new Promise(resolver => setTimeout(resolver, 50));
+  }
+  throw new Error("o cadastro não parou na trava da linha da sessão: o SELECT dela perdeu o FOR UPDATE?");
+}
+
 describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
   beforeAll(() => {
     process.env.WEBAUTHN_RP_ID = RP_ID;
@@ -172,6 +258,9 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
 
   beforeEach(() => {
     for (const teto of [tetoDeOpcoesDeEntrada, tetoDeEntradaComChave, tetoDeEntradaPorChave, tetoDeCadastroDeChave]) teto.esquecer();
+    falhas.tentativa = null;
+    falhas.abrirSessao = null;
+    dubles.sendEmail.mockClear();
     // As recusas e a abertura da sessão escrevem no log; aqui elas são esperadas.
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -241,11 +330,13 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
       riskLevel: "low",
     }]);
 
-    // A lista da dona não leva a chave pública nem o id da credencial.
+    // A lista da dona não leva a chave pública. Leva o id da credencial e o
+    // identificador da conta, que as opções de cadastro já mandam à dona: com
+    // eles a tela avisa o aparelho da chave removida (a Signal API).
     const { chamar } = await contextoLogado(conta);
     const lista = await chamar.listar();
     expect(lista).toEqual([{ ...chave, ultimoUsoEm: usada.ultimoUsoEm }]);
-    expect(JSON.stringify(lista)).not.toContain(autenticador.credencialId);
+    expect(lista[0]).toMatchObject({ credencialId: autenticador.credencialId, identificadorDaConta: autenticador.identificadorDaConta });
     expect(JSON.stringify(lista)).not.toContain(gravada.chavePublica);
   });
 
@@ -615,6 +706,271 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
       // A sessão chegou a ser gravada (abrirSessao vem antes da transação) e caiu.
       expect(await todasAsSessoes()).toHaveLength(totalAntes + 1);
       expect(await sessoesAtivas(conta.id)).toHaveLength(ativasAntes);
+      expect(await auditoriaDe(conta.id, "LOGIN")).toEqual([]);
+    });
+  });
+
+  describe("cadastrar pede entrada recente: uma sessão alheia não vira credencial", () => {
+    it(`a sessão aberta há mais de ${MINUTOS_PARA_CADASTRAR_CHAVE} minutos não pede as opções: CHAVE_REAUTENTICAR antes do Face ID`, async () => {
+      const conta = await criarConta("antiga-opcoes");
+      const { chamar, sessao } = await contextoLogado(conta);
+      await envelhecerSessao(sessao.sessionToken, MINUTOS_PARA_CADASTRAR_CHAVE + 1);
+
+      await expect(chamar.opcoesDeCadastro()).rejects.toMatchObject({ code: "UNAUTHORIZED", message: ERRO.reautenticar });
+      // Nenhum desafio gravado: sem ele, nada a assinar.
+      expect(await desafiosDe(conta.id)).toEqual([]);
+      // A sessão continua valendo para o resto (a recusa não é "saia da conta").
+      expect(await sessoesAtivas(conta.id)).toHaveLength(1);
+    });
+
+    it("a sessão que passou da janela entre as opções e o cadastro: o cadastro recusa, sem chave, sem auditoria e sem e-mail", async () => {
+      const conta = await criarConta("antiga-cadastro");
+      const { chamar, sessao } = await contextoLogado(conta);
+      const opcoes = await chamar.opcoesDeCadastro();
+      await envelhecerSessao(sessao.sessionToken, MINUTOS_PARA_CADASTRAR_CHAVE + 1);
+
+      await expect(chamar.cadastrar({ resposta: criarAutenticador({ origem: ORIGEM }).criar(opcoes) })).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+        message: ERRO.reautenticar,
+      });
+      expect(await chavesDe(conta.id)).toEqual([]);
+      expect(await auditoriaDe(conta.id, "PASSKEY_REGISTERED")).toEqual([]);
+      expect(dubles.sendEmail).not.toHaveBeenCalled();
+    });
+
+    it(`a sessão aberta há ${MINUTOS_PARA_CADASTRAR_CHAVE - 1} minutos ainda cadastra (o convite depois do login cabe na janela)`, async () => {
+      const conta = await criarConta("quase-antiga");
+      const { chamar, sessao } = await contextoLogado(conta);
+      await envelhecerSessao(sessao.sessionToken, MINUTOS_PARA_CADASTRAR_CHAVE - 1);
+
+      const opcoes = await chamar.opcoesDeCadastro();
+      await expect(chamar.cadastrar({ resposta: criarAutenticador({ origem: ORIGEM }).criar(opcoes) })).resolves.toMatchObject({ apelido: null });
+      expect(await chavesDe(conta.id)).toHaveLength(1);
+    });
+
+    it("entrar de novo com a senha (auth.login) abre uma sessão nova, e ela cadastra", async () => {
+      const senha = "senha-da-dona-123";
+      const conta = await criarConta("reentrar", senha);
+      const { chamar: comAntiga, sessao } = await contextoLogado(conta);
+      await envelhecerSessao(sessao.sessionToken, 60);
+      await expect(comAntiga.opcoesDeCadastro()).rejects.toMatchObject({ message: ERRO.reautenticar });
+
+      // A tela pede a senha e entra de novo; o cookie novo leva a sessão nova.
+      const doLogin = contextoPublico();
+      await authRouter.createCaller(doLogin).login({ email: conta.email!, password: senha });
+      const [, token] = cookieDe(doLogin).mock.calls[0] as [string, string];
+      const ctx = { user: conta, req: pedido({ cookie: `${COOKIE_NAME}=${token}` }), res: respostaHttp() } as unknown as TrpcContext;
+      const comNova = chavesDeAcessoRouter.createCaller(ctx);
+
+      const opcoes = await comNova.opcoesDeCadastro();
+      await expect(comNova.cadastrar({ resposta: criarAutenticador({ origem: ORIGEM }).criar(opcoes), apelido: "Celular" })).resolves.toMatchObject({ apelido: "Celular" });
+      expect(await chavesDe(conta.id)).toHaveLength(1);
+      // A sessão antiga continua antiga: com ela, ainda não.
+      await expect(comAntiga.opcoesDeCadastro()).rejects.toMatchObject({ message: ERRO.reautenticar });
+    });
+
+    it("cada chave cadastrada manda um e-mail à dona; a Resend que falha não desfaz o cadastro e o log não leva o e-mail", async () => {
+      const conta = await criarConta("aviso");
+      await cadastrar(conta, criarAutenticador({ origem: ORIGEM }), {}, "iPhone da dona");
+
+      expect(dubles.sendEmail).toHaveBeenCalledTimes(1);
+      const [aviso] = dubles.sendEmail.mock.calls[0];
+      expect(aviso).toMatchObject({ to: conta.email, subject: "Nova chave de acesso na sua conta WRW" });
+      expect(aviso.text).toContain(`Olá, ${conta.name}.`);
+      expect(aviso.text).toContain('com o nome "iPhone da dona"');
+      expect(aviso.text).toContain("redefina a sua senha");
+
+      const erros = vi.spyOn(console, "error").mockImplementation(() => {});
+      dubles.sendEmail.mockRejectedValueOnce(new Error("Resend fora do ar"));
+      await expect(cadastrar(conta, criarAutenticador({ origem: ORIGEM }), {}, "Notebook")).resolves.toMatchObject({ apelido: "Notebook" });
+      expect(await chavesDe(conta.id)).toHaveLength(2);
+      await vi.waitFor(() => expect(erros).toHaveBeenCalledWith(expect.stringContaining(`(userId ${conta.id})`), "Resend fora do ar"));
+      expect(JSON.stringify(erros.mock.calls)).not.toContain(conta.email!);
+    });
+  });
+
+  describe("a assinatura que não confere (a única falha que a biblioteca devolve sem lançar)", () => {
+    it.each([
+      ["a assinatura de outra chave, com o id da credencial da vítima", "intruso"],
+      ["os dados do autenticador trocados depois de assinar", "adulterada"],
+    ] as const)("%s: recusada, sem sessão, sem LOGIN, o contador parado e a tentativa contada", async (_caso, tipo) => {
+      const conta = await criarConta(`assinatura-${tipo}`);
+      const vitima = criarAutenticador({ origem: ORIGEM, contadorInicial: 0 });
+      await cadastrar(conta, vitima);
+      const ativas = (await sessoesAtivas(conta.id)).length;
+      const ctx = contextoPublico();
+      const opcoes = await opcoesDeEntrada();
+
+      let resposta;
+      if (tipo === "intruso") {
+        const intruso = criarAutenticador({ origem: ORIGEM, contadorInicial: 0 });
+        resposta = { ...intruso.obter(opcoes), id: vitima.credencialId, rawId: vitima.credencialId };
+        // Quem nunca cadastrou não manda o identificador da conta: passa por
+        // essa conferência e chega à da assinatura, com o contador subindo.
+        expect(resposta.response.userHandle).toBeUndefined();
+      } else {
+        resposta = vitima.obter(opcoes, { adulterarDepoisDeAssinar: true });
+      }
+
+      await expect(chavesDeAcessoRouter.createCaller(ctx).entrar({ resposta })).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+        message: ERRO.recusada,
+      });
+      // A recusa veio da conferência da assinatura, e não de uma exceção da biblioteca.
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("a assinatura não confere"));
+      expect(cookieDe(ctx)).not.toHaveBeenCalled();
+      expect(await sessoesAtivas(conta.id)).toHaveLength(ativas);
+      expect((await chavesDe(conta.id))[0]).toMatchObject({ contador: 0, ultimoUsoEm: null });
+      expect(await auditoriaDe(conta.id, "LOGIN")).toEqual([]);
+      const [tentativas] = await (await db()).select().from(loginAttempts).where(eq(loginAttempts.identifier, conta.email!.toLowerCase()));
+      expect(tentativas).toMatchObject({ attemptCount: 1 });
+    });
+  });
+
+  describe("as recusas de dentro da transação da entrada (o que muda entre a conferência e a gravação)", () => {
+    it.each([
+      ["outra entrada com a mesma chave chegou antes (o contador já andou)", "concorrente", "UNAUTHORIZED", ERRO.recusada],
+      ["a chave foi removida", "removida", "UNAUTHORIZED", ERRO.recusada],
+      ["a conta foi desativada", "desativada", "FORBIDDEN", ERRO.contaDesativada],
+      ["a conta foi excluída", "excluida", "UNAUTHORIZED", ERRO.desconhecida],
+    ] as const)("%s: recusada; a sessão aberta cai, sem cookie e sem LOGIN", async (_caso, tipo, codigo, mensagem) => {
+      const conta = await criarConta(`no-meio-${tipo}`);
+      const autenticador = criarAutenticador({ origem: ORIGEM, contadorInicial: 4 });
+      const chave = await cadastrar(conta, autenticador);
+      const todasAsSessoes = async () => (await db()).select().from(sessions).where(eq(sessions.userId, conta.id));
+      const totalAntes = (await todasAsSessoes()).length;
+      const ativasAntes = (await sessoesAtivas(conta.id)).length;
+      const ctx = contextoPublico();
+      // O aparelho assina o contador 5.
+      const resposta = autenticador.obter(await opcoesDeEntrada());
+
+      const banco = await db();
+      const espiao = await noMeioDaProximaTransacao(async () => {
+        if (tipo === "concorrente") await banco.update(chavesDeAcesso).set({ contador: 5 }).where(eq(chavesDeAcesso.id, chave.id));
+        if (tipo === "removida") await banco.delete(chavesDeAcesso).where(eq(chavesDeAcesso.id, chave.id));
+        if (tipo === "desativada") await banco.update(users).set({ isActive: false }).where(eq(users.id, conta.id));
+        if (tipo === "excluida") await banco.delete(users).where(eq(users.id, conta.id));
+      });
+      await expect(chavesDeAcessoRouter.createCaller(ctx).entrar({ resposta })).rejects.toMatchObject({ code: codigo, message: mensagem });
+      expect(espiao).toHaveBeenCalledTimes(1);
+
+      expect(cookieDe(ctx)).not.toHaveBeenCalled();
+      // A sessão chegou a ser gravada (abrirSessao vem antes da transação) e caiu.
+      expect(await todasAsSessoes()).toHaveLength(totalAntes + 1);
+      expect(await sessoesAtivas(conta.id)).toHaveLength(ativasAntes);
+      expect(await auditoriaDe(conta.id, "LOGIN")).toEqual([]);
+      if (tipo === "concorrente") expect((await chavesDe(conta.id))[0]).toMatchObject({ contador: 5, ultimoUsoEm: null });
+    });
+  });
+
+  it("o cadastro espera a transação que derruba as sessões (a trava da linha da sessão) e, depois dela, é recusado", async () => {
+    const conta = await criarConta("trava");
+    const { chamar } = await contextoLogado(conta);
+    const resposta = criarAutenticador({ origem: ORIGEM }).criar(await chamar.opcoesDeCadastro());
+
+    let cadastro: Promise<unknown> | undefined;
+    await (await db()).transaction(async tx => {
+      // A redefinição da senha, parada no meio: as sessões caíram, sem confirmar.
+      await tx.update(sessions).set({ isActive: false }).where(eq(sessions.userId, conta.id));
+      cadastro = chamar.cadastrar({ resposta });
+      cadastro.catch(() => {});
+      // Sem o FOR UPDATE, o cadastro leria a sessão ainda ativa (a versão
+      // confirmada), gravaria a chave sem esperar, e o prazo acabaria aqui.
+      await esperarOCadastroNaTravaDaSessao();
+    });
+
+    await expect(cadastro).rejects.toMatchObject({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+    expect(await chavesDe(conta.id)).toEqual([]);
+    expect(await auditoriaDe(conta.id, "PASSKEY_REGISTERED")).toEqual([]);
+  }, 20_000);
+
+  it("o identificador da conta no aparelho é fixo: a conta que ficou sem chaves recebe o mesmo (o aparelho troca a chave antiga)", async () => {
+    const conta = await criarConta("identificador");
+    const primeiro = criarAutenticador({ origem: ORIGEM });
+    const chave = await cadastrar(conta, primeiro);
+    expect(primeiro.identificadorDaConta).toBe(identificadorFixoDaConta(conta.id));
+
+    const { chamar } = await contextoLogado(conta);
+    await chamar.remover({ id: chave.id });
+    expect(await chavesDe(conta.id)).toEqual([]);
+    const opcoes = await chamar.opcoesDeCadastro();
+    expect(opcoes.user.id).toBe(primeiro.identificadorDaConta);
+    expect(opcoes.excludeCredentials).toEqual([]);
+
+    const outra = await criarConta("identificador-outra");
+    const { chamar: comoOutra } = await contextoLogado(outra);
+    expect((await comoOutra.opcoesDeCadastro()).user.id).not.toBe(primeiro.identificadorDaConta);
+  });
+
+  it("a chave RS256 (Windows Hello em TPM antigo) cadastra e entra; a chave pública RSA, maior, fica inteira", async () => {
+    const conta = await criarConta("rs256");
+    const autenticador = criarAutenticador({ origem: ORIGEM, algoritmo: "RS256", contadorInicial: 0 });
+    await cadastrar(conta, autenticador);
+    const [gravada] = await chavesDe(conta.id);
+    // COSE RSA de 2048 bits: uns 272 bytes, uns 363 caracteres em base64url.
+    expect(gravada.chavePublica.length).toBeGreaterThan(350);
+
+    await expect((await entrar(autenticador)).resultado).resolves.toMatchObject({ success: true });
+    expect((await chavesDe(conta.id))[0].contador).toBe(1);
+    // E a assinatura RS256 adulterada também é recusada.
+    await expect((await entrar(autenticador, { adulterarDepoisDeAssinar: true })).resultado).rejects.toMatchObject({ message: ERRO.recusada });
+    expect((await chavesDe(conta.id))[0].contador).toBe(1);
+  });
+
+  describe("o que falha fora da conferência", () => {
+    it("na recusa, o banco fora do ar ao contar a tentativa é 'banco indisponível', e não CHAVE_RECUSADA", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const conta = await criarConta("tentativa-sem-banco");
+      const autenticador = criarAutenticador({ origem: ORIGEM });
+      await cadastrar(conta, autenticador);
+      falhas.tentativa = sucesso => (sucesso ? null : new BancoIndisponivel());
+
+      const { ctx, resultado } = await entrar(autenticador, { origem: "https://golpe.example" });
+      await expect(resultado).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+      expect(cookieDe(ctx)).not.toHaveBeenCalled();
+    });
+
+    it("na recusa, outro erro ao contar a tentativa vai para o log, e a recusa sai como sempre", async () => {
+      const conta = await criarConta("tentativa-erro");
+      const autenticador = criarAutenticador({ origem: ORIGEM });
+      await cadastrar(conta, autenticador);
+      falhas.tentativa = sucesso => (sucesso ? null : new Error("falha qualquer da gravação"));
+
+      await expect((await entrar(autenticador, { origem: "https://golpe.example" })).resultado).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+        message: ERRO.recusada,
+      });
+      expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/a tentativa errada não foi registrada \(userId \d+\): .*falha qualquer da gravação/));
+    });
+
+    it("na entrada certa, a falha ao zerar as tentativas vai para o log, e a entrada vale", async () => {
+      const erros = vi.spyOn(console, "error").mockImplementation(() => {});
+      const conta = await criarConta("zerar-falha");
+      const autenticador = criarAutenticador({ origem: ORIGEM });
+      await cadastrar(conta, autenticador);
+      falhas.tentativa = sucesso => (sucesso ? new BancoIndisponivel() : null);
+
+      const { ctx, resultado } = await entrar(autenticador);
+      await expect(resultado).resolves.toMatchObject({ success: true });
+      expect(cookieDe(ctx)).toHaveBeenCalledTimes(1);
+      expect(erros).toHaveBeenCalledWith(expect.stringContaining(`as tentativas erradas não foram zeradas (userId ${conta.id})`));
+    });
+
+    it("a sessão que não abre: banco fora do ar é 'banco indisponível'; outra falha é CHAVE_ERRO_INTERNO; nos dois, sem cookie e sem LOGIN", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const conta = await criarConta("sessao-nao-abre");
+      const autenticador = criarAutenticador({ origem: ORIGEM });
+      await cadastrar(conta, autenticador);
+
+      falhas.abrirSessao = new BancoIndisponivel();
+      const semBanco = await entrar(autenticador);
+      await expect(semBanco.resultado).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+      expect(cookieDe(semBanco.ctx)).not.toHaveBeenCalled();
+
+      falhas.abrirSessao = new Error("Erro interno ao criar sessão. Tente novamente.");
+      const comErro = await entrar(autenticador);
+      await expect(comErro.resultado).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: ERRO.erroInterno });
+      expect(cookieDe(comErro.ctx)).not.toHaveBeenCalled();
       expect(await auditoriaDe(conta.id, "LOGIN")).toEqual([]);
     });
   });
