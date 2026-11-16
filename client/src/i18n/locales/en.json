@@ -1519,6 +1519,7 @@
     "audioLoadError": "Could not load the audio right now. Reload the page; if your session has expired, sign in again.",
     "availableUntil": "· available until",
     "recordingExpiredNotice": "This recording passed the 30-day mark and was deleted, as promised. The transcript is still here.",
+    "recordingDeletionPending": "This recording passed the 30-day mark and can no longer be played. The app is still deleting the audio from storage.",
     "noRecordingStored": "No audio stored for this meeting.",
     "privacyNotice": "The audio and the transcript stay in your account only, unless you turn on a sharing link. The audio expires automatically after 30 days.",
     "translateHeading": "Translate what was said in this meeting",

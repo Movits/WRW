@@ -1,10 +1,10 @@
 import crypto from "crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
-import { storageDelete, storagePut } from "./storage";
+import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
-import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS } from "./meeting-service";
+import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
@@ -65,6 +65,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
   const db = await exigirDb();
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
   const agora = Date.now();
+  // O prazo do áudio da reunião em partes: 30 dias depois da chegada da ÚLTIMA
+  // parte, a mesma regra do envio único (30 dias contados do envio, que lá manda
+  // o áudio inteiro de uma vez no fim). Todas as partes da reunião ficam com o
+  // prazo da que chegou por último, para vencerem e saírem juntas: a gravação é
+  // uma só para quem a ouve, e não pode perder o começo antes do fim.
+  const prazo = agora + MEETING_AUDIO_TTL_MS;
 
   // A decisão (a reunião aceita esta parte? cabe no teto? a posição é nova?) e o
   // INSERT correm numa transação com a linha da reunião TRAVADA (FOR UPDATE):
@@ -85,7 +91,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
 
     const existente = await lerParte(tx, meetingId, seq);
     if (existente && existente.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
-    if (existente) return existente.status === "uploading" ? { linha: existente } : { repetida: true as const };
+    if (existente?.status === "uploading") {
+      // O reenvio da parte que não subiu é uma chegada também: renova o prazo.
+      await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
+      return { linha: existente };
+    }
+    if (existente) return { repetida: true as const };
 
     // O teto da reunião em partes é técnico, contra gasto (G13a): 12 h, com a
     // folga do servidor. O envio único segue com os 10 min dele.
@@ -102,11 +113,12 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     const nova = {
       id, meetingId, ownerId, seq, status: "uploading" as const,
       storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType, sizeBytes: bytes.length, sha256,
-      durationMs: Math.round(duracao * 1000), expiresAt: agora + MEETING_AUDIO_TTL_MS, createdAt: agora, updatedAt: agora,
+      durationMs: Math.round(duracao * 1000), expiresAt: prazo, createdAt: agora, updatedAt: agora,
     };
     // Com a reunião travada, dois envios da mesma parte se enfileiram aqui: o
     // segundo já acha a linha acima. O UNIQUE (reunião, posição) segue de guarda.
     await tx.insert(meetingAudioSlices).values(nova);
+    await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
     return { linha: nova };
   });
   if ("repetida" in decisao) return { seq, repetida: true };
@@ -120,21 +132,94 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
   }
   const recebida = await db.update(meetingAudioSlices).set({ status: "received", updatedAt: Date.now() })
     .where(and(eq(meetingAudioSlices.id, linha.id), eq(meetingAudioSlices.status, "uploading")));
-  if (!linhasAlcancadas(recebida)) {
-    // A linha sumiu (a reunião foi excluída durante o upload) ou outro envio
-    // simultâneo já a marcou. Sumiu: o objeto que acabou de subir sai também,
-    // para nenhuma voz ficar no bucket sem ponteiro.
-    const ainda = await lerParte(db, meetingId, seq);
-    if (!ainda) {
-      await storageDelete(linha.storageKey).catch(erro => console.warn("[Reuniões] a parte de uma reunião excluída ficou no bucket:", erro instanceof Error ? erro.message : erro));
-      throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
-    }
-    return { seq, repetida: true };
+  const marcada = linhasAlcancadas(recebida) > 0;
+  // A reunião é relida DEPOIS do upload, tenha o UPDATE achado a linha ou não.
+  // A exclusão da reunião grava 'deleted' antes de ler as partes, e o expurgo
+  // que ela faz desta parte pode ter rodado antes de o objeto existir ("dando
+  // certo" sem apagar nada); a exclusão da conta marca as reuniões do mesmo
+  // jeito. Sem acertar a linha, ela sumiu (a exclusão a apagou) ou outro envio
+  // simultâneo já a marcou. Excluída, sem reunião ou sem linha: o objeto que
+  // acabou de subir sai daqui, para nenhuma voz ficar no bucket sem ponteiro.
+  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  const reuniaoExcluida = !reuniao || reuniao.status === "deleted";
+  if (reuniaoExcluida || !(marcada || await lerParte(db, meetingId, seq))) {
+    await tirarParteQueSubiuSemDestino(db, {
+      id: linha.id, meetingId, ownerId, seq, storageKey: linha.storageKey, storageUrl: `/manus-storage/${linha.storageKey}`,
+      mimeType, sizeBytes: bytes.length, sha256, durationMs: Math.round(duracao * 1000),
+    }, reuniaoExcluida);
+    throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
   }
-  return { seq, repetida: false };
+  return { seq, repetida: !marcada };
 }
 
 type LeitorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "select">;
+type EscritorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "update">;
+
+/** O que a linha de uma parte guarda sobre o objeto: o bastante para refazê-la como ponteiro. */
+type LinhaDaParte = {
+  id: string; meetingId: string; ownerId: string; seq: number; storageKey: string; storageUrl: string;
+  mimeType: string; sizeBytes: number; sha256: string; durationMs: number;
+};
+
+/**
+ * O objeto da parte que terminou de subir para uma reunião excluída (ou sem a
+ * linha da parte) sai do bucket com todas as versões (o DELETE simples só
+ * esconderia a voz no B2), e só então a linha.
+ *
+ * Se o bucket recusar, o log de ERRO leva a chave (só o openId aleatório, o id
+ * da reunião e a posição, sem dado de ninguém), e, na reunião excluída, a linha
+ * fica, ou volta, como ponteiro já vencido, sem transcrição e fora da fila: a
+ * varredura (limparGravacoesVencidas) a acha pelo ramo da reunião excluída ou
+ * sem linha e tenta de novo. O log fica mesmo com o ponteiro, porque uma
+ * exclusão de CONTA ainda em curso apaga as partes pela dona.
+ */
+async function tirarParteQueSubiuSemDestino(db: Awaited<ReturnType<typeof exigirDb>>, linha: LinhaDaParte, reuniaoExcluida: boolean) {
+  try {
+    await storageApagarTodasAsVersoes(linha.storageKey);
+  } catch (erro) {
+    console.error(
+      `[Reuniões] a parte de uma reunião excluída ficou no bucket (${reuniaoExcluida ? "a linha fica como ponteiro para a varredura" : "SEM ponteiro no banco; remoção manual"}): ${linha.storageKey}`,
+      erro instanceof Error ? erro.message : erro,
+    );
+    if (reuniaoExcluida) {
+      await deixarSoOPonteiroDaParte(db, linha).catch(falha => {
+        console.error(`[Reuniões] nem o ponteiro da parte foi gravado; remoção manual: ${linha.storageKey}`, falha instanceof Error ? falha.message : falha);
+      });
+    }
+    return;
+  }
+  await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.id, linha.id), eq(meetingAudioSlices.ownerId, linha.ownerId)));
+}
+
+/**
+ * A linha da parte vira só o ponteiro para o objeto que o bucket não deixou
+ * sair, como na exclusão da reunião (MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA): sem
+ * a transcrição, fora da fila e vencida na hora. Se a exclusão já a apagou, ela
+ * volta com os mesmos dados.
+ */
+async function deixarSoOPonteiroDaParte(db: Awaited<ReturnType<typeof exigirDb>>, linha: LinhaDaParte) {
+  const agora = Date.now();
+  const ponteiro = {
+    status: "failed" as const, lastError: MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, result: null,
+    lockedUntil: null, lockToken: null, expiresAt: agora, updatedAt: agora,
+  };
+  const atualizada = await db.update(meetingAudioSlices).set(ponteiro)
+    .where(and(eq(meetingAudioSlices.id, linha.id), eq(meetingAudioSlices.ownerId, linha.ownerId)));
+  if (!linhasAlcancadas(atualizada)) {
+    await db.insert(meetingAudioSlices).values({ ...linha, ...ponteiro, createdAt: agora });
+  }
+}
+
+/**
+ * Leva o prazo de todas as partes da reunião ao da parte que acabou de chegar
+ * (ver o prazo em receberParte). Nunca encurta: só toca a parte com prazo
+ * menor. Corre na transação de receberParte, com a reunião travada.
+ */
+async function renovarPrazoDasPartes(db: EscritorDoBanco, ownerId: string, meetingId: string, prazo: number) {
+  await db.update(meetingAudioSlices).set({ expiresAt: prazo })
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), lt(meetingAudioSlices.expiresAt, prazo)));
+}
 
 async function lerParte(db: LeitorDoBanco, meetingId: string, seq: number) {
   const [linha] = await db.select({

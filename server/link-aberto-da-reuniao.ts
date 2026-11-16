@@ -184,7 +184,10 @@ export async function verReuniaoPeloLink(token: string) {
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
-  const { recording, recordingExpired } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, reuniao.createdAt, reuniao.emPartes);
+  // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras).
+  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, {
+    createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes,
+  });
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
@@ -201,7 +204,9 @@ export async function verReuniaoPeloLink(token: string) {
           })),
         }
       : null,
+    // "Foi apagada" só quando o áudio saiu do bucket; vencido e ainda saindo é outro aviso.
     gravacaoExpirada: recordingExpired,
+    gravacaoSaindo: recordingDeletionPending,
   };
 }
 

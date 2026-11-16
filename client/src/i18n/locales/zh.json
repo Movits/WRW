@@ -1519,6 +1519,7 @@
     "audioLoadError": "目前无法加载音频。请刷新页面；如果会话已过期，请重新登录。",
     "availableUntil": "· 有效期至",
     "recordingExpiredNotice": "此录音已超过30天，已按照本应用的承诺被删除。转录内容仍保留在此处。",
+    "recordingDeletionPending": "此录音已超过30天，无法再播放。本应用仍在从存储中删除该音频。",
     "noRecordingStored": "此会议未保存任何音频。",
     "privacyNotice": "音频和转录内容仅保存在您的账户中，除非您开启分享链接。音频将在30天后自动过期。",
     "translateHeading": "翻译此次会议中的发言内容",

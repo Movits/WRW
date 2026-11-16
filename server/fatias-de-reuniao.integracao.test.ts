@@ -7,11 +7,14 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 // O bucket é um dublê: o que se prova aqui é o banco (a linha antes do upload,
 // o UNIQUE da posição, os estados) e a chave exata que vai ao bucket.
 const storagePut = vi.hoisted(() => vi.fn());
-const storageDelete = vi.hoisted(() => vi.fn());
+// O áudio da parte sai do bucket com todas as versões (no B2, que guarda
+// versões, o DELETE simples só esconderia a voz).
+const storageApagarTodasAsVersoes = vi.hoisted(() => vi.fn());
 vi.mock("./storage", async (original) => ({
   ...(await original<typeof import("./storage")>()),
   storagePut: (...args: unknown[]) => storagePut(...args),
-  storageDelete: (...args: unknown[]) => storageDelete(...args),
+  storageApagarTodasAsVersoes: (...args: unknown[]) => storageApagarTodasAsVersoes(...args),
+  storageDelete: async () => { throw new Error("o áudio de reunião não sai por storageDelete"); },
 }));
 
 const { getDb } = await import("./db");
@@ -21,7 +24,7 @@ const {
   DURACAO_MAXIMA_DA_PARTE_SEGUNDOS, FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS, PARTES_NO_MAXIMO,
 } = await import("./fatias-de-reuniao");
 const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
-const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas } = await import("./meeting-service");
+const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 const { TRPCError } = await import("@trpc/server");
 
@@ -75,8 +78,8 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
   beforeEach(() => {
     storagePut.mockReset();
     storagePut.mockImplementation(async (chave: string) => ({ key: chave, url: `/manus-storage/${chave}` }));
-    storageDelete.mockReset();
-    storageDelete.mockResolvedValue(undefined);
+    storageApagarTodasAsVersoes.mockReset();
+    storageApagarTodasAsVersoes.mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -221,31 +224,119 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     const chaves = (await partes(id)).map(p => p.storageKey).sort();
     expect(await deletePrivateMeeting(DONA, id)).toBe(true);
     expect(await partes(id)).toHaveLength(0);
-    expect(storageDelete.mock.calls.map(c => c[0]).sort()).toEqual(chaves);
+    expect(storageApagarTodasAsVersoes.mock.calls.map(c => c[0]).sort()).toEqual(chaves);
   });
 
-  it("reunião excluída durante o upload: o objeto que acabou de subir sai também, e a parte é recusada", async () => {
+  it("reunião excluída durante o upload: o objeto que acabou de subir sai também (com todas as versões), e a parte é recusada", async () => {
     const { id } = await iniciar();
     storagePut.mockImplementation(async (chave: string) => {
       await deletePrivateMeeting(DONA, id);
-      storageDelete.mockClear();
+      storageApagarTodasAsVersoes.mockClear();
       return { key: chave, url: `/manus-storage/${chave}` };
     });
     expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) }))).toBe("SEM_REUNIAO");
-    expect(storageDelete).toHaveBeenCalledTimes(1);
-    expect(storageDelete.mock.calls[0][0]).toBe(storagePut.mock.calls[0][0]);
+    expect(storageApagarTodasAsVersoes).toHaveBeenCalledTimes(1);
+    expect(storageApagarTodasAsVersoes.mock.calls[0][0]).toBe(storagePut.mock.calls[0][0]);
     expect(await partes(id)).toHaveLength(0);
   });
 
-  it("a limpeza dos vencidos apaga a parte vencida (objeto e linha) e deixa a que vale", async () => {
+  it("a parte que termina de subir NO MEIO do expurgo da exclusão (depois de o expurgo dela não achar nada) sai do bucket do mesmo jeito: nenhum objeto fica sem linha", async () => {
+    // O bucket de mentira: o que subiu e ainda não saiu.
+    const noBucket = new Set<string>();
+    storagePut.mockImplementation(async (chave: string) => { noBucket.add(chave); return { key: chave, url: `/manus-storage/${chave}` }; });
+    storageApagarTodasAsVersoes.mockImplementation(async (chave: string) => { noBucket.delete(chave); });
+    const { id } = await iniciar();
+    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
+
+    // A parte 1 começa a subir e fica presa no upload até o teste soltar.
+    let soltarUpload: () => void = () => {};
+    const uploadSolto = new Promise<void>(resolver => { soltarUpload = resolver; });
+    let avisarQueComecou: () => void = () => {};
+    const comecou = new Promise<void>(resolver => { avisarQueComecou = resolver; });
+    storagePut.mockImplementationOnce(async (chave: string) => {
+      avisarQueComecou();
+      await uploadSolto;
+      noBucket.add(chave);
+      return { key: chave, url: `/manus-storage/${chave}` };
+    });
+    const envio = receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(1, 5) }).catch(erro => erro);
+    await comecou;
+    const [subindo] = (await partes(id)).filter(parte => parte.seq === 1);
+    expect(subindo.status).toBe("uploading");
+
+    // A exclusão expurga a parte 1 ANTES de o objeto existir (não acha nada);
+    // logo depois o upload termina, e a linha vira 'received' antes de a
+    // exclusão seguir. Antes, receberParte respondia OK sem reler a reunião, a
+    // exclusão apagava a linha, e o objeto ficava no bucket sem ponteiro.
+    let soltou = false;
+    storageApagarTodasAsVersoes.mockImplementation(async (chave: string) => {
+      noBucket.delete(chave);
+      if (chave !== subindo.storageKey || soltou) return;
+      soltou = true;
+      soltarUpload();
+      for (let tentativa = 0; tentativa < 300; tentativa++) {
+        const [agora] = await (await getDb())!.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices).where(eq(meetingAudioSlices.id, subindo.id));
+        if (!agora || agora.status !== "uploading") return;
+        await new Promise(resolver => setTimeout(resolver, 10));
+      }
+    });
+
+    expect(await deletePrivateMeeting(DONA, id)).toBe(true);
+    const resposta = await envio;
+
+    expect(soltou).toBe(true);
+    expect(resposta).toBeInstanceOf(RecusaDaParte);
+    expect((resposta as InstanceType<typeof RecusaDaParte>).codigo).toBe("SEM_REUNIAO");
+    expect([...noBucket]).toEqual([]);
+    expect(await partes(id)).toHaveLength(0);
+  });
+
+  it("o bucket recusa tirar a parte que subiu para a reunião excluída: a linha volta como ponteiro vencido, o log de erro tem a chave, e a varredura a tira depois", async () => {
+    const { id } = await iniciar();
+    storagePut.mockImplementation(async (chave: string) => {
+      // A exclusão inteira acontece durante o upload: o expurgo da linha
+      // 'uploading' não acha nada, e a linha e a reunião saem.
+      await deletePrivateMeeting(DONA, id);
+      storageApagarTodasAsVersoes.mockReset();
+      storageApagarTodasAsVersoes.mockRejectedValue(new Error("B2 fora do ar"));
+      return { key: chave, url: `/manus-storage/${chave}` };
+    });
+
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) }))).toBe("SEM_REUNIAO");
+
+    const chave = storagePut.mock.calls[0][0] as string;
+    const [ponteiro] = await partes(id);
+    expect(ponteiro).toMatchObject({
+      ownerId: DONA, seq: 0, storageKey: chave, status: "failed", lastError: MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA,
+      result: null, lockToken: null, lockedUntil: null,
+    });
+    expect(ponteiro.expiresAt).toBeLessThanOrEqual(Date.now());
+    const pedido = vi.mocked(console.error).mock.calls.map(chamada => chamada.map(String).join(" ")).find(linha => linha.includes(chave));
+    expect(pedido).toContain("a parte de uma reunião excluída ficou no bucket");
+
+    // Sem a reunião, a varredura acha o ponteiro e, com o bucket de volta, tira o objeto e a linha.
+    storageApagarTodasAsVersoes.mockReset();
+    storageApagarTodasAsVersoes.mockResolvedValue(undefined);
+    await limparGravacoesVencidas({ ownerId: DONA });
+    expect(storageApagarTodasAsVersoes.mock.calls.map(c => c[0])).toContain(chave);
+    expect(await partes(id)).toHaveLength(0);
+  });
+
+  it("a limpeza dos vencidos apaga a parte vencida (objeto e linha) e deixa a que vale, quando a reunião já saiu da fila", async () => {
     const { id } = await iniciar();
     await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
     await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(1) });
+    // As partes de hoje vencem juntas (receberParte iguala o prazo); aqui a 0
+    // vence antes, como as de antes do prazo comum.
     const [vencida] = (await partes(id)).filter(p => p.seq === 0);
     await (await getDb())!.update(meetingAudioSlices).set({ expiresAt: Date.now() - 1000 }).where(eq(meetingAudioSlices.id, vencida.id));
-    await limparGravacoesVencidas();
+    // Gravando, a reunião ainda recebe partes (e cada uma renova o prazo): a varredura não mexe.
+    await limparGravacoesVencidas({ ownerId: DONA });
+    expect((await partes(id)).map(p => p.seq)).toEqual([0, 1]);
+    await (await getDb())!.update(meetings).set({ status: "ready" }).where(and(eq(meetings.id, id), eq(meetings.ownerId, DONA)));
+    await limparGravacoesVencidas({ ownerId: DONA });
     expect((await partes(id)).map(p => p.seq)).toEqual([1]);
-    expect(storageDelete.mock.calls.map(c => c[0])).toContain(vencida.storageKey);
+    expect(storageApagarTodasAsVersoes.mock.calls.map(c => c[0])).toEqual([vencida.storageKey]);
   });
 
   it("os procedimentos: iniciarGravacao cria em partes; encerrarGravacao traduz as recusas em códigos do tRPC", async () => {
