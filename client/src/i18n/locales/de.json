@@ -1515,6 +1515,8 @@
     "contactCreatedStatus": "Kontakt erstellt",
     "ignoredStatus": "Ignoriert",
     "noContactSuggestions": "Keine Kontaktvorschläge für dieses Meeting.",
+    "mentionedHeading": "Erwähnte Personen",
+    "mentionedHelp": "Sie wurden im Gespräch erwähnt, haben aber nicht am Meeting teilgenommen.",
     "reprocessButton": "Erneut verarbeiten",
     "reprocessHint": "Das Audio dieses Meetings bleibt bis zum {{date}} gespeichert. Die erneute Verarbeitung nutzt dasselbe Audio ohne neue Aufnahme und ersetzt die bisherige Transkription und die Vorschläge.",
     "reprocessStarted": "Erneute Verarbeitung gestartet. Das Meeting ist hier fertig, sobald sie abgeschlossen ist.",
@@ -1828,7 +1830,9 @@
       "telefone": "Telefon",
       "email": "E-Mail",
       "tenho": "Was ich habe",
-      "preciso": "Was ich brauche"
+      "preciso": "Was ich brauche",
+      "cargo": "Position",
+      "empresa": "Unternehmen"
     },
     "completeByText": "Per Text ergänzen",
     "completeHint": "Antworten Sie dem Assistenten unten: Er speichert nur, was Sie bestätigen. Telefon und E-Mail können Sie auch unter Bearbeiten eingeben.",
@@ -2212,7 +2216,8 @@
       "open": "Profil, KI-Vorschläge, Ergänzen per Sprache und Verlauf öffnen"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "Beim Anlegen des Kontakts warten Was Ich Habe und Was Ich Brauche in seinem Profil auf Ihre Bestätigung.",
+      "pendingAfterCreate": "Beim Anlegen des Kontakts warten Position, Unternehmen, Was Ich Habe und Was Ich Brauche in seinem Profil auf Ihre Bestätigung.",
+      "mentionedBadge": "Nicht teilgenommen",
       "review": "Im Intelligenten Netzwerk prüfen"
     },
     "dashboard": {

@@ -1515,6 +1515,8 @@
     "contactCreatedStatus": "Contato criado",
     "ignoredStatus": "Ignorada",
     "noContactSuggestions": "Nenhum contato sugerido nesta reunião.",
+    "mentionedHeading": "Pessoas citadas",
+    "mentionedHelp": "Foram mencionadas na conversa, mas não participaram da reunião.",
     "reprocessButton": "Reprocessar",
     "reprocessHint": "O áudio desta reunião continua guardado até {{date}}. Reprocessar usa o mesmo áudio, sem gravar de novo, e substitui a transcrição e as sugestões anteriores.",
     "reprocessStarted": "Reprocessamento iniciado. A reunião fica pronta aqui quando terminar.",
@@ -1828,7 +1830,9 @@
       "telefone": "Telefone",
       "email": "E-mail",
       "tenho": "O Que Tenho",
-      "preciso": "O Que Preciso"
+      "preciso": "O Que Preciso",
+      "cargo": "Cargo",
+      "empresa": "Empresa"
     },
     "completeByText": "Completar por texto",
     "completeHint": "Responda ao assistente logo abaixo: ele só grava o que você confirmar. Telefone e e-mail também podem ser digitados em Editar.",
@@ -2212,7 +2216,8 @@
       "open": "Abrir perfil, sugestões da IA, completar por voz e histórico"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "Ao criar o contato, O Que Tenho e O Que Preciso ficam esperando a sua confirmação no perfil dele.",
+      "pendingAfterCreate": "Ao criar o contato, cargo, empresa, O Que Tenho e O Que Preciso ficam esperando a sua confirmação no perfil dele.",
+      "mentionedBadge": "Não participou",
       "review": "Revisar no Meu Network Inteligente"
     },
     "dashboard": {

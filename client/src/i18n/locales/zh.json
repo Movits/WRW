@@ -1515,6 +1515,8 @@
     "contactCreatedStatus": "联系人已创建",
     "ignoredStatus": "已忽略",
     "noContactSuggestions": "此次会议没有建议的联系人。",
+    "mentionedHeading": "被提及的人",
+    "mentionedHelp": "在谈话中被提到，但没有参加会议。",
     "reprocessButton": "重新处理",
     "reprocessHint": "此会议的音频保存至 {{date}}。重新处理将使用同一段音频，无需重新录制，并替换之前的转录内容和建议。",
     "reprocessStarted": "已开始重新处理。完成后会议将在此处就绪。",
@@ -1828,7 +1830,9 @@
       "telefone": "电话",
       "email": "电子邮箱",
       "tenho": "我拥有什么",
-      "preciso": "我需要什么"
+      "preciso": "我需要什么",
+      "cargo": "职位",
+      "empresa": "公司"
     },
     "completeByText": "通过文字补全",
     "completeHint": "回答下方助手的问题：它只保存您确认的内容。电话和电子邮箱也可以通过「编辑」填写。",
@@ -2212,7 +2216,8 @@
       "open": "打开档案、AI 建议、语音补充和历史"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "创建联系人后，“我拥有的”和“我需要的”会在其档案中等待您确认。",
+      "pendingAfterCreate": "创建联系人后，职位、公司、“我拥有的”和“我需要的”会在其档案中等待您确认。",
+      "mentionedBadge": "未参会",
       "review": "在我的智能人脉中查看"
     },
     "dashboard": {

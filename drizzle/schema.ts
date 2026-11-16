@@ -1169,6 +1169,11 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   company: varchar("company", { length: 200 }),
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 320 }),
+  // Participou da reunião ('present') ou só foi citada nela ('mentioned'),
+  // como a extração disse (achado 7 da bancada de 16/11): a tela separa as
+  // citadas das participantes. Nula nas sugestões anteriores, que a tela mostra
+  // como sempre. Varchar com o enum só no TypeScript, como em network_sugestoes.
+  presence: varchar("presence", { length: 12, enum: ["present", "mentioned"] }),
   sourceEntityIds: jsonCompat("source_entity_ids"),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
   status: mysqlEnum("status", ["pending", "created", "linked", "ignored"]).default("pending").notNull(),
@@ -1363,7 +1368,8 @@ export const networkSugestoes = mysqlTable("network_sugestoes", {
   meetingId:           varchar("meeting_id", { length: 36 }),
   meetingSuggestionId: varchar("meeting_suggestion_id", { length: 36 }),
   origem:              varchar("origem", { length: 10, enum: ["reuniao", "voz", "texto"] }).notNull(),
-  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso"] }).notNull(),
+  // cargo e empresa: o apoio da pessoa da reunião, que criar ou vincular não grava sozinho (achado 6 da bancada de 16/11).
+  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso", "cargo", "empresa"] }).notNull(),
   valor:               varchar("valor", { length: 320 }).notNull(),
   categoria:           varchar("categoria", { length: 120 }),
   trecho:              text("trecho"),

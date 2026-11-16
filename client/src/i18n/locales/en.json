@@ -1515,6 +1515,8 @@
     "contactCreatedStatus": "Contact created",
     "ignoredStatus": "Ignored",
     "noContactSuggestions": "No contacts suggested in this meeting.",
+    "mentionedHeading": "People mentioned",
+    "mentionedHelp": "They were mentioned in the conversation but did not take part in the meeting.",
     "reprocessButton": "Reprocess",
     "reprocessHint": "This meeting's audio is still stored until {{date}}. Reprocessing uses the same audio, with no new recording, and replaces the previous transcript and suggestions.",
     "reprocessStarted": "Reprocessing started. The meeting will be ready here when it finishes.",
@@ -1828,7 +1830,9 @@
       "telefone": "Phone",
       "email": "Email",
       "tenho": "What I Have",
-      "preciso": "What I Need"
+      "preciso": "What I Need",
+      "cargo": "Job title",
+      "empresa": "Company"
     },
     "completeByText": "Complete by text",
     "completeHint": "Answer the assistant below: it only saves what you confirm. Phone and email can also be typed in Edit.",
@@ -2212,7 +2216,8 @@
       "open": "Open profile, AI suggestions, complete by voice and history"
     },
     "meetingProposal": {
-      "pendingAfterCreate": "When you create the contact, What I Have and What I Need wait for your confirmation on their profile.",
+      "pendingAfterCreate": "When you create the contact, job title, company, What I Have and What I Need wait for your confirmation on their profile.",
+      "mentionedBadge": "Did not attend",
       "review": "Review in My Smart Network"
     },
     "dashboard": {

@@ -22,7 +22,7 @@ import { dividirEmJanelas } from "./janelas-de-texto";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
-  apagarPendenciasDaReuniao, emailEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
+  apagarPendenciasDaReuniao, emailEstaNaFonte, expressaoEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
   REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type ItemProposto,
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
@@ -116,8 +116,16 @@ export type MeetingExtraction = {
     tipoPessoa?: "fisica" | "juridica" | "nao_informado";
     oQueTenho?: ItemProposto[];
     oQuePreciso?: ItemProposto[];
+    // Participou da reunião ou só foi citada nela (achado 7 da bancada de
+    // 16/11): a citada não vira cartão igual ao das participantes. Ausente
+    // numa resposta antiga, a sugestão fica sem a marca, como antes.
+    presence?: PresencaNaReuniao;
   }>;
 };
+
+/** "present": participou da reunião; "mentioned": só foi citada por quem participou. */
+export const PRESENCAS_NA_REUNIAO = ["present", "mentioned"] as const;
+export type PresencaNaReuniao = (typeof PRESENCAS_NA_REUNIAO)[number];
 
 // Os idiomas da reunião e os nomes que vão no prompt moram em
 // shared/idioma-da-reuniao.ts (uma função só, nomeDoIdioma). Os nomes antigos
@@ -219,6 +227,9 @@ export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction 
     mesma.email ??= pessoa.email;
     mesma.confidence = Math.max(mesma.confidence, pessoa.confidence);
     if (!mesma.tipoPessoa || mesma.tipoPessoa === "nao_informado") mesma.tipoPessoa = pessoa.tipoPessoa;
+    // Quem participou em alguma janela participou da reunião (citada no começo, chegou depois).
+    if (pessoa.presence === "present") mesma.presence = "present";
+    else mesma.presence ??= pessoa.presence;
     mesma.oQueTenho = semItensRepetidos([...(mesma.oQueTenho ?? []), ...(pessoa.oQueTenho ?? [])]);
     mesma.oQuePreciso = semItensRepetidos([...(mesma.oQuePreciso ?? []), ...(pessoa.oQuePreciso ?? [])]);
   }
@@ -252,6 +263,17 @@ function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtract
   return igual(a.fullName, b.fullName) && !conflita(a.email, b.email, email) && !conflita(a.phone, b.phone, soDigitos);
 }
 
+/**
+ * O que o prompt da extração pede sobre cada pessoa, além das três dimensões.
+ * Cargo e empresa passam pela conferência de gravarResultadoDaReuniao
+ * (expressaoEstaNaFonte) e a presença separa, na tela, quem participou de
+ * quem só foi citado (achados 6 e 7 da bancada de 16/11). Os exemplos não
+ * são os da reunião sintética da bancada, para não ensinar a prova ao modelo.
+ */
+export const REGRAS_DA_PESSOA_NA_REUNIAO = `Em "contacts", fullName, phone e email são o QUEM SOU; jobTitle e company ficam só como apoio e nunca substituem O QUE TENHO.
+- jobTitle e company só com as palavras ditas na reunião sobre aquela pessoa, copiadas como foram ditas ("diretora comercial", "Vinícola Serra Alta"). Não deduza cargo pelo que a pessoa faz ("fundadora", "consultor") nem complete o nome da empresa. Se não foi dito, null.
+- presence diz se a pessoa participou da reunião: "present" quando ela fala, se apresenta ou é dada como presente ("a Ana e o Bruno estão aqui com a gente"); "mentioned" quando alguém só fala dela e ela não está na reunião ("a Carla não pôde vir", "vou te apresentar a Denise"). Empresa é "present" só se alguém dela participou. Na dúvida, "mentioned".`;
+
 async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
@@ -259,7 +281,7 @@ async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction
     messages: [
       {
         role: "system",
-        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\nEm "contacts", fullName, phone e email são o QUEM SOU; jobTitle e company ficam só como apoio e nunca substituem O QUE TENHO.`,
+        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\n${REGRAS_DA_PESSOA_NA_REUNIAO}`,
       },
       {
         role: "user",
@@ -304,8 +326,9 @@ async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction
                   tipoPessoa: { type: "string", enum: ["fisica", "juridica", "nao_informado"] },
                   oQueTenho: { type: "array", items: ITEM_DO_PERFIL },
                   oQuePreciso: { type: "array", items: ITEM_DO_PERFIL },
+                  presence: { type: "string", enum: [...PRESENCAS_NA_REUNIAO] },
                 },
-                required: ["fullName", "jobTitle", "company", "phone", "email", "confidence", "tipoPessoa", "oQueTenho", "oQuePreciso"],
+                required: ["fullName", "jobTitle", "company", "phone", "email", "confidence", "tipoPessoa", "oQueTenho", "oQuePreciso", "presence"],
                 additionalProperties: false,
               },
             },
@@ -925,14 +948,24 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // completar — o modelo às vezes "completa" um sobrenome ou um número, ou
   // monta um e-mail com o nome da empresa. O que a pessoa TEM e PRECISA vira
   // pendência à parte (network_sugestoes), só com trecho literal conferido.
+  //
+  // Cargo e empresa também (achado 6 da bancada de 16/11): ficam só se a
+  // transcrição os diz como estão escritos ("fundadora" e "Consultor", que
+  // ninguém disse, caem), e nem assim entram sozinhos no contato — criar ou
+  // vincular a pessoa os transforma em pendências (meetings.decideContactSuggestion).
+  // A presença (achado 7) separa, na tela, quem participou de quem só foi citado.
   const sugestoes = extraction.contacts
     .map(contact => {
       const ajustada = ajustarSugestaoAosLimites(contact);
       return {
         ...ajustada,
         fullName: nomeSustentadoPelaTranscricao(ajustada.fullName, transcription.text),
+        jobTitle: expressaoEstaNaFonte(ajustada.jobTitle, transcription.text) ? ajustada.jobTitle : null,
+        company: expressaoEstaNaFonte(ajustada.company, transcription.text) ? ajustada.company : null,
         phone: telefoneEstaNaFonte(ajustada.phone, transcription.text) ? ajustada.phone : null,
         email: emailEstaNaFonte(ajustada.email, transcription.text) ? ajustada.email : null,
+        // Valor fora dos dois (o modelo nem sempre obedece ao enum) fica sem marca, como a sugestão antiga.
+        presence: contact.presence === "present" || contact.presence === "mentioned" ? contact.presence : null,
         id: crypto.randomUUID(),
         confidence: contact.confidence,
         pendencias: pendenciasDaPessoaNaReuniao(contact, transcription.text),
@@ -943,7 +976,7 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
     await db.insert(meetingContactSuggestions).values(sugestoes.map(contact => ({
       id: contact.id, meetingId, ownerId,
       fullName: contact.fullName, jobTitle: contact.jobTitle, company: contact.company,
-      phone: contact.phone, email: contact.email, sourceEntityIds: [],
+      phone: contact.phone, email: contact.email, presence: contact.presence, sourceEntityIds: [],
       confidence: confiancaParaGravar(contact.confidence), status: "pending" as const,
       createdAt: completedAt, updatedAt: completedAt,
     })));

@@ -492,3 +492,91 @@ describe("a pessoa sugerida pela reunião — criar, vincular, ignorar", () => {
     expect(insert.params).not.toContain("(11) 98765-4321");
   });
 });
+
+/**
+ * Achado 6 da bancada de 16/11: cargo e empresa que a IA deu à pessoa da
+ * reunião iam sozinhos para o contato no "Criar contato". Agora viram
+ * pendências do contato — criado ou vinculado — e só entram com a dona.
+ */
+describe("cargo e empresa da pessoa da reunião — pendência, nunca dado direto", () => {
+  const PESSOA = { fullName: "Fernando Okada", phone: null, email: null, jobTitle: "mentor convidado", company: "Ponte Sul Consultoria" };
+
+  it("criar a pessoa: cargo e empresa viram pendências do contato novo, com origem e confiança; o QUEM SOU não volta", async () => {
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, {
+      ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9, quemSouDaSugestao: PESSOA,
+    });
+    const [vinculo] = estado.consultas;
+    expect(vinculo.sql).toMatch(/^update `network_sugestoes` set `contact_id` = \?/);
+    const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
+    expect(insert.params).toEqual(expect.arrayContaining([
+      "dona-1", 9, "m-1", "s-1", "reuniao", "cargo", "mentor convidado", "empresa", "Ponte Sul Consultoria", "0.800", "pendente",
+    ]));
+    expect(insert.params).not.toContain("Fernando Okada");
+  });
+
+  it("criar a pessoa sem cargo nem empresa: só o vínculo das pendências, nada inserido", async () => {
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, {
+      ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "create", contactId: 9,
+      quemSouDaSugestao: { ...PESSOA, jobTitle: null, company: "   " },
+    });
+    expect(estado.consultas.map(c => c.sql.split(" ")[0])).toEqual(["update"]);
+  });
+
+  it("vincular: o cargo que difere do contato vira pendência; a empresa igual (sem caixa nem acento), não", async () => {
+    estado.responder = sql => {
+      // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company
+      if (/from `private_contacts`/.test(sql)) return [[7, "Fernando Okada", null, null, null, null, null, "Ponte Sul Consultoria"]];
+      return [];
+    };
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, {
+      ownerId: "dona-1", meetingSuggestionId: "s-1", meetingId: "m-1", acao: "link", contactId: 7,
+      quemSouDaSugestao: { ...PESSOA, company: "PONTE SUL CONSULTÓRIA" },
+    });
+    const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
+    expect(insert.params).toEqual(expect.arrayContaining(["cargo", "mentor convidado"]));
+    expect(insert.params).not.toContain("empresa");
+    expect(insert.params).not.toContain("Fernando Okada");
+  });
+
+  it("o que o contato já tem não vira pendência; cargo ou empresa diferentes viram", () => {
+    const atual = { fullName: "Fernando Okada", jobTitle: "Mentor Convidado", company: null, tenho: [], preciso: [] };
+    const linhas = semRepeticao([
+      { campo: "cargo", valor: "mentor convidado", categoria: null, trecho: null, confianca: 0.8 },
+      { campo: "empresa", valor: "Ponte Sul Consultoria", categoria: null, trecho: null, confianca: 0.8 },
+    ], atual);
+    expect(linhas.map(l => `${l.campo}:${l.valor}`)).toEqual(["empresa:Ponte Sul Consultoria"]);
+  });
+
+  // id, owner_id, contact_id, meeting_id, meeting_suggestion_id, origem, campo, valor, categoria, trecho, confianca, status, decidida_em, created_at, updated_at
+  const pendencia = (campo: string, valor: string) => ["p-1", "dona-1", 5, "m-1", "s-1", "reuniao", campo, valor, null, null, "0.800", "pendente", null, 1, 1];
+
+  it.each([
+    ["cargo", "mentor convidado", "`jobTitle` = ?"],
+    ["empresa", "Ponte Sul Consultoria", "`company` = ?"],
+  ])("confirmar %s grava no campo do contato da dona, na transação da tomada", async (campo, valor, coluna) => {
+    estado.responder = sql => {
+      if (/from `network_sugestoes`/.test(sql)) return [pendencia(campo, valor)];
+      // id, fullName, company, phone, whatsapp
+      if (/from `private_contacts`/.test(sql)) return [[5, "Fernando Okada", null, null, null]];
+      return undefined;
+    };
+    const r = await confirmarPendencia("dona-1", "p-1");
+    expect(r).toEqual({ campo, contactId: 5, mudouTenhoOuPreciso: false });
+    const sqls = estado.consultas.map(c => c.sql);
+    const update = estado.consultas.find(c => /^update `private_contacts`/.test(c.sql))!;
+    expect(update.sql).toContain(coluna);
+    expect(update.sql).toContain("`private_contacts`.`ownerId` = ?");
+    expect(update.params).toEqual(expect.arrayContaining([valor, 5, "dona-1"]));
+    expect(sqls.indexOf("begin")).toBeLessThan(sqls.findIndex(sql => /^update `network_sugestoes`/.test(sql)));
+    expect(sqls.at(-1)).toBe("commit");
+  });
+
+  it("valor de cargo ou empresa maior que a coluna é recusado; o corrigido pela dona vale aparado", () => {
+    expect(() => valorParaGravar("cargo", "x".repeat(201))).toThrow(ValorInvalido);
+    expect(() => valorParaGravar("empresa", "   ")).toThrow(ValorInvalido);
+    expect(valorParaGravar("empresa", "  Ponte Sul Consultoria ")).toBe("Ponte Sul Consultoria");
+  });
+});

@@ -23,9 +23,12 @@ import { slugifyMatchTag } from "./match-service";
  *    proposto carrega o TRECHO literal da fonte, e o código confere: trecho
  *    que não está na transcrição (ou no texto), que não diz nada (uma palavra
  *    solta) ou que a fonte nega derruba o item; o TEXTO do item precisa ser
- *    sustentado pelo trecho (palavra e número que o trecho não diz derrubam);
- *    telefone que não é um número inteiro da fonte vira nada; e-mail que não
- *    aparece inteiro, idem; nome cujas palavras não aparecem, idem.
+ *    sustentado pelo trecho (palavra e número que o trecho não diz derrubam,
+ *    e a negação que restringe o item — "embalagem que não seja de plástico"
+ *    — fica, sem trocar de lado); telefone que não é um número inteiro da
+ *    fonte vira nada; e-mail que não aparece inteiro, idem; nome cujas
+ *    palavras não aparecem, idem; cargo e empresa que a fonte não diz como
+ *    estão escritos, idem.
  *
  * 4. O QUE TENHO e O QUE PRECISO podem circular sem identificação na rede
  *    global (itens 12 e 13): item que carrega o nome, a empresa, o telefone ou
@@ -36,13 +39,18 @@ import { slugifyMatchTag } from "./match-service";
  *    quando a dona confirma — podendo corrigir o valor antes.
  */
 
-export const CAMPOS_DA_SUGESTAO = ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso"] as const;
+/**
+ * Os campos que uma pendência propõe. `cargo` e `empresa` (achado 6 da
+ * bancada de 16/11) são o apoio da pessoa da reunião, jobTitle e company do
+ * contato: criar ou vincular a pessoa não os grava, eles esperam a dona aqui.
+ */
+export const CAMPOS_DA_SUGESTAO = ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso", "cargo", "empresa"] as const;
 export type CampoDaSugestao = (typeof CAMPOS_DA_SUGESTAO)[number];
 export type OrigemDaSugestao = "reuniao" | "voz" | "texto";
 
 /** Os tetos das colunas de destino (private_contacts, contact_assets, contact_needs). */
 export const LIMITES_DO_CAMPO: Record<CampoDaSugestao, number> = {
-  nome: 200, telefone: 50, email: 254, tipo_pessoa: 10, tenho: 200, preciso: 200,
+  nome: 200, telefone: 50, email: 254, tipo_pessoa: 10, tenho: 200, preciso: 200, cargo: 200, empresa: 200,
 };
 
 export type ItemProposto = { texto: string; categoria: string | null; trecho: string; confianca: number };
@@ -78,6 +86,19 @@ function comparavel(texto: string): string {
   return unidades(texto).join(" ");
 }
 
+/** As unidades de um texto com a oração de cada uma: ponto, vírgula, dois-pontos e quebra de linha separam orações. */
+function unidadesPorOracao(texto: string): { lista: string[]; oracao: number[] } {
+  const lista: string[] = [];
+  const oracao: number[] = [];
+  texto.split(/[.,;:!?…\n]+/).forEach((parte, indice) => {
+    for (const unidade of unidades(parte)) {
+      lista.push(unidade);
+      oracao.push(indice);
+    }
+  });
+  return { lista, oracao };
+}
+
 const temDigito = (unidade: string) => /\d/.test(unidade);
 
 /** Palavra que prova alguma coisa: não é número (conferido à parte), ligação, artigo nem sigla de duas letras. */
@@ -102,23 +123,88 @@ const ALCANCE_DA_NEGACAO = 3;
 const JANELA_DO_TRECHO = 5;
 
 /**
- * A fonte em unidades, com a oração de cada uma. A mesma transcrição é
- * conferida item a item, pessoa a pessoa: a última leitura fica guardada.
+ * A negação que RESTRINGE um nome não desmente a declaração (achado 5 da
+ * bancada de 16/11): "uma embalagem QUE NÃO seja de plástico" pede uma
+ * embalagem, e a restrição é parte do item. O "não" derrubava o item nas 6
+ * rodadas, e com ele o resto da frase ("um distribuidor em São Paulo").
+ *
+ * Restringe o "não" que vem logo depois de "que" (ou com uma palavra no
+ * meio: "que ainda não"), com um nome antes do "que", tudo na mesma oração.
+ * Não restringe — desmente — "o que não temos", "a gente que não tem", "isso
+ * que não" (antes do "que" não há nome) nem "um distribuidor que não temos"
+ * (o verbo depois do "não" é a própria declaração de quem fala).
  */
-let ultimaFonteLida: { fonte: string; daFonte: string[]; oracao: number[] } | null = null;
+const RELATIVOS = new Set(["que", "that", "which", "who"]);
+const NAO_SAO_NOME = new Set([
+  "isso", "isto", "aquilo", "tudo", "algo", "nada", "coisa", "coisas", "gente",
+  "what", "all", "something", "anything", "nothing", "everything", "thing", "things",
+]);
+const VERBOS_DA_DECLARACAO = new Set([
+  "tenho", "temos", "possuo", "possuimos", "preciso", "precisamos", "procuro", "procuramos", "busco", "buscamos",
+  "quero", "queremos", "ofereco", "oferecemos", "vendo", "vendemos", "faco", "fazemos", "conheco", "conhecemos",
+  "have", "need", "want", "offer", "sell", "own",
+]);
+function negacaoRestringeUmNome(lista: readonly string[], oracao: readonly number[], k: number): boolean {
+  if (!negaEm(lista, k, NEGACOES_NO_TRECHO) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
+  return [k - 1, k - 2].some(j => j >= 1 && RELATIVOS.has(lista[j]) && oracao[j - 1] === oracao[k]
+    && ehConteudo(lista[j - 1]) && !NAO_SAO_NOME.has(lista[j - 1]));
+}
+
+/**
+ * O trecho desmente a própria declaração? A negação dentro dele derruba
+ * ("não precisamos de investidores"), salvo a que restringe um nome e o
+ * "nem" que continua uma restrição na mesma oração ("sem plástico nem
+ * isopor", "que não seja de plástico nem de isopor").
+ */
+function trechoSeDesmente(lista: readonly string[], oracao: readonly number[]): boolean {
+  let restricao: number | null = null;
+  for (let k = 0; k < lista.length; k += 1) {
+    if (restricao !== null && restricao !== oracao[k]) restricao = null;
+    if (lista[k] === "sem" || lista[k] === "without") restricao = oracao[k];
+    else if (lista[k] === "nem" && restricao !== null) continue;
+    else if (negacaoRestringeUmNome(lista, oracao, k)) restricao = oracao[k];
+    else if (negaEm(lista, k, NEGACOES_NO_TRECHO)) return true;
+  }
+  return false;
+}
+
+/**
+ * Até onde vai cada negação de um texto: a marca ("não", "sem", "nem"...,
+ * fora "não só") alcança da palavra seguinte ao fim da oração.
+ */
+function alcanceDaNegacao(lista: readonly string[], oracao: readonly number[]) {
+  const negada: boolean[] = [];
+  const marca: boolean[] = [];
+  let aberta: number | null = null;
+  lista.forEach((_, k) => {
+    if (aberta !== null && aberta !== oracao[k]) aberta = null;
+    negada.push(aberta !== null);
+    marca.push(negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO));
+    if (marca[k]) aberta = oracao[k];
+  });
+  return { negada, marca };
+}
+
+/**
+ * A fonte em unidades, com a oração de cada uma e o alcance das negações
+ * dela. A mesma transcrição é conferida item a item, pessoa a pessoa: a
+ * última leitura fica guardada.
+ */
+let ultimaFonteLida: { fonte: string; daFonte: string[]; oracao: number[]; negada: boolean[] } | null = null;
 function fonteLida(fonte: string) {
   if (ultimaFonteLida?.fonte === fonte) return ultimaFonteLida;
-  const daFonte: string[] = [];
-  const oracao: number[] = [];
-  fonte.split(/[.,;:!?…\n]+/).forEach((parte, indice) => {
-    for (const unidade of unidades(parte)) {
-      daFonte.push(unidade);
-      oracao.push(indice);
-    }
-  });
-  ultimaFonteLida = { fonte, daFonte, oracao };
+  const { lista: daFonte, oracao } = unidadesPorOracao(fonte);
+  ultimaFonteLida = { fonte, daFonte, oracao, negada: alcanceDaNegacao(daFonte, oracao).negada };
   return ultimaFonteLida;
 }
+
+/**
+ * Uma palavra da fonte em volta do trecho. `negada`: está no alcance de uma
+ * negação que o PRÓPRIO trecho traz ("embalagem que não seja de PLÁSTICO");
+ * `marca`: é essa negação. Negação de fora do trecho não entra aqui: a que
+ * vem logo antes já derruba a ocorrência inteira.
+ */
+type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean };
 
 /**
  * O que a fonte diz em volta do trecho citado, ou null se o trecho não a
@@ -127,16 +213,17 @@ function fonteLida(fonte: string) {
  * palavras inteiras. Pedaço com menos de 4 letras não prova nada e é
  * ignorado; o trecho inteiro precisa de pelo menos DUAS palavras de conteúdo
  * (uma palavra solta — "para", "pessoas" — é palavra-chave, não declaração,
- * como em citacaoConfere). Ocorrência negada não conta.
+ * como em citacaoConfere). Ocorrência negada não conta, nem trecho que se
+ * desmente.
  */
-function apoioDoTrecho(trecho: unknown, fonte: string): string[] | null {
+function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null {
   if (typeof trecho !== "string") return null;
   const { daFonte, oracao } = fonteLida(fonte);
-  const pedacos = trecho.split(/\.{3}|…/).map(unidades).filter(pedaco => pedaco.join("").length >= 4);
-  if (!pedacos.length || pedacos.reduce((soma, pedaco) => soma + pedaco.filter(ehConteudo).length, 0) < 2) return null;
-  const apoio: string[] = [];
-  for (const pedaco of pedacos) {
-    if (pedaco.some((_, k) => negaEm(pedaco, k, NEGACOES_NO_TRECHO))) return null;
+  const pedacos = trecho.split(/\.{3}|…/).map(unidadesPorOracao).filter(pedaco => pedaco.lista.join("").length >= 4);
+  if (!pedacos.length || pedacos.reduce((soma, pedaco) => soma + pedaco.lista.filter(ehConteudo).length, 0) < 2) return null;
+  const apoio: PalavraDoApoio[] = [];
+  for (const { lista: pedaco, oracao: oracaoDoPedaco } of pedacos) {
+    if (trechoSeDesmente(pedaco, oracaoDoPedaco)) return null;
     let achou = false;
     for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
       if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
@@ -146,7 +233,14 @@ function apoioDoTrecho(trecho: unknown, fonte: string): string[] | null {
       }
       if (negado) continue;
       achou = true;
-      apoio.push(...daFonte.slice(Math.max(0, inicio - JANELA_DO_TRECHO), inicio + pedaco.length + JANELA_DO_TRECHO));
+      const fim = inicio + pedaco.length;
+      let aberta: number | null = null;
+      for (let k = Math.max(0, inicio - JANELA_DO_TRECHO); k < Math.min(daFonte.length, fim + JANELA_DO_TRECHO); k += 1) {
+        if (aberta !== null && aberta !== oracao[k]) aberta = null;
+        const marca = k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO);
+        apoio.push({ unidade: daFonte[k], negada: aberta !== null, marca });
+        if (marca) aberta = oracao[k];
+      }
     }
     if (!achou) return null;
   }
@@ -174,22 +268,70 @@ function mesmaRaiz(a: string, b: string): boolean {
 }
 
 /**
- * O TEXTO do item é sustentado pelo trecho? O modelo pode resumir ("atua na
+ * O TEXTO do item é sustentado pelo trecho? O modelo pode encurtar ("atua na
  * distribuição de medicamentos em todo o Brasil" → "Distribuição de
  * medicamentos no Brasil"), nunca acrescentar: toda palavra de conteúdo do
  * texto aparece, na mesma raiz, no trecho ou em volta dele, e todo número
  * aparece igual. Sem isso, um trecho verdadeiro servia de passe para um texto
- * inventado ("Fundo de investimento com R$ 50 milhões").
+ * inventado ("Fundo de investimento com R$ 50 milhões"). É o mesmo que o
+ * prompt pede (REGRAS_DAS_TRES_DIMENSOES): palavra que o trecho não tem
+ * ("Serviços de", "Especialista em") continua caindo.
+ *
+ * A negação que o trecho traz é parte do item e não pode trocar de lado
+ * (achado 5 da bancada de 16/11). De "uma embalagem que não seja de
+ * plástico" passam "Embalagem que não seja de plástico", "Embalagem sem
+ * plástico" (o "sem" faz as vezes do "que não seja") e "Embalagem"; não passa
+ * "Embalagem de plástico". A palavra que fica sob a negação no item precisa
+ * estar sob a negação no trecho, a que fica fora, fora; e o item afirma
+ * alguma coisa ("Sem distribuidor no Chile" não é item).
  */
 export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte: string): boolean {
   if (typeof texto !== "string") return false;
   const apoio = apoioDoTrecho(trecho, fonte);
   if (!apoio) return false;
-  const doTexto = unidades(texto);
-  const conteudo = doTexto.filter(ehConteudo);
-  if (!conteudo.length) return false;
-  return doTexto.filter(temDigito).every(numero => apoio.includes(numero))
-    && conteudo.every(palavra => apoio.some(daFonte => mesmaRaiz(palavra, daFonte)));
+  const { lista: doTexto, oracao } = unidadesPorOracao(texto);
+  if (!doTexto.some(ehConteudo)) return false;
+  const { negada: sobNegacao, marca } = alcanceDaNegacao(doTexto, oracao);
+  const casa = (unidade: string, daFonte: PalavraDoApoio) => (temDigito(unidade) ? daFonte.unidade === unidade : mesmaRaiz(unidade, daFonte.unidade));
+  let afirma = false;
+  for (let k = 0; k < doTexto.length; k += 1) {
+    const unidade = doTexto[k];
+    if (marca[k]) {
+      // A negação do item: o trecho também nega, e alguma palavra do item fica sob ela.
+      const alcanca = doTexto.some((outra, j) => j > k && oracao[j] === oracao[k] && !marca[j] && (ehConteudo(outra) || temDigito(outra)));
+      if (!alcanca || !apoio.some(daFonte => daFonte.marca)) return false;
+      continue;
+    }
+    if (!temDigito(unidade) && !ehConteudo(unidade)) continue;
+    if (sobNegacao[k]) {
+      if (!apoio.some(daFonte => daFonte.negada && !daFonte.marca && casa(unidade, daFonte))) return false;
+    } else {
+      if (!apoio.some(daFonte => !daFonte.negada && !daFonte.marca && casa(unidade, daFonte))) return false;
+      if (ehConteudo(unidade)) afirma = true;
+    }
+  }
+  return afirma;
+}
+
+/** Letra de qualquer escrita (RegExp por string, como a SEPARADOR_DE_PALAVRA: tsc em ES5). */
+const TEM_LETRA = new RegExp("\\p{L}", "u");
+
+/**
+ * Cargo e empresa que a IA deu a uma pessoa da reunião (achado 6 da bancada
+ * de 16/11) ficam só se a fonte os diz como estão escritos: as mesmas
+ * palavras, na mesma ordem, e não no alcance de uma negação da mesma oração
+ * ("não sou mais a diretora"). "Consultor" não se sustenta em "Ponte Sul
+ * Consultoria", nem "fundadora" numa reunião em que ninguém disse a palavra.
+ * Acento, caixa e pontuação não contam.
+ */
+export function expressaoEstaNaFonte(expressao: string | null | undefined, fonte: string): boolean {
+  const procurada = unidades(expressao ?? "");
+  if (!procurada.some(unidade => TEM_LETRA.test(unidade))) return false;
+  const { daFonte, negada } = fonteLida(fonte);
+  for (let inicio = 0; inicio + procurada.length <= daFonte.length; inicio += 1) {
+    if (procurada.every((unidade, k) => daFonte[inicio + k] === unidade) && !negada[inicio]) return true;
+  }
+  return false;
 }
 
 /**
@@ -326,8 +468,10 @@ export const REGRAS_DAS_TRES_DIMENSOES = `Organize o que for dito sobre a pessoa
 REGRAS OBRIGATÓRIAS:
 - NÃO INVENTE. Só preencha o que está dito na fonte. Nome, telefone e e-mail só se aparecerem escritos ou falados; senão, null.
 - Não deduza necessidade a partir de setor, porte, cargo ou "poderia precisar". Só entra em O QUE PRECISO o que foi declarado.
-- Cada item de O QUE TENHO e O QUE PRECISO leva "trecho": a frase LITERAL da fonte que o sustenta, copiada sem alterar palavras.
-- O texto do item usa só o que o trecho diz: pode resumir, nunca acrescentar produto, lugar, número ou valor. O que a fonte NEGA ("não temos", "não precisamos") não vira item.
+- Um item por coisa: "um distribuidor no Chile e um fornecedor de vidro" são dois itens, cada um com o seu trecho.
+- Cada item de O QUE TENHO e O QUE PRECISO leva "trecho": as palavras LITERAIS da fonte que dizem aquele item (a parte da frase sobre ele), copiadas sem alterar nada.
+- O texto do item é feito com as palavras do trecho: pode cortar palavras e mudar a forma de uma palavra (plural, verbo em substantivo: "distribuímos" vira "distribuição"). Não troque palavra por sinônimo nem acrescente palavra que o trecho não tem ("Serviços de", "Especialista em", "Produção de"), produto, lugar, número ou valor.
+- Restrição dita com "não" faz parte do item: "um tecido que não tenha poliéster" vira "Tecido que não tenha poliéster" ou "Tecido sem poliéster". O que a fonte NEGA ("não temos", "não precisamos") não vira item.
 - O QUE TENHO e O QUE PRECISO NUNCA levam nome de pessoa, razão social, nome da empresa, telefone ou e-mail: esses itens podem circular sem identificação na rede. Escreva "Distribuição de medicamentos no Brasil", nunca "Farmabras: distribuição de medicamentos".
 - Faltou informação? Deixe vazio. É melhor faltar do que inventar.`;
 
@@ -429,7 +573,10 @@ function chaveDaPendencia(campo: CampoDaSugestao, valor: string): string {
 
 export function semRepeticao(
   linhas: PendenciaNova[],
-  atual: { fullName?: string | null; phone?: string | null; whatsapp?: string | null; email?: string | null; tipoPessoa?: string | null; tenho: string[]; preciso: string[] },
+  atual: {
+    fullName?: string | null; phone?: string | null; whatsapp?: string | null; email?: string | null; tipoPessoa?: string | null;
+    jobTitle?: string | null; company?: string | null; tenho: string[]; preciso: string[];
+  },
 ): PendenciaNova[] {
   const digitos = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
   const slugs = (lista: string[]) => new Set(lista.map(slugifyMatchTag));
@@ -450,6 +597,8 @@ export function semRepeticao(
       case "tipo_pessoa": return linha.valor !== atual.tipoPessoa;
       case "tenho": return !tenho.has(slugifyMatchTag(linha.valor));
       case "preciso": return !preciso.has(slugifyMatchTag(linha.valor));
+      case "cargo": return comparavel(linha.valor) !== comparavel(atual.jobTitle ?? "");
+      case "empresa": return comparavel(linha.valor) !== comparavel(atual.company ?? "");
     }
   });
 }
@@ -506,6 +655,7 @@ export async function retratoDoContato(db: Banco, ownerId: string, contactId: nu
   const [contato] = await db.select({
     id: privateContacts.id, fullName: privateContacts.fullName, phone: privateContacts.phone,
     whatsapp: privateContacts.whatsapp, email: privateContacts.email, tipoPessoa: privateContacts.tipoPessoa,
+    jobTitle: privateContacts.jobTitle, company: privateContacts.company,
   }).from(privateContacts).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId))).limit(1);
   if (!contato) return null;
   const [tenho, preciso] = await Promise.all([
@@ -608,6 +758,8 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
       case "telefone": await tx.update(privateContacts).set({ phone: valor, updatedAt: agora }).where(doContato); return false;
       case "email": await tx.update(privateContacts).set({ email: valor, updatedAt: agora }).where(doContato); return false;
       case "tipo_pessoa": await tx.update(privateContacts).set({ tipoPessoa: valor as "fisica" | "juridica", updatedAt: agora }).where(doContato); return false;
+      case "cargo": await tx.update(privateContacts).set({ jobTitle: valor, updatedAt: agora }).where(doContato); return false;
+      case "empresa": await tx.update(privateContacts).set({ company: valor, updatedAt: agora }).where(doContato); return false;
       case "tenho":
       case "preciso": {
         const tabela = campo === "tenho" ? contactAssets : contactNeeds;
@@ -639,9 +791,12 @@ export async function ignorarPendencia(ownerId: string, id: string) {
  * Decisão sobre a pessoa sugerida pela reunião (meetings.decideContactSuggestion):
  * - criar: as pendências de O QUE TENHO / O QUE PRECISO / tipo de pessoa passam
  *   a apontar para o contato novo, ainda pendentes — criar o contato confirma
- *   o QUEM SOU que a tela mostrou, não o resto;
- * - vincular a um contato que já existe: idem, e o QUEM SOU da sugestão que
- *   difere do contato vira pendência (nada sobrescreve o que a dona gravou);
+ *   o QUEM SOU que a tela mostrou, não o resto. Cargo e empresa que a IA deu
+ *   à pessoa não entram no contato (achado 6 da bancada de 16/11): viram
+ *   pendências dele;
+ * - vincular a um contato que já existe: idem, e o QUEM SOU, o cargo e a
+ *   empresa da sugestão que diferem do contato viram pendência (nada
+ *   sobrescreve o que a dona gravou);
  * - ignorar: tudo que veio daquela pessoa é ignorado.
  */
 export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
@@ -650,7 +805,7 @@ export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
   meetingId: string;
   acao: "create" | "link" | "ignore";
   contactId: number | null;
-  quemSouDaSugestao?: { fullName: string; phone: string | null; email: string | null };
+  quemSouDaSugestao?: { fullName: string; phone: string | null; email: string | null; jobTitle?: string | null; company?: string | null };
 }) {
   const agora = Date.now();
   const daPessoa = and(
@@ -663,20 +818,24 @@ export async function decidirPendenciasDaPessoaSugerida(db: Banco, entrada: {
     return;
   }
   await db.update(networkSugestoes).set({ contactId: entrada.contactId, updatedAt: agora }).where(daPessoa);
-  if (entrada.acao === "link" && entrada.quemSouDaSugestao) {
-    const atual = await retratoDoContato(db, entrada.ownerId, entrada.contactId);
-    if (!atual) return;
-    const linhas: PendenciaNova[] = [
-      { campo: "nome", valor: entrada.quemSouDaSugestao.fullName, categoria: null, trecho: null, confianca: 0.8 },
-      ...(entrada.quemSouDaSugestao.phone ? [{ campo: "telefone" as const, valor: entrada.quemSouDaSugestao.phone, categoria: null, trecho: null, confianca: 0.8 }] : []),
-      ...(entrada.quemSouDaSugestao.email ? [{ campo: "email" as const, valor: entrada.quemSouDaSugestao.email, categoria: null, trecho: null, confianca: 0.8 }] : []),
-    ];
-    await gravarPendencias(db, {
-      ownerId: entrada.ownerId, origem: "reuniao", contactId: entrada.contactId,
-      meetingId: entrada.meetingId, meetingSuggestionId: entrada.meetingSuggestionId,
-      linhas: semRepeticao(linhas, atual),
-    });
+  const sugestao = entrada.quemSouDaSugestao;
+  if (!sugestao) return;
+  const linha = (campo: CampoDaSugestao, valor: string | null | undefined): PendenciaNova[] =>
+    valor?.trim() ? [{ campo, valor: valor.trim(), categoria: null, trecho: null, confianca: 0.8 }] : [];
+  const apoio = [...linha("cargo", sugestao.jobTitle), ...linha("empresa", sugestao.company)];
+  const gravar = (linhas: PendenciaNova[]) => gravarPendencias(db, {
+    ownerId: entrada.ownerId, origem: "reuniao", contactId: entrada.contactId,
+    meetingId: entrada.meetingId, meetingSuggestionId: entrada.meetingSuggestionId, linhas,
+  });
+  if (entrada.acao === "create") {
+    await gravar(apoio);
+    return;
   }
+  const atual = await retratoDoContato(db, entrada.ownerId, entrada.contactId);
+  if (!atual) return;
+  await gravar(semRepeticao([
+    ...linha("nome", sugestao.fullName), ...linha("telefone", sugestao.phone), ...linha("email", sugestao.email), ...apoio,
+  ], atual));
 }
 
 /**
