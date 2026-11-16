@@ -93,6 +93,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink"), traduzirResumo: duble.registrar("traduzirResumoPeloLink") },
     networkInteligente: {

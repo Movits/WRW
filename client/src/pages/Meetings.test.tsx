@@ -78,6 +78,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
     },
@@ -1002,6 +1003,55 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     const titulo = screen.getByRole("heading", { level: 1, name: "Reunião com a vinícola" });
     expect(titulo.textContent).toBe("📄Reunião com a vinícola");
     expect(within(titulo).getByText("📄")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("o e-mail de retorno (H20) aparece com o resumo pronto, entre o resumo e o Pergunte, e pede só com item confirmado", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    const secao = screen.getByRole("region", { name: "E-mail de retorno" });
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    expect(resumo.compareDocumentPosition(secao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // O idioma do e-mail começa no do resumo.
+    expect(within(secao).getByRole("combobox", { name: "Idioma do e-mail" })).toHaveValue("pt-BR");
+    // Um dos dois itens está confirmado: com o nome de quem recebe, o pedido sai.
+    fireEvent.change(within(secao).getByRole("combobox", { name: "Para quem?" }), { target: { value: "Ana" } });
+    fireEvent.click(within(secao).getByRole("button", { name: /Escrever rascunho/ }));
+    expect(duble.mutacoes.rascunharEmailDeRetorno.mutate).toHaveBeenCalledWith({
+      meetingId: REUNIAO.id, relacao: "external", tom: "professional", idioma: "pt-BR", vozDoDestinatario: "F1",
+    }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+  });
+
+  it("o e-mail de retorno é guardado pela página: a dona vai à Transcrição, volta antes da resposta, e a resposta aparece no Resumo", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    const secao = () => screen.getByRole("region", { name: "E-mail de retorno" });
+    fireEvent.change(within(secao()).getByRole("combobox", { name: "Para quem?" }), { target: { value: "Carla" } });
+    fireEvent.click(within(secao()).getByRole("button", { name: /Escrever rascunho/ }));
+    const [, opcoes] = duble.mutacoes.rascunharEmailDeRetorno.mutate.mock.calls[0];
+
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.queryByRole("region", { name: "E-mail de retorno" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+    // A resposta chega depois da volta: o React Query chama o onSuccess do pedido.
+    act(() => opcoes.onSuccess({ assunto: "Retorno para {DESTINATARIO}", corpo: "Olá, {DESTINATARIO}. {F1} manda a minuta." }));
+
+    expect(within(secao()).getByRole("textbox", { name: "Assunto" })).toHaveValue("Retorno para Carla");
+    expect(within(secao()).getByRole("textbox", { name: "Texto do e-mail" })).toHaveValue("Olá, Carla. Ana manda a minuta.");
+    expect(within(secao()).getByRole("combobox", { name: "Para quem?" })).toHaveValue("Carla");
+  });
+
+  it("sem item confirmado, o e-mail de retorno pede para confirmar antes", () => {
+    duble.resumoGuardado.mockReturnValue({ ...resumoPronto(), data: { ...resumoPronto().data, itens: ITENS.map(item => ({ ...item, status: "pending" })) } });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const secao = screen.getByRole("region", { name: "E-mail de retorno" });
+    expect(within(secao).getByText("Confirme ao menos um item do resumo para escrever o e-mail.")).toBeInTheDocument();
+    expect(within(secao).getByRole("button", { name: /Escrever rascunho/ })).toBeDisabled();
+  });
+
+  it.each(["sem_resumo", "pendente", "gerando", "falhou"])("resumo '%s': o e-mail de retorno nem aparece", estado => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado, emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(screen.queryByRole("region", { name: "E-mail de retorno" })).not.toBeInTheDocument();
   });
 
   it("os nomes das vozes vêm dos nomes que a dona deu (meeting.speakerNames)", () => {

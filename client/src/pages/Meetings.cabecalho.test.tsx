@@ -54,6 +54,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.mutacao(),
       traduzirResumo: duble.mutacao(),
       perguntar: duble.mutacao(),
+      rascunharEmailDeRetorno: duble.mutacao(),
       ligarLinkAberto: duble.mutacao(),
       desligarLinkAberto: duble.mutacao(),
     },
