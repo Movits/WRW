@@ -1892,7 +1892,22 @@
     "undoConfirm": "Desfazer a confirmação",
     "undoConfirmQuestion": "Desfazer a confirmação também apaga a próxima ação criada a partir deste item. Desfazer mesmo?",
     "undoConfirmYes": "Sim, desfazer",
-    "inNextActions": "Em Próximas ações"
+    "inNextActions": "Em Próximas ações",
+    "agenda": {
+      "group": "Na agenda",
+      "pageHint": "Com prazo, a ação pode ir para a sua agenda: o evento fica às 9h do dia do prazo, com aviso na hora. Com a Google Agenda conectada no Perfil, ela vai sozinha.",
+      "downloadIcs": "Agenda do celular (.ics)",
+      "toast": {
+        "sent": "A ação está na sua Google Agenda.",
+        "notSent": "A ação está salva na WRW, mas não foi para a sua Google Agenda.",
+        "pastNotSent": "O prazo desta ação já passou: ela fica só na WRW.",
+        "removed": "O evento da ação saiu da sua Google Agenda.",
+        "notRemoved": "O evento desta ação continua na sua Google Agenda."
+      },
+      "errors": {
+        "stillOpen": "Esta ação continua aberta e com prazo, e o evento dela fica na sua Google Agenda. Atualize a tela."
+      }
+    }
   },
   "errorBoundary": {
     "title": "Algo inesperado aconteceu",

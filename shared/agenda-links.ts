@@ -48,13 +48,16 @@ export const ENDERECO_DA_GOOGLE_AGENDA = "https://calendar.google.com/calendar/r
  * dona. Só o botão da própria dona passa convidados; o link que vai no convite,
  * não (ver mensagemDoConvite).
  */
-export function linkDaGoogleAgenda(evento: EventoDoConvite & { convidados?: readonly string[] }): string {
+export function linkDaGoogleAgenda(evento: EventoDoConvite & { convidados?: readonly string[]; detalhes?: string | null }): string {
   const fimMs = evento.inicioMs + evento.duracaoMinutos * 60_000;
   const parametros = new URLSearchParams({
     action: "TEMPLATE",
     text: evento.titulo,
     dates: `${dataIcsUtc(evento.inicioMs)}/${dataIcsUtc(fimMs)}`,
   });
+  // A descrição do evento (a próxima ação da H5c leva o detalhe, o responsável e o endereço dela).
+  const detalhes = evento.detalhes?.trim();
+  if (detalhes) parametros.set("details", detalhes);
   const local = evento.local?.trim();
   if (local) parametros.set("location", local);
   if (evento.fuso) parametros.set("ctz", evento.fuso);

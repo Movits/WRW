@@ -1355,6 +1355,16 @@ export const proximasAcoes = mysqlTable("proximas_acoes", {
   origem:      varchar("origem", { length: 8, enum: ["reuniao", "manual"] }).notNull(),
   feita:       boolean("feita").default(false).notNull(),
   feitaEm:     bigint("feita_em", { mode: "number" }),
+  // A ação na Google Agenda conectada da dona (H5c do plano do gravador), com
+  // os estados de agenda_reunioes.google. Nulo enquanto ela não está lá: sem
+  // prazo, feita, sem a Google Agenda conectada, com o dia do prazo encerrado
+  // antes de ir, ou depois que a conta Google sai ou muda (server/google-agenda.ts).
+  // "pendente" do momento em que o banco gravou até a Google responder; "ok"
+  // quando a Google tem a versão daqui; "falhou" quando não tem, e a tela
+  // mostra "Tentar de novo". O id do evento lá é "acao" mais o id daqui sem os
+  // hífens (server/acoes-na-google.ts): não há coluna para ele. Enum só no
+  // TypeScript, como em agenda_reunioes.google.
+  google:      varchar("google", { length: 16, enum: ["pendente", "ok", "falhou"] }),
   createdAt:   bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:   bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

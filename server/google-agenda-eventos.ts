@@ -168,8 +168,20 @@ export async function gravarEventoNaGoogle(
   avisarConvidados: boolean,
   criar = true,
 ): Promise<"gravado" | "ausente"> {
-  const id = idDoEventoNaGoogle(reuniao.id);
-  const corpo = corpoDoEvento(reuniao);
+  return gravarEventoPeloId(sessao, idDoEventoNaGoogle(reuniao.id), corpoDoEvento(reuniao), avisarConvidados, criar);
+}
+
+/**
+ * O mesmo, para qualquer evento da WRW, pelo id dele e com o corpo pronto: a
+ * reunião da agenda (acima) e a próxima ação (H5c, server/acoes-na-google.ts).
+ */
+export async function gravarEventoPeloId(
+  sessao: SessaoDaGoogle,
+  id: string,
+  corpo: Record<string, unknown>,
+  avisarConvidados: boolean,
+  criar = true,
+): Promise<"gravado" | "ausente"> {
   if (criar) {
     const criacao = await sessao.chamar("POST", `${URL_DOS_EVENTOS}?${envio(avisarConvidados)}`, { id, ...corpo });
     if (deuCerto(criacao.status)) return "gravado";
@@ -185,7 +197,12 @@ export async function gravarEventoNaGoogle(
 
 /** Tira o evento da reunião. O evento que já não existe (404 ou 410) conta como tirado. */
 export async function excluirEventoNaGoogle(sessao: SessaoDaGoogle, agendaId: string, avisarConvidados: boolean): Promise<void> {
-  const resposta = await sessao.chamar("DELETE", urlDoEvento(idDoEventoNaGoogle(agendaId), avisarConvidados));
+  return excluirEventoPeloId(sessao, idDoEventoNaGoogle(agendaId), avisarConvidados);
+}
+
+/** O mesmo, para qualquer evento da WRW, pelo id dele (a próxima ação, H5c). */
+export async function excluirEventoPeloId(sessao: SessaoDaGoogle, id: string, avisarConvidados: boolean): Promise<void> {
+  const resposta = await sessao.chamar("DELETE", urlDoEvento(id, avisarConvidados));
   if (deuCerto(resposta.status) || resposta.status === 404 || resposta.status === 410) return;
   throw new RecusaDaGoogle(resposta.motivo, resposta.status);
 }

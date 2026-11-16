@@ -23,6 +23,7 @@ const duble = vi.hoisted(() => {
       useUtils: () => ({
         proximasAcoes: { invalidate: () => Promise.resolve() }, meetings: { resumoGuardado: { invalidate: () => Promise.resolve() } },
         networkInteligente: { contato: { invalidate: () => Promise.resolve() } },
+        googleAgenda: { estado: { invalidate: () => Promise.resolve() } },
       }),
       proximasAcoes: {
         listar: { useQuery: (entrada: unknown) => { entradas.push(entrada); return { data: undefined, isError: false, error: null, refetch: () => undefined, ...(respostas.listar ?? {}) }; } },
@@ -31,12 +32,15 @@ const duble = vi.hoisted(() => {
         ligarContato: registrar("ligarContato"),
         editar: registrar("editar"),
         apagar: registrar("apagar"),
+        mandarParaGoogle: registrar("mandarParaGoogle"),
+        tirarDaGoogle: registrar("tirarDaGoogle"),
       },
       network: { list: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: () => undefined }) } },
+      googleAgenda: { estado: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: () => undefined }) } },
     },
   };
 });
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({ trpc: duble.trpc }));
 
 const ACAO = {
@@ -90,7 +94,11 @@ describe("a página das próximas ações", () => {
     fireEvent.change(screen.getByLabelText("Prazo (opcional)"), { target: { value: "2026-12-01" } });
     fireEvent.click(salvar);
     // O fuso do aparelho vai junto, para o lembrete do prazo sair às 9h no relógio dela (H15).
-    expect(duble.chamadas.criar?.[0]?.[0]).toEqual({ texto: "Ligar para a Bia", detalhe: "", responsavel: "", prazo: "2026-12-01", fuso: expect.any(String) });
+    // O fuso do aparelho (o lembrete no sino, H15) e os rótulos da tela (o evento na Google Agenda, H5c).
+    expect(duble.chamadas.criar?.[0]?.[0]).toEqual({
+      texto: "Ligar para a Bia", detalhe: "", responsavel: "", prazo: "2026-12-01", fuso: expect.any(String),
+      rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" },
+    });
   });
 
   it("no teto da lista, avisa que mostra só as primeiras", () => {

@@ -4,7 +4,9 @@ import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, privateContacts, proximasAcoes } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { agendarLembreteDaAcao, esquecerLembrete } from "./lembretes";
+import { destinoDaAcaoNaAgenda, estadoDaAcaoAoEscrever, type DestinoDaAcaoNaAgenda } from "@shared/acoes-na-agenda";
 import { nomesDosFalantes } from "@shared/const";
+import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
   indexarRedeParaSugerir,
@@ -35,6 +37,11 @@ import {
  * O lembrete no sino (H15, server/lembretes.ts) anda com o prazo: anotar e
  * editar o prazo o agendam, na mesma transação; apagar a ação o esquece. A
  * feita não precisa de escrita: o laço confere a ação no disparo.
+ *
+ * O estado da ação na Google Agenda (H5c, proximas_acoes.google) muda nas
+ * mesmas escritas: anotar e editar o gravam pelo destino da ação
+ * (shared/acoes-na-agenda.ts), e marcar feita o zera, porque a feita sai da
+ * agenda. A conversa com a Google vem depois, em server/acoes-na-google.ts.
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -201,7 +208,10 @@ export async function escreverFeita(
       .where(and(eq(meetingSummaryItems.id, alvo.itemId), eq(meetingSummaryItems.ownerId, ownerId)));
   }
   const daAcao = "acaoId" in alvo ? eq(proximasAcoes.id, alvo.acaoId) : eq(proximasAcoes.itemId, alvo.itemId);
-  return linhasAfetadas(await ex.update(proximasAcoes).set({ feita, feitaEm: quando, updatedAt: agora })
+  // A feita sai da Google Agenda (H5c): o estado zera aqui, e quem chamou tira o
+  // evento depois (server/acoes-na-google.ts). Reabrir não mexe no estado: quem
+  // reabre manda a ação de novo, se ela tem prazo.
+  return linhasAfetadas(await ex.update(proximasAcoes).set({ feita, feitaEm: quando, ...(feita ? { google: null } : {}), updatedAt: agora })
     .where(and(eq(proximasAcoes.ownerId, ownerId), daAcao)));
 }
 
@@ -288,7 +298,9 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
     feita: proximasAcoes.feita,
     feitaEm: proximasAcoes.feitaEm,
     trecho: proximasAcoes.trecho,
+    google: proximasAcoes.google,
     createdAt: proximasAcoes.createdAt,
+    updatedAt: proximasAcoes.updatedAt,
     meetingId: proximasAcoes.meetingId,
     contactId: proximasAcoes.contactId,
     tituloDaReuniao: meetings.title,
@@ -327,7 +339,10 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
       feita: linha.feita,
       feitaEm: linha.feitaEm,
       trecho: linha.trecho,
+      // O estado na Google Agenda (H5c) e a última mudança, que é a revisão do .ics.
+      google: estadoNaGoogle(linha.google),
       createdAt: linha.createdAt,
+      updatedAt: linha.updatedAt,
       reuniao: reuniaoViva ? { id: linha.meetingId as string, titulo: linha.tituloDaReuniao as string, itemId: presaAoItem ? linha.itemVivo : null } : null,
       vozes: presaAoItem ? nomesDosFalantes(linha.vozesDaReuniao) : {},
       contato: linha.contactId !== null && linha.nomeDoContato !== null ? { id: linha.contactId, nome: linha.nomeDoContato } : null,
@@ -431,8 +446,23 @@ export type DadosDaAcao = {
   fuso?: string | null;
 };
 
-/** A ação que a dona anota à mão. */
-export async function criarProximaAcao(ownerId: string, dados: DadosDaAcao): Promise<{ id: string }> {
+/**
+ * Como a escrita trata a Google Agenda (H5c): `naGoogle` quando a dona a tem
+ * conectada (mesmo com a conexão quebrada, que falha e pede "Reconectar"), e o
+ * fuso e o relógio que dizem se o dia do prazo já acabou.
+ */
+export type GoogleNaEscrita = { naGoogle: boolean; fuso: string; agora: number };
+/** O que a escrita decidiu para a Google: o destino da ação e o estado de antes. */
+export type PassoNaGoogle = { destino: DestinoDaAcaoNaAgenda; googleAntes: EstadoNaGoogle | null };
+/** O que a ação tinha antes de mudar: o prazo e o estado na Google Agenda (H5c), para quem chama tirar o evento ou mandá-lo de novo. */
+export type AcaoAntesDeMudar = { prazo: string | null; googleAntes: EstadoNaGoogle | null };
+
+/**
+ * A ação que a dona anota à mão. Com `naGoogle` (a ação com prazo por vir e a
+ * Google Agenda conectada), ela nasce "pendente" na Google: quem chama manda o
+ * evento logo depois (server/acoes-na-google.ts).
+ */
+export async function criarProximaAcao(ownerId: string, dados: DadosDaAcao, opcoes: { naGoogle?: boolean } = {}): Promise<{ id: string }> {
   const db = await exigirDb();
   if (dados.contactId) await exigirContatoDaDona(db, ownerId, dados.contactId);
   const agora = Date.now();
@@ -440,7 +470,8 @@ export async function criarProximaAcao(ownerId: string, dados: DadosDaAcao): Pro
   await db.transaction(async tx => {
     await tx.insert(proximasAcoes).values({
       id, ownerId, origem: "manual", texto: dados.texto, detalhe: dados.detalhe || null, responsavel: dados.responsavel || null,
-      prazo: dados.prazo || null, contactId: dados.contactId ?? null, feita: false, createdAt: agora, updatedAt: agora,
+      prazo: dados.prazo || null, contactId: dados.contactId ?? null, feita: false,
+      google: opcoes.naGoogle ? "pendente" : null, createdAt: agora, updatedAt: agora,
     });
     // O lembrete no sino (H15), junto com a ação: às 9h do dia do prazo.
     await agendarLembreteDaAcao(tx, ownerId, id, dados.prazo || null, dados.fuso, agora);
@@ -452,8 +483,17 @@ export async function criarProximaAcao(ownerId: string, dados: DadosDaAcao): Pro
  * Texto, detalhe, responsável e prazo, de qualquer ação da dona. Só muda o que
  * veio. O prazo novo (ou nenhum) reagenda o lembrete no sino na mesma
  * transação (H15); o texto novo não precisa: o lembrete o lê no disparo.
+ *
+ * Com `google` (H5c), a ação é lida travada antes, e o estado na Google muda
+ * na mesma escrita, pelo destino que ela fica tendo (estadoDaAcaoAoEscrever):
+ * a que sai da agenda (sem prazo) zera; a que vai, ou já estava, fica
+ * "pendente", para quem chama mandar a versão nova; a que estava lá, sem a
+ * Google Agenda conectada agora, fica "falhou", porque a Google ficou com a
+ * versão antiga. Devolve o que decidiu.
  */
-export async function editarProximaAcao(ownerId: string, acaoId: string, campos: Partial<Omit<DadosDaAcao, "contactId">>) {
+export async function editarProximaAcao(
+  ownerId: string, acaoId: string, campos: Partial<Omit<DadosDaAcao, "contactId">>, google?: GoogleNaEscrita,
+): Promise<PassoNaGoogle | undefined> {
   const db = await exigirDb();
   const valores = {
     ...(campos.texto !== undefined ? { texto: campos.texto } : {}),
@@ -462,11 +502,22 @@ export async function editarProximaAcao(ownerId: string, acaoId: string, campos:
     ...(campos.prazo !== undefined ? { prazo: campos.prazo || null } : {}),
   };
   const agora = Date.now();
-  await db.transaction(async tx => {
-    const r = await tx.update(proximasAcoes).set({ ...valores, updatedAt: agora })
-      .where(and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId)));
+  const daDona = and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId));
+  return db.transaction(async tx => {
+    let passo: PassoNaGoogle | undefined;
+    let estado: { google?: EstadoNaGoogle | null } = {};
+    if (google) {
+      const [antes] = await tx.select({ prazo: proximasAcoes.prazo, feita: proximasAcoes.feita, google: proximasAcoes.google })
+        .from(proximasAcoes).where(daDona).for("update");
+      if (!antes) throw acaoNaoEncontrada();
+      const prazo = campos.prazo !== undefined ? campos.prazo || null : antes.prazo ?? null;
+      passo = { destino: destinoDaAcaoNaAgenda({ prazo, feita: Boolean(antes.feita) }, google.fuso, google.agora), googleAntes: estadoNaGoogle(antes.google) };
+      estado = { google: estadoDaAcaoAoEscrever(passo.destino, passo.googleAntes, google.naGoogle) };
+    }
+    const r = await tx.update(proximasAcoes).set({ ...valores, ...estado, updatedAt: agora }).where(daDona);
     if (!linhasAfetadas(r)) throw acaoNaoEncontrada();
     if (campos.prazo !== undefined) await agendarLembreteDaAcao(tx, ownerId, acaoId, campos.prazo || null, campos.fuso, agora);
+    return passo;
   });
 }
 
@@ -476,8 +527,10 @@ export async function editarProximaAcao(ownerId: string, acaoId: string, campos:
  * primeiro).
  */
 async function acaoParaMudar(tx: Executor, ownerId: string, acaoId: string) {
-  const [acao] = await tx.select({ id: proximasAcoes.id, itemId: proximasAcoes.itemId, meetingId: proximasAcoes.meetingId })
-    .from(proximasAcoes).where(and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId))).limit(1);
+  const [acao] = await tx.select({
+    id: proximasAcoes.id, itemId: proximasAcoes.itemId, meetingId: proximasAcoes.meetingId,
+    prazo: proximasAcoes.prazo, google: proximasAcoes.google,
+  }).from(proximasAcoes).where(and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId))).limit(1);
   if (!acao) throw acaoNaoEncontrada();
   if (acao.itemId && acao.meetingId) {
     await tx.select({ id: meetings.id }).from(meetings)
@@ -486,12 +539,17 @@ async function acaoParaMudar(tx: Executor, ownerId: string, acaoId: string) {
   return acao;
 }
 
-/** Marca ou desmarca a ação; o item do resumo dela muda junto (escreverFeita). */
-export async function marcarProximaAcaoFeita(ownerId: string, acaoId: string, feita: boolean) {
+/**
+ * Marca ou desmarca a ação; o item do resumo dela muda junto (escreverFeita).
+ * A feita sai da Google Agenda (H5c): devolve o prazo e o estado de antes, para
+ * quem chama tirar o evento, ou mandá-lo de novo ao reabrir.
+ */
+export async function marcarProximaAcaoFeita(ownerId: string, acaoId: string, feita: boolean): Promise<AcaoAntesDeMudar> {
   const db = await exigirDb();
-  await db.transaction(async tx => {
+  return db.transaction(async tx => {
     const acao = await acaoParaMudar(tx, ownerId, acaoId);
     if (!(await escreverFeita(tx, ownerId, { acaoId: acao.id, itemId: acao.itemId }, feita, Date.now()))) throw acaoNaoEncontrada();
+    return { prazo: acao.prazo ?? null, googleAntes: estadoNaGoogle(acao.google) };
   });
 }
 
@@ -501,9 +559,9 @@ export async function marcarProximaAcaoFeita(ownerId: string, acaoId: string, fe
  * (desconfirmar apaga a ação), e sem isso garantirAcoesDosItensConfirmados a
  * recriaria na próxima leitura. A tela pede a confirmação antes.
  */
-export async function apagarProximaAcao(ownerId: string, acaoId: string) {
+export async function apagarProximaAcao(ownerId: string, acaoId: string): Promise<AcaoAntesDeMudar> {
   const db = await exigirDb();
-  await db.transaction(async tx => {
+  return db.transaction(async tx => {
     const acao = await acaoParaMudar(tx, ownerId, acaoId);
     const agora = Date.now();
     if (acao.itemId) {
@@ -513,6 +571,8 @@ export async function apagarProximaAcao(ownerId: string, acaoId: string) {
     await tx.delete(proximasAcoes).where(and(eq(proximasAcoes.id, acao.id), eq(proximasAcoes.ownerId, ownerId)));
     // O lembrete no sino e os avisos dela saem junto (H15).
     await esquecerLembrete(tx, ownerId, "acao", acao.id);
+    // O evento na Google Agenda sai depois, por quem chama (H5c).
+    return { prazo: acao.prazo ?? null, googleAntes: estadoNaGoogle(acao.google) };
   });
 }
 

@@ -230,6 +230,16 @@ vão acontecer voltam a oferecer "Pôr na Google Agenda". A reunião que já aca
 criada lá: mudá-la só muda o evento que já existe, sem aviso aos convidados, e excluí-la
 deixa o evento na Google como histórico.
 
+**As próximas ações (H5c) também não pedem variável nova.** Com a mesma conexão, a ação
+aberta com prazo vira um evento às 9h do dia do prazo, no fuso do aparelho de quem mexe
+nela, de 30 minutos, livre na agenda e com aviso na hora
+(`server/acoes-na-google.ts`), e o estado fica em `proximas_acoes.google`. Marcar feita,
+tirar o prazo, apagar a ação e desconfirmar o item no resumo tiram o evento; reabrir e
+mudar o texto ou o prazo o mudam. O id do evento é `acao` mais o id da ação, sem
+coluna própria. Desconectar e excluir a conta da WRW não apagam os eventos que já estão
+na agenda da dona, e a desconexão zera também este estado. Sem a Google Agenda
+conectada, a lista oferece o link de criar evento e o `.ics`, feitos no navegador.
+
 ### Para entrar com Face ID ou digital (chaves de acesso)
 
 Sem estas duas, o app sobe e a função fica desligada: o `chavesDeAcesso.estado`

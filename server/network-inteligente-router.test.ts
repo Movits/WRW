@@ -458,12 +458,12 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
           : [[5, "NW-1"]];
       }
       if (/from `proximas_acoes`/.test(sql)) {
-        // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, createdAt,
-        // meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
+        // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, google (H5c),
+        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
         return [
-          ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", 300,
+          ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", "ok", 300, 310,
             "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva"],
-          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, 200, null, 5, null, null, null, "Maria Silva"],
+          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva"],
         ];
       }
       return [];
@@ -484,7 +484,10 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
     ]);
     expect(perfil.proximasAcoes.lista[0]).toMatchObject({
       reuniao: { id: "reuniao-1", titulo: "Café na feira", itemId: "item-1" }, vozes: { F2: "Carla" }, prazo: "2026-11-20",
+      // O estado na Google Agenda e a última mudança (H5c), para o perfil mostrar a ação na agenda.
+      google: "ok", updatedAt: 310,
     });
+    expect(perfil.proximasAcoes.lista[1]).toMatchObject({ google: null, updatedAt: 500 });
     expect(perfil.linhaDoTempo.map(e => [e.tipo, e.em])).toEqual([
       ["proxima_acao_feita", 500], ["proxima_acao", 300], ["proxima_acao", 200], ["contato_criado", 100],
     ]);

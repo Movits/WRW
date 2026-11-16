@@ -6,6 +6,8 @@ import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucid
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
+import { motivoDaAgendaNaTela, pedidoDaTela } from "@/components/AcaoNaAgenda";
+import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
 import { mmss } from "@/components/TranscricaoPorFalante";
@@ -122,11 +124,23 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     ? utils.reuniaoAberta.resumoGuardado.invalidate({ token })
     : utils.meetings.resumoGuardado.invalidate({ meetingId });
   const aoFalharDecisao = (erro: unknown) => toast.error(mensagemDaDecisao(t, erro));
+  // A próxima ação do item, com prazo, anda com a Google Agenda (H5c):
+  // desconfirmar o item ou marcá-la feita tira o evento, e reabri-la o manda de
+  // novo. A decisão fica; quando a Google falha, um aviso à parte.
+  const avisarDaAgenda = (resultado: ResultadoNaGoogle | undefined, saiu: boolean) => {
+    if (resultado?.naGoogle !== "falhou") return;
+    if (saiu) toast.warning(`${t("proximasAcoes.agenda.toast.notRemoved")} ${t("agenda.google.toast.removeThere")}`, { duration: 15_000 });
+    else toast.warning(`${t("proximasAcoes.agenda.toast.notSent")} ${motivoDaAgendaNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+  };
   const pedirDaDona = trpc.meetings.pedirResumo.useMutation({ onSettled: reler });
   const pedirPeloLink = trpc.reuniaoAberta.pedirResumo.useMutation({ onSettled: reler });
-  const decidir = trpc.meetings.decidirItemDoResumo.useMutation({ onError: aoFalharDecisao, onSettled: reler });
+  const decidir = trpc.meetings.decidirItemDoResumo.useMutation({
+    onSuccess: resultado => avisarDaAgenda(resultado, true), onError: aoFalharDecisao, onSettled: reler,
+  });
   const confirmarTodos = trpc.meetings.confirmarItensDoResumo.useMutation({ onError: aoFalharDecisao, onSettled: reler });
-  const marcar = trpc.meetings.marcarAcaoFeita.useMutation({ onError: aoFalharDecisao, onSettled: reler });
+  const marcar = trpc.meetings.marcarAcaoFeita.useMutation({
+    onSuccess: (resultado, variaveis) => avisarDaAgenda(resultado, variaveis.feito), onError: aoFalharDecisao, onSettled: reler,
+  });
   const pedir = peloLink ? pedirPeloLink : pedirDaDona;
   const pedirResumo = () => {
     if (peloLink) pedirPeloLink.mutate({ token });
@@ -219,7 +233,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes}
               aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
-              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}/>)}
+              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito, ...pedidoDaTela(t) }); }}/>)}
           </ul>
         </section>;
       })}

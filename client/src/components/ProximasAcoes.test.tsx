@@ -36,10 +36,11 @@ const duble = vi.hoisted(() => {
       proximasAcoes: { invalidate: () => { invalidados.push("proximasAcoes"); return Promise.resolve(); } },
       meetings: { resumoGuardado: { invalidate: () => { invalidados.push("resumoGuardado"); return Promise.resolve(); } } },
       networkInteligente: { contato: { invalidate: () => { invalidados.push("perfilDoContato"); return Promise.resolve(); } } },
+      googleAgenda: { estado: { invalidate: () => { invalidados.push("googleAgenda"); return Promise.resolve(); } } },
     },
   };
 });
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
@@ -51,8 +52,11 @@ vi.mock("@/lib/trpc", () => ({
       editar: duble.registrar("editar"),
       apagar: duble.registrar("apagar"),
       criar: duble.registrar("criar"),
+      mandarParaGoogle: duble.registrar("mandarParaGoogle"),
+      tirarDaGoogle: duble.registrar("tirarDaGoogle"),
     },
     network: { list: duble.consultar("network.list") },
+    googleAgenda: { estado: duble.consultar("googleAgenda.estado") },
   },
 }));
 
@@ -67,6 +71,8 @@ const acao = (extra: Partial<ProximaAcao & { contatoSugerido: { id: number; nome
 }) as ProximaAcao;
 
 const chamadas = (nome: string) => duble.mutacoes[nome]?.chamadas ?? [];
+/** O que toda mutação que pode levar a ação à Google manda (H5c): o fuso do aparelho e os rótulos da tela, em pt-BR. */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 const itemDoTexto = (texto: string | RegExp) => screen.getByText(texto).closest("li") as HTMLElement;
 
 beforeEach(() => {
@@ -108,7 +114,8 @@ describe("o cartão do Dashboard", () => {
     expect(within(itemDoTexto("Ligar para Falante 3")).getByText("Vence hoje")).toBeInTheDocument();
     expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
-    expect(chamadas("marcarFeita")).toEqual([[{ id: "acao-1", feita: true }]]);
+    // O fuso e os rótulos da tela vão junto: com a Google Agenda conectada, o evento anda com a ação (H5c).
+    expect(chamadas("marcarFeita")).toEqual([[{ id: "acao-1", feita: true, ...PEDIDO }]]);
     // Compacto: nada de editar, apagar ou ligar contato no cartão.
     expect(screen.queryByRole("button", { name: /Editar|Apagar|Vincular/ })).not.toBeInTheDocument();
   });
@@ -195,16 +202,16 @@ describe("a lista da página", () => {
     expect(screen.getByLabelText("Prazo (opcional)")).toHaveValue("2026-11-20");
     fireEvent.change(screen.getByLabelText("Prazo (opcional)"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-    // O prazo mudou: vai com o fuso do aparelho, para o lembrete no sino (H15).
-    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", prazo: "", fuso: expect.any(String) });
+    // O prazo mudou: vai com o fuso do aparelho, para o lembrete no sino (H15), e os rótulos da tela, para o evento (H5c).
+    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", prazo: "", ...PEDIDO });
   });
 
-  it("editar só o texto não manda o prazo nem o fuso: o lembrete fica como está", () => {
+  it("editar só o texto não manda o prazo (o lembrete fica como está); o fuso e os rótulos vão, para o evento na Google (H5c)", () => {
     render(<ProximasAcoes acoes={[acao({ prazo: "2026-11-20" })]}/>);
     fireEvent.click(screen.getByRole("button", { name: "Editar" }));
     fireEvent.change(screen.getByLabelText("O que fazer"), { target: { value: "Carla envia o contrato" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", texto: "Carla envia o contrato" });
+    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", texto: "Carla envia o contrato", ...PEDIDO });
   });
 
   it("a ação do lembrete no sino (?acao=, H15) fica destacada e a lista rola até ela uma vez", () => {
@@ -255,7 +262,7 @@ describe("a lista da página", () => {
     // Feita não está atrasada.
     expect(screen.queryByText("Atrasada")).not.toBeInTheDocument();
     fireEvent.click(caixa);
-    expect(chamadas("marcarFeita")).toEqual([[{ id: "acao-1", feita: false }]]);
+    expect(chamadas("marcarFeita")).toEqual([[{ id: "acao-1", feita: false, ...PEDIDO }]]);
   });
 });
 

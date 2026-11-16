@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import { ListChecks, Loader2, Plus } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import { FormularioDaAcao, mensagemDoErroDaAcao, ProximasAcoes } from "@/components/ProximasAcoes";
-import { fusoDoAparelho } from "@shared/agenda";
 import { PARAMETRO_DA_ACAO } from "@shared/lembretes";
 
 /**
@@ -18,6 +18,9 @@ import { PARAMETRO_DA_ACAO } from "@shared/lembretes";
  * O lembrete no sino (H15) abre esta página com ?acao=<id>: a lista rola até a
  * ação e a destaca. Se ela não está entre as abertas (foi feita depois do
  * aviso), a lista passa a mostrar todas, uma vez por link.
+ *
+ * A ação anotada com prazo vai para a Google Agenda conectada (H5c); a falha da
+ * Google vem num aviso à parte (useAvisosDaAgenda), e a ação fica salva.
  */
 
 type Filtro = "abertas" | "todas";
@@ -33,7 +36,9 @@ export default function PaginaDasProximasAcoes() {
   const acaoPedida = useMemo(() => new URLSearchParams(busca).get(PARAMETRO_DA_ACAO) || null, [busca]);
   const jaProcurouEmTodas = useRef<string | null>(null);
   const utils = trpc.useUtils();
+  const avisos = useAvisosDaAgenda();
   const criar = trpc.proximasAcoes.criar.useMutation({
+    onSuccess: resultado => avisos.depoisDeMandar(resultado),
     onError: erro => toast.error(mensagemDoErroDaAcao(t, erro)),
     onSettled: () => utils.proximasAcoes.invalidate(),
   });
@@ -72,6 +77,7 @@ export default function PaginaDasProximasAcoes() {
       <ListChecks size={22} className="text-[#c98f70]" aria-hidden/> {t("proximasAcoes.title")}
     </h1>
     <p className="mt-2 text-sm text-white/55">{t("proximasAcoes.intro")}</p>
+    <p className="mt-1 text-xs text-white/40">{t("proximasAcoes.agenda.pageHint")}</p>
 
     <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -89,8 +95,9 @@ export default function PaginaDasProximasAcoes() {
       <FormularioDaAcao inicial={VAZIO} salvando={criar.isPending} aoCancelar={() => setAnotando(false)}
         aoSalvar={valores => criar.mutate({
           texto: valores.texto, detalhe: valores.detalhe, responsavel: valores.responsavel, prazo: valores.prazo,
-          // O lembrete do prazo sai às 9h no relógio deste aparelho (H15).
-          fuso: fusoDoAparelho(),
+          // O lembrete do prazo sai às 9h no relógio deste aparelho (H15), e o
+          // evento da ação na Google Agenda fica nessa hora, com o texto no idioma da tela (H5c).
+          ...pedidoDaTela(t),
         }, { onSuccess: () => setAnotando(false) })}/>
     </div>}
 

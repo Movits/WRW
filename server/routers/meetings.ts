@@ -31,6 +31,10 @@ import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { depoisDeMexerNoItem, prepararAcaoDoItem } from "../acoes-na-google";
+import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
+import { FUSO_MAX } from "@shared/agenda";
+import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -252,22 +256,38 @@ export const meetingsRouter = router({
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
 
+  // Desconfirmar apaga a próxima ação do item (H5a), e o evento dela sai da
+  // Google Agenda depois (H5c, server/acoes-na-google.ts): o token vem antes da
+  // escrita, e só quando a ação tem prazo. Quando o evento fica lá, a resposta
+  // diz "falhou" com o id da ação, para o "Tentar de novo" da tela.
   decidirItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
+      const conta = { id: ctx.user.id, openId: ctx.user.openId };
+      const preparo = input.status === "confirmed" ? null : await prepararAcaoDoItem(conta, input.itemId);
       await decidirItemDoResumo(ctx.user.openId, input.itemId, input.status);
-      return { ok: true as const };
+      return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, false)) };
     }),
 
   confirmarItensDoResumo: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => ({ confirmados: await confirmarItensDoResumo(ctx.user.openId, input.meetingId) })),
 
+  // A caixa da ação no resumo marca também a próxima ação dela (H5a): feita, ela
+  // sai da Google Agenda; reaberta, volta, se o prazo ainda vem (H5c). O fuso
+  // e os rótulos vêm da tela, como na lista (routers/proximasAcoes.ts).
   marcarAcaoFeita: protectedProcedure
-    .input(z.object({ itemId: z.string().uuid(), feito: z.boolean() }))
-    .mutation(async ({ ctx, input }) => {
+    .input(z.object({
+      itemId: z.string().uuid(),
+      feito: z.boolean(),
+      fuso: z.string().trim().max(FUSO_MAX).nullish(),
+      rotulos: z.object({ voz: z.string().max(ROTULO_DA_AGENDA_MAX), responsavel: z.string().max(ROTULO_DA_AGENDA_MAX) }).nullish(),
+    }))
+    .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
+      const conta = { id: ctx.user.id, openId: ctx.user.openId };
+      const preparo = await prepararAcaoDoItem(conta, input.itemId);
       await marcarAcaoFeita(ctx.user.openId, input.itemId, input.feito);
-      return { ok: true as const };
+      return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, !input.feito, { fuso: input.fuso, rotulos: input.rotulos })) };
     }),
 
   perguntar: protectedProcedure

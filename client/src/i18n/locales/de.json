@@ -1892,7 +1892,22 @@
     "undoConfirm": "Bestätigung zurücknehmen",
     "undoConfirmQuestion": "Wenn Sie die Bestätigung zurücknehmen, wird auch der aus diesem Punkt erstellte nächste Schritt gelöscht. Trotzdem zurücknehmen?",
     "undoConfirmYes": "Ja, zurücknehmen",
-    "inNextActions": "Unter Nächste Schritte"
+    "inNextActions": "Unter Nächste Schritte",
+    "agenda": {
+      "group": "Im Kalender",
+      "pageHint": "Mit Frist kann der Schritt in Ihren Kalender: Der Termin liegt um 9 Uhr am Tag der Frist, mit Erinnerung zu dieser Uhrzeit. Ist Google Kalender in Ihrem Profil verbunden, wird er automatisch eingetragen.",
+      "downloadIcs": "Handykalender (.ics)",
+      "toast": {
+        "sent": "Der Schritt steht in Ihrem Google Kalender.",
+        "notSent": "Der Schritt ist in WRW gespeichert, wurde aber nicht in Ihren Google Kalender eingetragen.",
+        "pastNotSent": "Die Frist dieses Schritts ist abgelaufen: Er bleibt nur in WRW.",
+        "removed": "Der Termin des Schritts wurde aus Ihrem Google Kalender entfernt.",
+        "notRemoved": "Der Termin dieses Schritts steht noch in Ihrem Google Kalender."
+      },
+      "errors": {
+        "stillOpen": "Dieser Schritt ist noch offen und hat eine Frist, daher bleibt sein Termin in Ihrem Google Kalender. Laden Sie die Seite neu."
+      }
+    }
   },
   "errorBoundary": {
     "title": "Etwas Unerwartetes ist passiert",

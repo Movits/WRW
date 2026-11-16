@@ -1892,7 +1892,22 @@
     "undoConfirm": "撤销确认",
     "undoConfirmQuestion": "撤销确认也会删除由此条目创建的后续行动。仍要撤销吗？",
     "undoConfirmYes": "是，撤销",
-    "inNextActions": "已在后续行动中"
+    "inNextActions": "已在后续行动中",
+    "agenda": {
+      "group": "日历",
+      "pageHint": "有截止日期的行动可以加入您的日历：活动安排在截止日期当天上午 9 点，并在那时提醒。如果您在个人资料中连接了 Google 日历，行动会自动加入。",
+      "downloadIcs": "手机日历（.ics）",
+      "toast": {
+        "sent": "该行动已在您的 Google 日历中。",
+        "notSent": "行动已保存在 WRW，但没有添加到您的 Google 日历。",
+        "pastNotSent": "该行动的截止日期已过，因此只保留在 WRW 中。",
+        "removed": "该行动的活动已从您的 Google 日历中移除。",
+        "notRemoved": "该行动的活动仍在您的 Google 日历中。"
+      },
+      "errors": {
+        "stillOpen": "该行动仍未完成且有截止日期，因此其活动保留在您的 Google 日历中。请刷新页面。"
+      }
+    }
   },
   "errorBoundary": {
     "title": "发生了意外情况",

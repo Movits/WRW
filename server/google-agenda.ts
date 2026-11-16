@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { FalhaDaConexaoGoogle } from "@shared/google-agenda";
-import { agendaReunioes, auditLogs, googleAgendaConexoes, users } from "../drizzle/schema";
+import { agendaReunioes, auditLogs, googleAgendaConexoes, proximasAcoes, users } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import {
   ConexaoGoogleRevogada,
@@ -273,6 +273,14 @@ async function esquecerEstadoNaGoogle(tx: Escritor, userId: number) {
     .where(and(
       inArray(agendaReunioes.ownerId, sql`(select ${users.openId} from ${users} where ${users.id} = ${userId})`),
       isNotNull(agendaReunioes.google),
+    ));
+  // As próximas ações com prazo (H5c) seguem a mesma regra: o estado é da conta
+  // Google que recebeu o evento, e a ação aberta volta a oferecer "Pôr na Google Agenda".
+  await tx.update(proximasAcoes)
+    .set({ google: null })
+    .where(and(
+      inArray(proximasAcoes.ownerId, sql`(select ${users.openId} from ${users} where ${users.id} = ${userId})`),
+      isNotNull(proximasAcoes.google),
     ));
 }
 

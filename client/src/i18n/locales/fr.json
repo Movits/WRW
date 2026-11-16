@@ -1892,7 +1892,22 @@
     "undoConfirm": "Annuler la confirmation",
     "undoConfirmQuestion": "Annuler la confirmation supprime aussi la prochaine action créée à partir de cet élément. Annuler quand même ?",
     "undoConfirmYes": "Oui, annuler",
-    "inNextActions": "Dans Prochaines actions"
+    "inNextActions": "Dans Prochaines actions",
+    "agenda": {
+      "group": "Dans l’agenda",
+      "pageHint": "Avec une échéance, l’action peut aller dans votre agenda : l’événement est à 9 h le jour de l’échéance, avec un rappel à cette heure-là. Si Google Agenda est connecté dans votre Profil, elle y va automatiquement.",
+      "downloadIcs": "Agenda du téléphone (.ics)",
+      "toast": {
+        "sent": "L’action est dans votre Google Agenda.",
+        "notSent": "L’action est enregistrée dans WRW, mais elle n’a pas été ajoutée à votre Google Agenda.",
+        "pastNotSent": "L’échéance de cette action est passée : elle reste uniquement dans WRW.",
+        "removed": "L’événement de l’action a été retiré de votre Google Agenda.",
+        "notRemoved": "L’événement de cette action est toujours dans votre Google Agenda."
+      },
+      "errors": {
+        "stillOpen": "Cette action est toujours ouverte et a une échéance : son événement reste dans votre Google Agenda. Actualisez la page."
+      }
+    }
   },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",
