@@ -99,6 +99,21 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
+/**
+ * Cache-Control gravado NO OBJETO, para o bucket repeti-lo em toda resposta.
+ *
+ * É a metade que falta do reaproveitamento da URL assinada (storageProxy): a
+ * URL ser a mesma só evita o download novo se o navegador puder guardar os
+ * bytes. Sem este cabeçalho, o B2 responde com Last-Modified e ETag e o
+ * navegador cai na heurística — que num arquivo recém-enviado dá validade
+ * quase zero e revalida a cada abertura de tela.
+ *
+ * `private` é obrigatório: proxy ou CDN no meio do caminho NÃO pode guardar
+ * arquivo de uma usuária. Os 50 minutos casam com a janela de reaproveitamento
+ * da URL; passada ela, vem URL nova e o cache antigo deixa de ser consultado.
+ */
+export const CACHE_DE_ARQUIVO_PRIVADO = "private, max-age=3000";
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
@@ -106,8 +121,9 @@ export async function storagePut(
   // A parte da reunião gravada em partes (server/fatias-de-reuniao.ts) grava a
   // linha que aponta para o objeto ANTES do upload: a chave tem de ser a que ela
   // já guardou, sem o sufixo aleatório. Quem pede a chave exata garante que ela
-  // é única (a da parte leva o id da linha).
-  opcoes: { chaveExata?: boolean } = {},
+  // é única (a da parte leva o id da linha). O cacheControl vai gravado no
+  // próprio objeto (ver CACHE_DE_ARQUIVO_PRIVADO, acima).
+  opcoes: { chaveExata?: boolean; cacheControl?: string } = {},
 ): Promise<{ key: string; url: string }> {
   const config = getStorageConfig();
   const key = opcoes.chaveExata ? normalizeKey(relKey) : appendHashSuffix(normalizeKey(relKey));
@@ -118,6 +134,7 @@ export async function storagePut(
       Key: key,
       Body: typeof data === "string" ? Buffer.from(data) : data,
       ContentType: contentType,
+      ...(opcoes.cacheControl ? { CacheControl: opcoes.cacheControl } : {}),
     }),
   );
 
@@ -371,13 +388,10 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
 }
 
 /**
- * URL assinada de leitura, válida por 5 minutos. Curta de propósito: a URL em
- * si dispensa autenticação, então quanto menos tempo viver, menor a janela para
- * um link colado num chat continuar funcionando.
- */
-/**
- * Prazo da URL assinada. Cinco minutos servem para abrir um documento ou uma
- * foto, mas NÃO para tocar uma gravação: o áudio de reunião chega a 10
+ * Prazo da URL assinada de leitura. A URL em si dispensa autenticação, então o
+ * prazo é a janela em que um link colado num chat continua abrindo. Ele já foi
+ * de cinco minutos, que servem para abrir um documento ou uma foto, mas NÃO
+ * para tocar uma gravação: o áudio de reunião chega a 10
  * minutos, e toda requisição nova depois do prazo — arrastar a barra, ou
  * pausar e retomar quando o navegador já fechou a conexão — bateria num 403
  * do bucket, deixando o player travado sem explicação. Uma hora cobre a
@@ -391,8 +405,11 @@ export function chaveDoStorageDaDona(prefixo: string, openId: string, storagePat
  * já tinha a gravação carregada segue ouvindo até ela vencer. Quem mudar este
  * valor atualiza o "até 1 hora" de docs/arquitetura/decisoes-tomadas.md, de
  * docs/arquitetura/gravador-de-reunioes.md e do texto meetings.share.turnOffConfirm.
+ * O cofre de URLs do proxy acompanha sozinho: a janela em que ele repete a mesma
+ * URL (MS_DE_REUSO_DA_URL, em server/_core/storageProxy.ts) é calculada a partir
+ * deste valor, para nunca entregar uma URL já vencida.
  */
-const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
+export const SEGUNDOS_DA_URL_ASSINADA = 60 * 60;
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const config = getStorageConfig();
