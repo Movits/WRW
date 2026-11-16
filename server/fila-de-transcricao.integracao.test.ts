@@ -22,7 +22,7 @@ const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, mee
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const { GeminiIndisponivelError } = await import("./gemini");
-const { marcarReunioesInterrompidas, iniciarReprocessamento, ReprocessamentoRecusado } = await import("./meeting-service");
+const { marcarReunioesInterrompidas, iniciarReprocessamento, REGRA_DOS_ROTULOS_NA_EXTRACAO, ReprocessamentoRecusado } = await import("./meeting-service");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 // A rodada só olha as reuniões desta dona: o Vitest roda os arquivos em
@@ -125,6 +125,13 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
       { inicio: 601, fim: 602, falante: "F2", texto: "Combinado." },
     ]);
     expect(gancho).toHaveBeenCalledWith({ meetingId: id, ownerId: DONA });
+    // A extração lê as falas com o rótulo da voz, e o prompt explica os rótulos
+    // (revisão do pacote P2B): sem eles, a presença de quem fala sem dizer o
+    // nome era chute. A transcrição gravada, acima, segue sem rótulos.
+    const extracao = invokeLLM.mock.calls.map(([pedido]) => pedido as { funcao?: string; messages: Array<{ content: string }> })
+      .find(pedido => pedido.funcao === "extracao")!;
+    expect(extracao.messages[1].content).toContain("{F1}: Bom dia.\n{F2}: Combinado.");
+    expect(extracao.messages[0].content).toContain(REGRA_DOS_ROTULOS_NA_EXTRACAO);
     // Pronta, a reunião em partes ganha o pedido do resumo guardado, da
     // transcrição montada: a fila do resumo o gera em segundo plano (H4c).
     const resumos = await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id));

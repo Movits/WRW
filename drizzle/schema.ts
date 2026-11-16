@@ -1237,6 +1237,12 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   company: varchar("company", { length: 200 }),
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 320 }),
+  // Participou da reunião ('present') ou a reunião disse que ela não estava
+  // ('mentioned'), como a extração disse (achado 7 da bancada de 16/11): a tela
+  // separa as citadas das participantes. Nula nas sugestões anteriores e na
+  // dúvida (a extração diz 'unknown'), que a tela mostra com as participantes.
+  // Varchar com o enum só no TypeScript, como em network_sugestoes.
+  presence: varchar("presence", { length: 12, enum: ["present", "mentioned"] }),
   sourceEntityIds: jsonCompat("source_entity_ids"),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
   status: mysqlEnum("status", ["pending", "created", "linked", "ignored"]).default("pending").notNull(),
@@ -1261,7 +1267,9 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   // e o resumo da anterior não é gravado.
   transcriptId: varchar("transcript_id", { length: 36 }),
   status: varchar("status", { length: 12, enum: ["pending", "ready", "failed"] }).default("pending").notNull(),
-  // O modelo de resumo; só 'general' até a PR dos modelos (H4d).
+  // O modelo de resumo (H4d): o que a dona escolheu ao pedir o resumo ou no
+  // "Refazer como…". A lista da tela mora em shared/modelos-de-resumo.ts, e
+  // server/modelos-de-resumo.ts confere que é a mesma deste enum.
   template: varchar("template", { length: 16, enum: ["general", "networking", "mentoring", "sales", "one_on_one"] }).default("general").notNull(),
   // O idioma em que o resumo foi escrito: o da reunião.
   language: varchar("language", { length: 12 }),
@@ -1269,8 +1277,11 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   emoji: varchar("emoji", { length: 16 }),
   // O id do modelo de IA que escreveu o resumo.
   model: varchar("model", { length: 80 }),
-  // Sobe a cada resumo gravado: a tradução do resumo (H11) guarda de qual
-  // versão saiu e é refeita quando ela muda.
+  // Sobe a cada resumo que a fila grava, e só aí: editar ou acrescentar um item
+  // (H4f) não a muda. A tradução do resumo (H11) guarda de qual versão saiu e é
+  // refeita inteira quando ela muda; o item editado (a impressão digital do
+  // texto não bate) e o acrescentado (o id não tem tradução) são traduzidos
+  // sozinhos.
   version: int("version").default(0).notNull(),
   generatedAt: bigint("generated_at", { mode: "number" }),
   // Controle da fila do resumo; fica no servidor.
@@ -1279,6 +1290,20 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   lockToken: varchar("lock_token", { length: 36 }),
   // Código nosso, nunca o texto da IA ou do driver.
   lastError: varchar("last_error", { length: 40 }),
+  // O mapa mental (H10): o mesmo trabalho da fila, numa chamada à IA depois
+  // do resumo, com as mesmas colunas de reserva. O mapa que falha não derruba
+  // o resumo pronto. A árvore guardada já passou pela conferência de
+  // shared/mapa-mental.ts (de 2 a 12 ramos, até 8 folhas por ramo, até 4
+  // filhos por folha, até 150 nós, rótulos de até 60 caracteres e nenhum
+  // rótulo de voz); a raiz é o título da reunião e não fica guardada.
+  mindMap: jsonCompat("mind_map"),
+  // Nulo: o resumo é de antes do mapa, e a dona o pede na aba do mapa.
+  mindMapStatus: varchar("mind_map_status", { length: 12, enum: ["pending", "ready", "failed"] }),
+  // Quando o mapa foi gravado: a tradução do resumo (H11) refaz a do mapa
+  // quando ela muda (a `version` sobe só com o resumo).
+  mindMapGeneratedAt: bigint("mind_map_generated_at", { mode: "number" }),
+  // Código nosso, como o last_error.
+  mindMapError: varchar("mind_map_error", { length: 40 }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1286,6 +1311,8 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   ownerMeetingIdx: index("meeting_summaries_owner_meeting_idx").on(table.ownerId, table.meetingId),
   // A fila reserva pelo estado e pela reserva vencida.
   statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
+  // E o mapa pendente (H10) pelo estado dele, sem varrer os resumos prontos.
+  mindMapStatusLockedIdx: index("meeting_summaries_mind_map_status_locked_idx").on(table.mindMapStatus, table.lockedUntil),
 }));
 
 // Cada item do resumo guardado. Nada extraído por IA entra sozinho
@@ -1293,6 +1320,8 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
 // transcrição que o sustenta, e só vale como dado da dona quando ela confirma.
 // Quem falou aparece como o rótulo da voz ({F2}), que a tela troca pelo nome
 // que a dona deu (meetings.speaker_names); o servidor nunca escreve o nome.
+// A dona também edita o item e acrescenta item à mão (H4f): o que ela escreve
+// vale como confirmado, e a origem diz quem escreveu o item.
 export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   id: varchar("id", { length: 36 }).primaryKey(),
   summaryId: varchar("summary_id", { length: 36 }).notNull(),
@@ -1303,11 +1332,12 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // O assunto das tarefas ("Publicação nas lojas"); nulo nas outras seções.
   subject: varchar("subject", { length: 120 }),
   text: text("text").notNull(),
-  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito.
-  // Nulo quando a transcrição não sustenta ninguém perto do trecho.
+  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito, um
+  // ou mais ("{F2}, {F3}"). Nulo quando a transcrição não sustenta todos.
   assignee: varchar("assignee", { length: 120 }),
   // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
   due: varchar("due", { length: 120 }),
+  // Vazio no item que a dona acrescentou: ele não sai de um trecho.
   excerpt: text("excerpt").notNull(),
   // O segundo da reunião em que o trecho começa; nulo sem tempo (envio único).
   startSeconds: int("start_seconds"),
@@ -1317,6 +1347,24 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   done: boolean("done").default(false).notNull(),
   decidedAt: bigint("decided_at", { mode: "number" }),
   doneAt: bigint("done_at", { mode: "number" }),
+  // Quem escreveu o item (H4f): a IA, a partir da transcrição, ou a dona, à
+  // mão. O item da dona nasce confirmado, sem trecho, sem tempo e sem
+  // confiança. Não muda quando a dona edita: o item da IA editado continua
+  // vindo da reunião, com o trecho e o tempo, e o edited_at marca a edição.
+  // Varchar com o enum só no TypeScript: a origem que vier depois (a busca na
+  // web da H4i) não pede migração.
+  origin: varchar("origin", { length: 12, enum: ["ai", "owner"] }).default("ai").notNull(),
+  // Quando a dona mudou por último o texto, o assunto, o responsável ou o
+  // prazo do item. Nulo: o item está como foi escrito. O item escrito pela
+  // dona (acrescentado ou editado) não volta a "para conferir".
+  editedAt: bigint("edited_at", { mode: "number" }),
+  // O estado de antes do Ignorar (H4f), para o Desfazer voltar a ele: o
+  // status (pending ou confirmed) e a hora em que a ação foi marcada feita
+  // (nula: não estava feita). Gravado ao ignorar e só lido enquanto o item
+  // está ignorado. Nulo no item ignorado antes destas colunas, quando só o
+  // item pendente tinha Ignorar: o Desfazer o devolve pendente.
+  statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
+  doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1502,6 +1550,33 @@ export const lembretes = mysqlTable("lembretes", {
   lockIdx: index("lembretes_lock_idx").on(table.lockToken),
 }));
 
+// A tradução do resumo guardado (H11) para o idioma de quem lê: o resumo é
+// escrito no idioma da reunião, e a IA o traduz em segundo plano quando alguém
+// o lê em outro idioma. Uma linha por dona, reunião e idioma. O conteúdo vai
+// por id de item, com a impressão digital do texto de que saiu, mais os
+// rótulos do mapa mental (H10): item novo ou editado não acha a tradução e é
+// traduzido de novo, e a tradução de outra versão do resumo não vale. O trecho
+// nunca é traduzido (é a prova, no idioma original), e os rótulos de voz
+// ({F2}) vão como estão: a tela é que os troca pelo nome.
+export const meetingSummaryTranslations = mysqlTable("meeting_summary_translations", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  // O resumo de que a tradução saiu: reprocessar a reunião cria outro.
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  language: varchar("language", { length: 12 }).notNull(),
+  // A versão do resumo (meeting_summaries.version) de que a tradução saiu.
+  sourceVersion: int("source_version").notNull(),
+  // { itens: { [id do item]: { h, subject, text, due } }, mapa: { [rótulo]: tradução } }
+  content: jsonCompat("content").notNull(),
+  // O id do modelo de IA que traduziu.
+  model: varchar("model", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerMeetingLanguageIdx: uniqueIndex("meeting_summary_translations_owner_meeting_language_idx").on(table.ownerId, table.meetingId, table.language),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é
@@ -1607,7 +1682,8 @@ export const networkSugestoes = mysqlTable("network_sugestoes", {
   meetingId:           varchar("meeting_id", { length: 36 }),
   meetingSuggestionId: varchar("meeting_suggestion_id", { length: 36 }),
   origem:              varchar("origem", { length: 10, enum: ["reuniao", "voz", "texto"] }).notNull(),
-  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso"] }).notNull(),
+  // cargo e empresa: o apoio da pessoa da reunião, que criar ou vincular não grava sozinho (achado 6 da bancada de 16/11).
+  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso", "cargo", "empresa"] }).notNull(),
   valor:               varchar("valor", { length: 320 }).notNull(),
   categoria:           varchar("categoria", { length: 120 }),
   trecho:              text("trecho"),

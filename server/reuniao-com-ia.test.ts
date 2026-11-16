@@ -179,6 +179,8 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
     expect(invokeLLM.mock.calls[0][0]).toMatchObject({
       response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true, schema: { required: ["respondida", "resposta", "citacoes"] } } },
     });
+    // A função escolhe o modelo do Pergunte (LLM_MODEL_PERGUNTA; sem ela, o LLM_MODEL).
+    expect(invokeLLM.mock.calls[0][0]).toMatchObject({ funcao: "pergunta" });
   });
 
   it("só a dona: o ownerId vai no WHERE das duas leituras", async () => {

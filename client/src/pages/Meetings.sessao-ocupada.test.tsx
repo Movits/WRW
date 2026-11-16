@@ -98,9 +98,11 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
     },
-    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink") },
+    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink"), traduzirResumo: duble.registrar("traduzirResumoPeloLink") },
     // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
     proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
     networkInteligente: {

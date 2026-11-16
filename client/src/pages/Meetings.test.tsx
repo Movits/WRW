@@ -87,13 +87,19 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      traduzirResumo: duble.registrar("traduzirResumo"),
+      // As do formulário do item do resumo (H4f), que só monta quando a dona o abre.
+      editarItemDoResumo: duble.registrar("editarItemDoResumo"),
+      acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
       perguntar: duble.registrar("perguntar"),
+      rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
       perguntar: duble.registrar("perguntarPeloLink"),
+      traduzirResumo: duble.registrar("traduzirResumoPeloLink"),
     },
     // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
     proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
@@ -106,6 +112,21 @@ vi.mock("@/lib/trpc", () => ({
 // O jsdom não carrega mídia: a leitura da duração pelo navegador é dublada
 // (e provada em lib/duracao-no-navegador.test.ts).
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: unknown[]) => duble.duracao(...args) }));
+// O mapa mental (H10) vira um marcador que mostra o que recebeu; o
+// comportamento dele está em components/MapaMental.test.tsx. A tradução (H11)
+// que a página passa aparece nele (o estado e o rótulo "Prazos" traduzido), e
+// o botão faz o papel do mapa que fica pronto e avisa a página dos rótulos.
+type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
+vi.mock("@/components/MapaMental", () => ({
+  MapaMentalDaReuniao: ({ meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
+    meetingId: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
+  }) => (
+    <div data-testid="mapa-mental">{meetingId} | {titulo} | {emoji ?? "sem emoji"}
+      <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
+      {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
+    </div>
+  ),
+}));
 
 beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); m.data = undefined; }
@@ -409,6 +430,35 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     expect(screen.getByText(/passou dos 30 dias e já não pode ser ouvida\. O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
     expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Nenhum áudio guardado/)).not.toBeInTheDocument();
+  });
+});
+
+// Achado 7 da bancada de 16/11: a pessoa só citada virava um cartão igual ao das participantes.
+describe("Detalhe da reunião — quem participou e quem só foi citada", () => {
+  const abaContatos = () => screen.getByRole("button", { name: /Contatos/ });
+
+  it("a citada sai à parte, compacta e marcada; as duas seguem com Criar contato", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [
+      { ...sugestaoPendente, presence: "present", phone: null, existingContactId: null },
+      { ...sugestaoPendente, id: "s2", fullName: "Sônia Pacheco", company: "Embalagens Girassol", presence: "mentioned", phone: null, existingContactId: null },
+    ] });
+    fireEvent.click(abaContatos());
+    const citadas = screen.getByRole("region", { name: "Pessoas citadas" });
+    expect(within(citadas).getByText("Foram mencionadas na conversa, mas não participaram da reunião.")).toBeInTheDocument();
+    expect(within(citadas).getByText("Sônia Pacheco")).toBeInTheDocument();
+    expect(within(citadas).getByText("Não participou")).toBeInTheDocument();
+    expect(within(citadas).queryByText("Ana Souza")).not.toBeInTheDocument();
+    expect(screen.getByText("Ana Souza")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Criar contato/ })).toHaveLength(2);
+    fireEvent.click(within(citadas).getByRole("button", { name: /Criar contato/ }));
+    expect(duble.mutacoes.decideContactSuggestion.mutate).toHaveBeenCalledWith({ suggestionId: "s2", action: "create" });
+  });
+
+  it("sugestão anterior à marca (sem presença) fica com as participantes, e a seção das citadas não aparece", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [sugestaoPendente] });
+    fireEvent.click(abaContatos());
+    expect(screen.getByRole("heading", { level: 2, name: "Ana Souza" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Pessoas citadas" })).not.toBeInTheDocument();
   });
 });
 
@@ -990,7 +1040,8 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
 
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
 
-    expect(duble.mutacoes.pedirResumo.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    // No modelo escolhido ao lado do botão: o Geral, de início (H4d).
+    expect(duble.mutacoes.pedirResumo.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, modelo: "general" });
   });
 
   it.each([
@@ -1053,11 +1104,73 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     expect(within(titulo).getByText("📄")).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("o e-mail de retorno (H20) aparece com o resumo pronto, entre o resumo e o Pergunte, e pede só com item confirmado", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    const secao = screen.getByRole("region", { name: "E-mail de retorno" });
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    expect(resumo.compareDocumentPosition(secao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // O idioma do e-mail começa no do resumo.
+    expect(within(secao).getByRole("combobox", { name: "Idioma do e-mail" })).toHaveValue("pt-BR");
+    // Um dos dois itens está confirmado: com o nome de quem recebe, o pedido sai.
+    fireEvent.change(within(secao).getByRole("combobox", { name: "Para quem?" }), { target: { value: "Ana" } });
+    fireEvent.click(within(secao).getByRole("button", { name: /Escrever rascunho/ }));
+    expect(duble.mutacoes.rascunharEmailDeRetorno.mutate).toHaveBeenCalledWith({
+      meetingId: REUNIAO.id, relacao: "external", tom: "professional", idioma: "pt-BR", vozDoDestinatario: "F1",
+    }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+  });
+
+  it("o e-mail de retorno é guardado pela página: a dona vai à Transcrição, volta antes da resposta, e a resposta aparece no Resumo", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    const secao = () => screen.getByRole("region", { name: "E-mail de retorno" });
+    fireEvent.change(within(secao()).getByRole("combobox", { name: "Para quem?" }), { target: { value: "Carla" } });
+    fireEvent.click(within(secao()).getByRole("button", { name: /Escrever rascunho/ }));
+    const [, opcoes] = duble.mutacoes.rascunharEmailDeRetorno.mutate.mock.calls[0];
+
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.queryByRole("region", { name: "E-mail de retorno" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+    // A resposta chega depois da volta: o React Query chama o onSuccess do pedido.
+    act(() => opcoes.onSuccess({ assunto: "Retorno para {DESTINATARIO}", corpo: "Olá, {DESTINATARIO}. {F1} manda a minuta." }));
+
+    expect(within(secao()).getByRole("textbox", { name: "Assunto" })).toHaveValue("Retorno para Carla");
+    expect(within(secao()).getByRole("textbox", { name: "Texto do e-mail" })).toHaveValue("Olá, Carla. Ana manda a minuta.");
+    expect(within(secao()).getByRole("combobox", { name: "Para quem?" })).toHaveValue("Carla");
+  });
+
+  it("sem item confirmado, o e-mail de retorno pede para confirmar antes", () => {
+    duble.resumoGuardado.mockReturnValue({ ...resumoPronto(), data: { ...resumoPronto().data, itens: ITENS.map(item => ({ ...item, status: "pending" })) } });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const secao = screen.getByRole("region", { name: "E-mail de retorno" });
+    expect(within(secao).getByText("Confirme ao menos um item do resumo para escrever o e-mail.")).toBeInTheDocument();
+    expect(within(secao).getByRole("button", { name: /Escrever rascunho/ })).toBeDisabled();
+  });
+
+  it.each(["sem_resumo", "pendente", "gerando", "falhou"])("resumo '%s': o e-mail de retorno nem aparece", estado => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado, emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(screen.queryByRole("region", { name: "E-mail de retorno" })).not.toBeInTheDocument();
+  });
+
   it("os nomes das vozes vêm dos nomes que a dona deu (meeting.speakerNames)", () => {
     duble.resumoGuardado.mockReturnValue(resumoPronto());
     abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
     expect(screen.getByRole("checkbox", { name: "Ana manda a minuta do contrato" })).toBeInTheDocument();
     expect(screen.getByText("Responsável: Ana")).toBeInTheDocument();
+  });
+
+  it("o responsável sugere também quem falou na transcrição, sem nome e sem citação no resumo (H4f)", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    // O resumo cita só F1; F3 só falou.
+    const segments = [
+      { inicio: 5, fim: 20, falante: "F1", texto: "Eu mando a minuta do contrato." },
+      { inicio: 30, fim: 45, falante: "F3", texto: "Eu ligo para o importador." },
+    ];
+    abrirDetalhe({ status: "ready" }, { transcript: { ...TRANSCRICAO, segments } });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    const lista = document.getElementById(screen.getByLabelText("Responsável").getAttribute("list") ?? "");
+    expect(Array.from(lista?.querySelectorAll("option") ?? []).map(opcao => opcao.getAttribute("value"))).toEqual(["Falante 1", "Falante 3"]);
   });
 
   it("o '▶ mm:ss' de um item do resumo leva o player da barra ao ponto do item, na parte certa", () => {
@@ -1218,5 +1331,94 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
     abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
     expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
     expect(abrirCampoDoNome()).not.toHaveAccessibleDescription();
+  });
+});
+
+describe("Detalhe da reunião — a aba Mapa mental (H10)", () => {
+  const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "Vamos fechar o contrato até sexta-feira.", language: "pt-BR" };
+  const abaDoMapa = () => screen.getByRole("button", { name: "Mapa mental" });
+
+  it("fica entre a Transcrição e os Contatos, e mostra o mapa da reunião com o título e o emoji do resumo", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🍷", idioma: "pt-BR", erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    const abas = screen.getAllByRole("button").filter(botao => botao.hasAttribute("aria-pressed")).map(aba => aba.textContent);
+    expect(abas).toEqual(["Resumo", "Transcrição", "Mapa mental", "Contatos (0)"]);
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+
+    fireEvent.click(abaDoMapa());
+
+    expect(abaDoMapa()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("mapa-mental")).toHaveTextContent(`${REUNIAO.id} | Reunião com a vinícola | 🍷`);
+    // A aba do mapa não leva o resumo nem a pergunta junto.
+    expect(screen.queryByRole("heading", { name: "Resumo da reunião" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["pronta sem transcrição", "ready", null],
+    ["em processamento", "processing", TRANSCRICAO],
+    ["com falha", "failed", TRANSCRICAO],
+  ])("reunião %s: a aba diz que o mapa vem com a transcrição, sem pedir nada", (_caso, status, transcript) => {
+    abrirDetalhe({ status }, { transcript });
+    fireEvent.click(abaDoMapa());
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+    expect(screen.getByText("O mapa mental aparece aqui quando a transcrição da reunião estiver pronta.")).toBeInTheDocument();
+  });
+});
+
+/**
+ * A tradução do resumo (H11) ligada na página da dona: a página pede a
+ * tradução, passa ao resumo e ao mapa mental, e o mapa que fica pronto pede de
+ * novo. Os componentes têm os próprios testes; aqui se prova que a página os
+ * liga (sem as props, nada disto acontece e a suíte ficava verde).
+ */
+describe("Detalhe da reunião — a tradução do resumo e do mapa (H11), ligada na página", () => {
+  const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "We will close the contract by Friday.", language: "en" };
+  const ITENS_EM_INGLES = [
+    { id: "a0000000-0000-4000-8000-000000000001", section: "decision", position: 0, subject: null, text: "Close the contract by Friday.", assignee: null, due: null, excerpt: "we will close the contract by Friday", startSeconds: 5, status: "confirmed", done: false, origin: "ai", editedAt: null },
+  ];
+  // O resumo foi escrito em inglês; a tela está em português.
+  const resumoEmIngles = () => ({ data: { estado: "pronto", emoji: "📄", idioma: "en", erro: null, versaoAnterior: false, itens: ITENS_EM_INGLES }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  type Opcoes = { onSuccess: (resposta: unknown) => void; onError: (erro: unknown) => void };
+  const pedidos = () => (duble.mutacoes.traduzirResumo?.mutate.mock.calls ?? []) as Array<[{ meetingId: string; idioma: string }, Opcoes]>;
+
+  it("a página pede a tradução no idioma da tela, e o resumo traduzido entra na aba Resumo", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(pedidos().map(([entrada]) => entrada)).toEqual([{ meetingId: REUNIAO.id, idioma: "pt-BR" }]);
+    expect(screen.getByText("Close the contract by Friday.")).toBeInTheDocument();
+
+    act(() => pedidos()[0][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: {}, itens: [{ id: ITENS_EM_INGLES[0].id, subject: null, text: "Fechar o contrato até sexta-feira.", due: null }] }));
+
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    expect(within(resumo).getByText("Fechar o contrato até sexta-feira.")).toBeInTheDocument();
+    expect(within(resumo).getByText("Tradução automática pela IA. Original: English. Os trechos citados ficam no idioma original.")).toBeInTheDocument();
+    expect(within(resumo).getByRole("combobox", { name: "Idioma do resumo" })).toHaveValue("pt-BR");
+  });
+
+  it("com a reunião em processamento, o resumo é da tentativa anterior: a página não pede tradução", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "processing" }, { transcript: TRANSCRICAO });
+    expect(pedidos()).toEqual([]);
+  });
+
+  it("o mapa mental recebe a tradução da página; o mapa que avisa os rótulos pede a tradução de novo, e os rótulos chegam traduzidos", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    act(() => pedidos()[0][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: {}, itens: [] }));
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Prazos");
+
+    fireEvent.click(screen.getByRole("button", { name: "rótulos do mapa" }));
+    expect(pedidos()).toHaveLength(2);
+    expect(pedidos()[1][0]).toEqual({ meetingId: REUNIAO.id, idioma: "pt-BR" });
+    act(() => pedidos()[1][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: { Prazos: "Deadlines em português" }, itens: [] }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines em português");
+  });
+
+  it("com o link ligado, o formulário do item avisa que o que a dona salva aparece para quem tem o link", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready", shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345" } as never, { transcript: TRANSCRICAO });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(screen.getByRole("form", { name: "Acrescentar item" })).toHaveAccessibleDescription("O link desta reunião está ligado: o que você salvar aqui aparece também para quem tem o link.");
   });
 });

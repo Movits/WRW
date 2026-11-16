@@ -66,7 +66,7 @@ const hoje = hojeNoRelogio();
 const acao = (extra: Partial<ProximaAcao & { contatoSugerido: { id: number; nome: string } | null }> = {}) => ({
   id: "acao-1", texto: "{F2} envia a proposta revisada", detalhe: null, responsavel: "{F2}", prazo: null, prazoDito: "até sexta-feira",
   origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta até sexta", createdAt: 1,
-  reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1" }, vozes: { F2: "Carla" }, contato: null,
+  reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1", itemDaDona: false }, vozes: { F2: "Carla" }, contato: null,
   contatoSugerido: null, ...extra,
 }) as ProximaAcao;
 
@@ -181,6 +181,16 @@ describe("a lista da página", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apagar" }));
     expect(screen.getByText("Apagar esta ação? O item volta a ficar para conferir no resumo da reunião.")).toBeInTheDocument();
     expect(chamadas("apagar")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Sim, apagar" }));
+    expect(chamadas("apagar")).toEqual([[{ id: "acao-1" }]]);
+  });
+
+  // O item que a dona escreveu, acrescentado ou editado (H4f), não volta a
+  // "para conferir": vai para os ignorados (server/proximas-acoes.ts).
+  it("apagar a ação do item que a dona escreveu avisa que ele vai para os ignorados", () => {
+    render(<ProximasAcoes acoes={[acao({ reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1", itemDaDona: true } })]}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Apagar" }));
+    expect(screen.getByText("Apagar esta ação? O item que você escreveu vai para os ignorados no resumo da reunião, e o Desfazer de lá o traz de volta.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sim, apagar" }));
     expect(chamadas("apagar")).toEqual([[{ id: "acao-1" }]]);
   });

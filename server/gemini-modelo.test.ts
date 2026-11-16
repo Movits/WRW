@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as listarModelosMod from "../scripts/listar-modelos-gemini.mjs";
 
@@ -17,6 +17,12 @@ import * as listarModelosMod from "../scripts/listar-modelos-gemini.mjs";
  * valem, sem a chave, e scripts/listar-modelos-gemini.mjs lista o que a chave
  * enxerga.
  *
+ * O texto tem um modelo por função (extração, resumo e Pergunte), pela ordem
+ * LLM_MODEL_<FUNÇÃO> > o padrão da função no código > LLM_MODEL > o padrão,
+ * sempre pela mesma guarda. O padrão da função só vale com o texto na API do
+ * Gemini, e hoje nenhuma função tem um: a extração no Lite espera a decisão
+ * sobre as entidades que ele não devolve.
+ *
  * O fetch é dublado em tudo: nada aqui sai para a internet.
  */
 
@@ -24,7 +30,14 @@ import * as listarModelosMod from "../scripts/listar-modelos-gemini.mjs";
 // de segredos do /abrir-pr e a proteção de push do GitHub os tomariam por
 // chave de verdade.
 const CHAVE_FALSA = "chave-falsa-que-nunca-pode-aparecer";
-const VARIAVEIS_DE_MODELO = ["LLM_AUDIO_MODEL", "LLM_AUDIO_MODEL_RESERVA", "LLM_MODEL"];
+const VARIAVEIS_DE_MODELO = [
+  "LLM_AUDIO_MODEL",
+  "LLM_AUDIO_MODEL_RESERVA",
+  "LLM_MODEL",
+  "LLM_MODEL_EXTRACAO",
+  "LLM_MODEL_RESUMO",
+  "LLM_MODEL_PERGUNTA",
+];
 
 let fetchFalso: ReturnType<typeof vi.fn>;
 let avisos: ReturnType<typeof vi.spyOn>;
@@ -121,7 +134,9 @@ describe("a guarda do texto: aceita outro provedor, recusa alias", () => {
 describe("a recusa: o padrão assume, o log avisa e a chave fica fora dele", () => {
   it("os padrões passam nas duas guardas, e a reserva é diferente do principal", async () => {
     const m = await modelosDeIa();
-    for (const padrao of [m.MODELO_DE_AUDIO_PADRAO, m.MODELO_DE_AUDIO_RESERVA_PADRAO, m.MODELO_DE_TEXTO_PADRAO]) {
+    // O padrão de uma função, quando houver, passa pelas mesmas guardas.
+    const dasFuncoes = Object.values(m.FUNCOES_DE_TEXTO).flatMap(({ padrao }) => (padrao ? [padrao] : []));
+    for (const padrao of [m.MODELO_DE_AUDIO_PADRAO, m.MODELO_DE_AUDIO_RESERVA_PADRAO, m.MODELO_DE_TEXTO_PADRAO, ...dasFuncoes]) {
       expect(m.ehModeloDeAudioConcreto(padrao), padrao).toBe(true);
       expect(m.ehModeloDeTextoConcreto(padrao), padrao).toBe(true);
     }
@@ -308,17 +323,57 @@ describe("texto: LLM_MODEL passa pela guarda do texto em invokeLLM", () => {
     expect(avisos).not.toHaveBeenCalled();
   });
 
-  it("LLM_MODEL vence o model de quem chama; sem a variável, o do chamador vai como está", async () => {
-    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
+  it("o deploy não troca o modelo de nenhuma função: com o LLM_MODEL de produção, a extração, o resumo e a pergunta pedem ele", async () => {
+    // Com o Lite como padrão da extração, as reuniões novas tenderiam a perder
+    // as entidades de cargo, ativo, necessidade e oportunidade, sem erro na
+    // tela (ver FUNCOES_DE_TEXTO); e uma chave que não servisse o Lite faria
+    // toda reunião nova falhar. Trocar é decisão de quem define a variável.
+    vi.stubEnv("LLM_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai");
+    vi.stubEnv("LLM_MODEL", "gemini-3.5-flash");
     const { invokeLLM } = await import("./_core/llm");
     fetchFalso.mockImplementation(async () => respostaDoLLM());
 
-    await invokeLLM({ messages: mensagens, model: "gemini-2.0-flash-001" });
-    expect(modeloPedido(0)).toBe("gemini-2.5-flash");
+    await invokeLLM({ messages: mensagens, funcao: "extracao" });
+    await invokeLLM({ messages: mensagens, funcao: "resumo" });
+    await invokeLLM({ messages: mensagens, funcao: "pergunta" });
+    await invokeLLM({ messages: mensagens });
+    expect([0, 1, 2, 3].map(modeloPedido)).toEqual(["gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.5-flash"]);
+    // A função escolhe o modelo e fica fora do corpo: campo desconhecido é
+    // 400 em algumas implementações da API compatível com a OpenAI.
+    for (const [, init] of fetchFalso.mock.calls) expect(JSON.parse(String(init.body))).not.toHaveProperty("funcao");
+    expect(avisos).not.toHaveBeenCalled();
+  });
 
-    vi.stubEnv("LLM_MODEL", undefined);
-    await invokeLLM({ messages: mensagens, model: "gemini-2.0-flash-001" });
-    expect(modeloPedido(1)).toBe("gemini-2.0-flash-001");
+  it("a variável da função vale já na chamada seguinte, sem reiniciar, e só para a função dela", async () => {
+    const { invokeLLM } = await import("./_core/llm");
+    fetchFalso.mockImplementation(async () => respostaDoLLM());
+
+    await invokeLLM({ messages: mensagens, funcao: "extracao" });
+    // É assim que a extração vai ao Lite, se a troca for decidida: a variável
+    // no painel, sem deploy.
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-3.5-flash-lite");
+    vi.stubEnv("LLM_MODEL_PERGUNTA", "gemini-2.5-flash");
+    await invokeLLM({ messages: mensagens, funcao: "extracao" });
+    await invokeLLM({ messages: mensagens, funcao: "pergunta" });
+    await invokeLLM({ messages: mensagens, funcao: "resumo" });
+    await invokeLLM({ messages: mensagens });
+    expect([0, 1, 2, 3, 4].map(modeloPedido)).toEqual([
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-2.5-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash",
+    ]);
+  });
+
+  it("o model de quem chama, herança do proxy Manus, saiu: não escolhe mais o modelo", async () => {
+    // O campo saiu de InvokeParams (o pnpm check recusa quem o passar); um
+    // chamador sem tipo, como este teste, também não decide nada com ele.
+    const { invokeLLM } = await import("./_core/llm");
+    fetchFalso.mockImplementation(async () => respostaDoLLM());
+
+    await invokeLLM({ messages: mensagens, model: "gemini-2.0-flash-001" } as never);
+    expect(modeloPedido(0)).toBe("gemini-3.5-flash");
     expect(avisos).not.toHaveBeenCalled();
   });
 
@@ -339,25 +394,235 @@ describe("texto: LLM_MODEL passa pela guarda do texto em invokeLLM", () => {
     }
   );
 
-  it("o model de quem chama, herança do proxy Manus, também passa pela guarda", async () => {
-    const { invokeLLM } = await import("./_core/llm");
-    fetchFalso.mockImplementation(async () => respostaDoLLM());
+});
 
-    await invokeLLM({ messages: mensagens, model: "gemini-flash-latest" });
-    expect(modeloPedido(0)).toBe("gemini-3.5-flash");
-    expect(textoDosAvisos()).toContain('invokeLLM({ model }) recusado ("gemini-flash-latest")');
+describe("texto por função: LLM_MODEL_<FUNÇÃO> > o padrão da função > LLM_MODEL > o padrão", () => {
+  it("cada função tem a sua variável, e nenhuma tem padrão no código: a extração no Lite espera a decisão", async () => {
+    // A bancada indicou o Lite para a extração, mas ele não devolveu as
+    // entidades de cargo, ativo, necessidade e oportunidade, que a linha
+    // "Assuntos" do perfil do contato, os chips da reunião e os destaques da
+    // transcrição usam. Pôr o padrão de volta aqui leva a perda ao ar no
+    // próximo deploy, sem ninguém mexer no painel.
+    const { FUNCOES_DE_TEXTO } = await modelosDeIa();
+    expect(FUNCOES_DE_TEXTO).toEqual({
+      extracao: { variavel: "LLM_MODEL_EXTRACAO", padrao: null, nomeNoLog: "extração" },
+      resumo: { variavel: "LLM_MODEL_RESUMO", padrao: null, nomeNoLog: "resumo" },
+      pergunta: { variavel: "LLM_MODEL_PERGUNTA", padrao: null, nomeNoLog: "pergunta" },
+    });
+  });
+
+  it("sem variável: as três funções ficam no padrão, como o resto do texto", async () => {
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("pergunta")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto()).toBe("gemini-3.5-flash");
+    expect(avisos).not.toHaveBeenCalled();
+  });
+
+  it("vazio, como no .env.example, vale como ausente: o degrau seguinte, em silêncio", async () => {
+    for (const nome of ["LLM_MODEL_EXTRACAO", "LLM_MODEL_RESUMO", "LLM_MODEL_PERGUNTA"]) vi.stubEnv(nome, "");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("pergunta")).toBe("gemini-3.5-flash");
+    expect(avisos).not.toHaveBeenCalled();
+  });
+
+  it("o LLM_MODEL vale para as três funções e para quem chama sem função, também com o texto na API do Gemini", async () => {
+    vi.stubEnv("LLM_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai");
+    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto("pergunta")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto()).toBe("gemini-2.5-flash");
+  });
+
+  it("a variável da função vence o LLM_MODEL, e só muda a sua função", async () => {
+    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-3.5-flash");
+    vi.stubEnv("LLM_MODEL_PERGUNTA", "gemini-3.5-flash-lite");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("pergunta")).toBe("gemini-3.5-flash-lite");
+    expect(modeloDeTexto("resumo")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto()).toBe("gemini-2.5-flash");
+
+    vi.stubEnv("LLM_MODEL_RESUMO", " gemini-3.5-flash-lite ");
+    expect(modeloDeTexto("resumo")).toBe("gemini-3.5-flash-lite");
+    expect(modeloDeTexto()).toBe("gemini-2.5-flash");
+    expect(avisos).not.toHaveBeenCalled();
+  });
+
+  it("variável da função recusada cai no degrau seguinte, não no padrão fixo, e avisa uma vez com o nome dela", async () => {
+    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-flash-latest");
+    vi.stubEnv("LLM_MODEL_RESUMO", "gemini-pro");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto("extracao")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-2.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-2.5-flash");
+    expect(avisos).toHaveBeenCalledTimes(2);
+    const texto = textoDosAvisos();
+    expect(texto).toMatch(/LLM_MODEL_EXTRACAO recusado \("gemini-flash-latest"\).*padrão gemini-2\.5-flash\./);
+    expect(texto).toMatch(/LLM_MODEL_RESUMO recusado \("gemini-pro"\).*padrão gemini-2\.5-flash\./);
+  });
+
+  it("LLM_MODEL recusado: as três funções caem no padrão, com um aviso só", async () => {
+    vi.stubEnv("LLM_MODEL", "gemini-flash-latest");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("resumo")).toBe("gemini-3.5-flash");
+    expect(modeloDeTexto("pergunta")).toBe("gemini-3.5-flash");
+    const recusas = textoDosAvisos().split("\n").filter(aviso => aviso.includes("recusado"));
+    expect(recusas).toHaveLength(1);
+    expect(recusas[0]).toContain('LLM_MODEL recusado ("gemini-flash-latest")');
+  });
+
+  it("com o LLM_MODEL em outro provedor, as funções vão a ele, e a variável da função também vale lá", async () => {
+    vi.stubEnv("LLM_MODEL", "gpt-4o-2024-08-06");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("extracao")).toBe("gpt-4o-2024-08-06");
+    expect(modeloDeTexto("resumo")).toBe("gpt-4o-2024-08-06");
+
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gpt-4.1-mini");
+    expect(modeloDeTexto("extracao")).toBe("gpt-4.1-mini");
+    expect(avisos).not.toHaveBeenCalled();
+  });
+
+  it("o aviso da variável recusada não leva ao log o degrau seguinte que não parece do Gemini: pode ser a chave", async () => {
+    // Com dígito e sem "latest", uma chave colada no LLM_MODEL passa na guarda
+    // do texto e vira o padrão do resumo; o aviso do resumo cita esse padrão.
+    const chaveComDigitos = "chave-falsa-com-digitos-0123456789";
+    vi.stubEnv("LLM_MODEL", chaveComDigitos);
+    vi.stubEnv("LLM_MODEL_RESUMO", "gemini-flash-latest");
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("resumo")).toBe(chaveComDigitos);
+    expect(avisos).toHaveBeenCalledTimes(1);
+    expect(textoDosAvisos()).toContain('LLM_MODEL_RESUMO recusado ("gemini-flash-latest")');
+    expect(textoDosAvisos()).toContain("padrão (id de outro provedor, fora do log)");
+    expect(textoDosAvisos()).not.toContain(chaveComDigitos);
+  });
+
+  it("o docs/deploy.md e o .env.example citam a variável de cada função, e o .env.example sem valor", async () => {
+    const { FUNCOES_DE_TEXTO } = await modelosDeIa();
+    // Sem o CR: num checkout do Windows com core.autocrlf=true, cada linha
+    // terminaria em \r.
+    const ler = (...caminho: string[]) => readFileSync(join(__dirname, "..", ...caminho), "utf8").replace(/\r\n/g, "\n");
+    const deploy = ler("docs", "deploy.md");
+    const exemplo = ler(".env.example");
+    for (const { variavel } of Object.values(FUNCOES_DE_TEXTO)) {
+      expect(deploy, variavel).toContain(`| \`${variavel}\` |`);
+      expect(exemplo, variavel).toMatch(new RegExp(`^${variavel}=$`, "m"));
+    }
+  });
+
+  it("o docs/deploy.md diz que cada chamada com funcao null fica no LLM_MODEL, e que o mapa mental não segue o LLM_MODEL_RESUMO", () => {
+    // Quem passa funcao: null ao pedirJsonAIA fica no LLM_MODEL e não lê
+    // nenhuma variável de função (server/CLAUDE.md). O mapa mental sai da fila
+    // do resumo, logo depois dele: quem lê só o deploy.md e define o
+    // LLM_MODEL_RESUMO para baratear o resumo supõe que o mapa vai junto, e a
+    // conta de custo e de tempo sai errada. Chamada nova com funcao null entra
+    // nesta lista e no docs/deploy.md.
+    const NOME_NO_DEPLOY: Record<string, string> = {
+      "email-de-retorno.ts": "e-mail de retorno",
+      "mapa-mental.ts": "mapa mental",
+      "traducao-do-resumo.ts": "tradução do resumo",
+    };
+    const comFuncaoNull: string[] = [];
+    const varrer = (pasta: string) => {
+      for (const entrada of readdirSync(pasta, { withFileTypes: true })) {
+        const caminho = join(pasta, entrada.name);
+        if (entrada.isDirectory()) varrer(caminho);
+        else if (entrada.name.endsWith(".ts") && !entrada.name.endsWith(".test.ts") && /funcao:\s*null/.test(readFileSync(caminho, "utf8"))) {
+          comFuncaoNull.push(relative(__dirname, caminho).replace(/\\/g, "/"));
+        }
+      }
+    };
+    varrer(__dirname);
+    expect(comFuncaoNull.sort()).toEqual(Object.keys(NOME_NO_DEPLOY).sort());
+
+    // Sem o CR, como no teste de cima; o parágrafo quebra linha no meio do nome.
+    const deploy = readFileSync(join(__dirname, "..", "docs", "deploy.md"), "utf8").replace(/\r\n/g, "\n");
+    const linhaDa = (variavel: string) => deploy.split("\n").find(linha => linha.startsWith(`| \`${variavel}\` |`)) ?? "";
+    const paragrafo = (deploy.split(/\n\s*\n/).find(trecho => trecho.includes("Quem chama sem função")) ?? "").replace(/\s+/g, " ");
+    for (const nome of Object.values(NOME_NO_DEPLOY)) {
+      expect(linhaDa("LLM_MODEL"), nome).toContain(nome);
+      expect(paragrafo, nome).toContain(nome);
+    }
+    expect(linhaDa("LLM_MODEL_RESUMO")).toContain("mapa mental");
+  });
+});
+
+describe("o padrão da função no código só vale com o texto na API do Gemini", () => {
+  // Hoje nenhuma função tem padrão no código. Estes testes dão um à extração no
+  // módulo novo de cada teste (o vi.resetModules do beforeEach o descarta), para
+  // provar a regra que vale quando uma função ganhar o seu: é o destino, o host
+  // do LLM_API_URL, que decide, e não o formato do id no LLM_MODEL.
+  const API_DO_GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai";
+  const comPadraoNaExtracao = async (padrao: string) => {
+    const m = await modelosDeIa();
+    (m.FUNCOES_DE_TEXTO.extracao as { padrao: string | null }).padrao = padrao;
+    return m;
+  };
+
+  it("na API do Gemini, o padrão vence o LLM_MODEL, a variável da função vence o padrão, e a recusada cai nele", async () => {
+    vi.stubEnv("LLM_API_URL", API_DO_GEMINI);
+    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
+    const { modeloDeTexto, linhaDosModelosDeIa } = await comPadraoNaExtracao("gemini-3.5-flash-lite");
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash-lite");
+    expect(modeloDeTexto("resumo")).toBe("gemini-2.5-flash");
+    expect(linhaDosModelosDeIa()).toContain("· extração gemini-3.5-flash-lite ·");
+
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-3.5-flash");
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash");
+
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-flash-latest");
+    expect(modeloDeTexto("extracao")).toBe("gemini-3.5-flash-lite");
+    expect(textoDosAvisos()).toMatch(/LLM_MODEL_EXTRACAO recusado \("gemini-flash-latest"\).*padrão gemini-3\.5-flash-lite\./);
+  });
+
+  it("num proxy compatível com a OpenAI, vale o LLM_MODEL, mesmo com cara de id do Gemini (gemini/gemini-2.5-flash)", async () => {
+    // O LiteLLM, por exemplo, pede o provedor no id: o id cru do padrão daria
+    // erro em toda extração, e as reuniões virariam 'failed'.
+    vi.stubEnv("LLM_API_URL", "https://litellm.exemplo.local/v1");
+    vi.stubEnv("LLM_MODEL", "gemini/gemini-2.5-flash");
+    const { modeloDeTexto } = await comPadraoNaExtracao("gemini-3.5-flash-lite");
+    expect(modeloDeTexto("extracao")).toBe("gemini/gemini-2.5-flash");
+    expect(modeloDeTexto()).toBe("gemini/gemini-2.5-flash");
+
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini/gemini-2.5-flash-lite");
+    expect(modeloDeTexto("extracao")).toBe("gemini/gemini-2.5-flash-lite");
+    expect(avisos).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["outro provedor", "https://api.openai.com/v1", "gpt-4o-2024-08-06"],
+    ["host que só começa como o do Gemini", "https://generativelanguage.googleapis.com.exemplo.local/v1beta/openai", "gemini-2.5-flash"],
+    ["a Vertex AI, que pede o id com google/", "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/endpoints/openapi", "google/gemini-2.5-flash"],
+    ["URL vazia", "", "gemini-2.5-flash"],
+    ["URL inválida", "não é uma URL", "gemini-2.5-flash"],
+  ])("fora da API do Gemini (%s), vale o LLM_MODEL", async (_caso, url, llmModel) => {
+    vi.stubEnv("LLM_API_URL", url);
+    vi.stubEnv("LLM_MODEL", llmModel);
+    const { modeloDeTexto } = await comPadraoNaExtracao("gemini-3.5-flash-lite");
+    expect(modeloDeTexto("extracao")).toBe(llmModel);
   });
 });
 
 describe("a linha [IA] do boot", () => {
-  it("mostra áudio, reserva e texto em uso, sem a chave", async () => {
+  it("mostra áudio, reserva, texto e o modelo de cada função em uso, sem a chave", async () => {
     vi.stubEnv("GOOGLE_API_KEY", "chave-falsa-do-google-que-nao-aparece");
     const { linhaDosModelosDeIa } = await modelosDeIa();
 
     const linha = linhaDosModelosDeIa();
     expect(linha).not.toContain(CHAVE_FALSA);
     expect(linha).not.toContain("chave-falsa-do-google-que-nao-aparece");
-    expect(linha).toBe("[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash");
+    expect(linha).toBe(
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash"
+    );
   });
 
   it("reflete o ambiente depois da guarda e diz quando a reserva não dispara", async () => {
@@ -367,28 +632,49 @@ describe("a linha [IA] do boot", () => {
     const { linhaDosModelosDeIa } = await modelosDeIa();
 
     expect(linhaDosModelosDeIa()).toBe(
-      "[IA] áudio gemini-2.5-flash · reserva gemini-2.5-flash (igual ao áudio: não dispara) · texto gemini-3.5-flash"
+      "[IA] áudio gemini-2.5-flash · reserva gemini-2.5-flash (igual ao áudio: não dispara) · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash"
     );
     expect(textoDosAvisos()).toContain('LLM_MODEL recusado ("gemini-flash-latest")');
   });
 
-  it("LLM_MODEL sozinho muda só o texto", async () => {
-    vi.stubEnv("LLM_MODEL", "gemini-3.5-flash-lite");
+  it("LLM_MODEL sozinho muda só o texto: o geral e as três funções", async () => {
+    vi.stubEnv("LLM_MODEL", "gemini-2.5-flash");
     const { linhaDosModelosDeIa } = await modelosDeIa();
 
-    expect(linhaDosModelosDeIa()).toBe("[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash-lite");
+    expect(linhaDosModelosDeIa()).toBe(
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-2.5-flash · extração gemini-2.5-flash · resumo gemini-2.5-flash · pergunta gemini-2.5-flash"
+    );
+  });
+
+  it("a variável de cada função aparece no item dela, e a que não parece do Gemini fica fora da linha", async () => {
+    const chaveComDigitos = "chave-falsa-com-digitos-0123456789";
+    vi.stubEnv("LLM_MODEL_EXTRACAO", "gemini-3.5-flash");
+    vi.stubEnv("LLM_MODEL_RESUMO", chaveComDigitos);
+    vi.stubEnv("LLM_MODEL_PERGUNTA", "gemini-3.5-flash-lite");
+    const { linhaDosModelosDeIa } = await modelosDeIa();
+
+    const linha = linhaDosModelosDeIa();
+    expect(linha).toBe(
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo (id de outro provedor, fora do log) · pergunta gemini-3.5-flash-lite"
+    );
+    expect(linha).not.toContain(chaveComDigitos);
+    expect(avisos).not.toHaveBeenCalled();
   });
 
   it("id de outro provedor no texto fica fora da linha: a guarda do texto não o distingue de uma chave", async () => {
     // Com dígito e sem "latest", uma chave colada no LLM_MODEL passa na guarda
-    // do texto; a linha do boot não pode levá-la ao log do Render.
+    // do texto; a linha do boot não pode levá-la ao log do Render. As três
+    // funções também vão ao LLM_MODEL e ficam fora da linha.
     const chaveComDigitos = "chave-falsa-com-digitos-0123456789";
+    const fora = "(id de outro provedor, fora do log)";
     for (const valor of ["gpt-4o-2024-08-06", chaveComDigitos]) {
       vi.stubEnv("LLM_MODEL", valor);
       const { linhaDosModelosDeIa, modeloDeTexto } = await modelosDeIa();
       expect(modeloDeTexto()).toBe(valor);
       const linha = linhaDosModelosDeIa();
-      expect(linha).toBe("[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto (id de outro provedor, fora do log)");
+      expect(linha).toBe(
+        `[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto ${fora} · extração ${fora} · resumo ${fora} · pergunta ${fora}`
+      );
       expect(linha).not.toContain(valor);
     }
     expect(avisos).not.toHaveBeenCalled();

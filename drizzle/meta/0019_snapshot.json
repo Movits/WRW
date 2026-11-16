@@ -1,141 +1,9 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "e9edbf62-b747-48f7-bbbe-2165fd2d815f",
+  "id": "7dae3947-877d-4bd9-96a2-5da0505d2dd9",
   "prevId": "7dab505e-c9bb-4486-b8d3-32478b4dce03",
   "tables": {
-    "agenda_reunioes": {
-      "name": "agenda_reunioes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "titulo": {
-          "name": "titulo",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "inicio_em": {
-          "name": "inicio_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "duracao_minutos": {
-          "name": "duracao_minutos",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fuso": {
-          "name": "fuso",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "local": {
-          "name": "local",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "participantes": {
-          "name": "participantes",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lembrete_minutos": {
-          "name": "lembrete_minutos",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "meeting_id": {
-          "name": "meeting_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "google": {
-          "name": "google",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "google_convites": {
-          "name": "google_convites",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "agenda_reunioes_owner_inicio_idx": {
-          "name": "agenda_reunioes_owner_inicio_idx",
-          "columns": [
-            "owner_id",
-            "inicio_em"
-          ],
-          "isUnique": false
-        },
-        "agenda_reunioes_meeting_unique": {
-          "name": "agenda_reunioes_meeting_unique",
-          "columns": [
-            "meeting_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "agenda_reunioes_id": {
-          "name": "agenda_reunioes_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "ai_match_suggestions": {
       "name": "ai_match_suggestions",
       "columns": {
@@ -2996,220 +2864,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "google_agenda_conexoes": {
-      "name": "google_agenda_conexoes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "google_sub": {
-          "name": "google_sub",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "email_google": {
-          "name": "email_google",
-          "type": "varchar(320)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "refresh_token_cifrado": {
-          "name": "refresh_token_cifrado",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "escopos": {
-          "name": "escopos",
-          "type": "varchar(1000)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "falha": {
-          "name": "falha",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "google_agenda_conexoes_user_unique": {
-          "name": "google_agenda_conexoes_user_unique",
-          "columns": [
-            "userId"
-          ],
-          "isUnique": true
-        },
-        "google_agenda_conexoes_sub_idx": {
-          "name": "google_agenda_conexoes_sub_idx",
-          "columns": [
-            "google_sub"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "google_agenda_conexoes_id": {
-          "name": "google_agenda_conexoes_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "lembretes": {
-      "name": "lembretes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "origem": {
-          "name": "origem",
-          "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "origem_id": {
-          "name": "origem_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "disparar_em": {
-          "name": "disparar_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expira_em": {
-          "name": "expira_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "disparado_em": {
-          "name": "disparado_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lock_token": {
-          "name": "lock_token",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "locked_until": {
-          "name": "locked_until",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "lembretes_owner_origem_unique": {
-          "name": "lembretes_owner_origem_unique",
-          "columns": [
-            "owner_id",
-            "origem",
-            "origem_id"
-          ],
-          "isUnique": true
-        },
-        "lembretes_disparo_idx": {
-          "name": "lembretes_disparo_idx",
-          "columns": [
-            "disparado_em",
-            "disparar_em"
-          ],
-          "isUnique": false
-        },
-        "lembretes_lock_idx": {
-          "name": "lembretes_lock_idx",
-          "columns": [
-            "lock_token"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "lembretes_id": {
-          "name": "lembretes_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "login_attempts": {
       "name": "login_attempts",
       "columns": {
@@ -3721,6 +3375,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "presence": {
+          "name": "presence",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "source_entity_ids": {
           "name": "source_entity_ids",
           "type": "json",
@@ -4110,6 +3771,34 @@
           "notNull": false,
           "autoincrement": false
         },
+        "mind_map": {
+          "name": "mind_map",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mind_map_status": {
+          "name": "mind_map_status",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mind_map_generated_at": {
+          "name": "mind_map_generated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mind_map_error": {
+          "name": "mind_map_error",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -4145,6 +3834,14 @@
           "name": "meeting_summaries_status_locked_idx",
           "columns": [
             "status",
+            "locked_until"
+          ],
+          "isUnique": false
+        },
+        "meeting_summaries_mind_map_status_locked_idx": {
+          "name": "meeting_summaries_mind_map_status_locked_idx",
+          "columns": [
+            "mind_map_status",
             "locked_until"
           ],
           "isUnique": false
@@ -4287,6 +3984,35 @@
           "notNull": false,
           "autoincrement": false
         },
+        "origin": {
+          "name": "origin",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'ai'"
+        },
+        "edited_at": {
+          "name": "edited_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status_before_ignore": {
+          "name": "status_before_ignore",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "done_at_before_ignore": {
+          "name": "done_at_before_ignore",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -4333,6 +4059,103 @@
       "compositePrimaryKeys": {
         "meeting_summary_items_id": {
           "name": "meeting_summary_items_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "meeting_summary_translations": {
+      "name": "meeting_summary_translations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "summary_id": {
+          "name": "summary_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "language": {
+          "name": "language",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_version": {
+          "name": "source_version",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_summary_translations_owner_meeting_language_idx": {
+          "name": "meeting_summary_translations_owner_meeting_language_idx",
+          "columns": [
+            "owner_id",
+            "meeting_id",
+            "language"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_summary_translations_id": {
+          "name": "meeting_summary_translations_id",
           "columns": [
             "id"
           ]
@@ -5932,7 +5755,7 @@
         },
         "type": {
           "name": "type",
-          "type": "enum('new_match','interest_received','gold_granted','gold_revoked','opportunity_approved','opportunity_rejected','new_message','compliance_update','system','lembrete','reuniao_pronta')",
+          "type": "enum('new_match','interest_received','gold_granted','gold_revoked','opportunity_approved','opportunity_rejected','new_message','compliance_update','system')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -5954,13 +5777,6 @@
         "actionUrl": {
           "name": "actionUrl",
           "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "parametros": {
-          "name": "parametros",
-          "type": "json",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -6339,177 +6155,6 @@
       "compositePrimaryKeys": {
         "private_contacts_id": {
           "name": "private_contacts_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "proximas_acoes": {
-      "name": "proximas_acoes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "texto": {
-          "name": "texto",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "detalhe": {
-          "name": "detalhe",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "responsavel": {
-          "name": "responsavel",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "prazo": {
-          "name": "prazo",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "prazo_dito": {
-          "name": "prazo_dito",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "meeting_id": {
-          "name": "meeting_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "trecho": {
-          "name": "trecho",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "origem": {
-          "name": "origem",
-          "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "feita": {
-          "name": "feita",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "feita_em": {
-          "name": "feita_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "google": {
-          "name": "google",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "proximas_acoes_owner_item_unique": {
-          "name": "proximas_acoes_owner_item_unique",
-          "columns": [
-            "owner_id",
-            "item_id"
-          ],
-          "isUnique": true
-        },
-        "proximas_acoes_owner_feita_prazo_idx": {
-          "name": "proximas_acoes_owner_feita_prazo_idx",
-          "columns": [
-            "owner_id",
-            "feita",
-            "prazo"
-          ],
-          "isUnique": false
-        },
-        "proximas_acoes_owner_meeting_idx": {
-          "name": "proximas_acoes_owner_meeting_idx",
-          "columns": [
-            "owner_id",
-            "meeting_id"
-          ],
-          "isUnique": false
-        },
-        "proximas_acoes_owner_contact_idx": {
-          "name": "proximas_acoes_owner_contact_idx",
-          "columns": [
-            "owner_id",
-            "contact_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "proximas_acoes_id": {
-          "name": "proximas_acoes_id",
           "columns": [
             "id"
           ]

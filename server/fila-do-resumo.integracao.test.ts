@@ -12,11 +12,18 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+// O mapa mental (H10) é a segunda fase do mesmo trabalho e segue na mesma
+// rodada: dublado aqui, para a rodada nunca chamar a IA de verdade. O que é
+// do mapa está em mapa-mental.integracao.test.ts.
+const gerarMapaMental = vi.hoisted(() => vi.fn());
+vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("./mapa-mental")>()), gerarMapaMental: (...a: unknown[]) => gerarMapaMental(...a) }));
+const MAPA = { ramos: [{ rotulo: "Exportação de café", folhas: [] }, { rotulo: "Transportadora", folhas: [] }] };
 
 const { getDb } = await import("./db");
 const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, platformNotifications, proximasAcoes, users } = await import("../drizzle/schema");
 const fila = await import("./fila-do-resumo");
 const servico = await import("./resumo-guardado");
+const acoes = await import("./proximas-acoes");
 const { FalhaDaIA } = await import("./ia-em-json");
 const { deletePrivateMeeting, gravarResultadoDaReuniao } = await import("./meeting-service");
 
@@ -96,6 +103,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     fila.religarParaTestes();
     gerarResumoDaReuniao.mockReset();
     gerarResumoDaReuniao.mockResolvedValue(RESUMO);
+    gerarMapaMental.mockReset();
+    gerarMapaMental.mockResolvedValue(MAPA);
     vaga.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -108,7 +117,9 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     await rodar();
 
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR" });
+    // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
+    // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [] });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);
     expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
     expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
@@ -116,6 +127,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       ["decision", 1, "pending", false, 5, null],
     ]);
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, model: "gemini-teste-1" });
+    // O mapa mental (H10) veio na mesma rodada, sem mexer no resumo.
+    expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMapError: null });
     // O aviso no sino (H15), na mesma transação: o tipo, o link da reunião e
     // os parâmetros que a tela traduz.
     const avisos = await avisosDaDona(id);
@@ -298,13 +311,36 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await expect(servico.marcarAcaoFeita(DONA, acao.id, true)).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("o resumo refeito troca os itens e solta antes a próxima ação do item confirmado: o nome da voz vai para o texto, e a reunião e o trecho ficam (H5a)", async () => {
+  it("o resumo refeito (H4d) guarda o item confirmado com a próxima ação presa a ele, com o prazo; a leitura seguinte não cria outra (H5a)", async () => {
     const id = await reuniaoPronta({ speakerNames: { F2: "Carla" } });
     await pedir(id);
     await rodar();
     const [acao] = await itensDe(id);
     await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
-    // O resumo volta à fila com os itens ainda lá (o que o "Refazer" vai fazer), e a rodada grava os novos.
+    const [proxima] = await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    await (await db()).update(proximasAcoes).set({ prazo: "2026-11-20" }).where(eq(proximasAcoes.id, proxima.id));
+    // "Refazer como…": o resumo volta à fila com os itens ainda lá, e a rodada grava os novos.
+    await (await db()).update(meetingSummaries).set({ status: "pending" }).where(eq(meetingSummaries.meetingId, id));
+    await rodar();
+    expect((await itensDe(id)).map(item => item.id)).toContain(acao.id);
+    // A lista e o Dashboard completam as ações que faltam antes de ler: nenhuma falta.
+    await acoes.listarProximasAcoes(DONA, "todas");
+    expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{
+      id: proxima.id, itemId: acao.id, meetingId: id, prazo: "2026-11-20", texto: "Avisar a transportadora", responsavel: "{F2}",
+    }]);
+  });
+
+  it("o resumo refeito solta só a ação presa a um item que sai: o nome da voz vai para o texto, e a reunião e o trecho ficam (H5a)", async () => {
+    const id = await reuniaoPronta({ speakerNames: { F2: "Carla" } });
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    // A ação de um item que não está confirmado (a regra não deixa nascer; um
+    // dado antigo, por exemplo): o item sai, e ela se solta dele.
+    await (await db()).insert(proximasAcoes).values({
+      id: crypto.randomUUID(), ownerId: DONA, origem: "reuniao", meetingId: id, itemId: acao.id, texto: acao.text, responsavel: acao.assignee,
+      trecho: acao.excerpt, feita: false, createdAt: AGORA(), updatedAt: AGORA(),
+    });
     await (await db()).update(meetingSummaries).set({ status: "pending" }).where(eq(meetingSummaries.meetingId, id));
     await rodar();
     expect((await itensDe(id)).map(item => item.id)).not.toContain(acao.id);
@@ -312,6 +348,28 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       texto: "Avisar a transportadora", responsavel: "Carla", itemId: null, meetingId: id,
       trecho: "Decidimos não renovar o contrato com a transportadora",
     }]);
+  });
+
+  it("a falha de vez do mapa (H10) e a do resumo refeito (H4d) não trocam o aviso de pronta; a do primeiro resumo, sim (H15)", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarMapaMental.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", mindMapStatus: "failed", mindMapError: "RESPOSTA_CORTADA" });
+    expect((await avisosDaDona(id)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "pronto" }]);
+
+    // O refazer que falha de vez: a versão anterior segue na tela, e o sino segue dizendo que a reunião está pronta.
+    await (await db()).update(meetingSummaries).set({ status: "pending", attempts: 0 }).where(eq(meetingSummaries.meetingId, id));
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", version: 1, lastError: "RESPOSTA_CORTADA" });
+    expect((await avisosDaDona(id)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "pronto" }]);
+
+    // O primeiro resumo de outra reunião que falha de vez avisa que ela ficou sem o resumo.
+    const outra = await reuniaoPronta();
+    await pedir(outra);
+    await rodar();
+    expect((await avisosDaDona(outra)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "falhou" }]);
   });
 
   it("o desligamento devolve a reserva sem gastar a tentativa, e a geração em curso não grava", async () => {
@@ -388,9 +446,12 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.estado).toBe("pronto");
+    // O idioma em que o resumo foi escrito: a página do link o traduz (H11), e
+    // "Ouvir o resumo" (H19) escolhe a voz por ele.
+    expect(visto.idioma).toBe("pt-BR");
     expect(visto.itens).toEqual([{
       section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,
-      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending",
+      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending", escritoPelaDona: false,
     }]);
     await expect(servico.resumoGuardadoPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
   });
@@ -398,7 +459,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("o link de reunião sem resumo diz 'sem_resumo'; sem transcrição, não pede", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     await reuniaoPronta({ shareToken: token }, false);
-    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, itens: [] });
+    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, idioma: null, versaoAnterior: false, itens: [] });
     await expect(servico.pedirResumoPeloLink(token, vi.fn())).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

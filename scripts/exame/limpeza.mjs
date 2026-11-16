@@ -43,7 +43,8 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "proximas_acoes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Os lembretes no sino (H15) da próxima ação e da agenda.
   { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
-  // O resumo guardado da reunião (H4) e os itens dele.
+  // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens.
+  { tabela: "meeting_summary_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as

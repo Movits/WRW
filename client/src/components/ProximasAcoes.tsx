@@ -271,7 +271,11 @@ function ItemDaProximaAcao({ acao, compacto, hoje, destacada, contatoDaPagina, g
         aoFechar={() => setModo("ver")} aoEscolher={contactId => ligar.mutate({ id: acao.id, contactId }, { onSuccess: () => setModo("ver") })}/>}
 
       {modo === "apagar" && <div className="rounded-lg border border-red-400/25 bg-red-400/[0.06] p-3 text-xs text-red-100">
-        <p>{daReuniao && acao.reuniao?.itemId ? t("proximasAcoes.deleteQuestionMeeting") : t("proximasAcoes.deleteQuestion")}</p>
+        {/* A ação presa ao item do resumo: o item volta a "para conferir"; o que a
+            dona escreveu (H4f) vai para os ignorados (server/proximas-acoes.ts). */}
+        <p>{daReuniao && acao.reuniao?.itemId
+          ? acao.reuniao.itemDaDona ? t("proximasAcoes.deleteQuestionOwnerItem") : t("proximasAcoes.deleteQuestionMeeting")
+          : t("proximasAcoes.deleteQuestion")}</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" disabled={ocupado} aria-describedby={idDoTexto} onClick={() => apagar.mutate({ id: acao.id })}
             className="rounded-lg bg-red-400/90 px-3 py-1.5 text-xs font-bold text-[#1a120c] hover:bg-red-300 disabled:opacity-50">

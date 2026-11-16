@@ -3,6 +3,7 @@ import {
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
@@ -10,6 +11,7 @@ import {
   type CodigoDaRecusaDaParte,
 } from "@shared/const";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
+import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -61,6 +63,11 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas das próximas ações (server/proximas-acoes.ts).
   [MENSAGEM_ACAO_NAO_ENCONTRADA]: "proximasAcoes.errorGone",
   [MENSAGEM_CONTATO_FORA_DA_REDE]: "proximasAcoes.errorContactOutside",
+  // As recusas do rascunho de e-mail de retorno (server/email-de-retorno.ts).
+  [MENSAGEM_EMAIL_SEM_RESUMO_PRONTO]: "meetings.followUp.summaryNotReady",
+  [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO]: "meetings.followUp.needsConfirmed",
+  // O item que a dona acrescenta passaria do teto do resumo (H4f).
+  [MENSAGEM_RESUMO_CHEIO]: "meetings.summary.errorFull",
 };
 
 /**

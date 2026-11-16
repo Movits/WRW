@@ -1054,9 +1054,12 @@ export async function respondToConnection(connectionId: number, userId: number, 
 
 export async function createPrivateContact(
   ownerId: string,
-  data: Omit<InsertPrivateContact, "id" | "ownerId" | "createdAt" | "updatedAt">
+  data: Omit<InsertPrivateContact, "id" | "ownerId" | "createdAt" | "updatedAt">,
+  // A transação de quem cria o contato junto com outras escritas (a pessoa
+  // da reunião e as pendências dela, em meetings.decideContactSuggestion).
+  transacao?: Pick<Awaited<ReturnType<typeof exigirDb>>, "insert">,
 ): Promise<number> {
-  const db = await exigirDb();
+  const db = transacao ?? await exigirDb();
   const now = Date.now();
   // Meu Network Inteligente (item 13): o contato nasce com o ID anônimo. A
   // colisão do índice único, rara, grava de novo com outro código.

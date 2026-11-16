@@ -410,9 +410,9 @@ export async function tirarDaGoogleAAcaoQueSaiu(conta: ContaDaAgenda, acaoId: st
 export type AcaoDoItemNaGoogle = { acaoId: string; estavaNaGoogle: boolean; acesso: AcessoDaGoogle; ligada: boolean };
 
 /**
- * Antes de desconfirmar o item, ou de marcar a ação dele no resumo: a ação
- * dele, quando tem prazo, e o token, lido antes da escrita. Sem ação, ou sem
- * prazo, nada (ela não pode ter evento).
+ * Antes de desconfirmar o item, de marcar a ação dele no resumo ou de editá-lo
+ * (H4f): a ação dele, quando tem prazo, e o token, lido antes da escrita. Sem
+ * ação, ou sem prazo, nada (ela não pode ter evento).
  */
 export async function prepararAcaoDoItem(conta: ContaDaAgenda, itemId: string, deps: DependenciasDaGoogle = DEPENDENCIAS_DA_GOOGLE): Promise<AcaoDoItemNaGoogle | null> {
   const db = await exigirDb();
@@ -428,8 +428,8 @@ export async function prepararAcaoDoItem(conta: ContaDaAgenda, itemId: string, d
 
 /**
  * Depois de mexer no item do resumo: a ação desconfirmada (apagada) ou marcada
- * feita sai da Google; a reaberta volta. O id da ação vai junto, para o
- * "Tentar de novo" da tela.
+ * feita sai da Google; a reaberta volta, e a do item editado (H4f) vai com o
+ * texto novo. O id da ação vai junto, para o "Tentar de novo" da tela.
  */
 export async function depoisDeMexerNoItem(
   conta: ContaDaAgenda, preparo: AcaoDoItemNaGoogle | null, ficouAberta: boolean, pedido: PedidoDaTela = {},

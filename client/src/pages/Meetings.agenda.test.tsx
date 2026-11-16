@@ -96,9 +96,13 @@ vi.mock("@/lib/trpc", () => ({
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
+      // A tradução do resumo (H11) e o e-mail de retorno (H20), do pacote do
+      // resumo: o detalhe da reunião, aberto depois do Encerrar, os monta.
+      traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
     },
-    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink") },
+    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink"), traduzirResumo: duble.registrar("traduzirResumoPeloLink") },
     // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
     proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogleAAcao") },
     networkInteligente: { pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) } },

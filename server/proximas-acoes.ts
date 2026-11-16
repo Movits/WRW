@@ -127,15 +127,17 @@ export async function criarDoItem(ex: Executor, ownerId: string, itemId: string,
 
 /**
  * As ações que faltam aos itens confirmados (ação ou tarefa) de uma reunião
- * com o resumo pronto: os confirmados antes da H5a e o "Confirmar todos".
- * Idempotente: a leitura só acha item sem ação, e o índice único segura a
- * corrida. Quem chama trava a reunião na transação. Devolve quantas criou.
+ * com o resumo fora da fila: o pronto e o refazer que falhou (H4d), em que a
+ * versão anterior segue valendo e a dona decide sobre ela. São os confirmados
+ * antes da H5a e o "Confirmar todos". Idempotente: a leitura só acha item sem
+ * ação, e o índice único segura a corrida. Quem chama trava a reunião na
+ * transação. Devolve quantas criou.
  */
 export async function garantirAcoesDosItensConfirmados(ex: Executor, ownerId: string, meetingId: string, agora = Date.now()): Promise<number> {
   const faltando = await ex.select(COLUNAS_DO_ITEM).from(meetingSummaryItems)
     .innerJoin(meetingSummaries, and(
       eq(meetingSummaries.id, meetingSummaryItems.summaryId), eq(meetingSummaries.ownerId, meetingSummaryItems.ownerId),
-      eq(meetingSummaries.status, "ready"),
+      inArray(meetingSummaries.status, ["ready", "failed"]),
     ))
     .leftJoin(proximasAcoes, and(eq(proximasAcoes.itemId, meetingSummaryItems.id), eq(proximasAcoes.ownerId, meetingSummaryItems.ownerId)))
     .where(and(
@@ -186,12 +188,48 @@ export async function garantirAcoesDaDona(ownerId: string): Promise<number> {
 /**
  * O item deixou de estar confirmado: a ação dele sai (na transação de quem
  * desconfirma), e o lembrete no sino e os avisos dela saem junto (H15).
+ * Devolve quantas saíram.
  */
-export async function apagarAcaoDoItem(ex: Executor, ownerId: string, itemId: string) {
+export async function apagarAcaoDoItem(ex: Executor, ownerId: string, itemId: string): Promise<number> {
   const daDona = and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.itemId, itemId));
   const saem = await ex.select({ id: proximasAcoes.id }).from(proximasAcoes).where(daDona);
   await ex.delete(proximasAcoes).where(daDona);
   for (const acao of saem) await esquecerLembrete(ex, ownerId, "acao", acao.id);
+  return saem.length;
+}
+
+/** Os campos do item de que a ação copia o texto (camposDaAcaoDoItem). */
+export type CopiaDoItem = Pick<ItemParaAcao, "subject" | "text" | "assignee" | "due" | "excerpt">;
+
+/**
+ * A dona editou no resumo (H4f) o item de que a ação é cópia: a ação leva o
+ * texto novo, campo a campo, só onde ainda tem o que copiou do item. O que a
+ * dona mudou na lista (o texto, o detalhe, o responsável) fica: ali a palavra
+ * dela vale mais que a cópia. A última mudança sobe, e o .ics baixado de novo
+ * sai com o SEQUENCE maior. A ação que tem estado na Google Agenda (H5c) fica
+ * "falhou", como a da voz renomeada (acoesComAVozRenomeada): a Google ficou
+ * com o texto antigo, e quem chama manda o novo logo depois; se o envio não
+ * sair, a lista mostra "Tentar de novo". Roda na transação da edição, com a
+ * reunião travada. Devolve o id da ação que mudou, ou nulo.
+ */
+export async function levarEdicaoDoItemAAcao(
+  ex: Executor, ownerId: string, itemId: string, antes: CopiaDoItem, depois: CopiaDoItem, agora = Date.now(),
+): Promise<string | null> {
+  const [acao] = await ex.select({
+    id: proximasAcoes.id, texto: proximasAcoes.texto, detalhe: proximasAcoes.detalhe, responsavel: proximasAcoes.responsavel,
+    prazoDito: proximasAcoes.prazoDito, trecho: proximasAcoes.trecho, google: proximasAcoes.google,
+  }).from(proximasAcoes).where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.itemId, itemId))).limit(1).for("update");
+  if (!acao) return null;
+  const copiado = camposDaAcaoDoItem(antes);
+  const novo = camposDaAcaoDoItem(depois);
+  const mudancas: Partial<ReturnType<typeof camposDaAcaoDoItem>> = {};
+  for (const campo of Object.keys(novo) as Array<keyof typeof novo>) {
+    if (novo[campo] !== copiado[campo] && (acao[campo] ?? null) === (copiado[campo] ?? null)) Object.assign(mudancas, { [campo]: novo[campo] });
+  }
+  if (!Object.keys(mudancas).length) return null;
+  await ex.update(proximasAcoes).set({ ...mudancas, ...(acao.google !== null ? { google: "falhou" as const } : {}), updatedAt: agora })
+    .where(and(eq(proximasAcoes.id, acao.id), eq(proximasAcoes.ownerId, ownerId)));
+  return acao.id;
 }
 
 /**
@@ -246,12 +284,22 @@ export function textosComNomes(
  *   transcrição apagada.
  * Roda antes de os itens e a reunião saírem (apagarDerivadosSemGravacao), sem
  * transação própria: cada UPDATE é por ação, e repetir não muda nada.
+ *
+ * Com `soDosItens`, só as ações presas a esses itens: os que saem do resumo
+ * refeito (H4d, server/fila-do-resumo.ts), em que os outros itens ficam e as
+ * ações deles continuam presas a eles.
  */
-export async function soltarAcoesDaReuniao(ex: Executor, ownerId: string, meetingId: string, reuniaoSai: boolean, agora = Date.now()): Promise<number> {
+export async function soltarAcoesDaReuniao(
+  ex: Executor, ownerId: string, meetingId: string, reuniaoSai: boolean, agora = Date.now(), soDosItens?: readonly string[],
+): Promise<number> {
+  if (soDosItens && !soDosItens.length) return 0;
   const acoes = await ex.select({
     id: proximasAcoes.id, texto: proximasAcoes.texto, detalhe: proximasAcoes.detalhe,
     responsavel: proximasAcoes.responsavel, itemId: proximasAcoes.itemId,
-  }).from(proximasAcoes).where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.meetingId, meetingId)));
+  }).from(proximasAcoes).where(and(
+    eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.meetingId, meetingId),
+    soDosItens ? inArray(proximasAcoes.itemId, [...soDosItens]) : undefined,
+  ));
   // Já solta (reprocessada antes) e a reunião fica: nada a fazer.
   const aSoltar = acoes.filter(acao => acao.itemId !== null || reuniaoSai);
   if (!aSoltar.length) return 0;
@@ -339,6 +387,9 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
     vozesDaReuniao: meetings.speakerNames,
     itemVivo: meetingSummaryItems.id,
     nomeDoContato: privateContacts.fullName,
+    // Quem escreveu o item (H4f): o da dona não volta a "para conferir" quando a ação é apagada.
+    origemDoItem: meetingSummaryItems.origin,
+    itemEditadoEm: meetingSummaryItems.editedAt,
   }).from(proximasAcoes)
     // A reunião, o item e o contato só valem se ainda são da dona: o ponteiro
     // velho (excluído no meio de uma escrita) não traz nada de ninguém.
@@ -375,7 +426,11 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
       google: estadoNaGoogle(linha.google),
       createdAt: linha.createdAt,
       updatedAt: linha.updatedAt,
-      reuniao: reuniaoViva ? { id: linha.meetingId as string, titulo: linha.tituloDaReuniao as string, itemId: presaAoItem ? linha.itemVivo : null } : null,
+      reuniao: reuniaoViva ? {
+        id: linha.meetingId as string, titulo: linha.tituloDaReuniao as string, itemId: presaAoItem ? linha.itemVivo : null,
+        // O item que a dona escreveu, acrescentado ou editado (H4f): apagar a ação o leva aos ignorados (apagarProximaAcao).
+        itemDaDona: presaAoItem && (linha.origemDoItem === "owner" || (linha.itemEditadoEm !== null && linha.itemEditadoEm !== undefined)),
+      } : null,
       vozes: presaAoItem ? nomesDosFalantes(linha.vozesDaReuniao) : {},
       contato: linha.contactId !== null && linha.nomeDoContato !== null ? { id: linha.contactId, nome: linha.nomeDoContato } : null,
     };
@@ -589,7 +644,11 @@ export async function marcarProximaAcaoFeita(ownerId: string, acaoId: string, fe
  * Apaga a ação. A da reunião, ainda presa ao item, desconfirma o item: ele
  * volta a "para conferir" no resumo. É o mesmo par da decisão no resumo
  * (desconfirmar apaga a ação), e sem isso garantirAcoesDosItensConfirmados a
- * recriaria na próxima leitura. A tela pede a confirmação antes.
+ * recriaria na próxima leitura. O item que a dona escreveu, acrescentado ou
+ * editado (H4f), não volta a "para conferir" (não há o que conferir na palavra
+ * dela): vai para os ignorados, com o estado de antes guardado, e o Desfazer do
+ * resumo o devolve confirmado, como o Ignorar do resumo. A tela pede a
+ * confirmação antes, com o texto de cada caso.
  */
 export async function apagarProximaAcao(ownerId: string, acaoId: string): Promise<AcaoAntesDeMudar> {
   const db = await exigirDb();
@@ -597,8 +656,18 @@ export async function apagarProximaAcao(ownerId: string, acaoId: string): Promis
     const acao = await acaoParaMudar(tx, ownerId, acaoId);
     const agora = Date.now();
     if (acao.itemId) {
-      await tx.update(meetingSummaryItems).set({ status: "pending", decidedAt: null, done: false, doneAt: null, updatedAt: agora })
-        .where(and(eq(meetingSummaryItems.id, acao.itemId), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "confirmed")));
+      const doItem = and(eq(meetingSummaryItems.id, acao.itemId), eq(meetingSummaryItems.ownerId, ownerId));
+      const [item] = await tx.select({
+        status: meetingSummaryItems.status, origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
+        done: meetingSummaryItems.done, doneAt: meetingSummaryItems.doneAt,
+      }).from(meetingSummaryItems).where(doItem).limit(1).for("update");
+      if (item?.status === "confirmed") {
+        const daDona = item.origin === "owner" || item.editedAt !== null;
+        await tx.update(meetingSummaryItems).set(daDona
+          ? { status: "ignored", decidedAt: agora, done: false, doneAt: null, statusBeforeIgnore: "confirmed", doneAtBeforeIgnore: item.done ? item.doneAt ?? agora : null, updatedAt: agora }
+          : { status: "pending", decidedAt: null, done: false, doneAt: null, updatedAt: agora })
+          .where(doItem);
+      }
     }
     await tx.delete(proximasAcoes).where(and(eq(proximasAcoes.id, acao.id), eq(proximasAcoes.ownerId, ownerId)));
     // O lembrete no sino e os avisos dela saem junto (H15).

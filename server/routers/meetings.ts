@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
@@ -30,11 +30,33 @@ import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
-import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { depoisDeMexerNoItem, prepararAcaoDoItem } from "../acoes-na-google";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
+import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
+import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
+import { traduzirResumoDaDona } from "../traducao-do-resumo";
+import { rascunharEmailDeRetorno } from "../email-de-retorno";
+import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
+import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
+
+// O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
+// assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
+const campoDoItemDoResumo = z.string().trim().max(CAMPO_DO_ITEM_DO_RESUMO_MAX).nullish().transform(valor => valor || null);
+const camposDoItemDoResumo = {
+  texto: z.string().trim().min(1).max(TEXTO_DO_ITEM_DO_RESUMO_MAX),
+  assunto: campoDoItemDoResumo,
+  responsavel: campoDoItemDoResumo,
+  prazo: campoDoItemDoResumo,
+};
+// O fuso do aparelho e os rótulos da tela, para o evento da próxima ação na
+// Google Agenda (H5c), como na lista (routers/proximasAcoes.ts).
+const pedidoDaTelaParaAGoogle = {
+  fuso: z.string().trim().max(FUSO_MAX).nullish(),
+  rotulos: z.object({ voz: z.string().max(ROTULO_DA_AGENDA_MAX), responsavel: z.string().max(ROTULO_DA_AGENDA_MAX) }).nullish(),
+};
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -51,13 +73,15 @@ export function esquecerTentativasDeReprocesso() {
 }
 
 // Cada pergunta manda a transcrição inteira à IA (até 400 mil caracteres,
-// server/reuniao-com-ia.ts), e cada resumo pedido é uma geração paga na fila.
-// Teto brando por dona, pedidos de resumo e perguntas somados, em memória como
-// o do reprocesso. A pergunta conta todo pedido que passa da validação, até o
-// recusado: a recusa não chama a IA, e assim também não serve de sonda. A
-// pergunta sobre reunião longa conta duas (segundaVagaDaPerguntaLonga): a dona
-// faz até 10 delas a cada 10 minutos. O pedido de resumo só conta quando cria
-// trabalho novo (server/resumo-guardado.ts).
+// server/reuniao-com-ia.ts), cada resumo pedido é uma geração paga na fila e
+// cada rascunho de e-mail de retorno (H20) manda os itens confirmados do
+// resumo. Teto brando por dona, os três somados, em memória como o do
+// reprocesso. A pergunta e o rascunho contam todo pedido que passa da
+// validação, até o recusado: a recusa não chama a IA, e assim também não serve
+// de sonda. A pergunta sobre reunião longa conta duas
+// (segundaVagaDaPerguntaLonga): a dona faz até 10 delas a cada 10 minutos. O
+// pedido de resumo só conta quando cria trabalho novo
+// (server/resumo-guardado.ts).
 export const PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA = 20;
 export const tetoDaIADaReuniao = criarTeto(
   PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA,
@@ -85,6 +109,19 @@ export function segundaVagaDaPerguntaLonga(reservarSegunda: () => unknown, solta
     }
   };
 }
+
+// A tradução do resumo guardado (H11) para a dona: cada pedido que chama a IA
+// de fato (o item editado ou acrescentado, outro idioma, o mapa que chegou)
+// gasta uma vaga; a tradução guardada e a que já está na IA, não. Teto próprio,
+// por dona e em memória como os outros: a tela pede a tradução de novo a cada
+// item que a dona corrige, e corrigir o resumo não pode gastar as vagas do
+// Pergunte. Sem ele, editar e traduzir em laço chamava a IA sem limite.
+export const TRADUCOES_DO_RESUMO_POR_JANELA = 30;
+export const tetoDaTraducaoDoResumo = criarTeto(
+  TRADUCOES_DO_RESUMO_POR_JANELA,
+  10 * 60_000,
+  "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
+);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -275,20 +312,46 @@ export const meetingsRouter = router({
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
 
+  // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
+  // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
   pedirResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO).optional() }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
+
+  // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
+  // confirmados, os feitos e os que a dona escreveu ou editou (H4f) ficam, os
+  // outros pendentes e ignorados são trocados. Gasta uma vaga do mesmo teto de
+  // pedidos à IA.
+  refazerResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
+    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // O mapa mental (H10), na linha do resumo guardado: a fila o gera logo
+  // depois do resumo, numa chamada à parte (server/fila-do-resumo.ts). Pedir
+  // serve à reunião resumida antes do mapa e ao mapa que falhou, e gasta uma
+  // vaga do mesmo teto de pedidos à IA (server/mapa-mental-guardado.ts).
+  mapaMental: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+    .query(({ ctx, input }) => mapaMentalDaDona(ctx.user.openId, input.meetingId)),
+
+  pedirMapa: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => pedirMapaDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
 
   // Desconfirmar apaga a próxima ação do item (H5a), e o evento dela sai da
   // Google Agenda depois (H5c, server/acoes-na-google.ts): o token vem antes da
   // escrita, e só quando a ação tem prazo. Quando o evento fica lá, a resposta
-  // diz "falhou" com o id da ação, para o "Tentar de novo" da tela.
+  // diz "falhou" com o id da ação, para o "Tentar de novo" da tela. Quem decide
+  // se a ação saiu é o estado gravado, não o pedido: o item escrito pela dona
+  // (H4f) que a tela pede de volta a "para conferir" fica confirmado, e a ação
+  // dele, com o evento, fica.
   decidirItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))
     .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
       const conta = { id: ctx.user.id, openId: ctx.user.openId };
       const preparo = input.status === "confirmed" ? null : await prepararAcaoDoItem(conta, input.itemId);
-      await decidirItemDoResumo(ctx.user.openId, input.itemId, input.status);
+      const { acaoSaiu } = await decidirItemDoResumo(ctx.user.openId, input.itemId, input.status);
+      if (!acaoSaiu) return { ok: true as const, acaoId: null, naGoogle: null };
       return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, false)) };
     }),
 
@@ -300,17 +363,50 @@ export const meetingsRouter = router({
   // sai da Google Agenda; reaberta, volta, se o prazo ainda vem (H5c). O fuso
   // e os rótulos vêm da tela, como na lista (routers/proximasAcoes.ts).
   marcarAcaoFeita: protectedProcedure
-    .input(z.object({
-      itemId: z.string().uuid(),
-      feito: z.boolean(),
-      fuso: z.string().trim().max(FUSO_MAX).nullish(),
-      rotulos: z.object({ voz: z.string().max(ROTULO_DA_AGENDA_MAX), responsavel: z.string().max(ROTULO_DA_AGENDA_MAX) }).nullish(),
-    }))
+    .input(z.object({ itemId: z.string().uuid(), feito: z.boolean(), ...pedidoDaTelaParaAGoogle }))
     .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
       const conta = { id: ctx.user.id, openId: ctx.user.openId };
       const preparo = await prepararAcaoDoItem(conta, input.itemId);
       await marcarAcaoFeita(ctx.user.openId, input.itemId, input.feito);
       return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, !input.feito, { fuso: input.fuso, rotulos: input.rotulos })) };
+    }),
+
+  // A tradução do resumo guardado (H11) para o idioma de quem lê, em segundo
+  // plano como a da transcrição: responde "traduzindo" enquanto a IA trabalha,
+  // e a tela pergunta de novo. A tradução guardada não chama a IA e não gasta
+  // vaga; a que chama gasta uma do teto próprio da tradução
+  // (tetoDaTraducaoDoResumo), só quando a IA é chamada de fato.
+  traduzirResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(IDIOMAS_DA_REUNIAO) }))
+    .mutation(({ ctx, input }) => traduzirResumoDaDona(ctx.user.openId, input.meetingId, input.idioma,
+      () => { tetoDaTraducaoDoResumo.reservar(ctx.user.openId); })),
+
+  // A dona edita um item e acrescenta item à mão (H4f): o que ela escreve vale
+  // como confirmado. Sem IA, então sem teto de pedidos; o resumo guarda até
+  // ITENS_DO_RESUMO_MAX itens. A tradução que a tela pede depois traduz só o
+  // item que mudou, e gasta a vaga dela.
+  //
+  // A próxima ação do item editado leva o texto novo (H5a), e o evento dela na
+  // Google Agenda também (H5c), como a edição na lista: o token vem antes da
+  // escrita, só quando a ação tem prazo, e o fuso e os rótulos vêm da tela.
+  // Quando a Google falha, a resposta diz "falhou", e a lista mostra "Tentar de
+  // novo" (a escrita deixou a ação "falhou" antes do envio).
+  editarItemDoResumo: protectedProcedure
+    .input(z.object({ itemId: z.string().uuid(), ...camposDoItemDoResumo, ...pedidoDaTelaParaAGoogle }))
+    .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
+      const { itemId, fuso, rotulos, ...campos } = input;
+      const conta = { id: ctx.user.id, openId: ctx.user.openId };
+      const preparo = await prepararAcaoDoItem(conta, itemId);
+      const { acaoQueMudou } = await editarItemDoResumo(ctx.user.openId, itemId, campos);
+      if (!acaoQueMudou) return { ok: true as const, acaoId: null, naGoogle: null };
+      return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, true, { fuso, rotulos })) };
+    }),
+
+  acrescentarItemDoResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), secao: z.enum(SECOES_DO_RESUMO), ...camposDoItemDoResumo }))
+    .mutation(async ({ ctx, input }) => {
+      const { meetingId, secao, ...campos } = input;
+      return { id: await acrescentarItemDoResumo(ctx.user.openId, meetingId, secao, campos) };
     }),
 
   perguntar: protectedProcedure
@@ -323,6 +419,29 @@ export const meetingsRouter = router({
       const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
         segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
+    }),
+
+  // H20: o rascunho de um e-mail de retorno, escrito pela IA a partir dos itens
+  // que a dona confirmou no resumo guardado (server/email-de-retorno.ts). O
+  // servidor só devolve o texto: nada é gravado nem enviado, e a dona manda
+  // pelo app de e-mail dela. O nome de quem recebe nem chega aqui (a tela o põe
+  // no lugar da marca {DESTINATARIO}); só a voz dela, quando a tela a reconhece.
+  rascunharEmailDeRetorno: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      relacao: z.enum(RELACOES_DO_EMAIL),
+      tom: z.enum(TONS_DO_EMAIL),
+      idioma: z.enum(IDIOMAS_DA_REUNIAO),
+      vozDoDestinatario: z.string().regex(FORMATO_DO_FALANTE).optional(),
+    }))
+    .mutation(({ ctx, input }) => {
+      tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return rascunharEmailDeRetorno(ctx.user.openId, input.meetingId, {
+        relacao: input.relacao,
+        tom: input.tom,
+        idioma: input.idioma,
+        vozDoDestinatario: input.vozDoDestinatario,
+      });
     }),
 
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
@@ -408,45 +527,53 @@ export const meetingsRouter = router({
         if (!alvo) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
         linkedContactId = input.contactId;
       }
-      // Tomada: só UMA decisão tira a sugestão de 'pending', e antes de criar
-      // contato ou mexer nas pendências. Sem o status no WHERE, o duplo clique
-      // (ou a aba velha) criava um segundo contato e levava as pendências da IA
-      // para ele, e um 'ignorar' tardio ignorava as do contato já criado.
-      const [tomada] = await db.update(meetingContactSuggestions)
-        .set({ status, existingContactId: linkedContactId, updatedAt: Date.now() })
-        .where(and(daDona, eq(meetingContactSuggestions.status, "pending")));
-      if (!(tomada as { affectedRows?: number } | undefined)?.affectedRows) {
-        throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_SUGESTAO_JA_DECIDIDA });
-      }
-      if (input.action === "create") {
-        try {
-          linkedContactId = await createPrivateContact(ctx.user.openId, {
+      // Tudo numa transação só (revisão do pacote P2B): a tomada, o contato
+      // novo, o ponteiro da sugestão e as pendências. Com um commit por passo,
+      // a conexão que caía depois do contato e antes das pendências deixava a
+      // sugestão 'created', o contato sem cargo nem empresa e a dona sem como
+      // repetir (CONFLICT, "já decidida"). Agora qualquer falha desfaz tudo, e
+      // a sugestão continua pendente para ela tentar de novo.
+      linkedContactId = await db.transaction(async tx => {
+        // Tomada: só UMA decisão tira a sugestão de 'pending', e antes de criar
+        // contato ou mexer nas pendências. Sem o status no WHERE, o duplo clique
+        // (ou a aba velha) criava um segundo contato e levava as pendências da IA
+        // para ele, e um 'ignorar' tardio ignorava as do contato já criado.
+        const [tomada] = await tx.update(meetingContactSuggestions)
+          .set({ status, existingContactId: linkedContactId, updatedAt: Date.now() })
+          .where(and(daDona, eq(meetingContactSuggestions.status, "pending")));
+        if (!(tomada as { affectedRows?: number } | undefined)?.affectedRows) {
+          throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_SUGESTAO_JA_DECIDIDA });
+        }
+        let contactId = linkedContactId;
+        if (input.action === "create") {
+          // Só o QUEM SOU que a tela marcou: nome, telefone e e-mail, conferidos
+          // contra a transcrição. Cargo e empresa vieram da IA e não entram
+          // sozinhos (achado 6 da bancada de 16/11): viram pendências do contato
+          // novo, em decidirPendenciasDaPessoaSugerida, para a dona confirmar.
+          contactId = await createPrivateContact(ctx.user.openId, {
             fullName: suggestion.fullName,
-            jobTitle: suggestion.jobTitle,
-            company: suggestion.company,
             phone: suggestion.phone,
             email: suggestion.email,
-          });
-        } catch (erro) {
-          // O contato não nasceu: a sugestão volta a pendente para a dona tentar de novo.
-          await db.update(meetingContactSuggestions).set({ status: "pending", updatedAt: Date.now() })
-            .where(and(daDona, eq(meetingContactSuggestions.status, "created"), isNull(meetingContactSuggestions.existingContactId)))
-            .catch(erroAoDevolver => console.error("[meetings.decideContactSuggestion] a sugestão não voltou a pendente:", erroAoDevolver));
-          throw erro;
+          }, tx);
+          await tx.update(meetingContactSuggestions).set({ existingContactId: contactId, updatedAt: Date.now() }).where(daDona);
         }
-        await db.update(meetingContactSuggestions).set({ existingContactId: linkedContactId, updatedAt: Date.now() }).where(daDona);
-      }
-      // Meu Network Inteligente: O QUE TENHO / O QUE PRECISO que a IA tirou da
-      // reunião para esta pessoa passam a apontar para o contato, AINDA
-      // pendentes — criar o contato confirma o Quem Sou que a tela mostrou, não
-      // o resto. Ignorar a pessoa ignora tudo que veio dela.
-      await decidirPendenciasDaPessoaSugerida(db, {
-        ownerId: ctx.user.openId,
-        meetingSuggestionId: suggestion.id,
-        meetingId: suggestion.meetingId,
-        acao: input.action,
-        contactId: linkedContactId,
-        quemSouDaSugestao: { fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email },
+        // Meu Network Inteligente: O QUE TENHO / O QUE PRECISO que a IA tirou da
+        // reunião para esta pessoa passam a apontar para o contato, AINDA
+        // pendentes — criar o contato confirma o Quem Sou que a tela mostrou, não
+        // o resto; cargo e empresa viram pendências também, se a transcrição os
+        // diz, com a confiança da sugestão. Ignorar a pessoa ignora tudo que veio dela.
+        await decidirPendenciasDaPessoaSugerida(tx, {
+          ownerId: ctx.user.openId,
+          meetingSuggestionId: suggestion.id,
+          meetingId: suggestion.meetingId,
+          acao: input.action,
+          contactId,
+          quemSouDaSugestao: {
+            fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email,
+            jobTitle: suggestion.jobTitle, company: suggestion.company, confianca: suggestion.confidence,
+          },
+        });
+        return contactId;
       });
       return { success: true, contactId: linkedContactId };
     }),

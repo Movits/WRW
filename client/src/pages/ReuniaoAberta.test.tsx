@@ -33,6 +33,9 @@ const duble = vi.hoisted(() => ({
   resumoGuardado: vi.fn(),
   opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
+  // A tradução do resumo guardado (H11): a página pede pelo link; a mutação da dona nunca é chamada aqui.
+  traduzirResumo: { mutate: vi.fn() },
+  traduzirResumoDaDona: { mutate: vi.fn() },
   // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
   propsDaPergunta: null as Record<string, unknown> | null,
   propsDoResumo: null as Record<string, unknown> | null,
@@ -44,6 +47,14 @@ const duble = vi.hoisted(() => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // A tradução do resumo relê o resumo quando o servidor diz que ele mudou.
+    useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } }),
+    // O "Pergunte à reunião" de verdade pede as duas mutações de pergunta a
+    // cada render; a tradução do resumo da dona nunca é chamada aqui.
+    meetings: {
+      traduzirResumo: { useMutation: () => duble.traduzirResumoDaDona },
+      perguntar: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+    },
     reuniaoAberta: {
       ver: {
         useQuery: (entrada: unknown, opcoes: OpcoesDaConsulta) => {
@@ -52,6 +63,7 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
       traduzir: { useMutation: () => duble.traduzir },
+      traduzirResumo: { useMutation: () => duble.traduzirResumo },
       resumoGuardado: {
         useQuery: (entrada: unknown, opcoes: OpcoesDoResumo) => {
           duble.opcoesDoResumo = opcoes;
@@ -60,8 +72,6 @@ vi.mock("@/lib/trpc", () => ({
       },
       perguntar: { useMutation: () => ({ data: duble.respostaDaPergunta, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
     },
-    // O "Pergunte à reunião" de verdade pede as duas mutações a cada render.
-    meetings: { perguntar: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) } },
   },
 }));
 // O marcador da pergunta mostra o token, e o "▶" de uma citação chama o
@@ -78,13 +88,33 @@ vi.mock("@/components/ReuniaoComIA", async importOriginal => {
   };
 });
 // O marcador do resumo mostra o token e o estado que recebeu, e o "▶" dele
-// chama o aoIrPara da página com 610 s (10:10).
+// chama o aoIrPara da página com 610 s (10:10). A tradução (H11) que a página
+// passa aparece em outro marcador, com os textos que ela poria no resumo.
+type TraducaoRecebida = { estado: string; idioma: string; aplicar: (dados: unknown) => { itens?: Array<{ text: string }> } | undefined };
 vi.mock("@/components/ResumoGuardado", () => ({
-  ResumoGuardado: (props: { token: string; consulta: { data?: { estado: string } }; nomes?: Record<string, string>; aoIrPara?: (segundo: number) => void }) => {
+  ResumoGuardado: (props: { token: string; consulta: { data?: { estado: string } }; nomes?: Record<string, string>; aoIrPara?: (segundo: number) => void; traducao?: TraducaoRecebida }) => {
     duble.propsDoResumo = props;
-    const { token, consulta, aoIrPara } = props;
-    return <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>;
+    const { token, consulta, aoIrPara, traducao } = props;
+    return <>
+      <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>
+      <div data-testid="traducao-do-resumo">{traducao?.estado} {traducao?.idioma} {traducao?.aplicar(consulta.data)?.itens?.map(item => item.text).join(" | ")}</div>
+    </>;
   },
+}));
+// O mapa mental (H10) vira um marcador que mostra o que recebeu; o
+// comportamento dele está em components/MapaMental.test.tsx.
+// A tradução (H11) que a página passa aparece nele (o estado e o rótulo
+// "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
+type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
+vi.mock("@/components/MapaMental", () => ({
+  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
+  }) => (
+    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
+      <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
+      {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
+    </div>
+  ),
 }));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
@@ -119,6 +149,8 @@ beforeEach(() => {
   duble.opcoesDoResumo = null;
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
+  duble.traduzirResumo = { mutate: vi.fn() };
+  duble.traduzirResumoDaDona = { mutate: vi.fn() };
   duble.propsDaPergunta = null;
   duble.propsDoResumo = null;
   duble.perguntaDeVerdade = false;
@@ -579,5 +611,102 @@ describe("Reunião aberta pelo link — os nomes das vozes (H3b)", () => {
     expect(duble.propsDaPergunta?.nomes).toEqual({});
     fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
     expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
+  });
+});
+
+describe("Reunião aberta pelo link — a aba Mapa mental (H10)", () => {
+  const abaDoMapa = () => screen.getByRole("button", { name: "Mapa mental" });
+
+  it("é a terceira aba, como no app de referência; mostra o mapa pelo token, com o título e o emoji do resumo", () => {
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "🍷", itens: [] }, isError: false, error: null, refetch: vi.fn() });
+    abrir();
+    const abas = screen.getAllByRole("button").filter(botao => botao.hasAttribute("aria-pressed")).map(aba => aba.textContent);
+    expect(abas).toEqual(["Resumo", "Transcrição", "Mapa mental"]);
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+
+    fireEvent.click(abaDoMapa());
+
+    expect(abaDoMapa()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("mapa-mental")).toHaveTextContent(`${TOKEN} | sem id | Reunião com a Ana | 🍷`);
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+  });
+
+  it("trocar para o mapa e voltar não corta o áudio", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    const audio = document.querySelector("audio");
+    fireEvent.click(abaDoMapa());
+    expect(document.querySelector("audio")).toBe(audio);
+    fireEvent.click(screen.getByRole("button", { name: "Resumo" }));
+    expect(document.querySelector("audio")).toBe(audio);
+  });
+
+  it("sem texto na transcrição, a aba diz que o mapa vem com a transcrição, sem pedir nada", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "  ", idioma: "pt-BR" } }));
+    abrir();
+    fireEvent.click(abaDoMapa());
+    expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
+    expect(screen.getByText("O mapa mental aparece aqui quando a transcrição da reunião estiver pronta.")).toBeInTheDocument();
+  });
+});
+
+describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
+  const ITENS = [
+    { section: "action", subject: null, text: "{F2} envia a proposta", assignee: "{F2}", due: null, excerpt: "eu mando a proposta", startSeconds: 5, status: "pending" },
+    { section: "decision", subject: null, text: "Renovar o contrato", assignee: null, due: null, excerpt: "vamos renovar", startSeconds: 9, status: "confirmed" },
+  ];
+  const resumoPronto = (idioma: string | null = "pt-BR") => ({ data: { estado: "pronto", emoji: null, idioma, itens: ITENS }, isError: false, error: null, refetch: vi.fn() });
+  type Pedido = [{ token: string; idioma: string }, { onSuccess: (resposta: unknown) => void; onError: (erro: unknown) => void }];
+
+  it("com a tela em outro idioma, pede pelo link a tradução no idioma da tela, e o resumo traduzido entra no lugar", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrir();
+
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledWith({ token: TOKEN, idioma: "en" }, expect.anything());
+    expect(duble.traduzirResumoDaDona.mutate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("traducao-do-resumo")).toHaveTextContent("traduzindo en {F2} envia a proposta | Renovar o contrato");
+
+    const [, { onSuccess }] = duble.traduzirResumo.mutate.mock.calls[0] as Pedido;
+    act(() => onSuccess({
+      estado: "pronta", idioma: "en", mapa: {},
+      itens: [{ ...ITENS[0], text: "{F2} sends the proposal" }, { ...ITENS[1], text: "Renew the contract" }],
+    }));
+    expect(screen.getByTestId("traducao-do-resumo")).toHaveTextContent("pronta en {F2} sends the proposal | Renew the contract");
+  });
+
+  it("com a tela no idioma do resumo, não pede nada", () => {
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue(resumoPronto("pt-BR"));
+    abrir();
+    expect(duble.traduzirResumo.mutate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("traducao-do-resumo")).toHaveTextContent("original pt-BR");
+  });
+
+  it("sem resumo pronto, nem pede nem oferece a escolha do idioma", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(duble.traduzirResumo.mutate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("traducao-do-resumo")).toHaveTextContent("inativa");
+  });
+
+  it("o mapa mental recebe a mesma tradução; o mapa que avisa os rótulos pede de novo pelo link, e os rótulos chegam traduzidos", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrir();
+    const [, { onSuccess }] = duble.traduzirResumo.mutate.mock.calls[0] as Pedido;
+    act(() => onSuccess({ estado: "pronta", idioma: "en", mapa: {}, itens: ITENS }));
+    fireEvent.click(screen.getByRole("button", { name: "Mind map" }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Prazos");
+
+    fireEvent.click(screen.getByRole("button", { name: "rótulos do mapa" }));
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(2);
+    expect(duble.traduzirResumo.mutate.mock.calls[1][0]).toEqual({ token: TOKEN, idioma: "en" });
+    const [, segundo] = duble.traduzirResumo.mutate.mock.calls[1] as Pedido;
+    act(() => segundo.onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines" }, itens: ITENS }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
   });
 });

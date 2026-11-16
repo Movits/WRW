@@ -9,8 +9,8 @@ import { recalculatePrivateMatches } from "../match-service";
 import { ALLOWED_MEETING_AUDIO_TYPES, decodeMeetingAudio } from "../meeting-service";
 import { registrarConsumoDeMinutos, resumoDeMinutos } from "../minutos-de-reuniao";
 import {
-  confirmarPendencia, gravarPendencias, ignorarPendencia, interpretarComplemento, listarPendencias,
-  PendenciaNaoEncontrada, pendenciasDaProposta, retratoDoContato, semRepeticao, ValorInvalido,
+  confirmarPendencia, gravarPendencias, identificacaoDoContato, ignorarPendencia, interpretarComplemento, listarPendencias,
+  PendenciaNaoEncontrada, pendenciasDaProposta, retratoDoContato, semRepeticao, ValorInvalido, type Identificacao,
 } from "../network-extracao";
 import { resumoDoNetworkInteligente } from "../network-inteligente";
 import { garantirCodigosAnonimos } from "../network-codigo-anonimo";
@@ -91,9 +91,9 @@ export const MENSAGEM_INTERPRETACAO_FALHOU = "Não foi possível interpretar as 
  * um ECONNREFUSED aqui é do fetch ao provedor, e `ehErroDeBancoIndisponivel`
  * o confundiria com queda do banco — por isso não há relançamento para ela.
  */
-async function interpretarOuFalharComFraseNeutra(fonte: string, nomeDoContato: string) {
+async function interpretarOuFalharComFraseNeutra(fonte: string, nomeDoContato: string, identificacao: Identificacao) {
   try {
-    return await interpretarComplemento(fonte, { nomeDoContato });
+    return await interpretarComplemento(fonte, { nomeDoContato, identificacao });
   } catch (erro) {
     if (erro instanceof TRPCError) throw erro;
     console.warn("[Network Inteligente] a interpretação falhou:", erro instanceof Error ? erro.message.slice(0, 300) : erro);
@@ -251,7 +251,9 @@ export const networkInteligenteRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { db, retrato } = await exigirContatoDaDona(ctx.user.openId, input.contactId);
       reservarComplemento(ctx.user.openId);
-      const proposta = await interpretarOuFalharComFraseNeutra(input.texto, retrato.fullName);
+      // A empresa que a reunião deu ao contato e ainda espera a dona também não entra no item (revisão da IA3).
+      const identificacao = await identificacaoDoContato(db, ctx.user.openId, retrato);
+      const proposta = await interpretarOuFalharComFraseNeutra(input.texto, retrato.fullName, identificacao);
       const linhas = semRepeticao(pendenciasDaProposta(proposta), retrato);
       const criadas = await gravarPendencias(db, { ownerId: ctx.user.openId, origem: "texto", contactId: input.contactId, linhas });
       return { pendenciasCriadas: criadas };
@@ -297,7 +299,8 @@ export const networkInteligenteRouter = router({
       if (!transcricaoCabeNaDuracao(transcricao, input.durationSeconds)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "O áudio é mais longo do que a duração informada. Grave de novo, com até 2 minutos." });
       }
-      const proposta = await interpretarOuFalharComFraseNeutra(transcricao, retrato.fullName);
+      const identificacao = await identificacaoDoContato(db, ctx.user.openId, retrato);
+      const proposta = await interpretarOuFalharComFraseNeutra(transcricao, retrato.fullName, identificacao);
       await registrarConsumoDeMinutos(db, {
         ownerId: ctx.user.openId, origem: "voz", referencia: crypto.randomUUID(), segundos: input.durationSeconds,
       });

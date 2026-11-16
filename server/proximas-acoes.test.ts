@@ -312,12 +312,30 @@ describe("a reunião que sai: as ações se soltam", () => {
     expect(fonte).toContain("if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId, false);");
   });
 
-  it("a fila do resumo, ao trocar os itens, solta antes as ações presas a eles, na transação dela, com a reunião já travada", () => {
+  it("a fila do resumo, ao trocar os itens, solta antes só as ações dos itens que saem, na transação dela, com a reunião já travada", () => {
     const fonte = readFileSync(join(__dirname, "fila-do-resumo.ts"), "utf8");
     const corpo = fonte.slice(fonte.indexOf("async function gravarResumo"), fonte.indexOf("export async function rodarUmaVez"));
-    const soltar = corpo.indexOf("await soltarAcoesDaReuniao(tx, alvo.ownerId, alvo.meetingId, false, agora);");
+    // O resumo refeito (H4d) guarda o item confirmado, o feito e o da dona: a
+    // ação deles fica presa. Soltar todas faria a leitura seguinte criar outra
+    // ação para o mesmo item.
+    const soltar = corpo.indexOf("await soltarAcoesDaReuniao(tx, alvo.ownerId, alvo.meetingId, false, agora, queSaem);");
     expect(soltar).toBeGreaterThan(corpo.indexOf(".from(meetings)"));
+    expect(soltar).toBeGreaterThan(corpo.indexOf("const queSaem"));
     expect(soltar).toBeLessThan(corpo.indexOf("tx.delete(meetingSummaryItems)"));
+    expect(corpo.match(/soltarAcoesDaReuniao\(/g)).toHaveLength(1);
+  });
+
+  it("soltar só as ações de alguns itens: o WHERE leva a lista, e a lista vazia não lê nada", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", texto: "{F2} liga", detalhe: null, responsavel: null, itemId: "item-1" }]);
+    estado.tabelas.set(schema.meetings, [{ speakerNames: { F2: "Carla" } }]);
+    expect(await servico.soltarAcoesDaReuniao(db, DONA, "reuniao-1", false, 9, ["item-1", "item-2"])).toBe(1);
+    const [leitura] = de("select", schema.proximasAcoes);
+    expect(leitura.sql).toBe("(`proximas_acoes`.`owner_id` = ? and `proximas_acoes`.`meeting_id` = ? and `proximas_acoes`.`item_id` in (?, ?))");
+    expect(leitura.params).toEqual([DONA, "reuniao-1", "item-1", "item-2"]);
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ texto: "Carla liga", itemId: null, updatedAt: 9 });
+    estado.operacoes = [];
+    expect(await servico.soltarAcoesDaReuniao(db, DONA, "reuniao-1", false, 9, [])).toBe(0);
+    expect(estado.operacoes).toEqual([]);
   });
 });
 
@@ -344,7 +362,7 @@ describe("a lista: o que vai à tela", () => {
     expect(acoes).toEqual([{
       id: "acao-1", texto: "{F2} envia a proposta", detalhe: null, responsavel: "{F2}", prazo: "2026-11-20", prazoDito: "até sexta",
       origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta", google: "ok", createdAt: 1, updatedAt: 2,
-      reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1" },
+      reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1", itemDaDona: false },
       vozes: { F2: "Carla" }, contato: null, contatoSugerido: { id: 7, nome: "Carla Souza" },
     }]);
     // As abertas, da dona.
@@ -475,17 +493,42 @@ describe("o que a dona faz na lista", () => {
     await expect(servico.marcarProximaAcaoFeita(DONA, "acao-1", true)).rejects.toEqual(erro(MENSAGEM_ACAO_NAO_ENCONTRADA));
   });
 
-  it("apagar a ação presa ao item trava a reunião, devolve o item a 'para conferir' e apaga a ação, numa transação", async () => {
+  it("apagar a ação presa ao item trava a reunião e o item, devolve o item a 'para conferir' e apaga a ação, numa transação", async () => {
     estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: "item-1", meetingId: "reuniao-1" }]);
+    estado.tabelas.set(schema.meetingSummaryItems, [{ status: "confirmed", origin: "ai", editedAt: null, done: true, doneAt: 5 }]);
     await servico.apagarProximaAcao(DONA, "acao-1");
     expect(estado.transacoes).toBe(1);
     expect(de("select", schema.meetings)[0]).toMatchObject({ travada: true, params: ["reuniao-1", DONA] });
+    // O item lido travado, depois da reunião: o estado dele decide para onde ele vai.
+    expect(de("select", schema.meetingSummaryItems)[0]).toMatchObject({ travada: true, params: ["item-1", DONA] });
     const [item] = de("update", schema.meetingSummaryItems);
     expect(item.valores).toMatchObject({ status: "pending", decidedAt: null, done: false, doneAt: null });
-    // Só o item ainda confirmado, da dona.
-    expect(item.sql).toBe("(`meeting_summary_items`.`id` = ? and `meeting_summary_items`.`owner_id` = ? and `meeting_summary_items`.`status` = ?)");
-    expect(item.params).toEqual(["item-1", DONA, "confirmed"]);
+    expect(item.sql).toBe("(`meeting_summary_items`.`id` = ? and `meeting_summary_items`.`owner_id` = ?)");
+    expect(item.params).toEqual(["item-1", DONA]);
     expect(de("delete", schema.proximasAcoes)[0].params).toEqual(["acao-1", DONA]);
+  });
+
+  // O item que a dona escreveu (H4f) não volta a "para conferir": vai aos
+  // ignorados com o estado de antes, e o Desfazer do resumo o devolve.
+  it.each([
+    ["acrescentado à mão", { origin: "owner", editedAt: null }],
+    ["da IA, editado", { origin: "ai", editedAt: 50 }],
+  ])("apagar a ação do item da dona (%s) o leva aos ignorados, com o estado de antes", async (_nome, quem) => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: "item-1", meetingId: "reuniao-1" }]);
+    estado.tabelas.set(schema.meetingSummaryItems, [{ status: "confirmed", done: true, doneAt: 5, ...quem }]);
+    await servico.apagarProximaAcao(DONA, "acao-1");
+    expect(de("update", schema.meetingSummaryItems)[0].valores).toMatchObject({
+      status: "ignored", done: false, doneAt: null, statusBeforeIgnore: "confirmed", doneAtBeforeIgnore: 5,
+    });
+    expect(de("delete", schema.proximasAcoes)).toHaveLength(1);
+  });
+
+  it("apagar a ação de um item que já não está confirmado não mexe no item", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: "item-1", meetingId: "reuniao-1" }]);
+    estado.tabelas.set(schema.meetingSummaryItems, [{ status: "pending", origin: "ai", editedAt: null, done: false, doneAt: null }]);
+    await servico.apagarProximaAcao(DONA, "acao-1");
+    expect(de("update", schema.meetingSummaryItems)).toEqual([]);
+    expect(de("delete", schema.proximasAcoes)).toHaveLength(1);
   });
 
   it("apagar a manual: só a ação, sem trava nem item", async () => {

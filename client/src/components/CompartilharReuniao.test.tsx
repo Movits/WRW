@@ -340,3 +340,10 @@ describe("o painel anuncia o que mudou e não perde o foco", () => {
     expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveAttribute("dir", "ltr");
   });
 });
+
+describe("o que o link mostra do resumo (H4f)", () => {
+  it("antes de ligar, o painel diz que o link mostra o resumo como a dona o deixar, com o que ela escrever, e o mapa mental", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByText("O link mostra também o resumo como você o deixar, com os itens que você escrever ou editar, e o mapa mental.")).toBeInTheDocument();
+  });
+});

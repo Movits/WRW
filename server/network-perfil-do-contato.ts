@@ -24,11 +24,11 @@ import { ACOES_NO_PERFIL_DO_CONTATO, proximasAcoesDoContato } from "./proximas-a
  *
  * A linha do tempo é MONTADA a partir do que já existe — reuniões, contextos
  * (onde se conheceram), itens de tenho/preciso com a data em que entraram,
- * confirmações de Quem Sou vindas da IA, a disponibilização, as conexões
- * registradas com suas etapas e as próximas ações (a anotada e a feita). Sem
- * tabela nova de eventos: o que não deixou rastro (remoção de um item, a ação
- * desmarcada ou desligada do contato, por exemplo) não aparece, e o relatório
- * diz isso.
+ * confirmações de Quem Sou vindas da IA (e, à parte, as de cargo e empresa,
+ * que não são Quem Sou), a disponibilização, as conexões registradas com suas
+ * etapas e as próximas ações (a anotada e a feita). Sem tabela nova de
+ * eventos: o que não deixou rastro (remoção de um item, a ação desmarcada ou
+ * desligada do contato, por exemplo) não aparece, e o relatório diz isso.
  */
 
 export type EventoDaLinhaDoTempo =
@@ -37,6 +37,7 @@ export type EventoDaLinhaDoTempo =
   | { tipo: "contexto"; em: number; nome: string; data: string | null }
   | { tipo: "tenho_adicionado" | "preciso_adicionado"; em: number; valor: string }
   | { tipo: "quem_sou_confirmado"; em: number; campo: string; valor: string; origem: string }
+  | { tipo: "apoio_confirmado"; em: number; campo: "cargo" | "empresa"; valor: string; origem: string }
   | { tipo: "disponibilidade"; em: number; disponivel: boolean }
   | { tipo: "conexao_registrada"; em: number; conexaoId: string; origem: string }
   | { tipo: "conexao_etapa"; em: number; conexaoId: string; etapa: "apresentacao" | "negociacao" | "fechada" | "descartada" }
@@ -62,8 +63,13 @@ export function montarLinhaDoTempo(dados: {
   for (const t of dados.tenho) eventos.push({ tipo: "tenho_adicionado", em: Number(t.createdAt), valor: t.label });
   for (const p of dados.preciso) eventos.push({ tipo: "preciso_adicionado", em: Number(p.createdAt), valor: p.label });
   for (const c of dados.confirmacoes) {
-    // Tenho/preciso confirmados já aparecem pelo item gravado; aqui só o Quem Sou.
+    // Tenho/preciso confirmados já aparecem pelo item gravado; aqui o Quem Sou, e cargo e empresa à parte.
     if (c.decididaEm === null || c.campo === "tenho" || c.campo === "preciso") continue;
+    // Cargo e empresa nunca são QUEM SOU (item 6 da spec): têm evento próprio (revisão da IA3).
+    if (c.campo === "cargo" || c.campo === "empresa") {
+      eventos.push({ tipo: "apoio_confirmado", em: Number(c.decididaEm), campo: c.campo, valor: c.valor, origem: c.origem });
+      continue;
+    }
     eventos.push({ tipo: "quem_sou_confirmado", em: Number(c.decididaEm), campo: c.campo, valor: c.valor, origem: c.origem });
   }
   if (dados.contato.disponibilidadeAlteradaEm !== null) {

@@ -271,11 +271,16 @@ describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
   // exclusão esperar o COMMIT dela, e a ação que acabou de nascer sai solta
   // junto com as outras. Sem a trava, a exclusão soltaria as ações antes de a
   // nova existir, e ela ficaria com a reunião, o item e o trecho apagados.
+  // Decidir e marcar leem o item travado depois da reunião e do resumo (o
+  // estado dele decide o Desfazer, H4f): param ali. Confirmar todos para no
+  // UPDATE dos itens.
+  const NA_LEITURA_DO_ITEM = "%from `meeting_summary_items`%for update%";
+  const NO_UPDATE_DOS_ITENS = "%update `meeting_summary_items` set%";
   it.each([
-    ["decidir (confirmar o item)", (itemId: string) => resumo.decidirItemDoResumo(DONA, itemId, "confirmed")],
-    ["marcar a ação feita", (itemId: string) => resumo.marcarAcaoFeita(DONA, itemId, true)],
-    ["confirmar todos", (_itemId: string, meetingId: string) => resumo.confirmarItensDoResumo(DONA, meetingId)],
-  ])("%s com a exclusão no meio: a exclusão espera a decisão e solta a ação nova, sem reunião, item nem trecho", async (_nome, decidir) => {
+    ["decidir (confirmar o item)", NA_LEITURA_DO_ITEM, (itemId: string) => resumo.decidirItemDoResumo(DONA, itemId, "confirmed")],
+    ["marcar a ação feita", NA_LEITURA_DO_ITEM, (itemId: string) => resumo.marcarAcaoFeita(DONA, itemId, true)],
+    ["confirmar todos", NO_UPDATE_DOS_ITENS, (_itemId: string, meetingId: string) => resumo.confirmarItensDoResumo(DONA, meetingId)],
+  ])("%s com a exclusão no meio: a exclusão espera a decisão e solta a ação nova, sem reunião, item nem trecho", async (_nome, paradaNoItem, decidir) => {
     const banco = await db();
     const { meetingId, ids: [itemId] } = await reuniaoComResumo(
       [{ section: "action", text: "{F2} envia a proposta", assignee: "{F2}" }],
@@ -285,11 +290,11 @@ describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
     let exclusao: Promise<boolean> | undefined;
     await banco.transaction(async tx => {
       // A alavanca: o item preso por esta conexão. A decisão trava a reunião e o
-      // resumo e para no UPDATE do item, ainda com a reunião presa.
+      // resumo e para no item, ainda com a reunião presa.
       await tx.select({ id: meetingSummaryItems.id }).from(meetingSummaryItems).where(eq(meetingSummaryItems.id, itemId)).for("update");
       decisao = decidir(itemId, meetingId);
       decisao.catch(() => {});
-      await esperarParadoNaTrava("%update `meeting_summary_items` set%", "a decisão não parou no item preso por este teste");
+      await esperarParadoNaTrava(paradaNoItem, "a decisão não parou no item preso por este teste");
       exclusao = deletePrivateMeeting(DONA, meetingId);
       exclusao.catch(() => {});
       // Sem o FOR UPDATE da reunião na decisão, a exclusão marcaria 'deleted' na
@@ -303,6 +308,90 @@ describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
     }]);
     expect(await itemPorId(itemId)).toBeUndefined();
   }, 30_000);
+
+  // ── a junção com o pacote do resumo (H4d, H4f) ─────────────────────────────
+
+  it("o refazer que falhou (H4d): 'Confirmar todos' cria as ações, e a leitura completa a que faltar", async () => {
+    const banco = await db();
+    const { meetingId, summaryId, ids: [acaoId, tarefaId, decisaoId] } = await reuniaoComResumo([
+      { section: "action", text: "Enviar a proposta" },
+      { section: "task", subject: "Contrato", text: "Revisar as cláusulas" },
+      { section: "decision", text: "Não renovar" },
+    ]);
+    // A versão anterior segue valendo, e a dona decide sobre ela.
+    await banco.update(meetingSummaries).set({ status: "failed", version: 1, lastError: "RESPOSTA_CORTADA" }).where(eq(meetingSummaries.id, summaryId));
+    await expect(resumo.confirmarItensDoResumo(DONA, meetingId)).resolves.toBe(3);
+    expect((await acoesDa(DONA)).map(acao => acao.itemId).sort()).toEqual([acaoId, tarefaId].sort());
+    expect(await acaoDoItem(decisaoId)).toBeUndefined();
+    // O item confirmado sem ação (a ação apagada por fora) volta na leitura da lista.
+    await banco.delete(proximasAcoes).where(and(eq(proximasAcoes.ownerId, DONA), eq(proximasAcoes.itemId, tarefaId)));
+    await acoes.listarProximasAcoes(DONA, "todas");
+    expect(await acaoDoItem(tarefaId)).toMatchObject({ texto: "Contrato", detalhe: "Revisar as cláusulas" });
+    expect(await acoesDa(DONA)).toHaveLength(2);
+  });
+
+  it("o item que a dona escreveu, pedido de volta a 'para conferir', fica confirmado com a ação dele, o prazo e o contato (H4f)", async () => {
+    const { meetingId } = await reuniaoComResumo([]);
+    const itemId = await resumo.acrescentarItemDoResumo(DONA, meetingId, "action", { texto: "Ligar para o importador", assunto: null, responsavel: null, prazo: null });
+    const acao = await acaoDoItem(itemId);
+    expect(acao).toMatchObject({ texto: "Ligar para o importador", origem: "reuniao", meetingId });
+    await (await db()).update(proximasAcoes).set({ prazo: "2026-11-20" }).where(eq(proximasAcoes.id, acao.id));
+    await expect(resumo.decidirItemDoResumo(DONA, itemId, "pending")).resolves.toEqual({ acaoSaiu: false });
+    expect(await itemPorId(itemId)).toMatchObject({ status: "confirmed" });
+    expect(await acoesDa(DONA)).toMatchObject([{ id: acao.id, itemId, prazo: "2026-11-20" }]);
+    // Ignorar tira a ação; o Desfazer devolve o item confirmado, com a ação de novo.
+    await expect(resumo.decidirItemDoResumo(DONA, itemId, "ignored")).resolves.toEqual({ acaoSaiu: true });
+    expect(await acoesDa(DONA)).toEqual([]);
+    await expect(resumo.decidirItemDoResumo(DONA, itemId, "pending")).resolves.toEqual({ acaoSaiu: false });
+    expect(await itemPorId(itemId)).toMatchObject({ status: "confirmed" });
+    expect(await acoesDa(DONA)).toMatchObject([{ itemId, texto: "Ligar para o importador" }]);
+  });
+
+  it("editar o item no resumo leva o texto novo à ação, campo a campo, sem passar por cima do que a dona mudou na lista (H4f)", async () => {
+    const { ids: [itemId] } = await reuniaoComResumo([{ section: "action", text: "Enviar proposta a {F2}", assignee: "{F2}", due: "sexta" }]);
+    await resumo.decidirItemDoResumo(DONA, itemId, "confirmed");
+    const acao = await acaoDoItem(itemId);
+    // Na Google Agenda (H5c): a edição deixa o evento para trás, e quem chama manda o novo.
+    await (await db()).update(proximasAcoes).set({ google: "ok", updatedAt: 1 }).where(eq(proximasAcoes.id, acao.id));
+    await expect(resumo.editarItemDoResumo(DONA, itemId, { texto: "Enviar a proposta revisada a {F2}", assunto: null, responsavel: "{F2}", prazo: "até sexta" }))
+      .resolves.toEqual({ acaoQueMudou: acao.id });
+    const editada = await acaoDoItem(itemId);
+    expect(editada).toMatchObject({ texto: "Enviar a proposta revisada a {F2}", responsavel: "{F2}", prazoDito: "até sexta", google: "falhou", trecho: acao.trecho });
+    expect(Number(editada.updatedAt)).toBeGreaterThan(1);
+    // A dona reescreveu o texto na lista: a próxima edição do item não o troca, só o que ainda é cópia.
+    await acoes.editarProximaAcao(DONA, acao.id, { texto: "Minha versão" });
+    await resumo.editarItemDoResumo(DONA, itemId, { texto: "Outra versão da IA", assunto: null, responsavel: "Carla", prazo: "até sexta" });
+    expect(await acaoDoItem(itemId)).toMatchObject({ texto: "Minha versão", responsavel: "Carla" });
+    // Salvar sem mudar nada não mexe na ação.
+    await expect(resumo.editarItemDoResumo(DONA, itemId, { texto: "Outra versão da IA", assunto: null, responsavel: "Carla", prazo: "até sexta" }))
+      .resolves.toEqual({ acaoQueMudou: null });
+  });
+
+  it("editar um item pendente o confirma, e a ação nasce com o texto novo; acrescentar uma tarefa já cria a ação (H4f)", async () => {
+    const { meetingId, ids: [itemId] } = await reuniaoComResumo([{ section: "action", text: "Texto da IA" }]);
+    await resumo.editarItemDoResumo(DONA, itemId, { texto: "Texto da dona", assunto: null, responsavel: null, prazo: null });
+    expect(await acaoDoItem(itemId)).toMatchObject({ texto: "Texto da dona" });
+    const tarefa = await resumo.acrescentarItemDoResumo(DONA, meetingId, "task", { texto: "Revisar o contrato", assunto: "Contrato", responsavel: null, prazo: null });
+    expect(await acaoDoItem(tarefa)).toMatchObject({ texto: "Contrato", detalhe: "Revisar o contrato" });
+    // A decisão acrescentada não vira ação.
+    const decisao = await resumo.acrescentarItemDoResumo(DONA, meetingId, "decision", { texto: "Fechar com a Vinícola", assunto: null, responsavel: null, prazo: null });
+    expect(await acaoDoItem(decisao)).toBeUndefined();
+  });
+
+  it("apagar na lista a ação do item que a dona escreveu leva o item aos ignorados, e o Desfazer o devolve com a ação (H4f)", async () => {
+    const { meetingId } = await reuniaoComResumo([]);
+    const itemId = await resumo.acrescentarItemDoResumo(DONA, meetingId, "action", { texto: "Reservar a sala", assunto: null, responsavel: null, prazo: null });
+    const acao = await acaoDoItem(itemId);
+    expect((await acoes.listarProximasAcoes(DONA, "todas")).acoes[0].reuniao).toMatchObject({ itemId, itemDaDona: true });
+    await acoes.apagarProximaAcao(DONA, acao.id);
+    expect(await itemPorId(itemId)).toMatchObject({ status: "ignored", statusBeforeIgnore: "confirmed" });
+    // A leitura não a recria: o item não está confirmado.
+    await acoes.listarProximasAcoes(DONA, "todas");
+    expect(await acoesDa(DONA)).toEqual([]);
+    await resumo.decidirItemDoResumo(DONA, itemId, "pending");
+    expect(await itemPorId(itemId)).toMatchObject({ status: "confirmed" });
+    expect(await acoesDa(DONA)).toMatchObject([{ itemId, texto: "Reservar a sala" }]);
+  });
 
   it("a decisão espera a exclusão que marcou a reunião (a trava da linha) e, depois dela, é 'não encontrada' e não cria ação", async () => {
     const banco = await db();
