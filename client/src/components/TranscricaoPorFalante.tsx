@@ -1,5 +1,5 @@
 import { NOME_DO_FALANTE_MAX } from "@shared/const";
-import { useMemo, useState, type ReactElement } from "react";
+import { useId, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 
@@ -58,16 +58,28 @@ function comDestaque(texto: string, termo: string) {
  * começou (clicar pula o player para ali), a busca com destaque e o tempo de
  * fala de cada voz. O trecho que não chegou aparece como tal.
  */
-export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", nomes = {}, aoNomear }: {
+export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", nomes = {}, aoNomear, nomeNoLink }: {
   segmentos: SegmentoDaTela[];
   aoIrPara?: (segundo: number) => void;
   termoInicial?: string;
   /** H3: os nomes que a dona deu às vozes ({ F1: "Ana" }). */
-  nomes?: Record<string, string>;
+  nomes?: Readonly<Record<string, string>>;
   /** Só na tela da dona: dar ou tirar (nome vazio) o nome de uma voz. */
   aoNomear?: (falante: string, nome: string) => Promise<unknown>;
+  /**
+   * Só na tela da dona, com o link aberto ligado (H3b): o campo do nome diz se
+   * o nome sai também pelo link. "aparece": o link foi ligado com a
+   * confirmação que fala dos nomes. "naoAparece": o link é da confirmação
+   * antiga, e a dica diz como mostrar o nome (desligar e compartilhar de novo).
+   * Sem link, nenhuma dica.
+   */
+  nomeNoLink?: "aparece" | "naoAparece";
 }) {
   const { t } = useTranslation();
+  const idDaDicaDoLink = useId();
+  const dicaDoLink = nomeNoLink === "aparece" ? t("meetings.speakerNameLinkHint")
+    : nomeNoLink === "naoAparece" ? t("meetings.speakerNameRelinkHint")
+    : null;
   const [termo, setTermo] = useState(termoInicial);
   const busca = termo.trim();
   const visiveis = useMemo(
@@ -102,10 +114,15 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", 
             {vozes.map(v => (
               <li key={v.falante} className="flex items-center gap-3 text-sm text-white/75">
                 {editando === v.falante
-                  ? <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void salvarNome(v.falante); }} onKeyDown={e => { if (e.key === "Escape") setEditando(null); }}>
-                      <input autoFocus value={rascunho} onChange={e => setRascunho(e.target.value)} maxLength={NOME_DO_FALANTE_MAX} aria-label={t("meetings.speakerNameLabel", { n: numeroDoFalante(v.falante) })} placeholder={t("meetings.speakerNamePlaceholder")} className="w-36 rounded-lg bg-white/5 border border-white/15 px-2 py-1 text-sm outline-none focus:border-amber-300"/>
-                      <button type="submit" disabled={salvando} className="text-xs font-semibold text-amber-200 disabled:opacity-50">{t("meetings.saveSpeakerName")}</button>
-                    </form>
+                  ? <div className="flex flex-col gap-1">
+                      <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void salvarNome(v.falante); }} onKeyDown={e => { if (e.key === "Escape") setEditando(null); }}>
+                        <input autoFocus value={rascunho} onChange={e => setRascunho(e.target.value)} maxLength={NOME_DO_FALANTE_MAX} aria-label={t("meetings.speakerNameLabel", { n: numeroDoFalante(v.falante) })} aria-describedby={dicaDoLink ? idDaDicaDoLink : undefined} placeholder={t("meetings.speakerNamePlaceholder")} className="w-36 rounded-lg bg-white/5 border border-white/15 px-2 py-1 text-sm outline-none focus:border-amber-300"/>
+                        <button type="submit" disabled={salvando} className="text-xs font-semibold text-amber-200 disabled:opacity-50">{t("meetings.saveSpeakerName")}</button>
+                      </form>
+                      {/* A confirmação nova cobre o nome dado depois de ligar o link: a dica diz à dona onde ele
+                          aparece. Com o link da confirmação antiga, diz que quem tem o link não o vê, e como mostrá-lo. */}
+                      {dicaDoLink && <p id={idDaDicaDoLink} className="text-xs text-amber-100/70">{dicaDoLink}</p>}
+                    </div>
                   : aoNomear
                     ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="w-24 shrink-0 truncate text-left underline decoration-dotted underline-offset-4 hover:text-white">{rotulo(v.falante)}</button>
                     : <span className="w-24 shrink-0 truncate">{rotulo(v.falante)}</span>}

@@ -11,7 +11,10 @@ import ReuniaoAberta from "./ReuniaoAberta";
  * o teste combina, e `traduzir` registra o mutate e as opções. O resumo
  * guardado e o "Pergunte à reunião" viram marcadores que mostram o que
  * receberam (o comportamento deles está em components/ResumoGuardado.test.tsx e
- * components/ReuniaoComIA.test.tsx).
+ * components/ReuniaoComIA.test.tsx). Um teste monta o "Pergunte à reunião" de
+ * verdade, para provar o elo da página com ele: as vozes com os nomes que o
+ * link recebeu (H3b), "Falante n" na voz sem nome, e o "▶" que leva o player
+ * da barra ao ponto.
  */
 
 type OpcoesDaConsulta = {
@@ -33,13 +36,25 @@ const duble = vi.hoisted(() => ({
   // A tradução do resumo guardado (H11): a página pede pelo link; a mutação da dona nunca é chamada aqui.
   traduzirResumo: { mutate: vi.fn() },
   traduzirResumoDaDona: { mutate: vi.fn() },
+  // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
+  propsDaPergunta: null as Record<string, unknown> | null,
+  propsDoResumo: null as Record<string, unknown> | null,
+  // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
+  // resposta da pergunta pelo link daqui (o `data` da mutação).
+  perguntaDeVerdade: false,
+  respostaDaPergunta: undefined as unknown,
 }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     // A tradução do resumo relê o resumo quando o servidor diz que ele mudou.
     useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } }),
-    meetings: { traduzirResumo: { useMutation: () => duble.traduzirResumoDaDona } },
+    // O "Pergunte à reunião" de verdade pede as duas mutações de pergunta a
+    // cada render; a tradução do resumo da dona nunca é chamada aqui.
+    meetings: {
+      traduzirResumo: { useMutation: () => duble.traduzirResumoDaDona },
+      perguntar: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+    },
     reuniaoAberta: {
       ver: {
         useQuery: (entrada: unknown, opcoes: OpcoesDaConsulta) => {
@@ -55,23 +70,36 @@ vi.mock("@/lib/trpc", () => ({
           return duble.resumoGuardado(entrada);
         },
       },
+      perguntar: { useMutation: () => ({ data: duble.respostaDaPergunta, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
     },
   },
 }));
-vi.mock("@/components/ReuniaoComIA", () => ({
-  PergunteAReuniao: ({ token }: { token: string }) => <div data-testid="pergunte">{token}</div>,
-}));
+// O marcador da pergunta mostra o token, e o "▶" de uma citação chama o
+// aoIrPara da página com 615 s (10:15). Com `perguntaDeVerdade`, a página
+// monta o componente de verdade.
+vi.mock("@/components/ReuniaoComIA", async importOriginal => {
+  const real = await importOriginal<typeof import("@/components/ReuniaoComIA")>();
+  return {
+    PergunteAReuniao: (props: { token: string; aoIrPara?: (segundo: number) => void }) => {
+      duble.propsDaPergunta = props;
+      if (duble.perguntaDeVerdade) return <real.PergunteAReuniao {...props}/>;
+      return <div data-testid="pergunte">{props.token}{props.aoIrPara && <button type="button" onClick={() => props.aoIrPara?.(615)}>▶ da pergunta</button>}</div>;
+    },
+  };
+});
 // O marcador do resumo mostra o token e o estado que recebeu, e o "▶" dele
 // chama o aoIrPara da página com 610 s (10:10). A tradução (H11) que a página
 // passa aparece em outro marcador, com os textos que ela poria no resumo.
 type TraducaoRecebida = { estado: string; idioma: string; aplicar: (dados: unknown) => { itens?: Array<{ text: string }> } | undefined };
 vi.mock("@/components/ResumoGuardado", () => ({
-  ResumoGuardado: ({ token, consulta, aoIrPara, traducao }: { token: string; consulta: { data?: { estado: string } }; aoIrPara?: (segundo: number) => void; traducao?: TraducaoRecebida }) => (
-    <>
+  ResumoGuardado: (props: { token: string; consulta: { data?: { estado: string } }; nomes?: Record<string, string>; aoIrPara?: (segundo: number) => void; traducao?: TraducaoRecebida }) => {
+    duble.propsDoResumo = props;
+    const { token, consulta, aoIrPara, traducao } = props;
+    return <>
       <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>
       <div data-testid="traducao-do-resumo">{traducao?.estado} {traducao?.idioma} {traducao?.aplicar(consulta.data)?.itens?.map(item => item.text).join(" | ")}</div>
-    </>
-  ),
+    </>;
+  },
 }));
 // O mapa mental (H10) vira um marcador que mostra o que recebeu; o
 // comportamento dele está em components/MapaMental.test.tsx.
@@ -123,6 +151,10 @@ beforeEach(() => {
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
   duble.traduzirResumo = { mutate: vi.fn() };
   duble.traduzirResumoDaDona = { mutate: vi.fn() };
+  duble.propsDaPergunta = null;
+  duble.propsDoResumo = null;
+  duble.perguntaDeVerdade = false;
+  duble.respostaDaPergunta = undefined;
 });
 afterEach(async () => {
   await act(async () => { await i18n.changeLanguage("pt-BR"); });
@@ -136,7 +168,8 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText("REUNIÃO COMPARTILHADA")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Reunião com a Ana" })).toBeInTheDocument();
     expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
-    expect(screen.getByText(/01:35/)).toBeInTheDocument();
+    // A linha da duração; o 01:35 aparece também na barra do player (o total, D1b).
+    expect(screen.getByText(/Duração: 01:35/)).toBeInTheDocument();
     expect(screen.getByTestId("resumo")).toHaveTextContent(`${TOKEN} sem_resumo`);
     expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
     fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
@@ -208,6 +241,14 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText(/passou dos 30 dias/)).toBeInTheDocument();
   });
 
+  it("gravação vencida que ainda não saiu do bucket: diz que está saindo, não que 'foi apagada'", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: false, gravacaoSaindo: true }));
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(screen.getByText(/O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
+    expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
+  });
+
   it("sem transcrição: a IA não aparece e a tela diz que a transcrição não está disponível", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: null }));
     abrir();
@@ -234,6 +275,23 @@ describe("Reunião aberta pelo link", () => {
     expect(barra.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
     expect(container.querySelector("main")!.className).toContain("pb-36");
     fireEvent.error(barra.querySelector("audio")!);
+    expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
+  });
+
+  it("em partes, a do meio que não carrega pula para a seguinte, e o aviso segue na barra quando a seguinte carrega (D1b)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const parte = (seq: number) => ({ seq, url: `/reuniao-aberta/${TOKEN}/audio?parte=${seq}`, mimeType: "audio/mp4", inicioSegundos: seq * 600, duracaoSegundos: 600 });
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: { ...VISTA.gravacao, durationSeconds: 1800, partes: [parte(0), parte(1), parte(2)] } }));
+    abrir();
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio")!;
+    fireEvent.click(within(barra).getByRole("button", { name: "Tocar" }));
+    fireEvent.ended(audio);
+    fireEvent.error(audio);
+    expect(audio.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=2`);
+    fireEvent.loadedMetadata(audio);
+    fireEvent.loadedData(audio);
+    // Sem o aviso, o salto de 10 a 20 min ficaria sem explicação.
     expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
   });
 
@@ -362,10 +420,18 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
     expect(screen.getByText("Escolha o idioma em que você quer ler a transcrição.")).toBeInTheDocument();
   });
 
+  it("gravação de mais de 1 h mostra a duração em H:MM:SS, como no detalhe da dona (G13a)", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: { ...VISTA.gravacao, durationSeconds: 4_500 } }));
+    abrir();
+    // A linha da duração; o 1:15:00 aparece também na barra do player (o total, D1b).
+    expect(screen.getByText(/Duração: 1:15:00/)).toBeInTheDocument();
+    expect(screen.queryByText(/75:00/)).not.toBeInTheDocument();
+  });
+
   it("a linha da gravação tem um separador só", () => {
     duble.ver.mockReturnValue(pronta());
     abrir();
-    const linha = screen.getByText(/01:35/);
+    const linha = screen.getByText(/Duração: 01:35/);
     expect(linha.textContent).not.toMatch(/·\s*·/);
   });
 });
@@ -445,6 +511,106 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     abrir();
     expect(screen.getByTestId("resumo")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "▶ do resumo" })).not.toBeInTheDocument();
+  });
+
+  it("o '▶' de uma citação do Pergunte à reunião leva o mesmo player da barra ao ponto, na parte certa (H6)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "▶ da pergunta" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+  });
+
+  it("com o 'Pergunte à reunião' de verdade: a resposta leva os nomes que o link recebeu, a voz sem nome é 'Falante n', e o '▶' da citação leva o player da barra à parte certa (H6, H3b)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.perguntaDeVerdade = true;
+    duble.respostaDaPergunta = {
+      respondida: true,
+      resposta: "{F1} propôs a entrega na sexta, e {F2} concordou.",
+      citacoes: [{ trecho: "Combinamos a entrega na sexta", inicioSegundos: 615 }],
+      trecho: "Combinamos a entrega na sexta",
+    };
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      vozes: { F1: "Ana" },
+      gravacao: { ...VISTA.gravacao, partes: [
+        { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
+        { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
+      ] },
+    }));
+    abrir();
+    expect(screen.getByText("Ana propôs a entrega na sexta, e Falante 2 concordou.")).toBeInTheDocument();
+    expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:15" }));
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
+  });
+
+  it("sem gravação, a pergunta não ganha o '▶', e segue pedindo pelo token, nunca pela reunião da dona", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: true }));
+    abrir();
+    expect(screen.getByTestId("pergunte")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "▶ da pergunta" })).not.toBeInTheDocument();
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN });
+    expect(duble.propsDaPergunta).not.toHaveProperty("meetingId");
+  });
+});
+
+describe("Reunião aberta pelo link — os nomes das vozes (H3b)", () => {
+  const COM_FALAS = {
+    ...VISTA,
+    transcricao: { texto: "Oi. Tchau.", idioma: "pt-BR", segmentos: [
+      { inicio: 1, fim: 2, falante: "F1", texto: "Oi." },
+      { inicio: 3, fim: 5, falante: "F2", texto: "Tchau." },
+    ] },
+  };
+
+  // Os nomes se conferem com toEqual, nunca com toMatchObject: no toMatchObject,
+  // `nomes: {}` casa com qualquer mapa, até com { F1: "Ana" }, e com undefined.
+  it("os nomes que o link recebeu chegam ao resumo, à pergunta e à transcrição; a voz sem nome segue 'Falante n'", () => {
+    duble.ver.mockReturnValue(pronta({ ...COM_FALAS, vozes: { F1: "Ana" } }));
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ token: TOKEN });
+    expect(duble.propsDoResumo?.nomes).toEqual({ F1: "Ana" });
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN });
+    expect(duble.propsDaPergunta?.nomes).toEqual({ F1: "Ana" });
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Ana")).toBeInTheDocument();
+    expect(within(falas).getByText("Falante 2")).toBeInTheDocument();
+    expect(within(falas).queryByText("Falante 1")).not.toBeInTheDocument();
+    // O tempo de fala também leva o nome; e quem tem o link não renomeia nada.
+    const tempoDeFala = screen.getByText("Tempo de fala").parentElement!;
+    expect(tempoDeFala).toHaveTextContent("Ana");
+    expect(tempoDeFala).toHaveTextContent("Falante 2");
+    expect(screen.queryByTitle("Dar nome a esta voz")).not.toBeInTheDocument();
+  });
+
+  it("link ligado com a confirmação antiga: o servidor manda vozes vazio, e toda voz é 'Falante n'", () => {
+    duble.ver.mockReturnValue(pronta({ ...COM_FALAS, vozes: {} }));
+    abrir();
+    expect(duble.propsDoResumo?.nomes).toEqual({});
+    expect(duble.propsDaPergunta?.nomes).toEqual({});
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Falante 1")).toBeInTheDocument();
+    expect(within(falas).getByText("Falante 2")).toBeInTheDocument();
+  });
+
+  it("a resposta de um servidor de antes da H3b, sem o campo, também mostra 'Falante n', sem quebrar a página", () => {
+    duble.ver.mockReturnValue(pronta(COM_FALAS));
+    abrir();
+    // O mapa vazio, e não undefined: a página põe o `?? {}` antes de passar adiante.
+    expect(duble.propsDoResumo?.nomes).toEqual({});
+    expect(duble.propsDaPergunta?.nomes).toEqual({});
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
   });
 });
 

@@ -53,15 +53,29 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
 
 const {
   decodeMeetingAudio,
+  duracaoConferidaDoAudio,
   extractMeetingData,
   JANELA_DA_EXTRACAO,
   JANELA_DA_TRADUCAO,
   juntarExtracoes,
   MAX_MEETING_AUDIO_BYTES,
   MAX_MEETING_DURATION_SECONDS,
+  MENSAGEM_REUNIAO_LONGA_DEMAIS,
   MEETING_TRANSCRIPT_LANGUAGES,
   translatePrivateMeetingTranscript,
 } = await import("./meeting-service");
+const { ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
+
+/** Um WAV mínimo de `segundos` (mono, 8 bits, 1 kHz): a duração é medida nos bytes. */
+function wavDe(segundos: number): Buffer {
+  const dados = Buffer.alloc(segundos * 1000, 128);
+  const cabecalho = Buffer.alloc(44);
+  cabecalho.write("RIFF", 0); cabecalho.writeUInt32LE(36 + dados.length, 4); cabecalho.write("WAVE", 8);
+  cabecalho.write("fmt ", 12); cabecalho.writeUInt32LE(16, 16); cabecalho.writeUInt16LE(1, 20); cabecalho.writeUInt16LE(1, 22);
+  cabecalho.writeUInt32LE(1000, 24); cabecalho.writeUInt32LE(1000, 28); cabecalho.writeUInt16LE(1, 32); cabecalho.writeUInt16LE(8, 34);
+  cabecalho.write("data", 36); cabecalho.writeUInt32LE(dados.length, 40);
+  return Buffer.concat([cabecalho, dados]);
+}
 
 describe("Assistente de Reuniões — validação de áudio", () => {
   it("aceita áudio WebM em base64 dentro do limite", () => {
@@ -87,6 +101,24 @@ describe("Assistente de Reuniões — validação de áudio", () => {
   it("mantém os limites de segurança do modo por solicitação", () => {
     expect(MAX_MEETING_AUDIO_BYTES).toBe(10 * 1024 * 1024);
     expect(MAX_MEETING_DURATION_SECONDS).toBe(10 * 60);
+    // Os nomes de sempre são os tetos do envio único que a tela também lê
+    // (shared/const.ts); as 12 h da gravação em partes (G13a) não chegam aqui.
+    expect(MAX_MEETING_AUDIO_BYTES).toBe(ENVIO_UNICO_BYTES_MAX);
+    expect(MAX_MEETING_DURATION_SECONDS).toBe(ENVIO_UNICO_SEGUNDOS_MAX);
+    expect(MAX_MEETING_DURATION_SECONDS).toBeLessThan(GRAVACAO_EM_PARTES_SEGUNDOS_MAX);
+  });
+
+  it("o envio único continua recusando o áudio acima de 10 MB (G13a não o muda)", () => {
+    const base64 = (bytes: number) => Buffer.alloc(bytes, 7).toString("base64");
+    expect(decodeMeetingAudio(base64(10 * 1024 * 1024), "audio/webm")).toHaveLength(10 * 1024 * 1024);
+    expect(() => decodeMeetingAudio(base64(10 * 1024 * 1024 + 1), "audio/webm")).toThrow("O áudio deve ter no máximo 10 MB.");
+  });
+
+  it("o envio único continua recusando a duração medida acima de 600 s, com a folga de 5 s (G13a não o muda)", () => {
+    expect(duracaoConferidaDoAudio(wavDe(600))).toBe(600);
+    expect(duracaoConferidaDoAudio(wavDe(605))).toBe(605);
+    expect(() => duracaoConferidaDoAudio(wavDe(606))).toThrow(MENSAGEM_REUNIAO_LONGA_DEMAIS);
+    expect(() => duracaoConferidaDoAudio(wavDe(3600))).toThrow(MENSAGEM_REUNIAO_LONGA_DEMAIS);
   });
 
   it("disponibiliza os dez idiomas do MMM para a tradução", () => {

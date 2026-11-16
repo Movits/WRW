@@ -145,7 +145,7 @@
     "impact": "Você conhece mais oportunidades do que consegue lembrar.",
     "record": {
       "title": "GRAVE E NÃO ESQUEÇA",
-      "desc": "Registre e transcreva gratuitamente reuniões de até 10 minutos e transforme conversas em memória estratégica."
+      "desc": "Registre e transcreva gratuitamente reuniões de até {{horas}} horas e transforme conversas em memória estratégica."
     },
     "organize": {
       "title": "A IA ORGANIZA PARA VOCÊ",
@@ -1448,7 +1448,7 @@
     "pageTitle": "Reuniões",
     "privateSecureBadge": "PRIVADO E SEGURO",
     "heroTitle": "Assistente de Reuniões",
-    "heroSubtitle": "Grave reuniões curtas com consentimento, revise a transcrição e confirme os contatos sugeridos.",
+    "heroSubtitle": "Grave reuniões com consentimento, revise a transcrição e confirme os contatos sugeridos.",
     "newMeetingButton": "Nova reunião",
     "consentNotice": "Somente grave com o consentimento de todas as pessoas. O áudio é transcrito pela IA do Google (Gemini), que pode processá-lo fora do Brasil e separar as falas por pessoa. O áudio fica na sua conta por 30 dias, e a transcrição até você excluir a reunião. Só você acessa, a menos que ligue o link de compartilhamento da reunião (o que pede nova autorização de quem falou).",
     "loadingList": "Carregando reuniões…",
@@ -1468,6 +1468,24 @@
     "pausedStatus": "Gravação pausada",
     "keepScreenOpenNotice": "Mantenha esta tela aberta e o aparelho desbloqueado enquanto grava: no iPhone, bloquear a tela ou trocar de app pode cortar a gravação.",
     "hoursOfRecording": "{{count}} h de gravação",
+    "hourCheckDescription": "Para seguir gravando, confirme em até {{minutos}} minutos. Sem confirmação, a gravação para sozinha e o que já foi gravado segue para a transcrição.",
+    "hourCheckTabTitle": "Confirme a gravação",
+    "hourCheckStopped": "A gravação parou sozinha: ninguém confirmou o aviso de hora em {{minutos}} minutos. O que foi gravado segue para a transcrição.",
+    "recordingLimitInParts": "A cada hora de gravação, confirme que ela continua. Limite: {{horas}} horas.",
+    "recordingMaxReached": "A gravação chegou ao limite de {{horas}} horas e foi encerrada. O que foi gravado segue para a transcrição.",
+    "uploadLimit": "Arquivo de áudio: até {{minutos}} minutos ou {{mb}} MB",
+    "discardRecording": "Descartar gravação",
+    "discardRecordingConfirmTitle": "Descartar esta gravação?",
+    "discardRecordingConfirmText": "Tudo o que foi gravado até agora será apagado, inclusive o que já foi enviado, e nada vai para a transcrição. Não dá para desfazer.",
+    "discardRecordingCancel": "Voltar à gravação",
+    "recordingDiscarded": "Gravação descartada. Nada dela vai para a transcrição.",
+    "discardRecordingError": "Não foi possível apagar a gravação agora. O app tenta de novo sozinho enquanto estiver aberto; se a reunião aparecer na lista, exclua-a por lá.",
+    "partRejectedMeetingGone": "Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio.",
+    "partRejectedTooLarge": "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição.",
+    "partRejectedUnreadable": "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição.",
+    "partRejected": "O servidor recusou um trecho da gravação, que ficou de fora da transcrição.",
+    "deviceCopyUnavailable": "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.",
+    "recordingEndedOnLeave": "A gravação foi encerrada ao sair da tela. O que foi gravado segue para a transcrição.",
     "stopRecording": "Encerrar gravação",
     "reviewBeforeTranscribe": "Ouça a gravação antes de transcrever",
     "durationLabel": "Duração:",
@@ -1502,6 +1520,7 @@
     "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página; se a sessão tiver expirado, entre de novo.",
     "availableUntil": "· disponível até",
     "recordingExpiredNotice": "Esta gravação passou dos 30 dias e foi apagada, como o app promete. A transcrição continua aqui.",
+    "recordingDeletionPending": "Esta gravação passou dos 30 dias e já não pode ser ouvida. O app ainda está apagando o áudio do armazenamento.",
     "noRecordingStored": "Nenhum áudio guardado para esta reunião.",
     "privacyNotice": "O áudio e a transcrição ficam só na sua conta, a menos que você ligue um link de compartilhamento. O áudio expira automaticamente após 30 dias.",
     "translateHeading": "Traduzir o que foi dito nesta reunião",
@@ -1529,10 +1548,10 @@
     "storedAudioMissing": "O áudio guardado desta reunião não foi encontrado.",
     "audioDurationUnreadable": "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3 ou M4A.",
     "ai": {
-      "reviewNotice": "Sugestões da IA para você conferir com o trecho da transcrição. Nada disto foi gravado nem entra na sua rede sozinho.",
+      "reviewNotice": "Sugestões da IA para você conferir com os trechos da transcrição. Nada disto foi gravado nem entra na sua rede sozinho.",
       "excerptLabel": "Trecho da transcrição",
       "askTitle": "Pergunte à reunião",
-      "askIntro": "A resposta vem só do que foi dito na reunião, com o trecho da transcrição que a sustenta.",
+      "askIntro": "A resposta vem só do que foi dito na reunião, com os trechos da transcrição que a sustentam.",
       "askLabel": "Sua pergunta sobre a reunião",
       "askPlaceholder": "Ex.: Qual prazo ficou combinado?",
       "askButton": "Perguntar",
@@ -1540,7 +1559,9 @@
       "notAnswered": "A transcrição desta reunião não responde a esta pergunta.",
       "askError": "Não foi possível responder à pergunta.",
       "unavailable": "O serviço de IA não respondeu agora. Tente de novo em instantes.",
-      "needsTranscript": "Esta reunião ainda não tem transcrição pronta para a IA ler."
+      "needsTranscript": "Esta reunião ainda não tem transcrição pronta para a IA ler.",
+      "tooLong": "Esta reunião é longa demais para perguntas à IA: o limite é de cerca de 7 horas de fala.",
+      "sourcesLabel": "Onde isso foi dito"
     },
     "summary": {
       "title": "Resumo da reunião",
@@ -1660,12 +1681,13 @@
     "share": {
       "button": "Compartilhar",
       "title": "Compartilhar por link",
-      "intro": "Quem receber o link ouve a gravação, lê a transcrição e pede à IA o resumo e respostas sobre a reunião, sem precisar de conta na WRW. Excluir e reprocessar continuam só com você.",
-      "authorization": "Confirmo que todas as pessoas que falaram nesta reunião autorizaram compartilhar a gravação e a transcrição com quem receber o link.",
+      "intro": "Quem receber o link ouve a gravação, lê a transcrição e pede à IA o resumo e respostas sobre a reunião, sem precisar de conta na WRW. Os nomes que você der às vozes aparecem para quem tem o link. Excluir e reprocessar continuam só com você.",
+      "authorization": "Confirmo que todas as pessoas que falaram nesta reunião autorizaram que quem receber o link ouça a gravação e leia a transcrição, com os nomes que eu der às vozes.",
       "createButton": "Criar link",
       "cancel": "Cancelar",
       "activeTitle": "Compartilhada por link",
       "activeIntro": "Qualquer pessoa com este link abre a reunião, inclusive quem o receber encaminhado. Para cortar o acesso, desligue o link.",
+      "namesNeedRelink": "Quem abre este link não vê os nomes que você deu às vozes: ele foi ligado antes de a confirmação incluir os nomes. Para mostrá-los, desligue o link e compartilhe de novo. O link novo será outro, e o antigo deixa de abrir.",
       "linkLabel": "Link da reunião",
       "copy": "Copiar link",
       "copied": "Link copiado.",
@@ -1691,7 +1713,7 @@
       "notFound": "Este link não existe ou não está mais disponível.",
       "goHome": "Conhecer a WRW",
       "audioLoadError": "Não foi possível carregar o áudio agora. Recarregue a página e tente de novo.",
-      "reviewNotice": "Sugestões da IA para conferir com o trecho da transcrição. Nada disto foi gravado.",
+      "reviewNotice": "Sugestões da IA para conferir com os trechos da transcrição. Nada disto foi gravado.",
       "translateSubtext": "Escolha o idioma em que você quer ler a transcrição."
     },
     "followUp": {
@@ -1757,6 +1779,8 @@
     "speakerNamePlaceholder": "Nome de quem falou",
     "speakerNameLabel": "Nome do falante {{n}}",
     "speakerNameError": "Não foi possível salvar o nome.",
+    "speakerNameLinkHint": "Este nome aparece também para quem tem o link da reunião.",
+    "speakerNameRelinkHint": "Quem tem o link da reunião não vê este nome. Para mostrá-lo, desligue o link e compartilhe de novo.",
     "saveSpeakerName": "Salvar",
     "speakingTime": "Tempo de fala",
     "searchTranscriptPlaceholder": "Buscar na transcrição",
@@ -1764,7 +1788,17 @@
     "playFrom": "Ouvir a partir de {{tempo}}",
     "progressRecording": "Gravação em andamento: o áudio chega aos poucos.",
     "progressUploading": "Recebendo o áudio: {{recebidas}} de {{esperadas}}",
-    "progressTranscribing": "Transcrevendo: {{transcritas}} de {{total}}"
+    "progressTranscribing": "Transcrevendo: {{transcritas}} de {{total}}",
+    "player": {
+      "play": "Tocar",
+      "pause": "Pausar",
+      "rewind": "Retroceder {{segundos}} segundos",
+      "forward": "Avançar {{segundos}} segundos",
+      "speed": "Velocidade de reprodução: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "Posição na gravação",
+      "positionValue": "{{atual}} de {{total}}"
+    }
   },
   "connections": {
     "messageSent": "Mensagem enviada",
@@ -1904,13 +1938,14 @@
     "minutesUsed": "Nas reuniões guardadas",
     "minutesUsedHelp": "Soma da duração das reuniões transcritas que continuam na sua conta.",
     "minutesLimit": "Limite gratuito por reunião",
-    "minutesLimitHelp": "Vale para cada gravação e para cada áudio enviado.",
+    "minutesLimitHelp": "Na gravação, que pede confirmação a cada hora. O arquivo de áudio enviado vai até {{minutos}} minutos.",
     "minutesValue": "{{minutos}} min",
+    "hoursValue": "{{horas}} h",
     "moreTime": "Precisa de mais tempo? Amplie seus minutos de reunião.",
-    "moreTimeUnavailable": "A ampliação de minutos por mensalidade ainda não está disponível. Por enquanto, cada reunião pode ter até {{minutos}} minutos.",
+    "moreTimeUnavailable": "A ampliação de minutos por mensalidade ainda não está disponível. Por enquanto, cada reunião gravada pode ter até {{horas}} horas.",
     "actionsTitle": "Comece por aqui",
     "actionRecord": "Gravar ou enviar uma reunião",
-    "actionRecordDesc": "Até {{minutos}} minutos por reunião, com transcrição e sugestão dos contatos citados.",
+    "actionRecordDesc": "Gravação de até {{horas}} horas por reunião, com transcrição e sugestão dos contatos citados.",
     "consentNotice": "Antes de gravar, você é responsável por obter o consentimento de todas as pessoas participantes e por cumprir as regras de privacidade aplicáveis.",
     "actionContacts": "Organizar meus contatos",
     "actionContactsDesc": "Sua base particular de contatos. Um contato não vira membro nem ganha perfil na plataforma.",
@@ -1948,6 +1983,7 @@
     "sairEnviando": "Um áudio desta aba ainda está sendo enviado.",
     "sairAudioNaoEnviado": "Há um áudio gravado nesta aba que ainda não foi enviado.",
     "sairPerdeOAudio": "Se sair agora, esse áudio se perde.",
+    "sairDescartePendente": "A gravação descartada ainda não foi apagada. Se sair agora, ela pode seguir para a transcrição.",
     "continuarAqui": "Continuar aqui",
     "sairMesmoAssim": "Sair mesmo assim",
     "versaoNovaDepoisDoEnvio": "Há uma versão nova do WRW. Esta página vai atualizar sozinha depois que o áudio for enviado.",
@@ -2324,7 +2360,7 @@
       "review": "Revisar no Meu Network Inteligente"
     },
     "dashboard": {
-      "minutesLine": "{{usados}} min usados neste mês · até {{limite}} min por reunião",
+      "minutesLine": "{{usados}} min usados neste mês · até {{horas}} h por reunião",
       "expandSoon": "ampliação depende de integração futura"
     }
   },

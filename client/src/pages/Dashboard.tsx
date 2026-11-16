@@ -1309,7 +1309,9 @@ export default function Dashboard() {
               <span className="mt-1 block text-xs font-semibold text-[#efcba8]">
                 {t("networkInteligente.dashboard.minutesLine", {
                   usados: minutosDoNetwork.data.usadosNoMesSegundos > 0 ? Math.max(1, Math.round(minutosDoNetwork.data.usadosNoMesSegundos / 60)) : 0,
-                  limite: Math.round(minutosDoNetwork.data.limitePorReuniaoSegundos / 60),
+                  // O limite por reunião é o da gravação em partes desde a G13b
+                  // (12 h): em horas inteiras, para baixo, para nunca prometer mais.
+                  horas: Math.floor(minutosDoNetwork.data.limitePorReuniaoSegundos / 3600),
                 })}
                 {!minutosDoNetwork.data.ampliacao.disponivel && ` · ${t("networkInteligente.dashboard.expandSoon")}`}
               </span>

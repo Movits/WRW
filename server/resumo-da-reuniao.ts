@@ -5,8 +5,7 @@ import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { ESCRITA_SEM_ESPACO, nomeSustentadoPelaTranscricao } from "./meeting-service";
 import { INSTRUCOES_DOS_MODELOS } from "./modelos-de-resumo";
-import { REGRA_DO_TRECHO, TRANSCRICAO_E_DADO } from "./reuniao-com-ia";
-import { limparRotulos, normalizarParaComparar, ocorrenciasDoTrecho, trechoApareceNaTranscricao, type OcorrenciaDoTrecho } from "./trecho-da-transcricao";
+import { limparRotulos, normalizarParaComparar, ocorrenciasDoTrecho, REGRA_DO_TRECHO, TRANSCRICAO_E_DADO, trechoApareceNaTranscricao, type OcorrenciaDoTrecho } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
 /**
@@ -88,10 +87,16 @@ const LETRAS_POR_LINHA = 2_000;
  * O que vai à IA: as falas com o rótulo da voz, uma linha por vez que a voz
  * fala (falas seguidas da mesma voz se juntam); sem falas (envio único), o
  * texto corrido. O trecho que não chegou (lacuna) não vai.
+ *
+ * `vozes` são os rótulos que a entrada escreveu, e só eles: a voz que só tem
+ * fala vazia não entra na entrada, e a IA que a cita a inventou. Quem confere
+ * o que a IA escreveu (o resumo, aqui, e a pergunta, em reuniao-com-ia.ts) usa
+ * este conjunto, e não refaz o filtro das falas, para as duas listas nunca
+ * divergirem.
  */
-export function entradaDoResumo(transcricao: string, segmentos: readonly Segmento[]): { texto: string; rotulada: boolean } {
+export function entradaDoResumo(transcricao: string, segmentos: readonly Segmento[]): { texto: string; rotulada: boolean; vozes: ReadonlySet<string> } {
   const falas = segmentos.filter(s => !s.lacuna && typeof s.texto === "string" && s.texto.trim() && FALANTE_VALIDO.test(s.falante));
-  if (!falas.length) return { texto: transcricao.trim(), rotulada: false };
+  if (!falas.length) return { texto: transcricao.trim(), rotulada: false, vozes: new Set() };
   const linhas: string[] = [];
   let anterior = "";
   for (const fala of falas) {
@@ -100,7 +105,7 @@ export function entradaDoResumo(transcricao: string, segmentos: readonly Segment
     else linhas.push(`{${fala.falante}}: ${texto}`);
     anterior = fala.falante;
   }
-  return { texto: linhas.join("\n"), rotulada: true };
+  return { texto: linhas.join("\n"), rotulada: true, vozes: new Set(falas.map(fala => fala.falante)) };
 }
 
 /**
@@ -213,7 +218,7 @@ function prazoSustentado(prazo: string, emVolta: string): boolean {
   return palavras.every(p => ditas.has(p));
 }
 
-type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada: boolean; vozes: Set<string> };
+type Contexto = { transcricao: string; segmentos: readonly Segmento[]; rotulada: boolean; vozes: ReadonlySet<string> };
 
 /**
  * O responsável fica se foi dito perto do trecho: o rótulo de uma voz que fala
@@ -320,7 +325,7 @@ export async function gerarResumoDaReuniao(
   },
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<ResumoGerado> {
-  const { texto: paraAIA, rotulada } = entradaDoResumo(entrada.transcricao, entrada.segmentos);
+  const { texto: paraAIA, rotulada, vozes } = entradaDoResumo(entrada.transcricao, entrada.segmentos);
   if (!paraAIA) return { emoji: null, modelo: null, itens: [], recebidos: 0 };
   const limite = opcoes.limiteDaEntrada ?? LIMITE_DA_ENTRADA_DO_RESUMO;
   const queFicam = blocoDosItensQueFicam(entrada.itensQueFicam ?? []);
@@ -346,7 +351,6 @@ export async function gerarResumoDaReuniao(
     );
   }
 
-  const vozes = new Set(entrada.segmentos.filter(s => !s.lacuna && FALANTE_VALIDO.test(s.falante)).map(s => s.falante));
   const itens = conferirResumo(resposta.dados, { transcricao: entrada.transcricao, segmentos: entrada.segmentos, rotulada, vozes });
   const recebidos = SECOES.reduce((soma, { campo }) => soma + itensDe(resposta.dados[campo]).filter(item => texto(item.texto, 900)).length, 0);
   // Só números no log: o conteúdo é a fala das pessoas.

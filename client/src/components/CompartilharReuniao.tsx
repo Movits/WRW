@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { LANGUAGES } from "@/i18n";
+import { VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { rotaDaReuniaoAberta } from "@shared/rotas";
 
 /**
@@ -12,6 +13,12 @@ import { rotaDaReuniaoAberta } from "@shared/rotas";
  * enquanto"): a dona liga o link aberto de uma reunião pronta e o manda por
  * WhatsApp, por e-mail ou copiando. Quem recebe ouve a gravação, lê a
  * transcrição e pergunta à IA sem conta na WRW (pages/ReuniaoAberta.tsx).
+ *
+ * Desde a H3b (decisão do Roberto de 16/11/2026), quem recebe vê também os
+ * nomes que a dona der às vozes. A caixa de confirmação fala deles e vai com a
+ * versão 2. O link ligado antes, com a caixa que não falava dos nomes, segue
+ * com "Falante n", e o painel avisa a dona que tem nomes: para mostrá-los, ela
+ * desliga e liga de novo.
  *
  * WhatsApp e e-mail abrem o app da própria dona com a mensagem pronta, e ela
  * escolhe para quem mandar: a WRW não envia nada em nome dela.
@@ -51,7 +58,15 @@ function mensagemDoErro(t: TranslateFn, erro: unknown) {
   }
 }
 
-export function CompartilharReuniao({ meetingId, titulo, token }: { meetingId: string; titulo: string; token: string | null }) {
+export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false }: {
+  meetingId: string;
+  titulo: string;
+  token: string | null;
+  /** O link ligado mostra os nomes das vozes: foi ligado com a confirmação que fala deles (meeting.linkMostraNomes). */
+  linkMostraNomes?: boolean;
+  /** A dona já deu nome a alguma voz desta reunião. */
+  temNomes?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   const campo = useRef<HTMLInputElement>(null);
@@ -66,8 +81,10 @@ export function CompartilharReuniao({ meetingId, titulo, token }: { meetingId: s
   const [confirmarDesligar, setConfirmarDesligar] = useState(false);
 
   // O token novo entra na tela na hora, e a releitura confirma com o servidor.
+  // Este painel sempre liga com a confirmação que fala dos nomes: ligado por
+  // aqui, o link mostra os nomes; desligado, não mostra nada.
   const trocarToken = (novo: string | null) => {
-    utils.meetings.get.setData({ meetingId }, anterior => anterior && { ...anterior, meeting: { ...anterior.meeting, shareToken: novo } });
+    utils.meetings.get.setData({ meetingId }, anterior => anterior && { ...anterior, meeting: { ...anterior.meeting, shareToken: novo, linkMostraNomes: novo !== null } });
     void utils.meetings.get.invalidate({ meetingId });
   };
   const ligar = trpc.meetings.ligarLinkAberto.useMutation({
@@ -121,9 +138,11 @@ export function CompartilharReuniao({ meetingId, titulo, token }: { meetingId: s
           <button type="button" disabled={!autorizou || ligar.isPending} onClick={() => ligar.mutate({
             meetingId,
             autorizacaoDasPessoas: true,
-            // A prova guarda a frase que a dona viu e o idioma dela.
+            // A prova guarda a frase que a dona viu, o idioma dela e a versão
+            // da caixa: a 2 fala dos nomes das vozes, e só com ela o link os mostra.
             idioma: idiomaDaTela(i18n),
             textoExibido: t("meetings.share.authorization"),
+            versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES,
           })}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-50">
             {ligar.isPending ? <Loader2 size={15} className="animate-spin"/> : <Link2 size={15}/>} {t("meetings.share.createButton")}
@@ -154,6 +173,8 @@ export function CompartilharReuniao({ meetingId, titulo, token }: { meetingId: s
   return <section aria-labelledby="compartilhar-reuniao" className="mb-6 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <h2 id="compartilhar-reuniao" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Share2 size={16}/>{t("meetings.share.activeTitle")}</h2>
     <p className="mt-1 text-sm text-white/60">{t("meetings.share.activeIntro")}</p>
+    {/* O link da caixa antiga não mostra os nomes: só o aviso diz à dona como mostrá-los. */}
+    {temNomes && !linkMostraNomes && <p className="mt-3 rounded-xl border border-amber-300/30 bg-black/20 px-3 py-2 text-sm text-amber-100/85">{t("meetings.share.namesNeedRelink")}</p>}
     {/* Endereço é sempre da esquerda para a direita, também numa tela em árabe. */}
     <input ref={campo} readOnly dir="ltr" value={endereco} aria-label={t("meetings.share.linkLabel")} onFocus={evento => evento.currentTarget.select()}
       className="mt-4 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white/85 outline-none focus:border-amber-300"/>

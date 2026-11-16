@@ -145,7 +145,7 @@
     "impact": "您知道的机会，比您记得的更多。",
     "record": {
       "title": "录下来，不遗忘",
-      "desc": "免费录制并转写最长 10 分钟的会议，把对话变成战略记忆。"
+      "desc": "免费录制并转写最长 {{horas}} 小时的会议，把对话变成战略记忆。"
     },
     "organize": {
       "title": "AI 为您整理",
@@ -1448,7 +1448,7 @@
     "pageTitle": "会议",
     "privateSecureBadge": "私密安全",
     "heroTitle": "会议助手",
-    "heroSubtitle": "在征得同意的情况下录制简短会议，查看转录内容并确认建议的联系人。",
+    "heroSubtitle": "在征得同意的情况下录制会议，查看转录内容并确认建议的联系人。",
     "newMeetingButton": "新建会议",
     "consentNotice": "仅在所有人同意的情况下录音。音频由 Google 的 AI（Gemini）转写，可能在巴西境外处理，并按人区分发言。音频在您的账户中保留 30 天，转写稿保留到您删除会议为止。只有您可以访问，除非您开启会议的分享链接（这需要发言者重新授权）。",
     "loadingList": "正在加载会议……",
@@ -1468,6 +1468,24 @@
     "pausedStatus": "录音已暂停",
     "keepScreenOpenNotice": "录音时请保持此页面打开并保持设备解锁：在 iPhone 上，锁屏或切换应用可能会中断录音。",
     "hoursOfRecording": "已录音 {{count}} 小时",
+    "hourCheckDescription": "如需继续录音，请在 {{minutos}} 分钟内确认。未确认时，录音会自动停止，已录制的内容将进入转录。",
+    "hourCheckTabTitle": "请确认录音",
+    "hourCheckStopped": "录音已自动停止：{{minutos}} 分钟内无人确认整点提醒。已录制的内容将进入转录。",
+    "recordingLimitInParts": "每录音一小时，请确认是否继续。上限：{{horas}} 小时。",
+    "recordingMaxReached": "录音已达到 {{horas}} 小时上限并已结束。已录制的内容将进入转录。",
+    "uploadLimit": "音频文件：最长 {{minutos}} 分钟或 {{mb}}MB",
+    "discardRecording": "丢弃录音",
+    "discardRecordingConfirmTitle": "丢弃这段录音？",
+    "discardRecordingConfirmText": "到目前为止录下的所有内容都将被删除，包括已上传的部分，且不会进入转录。此操作无法撤销。",
+    "discardRecordingCancel": "返回录音",
+    "recordingDiscarded": "录音已丢弃，任何内容都不会进入转录。",
+    "discardRecordingError": "暂时无法删除这段录音。只要 App 保持打开，它会自动重试；如果会议出现在列表中，请在列表中将其删除。",
+    "partRejectedMeetingGone": "有一段录音未能保存：会议已被删除或不再接收音频。",
+    "partRejectedTooLarge": "有一段录音超出了服务器接受的大小或时长，未纳入转录。",
+    "partRejectedUnreadable": "服务器无法读取一段录音，该段未纳入转录。",
+    "partRejected": "服务器拒绝了一段录音，该段未纳入转录。",
+    "deviceCopyUnavailable": "无法在此设备上保存录音副本。录音仍在上传，但如果网络中断，可能会丢失一段内容。",
+    "recordingEndedOnLeave": "离开页面时录音已结束。已录制的内容将进入转录。",
     "stopRecording": "结束录制",
     "reviewBeforeTranscribe": "转录前请先试听录音",
     "durationLabel": "时长：",
@@ -1502,6 +1520,7 @@
     "audioLoadError": "目前无法加载音频。请刷新页面；如果会话已过期，请重新登录。",
     "availableUntil": "· 有效期至",
     "recordingExpiredNotice": "此录音已超过30天，已按照本应用的承诺被删除。转录内容仍保留在此处。",
+    "recordingDeletionPending": "此录音已超过30天，无法再播放。本应用仍在从存储中删除该音频。",
     "noRecordingStored": "此会议未保存任何音频。",
     "privacyNotice": "音频和转录内容仅保存在您的账户中，除非您开启分享链接。音频将在30天后自动过期。",
     "translateHeading": "翻译此次会议中的发言内容",
@@ -1540,7 +1559,9 @@
       "notAnswered": "这次会议的转录内容无法回答这个问题。",
       "askError": "无法回答这个问题。",
       "unavailable": "AI 服务暂时没有响应，请稍后再试。",
-      "needsTranscript": "这次会议还没有可供 AI 阅读的转录内容。"
+      "needsTranscript": "这次会议还没有可供 AI 阅读的转录内容。",
+      "tooLong": "这次会议太长，无法向 AI 提问：上限约为 7 小时的发言。",
+      "sourcesLabel": "原话出处"
     },
     "summary": {
       "title": "会议摘要",
@@ -1660,12 +1681,13 @@
     "share": {
       "button": "分享",
       "title": "通过链接分享",
-      "intro": "收到链接的人无需 WRW 账户，即可收听录音、阅读转录内容，并请 AI 生成会议摘要和回答问题。删除和重新处理仍仅限您本人。",
-      "authorization": "我确认，在本次会议中发言的所有人都已同意将录音和转录内容分享给收到链接的人。",
+      "intro": "收到链接的人无需 WRW 账户，即可收听录音、阅读转录内容，并请 AI 生成会议摘要和回答问题。您为声音设置的名字，拥有链接的人也能看到。删除和重新处理仍仅限您本人。",
+      "authorization": "我确认，在本次会议中发言的所有人都已同意：收到链接的人可以收听录音、阅读转录内容，并看到我为各个声音设置的名字。",
       "createButton": "创建链接",
       "cancel": "取消",
       "activeTitle": "已通过链接分享",
       "activeIntro": "任何拥有此链接的人都可以打开这次会议，包括收到转发链接的人。要停止访问，请关闭链接。",
+      "namesNeedRelink": "打开此链接的人看不到您为声音设置的名字，因为此链接是在确认内容包含名字之前开启的。要显示名字，请关闭链接后重新分享。新链接会与旧链接不同，旧链接将无法再打开。",
       "linkLabel": "会议链接",
       "copy": "复制链接",
       "copied": "链接已复制。",
@@ -1757,6 +1779,8 @@
     "speakerNamePlaceholder": "说话人的姓名",
     "speakerNameLabel": "说话人 {{n}} 的姓名",
     "speakerNameError": "无法保存姓名。",
+    "speakerNameLinkHint": "拥有会议链接的人也会看到这个名字。",
+    "speakerNameRelinkHint": "拥有会议链接的人看不到这个名字。要显示它，请关闭链接后重新分享。",
     "saveSpeakerName": "保存",
     "speakingTime": "发言时长",
     "searchTranscriptPlaceholder": "在转写稿中搜索",
@@ -1764,7 +1788,17 @@
     "playFrom": "从 {{tempo}} 开始收听",
     "progressRecording": "正在录音：音频会陆续上传。",
     "progressUploading": "正在接收音频：{{recebidas}}/{{esperadas}}",
-    "progressTranscribing": "正在转写：{{transcritas}}/{{total}}"
+    "progressTranscribing": "正在转写：{{transcritas}}/{{total}}",
+    "player": {
+      "play": "播放",
+      "pause": "暂停",
+      "rewind": "快退 {{segundos}} 秒",
+      "forward": "快进 {{segundos}} 秒",
+      "speed": "播放速度：{{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "播放进度",
+      "positionValue": "{{atual}}，共 {{total}}"
+    }
   },
   "connections": {
     "messageSent": "消息已发送",
@@ -1904,13 +1938,14 @@
     "minutesUsed": "已保存的会议",
     "minutesUsedHelp": "仍保存在您账户中的已转写会议的总时长。",
     "minutesLimit": "每场会议的免费上限",
-    "minutesLimitHelp": "适用于每次录音和每个上传的音频文件。",
+    "minutesLimitHelp": "适用于录音，录音时每小时需确认一次。上传的音频文件最长 {{minutos}} 分钟。",
     "minutesValue": "{{minutos}} 分钟",
+    "hoursValue": "{{horas}} 小时",
     "moreTime": "需要更多时间？扩充您的会议分钟数。",
-    "moreTimeUnavailable": "按月订阅扩充分钟数的功能尚未开放。目前每场会议最长 {{minutos}} 分钟。",
+    "moreTimeUnavailable": "按月订阅扩充分钟数的功能尚未开放。目前每场录制的会议最长 {{horas}} 小时。",
     "actionsTitle": "从这里开始",
     "actionRecord": "录制或上传会议",
-    "actionRecordDesc": "每场会议最长 {{minutos}} 分钟，附带转写和所提及联系人的建议。",
+    "actionRecordDesc": "每场会议最长录制 {{horas}} 小时，附带转写和所提及联系人的建议。",
     "consentNotice": "录音前，您有责任征得所有参与者的同意，并遵守适用的隐私规定。",
     "actionContacts": "整理我的联系人",
     "actionContactsDesc": "您的私人联系人库。联系人不会成为会员，也不会在平台上拥有个人资料。",
@@ -1948,6 +1983,7 @@
     "sairEnviando": "此标签页中的一段音频仍在发送中。",
     "sairAudioNaoEnviado": "此标签页中有一段已录制但尚未发送的音频。",
     "sairPerdeOAudio": "如果现在退出登录，这段音频将会丢失。",
+    "sairDescartePendente": "已丢弃的录音尚未删除。如果现在退出登录，它可能会进入转录。",
     "continuarAqui": "留在此页",
     "sairMesmoAssim": "仍然退出登录",
     "versaoNovaDepoisDoEnvio": "WRW 有新版本。音频发送完成后，此页面会自动刷新。",
@@ -2324,7 +2360,7 @@
       "review": "在我的智能人脉中查看"
     },
     "dashboard": {
-      "minutesLine": "本月已用 {{usados}} 分钟 · 每场会议最多 {{limite}} 分钟",
+      "minutesLine": "本月已用 {{usados}} 分钟 · 每场会议最多 {{horas}} 小时",
       "expandSoon": "扩容取决于未来的集成"
     }
   },

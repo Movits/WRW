@@ -52,7 +52,8 @@ afterEach(() => { vi.useRealTimers(); });
 describe("meetings.perguntar — o que chega ao serviço", () => {
   it("o openId da dona, a reunião, o idioma e a pergunta aparada", async () => {
     await expect(rota().perguntar({ meetingId: ID, idioma: "ja", pergunta: "  Quem participou?  " })).resolves.toEqual({ respondida: false });
-    expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Quem participou?", "ja");
+    // O último argumento toma a segunda vaga da reunião longa (o teto, com o serviço de verdade, em reuniao-com-ia.test.ts).
+    expect(perguntarAReuniao).toHaveBeenCalledWith("dona-1", ID, "Quem participou?", "ja", expect.any(Function));
   });
 
   it("a recusa do serviço sai com o código que a tela traduz", async () => {

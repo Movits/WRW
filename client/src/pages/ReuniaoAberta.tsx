@@ -8,7 +8,7 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
-import { segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -25,7 +25,10 @@ import { MapaMentalDaReuniao } from "@/components/MapaMental";
  * ainda não tem) e faz perguntas à IA, sem conta na WRW. Só leitura:
  * excluir, reprocessar e o que é da rede particular da dona (contatos e
  * entidades) ficam no detalhe dela, em Meetings.tsx, e o servidor nem manda
- * esses dados para cá (server/link-aberto-da-reuniao.ts).
+ * esses dados para cá (server/link-aberto-da-reuniao.ts). Os nomes que a dona
+ * deu às vozes chegam no `vozes` (H3b, decisão do Roberto de 16/11/2026), só
+ * quando ela ligou o link com a confirmação que fala deles; sem nome, cada voz
+ * é "Falante n".
  *
  * O player e a tradução repetem os do detalhe da dona; o detalhe único da D1
  * (docs/arquitetura/gravador-de-reunioes.md) junta as duas telas.
@@ -57,10 +60,6 @@ function mensagemDaTraducao(t: TranslateFn, erro: unknown) {
   }
 }
 
-function duracao(segundos: number) {
-  return `${String(Math.floor(segundos / 60)).padStart(2, "0")}:${String(segundos % 60).padStart(2, "0")}`;
-}
-
 function Moldura({ children, comPlayer = false }: { children: React.ReactNode; comPlayer?: boolean }) {
   // Com o player fixo no rodapé, o fim da página fica livre embaixo dele.
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${comPlayer ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
@@ -78,7 +77,8 @@ export default function ReuniaoAberta() {
     refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
   });
   // O resumo guardado (H4), só leitura: sem ids, sem os ignorados e com as
-  // vozes como "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
+  // vozes como rótulo ({F2}), que o componente troca pelo nome do `vozes` ou
+  // por "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
   // fila ou sendo gerado, e para em qualquer erro, não só no link desligado: a
   // página não pede conta, e um 500 que persiste deixaria cada visitante
   // perguntando ao servidor para sempre. O erro só chega ao estado depois das
@@ -149,7 +149,10 @@ export default function ReuniaoAberta() {
   if (isError && !data) return <Moldura><ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()}/></Moldura>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
-  const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada } = data;
+  const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
+  // Os nomes das vozes, os mesmos no resumo, na pergunta e na transcrição. A
+  // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
+  const nomes = data.vozes ?? {};
   const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
   const falas = segmentosValidos(transcricao?.segmentos);
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
@@ -170,18 +173,19 @@ export default function ReuniaoAberta() {
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
-        <PergunteAReuniao token={token}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
+        {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
+        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
       </div>}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
         <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
-          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {duracao(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
+          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {mmss(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
         </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
-          : t("meetings.noRecordingStored")}</p>}
+          : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}
       </section>
     </>}
 
@@ -209,7 +213,7 @@ export default function ReuniaoAberta() {
               </button>
             </div>}
             {mostraFalas
-              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}

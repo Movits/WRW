@@ -83,12 +83,14 @@ afterEach(async () => {
   await i18n.changeLanguage("pt-BR");
 });
 
-const TEXTO_DO_MOTIVO: Record<MotivoDaOcupacao, string> = {
+const TEXTO_DO_MOTIVO: Record<Exclude<MotivoDaOcupacao, "descarte-pendente">, string> = {
   gravando: "Há uma gravação em andamento nesta aba.",
   enviando: "Um áudio desta aba ainda está sendo enviado.",
   "audio-nao-enviado": "Há um áudio gravado nesta aba que ainda não foi enviado.",
 };
 const PERDE = "Se sair agora, esse áudio se perde.";
+// O descarte que não terminou (G13b) não perde áudio: o texto é outro, inteiro.
+const DESCARTE_PENDENTE = "A gravação descartada ainda não foi apagada. Se sair agora, ela pode seguir para a transcrição.";
 
 const dialogo = () => screen.queryByRole("alertdialog");
 const continuarAqui = () => screen.getByRole("button", { name: "Continuar aqui" });
@@ -121,6 +123,33 @@ describe("useSairDaConta — o diálogo antes do logout", () => {
     expect(caixa).toHaveAccessibleDescription(`${TEXTO_DO_MOTIVO[motivo]} ${PERDE}`);
     // "Continuar aqui" é o padrão: o foco já está nele (Enter fica).
     await waitFor(() => expect(continuarAqui()).toHaveFocus());
+  });
+
+  it("ocupada pelo descarte de gravação que não terminou: o diálogo diz que ela pode seguir para a transcrição, sem falar em perder áudio", async () => {
+    ocupada("descarte-pendente");
+    const sair = vi.fn();
+    render(<BotaoDeSair sair={sair} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sair da conta" }));
+    expect(sair).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog", { name: "Sair agora?" })).toHaveAccessibleDescription(DESCARTE_PENDENTE);
+    await waitFor(() => expect(continuarAqui()).toHaveFocus());
+    fireEvent.click(sairMesmoAssim());
+    expect(sair).toHaveBeenCalledTimes(1);
+  });
+
+  it("o descarte que não terminou vem depois dos motivos que perdem áudio, e o texto dele sai no idioma da tela", async () => {
+    ocupada("descarte-pendente");
+    ocupada("enviando");
+    render(<BotaoDeSair sair={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sair da conta" }));
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription(`${TEXTO_DO_MOTIVO.enviando} ${PERDE}`);
+    fireEvent.click(continuarAqui());
+    for (const liberar of abertas.splice(1)) liberar();
+    await act(async () => { await i18n.changeLanguage("en"); });
+    fireEvent.click(screen.getByRole("button", { name: "Sair da conta" }));
+    expect(screen.getByRole("alertdialog", { name: "Sign out now?" })).toHaveAccessibleDescription(
+      "The discarded recording hasn't been deleted yet. If you sign out now, it may go on to transcription.",
+    );
   });
 
   it("com vários motivos, fala do principal: a gravação vem antes do áudio por enviar", () => {

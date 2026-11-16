@@ -453,11 +453,12 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  * O resumo guardado pelo link aberto (decisão do Roberto de 12/11/2026): só
  * leitura, sem ids, sem a caixa de feito e sem os itens que a dona ignorou.
  * Os pendentes vão com o estado, para a tela avisar que a dona ainda não os
- * conferiu. Os rótulos de voz ({F2}) vão crus: a tela do link mostra
- * "Falante 2", e os nomes que a dona deu às vozes não saem por aqui. O idioma
- * em que a IA escreveu vai junto, como para a dona: a página do link o traduz
- * (H11) quando quem lê escolhe outro, e "Ouvir o resumo" (H19) lê com a voz do
- * aparelho nesse idioma.
+ * conferiu. Os rótulos de voz ({F2}) vão crus: a página do link os troca pelo
+ * nome com o `vozes` de reuniaoAberta.ver (H3b), que só traz os nomes quando o
+ * link foi ligado com a confirmação que fala deles; sem nome, "Falante 2". O
+ * idioma em que a IA escreveu vai junto, como para a dona: a página do link o
+ * traduz (H11) quando quem lê escolhe outro, e "Ouvir o resumo" (H19) lê com a
+ * voz do aparelho nesse idioma.
  *
  * Enquanto a dona refaz o resumo (H4d), ou se o refazer falhou, o link segue
  * mostrando a versão anterior (`versaoAnterior`), com o que ela já confirmou.

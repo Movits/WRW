@@ -10,7 +10,7 @@ import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { mapaMentalPeloLink, pedirMapaPeloLink } from "../mapa-mental-guardado";
 import { traduzirResumoPeloLink } from "../traducao-do-resumo";
-import { comRecusaTraduzida } from "./meetings";
+import { comRecusaTraduzida, segundaVagaDaPerguntaLonga } from "./meetings";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
@@ -50,6 +50,9 @@ type Pedido = Parameters<typeof ipDaCliente>[0];
  * Uma vaga nos dois tetos, ou nenhuma: os dois são conferidos antes de gravar
  * em qualquer um, e a recusa de um não gasta a vaga do outro (o teto não
  * devolve vaga). Tudo síncrono: nenhum pedido entra entre conferir e reservar.
+ * A segunda vaga da pergunta sobre reunião longa não passa por aqui: ela só é
+ * tomada depois de ler a transcrição, quando o tamanho é conhecido (ver
+ * `perguntar`, abaixo).
  */
 function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
   const daVisitante = `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
@@ -64,6 +67,8 @@ function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
 export const MENSAGEM_TRADUCAO_INDISPONIVEL = "A tradução não respondeu agora. Tente de novo em instantes.";
 
 export const reuniaoAbertaRouter = router({
+  // A reunião do link, com os nomes que a dona deu às vozes só quando ela
+  // ligou o link com a confirmação que fala deles (H3b, verReuniaoPeloLink).
   ver: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .query(({ input }) => comRecusaTraduzida(() => verReuniaoPeloLink(input.token))),
@@ -89,8 +94,9 @@ export const reuniaoAbertaRouter = router({
     })),
 
   // O resumo guardado (H4), só leitura: sem ids, sem os itens ignorados e
-  // com as vozes como rótulo. Pedir o resumo que a reunião ainda não tem gasta
-  // uma vaga dos dois tetos; pedir o que já está na fila, não.
+  // com as vozes como rótulo, que a página troca com o `vozes` do `ver`. Pedir
+  // o resumo que a reunião ainda não tem gasta uma vaga dos dois tetos; pedir
+  // o que já está na fila, não.
   resumoGuardado: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .query(({ input }) => comRecusaTraduzida(() => resumoGuardadoPeloLink(input.token))),
@@ -130,6 +136,23 @@ export const reuniaoAbertaRouter = router({
       }
     })),
 
+  // A pergunta gasta uma vaga dos dois tetos antes de ler a transcrição: com
+  // um teto cheio, a rajada é recusada sem ler o banco. A pergunta recusada
+  // depois da leitura (reunião longa demais, sem transcrição) fica com essa
+  // vaga, como a da dona: a recusa não chama a IA, mas leu o banco.
+  //
+  // A pergunta sobre reunião longa (mais de 100 mil caracteres na entrada da
+  // IA, cerca de 1h45 de fala) custa mais, porque a IA cobra pelo tamanho da
+  // entrada, e gasta uma SEGUNDA vaga do teto da reunião
+  // (segundaVagaDaPerguntaLonga, em routers/meetings.ts): o link inteiro faz no
+  // máximo 30 perguntas longas a cada 10 minutos, em vez de 60. Essa vaga só se
+  // confere depois de ler a transcrição. Com uma vaga só sobrando, então, cada
+  // pergunta longa lê o banco antes de ser recusada (e devolve a primeira vaga).
+  // Aceito: é uma leitura por pedido, que o rate limit global segura, e
+  // nenhuma chega à IA.
+  //
+  // O teto da visitante segue contando uma por pergunta: ele reparte o link
+  // entre quem o recebeu, e o gasto total é o da reunião.
   perguntar: publicProcedure
     .input(z.object({
       token: tokenDoLink,
@@ -138,7 +161,8 @@ export const reuniaoAbertaRouter = router({
     }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
       const reuniao = await exigirReuniaoDoLink(input.token);
-      reservarVagaDaIA(reuniao.id, ctx.req);
-      return perguntarAReuniao(reuniao.ownerId, reuniao.id, input.pergunta, input.idioma);
+      const soltarVaga = reservarVagaDaIA(reuniao.id, ctx.req);
+      return perguntarAReuniao(reuniao.ownerId, reuniao.id, input.pergunta, input.idioma,
+        segundaVagaDaPerguntaLonga(() => tetoDaIADoLinkAberto.reservar(reuniao.id), soltarVaga));
     })),
 });
