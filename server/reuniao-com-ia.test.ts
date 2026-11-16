@@ -5,10 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 /**
- * meetings.resumir e meetings.perguntar, pelo router, com a IA dublada. Prova:
+ * meetings.perguntar, pelo router, com a IA dublada. O resumo a pedido saiu na
+ * H4c: o resumo é o guardado (resumo-da-reuniao.test.ts e
+ * fila-do-resumo.integracao.test.ts). Prova:
  *
- * - o JSON da IA vira as seções, e o item cujo trecho não está na transcrição
- *   sai (caixa, espaços e pontuação não contam);
+ * - a resposta cujo trecho não está na transcrição vale como não respondida
+ *   (caixa, espaços e pontuação não contam);
  * - só a dona: o ownerId vai no WHERE das leituras, e reunião de outra dona é
  *   NOT_FOUND sem chamar a IA;
  * - reunião sem transcrição, ou que não está pronta, é recusada antes da IA;
@@ -115,53 +117,22 @@ describe("trechoApareceNaTranscricao", () => {
   });
 });
 
-describe("meetings.resumir", () => {
-  it("o JSON da IA vira as seções, e o item com trecho fora da transcrição é descartado", async () => {
-    invokeLLM.mockResolvedValue(respostaDaIA({
-      topicos: [
-        { titulo: "Exportação de café", resumo: "Envio para a Alemanha.", trecho: "vamos falar da exportação de café para a Alemanha" },
-        { titulo: "Inventado", resumo: "Não foi dito.", trecho: "o preço da saca subiu vinte por cento" },
-      ],
-      decisoes: [
-        { texto: "Não renovar com a transportadora antiga.", trecho: "decidimos NÃO renovar o contrato com a transportadora antiga" },
-        { texto: "Inventada", trecho: "vamos abrir um escritório em Berlim" },
-      ],
-      tarefas: [
-        { oQue: "Fechar o contrato com o importador", quem: "Carla", quando: "sexta-feira", trecho: "a Carla fecha o contrato com o importador até sexta-feira" },
-        { oQue: "Reservar o contêiner", quem: null, quando: null, trecho: "O contêiner sai do porto de Santos" },
-        { oQue: "Inventada", quem: "Bruno", quando: null, trecho: "o Bruno manda as amostras amanhã" },
-      ],
-    }));
+describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai à IA", () => {
+  const perguntar = (openId = "dona-1") => rota(openId).perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: "Quando sai o contêiner?" });
+  const naoRespondida = () => invokeLLM.mockResolvedValue(respostaDaIA({ respondida: false, resposta: "", trecho: "" }));
 
-    const resumo = await rota().resumir({ meetingId: ID, idioma: "pt-BR" });
-
-    expect(resumo).toEqual({
-      topicos: [{ titulo: "Exportação de café", resumo: "Envio para a Alemanha.", trecho: "vamos falar da exportação de café para a Alemanha" }],
-      decisoes: [{ texto: "Não renovar com a transportadora antiga.", trecho: "decidimos NÃO renovar o contrato com a transportadora antiga" }],
-      tarefas: [
-        { oQue: "Fechar o contrato com o importador", quem: "Carla", quando: "sexta-feira", trecho: "a Carla fecha o contrato com o importador até sexta-feira" },
-        { oQue: "Reservar o contêiner", quem: null, quando: null, trecho: "O contêiner sai do porto de Santos" },
-      ],
-    });
-    expect(escritas).not.toHaveBeenCalled();
-  });
-
-  it("pede no idioma da tela, com JSON estruturado e a transcrição cortada no teto da extração", async () => {
+  it("pede JSON estruturado, com a transcrição cortada no teto da extração", async () => {
     banco.transcricao = `${TRANSCRICAO}\n${"blá ".repeat(10_000)}`;
-    invokeLLM.mockResolvedValue(respostaDaIA({ topicos: [], decisoes: [], tarefas: [] }));
-
-    await expect(rota().resumir({ meetingId: ID, idioma: "en" })).resolves.toEqual({ topicos: [], decisoes: [], tarefas: [] });
-
-    const [sistema, usuario] = mensagens();
-    expect(sistema.content).toContain("inglês");
-    expect(usuario.content.length).toBeLessThanOrEqual(LIMITE_DA_TRANSCRICAO_PARA_IA + 20);
-    expect(invokeLLM.mock.calls[0][0]).toMatchObject({ response_format: { type: "json_schema", json_schema: { name: "resumo_da_reuniao", strict: true } } });
+    naoRespondida();
+    await expect(perguntar()).resolves.toEqual({ respondida: false });
+    const [, usuario] = mensagens();
+    expect(usuario.content.length).toBeLessThanOrEqual(LIMITE_DA_TRANSCRICAO_PARA_IA + 100);
+    expect(invokeLLM.mock.calls[0][0]).toMatchObject({ response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true } } });
   });
 
   it("só a dona: o ownerId vai no WHERE das duas leituras", async () => {
-    invokeLLM.mockResolvedValue(respostaDaIA({ topicos: [], decisoes: [], tarefas: [] }));
-    await rota().resumir({ meetingId: ID, idioma: "pt-BR" });
-
+    naoRespondida();
+    await perguntar();
     const [daReuniao, daTranscricao] = banco.leituras;
     expect(daReuniao).toMatchObject({ tabela: schema.meetings, sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ?)", params: [ID, "dona-1"] });
     expect(daTranscricao).toMatchObject({ tabela: schema.meetingTranscripts, params: [ID, "dona-1"] });
@@ -169,44 +140,37 @@ describe("meetings.resumir", () => {
   });
 
   it("reunião de outra dona: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
-    await expect(rota("outra-dona").resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(perguntar("outra-dona")).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(banco.leituras).toHaveLength(1);
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 
-  it("reunião sem transcrição é recusada antes da IA", async () => {
-    banco.transcricao = null;
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
+  it("transcrição em branco é recusada antes da IA, com a frase que a tela traduz", async () => {
     banco.transcricao = "   ";
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(perguntar()).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 
   it.each(["processing", "failed", "recording"])("reunião em '%s' é recusada antes da IA", async status => {
     banco.status = status;
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(perguntar()).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 
-  it("banco fora do ar é erro, nunca resumo vazio", async () => {
-    banco.indisponivel = true;
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
-    banco.indisponivel = false;
+  it("a conexão do banco recusada no meio da consulta também é erro, nunca resposta vazia", async () => {
     banco.erroNaConsulta = new Error("Failed query: select ...", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+    await expect(perguntar()).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 
-  it("IA fora do ar ou JSON inválido: SERVICE_UNAVAILABLE com a frase que a tela traduz", async () => {
-    invokeLLM.mockRejectedValueOnce(new Error("LLM invoke failed: 503 Service Unavailable"));
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_IA_INDISPONIVEL });
+  it("JSON inválido da IA: SERVICE_UNAVAILABLE com a frase que a tela traduz", async () => {
     invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "isto não é JSON" } }] });
-    await expect(rota().resumir({ meetingId: ID, idioma: "pt-BR" })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    await expect(perguntar()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_IA_INDISPONIVEL });
   });
 
   it("idioma fora dos dez e id que não é uuid: BAD_REQUEST, sem ler o banco", async () => {
-    await expect(rota().resumir({ meetingId: ID, idioma: "it" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    await expect(rota().resumir({ meetingId: "reuniao-1", idioma: "pt-BR" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(rota().perguntar({ meetingId: ID, idioma: "it" as never, pergunta: "Quando sai?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(rota().perguntar({ meetingId: "reuniao-1", idioma: "pt-BR", pergunta: "Quando sai?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(banco.leituras).toHaveLength(0);
   });
 });

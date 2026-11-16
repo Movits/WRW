@@ -45,8 +45,10 @@ const duble = vi.hoisted(() => {
     get: vi.fn(),
     pendencias: vi.fn(),
     duracao: vi.fn(),
+    resumoGuardado: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
       // A gravação em partes (G9, /gravar?emPartes=1) chama o servidor por aqui.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
@@ -84,9 +86,14 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
-      resumir: duble.registrar("resumir"),
+      resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      pedirResumo: duble.registrar("pedirResumo"),
+      decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
+      marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       perguntar: duble.registrar("perguntar"),
     },
+    reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink") },
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
     },
@@ -124,6 +131,8 @@ beforeEach(() => {
   duble.list.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.get.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null, refetch: vi.fn() });
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   vi.mocked(useAuth).mockReturnValue({
     user: { id: 1, name: "Glenda", role: "silver" },
     loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),

@@ -4,6 +4,7 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
+import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 
@@ -18,9 +19,9 @@ import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 export type EstadoDoResumo = "sem_resumo" | "pendente" | "gerando" | "pronto" | "falhou";
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
 
-export const MENSAGEM_RESUMO_SENDO_GERADO = "O resumo desta reunião está sendo refeito. Espere terminar para decidir.";
-export const MENSAGEM_ITEM_NAO_ENCONTRADO = "Este item do resumo não existe mais. Atualize a tela.";
-export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa de marcar.";
+// As frases das recusas moram em shared/const.ts: a tela as reconhece pelo
+// texto exato para traduzi-las.
+export { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA };
 
 // "Gerando" só com uma reserva viva: na espera depois de uma falha passageira a
 // linha também tem prazo no futuro, mas ninguém está gerando.
