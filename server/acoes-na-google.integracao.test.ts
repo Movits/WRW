@@ -210,6 +210,8 @@ describe.skipIf(!temBanco)("Próximas ações na Google Agenda (integração)", 
     await desconectarNoBanco();
     // A desconexão de verdade zeraria o estado; aqui a conexão some só do banco, para provar o CASE da escrita.
     await (await getDb())!.update(proximasAcoes).set({ google: "ok" }).where(eq(proximasAcoes.id, id));
+    // Só a edição conta: o POST do criar, acima, já foi.
+    chamadas = [];
     google();
     expect(await rota().proximasAcoes.editar({ id, texto: "Outro", fuso: SP, rotulos: ROTULOS })).toEqual({ ok: true, naGoogle: null });
     expect((await linhaDaAcao(id)).google).toBe("falhou");
