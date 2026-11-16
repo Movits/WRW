@@ -12,7 +12,7 @@ import {
 } from "@shared/mapa-mental";
 import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
-import { TRANSCRICAO_E_DADO } from "./reuniao-com-ia";
+import { TRANSCRICAO_E_DADO } from "./trecho-da-transcricao";
 
 /**
  * O mapa mental da reunião (H10 do desenho do gravador,
