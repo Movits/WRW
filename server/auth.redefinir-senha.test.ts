@@ -27,9 +27,13 @@ type Atualizacao = {
   /** Pelo `tx` de uma transação, e não direto pelo banco. */
   naTransacao: boolean;
 };
+/** DELETE e INSERT pelo `tx`: as chaves de acesso que a redefinição apaga e a auditoria delas. */
+type Remocao = { op: "delete"; tabela: string; filtro: unknown; naTransacao: boolean };
+type Insercao = { op: "insert"; tabela: string; valores: Record<string, unknown>; naTransacao: boolean };
+type Gravacao = Atualizacao | Remocao | Insercao;
 type Operacao =
   | { op: "select"; tabela: string; campos: string[]; filtro: unknown }
-  | Atualizacao
+  | Gravacao
   | { op: "begin" | "commit" | "rollback" | "hash" | "revogar" | "auditar" };
 
 const estado = vi.hoisted(() => ({
@@ -43,10 +47,14 @@ const estado = vi.hoisted(() => ({
   erroAoTrocarSenha: null as unknown,
   /** Quando definida, cada hash espera por ela antes de terminar. */
   barreiraDoHash: null as null | (() => Promise<void>),
+  /** Quantas chaves de acesso a conta tem: as que o DELETE da redefinição alcança. */
+  chavesDaConta: 0,
+  /** Quando definido, o DELETE das chaves de acesso lança este erro. */
+  erroAoApagarChaves: null as unknown,
   /** Tudo o que a rota fez, na ordem, inclusive o que a transação desfez. */
   operacoes: [] as Operacao[],
-  /** Só o que ficou no banco: UPDATE fora de transação, ou de transação confirmada. */
-  gravadas: [] as Atualizacao[],
+  /** Só o que ficou no banco: escrita fora de transação, ou de transação confirmada. */
+  gravadas: [] as Gravacao[],
 }));
 
 const espioes = vi.hoisted(() => ({
@@ -64,7 +72,7 @@ vi.mock("./db", async importOriginal => {
   // `pendentes` nulo é o banco fora de transação: o UPDATE fica gravado na
   // hora. Pelo `tx`, ele só fica gravado se a transação confirmar; se ela
   // lançar, é desfeito.
-  const banco = (pendentes: Atualizacao[] | null): object => ({
+  const banco = (pendentes: Gravacao[] | null): object => ({
     select: (campos: Record<string, unknown>) => ({
       from: (tabela: Table) => ({
         where: (filtro: unknown) => ({
@@ -92,9 +100,27 @@ vi.mock("./db", async importOriginal => {
         },
       }),
     }),
+    delete: (tabela: Table) => ({
+      where: async (filtro: unknown) => {
+        const nome = getTableName(tabela);
+        if (nome === "chaves_de_acesso" && estado.erroAoApagarChaves) throw estado.erroAoApagarChaves;
+        const remocao: Remocao = { op: "delete", tabela: nome, filtro, naTransacao: pendentes !== null };
+        estado.operacoes.push(remocao);
+        (pendentes ?? estado.gravadas).push(remocao);
+        return [{ affectedRows: nome === "chaves_de_acesso" ? estado.chavesDaConta : 0 }, undefined];
+      },
+    }),
+    insert: (tabela: Table) => ({
+      values: async (valores: Record<string, unknown>) => {
+        const insercao: Insercao = { op: "insert", tabela: getTableName(tabela), valores, naTransacao: pendentes !== null };
+        estado.operacoes.push(insercao);
+        (pendentes ?? estado.gravadas).push(insercao);
+        return [{ affectedRows: 1 }, undefined];
+      },
+    }),
     transaction: async (tarefa: (tx: object) => Promise<unknown>) => {
       estado.operacoes.push({ op: "begin" });
-      const daTransacao: Atualizacao[] = [];
+      const daTransacao: Gravacao[] = [];
       try {
         const resultado = await tarefa(banco(daTransacao));
         estado.gravadas.push(...daTransacao);
@@ -162,9 +188,11 @@ const consulta = (filtro: unknown) => new MySqlDialect().sqlToQuery(filtro as SQ
 const passos = () =>
   estado.operacoes.map(o => {
     if (o.op === "select") return `select:${o.tabela}`;
-    if (o.op === "update") return `${o.naTransacao ? "tx." : ""}update:${o.tabela}`;
+    if (o.op === "update" || o.op === "delete" || o.op === "insert") return `${o.naTransacao ? "tx." : ""}${o.op}:${o.tabela}`;
     return o.op;
   });
+/** O que a transação da redefinição grava, na ordem, quando a conta não tem chave de acesso. */
+const GRAVADAS_NO_RESET = ["password_reset_tokens", "users", "sessions", "chaves_de_acesso", "desafios_de_chave_de_acesso"];
 const selecoes = () =>
   estado.operacoes.filter((o): o is Extract<Operacao, { op: "select" }> => o.op === "select");
 const atualizacoes = (tabela: string) =>
@@ -190,6 +218,8 @@ beforeEach(() => {
   estado.erroAoGastar = null;
   estado.erroAoTrocarSenha = null;
   estado.barreiraDoHash = null;
+  estado.chavesDaConta = 0;
+  estado.erroAoApagarChaves = null;
   estado.operacoes = [];
   estado.gravadas = [];
   vi.clearAllMocks();
@@ -201,7 +231,7 @@ afterEach(() => {
 });
 
 describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma vez só", () => {
-  it("com o link válido: calcula o hash, gasta o link e troca a senha numa transação, e só então derruba as sessões e grava PASSWORD_RESET", async () => {
+  it("com o link válido: calcula o hash, gasta o link, troca a senha, derruba as sessões e apaga as chaves de acesso numa transação, e só então revoga de novo e grava PASSWORD_RESET", async () => {
     estado.linhasDoLink = [LINK];
     await expect(redefinir()).resolves.toEqual({ success: true });
 
@@ -211,11 +241,14 @@ describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma 
       "begin",
       "tx.update:password_reset_tokens",
       "tx.update:users",
+      "tx.update:sessions",
+      "tx.delete:chaves_de_acesso",
+      "tx.delete:desafios_de_chave_de_acesso",
       "commit",
       "revogar",
       "auditar",
     ]);
-    expect(gravadas()).toEqual(["password_reset_tokens", "users"]);
+    expect(gravadas()).toEqual(GRAVADAS_NO_RESET);
 
     // (1) Busca pelo hash do link, nunca pelo link cru, e só o id e a conta.
     const [busca] = selecoes();
@@ -329,7 +362,7 @@ describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma 
     expect(espioes.hash).toHaveBeenCalledTimes(2);
     expect(atualizacoes("password_reset_tokens")).toHaveLength(2);
     // Do envio que perdeu, nada ficou: um gasto do link e uma troca de senha.
-    expect(gravadas()).toEqual(["password_reset_tokens", "users"]);
+    expect(gravadas()).toEqual(GRAVADAS_NO_RESET);
     expect(atualizacoes("users")).toHaveLength(1);
     expect(espioes.revogar).toHaveBeenCalledTimes(1);
     expect(espioes.auditar).toHaveBeenCalledTimes(1);
@@ -370,8 +403,93 @@ describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma 
     // A tela manda tentar de novo, e o mesmo link funciona.
     estado.erroAoTrocarSenha = null;
     await expect(redefinir()).resolves.toEqual({ success: true });
-    expect(gravadas()).toEqual(["password_reset_tokens", "users"]);
+    expect(gravadas()).toEqual(GRAVADAS_NO_RESET);
     expect(espioes.revogar).toHaveBeenCalledTimes(1);
     expect(espioes.auditar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A6: a redefinição de senha também apaga as chaves de acesso da conta. Sem
+// isso, uma chave cadastrada por quem tomou a conta sobreviveria ao reset.
+describe("auth.resetPassword — apaga as chaves de acesso da conta, na transação da senha", () => {
+  const remocoes = () => estado.operacoes.filter((o): o is Remocao => o.op === "delete");
+  const insercoes = () => estado.operacoes.filter((o): o is Insercao => o.op === "insert");
+
+  it("derruba as sessões ANTES de apagar as chaves e os desafios, todos pela conta dona do link", async () => {
+    estado.linhasDoLink = [LINK];
+    await expect(redefinir()).resolves.toEqual({ success: true });
+
+    // A ordem fecha a corrida com um cadastro de chave em andamento (ele trava a
+    // linha da própria sessão antes de gravar a chave).
+    const ordem = passos();
+    expect(ordem.indexOf("tx.update:sessions")).toBeLessThan(ordem.indexOf("tx.delete:chaves_de_acesso"));
+    const [sessoes] = atualizacoes("sessions");
+    expect(sessoes.valores).toEqual({ isActive: false });
+    expect(consulta(sessoes.filtro).sql).toMatch(/`userId` = \?/);
+    expect(consulta(sessoes.filtro).params).toEqual([LINK.userId]);
+
+    expect(remocoes().map(r => r.tabela)).toEqual(["chaves_de_acesso", "desafios_de_chave_de_acesso"]);
+    for (const remocao of remocoes()) {
+      expect(remocao.naTransacao).toBe(true);
+      expect(consulta(remocao.filtro).sql).toMatch(/`userId` = \?$/);
+      expect(consulta(remocao.filtro).params).toEqual([LINK.userId]);
+    }
+    // Sem chave apagada, nada a auditar além do PASSWORD_RESET de sempre.
+    expect(insercoes()).toEqual([]);
+  });
+
+  it("com chaves na conta, grava PASSKEY_REMOVED na mesma transação, com quantas saíram e o motivo", async () => {
+    estado.linhasDoLink = [LINK];
+    estado.chavesDaConta = 2;
+    await expect(redefinir()).resolves.toEqual({ success: true });
+
+    expect(passos()).toEqual([
+      "select:password_reset_tokens",
+      "hash",
+      "begin",
+      "tx.update:password_reset_tokens",
+      "tx.update:users",
+      "tx.update:sessions",
+      "tx.delete:chaves_de_acesso",
+      "tx.delete:desafios_de_chave_de_acesso",
+      "tx.insert:audit_logs",
+      "commit",
+      "revogar",
+      "auditar",
+    ]);
+    const [auditoria] = insercoes();
+    expect(auditoria.valores).toMatchObject({
+      userId: LINK.userId,
+      action: "PASSKEY_REMOVED",
+      resource: "auth",
+      resourceId: null,
+      details: { motivo: "redefinicao_de_senha", quantidade: 2 },
+      ipAddress: IP_DA_CLIENTE,
+      userAgent: "vitest",
+      status: "success",
+      riskLevel: "medium",
+    });
+    expect(JSON.stringify(auditoria.valores)).not.toContain(TOKEN_CRU);
+  });
+
+  it("se apagar as chaves falha, a transação inteira é desfeita: o link continua valendo, a senha e as sessões não mudam", async () => {
+    estado.linhasDoLink = [LINK];
+    estado.erroAoApagarChaves = new BancoIndisponivel();
+    await comAQuedaNoConsole(() =>
+      expect(redefinir()).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL }),
+    );
+
+    expect(passos()).toEqual([
+      "select:password_reset_tokens",
+      "hash",
+      "begin",
+      "tx.update:password_reset_tokens",
+      "tx.update:users",
+      "tx.update:sessions",
+      "rollback",
+    ]);
+    expect(gravadas()).toEqual([]);
+    expect(espioes.revogar).not.toHaveBeenCalled();
+    expect(espioes.auditar).not.toHaveBeenCalled();
   });
 });
