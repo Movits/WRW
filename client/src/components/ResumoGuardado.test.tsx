@@ -766,16 +766,31 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     }
   });
 
-  it("pelo link: 'Falante n', porque o link não leva os nomes, e o idioma que o link manda", () => {
+  it("pelo link: os nomes que o link recebeu (H3b), 'Falante n' na voz sem nome e no link sem os nomes, e o idioma que o link manda", () => {
     const voz = instalarSinteseFalsa({ vozes: VOZES });
-    const { unmount } = render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} {...({ nomes: { F2: "Carla" } } as never)}/>);
+    // A voz lê o que a tela mostra: o nome que o link recebeu (o `vozes` de
+    // reuniaoAberta.ver) e "Falante n" na voz sem nome, nunca o rótulo cru.
+    const { unmount } = render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} nomes={{ F2: "Carla" }}/>);
     ouvir();
-    const lidas = voz.lerAteOFim();
-    expect(lidas[0]).toBe("Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.");
-    expect(lidas).toContain("Falante 2 envia a proposta revisada");
-    expect(lidas).toContain("Responsável: Falante 2");
-    expect(lidas.join(" ")).not.toMatch(/Carla/);
+    expect(voz.lerAteOFim()).toEqual([
+      "Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.",
+      "Ações",
+      "Para conferir", "Carla envia a proposta revisada", "Responsável: Carla", "Prazo: até sexta-feira",
+      "Reservar a sala de reunião",
+      "Foco do trabalho",
+      "A reunião tratou da exportação de café para a Alemanha.",
+      "Tarefas e arranjos de trabalho",
+      "Para conferir", "Contrato com o importador: Falante 1 fecha o contrato com o importador.", "Responsável: Falante 1", "Prazo: sexta-feira",
+      "Decisões e mudanças de escopo",
+      "Para conferir", "Não renovar com a transportadora antiga.",
+      "Bloqueios, dependências e restrições",
+      "A licença de exportação ainda não saiu.",
+      "Questões pendentes",
+      "Para conferir", "Quem paga o seguro da carga?",
+    ]);
     unmount();
+    // O link ligado antes da confirmação que fala dos nomes não os recebe:
+    // toda voz é "Falante n", no idioma que o link manda.
     const acao = ITENS_DO_LINK.find(item => item.section === "action")!;
     doLink(consulta({ estado: "pronto", emoji: null, idioma: "en", itens: [{ ...acao, status: "confirmed" }] }));
     ouvir();
