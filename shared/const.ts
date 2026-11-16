@@ -43,9 +43,41 @@ export const CODIGO_ERRO_INTERROMPIDO = "ERRO_INTERROMPIDO";
  * Quanto tempo uma reunião pode ficar em "processing" antes de a varredura
  * dá-la como interrompida. Mora em shared/ porque os dois lados o usam: o
  * servidor na varredura e para recusar reprocessar um áudio prestes a vencer
- * (a retenção o apagaria no meio), e a tela para nem oferecer o botão nesse caso.
+ * (a retenção não apaga o áudio da reunião em processamento, e o reprocesso o
+ * seguraria além dos 30 dias; ver margemDoReprocesso, logo abaixo), e a tela
+ * para nem oferecer o botão nesse caso.
  */
 export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
+
+/**
+ * O tempo que o reprocesso da gravação em partes conta por parte. A fila
+ * transcreve as partes que falharam uma depois da outra (cada uma espera a
+ * anterior), e a montagem extrai da transcrição inteira, em janelas; enquanto
+ * isso a reunião fica em 'uploading' ou 'processing', e o áudio vencido não sai
+ * (STATUS_QUE_SEGURAM_AS_PARTES, em server/meeting-service.ts). É estimativa,
+ * não garantia (a chamada da IA de uma parte pode levar até 5 min e se repetir,
+ * em server/gemini.ts): o reprocesso que passar da conta segura o áudio além
+ * dos 30 dias pelo tempo que passar, e ele sai na primeira varredura depois de
+ * a reunião deixar esses estados.
+ */
+export const TEMPO_POR_PARTE_DO_REPROCESSO_MS = 2 * 60 * 1000;
+
+/**
+ * Quanto o áudio guardado ainda tem de durar para a reunião ser reprocessada: o
+ * processamento inteiro (LIMITE_PROCESSAMENTO_MS) e mais
+ * TEMPO_POR_PARTE_DO_REPROCESSO_MS por parte da gravação. Antes eram 15 min
+ * para qualquer tamanho, e o reprocesso de uma gravação de 12 h (72 partes)
+ * aceito a 20 min do prazo passava dele no meio.
+ *
+ * `partes` é o número de partes da gravação, a coluna expected_slices da
+ * reunião, que a tela recebe; no envio único ela é nula e conta zero. O
+ * servidor recusa (iniciarReprocessamento) e a tela esconde o botão com a
+ * mesma conta, para os dois não divergirem. Conta todas as partes, e não só as
+ * que falharam, porque a montagem relê a transcrição inteira.
+ */
+export function margemDoReprocesso(partes: number | null | undefined): number {
+  return LIMITE_PROCESSAMENTO_MS + Math.max(0, partes ?? 0) * TEMPO_POR_PARTE_DO_REPROCESSO_MS;
+}
 
 /**
  * Frase (e não código) que o reprocessamento grava em `processing_error`

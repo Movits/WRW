@@ -159,6 +159,8 @@ describe("Reuniões — erro de consulta não é 'nenhuma reunião'", () => {
 const REUNIAO = {
   id: "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b", ownerId: "dona", title: "Reunião com a vinícola",
   status: "ready", processingError: null as string | null, createdAt: Date.UTC(2026, 8, 4, 12), updatedAt: Date.UTC(2026, 8, 4, 12),
+  // Como no servidor (COLUNAS_DA_REUNIAO_NA_TELA): envio único, sem partes.
+  audioPipeline: "single" as "single" | "slices", expectedSlices: null as number | null,
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
@@ -317,6 +319,26 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     expect(botaoReprocessar()).not.toBeInTheDocument();
     expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
     expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
+  });
+
+  // A gravação em partes com as `partes` transcritas (a montagem falhou), todas vencendo em `expiraEm`.
+  const gravacaoEmPartes = (partes: number, expiraEm: number) => {
+    const lista = Array.from({ length: partes }, (_, seq) => ({
+      seq, url: `/manus-storage/meetings/dona/r/partes/${String(seq).padStart(4, "0")}.m4a`, mimeType: "audio/mp4",
+      inicioSegundos: seq * 600, duracaoSegundos: 600, expiresAt: expiraEm,
+    }));
+    return { url: lista[0].url, mimeType: "audio/mp4", durationSeconds: partes * 600, sizeBytes: 0, expiresAt: expiraEm, partes: lista };
+  };
+
+  it("gravação em partes de 12 h com o áudio vencendo em 20 min: nenhum botão, porque o reprocesso das 72 partes passaria do prazo", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 72 }, { recording: gravacaoEmPartes(72, Date.now() + 20 * 60 * 1000) });
+    expect(botaoReprocessar()).not.toBeInTheDocument();
+    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
+  });
+
+  it("…e a de uma parte só, com os mesmos 20 min, ainda oferece o botão: a margem cresce com as partes", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 1 }, { recording: gravacaoEmPartes(1, Date.now() + 20 * 60 * 1000) });
+    expect(botaoReprocessar()).toBeInTheDocument();
   });
 
   it.each(["ready", "processing"])("reunião %s não oferece reprocessar", status => {

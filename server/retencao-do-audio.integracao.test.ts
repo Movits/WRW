@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { margemDoReprocesso } from "@shared/const";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -17,7 +18,9 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * - pagina, para depois de recusas seguidas e roda de novo sem efeito;
  * - o áudio de reunião que já não existe (o ponteiro da exclusão) sai na hora;
  * - a leitura só diz "foi apagada" quando o áudio saiu;
- * - cada parte que chega renova o prazo de todas.
+ * - cada parte que chega renova o prazo de todas;
+ * - o reprocesso da reunião em partes só é aceito com o áudio durando a margem
+ *   do reprocesso, que cresce com as partes da gravação.
  *
  * Toda varredura daqui vai com `ownerId`: o Vitest roda os arquivos em paralelo
  * no mesmo banco, e uma varredura do sistema inteiro mexeria no que é deles.
@@ -417,6 +420,45 @@ describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integraç
       expect(recusa).toBeInstanceOf(ReprocessamentoRecusado);
       expect(recusa.codigo).toBe("PRECONDITION_FAILED");
       expect((await (await db()).select().from(meetings).where(eq(meetings.id, id)))[0]).toMatchObject({ status: "failed" });
+    });
+
+    /** A reunião em partes que falhou com as partes esgotadas (a IA ficou fora), todas vencendo em `prazo`. */
+    async function reuniaoEmPartesQueFalhou(partes: number, prazo: number) {
+      const id = await reuniao("failed", { audioPipeline: "slices", expectedSlices: partes, processingError: "x" });
+      for (let seq = 0; seq < partes; seq++) await parte(id, seq, prazo, { status: "failed", lastError: "TENTATIVAS_ESGOTADAS", attempts: 3, result: null });
+      return id;
+    }
+    const statusDe = async (id: string) => (await (await db()).select().from(meetings).where(eq(meetings.id, id)))[0]?.status;
+
+    it("a margem cresce com as partes: a gravação de 12 h (72 partes) a 20 min do prazo é recusada, e a de uma parte, não", async () => {
+      // Antes, 15 min bastavam para qualquer tamanho. A fila transcreve uma parte
+      // por vez, e as 72 passavam do prazo no meio do reprocesso, com o áudio
+      // vencido segurado no bucket (a reunião em 'uploading' não o deixa sair).
+      const vinteMinutos = agora() + 20 * 60_000;
+      const longa = await reuniaoEmPartesQueFalhou(72, vinteMinutos);
+      const curta = await reuniaoEmPartesQueFalhou(1, vinteMinutos);
+
+      const recusa = await iniciarReprocessamento(DONA, longa).catch(erro => erro);
+
+      expect(recusa).toBeInstanceOf(ReprocessamentoRecusado);
+      expect(recusa.codigo).toBe("PRECONDITION_FAILED");
+      expect(await statusDe(longa)).toBe("failed");
+      expect(new Set((await partesDe(longa)).map(p => p.status))).toEqual(new Set(["failed"]));
+
+      await iniciarReprocessamento(DONA, curta);
+      expect(await statusDe(curta)).toBe("uploading");
+      expect((await partesDe(curta)).map(p => p.status)).toEqual(["received"]);
+    });
+
+    it("com o áudio durando a margem das 72 partes, a gravação de 12 h é aceita e volta inteira à fila", async () => {
+      const longa = await reuniaoEmPartesQueFalhou(72, agora() + margemDoReprocesso(72) + 5 * 60_000);
+
+      await iniciarReprocessamento(DONA, longa);
+
+      expect(await statusDe(longa)).toBe("uploading");
+      const partes = await partesDe(longa);
+      expect(partes).toHaveLength(72);
+      expect(new Set(partes.map(p => p.status))).toEqual(new Set(["received"]));
     });
   });
 });

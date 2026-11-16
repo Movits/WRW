@@ -11,7 +11,7 @@ import {
   meetingSummaries,
   meetingSummaryItems,
 } from "../drizzle/schema";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
@@ -1083,20 +1083,25 @@ function chaveReprocessavel(gravacao: Gravacao | undefined, ownerId: string, mee
  * bucket ou nunca subiu) seguem como lacuna. Sem parte nenhuma, não há o que
  * reprocessar. Responde na hora: a tela acompanha pelo status.
  *
- * O mesmo prazo do envio único (chaveReprocessavel): com as partes a menos de
- * LIMITE_PROCESSAMENTO_MS de vencer, a fila leria áudio que já deveria ter
- * saído, e a tela também não oferece o botão. Vale a parte que vence primeiro:
- * as partes gravadas desde esta regra vencem juntas, e as de antes podem diferir
- * por alguns minutos.
+ * O prazo, como no envio único (chaveReprocessavel), mas com a margem que
+ * cresce com a gravação (margemDoReprocesso, em shared/const.ts): a fila
+ * transcreve uma parte por vez, e enquanto a reunião está em 'uploading' ou
+ * 'processing' o áudio vencido não sai. Com 15 min para qualquer tamanho, o
+ * reprocesso de 72 partes aceito a 20 min do prazo passava dele, e a fila
+ * seguia lendo áudio que já deveria ter saído. A tela esconde o botão com a
+ * mesma conta, sobre a mesma coluna (`esperadas`, a expected_slices que ela
+ * recebe); sem ela, contam as partes até a maior que chegou. Vale a parte que
+ * vence primeiro: as partes gravadas desde esta regra vencem juntas, e as de
+ * antes podem diferir por alguns minutos.
  */
-async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string): Promise<{ trabalho: Promise<void> }> {
+async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string, esperadas: number | null): Promise<{ trabalho: Promise<void> }> {
   const [partes] = await db.select({
     quantas: sql<number>`count(*)`,
     maiorSeq: sql<number | null>`max(${meetingAudioSlices.seq})`,
     prazo: sql<number | null>`min(${meetingAudioSlices.expiresAt})`,
   }).from(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
   if (!Number(partes?.quantas ?? 0)) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
-  if (Number(partes!.prazo ?? 0) <= now() + LIMITE_PROCESSAMENTO_MS) {
+  if (Number(partes!.prazo ?? 0) <= now() + margemDoReprocesso(esperadas ?? Number(partes!.maiorSeq) + 1)) {
     throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
   }
   const tomada = await db.update(meetings).set({
@@ -1135,7 +1140,7 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
-  if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId);
+  if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId, meeting.expectedSlices);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
   // unicidade por reunião no banco.

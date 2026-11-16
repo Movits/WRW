@@ -31,7 +31,7 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
@@ -924,10 +924,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
-      {/* Reprocessar só com áudio guardado que ainda dura mais que um
-          processamento inteiro: perto de vencer, a retenção o apagaria no meio
-          e o servidor recusaria o pedido. */}
-      {recording && !audioGuardadoAusente && recording.expiresAt - Date.now() > LIMITE_PROCESSAMENTO_MS ? (
+      {/* Reprocessar só com áudio guardado que ainda dura mais que o
+          reprocesso inteiro, que cresce com as partes da gravação: perto de
+          vencer, o reprocesso seguraria o áudio além dos 30 dias, e o servidor
+          recusa o pedido com a mesma conta (margemDoReprocesso). */}
+      {recording && !audioGuardadoAusente && recording.expiresAt - Date.now() > margemDoReprocesso(meeting.expectedSlices) ? (
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-red-100/75">{t("meetings.reprocessHint", { date: new Date(recording.expiresAt).toLocaleDateString(i18n.language) })}</p>
           <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
