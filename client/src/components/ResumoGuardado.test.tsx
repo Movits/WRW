@@ -453,7 +453,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     const voz = instalarSinteseFalsa({ vozes: VOZES });
     daDona(pronto(), { nomes: { F2: "Carla" } });
     ouvir();
-    expect(voz.fila()).toEqual([
+    expect(voz.lerAteOFim()).toEqual([
       "Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.",
       "Ações",
       "Para conferir", "Carla envia a proposta revisada", "Responsável: Carla", "Prazo: até sexta-feira",
@@ -476,7 +476,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     const voz = instalarSinteseFalsa({ vozes: VOZES });
     const { unmount } = daDona(pronto(ITENS.filter(item => item.status === "pending")), { nomes: { F2: "Carla" } });
     ouvir();
-    expect(voz.fila()).toEqual([
+    expect(voz.lerAteOFim()).toEqual([
       "Este resumo foi escrito pela IA, e nenhum item foi conferido ainda.",
       "Ações", "Carla envia a proposta revisada", "Responsável: Carla", "Prazo: até sexta-feira",
       "Tarefas e arranjos de trabalho", "Contrato com o importador: Falante 1 fecha o contrato com o importador.", "Responsável: Falante 1", "Prazo: sexta-feira",
@@ -486,7 +486,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     unmount();
     daDona(pronto(ITENS.filter(item => item.status === "confirmed")));
     ouvir();
-    expect(voz.fila()).toEqual([
+    expect(voz.lerAteOFim()).toEqual([
       "Ações", "Reservar a sala de reunião",
       "Foco do trabalho", "A reunião tratou da exportação de café para a Alemanha.",
       "Bloqueios, dependências e restrições", "A licença de exportação ainda não saiu.",
@@ -501,7 +501,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     ];
     daDona(consulta({ estado: "pronto", emoji: null, idioma: "en", erro: null, itens }));
     ouvir();
-    expect(voz.fila()).toEqual([
+    expect(voz.lerAteOFim()).toEqual([
       "Actions", "Speaker 2 sends the revised proposal", "Assigned to: Speaker 2", "Due: by Friday",
       "Open questions", "Insurance: Who pays for the cargo insurance?",
     ]);
@@ -515,7 +515,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     for (const idioma of [null, "pt"]) {
       const { unmount } = daDona(consulta({ estado: "pronto", emoji: null, idioma, erro: null, itens: ITENS.filter(item => item.id === "i-foco") }));
       ouvir();
-      expect(voz.fila()).toEqual(["Foco do trabalho", "A reunião tratou da exportação de café para a Alemanha."]);
+      expect(voz.lerAteOFim()).toEqual(["Foco do trabalho", "A reunião tratou da exportação de café para a Alemanha."]);
       expect(voz.pedidas.at(-1)?.voice?.name).toBe("Luciana");
       unmount();
     }
@@ -525,15 +525,16 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     const voz = instalarSinteseFalsa({ vozes: VOZES });
     const { unmount } = render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} {...({ nomes: { F2: "Carla" } } as never)}/>);
     ouvir();
-    expect(voz.fila()[0]).toBe("Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.");
-    expect(voz.fila()).toContain("Falante 2 envia a proposta revisada");
-    expect(voz.fila()).toContain("Responsável: Falante 2");
-    expect(voz.fila().join(" ")).not.toMatch(/Carla/);
+    const lidas = voz.lerAteOFim();
+    expect(lidas[0]).toBe("Os itens que começam com “Para conferir” foram escritos pela IA e ainda não foram conferidos.");
+    expect(lidas).toContain("Falante 2 envia a proposta revisada");
+    expect(lidas).toContain("Responsável: Falante 2");
+    expect(lidas.join(" ")).not.toMatch(/Carla/);
     unmount();
     const acao = ITENS_DO_LINK.find(item => item.section === "action")!;
     doLink(consulta({ estado: "pronto", emoji: null, idioma: "en", itens: [{ ...acao, status: "confirmed" }] }));
     ouvir();
-    expect(voz.fila()).toEqual(["Actions", "Speaker 2 envia a proposta revisada", "Assigned to: Speaker 2", "Due: até sexta-feira"]);
+    expect(voz.lerAteOFim()).toEqual(["Actions", "Speaker 2 envia a proposta revisada", "Assigned to: Speaker 2", "Due: até sexta-feira"]);
     expect(voz.pedidas.at(-1)?.voice?.name).toBe("Samantha");
   });
 

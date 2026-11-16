@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pause, Play, Square, Volume2 } from "lucide-react";
 import { escolherVoz, falasCurtas, PRAZO_DAS_VOZES } from "@/lib/leitura-em-voz-alta";
@@ -19,6 +19,14 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
  * para de vez, e no Chrome do computador o resume() falha com as vozes do
  * Google depois de alguns segundos. As falas são curtas (lib/leitura-em-voz-
  * alta.ts), então voltar ao começo da fala é voltar ao começo da frase.
+ *
+ * Uma fala por vez com o navegador: a seguinte só vai quando a anterior
+ * termina. No Chrome, o cancel() de qualquer aba (até de uma janela anônima)
+ * interrompe a fala da vez de todas, e o navegador, depois do erro, segue com
+ * a próxima fala da fila. Com a fila inteira entregue de uma vez, a voz
+ * seguiria lendo atrás de uma tela que diz "pausada". Com uma fala só, a
+ * interrupção vira pausa de verdade sem que esta tela chame o cancel(), que
+ * no Chrome calaria também a voz de quem interrompeu.
  *
  * Um som por vez: começar a ler pausa a gravação que estiver tocando, e a
  * gravação que começa a tocar (o "▶ mm:ss", o player do rodapé) pausa a
@@ -56,7 +64,9 @@ function pausarAsGravacoes() {
   });
 }
 
-function useLeituraEmVozAlta() {
+// antesDeParar: chamado logo antes de a leitura ficar parada (pelo Parar, no
+// fim ou na falha), enquanto o botão Parar ainda está na tela.
+function useLeituraEmVozAlta(antesDeParar: () => void) {
   const [estado, setEstado] = useState<EstadoDaLeitura>("parada");
   const [falhou, setFalhou] = useState(false);
   const leitura = useRef<{ falas: string[]; voz: SpeechSynthesisVoice; indice: number } | null>(null);
@@ -64,13 +74,14 @@ function useLeituraEmVozAlta() {
   // de uma fala de vez velha (o cancel() dispara um ou outro, conforme o
   // navegador) não mexe em nada.
   const vez = useRef(0);
-  // O Chrome perde os eventos de uma fala que ninguém mais referencia.
-  const naFila = useRef<SpeechSynthesisUtterance[]>([]);
+  // A fala desta tela que está com o navegador: o Chrome perde os eventos de
+  // uma fala que ninguém mais referencia.
+  const naVez = useRef<SpeechSynthesisUtterance | null>(null);
 
   const soltar = () => {
     vez.current += 1;
     leitura.current = null;
-    naFila.current = [];
+    naVez.current = null;
   };
   // Só cancela a leitura que é desta tela: a voz de mais ninguém se cala.
   const encerrar = () => {
@@ -78,54 +89,60 @@ function useLeituraEmVozAlta() {
     soltar();
     if (ativa) sintese()?.cancel();
   };
+  const ficarParada = () => {
+    antesDeParar();
+    setEstado("parada");
+  };
 
+  // Lê a partir da fala atual.indice, uma por vez: a seguinte só vai ao
+  // navegador no fim da anterior.
   const enfileirar = () => {
     const s = sintese();
     const atual = leitura.current;
     if (!s || !atual) return;
     const minhaVez = ++vez.current;
+    // A fala que falhou era a única desta tela com o navegador: nada a
+    // cancelar, e a voz de mais ninguém se cala.
     const falhar = () => {
-      encerrar();
-      setEstado("parada");
+      soltar();
+      ficarParada();
       setFalhou(true);
     };
-    // Aba que foi para o fundo pode deixar a síntese pausada, e aí nada toca.
-    if (s.paused) s.resume();
-    naFila.current = atual.falas.slice(atual.indice).map((texto, i) => {
-      const n = atual.indice + i;
-      const fala = new SpeechSynthesisUtterance(texto);
+    const falar = () => {
+      const n = atual.indice;
+      const fala = new SpeechSynthesisUtterance(atual.falas[n]);
       fala.voice = atual.voz;
       fala.lang = atual.voz.lang;
-      fala.onstart = () => {
-        if (vez.current === minhaVez) atual.indice = n;
-      };
       fala.onend = () => {
         if (vez.current !== minhaVez) return;
         atual.indice = n + 1;
-        // A última terminou: a fila já está vazia, nada a cancelar.
-        if (atual.indice >= atual.falas.length) {
-          soltar();
-          setEstado("parada");
-        }
+        if (atual.indice < atual.falas.length) return falar();
+        soltar();
+        ficarParada();
       };
       fala.onerror = evento => {
         if (vez.current !== minhaVez) return;
-        // Outra página ou o próprio aparelho interrompeu a leitura: fica
-        // pausada, e o Continuar volta à fala em que parou.
+        // Outra página ou o próprio aparelho interrompeu a fala: fica
+        // pausada, e o Continuar volta ao começo dela. Não há outra fala
+        // desta tela na fila do navegador, então a voz para mesmo.
         if (evento.error === "interrupted" || evento.error === "canceled") {
           vez.current += 1;
+          naVez.current = null;
           setEstado("pausada");
           return;
         }
         falhar();
       };
-      return fala;
-    });
-    try {
-      for (const fala of naFila.current) s.speak(fala);
-    } catch {
-      falhar();
-    }
+      naVez.current = fala;
+      try {
+        s.speak(fala);
+      } catch {
+        falhar();
+      }
+    };
+    // Aba que foi para o fundo pode deixar a síntese pausada, e aí nada toca.
+    if (s.paused) s.resume();
+    falar();
   };
 
   const comecar = (falas: string[], voz: SpeechSynthesisVoice) => {
@@ -140,7 +157,7 @@ function useLeituraEmVozAlta() {
   const pausar = () => {
     if (!leitura.current) return;
     vez.current += 1;
-    naFila.current = [];
+    naVez.current = null;
     sintese()?.cancel();
     setEstado("pausada");
   };
@@ -152,7 +169,7 @@ function useLeituraEmVozAlta() {
   };
   const parar = () => {
     encerrar();
-    setEstado("parada");
+    ficarParada();
   };
 
   // Sair da tela (ou da aba Resumo) cala a leitura; recarregar ou fechar a
@@ -192,7 +209,20 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
   const { t, i18n } = useTranslation();
   const { suportado, vozes, procurando } = useVozesDoAparelho();
   const voz = escolherVoz(vozes, idioma);
-  const leitura = useLeituraEmVozAlta();
+  const principal = useRef<HTMLButtonElement>(null);
+  const botaoParar = useRef<HTMLButtonElement>(null);
+  // O Parar sai da tela quando a leitura para (por ele, no fim ou na falha):
+  // o foco que estava nele volta ao botão principal, em vez de cair no começo
+  // da página. O foco que está em outro lugar fica onde está.
+  const devolverOFoco = useRef(false);
+  const leitura = useLeituraEmVozAlta(() => {
+    devolverOFoco.current = !!botaoParar.current && document.activeElement === botaoParar.current;
+  });
+  useLayoutEffect(() => {
+    if (leitura.estado !== "parada" || !devolverOFoco.current) return;
+    devolverOFoco.current = false;
+    principal.current?.focus({ preventScroll: true });
+  }, [leitura.estado]);
   const idDoAviso = useId();
 
   const aviso = !suportado
@@ -214,11 +244,11 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
   return <div className="flex flex-col items-start gap-1 sm:items-end">
     <div className="flex flex-wrap gap-2">
       {/* O mesmo botão vira Pausar e Continuar: o foco fica nele. */}
-      <button type="button" onClick={aoClicar} aria-disabled={desligado || undefined} aria-describedby={aviso ? idDoAviso : undefined}
+      <button ref={principal} type="button" onClick={aoClicar} aria-disabled={desligado || undefined} aria-describedby={aviso ? idDoAviso : undefined}
         className={`inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-sm font-semibold text-amber-100 ${desligado ? "cursor-not-allowed opacity-50" : "hover:bg-amber-300/10"}`}>
         <Icone size={15} aria-hidden/> {rotulo}
       </button>
-      {leitura.estado !== "parada" && <button type="button" onClick={leitura.parar}
+      {leitura.estado !== "parada" && <button ref={botaoParar} type="button" onClick={leitura.parar}
         className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-1.5 text-sm text-white/70 hover:bg-white/5">
         <Square size={13} aria-hidden/> {t("meetings.summary.listenStop")}
       </button>}

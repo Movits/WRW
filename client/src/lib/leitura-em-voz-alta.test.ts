@@ -47,6 +47,20 @@ describe("escolherVoz", () => {
     // Só as de brincadeira: lê com elas, em vez de dizer que não há voz.
     expect(escolherVoz([voz("Albert", "en-US")], "en")?.name).toBe("Albert");
   });
+
+  it("no Mac, as vozes robóticas da Eloquence vêm antes na lista e o Safari marca todas como padrão: a voz de verdade ganha", () => {
+    const doSafari = [
+      voz("Eddy (Português (Brasil))", "pt-BR", true),
+      voz("Flo (Português (Brasil))", "pt-BR", true),
+      voz("Luciana", "pt-BR", true),
+      voz("Shelley (Português (Brasil))", "pt-BR", true),
+    ];
+    expect(escolherVoz(doSafari, "pt-BR")?.name).toBe("Luciana");
+    // O nome que o Chrome do Mac mostra, em inglês, também.
+    expect(escolherVoz([voz("Grandma (English (US))", "en-US"), voz("Samantha", "en-US")], "en")?.name).toBe("Samantha");
+    // Só a Eloquence: lê com ela, em vez de dizer que não há voz.
+    expect(escolherVoz([voz("Eddy (Português (Brasil))", "pt-BR", true)], "pt-BR")?.name).toBe("Eddy (Português (Brasil))");
+  });
 });
 
 describe("falasCurtas", () => {

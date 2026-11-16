@@ -38,12 +38,20 @@ const VOZES_DE_BRINCADEIRA = new Set([
   "albert", "bad news", "bahh", "bells", "boing", "bubbles", "cellos", "deranged", "good news",
   "hysterical", "jester", "organ", "pipe organ", "superstar", "trinoids", "whisper", "wobble", "zarvox",
 ]);
+// As vozes da Eloquence, robóticas, que o macOS 13 em diante traz para vários
+// idiomas. A lista do Mac vem em ordem alfabética e o Safari marca toda voz
+// como padrão: sem isto, "Eddy (Português (Brasil))" ganharia da Luciana.
+const VOZES_DA_ELOQUENCE = new Set(["eddy", "flo", "grandma", "grandpa", "reed", "rocko", "sandy", "shelley"]);
+// O nome sem o idioma que o Mac acrescenta: "Eddy (Português (Brasil))" é "eddy".
+const nomeDaVoz = (voz: VozDoAparelho) => voz.name.split(" (")[0].trim().toLowerCase();
+const vozDeSegunda = (voz: VozDoAparelho) => VOZES_DE_BRINCADEIRA.has(nomeDaVoz(voz)) || VOZES_DA_ELOQUENCE.has(nomeDaVoz(voz));
 
 /**
  * A voz do aparelho que lê o idioma pedido, ou null quando o aparelho não tem
  * nenhuma (a tela explica, em vez de ler o texto com a pronúncia de outro
  * idioma). Entre as que servem: a da região preferida, depois uma que não seja
- * de brincadeira, depois a voz padrão do aparelho e, por fim, a ordem da lista.
+ * de brincadeira nem da Eloquence, depois a voz padrão do aparelho e, por fim,
+ * a ordem da lista.
  */
 export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma: IdiomaDaReuniao): V | null {
   const bases = BASES[idioma] ?? [idioma.split("-")[0].toLowerCase()];
@@ -54,7 +62,7 @@ export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma
     .filter(({ tag }) => bases.includes(tag.split("-")[0]))
     .map(({ voz, ordem, tag }) => ({
       voz,
-      nota: [regiao(tag), VOZES_DE_BRINCADEIRA.has(voz.name.trim().toLowerCase()) ? 1 : 0, voz.default ? 0 : 1, ordem],
+      nota: [regiao(tag), vozDeSegunda(voz) ? 1 : 0, voz.default ? 0 : 1, ordem],
     }));
   candidatas.sort((a, b) => {
     for (let i = 0; i < a.nota.length; i++) if (a.nota[i] !== b.nota[i]) return a.nota[i] - b.nota[i];

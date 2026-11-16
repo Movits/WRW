@@ -29,19 +29,22 @@ afterEach(async () => {
 });
 
 describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
-  it("lê as falas na ordem com a voz do idioma do resumo e, no fim, volta a 'Ouvir o resumo' sem calar ninguém", () => {
+  it("lê as falas na ordem, uma por vez, com a voz do idioma do resumo e, no fim, volta a 'Ouvir o resumo' sem calar ninguém", () => {
     const voz = instalarSinteseFalsa({ vozes: VOZES });
     ouvir();
     fireEvent.click(botao("Ouvir o resumo"));
-    expect(voz.fila()).toEqual(FALAS);
-    // A voz do Brasil, e não a padrão do aparelho (inglês) nem a de Portugal.
-    expect(voz.pedidas.map(fala => [fala.voice?.name, fala.lang])).toEqual(FALAS.map(() => ["Luciana", "pt-BR"]));
+    // Uma fala por vez com o navegador: a seguinte vai quando a anterior termina.
+    expect(voz.fila()).toEqual([FALAS[0]]);
     expect(botao("Parar a leitura")).toBeInTheDocument();
     act(() => { voz.terminar(); voz.terminar(); });
+    expect(voz.fila()).toEqual([FALAS[2]]);
     expect(botao("Pausar a leitura")).toBeInTheDocument();
     act(() => voz.terminar());
     expect(botao("Ouvir o resumo")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Parar a leitura" })).not.toBeInTheDocument();
+    expect(voz.pedidas.map(fala => fala.text)).toEqual(FALAS);
+    // A voz do Brasil, e não a padrão do aparelho (inglês) nem a de Portugal.
+    expect(voz.pedidas.map(fala => [fala.voice?.name, fala.lang])).toEqual(FALAS.map(() => ["Luciana", "pt-BR"]));
     expect(voz.chamadas.cancel).toBe(0);
   });
 
@@ -67,8 +70,7 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
     expect(botao("Parar a leitura")).toBeInTheDocument();
     fireEvent.click(botao("Continuar a leitura"));
     // A segunda fala, interrompida no meio, volta inteira; a primeira não se repete.
-    expect(voz.fila()).toEqual(FALAS.slice(1));
-    act(() => { voz.terminar(); voz.terminar(); });
+    expect(voz.lerAteOFim()).toEqual(FALAS.slice(1));
     expect(botao("Ouvir o resumo")).toBeInTheDocument();
   });
 
@@ -82,7 +84,7 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
     expect(botao("Ouvir o resumo")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Parar a leitura" })).not.toBeInTheDocument();
     fireEvent.click(botao("Ouvir o resumo"));
-    expect(voz.fila()).toEqual(FALAS);
+    expect(voz.lerAteOFim()).toEqual(FALAS);
   });
 
   it("frase longa vira falas curtas antes de ir para a fila", () => {
@@ -90,32 +92,47 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
     const longa = `${"A reunião tratou do frete marítimo e do seguro ".repeat(4).trim()}, e ficou para a semana que vem a decisão sobre a licença de exportação.`;
     render(<OuvirOResumo falas={["Foco do trabalho", longa]} idioma="pt-BR"/>);
     fireEvent.click(botao("Ouvir o resumo"));
-    expect(voz.fila().length).toBeGreaterThan(2);
-    for (const fala of voz.fila()) expect(fala.length).toBeLessThanOrEqual(160);
-    expect(voz.fila().slice(1).join(" ")).toBe(longa);
+    const lidas = voz.lerAteOFim();
+    expect(lidas.length).toBeGreaterThan(2);
+    for (const fala of lidas) expect(fala.length).toBeLessThanOrEqual(160);
+    expect(lidas.slice(1).join(" ")).toBe(longa);
   });
 
-  it("a leitura que falha avisa e volta a 'Ouvir o resumo'; ouvir de novo tira o aviso", () => {
-    const voz = instalarSinteseFalsa({ vozes: VOZES });
-    ouvir();
-    fireEvent.click(botao("Ouvir o resumo"));
-    act(() => voz.falhar("synthesis-failed"));
-    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível ler o resumo em voz alta. Tente de novo.");
-    expect(voz.fila()).toEqual([]);
-    expect(botao("Ouvir o resumo")).toBeInTheDocument();
-    fireEvent.click(botao("Ouvir o resumo"));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(voz.fila()).toEqual(FALAS);
-  });
-
-  it("outra página (ou o aparelho) interrompe a leitura: fica pausada, e Continuar volta à fala interrompida", () => {
+  it("a fala que falha no meio avisa, não deixa o resto tocar e volta a 'Ouvir o resumo'; ouvir de novo tira o aviso", () => {
     const voz = instalarSinteseFalsa({ vozes: VOZES });
     ouvir();
     fireEvent.click(botao("Ouvir o resumo"));
     act(() => voz.terminar());
-    act(() => voz.sintese.cancel());
+    act(() => voz.falhar("synthesis-failed"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível ler o resumo em voz alta. Tente de novo.");
+    // O navegador segue a fila depois de um erro: não pode haver nela outra fala desta tela.
+    expect(voz.fila()).toEqual([]);
+    expect(voz.pedidas.map(fala => fala.text)).toEqual(FALAS.slice(0, 2));
+    // E, sem nada desta tela para calar, a voz de mais ninguém se cala.
+    expect(voz.chamadas.cancel).toBe(0);
+    expect(botao("Ouvir o resumo")).toBeInTheDocument();
+    fireEvent.click(botao("Ouvir o resumo"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(voz.lerAteOFim()).toEqual(FALAS);
+  });
+
+  it.each(["interrupted", "canceled"])("outra página (ou o aparelho) interrompe a fala (%s): a leitura fica pausada de verdade, sem calar ninguém, e Continuar volta à fala interrompida", erro => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    ouvir();
+    fireEvent.click(botao("Ouvir o resumo"));
+    act(() => voz.terminar());
+    // No Chrome, o cancel() de outra aba interrompe a fala da vez, e o
+    // navegador seguiria com a próxima da fila: não pode haver próxima desta tela.
+    act(() => voz.falhar(erro));
+    expect(botao("Continuar a leitura")).toBeInTheDocument();
+    expect(voz.fila()).toEqual([]);
+    // O cancel() do Chrome cala todas as abas: quem interrompeu segue falando.
+    expect(voz.chamadas.cancel).toBe(0);
     fireEvent.click(botao("Continuar a leitura"));
-    expect(voz.fila()).toEqual(FALAS.slice(1));
+    // Da fala interrompida em diante, sem repetir nada.
+    expect(voz.lerAteOFim()).toEqual(FALAS.slice(1));
+    expect(voz.pedidas.map(fala => fala.text)).toEqual([...FALAS.slice(0, 2), ...FALAS.slice(1)]);
+    expect(botao("Ouvir o resumo")).toBeInTheDocument();
   });
 
   it("sair da tela cala a leitura; sair sem ter lido não cala a voz de mais ninguém", () => {
@@ -146,7 +163,7 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
     gravacao.pause = () => { tocando = false; };
     fireEvent.click(botao("Ouvir o resumo"));
     expect(tocando).toBe(false);
-    expect(voz.fila()).toEqual(FALAS);
+    expect(voz.fila()).toEqual([FALAS[0]]);
     act(() => voz.terminar());
     // O "play" não sobe pela árvore: a tela o ouve na captura.
     tocando = true;
@@ -154,7 +171,36 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
     expect(voz.fila()).toEqual([]);
     fireEvent.click(botao("Continuar a leitura"));
     expect(tocando).toBe(false);
-    expect(voz.fila()).toEqual(FALAS.slice(1));
+    expect(voz.lerAteOFim()).toEqual(FALAS.slice(1));
+  });
+
+  it("o foco que estava no Parar volta ao botão principal quando a leitura para: pelo Parar, no fim e na falha", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    ouvir();
+    fireEvent.click(botao("Ouvir o resumo"));
+    botao("Parar a leitura").focus();
+    fireEvent.click(botao("Parar a leitura"));
+    expect(botao("Ouvir o resumo")).toHaveFocus();
+
+    fireEvent.click(botao("Ouvir o resumo"));
+    botao("Parar a leitura").focus();
+    voz.lerAteOFim();
+    expect(botao("Ouvir o resumo")).toHaveFocus();
+
+    fireEvent.click(botao("Ouvir o resumo"));
+    botao("Parar a leitura").focus();
+    act(() => voz.falhar("synthesis-failed"));
+    expect(botao("Ouvir o resumo")).toHaveFocus();
+  });
+
+  it("o foco que está em outro lugar fica onde está quando a leitura termina", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    render(<><input aria-label="Anotação"/><OuvirOResumo falas={FALAS} idioma="pt-BR"/></>);
+    fireEvent.click(botao("Ouvir o resumo"));
+    const anotacao = screen.getByRole("textbox", { name: "Anotação" });
+    anotacao.focus();
+    voz.lerAteOFim();
+    expect(anotacao).toHaveFocus();
   });
 });
 
@@ -180,7 +226,7 @@ describe("Ouvir o resumo — sem voz para o idioma, o botão explica", () => {
     act(() => voz.trocarVozes(VOZES));
     expect(principal).not.toHaveAttribute("aria-disabled");
     fireEvent.click(principal);
-    expect(voz.fila()).toEqual(FALAS);
+    expect(voz.lerAteOFim()).toEqual(FALAS);
   });
 
   it("nenhuma voz depois do prazo: explica", () => {
