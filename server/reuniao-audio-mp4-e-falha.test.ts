@@ -421,6 +421,8 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
         email: `${"a".repeat(330)}@vinhosdosul.com`,
       }],
     };
+    // Cargo e empresa só ficam se a reunião os diz (achado 6 da bancada de 16/11): aqui ela diz, e o corte é o da coluna.
+    textoDaTranscricao = `transcrição: conversa com a Ana Souza, ${"j".repeat(269)} da ${"c".repeat(250)}`;
 
     await expect(processMeetingRecording(entradaValida)).resolves.toBeTruthy();
 
@@ -448,7 +450,7 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
 
   it("telefone e e-mail dentro do teto passam inteiros — o corte não é 'sempre null'", async () => {
     respostaDaIA = { entities: [], contacts: [ana] };
-    textoDaTranscricao = `Sou a Ana Souza, meu telefone é ${ana.phone} e o e-mail ${ana.email}.`;
+    textoDaTranscricao = `Sou a Ana Souza, diretora da Vinhos do Sul, meu telefone é ${ana.phone} e o e-mail ${ana.email}.`;
     await processMeetingRecording(entradaValida);
     const [sugestao] = insercoes.find(operacao => operacao.tabela === schema.meetingContactSuggestions)!.valores;
     expect(sugestao).toMatchObject({ phone: ana.phone, email: ana.email, jobTitle: "Diretora", company: "Vinhos do Sul" });
@@ -490,7 +492,7 @@ describe("processMeetingRecording — o que a IA devolve cabe nas colunas", () =
       { ...ana, company: empresaNoTeto, email: emailNoTeto },
       { ...ana, fullName: "Bia", company: `${empresaNoTeto}X`, email: `a${emailNoTeto}` },
     ] };
-    textoDaTranscricao = `Contatos da Ana Souza e da Bia: ${emailNoTeto} e a${emailNoTeto}.`;
+    textoDaTranscricao = `Contatos da Ana Souza, da ${empresaNoTeto}, e da Bia, da ${empresaNoTeto}X: ${emailNoTeto} e a${emailNoTeto}.`;
 
     await processMeetingRecording(entradaValida);
 

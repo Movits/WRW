@@ -33,6 +33,9 @@ function rotuloDoCampo(t: Traduzir, campo: string) {
     case "tipo_pessoa": return t("networkInteligente.contact.personType");
     case "tenho": return t("networkPanel.fields.tenho");
     case "preciso": return t("networkPanel.fields.preciso");
+    // O apoio da pessoa da reunião, que criar o contato não grava sozinho.
+    case "cargo": return t("networkPanel.fields.cargo");
+    case "empresa": return t("networkPanel.fields.empresa");
     default: return campo;
   }
 }

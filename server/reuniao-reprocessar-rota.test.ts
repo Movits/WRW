@@ -19,7 +19,9 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *   CONFLICT, sem criar contato nem atualizar nada;
  * - a sugestão de contato só é decidida UMA vez: a tomada leva status
  *   'pending' no WHERE, e o duplo clique ou a aba velha dão CONFLICT sem
- *   duplicar o contato nem mexer nas pendências do Meu Network Inteligente.
+ *   duplicar o contato nem mexer nas pendências do Meu Network Inteligente;
+ * - "Criar contato" grava só o Quem Sou: cargo e empresa da IA viram
+ *   pendências do contato novo (achado 6 da bancada de 16/11).
  */
 
 const iniciarReprocessamento = vi.fn();
@@ -33,6 +35,7 @@ const banco = {
   statusDaReuniao: "ready",
   atualizacoes: [] as Array<{ tabela: unknown; valores: Record<string, unknown>; sql: string; params: unknown[] }>,
   leituras: [] as Array<{ tabela: unknown; sql: string; params: unknown[] }>,
+  insercoes: [] as Array<{ tabela: unknown; valores: unknown }>,
 };
 
 // O UPDATE da sugestão obedece ao status do WHERE, como o MySQL: com
@@ -63,7 +66,8 @@ vi.mock("./db", () => ({
         : tabela === schema.meetingContactSuggestions ? (banco.sugestao ? [{ ...banco.sugestao }] : [])
           : tabela === schema.meetings ? [{ status: banco.statusDaReuniao }]
             : [];
-      return { limit: async () => linhas };
+      // Lida com `.limit` ou direto (as pendências abertas do contato, em gravarPendencias).
+      return Object.assign(Promise.resolve(linhas), { limit: async () => linhas });
     } }) }),
     update: (tabela: unknown) => ({ set: (valores: Record<string, unknown>) => ({ where: async (condicao?: SQL) => {
       const { sql, params } = condicao ? dialeto.sqlToQuery(condicao) : { sql: "", params: [] as unknown[] };
@@ -71,6 +75,10 @@ vi.mock("./db", () => ({
       const affectedRows = tabela === schema.meetingContactSuggestions ? atualizarSugestao(valores, sql, params) : 1;
       return [{ affectedRows }];
     } }) }),
+    insert: (tabela: unknown) => ({ values: async (valores: unknown) => {
+      banco.insercoes.push({ tabela, valores });
+      return [{ affectedRows: 1 }];
+    } }),
   }),
   createPrivateContact: (...args: unknown[]) => createPrivateContact(...(args as [])),
 }));
@@ -112,6 +120,7 @@ beforeEach(() => {
   banco.statusDaReuniao = "ready";
   banco.atualizacoes = [];
   banco.leituras = [];
+  banco.insercoes = [];
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -308,5 +317,18 @@ describe("meetings.decideContactSuggestion — uma decisão só por sugestão", 
     await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "link", contactId: 5 })).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(banco.atualizacoes).toEqual([]);
     expect(banco.sugestao).toMatchObject({ status: "pending" });
+  });
+
+  // Achado 6 da bancada de 16/11: com um clique, "fundadora" e "Consultor" iam para o contato.
+  it("criar: cargo e empresa da IA não vão para o contato — viram pendências dele, para a dona confirmar", async () => {
+    banco.sugestao = { ...banco.sugestao!, fullName: "Fernando Okada", jobTitle: "mentor convidado", company: "Ponte Sul Consultoria", email: "fernando@exemplo.invalid" };
+    await expect(rota().decideContactSuggestion({ suggestionId: ID, action: "create" })).resolves.toEqual({ success: true, contactId: 99 });
+    expect(createPrivateContact).toHaveBeenCalledWith("dona-1", { fullName: "Fernando Okada", phone: null, email: "fernando@exemplo.invalid" });
+    const pendencias = banco.insercoes.filter(({ tabela }) => tabela === schema.networkSugestoes)
+      .flatMap(({ valores }) => valores as Array<Record<string, unknown>>);
+    expect(pendencias.map(p => [p.campo, p.valor, p.contactId, p.status, p.origem])).toEqual([
+      ["cargo", "mentor convidado", 99, "pendente", "reuniao"],
+      ["empresa", "Ponte Sul Consultoria", 99, "pendente", "reuniao"],
+    ]);
   });
 });

@@ -371,10 +371,12 @@ export const meetingsRouter = router({
       }
       if (input.action === "create") {
         try {
+          // Só o QUEM SOU que a tela marcou: nome, telefone e e-mail, conferidos
+          // contra a transcrição. Cargo e empresa vieram da IA e não entram
+          // sozinhos (achado 6 da bancada de 16/11): viram pendências do contato
+          // novo, em decidirPendenciasDaPessoaSugerida, para a dona confirmar.
           linkedContactId = await createPrivateContact(ctx.user.openId, {
             fullName: suggestion.fullName,
-            jobTitle: suggestion.jobTitle,
-            company: suggestion.company,
             phone: suggestion.phone,
             email: suggestion.email,
           });
@@ -390,14 +392,18 @@ export const meetingsRouter = router({
       // Meu Network Inteligente: O QUE TENHO / O QUE PRECISO que a IA tirou da
       // reunião para esta pessoa passam a apontar para o contato, AINDA
       // pendentes — criar o contato confirma o Quem Sou que a tela mostrou, não
-      // o resto. Ignorar a pessoa ignora tudo que veio dela.
+      // o resto; cargo e empresa viram pendências também. Ignorar a pessoa
+      // ignora tudo que veio dela.
       await decidirPendenciasDaPessoaSugerida(db, {
         ownerId: ctx.user.openId,
         meetingSuggestionId: suggestion.id,
         meetingId: suggestion.meetingId,
         acao: input.action,
         contactId: linkedContactId,
-        quemSouDaSugestao: { fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email },
+        quemSouDaSugestao: {
+          fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email,
+          jobTitle: suggestion.jobTitle, company: suggestion.company,
+        },
       });
       return { success: true, contactId: linkedContactId };
     }),
