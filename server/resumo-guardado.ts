@@ -1,10 +1,11 @@
 import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, max, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
-import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { ITENS_DO_RESUMO_MAX, secaoTemAssunto, secaoTemResponsavel, type SecaoDoItem } from "@shared/item-do-resumo";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 
@@ -21,7 +22,7 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 
 // As frases das recusas moram em shared/const.ts: a tela as reconhece pelo
 // texto exato para traduzi-las.
-export { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA };
+export { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA };
 
 // "Gerando" só com uma reserva viva: na espera depois de uma falha passageira a
 // linha também tem prazo no futuro, mas ninguém está gerando.
@@ -78,6 +79,9 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       startSeconds: meetingSummaryItems.startSeconds,
       status: meetingSummaryItems.status,
       done: meetingSummaryItems.done,
+      // Quem escreveu e se a dona editou (H4f): a tela marca o que é dela.
+      origin: meetingSummaryItems.origin,
+      editedAt: meetingSummaryItems.editedAt,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
       .orderBy(asc(meetingSummaryItems.position))
@@ -144,6 +148,8 @@ async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
     id: meetingSummaryItems.id,
     section: meetingSummaryItems.section,
     status: meetingSummaryItems.status,
+    origin: meetingSummaryItems.origin,
+    editedAt: meetingSummaryItems.editedAt,
     statusDoResumo: meetingSummaries.status,
     statusDaReuniao: meetings.status,
   }).from(meetingSummaryItems)
@@ -162,12 +168,23 @@ function linhasAfetadas(resultado: unknown): number {
 }
 
 /**
+ * O item que a dona escreveu, acrescentado ou editado (H4f), não volta a
+ * "para conferir": não há o que conferir na palavra dela, e o link aberto
+ * mostraria o aviso de que a IA o gerou. Desfazer o ignorar o devolve
+ * confirmado.
+ */
+function escritoPelaDona(item: { origin: string; editedAt: number | null }): boolean {
+  return item.origin === "owner" || item.editedAt !== null;
+}
+
+/**
  * Confirma, ignora ou volta a pendente um item do resumo. Item que deixa de
  * estar confirmado perde também a marca de feito: só ação confirmada se marca.
  */
-export async function decidirItemDoResumo(ownerId: string, itemId: string, status: "pending" | "confirmed" | "ignored") {
+export async function decidirItemDoResumo(ownerId: string, itemId: string, pedido: "pending" | "confirmed" | "ignored") {
   const db = await exigirDb();
-  await itemParaDecidir(db, ownerId, itemId);
+  const item = await itemParaDecidir(db, ownerId, itemId);
+  const status = pedido === "pending" && escritoPelaDona(item) ? "confirmed" : pedido;
   const agora = Date.now();
   const r = await db.update(meetingSummaryItems).set({
     status,
@@ -206,6 +223,119 @@ export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: bo
     updatedAt: agora,
   }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
   if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+}
+
+/**
+ * O que a dona escreve num item (H4f), já aparado e validado pela entrada do
+ * procedimento: o texto é obrigatório; o assunto, o responsável e o prazo vêm
+ * nulos quando vazios. Os rótulos de voz ({F2}) chegam prontos da tela
+ * (shared/vozes-na-edicao.ts): o servidor nunca resolve nem desfaz um nome.
+ */
+export type CamposDoItem = { texto: string; assunto: string | null; responsavel: string | null; prazo: string | null };
+
+/**
+ * Os campos como a seção os guarda: só as tarefas têm assunto, e só as ações
+ * e as tarefas têm responsável e prazo (o formato da cliente). O que a seção
+ * não tem fica nulo, venha o que vier.
+ */
+function camposDaSecao(secao: SecaoDoItem, campos: CamposDoItem) {
+  return {
+    text: campos.texto,
+    subject: secaoTemAssunto(secao) ? campos.assunto : null,
+    assignee: secaoTemResponsavel(secao) ? campos.responsavel : null,
+    due: secaoTemResponsavel(secao) ? campos.prazo : null,
+  };
+}
+
+type Transacao = Parameters<Parameters<Banco["transaction"]>[0]>[0];
+
+/**
+ * Dentro da transação, trava a reunião e o resumo, nesta ordem (a mesma da
+ * gravação do resumo, server/fila-do-resumo.ts), e exige os dois prontos. A
+ * exclusão, que marca 'deleted' antes de apagar, espera a transação e leva
+ * junto o que ela gravou: nunca sobra item de reunião apagada.
+ */
+async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: string, naoAchou: string) {
+  const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
+  if (!reuniao || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
+  const [resumo] = await tx.select({ id: meetingSummaries.id, status: meetingSummaries.status }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1).for("update");
+  if (!resumo || resumo.status !== "ready" || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+  return resumo;
+}
+
+/** O conteúdo do resumo mudou: a versão sobe (a tradução da H11 é refeita). */
+async function subirVersao(tx: Transacao, ownerId: string, summaryId: string, agora: number) {
+  await tx.update(meetingSummaries).set({ version: sql`${meetingSummaries.version} + 1`, updatedAt: agora })
+    .where(and(eq(meetingSummaries.id, summaryId), eq(meetingSummaries.ownerId, ownerId)));
+}
+
+/**
+ * A dona edita o texto, o assunto (das tarefas), o responsável e o prazo de um
+ * item do resumo pronto (H4f). O item editado vale como confirmado: é a palavra
+ * dela, e o link aberto o mostra assim, sem o aviso de que a IA o gerou. A
+ * origem não muda; o edited_at marca a edição, só quando algo mudou (salvar
+ * sem mudar nada é confirmar). A marca de feito da ação fica como estava.
+ */
+export async function editarItemDoResumo(ownerId: string, itemId: string, campos: CamposDoItem) {
+  const db = await exigirDb();
+  await db.transaction(async tx => {
+    const [item] = await tx.select({
+      summaryId: meetingSummaryItems.summaryId,
+      meetingId: meetingSummaryItems.meetingId,
+      section: meetingSummaryItems.section,
+      status: meetingSummaryItems.status,
+      subject: meetingSummaryItems.subject,
+      text: meetingSummaryItems.text,
+      assignee: meetingSummaryItems.assignee,
+      due: meetingSummaryItems.due,
+    }).from(meetingSummaryItems)
+      .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
+    if (!item) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    const resumo = await travarResumoPronto(tx, ownerId, item.meetingId, MENSAGEM_ITEM_NAO_ENCONTRADO);
+    // O item é de outro resumo da mesma reunião (o resumo foi refeito entre a
+    // leitura e a trava): não existe mais.
+    if (resumo.id !== item.summaryId) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    const novos = camposDaSecao(item.section, campos);
+    const mudou = novos.text !== item.text || novos.subject !== item.subject || novos.assignee !== item.assignee || novos.due !== item.due;
+    const agora = Date.now();
+    const r = await tx.update(meetingSummaryItems).set({
+      ...novos,
+      status: "confirmed",
+      ...(item.status === "confirmed" ? {} : { decidedAt: agora }),
+      ...(mudou ? { editedAt: agora } : {}),
+      updatedAt: agora,
+    }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+    if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    if (mudou) await subirVersao(tx, ownerId, resumo.id, agora);
+  });
+}
+
+/**
+ * A dona acrescenta um item à mão ao resumo pronto (H4f): no fim da seção,
+ * confirmado, com a origem 'owner', sem trecho, sem tempo e sem confiança. O
+ * resumo guarda até ITENS_DO_RESUMO_MAX itens. Devolve o id do item novo.
+ */
+export async function acrescentarItemDoResumo(ownerId: string, meetingId: string, secao: SecaoDoItem, campos: CamposDoItem): Promise<string> {
+  const db = await exigirDb();
+  const id = crypto.randomUUID();
+  await db.transaction(async tx => {
+    const resumo = await travarResumoPronto(tx, ownerId, meetingId, MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    const [contagem] = await tx.select({ itens: count(), ultima: max(meetingSummaryItems.position) }).from(meetingSummaryItems)
+      .where(and(eq(meetingSummaryItems.summaryId, resumo.id), eq(meetingSummaryItems.ownerId, ownerId)));
+    if (Number(contagem?.itens ?? 0) >= ITENS_DO_RESUMO_MAX) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_RESUMO_CHEIO });
+    const agora = Date.now();
+    // A tela agrupa por seção na ordem da posição: o último do resumo é o último da seção.
+    const ultima = contagem?.ultima ?? null;
+    await tx.insert(meetingSummaryItems).values({
+      id, summaryId: resumo.id, meetingId, ownerId, section: secao, position: ultima === null ? 0 : Number(ultima) + 1,
+      ...camposDaSecao(secao, campos), excerpt: "", startSeconds: null,
+      origin: "owner", status: "confirmed", done: false, decidedAt: agora, createdAt: agora, updatedAt: agora,
+    });
+    await subirVersao(tx, ownerId, resumo.id, agora);
+  });
+  return id;
 }
 
 /**

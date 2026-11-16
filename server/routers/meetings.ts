@@ -30,7 +30,18 @@ import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
-import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
+
+// O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
+// assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
+const campoDoItemDoResumo = z.string().trim().max(CAMPO_DO_ITEM_DO_RESUMO_MAX).nullish().transform(valor => valor || null);
+const camposDoItemDoResumo = {
+  texto: z.string().trim().min(1).max(TEXTO_DO_ITEM_DO_RESUMO_MAX),
+  assunto: campoDoItemDoResumo,
+  responsavel: campoDoItemDoResumo,
+  prazo: campoDoItemDoResumo,
+};
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -268,6 +279,24 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       await marcarAcaoFeita(ctx.user.openId, input.itemId, input.feito);
       return { ok: true as const };
+    }),
+
+  // A dona edita um item e acrescenta item à mão (H4f): o que ela escreve vale
+  // como confirmado. Sem IA, então sem teto de pedidos; o resumo guarda até
+  // ITENS_DO_RESUMO_MAX itens.
+  editarItemDoResumo: protectedProcedure
+    .input(z.object({ itemId: z.string().uuid(), ...camposDoItemDoResumo }))
+    .mutation(async ({ ctx, input }) => {
+      const { itemId, ...campos } = input;
+      await editarItemDoResumo(ctx.user.openId, itemId, campos);
+      return { ok: true as const };
+    }),
+
+  acrescentarItemDoResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), secao: z.enum(SECOES_DO_RESUMO), ...camposDoItemDoResumo }))
+    .mutation(async ({ ctx, input }) => {
+      const { meetingId, secao, ...campos } = input;
+      return { id: await acrescentarItemDoResumo(ctx.user.openId, meetingId, secao, campos) };
     }),
 
   perguntar: protectedProcedure

@@ -3,6 +3,7 @@ import {
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
@@ -56,6 +57,8 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_RESUMO_SENDO_GERADO]: "meetings.summary.errorRegenerating",
   [MENSAGEM_ITEM_NAO_ENCONTRADO]: "meetings.summary.errorItemGone",
   [MENSAGEM_SO_ACAO_TEM_CAIXA]: "meetings.summary.errorOnlyActions",
+  // O item que a dona acrescenta passaria do teto do resumo (H4f).
+  [MENSAGEM_RESUMO_CHEIO]: "meetings.summary.errorFull",
 };
 
 /**
