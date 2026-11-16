@@ -52,6 +52,20 @@ export type OpcoesDoGravador = {
    * diz que bateu nas 12 h (G13a). Chamado uma vez por gravação (G13b).
    */
   aoChegarAoLimite?: () => void;
+  /**
+   * Sair da tela (o desmonte) com a gravação em curso, gravando ou pausada. Sem
+   * isto, o desmonte descarta: para, solta o microfone e não entrega nada (o
+   * ditado, a voz do contato, o envio único da reunião). Com isto, para e
+   * entrega pelo mesmo caminho do Parar — a última parte sai por aoFecharParte e
+   * por aoTerminar —, e `aoEntregarAoSair` avisa a tela. É a gravação em partes
+   * (G13b): as partes anteriores já estão no servidor, e descartar perdia a
+   * última e deixava a reunião "gravando" lá. A função é consultada na hora do
+   * desmonte, e só com a gravação em curso: a tela diz ali se ainda entrega (no
+   * Sair da conta, não).
+   */
+  entregarAoSair?: boolean | (() => boolean);
+  /** O desmonte parou e entregou a gravação em curso (com `entregarAoSair`): só para a tela avisar. */
+  aoEntregarAoSair?: () => void;
 };
 
 // Pedaços de 250 ms e o relógio a cada 500 ms, como os três faziam (a folga da
@@ -273,9 +287,32 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   }
 
   // Saiu da tela gravando, ou com o pedido do microfone aberto: para o gravador e
-  // o microfone e não entrega nada. No StrictMode, que monta, desmonta e monta de
-  // novo, isto roda sem nada gravando.
-  useEffect(() => () => descartar(), []);
+  // o microfone e não entrega nada. Com entregarAoSair (a gravação em partes,
+  // G13b), a gravação em curso para e entrega como no Parar: o fim do arquivo
+  // chega depois do desmonte (o onstop do MediaRecorder, que também solta o
+  // microfone), e quem recebe a última parte não depende da tela. O pedido do
+  // microfone ainda aberto é descartado nos dois casos: nada foi gravado. No
+  // StrictMode, que monta, desmonta e monta de novo, isto roda sem nada gravando.
+  useEffect(() => () => {
+    const agora = estadoAgora.current;
+    const emCurso = agora === "gravando" || agora === "pausado" || agora === "finalizando";
+    const entregar = atuais.current.entregarAoSair;
+    if (emCurso && (typeof entregar === "function" ? entregar() : entregar)) {
+      // O Parar já pedido (o Encerrar logo antes de sair): o fim que o
+      // MediaRecorder ainda vai entregar sai como a última parte.
+      if (agora === "finalizando") return;
+      parar();
+      // O parar() trocou o estado ("finalizando", ou já "parado" com o fim
+      // entregue na hora): a gravação vai ser, ou já foi, entregue.
+      if (estadoAgora.current !== agora) {
+        atuais.current.aoEntregarAoSair?.();
+        return;
+      }
+      // O parar() não teve o que parar (o MediaRecorder que o navegador já deu
+      // como inativo): o descarte abaixo ao menos solta o microfone.
+    }
+    descartar();
+  }, []);
 
   useEffect(() => {
     if (estado === "pausado") {

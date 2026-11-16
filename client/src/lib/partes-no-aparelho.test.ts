@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apagarParte, apagarPartesDaReuniao, apagarTodasAsPartes, guardarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
 
+// Quantas vezes o getAll trouxe as partes inteiras (com o áudio) para a memória.
+let leiturasComOAudio = 0;
+
 /**
  * Um IndexedDB mínimo em memória (o jsdom não traz um): só o que o módulo usa
- * (open com upgrade, put, delete, getAll, clear e o oncomplete da transação,
- * que chega depois, como no navegador).
+ * (open com upgrade, put, delete, getAll, getAllKeys, clear e o oncomplete da
+ * transação, que chega depois, como no navegador).
  */
 function indexedDBEmMemoria() {
   const tabelas = new Map<string, Map<string, unknown>>();
@@ -28,7 +31,12 @@ function indexedDBEmMemoria() {
         objectStore: () => ({
           put: (valor: Record<string, unknown>) => fazer(() => void linhas.set(chave(valor, caminho), valor)),
           delete: (k: unknown[]) => fazer(() => void linhas.delete(JSON.stringify(k))),
-          getAll: () => fazer(() => Array.from(linhas.values())),
+          getAll: () => {
+            leiturasComOAudio++;
+            return fazer(() => Array.from(linhas.values()));
+          },
+          // Só as chaves ([meetingId, seq]), sem o áudio.
+          getAllKeys: () => fazer(() => Array.from(linhas.keys()).map(k => JSON.parse(k) as unknown[])),
           clear: () => fazer(() => void linhas.clear()),
         }),
       };
@@ -57,6 +65,7 @@ const parte = (meetingId: string, seq: number, dona = "dona-1"): ParteNoAparelho
 });
 
 beforeEach(() => {
+  leiturasComOAudio = 0;
   vi.stubGlobal("indexedDB", indexedDBEmMemoria());
 });
 afterEach(() => {
@@ -103,6 +112,15 @@ describe("partes-no-aparelho (G9)", () => {
     await apagarPartesDaReuniao("r-1");
     expect((await partesGuardadas("dona-1")).map(p => `${p.meetingId}#${p.seq}`)).toEqual(["r-2#0"]);
     expect(await partesGuardadas("outra-conta")).toHaveLength(1);
+  });
+
+  it("apagar a gravação descartada lê só as chaves: o áudio das partes guardadas não vem para a memória (revisão da G13b)", async () => {
+    await guardarParte(parte("r-1", 0));
+    await guardarParte(parte("r-1", 1));
+    await guardarParte(parte("r-2", 0));
+    await apagarPartesDaReuniao("r-1");
+    expect(leiturasComOAudio).toBe(0);
+    expect((await partesGuardadas("dona-1")).map(p => `${p.meetingId}#${p.seq}`)).toEqual(["r-2#0"]);
   });
 
   it("sem IndexedDB nada foi guardado: apagar a gravação descartada não tem o que apagar e não falha", async () => {

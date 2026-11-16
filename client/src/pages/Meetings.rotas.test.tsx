@@ -6,6 +6,7 @@ import { Route, Switch } from "wouter";
 import i18n from "@/i18n";
 import { PageTransition } from "@/components/PageTransition";
 import { CODIGO_ERRO_INTERROMPIDO, MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/const";
+import { liberarTodas, sessaoOcupada } from "@/lib/sessao-ocupada";
 import Meetings from "./Meetings";
 
 /**
@@ -51,11 +52,27 @@ const duble = vi.hoisted(() => {
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
       client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
     },
+    // O envio de cada parte da gravação em partes (a rota binária, fora do tRPC).
+    enviarParte: vi.fn(),
   };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
+// A gravação em partes: os testes de gravação em curso rodam nos dois modos
+// (revisão da G13b), e as partes sobem por aqui, com a cópia no aparelho, que o
+// jsdom não tem (sem IndexedDB).
+vi.mock("@/lib/envio-das-partes", () => ({
+  enviarParte: (...a: unknown[]) => duble.enviarParte(...a),
+  enviarPendentes: async () => ({ restantes: 0, semSessao: false }),
+  travaDoNavegador: async (_nome: string, trabalho: () => Promise<unknown>) => trabalho(),
+}));
+vi.mock("@/lib/partes-no-aparelho", () => ({
+  guardarParte: async () => undefined,
+  apagarParte: async () => undefined,
+  apagarPartesDaReuniao: async () => undefined,
+  apagarTodasAsPartes: async () => undefined,
+}));
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (arquivo: Blob) => duble.duracao(arquivo) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -101,6 +118,31 @@ const reuniao = (id: string) => ({ id, title: TITULOS[id], status: "ready", proc
 // Meetings.sessao-ocupada.test.tsx. O envio de arquivo segue no envio único nos
 // dois modos e é testado no /gravar de sempre.
 const GRAVAR_ENVIO_UNICO = "/gravar?envioUnico=1";
+
+/**
+ * Os dois modos do gravador, para os testes de sair da tela com a gravação em
+ * curso (revisão da G13b): a gravação em partes, o padrão, e o envio único. Em
+ * partes, a reunião nasce no Iniciar, e sair da tela gravando ENTREGA o que foi
+ * gravado; no envio único, sair descarta, como antes.
+ */
+const MODOS = [
+  { modo: "em partes", gravar: "/gravar", lista: "/meetings", emPartes: true },
+  { modo: "envio único", gravar: GRAVAR_ENVIO_UNICO, lista: "/meetings?envioUnico=1", emPartes: false },
+] as const;
+const ENCERRADA_AO_SAIR = "A gravação foi encerrada ao sair da tela. O que foi gravado segue para a transcrição.";
+const FINS = "wrw:fins-de-gravacao-pendentes";
+const DESCARTES = "wrw:descartes-de-gravacao-pendentes";
+const { iniciarGravacao, encerrarGravacao, delete: excluirReuniao } = duble.utils.client.meetings;
+
+/** O que a gravação em partes pede ao servidor responde, salvo no teste que diz outro. */
+function servidorDaGravacaoEmPartes() {
+  iniciarGravacao.mutate.mockResolvedValue({ id: VINICOLA });
+  encerrarGravacao.mutate.mockResolvedValue({ partes: 1 });
+  excluirReuniao.mutate.mockResolvedValue({ success: true });
+  duble.enviarParte.mockResolvedValue({ tipo: "recebida" });
+  localStorage.removeItem(FINS);
+  localStorage.removeItem(DESCARTES);
+}
 
 function abrirEm(caminho: string) {
   window.history.replaceState(null, "", caminho);
@@ -359,6 +401,7 @@ describe("Reuniões — gravação em curso", () => {
   const trilha = { stop: vi.fn() };
 
   beforeEach(() => {
+    servidorDaGravacaoEmPartes();
     originais = { criar: URL.createObjectURL, revogar: URL.revokeObjectURL, microfone: Object.getOwnPropertyDescriptor(navigator, "mediaDevices") };
     vi.stubGlobal("MediaRecorder", GravadorFalso);
     Object.defineProperty(navigator, "mediaDevices", {
@@ -392,8 +435,8 @@ describe("Reuniões — gravação em curso", () => {
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
   }
 
-  it("sair de /gravar gravando pelo menu devolve a URL ao gravador, avisa e não deixa o véu preto preso", async () => {
-    abrirComTransicao(GRAVAR_ENVIO_UNICO);
+  it.each(MODOS)("$modo: sair de /gravar gravando pelo menu devolve a URL ao gravador, avisa e não deixa o véu preto preso", async ({ gravar, emPartes }) => {
+    abrirComTransicao(gravar);
     await comecarAGravar();
     // Nada avisou antes da saída: o aviso conferido abaixo é o da volta.
     expect(toast.info).not.toHaveBeenCalled();
@@ -420,10 +463,12 @@ describe("Reuniões — gravação em curso", () => {
     fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
     expect(pararGravador).toHaveBeenCalled();
     expect(trilha.stop).toHaveBeenCalled();
+    // Em partes, o Encerrar entrega a gravação inteira: a última parte e o fim.
+    if (emPartes) await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
   });
 
-  it("ir a uma reunião (/meetings/:id) gravando também devolve a URL ao gravador, com o microfone aberto", async () => {
-    abrirEm(GRAVAR_ENVIO_UNICO);
+  it.each(MODOS)("$modo: ir a uma reunião (/meetings/:id) gravando também devolve a URL ao gravador, com o microfone aberto", async ({ gravar }) => {
+    abrirEm(gravar);
     await comecarAGravar();
     act(() => window.history.pushState(null, "", `/meetings/${VINICOLA}`));
     await waitFor(() => expect(window.location.pathname).toBe("/gravar"));
@@ -436,16 +481,85 @@ describe("Reuniões — gravação em curso", () => {
     expect(trilha.stop).not.toHaveBeenCalled();
   });
 
-  it("sair de Reuniões gravando, para outra tela, desmonta a página e fecha o microfone", async () => {
-    const { unmount } = abrirEm(GRAVAR_ENVIO_UNICO);
+  it.each(MODOS)("$modo: sair de Reuniões gravando, para outra tela, desmonta a página e fecha o microfone", async ({ gravar, emPartes }) => {
+    const { unmount } = abrirEm(gravar);
     await comecarAGravar();
     expect(trilha.stop).not.toHaveBeenCalled();
     unmount();
     expect(trilha.stop).toHaveBeenCalled();
+    if (emPartes) {
+      // Em partes (revisão da G13b), sair ENTREGA como o Encerrar: a última parte
+      // sobe, o fim é declarado, e o aviso fica até ser fechado, porque a dona
+      // já está em outra tela. Nada é excluído.
+      await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+      expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+      expect(toast.info).toHaveBeenCalledWith(ENCERRADA_AO_SAIR, { id: "gravacao-encerrada-ao-sair", duration: Infinity, closeButton: true });
+      expect(excluirReuniao.mutate).not.toHaveBeenCalled();
+      expect(localStorage.getItem(FINS)).toBeNull();
+    } else {
+      // No envio único, sair descarta, como antes: nada vai ao servidor, nem avisa.
+      await act(async () => { await new Promise(resolver => setTimeout(resolver, 10)); });
+      expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
+      expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
+      expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
+      expect(duble.enviarParte).not.toHaveBeenCalled();
+      expect(toast.info).not.toHaveBeenCalled();
+    }
   });
 
-  it("o voltar do navegador durante a gravação também volta ao gravador, sem véu preso", async () => {
-    abrirComTransicao("/meetings?envioUnico=1");
+  it("em partes, a página que sai pelo fim da sessão (o Sair mesmo assim, excluir a conta) descarta como antes: nada sobe, nada avisa e a sessão não volta a ficar ocupada", async () => {
+    const { unmount } = abrirEm("/gravar");
+    await comecarAGravar();
+    // O logout zera a conta no cache e solta as ocupações antes de a página sair.
+    vi.spyOn(duble.utils.auth.me, "getData").mockReturnValue(null as unknown as { openId: string });
+    act(() => liberarTodas());
+    unmount();
+    expect(trilha.stop).toHaveBeenCalled();
+    await act(async () => { await new Promise(resolver => setTimeout(resolver, 10)); });
+    expect(duble.enviarParte).not.toHaveBeenCalled();
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(sessaoOcupada()).toBe(false);
+  });
+
+  it("em partes, o fim que falha depois de sair da tela fica guardado, e a retomada o declara quando a dona volta a Reuniões (revisão da G13b)", async () => {
+    encerrarGravacao.mutate.mockRejectedValueOnce(new Error("rede")).mockResolvedValue({ partes: 1 });
+    const { unmount } = abrirEm("/gravar");
+    await comecarAGravar();
+    unmount();
+    expect(trilha.stop).toHaveBeenCalled();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(FINS) ?? "{}")).toEqual({ [VINICOLA]: 1 }));
+    expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
+    // A dona volta a Reuniões: a retomada declara o fim guardado.
+    abrirEm("/meetings");
+    await waitFor(() => expect(localStorage.getItem(FINS)).toBeNull());
+    expect(encerrarGravacao.mutate).toHaveBeenLastCalledWith({ meetingId: VINICOLA, partes: 1 });
+  });
+
+  it("em partes, sair da tela com o Iniciar esperando o servidor criar a reunião: ela é excluída quando nasce, nenhuma parte sobe e o microfone nem é pedido (revisão da G13b)", async () => {
+    let criar: (reuniao: { id: string }) => void = () => {};
+    iniciarGravacao.mutate.mockImplementation(() => new Promise(resolver => { criar = resolver; }));
+    const pedirMicrofone = vi.fn(async () => ({ getTracks: () => [trilha] }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
+    const { unmount } = abrirEm("/gravar");
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    unmount();
+    await act(async () => { criar({ id: VINICOLA }); });
+    await waitFor(() => expect(excluirReuniao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+    // Nada fica aberto: o pedido de permissão do microfone não aparece em outra tela.
+    expect(pedirMicrofone).not.toHaveBeenCalled();
+    expect(trilha.stop).not.toHaveBeenCalled();
+    expect(duble.enviarParte).not.toHaveBeenCalled();
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(localStorage.getItem(DESCARTES)).toBeNull();
+  });
+
+  it.each(MODOS)("$modo: o voltar do navegador durante a gravação também volta ao gravador, sem véu preso", async ({ lista }) => {
+    abrirComTransicao(lista);
     fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument());
     // A troca de /meetings para /gravar termina antes do voltar, como no uso real.
@@ -545,36 +659,42 @@ describe("Reuniões — gravação em curso", () => {
     expect(trilha.stop).toHaveBeenCalled();
   });
 
-  it("o microfone que chega depois de a página sair é solto na hora, sem gravar", async () => {
+  it.each(MODOS)("$modo: o microfone que chega depois de a página sair é solto na hora, sem gravar", async ({ gravar, emPartes }) => {
     let entregar: (fluxo: unknown) => void = () => {};
     const trilha = { stop: vi.fn() };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: () => new Promise(resolver => { entregar = resolver; }) },
-    });
+    const pedirMicrofone = vi.fn(() => new Promise(resolver => { entregar = resolver; }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
     const criar = vi.spyOn(GravadorFalso.prototype, "start");
-    const { unmount } = abrirEm(GRAVAR_ENVIO_UNICO);
+    const { unmount } = abrirEm(gravar);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+    // Em partes, o microfone é pedido depois de o servidor criar a reunião.
+    await waitFor(() => expect(pedirMicrofone).toHaveBeenCalled());
     unmount();
     await act(async () => { entregar({ getTracks: () => [trilha] }); });
     expect(trilha.stop).toHaveBeenCalled();
     expect(criar).not.toHaveBeenCalled();
+    // Nada foi gravado: não há o que entregar, nem aviso de gravação encerrada.
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(duble.enviarParte).not.toHaveBeenCalled();
+    expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+    // Em partes, a reunião vazia desta tentativa sai.
+    if (emPartes) await waitFor(() => expect(excluirReuniao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+    else expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
   });
 
-  it("o microfone que chega depois de a dona ir do gravador à lista (a mesma página) é solto, sem gravar nem puxá-la de volta", async () => {
+  it.each(MODOS)("$modo: o microfone que chega depois de a dona ir do gravador à lista (a mesma página) é solto, sem gravar nem puxá-la de volta", async ({ gravar, emPartes }) => {
     let entregar: (fluxo: unknown) => void = () => {};
     const trilha = { stop: vi.fn() };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: () => new Promise(resolver => { entregar = resolver; }) },
-    });
+    const pedirMicrofone = vi.fn(() => new Promise(resolver => { entregar = resolver; }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
     const iniciar = vi.spyOn(GravadorFalso.prototype, "start");
-    abrirEm(GRAVAR_ENVIO_UNICO);
+    abrirEm(gravar);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+    await waitFor(() => expect(pedirMicrofone).toHaveBeenCalled());
     act(() => window.history.pushState(null, "", "/meetings"));
     await act(async () => { entregar({ getTracks: () => [trilha] }); });
     expect(trilha.stop).toHaveBeenCalled();
@@ -582,6 +702,8 @@ describe("Reuniões — gravação em curso", () => {
     expect(window.location.pathname).toBe("/meetings");
     expect(screen.getByRole("button", { name: /Nova reunião/ })).toBeInTheDocument();
     expect(toast.info).not.toHaveBeenCalled();
+    // Em partes, a reunião vazia desta tentativa sai.
+    if (emPartes) await waitFor(() => expect(excluirReuniao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
     // De volta ao gravador, ele está livre para gravar.
     fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
@@ -725,8 +847,8 @@ describe("Reuniões — gravação em curso", () => {
     await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ durationSeconds: 95 })));
   });
 
-  it("vários toques no menu durante a gravação dão um aviso só, com o mesmo id", async () => {
-    abrirEm(GRAVAR_ENVIO_UNICO);
+  it.each(MODOS)("$modo: vários toques no menu durante a gravação dão um aviso só, com o mesmo id", async ({ gravar }) => {
+    abrirEm(gravar);
     await comecarAGravar();
     for (let i = 0; i < 3; i++) act(() => window.history.pushState(null, "", "/meetings"));
     expect(window.location.pathname).toBe("/gravar");
@@ -735,19 +857,20 @@ describe("Reuniões — gravação em curso", () => {
     for (const chamada of avisos) expect(chamada).toEqual(["Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" }]);
   });
 
-  it("o microfone negado depois de a dona ir à lista não avisa fora do gravador nem fica guardado para a volta", async () => {
+  it.each(MODOS)("$modo: o microfone negado depois de a dona ir à lista não avisa fora do gravador nem fica guardado para a volta", async ({ gravar, emPartes }) => {
     let negar: (erro: unknown) => void = () => {};
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: () => new Promise((_resolver, rejeitar) => { negar = rejeitar; }) },
-    });
-    abrirEm(GRAVAR_ENVIO_UNICO);
+    const pedirMicrofone = vi.fn(() => new Promise((_resolver, rejeitar) => { negar = rejeitar; }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
+    abrirEm(gravar);
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+    await waitFor(() => expect(pedirMicrofone).toHaveBeenCalled());
     act(() => window.history.pushState(null, "", "/meetings"));
     await act(async () => { negar(new DOMException("negado", "NotAllowedError")); });
     expect(toast.error).not.toHaveBeenCalled();
+    // Em partes, a reunião vazia desta tentativa sai.
+    if (emPartes) await waitFor(() => expect(excluirReuniao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
     fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     expect(screen.queryByText(/Permissão de microfone:/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
@@ -983,10 +1106,12 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
     expect(window.location.pathname).toBe("/memory");
   });
 
-  it("o microfone que o navegador entrega com a página escondida é solto na hora, sem gravar", async () => {
+  it.each(MODOS)("$modo: o microfone que o navegador entrega com a página escondida é solto na hora, sem gravar", async ({ gravar, emPartes }) => {
+    servidorDaGravacaoEmPartes();
     let entregarMicrofone: (fluxo: unknown) => void = () => {};
     const trilha = { stop: vi.fn() };
     const iniciar = vi.fn();
+    const pedirMicrofone = vi.fn(() => new Promise(resolver => { entregarMicrofone = resolver; }));
     const microfoneOriginal = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
     vi.stubGlobal("MediaRecorder", class {
       static isTypeSupported() { return true; }
@@ -996,24 +1121,28 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
       start() { iniciar(); }
       stop() {}
     });
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: () => new Promise(resolver => { entregarMicrofone = resolver; }) },
-    });
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
     try {
-      const { entregarTela } = abrirNoApp(GRAVAR_ENVIO_UNICO);
+      const { entregarTela } = abrirNoApp(gravar);
       fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
       fireEvent.click(screen.getByRole("checkbox"));
       fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ }));
+      // Em partes, o microfone é pedido depois de o servidor criar a reunião.
+      await waitFor(() => expect(pedirMicrofone).toHaveBeenCalled());
       // O pedido do microfone ainda aberto quando a dona vai a uma tela que ainda carrega.
       act(() => window.history.pushState(null, "", "/memory"));
       expect(screen.getByText("Carregando a tela…")).toBeInTheDocument();
       await act(async () => { entregarMicrofone({ getTracks: () => [trilha] }); });
       expect(trilha.stop).toHaveBeenCalled();
       expect(iniciar).not.toHaveBeenCalled();
+      // Em partes, a reunião vazia desta tentativa sai, e nada sobe.
+      if (emPartes) await waitFor(() => expect(excluirReuniao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+      expect(duble.enviarParte).not.toHaveBeenCalled();
       await entregarTela();
       expect(await screen.findByRole("heading", { name: "Memória" })).toBeInTheDocument();
       expect(window.location.pathname).toBe("/memory");
+      // Nada gravava quando a página saiu de vez: nenhum aviso de gravação encerrada.
+      expect(toast.info).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
       if (microfoneOriginal) Object.defineProperty(navigator, "mediaDevices", microfoneOriginal);

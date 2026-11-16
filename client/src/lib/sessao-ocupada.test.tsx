@@ -84,6 +84,16 @@ describe("sessão ocupada — ocupar e liberar", () => {
     expect(motivoDaOcupacao()).toBe("audio-nao-enviado");
   });
 
+  it("o descarte de gravação que não terminou (G13b) é o último motivo: os que perdem áudio vêm antes", () => {
+    abrir("descarte-pendente");
+    expect(motivoDaOcupacao()).toBe("descarte-pendente");
+    const audio = abrir("audio-nao-enviado");
+    expect(motivoDaOcupacao()).toBe("audio-nao-enviado");
+    audio();
+    expect(motivoDaOcupacao()).toBe("descarte-pendente");
+    expect(fecharAba()).toBe(true);
+  });
+
   it("liberarTodas (o logout) solta todas de uma vez; o liberar que chega depois não reabre nada", () => {
     const envio = abrir("enviando");
     abrir("audio-nao-enviado");
@@ -188,8 +198,8 @@ describe("sessão ocupada — fechar ou recarregar a aba", () => {
     expect(fecharAba()).toBe(false);
   });
 
-  it("pergunta com qualquer motivo, também com o áudio só esperando o envio", () => {
-    for (const motivo of ["gravando", "enviando", "audio-nao-enviado"] as const) {
+  it("pergunta com qualquer motivo, também com o áudio só esperando o envio e com o descarte que não terminou", () => {
+    for (const motivo of ["gravando", "enviando", "audio-nao-enviado", "descarte-pendente"] as const) {
       const liberar = abrir(motivo);
       expect(fecharAba()).toBe(true);
       liberar();

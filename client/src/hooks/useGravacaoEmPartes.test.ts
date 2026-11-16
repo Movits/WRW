@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResultadoDoDescarte } from "./useGravacaoEmPartes";
 
 const d = vi.hoisted(() => ({
   iniciar: vi.fn(),
@@ -153,9 +154,9 @@ describe("useGravacaoEmPartes (G9)", () => {
   it("cancelar (o microfone não abriu) exclui a reunião que nasceu, pelo caminho de exclusão de sempre", async () => {
     const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
-    let apagada: boolean | undefined;
-    await act(async () => { apagada = await result.current.cancelar("r-1"); });
-    expect(apagada).toBe(true);
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await result.current.cancelar("r-1"); });
+    expect(resultado).toBe("descartada");
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
     expect(d.apagarPartesDaReuniao).toHaveBeenCalledWith("r-1");
     expect(localStorage.getItem(DESCARTES)).toBeNull();
@@ -296,16 +297,16 @@ describe("useGravacaoEmPartes — G13b", () => {
     act(() => result.current.receberParte(parte(0, false)));
     act(() => result.current.receberParte(parte(1, false)));
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
-    let descarte: Promise<boolean> = Promise.resolve(false);
+    let descarte: Promise<ResultadoDoDescarte> = Promise.resolve("nada");
     act(() => { descarte = result.current.descartar(); });
-    // Guardado antes de tudo, para a retomada repetir se a exclusão falhar.
-    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual(["r-1"]);
+    // Guardado antes de tudo, com a conta que descartou, para a retomada repetir se a exclusão falhar.
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1" }]);
     await act(async () => { await new Promise(r => setTimeout(r, 10)); });
     // A exclusão espera a parte que já subia.
     expect(d.excluir).not.toHaveBeenCalled();
-    let apagada: boolean | undefined;
-    await act(async () => { soltar({ tipo: "recebida" }); apagada = await descarte; });
-    expect(apagada).toBe(true);
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { soltar({ tipo: "recebida" }); resultado = await descarte; });
+    expect(resultado).toBe("descartada");
     // A parte 1 esperava a vez: não subiu nem ficou no aparelho.
     expect(d.enviarParte).toHaveBeenCalledTimes(1);
     expect(d.guardarParte).toHaveBeenCalledTimes(1);
@@ -318,15 +319,15 @@ describe("useGravacaoEmPartes — G13b", () => {
     expect(localStorage.getItem(DESCARTES)).toBeNull();
   });
 
-  it("descartar com a exclusão falhando: responde que não apagou, fica guardado e a retomada apaga depois", async () => {
+  it("descartar com a exclusão falhando: responde 'pendente', fica guardado e a retomada apaga depois", async () => {
     d.excluir.mockRejectedValueOnce(new Error("rede"));
     const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     await act(async () => { await primeira.result.current.iniciar(INICIO); });
-    let apagada: boolean | undefined;
-    await act(async () => { apagada = await primeira.result.current.descartar(); });
-    expect(apagada).toBe(false);
-    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual(["r-1"]);
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await primeira.result.current.descartar(); });
+    expect(resultado).toBe("pendente");
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1" }]);
     primeira.unmount();
     // A tela aberta de novo (ou a próxima volta da retomada) apaga.
     renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
@@ -336,7 +337,7 @@ describe("useGravacaoEmPartes — G13b", () => {
   });
 
   it("a exclusão repetida que responde NOT_FOUND (a anterior chegou e só a resposta se perdeu) dá o descarte por feito", async () => {
-    localStorage.setItem(DESCARTES, JSON.stringify(["r-velha"]));
+    localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-velha", dona: "dona-1" }]));
     d.excluir.mockRejectedValue({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
     renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
@@ -344,8 +345,9 @@ describe("useGravacaoEmPartes — G13b", () => {
   });
 
   it("a cópia de uma gravação descartada que ficou no aparelho volta recusada sem virar aviso; a de outra reunião avisa", async () => {
-    localStorage.setItem(DESCARTES, JSON.stringify(["r-descartada"]));
-    // A cópia não sai (outra aba bloqueia o IndexedDB): o descarte segue guardado.
+    localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-descartada", dona: "dona-1" }]));
+    // A cópia não sai (outra aba bloqueia o IndexedDB): o descarte segue guardado,
+    // marcado como já excluído no servidor.
     d.apagarPartesDaReuniao.mockRejectedValue(new Error("bloqueado por outra aba"));
     d.enviarPendentes.mockImplementation(async (_dona: string, opcoes?: { aoRecusar?: (parte: { meetingId: string; seq: number }, codigo?: string) => void }) => {
       opcoes?.aoRecusar?.({ meetingId: "r-descartada", seq: 0 }, "SEM_REUNIAO");
@@ -357,6 +359,124 @@ describe("useGravacaoEmPartes — G13b", () => {
     await waitFor(() => expect(aoRecusarParte).toHaveBeenCalled());
     expect(aoRecusarParte).toHaveBeenCalledTimes(1);
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-descartada" });
-    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual(["r-descartada"]);
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-descartada", dona: "dona-1", soFaltaACopia: true }]);
+  });
+});
+
+/**
+ * A revisão da G13b. O descarte guardado tem dona (só a conta que descartou o
+ * retoma, e o NOT_FOUND só vale para ela); descartar responde o que fez
+ * ("descartada", "pendente" ou "nada"); a cópia que não sai não vira erro; e a
+ * retomada avisa a tela quando conclui um descarte guardado.
+ */
+describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revisão da G13b)", () => {
+  it("a retomada só repete os descartes da conta logada: o NOT_FOUND da reunião de outra conta não apaga o descarte dela", async () => {
+    localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-minha", dona: "dona-1" }, { id: "r-da-outra", dona: "outra-conta" }]));
+    // Para a conta logada, toda reunião que não é dela responde NOT_FOUND.
+    d.excluir.mockRejectedValue({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
+    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-da-outra", dona: "outra-conta" }]));
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-minha" });
+    expect(d.excluir).not.toHaveBeenCalledWith({ meetingId: "r-da-outra" });
+    expect(d.apagarPartesDaReuniao).not.toHaveBeenCalledWith("r-da-outra");
+  });
+
+  it("descartar sem gravação em curso responde 'nada' e não exclui nada", async () => {
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await retomadaDaMontagemFeita();
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await result.current.descartar(); });
+    expect(resultado).toBe("nada");
+    expect(d.excluir).not.toHaveBeenCalled();
+    expect(localStorage.getItem(DESCARTES)).toBeNull();
+  });
+
+  it("o Descartar depois de a última parte entrar na fila (o Encerrar no mesmo instante) responde 'nada': a gravação segue para a transcrição", async () => {
+    let soltar: (resultado: unknown) => void = () => {};
+    d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, true)));
+    await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await result.current.descartar(); });
+    expect(resultado).toBe("nada");
+    await act(async () => { soltar({ tipo: "recebida" }); });
+    await waitFor(() => expect(aoEncerrar).toHaveBeenCalledWith("r-1"));
+    expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 1 });
+    expect(d.excluir).not.toHaveBeenCalled();
+    expect(localStorage.getItem(DESCARTES)).toBeNull();
+  });
+
+  it("a exclusão dá certo e só a cópia no aparelho falha: 'descartada', e o descarte fica guardado até a cópia sair, sem excluir de novo no servidor", async () => {
+    const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await primeira.result.current.iniciar(INICIO); });
+    d.apagarPartesDaReuniao.mockRejectedValueOnce(new Error("bloqueado por outra aba"));
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await primeira.result.current.descartar(); });
+    expect(resultado).toBe("descartada");
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1", soFaltaACopia: true }]);
+    primeira.unmount();
+    // A retomada seguinte tira a cópia, e o servidor não é chamado de novo.
+    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
+    expect(d.apagarPartesDaReuniao).toHaveBeenCalledTimes(2);
+    expect(d.excluir).toHaveBeenCalledTimes(1);
+  });
+
+  it("a parte que está subindo quando a gravação é descartada e que o servidor recusa não avisa, e sai do aparelho", async () => {
+    let soltar: (resultado: unknown) => void = () => {};
+    d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
+    const aoRecusarParte = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, false)));
+    await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
+    let descarte: Promise<ResultadoDoDescarte> = Promise.resolve("nada");
+    act(() => { descarte = result.current.descartar(); });
+    // O servidor já excluiu a reunião quando a parte chega: recusa de vez.
+    await act(async () => { soltar({ tipo: "recusada", codigo: "SEM_REUNIAO" }); await descarte; });
+    expect(d.apagarParte).toHaveBeenCalledWith("r-1", 0);
+    expect(aoRecusarParte).not.toHaveBeenCalled();
+  });
+
+  it("a retomada (com o relógio falso) repete a exclusão que falhou duas vezes, guarda o descarte até a 3ª dar certo e só então avisa a tela", async () => {
+    localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-velha", dona: "dona-1" }]));
+    d.excluir.mockRejectedValueOnce(new Error("rede")).mockRejectedValueOnce(new Error("deploy")).mockResolvedValue({ success: true });
+    const aoConcluirDescarte = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
+      // A primeira volta da retomada, na montagem.
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(d.excluir).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-velha", dona: "dona-1" }]);
+      // 30 s depois, a segunda.
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(d.excluir).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-velha", dona: "dona-1" }]);
+      expect(aoConcluirDescarte).not.toHaveBeenCalled();
+      // E a terceira, que dá certo.
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(d.excluir).toHaveBeenCalledTimes(3);
+      expect(localStorage.getItem(DESCARTES)).toBeNull();
+      expect(aoConcluirDescarte).toHaveBeenCalledTimes(1);
+      expect(aoConcluirDescarte).toHaveBeenCalledWith("r-velha");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o descarte que dá certo na hora não é 'concluído pela retomada': a tela não recebe aoConcluirDescarte", async () => {
+    const aoConcluirDescarte = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    await act(async () => { await result.current.descartar(); });
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+    expect(aoConcluirDescarte).not.toHaveBeenCalled();
   });
 });

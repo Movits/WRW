@@ -71,11 +71,17 @@ export async function partesGuardadas(dona: string): Promise<ParteNoAparelho[]> 
  * retomada não reenviá-las nem contá-las como áudio por enviar. Sem IndexedDB
  * neste navegador nada foi guardado, e não há o que apagar; as outras falhas
  * (outra aba bloqueando, por exemplo) chegam a quem chama, que tenta de novo.
+ *
+ * Só as CHAVES ([meetingId, seq]) são lidas: o getAll() trazia para a memória o
+ * áudio de todas as partes guardadas, de todas as reuniões, para apagar as de
+ * uma só (cada parte tem até ~5 MB).
  */
 export async function apagarPartesDaReuniao(meetingId: string): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const todas = await comTabela<ParteNoAparelho[]>("readonly", tabela => tabela.getAll() as IDBRequest<ParteNoAparelho[]>);
-  for (const parte of todas.filter(p => p.meetingId === meetingId)) await apagarParte(meetingId, parte.seq);
+  const chaves = await comTabela<IDBValidKey[]>("readonly", tabela => tabela.getAllKeys());
+  for (const chave of chaves) {
+    if (Array.isArray(chave) && chave[0] === meetingId && typeof chave[1] === "number") await apagarParte(meetingId, chave[1]);
+  }
 }
 
 /** Sair da conta ou excluí-la: nenhuma voz fica no aparelho. */

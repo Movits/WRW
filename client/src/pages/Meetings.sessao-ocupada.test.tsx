@@ -5,6 +5,7 @@ import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { PRAZO_DO_AVISO_DE_HORA_MS } from "@shared/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
+import { RetomadaDosDescartes } from "@/components/RetomadaDosDescartes";
 import Meetings from "./Meetings";
 
 /**
@@ -717,7 +718,7 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
     expect(encerrarGravacao.mutate).toHaveBeenCalledTimes(1);
   });
 
-  it("a gravação nova tira da tela os avisos que ficam até ser fechados (o das 12 h e o da hora sem OK); o Iniciar recusado, não", async () => {
+  it("a gravação nova tira da tela os avisos que ficam até ser fechados (os das 12 h, da hora sem OK, do descarte que não terminou e da gravação encerrada ao sair); o Iniciar recusado, não", async () => {
     window.history.replaceState(null, "", "/gravar");
     render(<Meetings />);
     // Sem título nada começa: os avisos da gravação anterior seguem na tela.
@@ -730,6 +731,9 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
     expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
     expect(toast.dismiss).toHaveBeenCalledWith(AVISO_DO_LIMITE);
     expect(toast.dismiss).toHaveBeenCalledWith(AVISO_PAROU_SOZINHA);
+    // Revisão da G13b: o do descarte que não terminou e o da gravação encerrada ao sair também.
+    expect(toast.dismiss).toHaveBeenCalledWith("gravacao-descarte-pendente");
+    expect(toast.dismiss).toHaveBeenCalledWith("gravacao-encerrada-ao-sair");
   });
 
   it("no envio único nada muda: para nos 10 min, com a revisão do áudio, sem aviso de hora", async () => {
@@ -757,8 +761,10 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
 describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", () => {
   const { iniciarGravacao, encerrarGravacao, delete: excluir } = duble.utils.client.meetings;
   const DESCARTES = "wrw:descartes-de-gravacao-pendentes";
+  const FINS = "wrw:fins-de-gravacao-pendentes";
   const DESCARTADA = "Gravação descartada. Nada dela vai para a transcrição.";
-  const DESCARTE_PENDENTE = "Não foi possível apagar a gravação agora. A tela tenta de novo sozinha enquanto estiver aberta; se a reunião aparecer na lista, exclua-a por lá.";
+  const DESCARTE_PENDENTE = "Não foi possível apagar a gravação agora. O app tenta de novo sozinho enquanto estiver aberto; se a reunião aparecer na lista, exclua-a por lá.";
+  const AVISO_DO_DESCARTE_PENDENTE = "gravacao-descarte-pendente";
 
   beforeEach(() => {
     iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
@@ -766,8 +772,12 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     excluir.mutate.mockReset().mockResolvedValue({ success: true });
     duble.enviarParte.mockReset().mockResolvedValue({ tipo: "recebida" });
     localStorage.removeItem(DESCARTES);
+    localStorage.removeItem(FINS);
   });
-  afterEach(() => { localStorage.removeItem(DESCARTES); });
+  afterEach(() => {
+    localStorage.removeItem(DESCARTES);
+    localStorage.removeItem(FINS);
+  });
 
   function preencher() {
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
@@ -811,8 +821,12 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("button", { name: "Descartar gravação" })).toBeInTheDocument();
+    // Sair da tela gravando em partes entrega o que foi gravado (revisão da G13b).
     padrao.unmount();
+    await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
     iniciarGravacao.mutate.mockClear();
+    duble.enviarParte.mockClear();
 
     window.history.replaceState(null, "", "/gravar?envioUnico=1");
     render(<Meetings />);
@@ -898,10 +912,11 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
       const confirmacao = screen.getByRole("alertdialog", { name: "Descartar esta gravação?" });
       expect(confirmacao).toHaveAccessibleDescription("Tudo o que foi gravado até agora será apagado, inclusive o que já foi enviado, e nada vai para a transcrição. Não dá para desfazer.");
       // O foco começa no botão que não perde o áudio.
-      expect(within(confirmacao).getByRole("button", { name: "Voltar à gravação" })).toHaveFocus();
+      await waitFor(() => expect(within(confirmacao).getByRole("button", { name: "Voltar à gravação" })).toHaveFocus());
       fireEvent.click(within(confirmacao).getByRole("button", { name: "Voltar à gravação" }));
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Descartar gravação" })).toHaveFocus();
+      // O foco volta ao Descartar, que continua na tela com a gravação.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Descartar gravação" })).toHaveFocus());
       expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
       expect(motivoDaOcupacao()).toBe("gravando");
       // O Esc também fecha sem descartar.
@@ -911,8 +926,11 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
       expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
       expect(excluir.mutate).not.toHaveBeenCalled();
 
+      vi.mocked(toast.dismiss).mockClear();
       await descartarPelaConfirmacao();
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith(DESCARTADA));
+      // Um aviso de descarte que não terminou, ainda na tela, contradiria este: sai.
+      expect(toast.dismiss).toHaveBeenCalledWith(AVISO_DO_DESCARTE_PENDENTE);
       // O caminho de exclusão de sempre (a reunião, as partes que subiram e os
       // objetos delas) e a cópia no aparelho.
       expect(excluir.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA });
@@ -922,40 +940,113 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
       expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
       expect(confirmarDoNavegador).not.toHaveBeenCalled();
       expect(localStorage.getItem(DESCARTES)).toBeNull();
-      // O gravador volta ao começo, com o título e a autorização para gravar de novo.
+      // O gravador volta ao começo: o título fica, para gravar de novo, e a
+      // autorização volta desmarcada, como no Encerrar (revisão da G13b).
       expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
       expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toHaveValue("Conversa com a Bia");
-      expect(screen.getByRole("checkbox")).toBeChecked();
+      expect(screen.getByRole("checkbox")).not.toBeChecked();
       await waitFor(() => expect(sessaoOcupada()).toBe(false));
     } finally {
       confirmarDoNavegador.mockRestore();
     }
   });
 
-  it("o descarte que não conseguiu apagar agora avisa até ser fechado e fica guardado para a retomada", async () => {
+  it("a confirmação do Descartar prende o foco, deixa o fundo inerte e fecha com o Esc mesmo com o foco fora dela (revisão da G13b)", async () => {
+    await iniciarEm("/gravar");
+    fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
+    const confirmacao = screen.getByRole("alertdialog", { name: "Descartar esta gravação?" });
+    const voltar = within(confirmacao).getByRole("button", { name: "Voltar à gravação" });
+    const descartar = within(confirmacao).getByRole("button", { name: "Descartar gravação" });
+    await waitFor(() => expect(voltar).toHaveFocus());
+    // O fundo fica inerte: fora da árvore de acessibilidade e sem clique.
+    expect(screen.queryByRole("button", { name: /Encerrar gravação/ })).not.toBeInTheDocument();
+    expect(document.body.style.pointerEvents).toBe("none");
+    // O Tab no último botão volta ao primeiro, e o Shift+Tab no primeiro vai ao
+    // último: o foco não sai da confirmação.
+    act(() => descartar.focus());
+    fireEvent.keyDown(descartar, { key: "Tab" });
+    expect(voltar).toHaveFocus();
+    fireEvent.keyDown(voltar, { key: "Tab", shiftKey: true });
+    expect(descartar).toHaveFocus();
+    // O Esc fecha de qualquer lugar da página, sem descartar.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    expect(excluir.mutate).not.toHaveBeenCalled();
+  });
+
+  it("o descarte que não conseguiu apagar agora avisa até ser fechado e fica guardado, com a conta, para a retomada", async () => {
     excluir.mutate.mockRejectedValue(new Error("rede"));
     await iniciarEm("/gravar");
     await descartarPelaConfirmacao();
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DESCARTE_PENDENTE, { id: "gravacao-descarte-pendente", duration: Infinity, closeButton: true }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DESCARTE_PENDENTE, { id: AVISO_DO_DESCARTE_PENDENTE, duration: Infinity, closeButton: true }));
     expect(toast.success).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([VINICOLA]);
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: VINICOLA, dona: "dona-1" }]);
     expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
-    expect(sessaoOcupada()).toBe(false);
+    // A autorização volta desmarcada também aqui: a gravação acabou.
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
   });
 
-  it("a confirmação aberta quando a gravação termina não volta na gravação seguinte", async () => {
+  it("o descarte que não terminou ocupa a sessão em toda tela logada: o fechar da aba e o Sair perguntam (revisão da G13b)", async () => {
+    excluir.mutate.mockRejectedValue(new Error("rede"));
+    window.history.replaceState(null, "", "/gravar");
+    // Como no App: a retomada de toda a sessão ao lado da página.
+    render(<><RetomadaDosDescartes /><Meetings /></>);
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    await descartarPelaConfirmacao();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DESCARTE_PENDENTE, expect.anything()));
+    expect(motivoDaOcupacao()).toBe("descarte-pendente");
+    expect(fecharAba()).toBe(true);
+    // O Sair do cabeçalho pergunta, com o texto do descarte que não terminou.
+    fireEvent.keyDown(screen.getByRole("button", { name: /menu/i }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Sair" }));
+    expect(duble.mutacoes.logout?.mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog", { name: "Sair agora?" })).toHaveAccessibleDescription(
+      "A gravação descartada ainda não foi apagada. Se sair agora, ela pode seguir para a transcrição.",
+    );
+  });
+
+  it("o aviso do descarte que não terminou fecha quando a retomada termina a exclusão (revisão da G13b)", async () => {
+    excluir.mutate.mockRejectedValueOnce(new Error("rede")).mockResolvedValue({ success: true });
+    window.history.replaceState(null, "", "/gravar");
+    const primeira = render(<Meetings />);
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    await descartarPelaConfirmacao();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DESCARTE_PENDENTE, expect.anything()));
+    vi.mocked(toast.dismiss).mockClear();
+    primeira.unmount();
+    // A dona volta à tela: a retomada dela repete a exclusão, que dá certo.
+    window.history.replaceState(null, "", "/meetings");
+    render(<Meetings />);
+    await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
+    expect(excluir.mutate).toHaveBeenLastCalledWith({ meetingId: VINICOLA });
+    expect(toast.dismiss).toHaveBeenCalledWith(AVISO_DO_DESCARTE_PENDENTE);
+  });
+
+  it("a confirmação aberta quando a gravação termina (o limite, o aviso de hora sem OK) não volta na gravação seguinte, nem deixa o fundo travado", async () => {
     // O fim que falha deixa a dona no gravador, para gravar de novo.
     encerrarGravacao.mutate.mockRejectedValue(new Error("rede"));
     iniciarGravacao.mutate.mockResolvedValueOnce({ id: VINICOLA }).mockResolvedValueOnce({ id: "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f" });
     await iniciarEm("/gravar");
     fireEvent.click(screen.getByRole("button", { name: "Descartar gravação" }));
     expect(screen.getByRole("alertdialog", { name: "Descartar esta gravação?" })).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    // A gravação termina com a confirmação aberta. O Encerrar, sob o fundo inerte
+    // (hidden), faz as vezes do fim que vem sozinho: o limite, o aviso de hora.
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/, hidden: true })); });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(document.body.style.pointerEvents).not.toBe("none");
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível enviar a gravação."));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(excluir.mutate).not.toHaveBeenCalled();
+    // A segunda gravação também termina aqui, e não no desmonte do fim do teste.
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 });
