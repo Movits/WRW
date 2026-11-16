@@ -91,6 +91,12 @@ describe("montarIcs", () => {
     ]);
   });
 
+  it("livre (a próxima ação, H5c): TRANSP:TRANSPARENT; a reunião, sem ele, fica ocupada, o padrão da RFC", () => {
+    expect(linhasLogicas(montarIcs({ ...evento, livre: true }, AGORA))).toContain("TRANSP:TRANSPARENT");
+    expect(montarIcs(evento, AGORA)).not.toContain("TRANSP");
+    expect(montarIcs({ ...evento, livre: false }, AGORA)).not.toContain("TRANSP");
+  });
+
   it("local de rua vai em LOCATION; o link da chamada vai também em URL, sem o escape do texto", () => {
     const rua = linhasLogicas(montarIcs({ ...evento, local: "Av. Paulista, 1000; sala 3" }, AGORA));
     expect(rua).toContain("LOCATION:Av. Paulista\\, 1000\\; sala 3");

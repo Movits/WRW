@@ -81,7 +81,8 @@ export type DependenciasDaGoogle = {
   agora: () => number;
 };
 
-const PADRAO: DependenciasDaGoogle = {
+/** As dependências de verdade; a próxima ação na Google (H5c, server/acoes-na-google.ts) usa as mesmas. */
+export const DEPENDENCIAS_DA_GOOGLE: DependenciasDaGoogle = {
   token: userId => tokenDeAcessoDaGoogleAgenda(userId),
   renovar: userId => renovarTokenDeAcessoDaGoogleAgenda(userId),
   buscar: fetchGlobal,
@@ -106,7 +107,7 @@ export function motivoSemGoogle(erro: unknown): MotivoSemGoogle {
 }
 
 /** O código que vai ao log: o motivo da Google ou o nome do erro, nunca a mensagem inteira. */
-function codigoParaLog(erro: unknown): string {
+export function codigoParaLog(erro: unknown): string {
   if (erro instanceof RecusaDaGoogle) return `${erro.codigo}${erro.status ? ` (HTTP ${erro.status})` : ""}`;
   return erro instanceof Error ? erro.name : "desconhecido";
 }
@@ -120,7 +121,7 @@ export type AcessoDaGoogle = { token: string } | { motivo: MotivoSemGoogle };
  * server/google-agenda.ts), e o banco fora do ar aqui sobe como erro
  * (motivoSemGoogle), com nada feito. Sem a Google Agenda, o motivo.
  */
-export async function acessoDaGoogle(conta: ContaDaAgenda, deps: DependenciasDaGoogle = PADRAO): Promise<AcessoDaGoogle> {
+export async function acessoDaGoogle(conta: ContaDaAgenda, deps: DependenciasDaGoogle = DEPENDENCIAS_DA_GOOGLE): Promise<AcessoDaGoogle> {
   try {
     return { token: await deps.token(conta.id) };
   } catch (erro) {
@@ -237,7 +238,7 @@ export type OpcoesDoEnvio = { acesso?: AcessoDaGoogle; deps?: DependenciasDaGoog
  * lá volta a nulo, como a que nunca foi.
  */
 export async function enviarParaGoogle(conta: ContaDaAgenda, linha: LinhaParaGoogle, opcoes: OpcoesDoEnvio = {}): Promise<ResultadoNaGoogle> {
-  const deps = opcoes.deps ?? PADRAO;
+  const deps = opcoes.deps ?? DEPENDENCIAS_DA_GOOGLE;
   const acabou = reuniaoJaAcabou(linha, deps.agora());
   if (acabou && linha.google === null) return { naGoogle: null };
   const db = await exigirDb();
@@ -301,7 +302,7 @@ async function tirarOrfao(sessao: SessaoDaGoogle, agendaId: string, avisarConvid
  *   GOOGLE_AGENDA_LIBERADA_PARA ou sem as variáveis), volta "falhou" com o
  *   motivo: a tela avisa que o evento continua lá.
  */
-export async function excluirComAGoogle(conta: ContaDaAgenda, id: string, deps: DependenciasDaGoogle = PADRAO): Promise<{ avisarConvidados: boolean } & ResultadoNaGoogle> {
+export async function excluirComAGoogle(conta: ContaDaAgenda, id: string, deps: DependenciasDaGoogle = DEPENDENCIAS_DA_GOOGLE): Promise<{ avisarConvidados: boolean } & ResultadoNaGoogle> {
   const lida = await lerParaGoogle(conta.openId, id);
   if (reuniaoJaAcabou(lida, deps.agora())) {
     await excluirDaAgenda(conta.openId, id);
@@ -328,7 +329,7 @@ export async function excluirComAGoogle(conta: ContaDaAgenda, id: string, deps: 
  * (o "Tentar de novo" da exclusão). Sem a Google Agenda conectada, nada é
  * tentado: o motivo `nao-conectada` diz isso a quem chama.
  */
-export async function tirarEventoDaGoogle(conta: ContaDaAgenda, agendaId: string, avisarConvidados: boolean, deps: DependenciasDaGoogle = PADRAO): Promise<ResultadoNaGoogle> {
+export async function tirarEventoDaGoogle(conta: ContaDaAgenda, agendaId: string, avisarConvidados: boolean, deps: DependenciasDaGoogle = DEPENDENCIAS_DA_GOOGLE): Promise<ResultadoNaGoogle> {
   try {
     const sessao = sessaoDaGoogle(await deps.token(conta.id), () => deps.renovar(conta.id), deps.buscar);
     await excluirEventoNaGoogle(sessao, agendaId, avisarConvidados);

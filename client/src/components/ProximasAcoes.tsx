@@ -6,10 +6,10 @@ import { toast } from "sonner";
 import { ListChecks, Loader2, Pencil, Trash2, UserRound, X } from "lucide-react";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
+import { AcaoNaAgenda, ErroDoEstadoDaGoogle, pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { rotaDaReuniao } from "@shared/rotas";
-import { fusoDoAparelho } from "@shared/agenda";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
   DETALHE_DA_ACAO_MAX,
@@ -35,6 +35,12 @@ import {
  * edita, se apaga (a da reunião volta a "para conferir" no resumo) e se liga a
  * um contato da rede, com a sugestão pelo nome do responsável. O que vale está
  * no servidor (server/proximas-acoes.ts).
+ *
+ * A ação aberta com prazo ganha a linha da agenda (H5c, AcaoNaAgenda): o estado
+ * dela na Google Agenda conectada, ou o link de criar evento, e o .ics. Anotar,
+ * editar, marcar e apagar mandam o fuso e os rótulos da tela, porque com a
+ * Google Agenda conectada o evento anda junto, e a falha da Google vem num
+ * aviso à parte (useAvisosDaAgenda). O cartão do Dashboard não tem a linha.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -105,17 +111,32 @@ const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchM
 
 /**
  * A lista de ações. `compacto` é o cartão do Dashboard: só a caixa, o texto, o
- * prazo e o contato. `contatoDaPagina` é o contato do perfil em que a lista
- * está: o link para ele mesmo não aparece. `destacada` é a ação do lembrete no
- * sino (?acao=, H15): a lista rola até ela uma vez por link e a marca.
+ * prazo e o contato. `destacada` é a ação do lembrete no sino (?acao=, H15):
+ * a lista rola até ela uma vez por link e a marca. `contatoDaPagina` é o
+ * contato do perfil em que a lista está: o link para ele mesmo não aparece.
  */
-export function ProximasAcoes({ acoes, compacto = false, contatoDaPagina, destacada = null }: {
+export function ProximasAcoes({ acoes, compacto = false, destacada = null, contatoDaPagina }: {
   acoes: readonly ProximaAcao[];
   compacto?: boolean;
-  contatoDaPagina?: number;
   destacada?: string | null;
+  contatoDaPagina?: number;
 }) {
   const hoje = hojeNoRelogio();
+  // A mesma consulta do Perfil e da Agenda (H16b), com as mesmas opções, para as
+  // telas dividirem o cache. Só a lista inteira a usa: o cartão do Dashboard
+  // não tem a linha da agenda (H5c).
+  const estadoGoogle = trpc.googleAgenda.estado.useQuery(undefined, { retry: false, refetchOnWindowFocus: false, enabled: !compacto });
+  const google = estadoGoogle.data;
+  const googleLigada = google?.disponivel === true && google.conectada === true;
+  // Só com a resposta (não conectada, ou a função fora do ar para a conta) o
+  // link de criar evento aparece: carregando ou com erro, ele criaria o evento
+  // em dobro na agenda de quem está conectada.
+  const googleDesligada = Boolean(google) && !googleLigada;
+  // A consulta que falha é erro na tela, nunca "não conectada": sem o aviso, as
+  // ações perdiam em silêncio o estado na Google e o "Tentar de novo". Só com
+  // alguma ação com a linha da agenda (aberta e com prazo): sem ela, o estado
+  // da Google não muda nada na lista.
+  const comLinhaDaAgenda = !compacto && acoes.some(acao => acao.prazo && !acao.feita);
   const achada = !!destacada && acoes.some(acao => acao.id === destacada);
   const jaRolou = useRef<string | null>(null);
   useEffect(() => {
@@ -126,9 +147,13 @@ export function ProximasAcoes({ acoes, compacto = false, contatoDaPagina, destac
     elemento.scrollIntoView?.({ block: "center", behavior: movimentoReduzido() ? "auto" : "smooth" });
     elemento.focus({ preventScroll: true });
   }, [destacada, achada]);
-  return <ul className="space-y-3">
-    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} contatoDaPagina={contatoDaPagina} destacada={acao.id === destacada}/>)}
-  </ul>;
+  return <>
+    {estadoGoogle.isError && comLinhaDaAgenda && <ErroDoEstadoDaGoogle erro={estadoGoogle.error} aoTentarDeNovo={() => void estadoGoogle.refetch()}/>}
+    <ul className="space-y-3">
+      {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} destacada={acao.id === destacada} contatoDaPagina={contatoDaPagina}
+        googleLigada={googleLigada} googleDesligada={googleDesligada}/>)}
+    </ul>
+  </>;
 }
 
 function Selo({ cor, children }: { cor: "vermelho" | "ambar"; children: ReactNode }) {
@@ -139,7 +164,9 @@ function Selo({ cor, children }: { cor: "vermelho" | "ambar"; children: ReactNod
 
 const BOTAO_DE_TEXTO = "inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50";
 
-function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }: { acao: ProximaAcao; compacto: boolean; hoje: string; contatoDaPagina?: number; destacada: boolean }) {
+function ItemDaProximaAcao({ acao, compacto, hoje, destacada, contatoDaPagina, googleLigada, googleDesligada }: {
+  acao: ProximaAcao; compacto: boolean; hoje: string; destacada: boolean; contatoDaPagina?: number; googleLigada: boolean; googleDesligada: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   // A ação e o item do resumo mudam juntos: relê as telas. O perfil do contato
@@ -148,10 +175,22 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }:
     utils.proximasAcoes.invalidate(), utils.meetings.resumoGuardado.invalidate(), utils.networkInteligente.contato.invalidate(),
   ]);
   const aoFalhar = (erro: unknown) => toast.error(mensagemDoErroDaAcao(t, erro));
-  const marcar = trpc.proximasAcoes.marcarFeita.useMutation({ onError: aoFalhar, onSettled: reler });
+  // O que a dona salvou está salvo; o que houve na Google vem à parte (H5c).
+  // Feita, sem prazo ou apagada, a ação sai da Google; o resto a manda de novo.
+  const avisos = useAvisosDaAgenda();
+  const marcar = trpc.proximasAcoes.marcarFeita.useMutation({
+    onSuccess: (resultado, variaveis) => (variaveis.feita ? avisos.depoisDeTirar(variaveis.id, resultado) : avisos.depoisDeMandar(resultado)),
+    onError: aoFalhar, onSettled: reler,
+  });
   const ligar = trpc.proximasAcoes.ligarContato.useMutation({ onError: aoFalhar, onSettled: reler });
-  const editar = trpc.proximasAcoes.editar.useMutation({ onError: aoFalhar, onSettled: reler });
-  const apagar = trpc.proximasAcoes.apagar.useMutation({ onError: aoFalhar, onSettled: reler });
+  const editar = trpc.proximasAcoes.editar.useMutation({
+    onSuccess: (resultado, variaveis) => (variaveis.prazo === "" ? avisos.depoisDeTirar(variaveis.id, resultado) : avisos.depoisDeMandar(resultado)),
+    onError: aoFalhar, onSettled: reler,
+  });
+  const apagar = trpc.proximasAcoes.apagar.useMutation({
+    onSuccess: (resultado, variaveis) => avisos.depoisDeTirar(variaveis.id, resultado),
+    onError: aoFalhar, onSettled: reler,
+  });
   const ocupado = marcar.isPending || ligar.isPending || editar.isPending || apagar.isPending;
   const [modo, setModo] = useState<"ver" | "editar" | "apagar" | "contato">("ver");
   const idDoTexto = useId();
@@ -176,7 +215,9 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }:
             ...(mudou("detalhe") ? { detalhe: valores.detalhe } : {}),
             ...(mudou("responsavel") ? { responsavel: valores.responsavel } : {}),
             // O prazo novo reagenda o lembrete no sino, às 9h no relógio deste aparelho (H15).
-            ...(mudou("prazo") ? { prazo: valores.prazo, fuso: fusoDoAparelho() } : {}),
+            ...(mudou("prazo") ? { prazo: valores.prazo } : {}),
+            // O fuso e os rótulos da tela: com a Google Agenda conectada, o evento da ação muda junto (H5c).
+            ...pedidoDaTela(t),
           }, { onSuccess: () => setModo("ver") });
         }}/>
     </li>;
@@ -189,7 +230,7 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }:
   return <li id={idDaAcao(acao.id)} tabIndex={destacada ? -1 : undefined} data-destacada={destacada ? "true" : undefined}
     className={`rounded-xl border p-3 wrap-anywhere ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"} ${destacada ? "ring-2 ring-amber-300/70" : ""}`}>
     <label className="flex cursor-pointer items-start gap-3">
-      <input type="checkbox" checked={acao.feita} disabled={ocupado} onChange={evento => marcar.mutate({ id: acao.id, feita: evento.target.checked })}
+      <input type="checkbox" checked={acao.feita} disabled={ocupado} onChange={evento => marcar.mutate({ id: acao.id, feita: evento.target.checked, ...pedidoDaTela(t) })}
         className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
       <span id={idDoTexto} dir="auto" className={`min-w-0 text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
     </label>
@@ -241,6 +282,10 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }:
           </button>
         </div>
       </div>}
+
+      {/* A agenda (H5c): só a ação aberta e com prazo tem evento. */}
+      {modo === "ver" && acao.prazo && !acao.feita && <AcaoNaAgenda acao={acao} googleLigada={googleLigada} googleDesligada={googleDesligada}
+        aoTerminar={reler} aoFalhar={aoFalhar}/>}
 
       {modo === "ver" && <div className="flex flex-wrap items-center gap-4 pt-1">
         <button type="button" disabled={ocupado} aria-describedby={idDoTexto} onClick={() => setModo("editar")} className={BOTAO_DE_TEXTO}>

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { AppHeader } from "@/components/AppHeader";
+import { pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import {
   CompletarInformacoes, DisponibilidadeDoContato, rotuloDoTipoDePessoa, SugestoesDaIA,
@@ -86,7 +87,10 @@ function AcoesDoContato({ contactId, acoes, limite }: { contactId: number; acoes
   const { t } = useTranslation();
   const [anotando, setAnotando] = useState(false);
   const utils = trpc.useUtils();
+  // A ação anotada com prazo vai para a Google Agenda conectada (H5c); a falha da Google vem à parte.
+  const avisos = useAvisosDaAgenda();
   const criar = trpc.proximasAcoes.criar.useMutation({
+    onSuccess: resultado => avisos.depoisDeMandar(resultado),
     onError: erro => toast.error(mensagemDoErroDaAcao(t, erro)),
     onSettled: () => Promise.all([utils.networkInteligente.contato.invalidate({ contactId }), utils.proximasAcoes.invalidate()]),
   });
@@ -107,6 +111,8 @@ function AcoesDoContato({ contactId, acoes, limite }: { contactId: number; acoes
           <FormularioDaAcao inicial={NOVA_ACAO} salvando={criar.isPending} aoCancelar={() => setAnotando(false)}
             aoSalvar={valores => criar.mutate({
               texto: valores.texto, detalhe: valores.detalhe, responsavel: valores.responsavel, prazo: valores.prazo, contactId,
+              // O fuso do aparelho (o lembrete às 9h, H15) e os rótulos da tela (o evento na Google Agenda, H5c).
+              ...pedidoDaTela(t),
             }, { onSuccess: () => setAnotando(false) })} />
         </div>
       )}

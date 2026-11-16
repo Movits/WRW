@@ -45,6 +45,20 @@ describe("linkDaGoogleAgenda", () => {
     const { parametros } = parametrosDe(linkDaGoogleAgenda({ titulo: "X", inicioMs: INICIO, duracaoMinutos: 30, local: "   " }));
     expect(parametros.has("location")).toBe(false);
     expect(parametros.has("ctz")).toBe(false);
+    expect(parametros.has("details")).toBe(false);
+  });
+
+  it("a descrição vai em details quando passada (a próxima ação, H5c), com as quebras de linha; vazia, não vai", () => {
+    const { parametros } = parametrosDe(linkDaGoogleAgenda({ ...evento, detalhes: " Com o desconto\n\nResponsável: Bia " }));
+    expect(parametros.get("details")).toBe("Com o desconto\n\nResponsável: Bia");
+    expect(parametrosDe(linkDaGoogleAgenda({ ...evento, detalhes: "  " })).parametros.has("details")).toBe(false);
+    // O convite (mensagemDoConvite) não passa descrição: o link dele fica como era.
+    expect(parametrosDe(linkDaGoogleAgenda(evento)).parametros.has("details")).toBe(false);
+  });
+
+  it("livre (a próxima ação, H5c): o evento nasce Livre (crm=AVAILABLE); a reunião, sem ele, fica no padrão da Google", () => {
+    expect(parametrosDe(linkDaGoogleAgenda({ ...evento, livre: true })).parametros.get("crm")).toBe("AVAILABLE");
+    expect(parametrosDe(linkDaGoogleAgenda(evento)).parametros.has("crm")).toBe(false);
   });
 });
 

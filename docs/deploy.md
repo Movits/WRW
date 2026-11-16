@@ -265,6 +265,22 @@ vão acontecer voltam a oferecer "Pôr na Google Agenda". A reunião que já aca
 criada lá: mudá-la só muda o evento que já existe, sem aviso aos convidados, e excluí-la
 deixa o evento na Google como histórico.
 
+**As próximas ações (H5c) também não pedem variável nova.** Com a mesma conexão, a ação
+aberta com prazo vira um evento às 9h do dia do prazo, no fuso do aparelho de quem mexe
+nela, de 30 minutos, livre na agenda e com aviso na hora
+(`server/acoes-na-google.ts`), e o estado fica em `proximas_acoes.google`. Marcar feita,
+tirar o prazo, apagar a ação e desconfirmar o item no resumo tiram o evento; reabrir e
+mudar o texto ou o prazo o mudam. O id do evento é `acao` mais o id da ação, sem
+coluna própria. Desconectar e excluir a conta da WRW não apagam os eventos que já estão
+na agenda da dona, e a desconexão zera também este estado. Sem a Google Agenda
+conectada, a lista oferece o link de criar evento e o `.ics`, feitos no navegador,
+também livres na agenda. Dar nome a uma voz da reunião muda o texto das ações que a
+citam: o evento delas na Google fica "falhou", com "Tentar de novo" na lista, e o
+`.ics` baixado de novo sai com revisão maior. A nota de privacidade do Perfil diz que a
+WRW só mexe nos eventos das reuniões da agenda e das próximas ações com prazo; a
+Política de Privacidade (Cris) e a descrição do uso da agenda na verificação da Google
+precisam dizer o mesmo.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

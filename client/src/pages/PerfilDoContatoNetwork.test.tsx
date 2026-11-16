@@ -38,10 +38,11 @@ const duble = vi.hoisted(() => ({
     },
     proximasAcoes: { invalidate: vi.fn() },
     meetings: { resumoGuardado: { invalidate: vi.fn() } },
+    googleAgenda: { estado: { invalidate: vi.fn() } },
   },
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("wouter", async importOriginal => ({ ...await importOriginal<typeof import("wouter")>(), useParams: () => duble.params }));
 vi.mock("@/lib/trpc", () => {
@@ -70,11 +71,17 @@ vi.mock("@/lib/trpc", () => {
         ligarContato: mutacao("ligarContato"),
         editar: mutacao("editar"),
         apagar: mutacao("apagar"),
+        mandarParaGoogle: mutacao("mandarParaGoogle"),
+        tirarDaGoogle: mutacao("tirarDaGoogle"),
       },
       network: { list: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }) } },
+      googleAgenda: { estado: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }) } },
     },
   };
 });
+
+/** O que toda mutação que pode levar a ação à Google manda (H5c): o fuso do aparelho e os rótulos da tela, em pt-BR. */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 
 function perfil(parcial: Record<string, unknown> = {}) {
   return {
@@ -377,7 +384,8 @@ describe("perfil do contato — próximas ações e o link das reuniões (H5b)",
     fireEvent.change(within(secao).getByLabelText("Prazo (opcional)"), { target: { value: "2026-11-30" } });
     fireEvent.click(within(secao).getByRole("button", { name: "Salvar" }));
     expect(duble.mutacoes.criar).toHaveBeenCalledWith(
-      { texto: "Mandar o catálogo", detalhe: "", responsavel: "", prazo: "2026-11-30", contactId: 5 },
+      // Com o fuso do aparelho e os rótulos da tela: o lembrete às 9h (H15) e o evento na Google Agenda (H5c).
+      { texto: "Mandar o catálogo", detalhe: "", responsavel: "", prazo: "2026-11-30", contactId: 5, ...PEDIDO },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
@@ -412,7 +420,7 @@ describe("perfil do contato — próximas ações e o link das reuniões (H5b)",
     expect(within(secao).queryByText(/Nenhuma próxima ação ligada/)).not.toBeInTheDocument();
     expect(within(secao).getByRole("checkbox", { name: "Revisar o contrato" })).toBeChecked();
     fireEvent.click(within(secao).getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
-    expect(duble.mutacoes.marcarFeita).toHaveBeenCalledWith({ id: "acao-1", feita: true });
+    expect(duble.mutacoes.marcarFeita).toHaveBeenCalledWith({ id: "acao-1", feita: true, ...PEDIDO });
     // Tirar o vínculo daqui manda null: a ação sai deste perfil.
     const primeira = within(secao).getByText("Carla envia a proposta revisada").closest("li")!;
     fireEvent.click(within(primeira).getByRole("button", { name: "Tirar o vínculo" }));

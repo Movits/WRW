@@ -38,6 +38,12 @@ export type EventoDoIcs = {
   revisao?: number;
   /** A última mudança da reunião (LAST-MODIFIED), em ms. */
   modificadoEmMs?: number | null;
+  /**
+   * O evento não ocupa a agenda (TRANSP:TRANSPARENT, RFC 5545, 3.8.2.7): quem
+   * consulta a disponibilidade da dona vê o horário livre. É o da próxima ação
+   * (H5c). Ausente, vale o padrão da RFC, ocupado, o certo para a reunião.
+   */
+  livre?: boolean;
 };
 
 const OCTETOS_POR_LINHA = 75;
@@ -141,6 +147,7 @@ export function montarIcs(evento: EventoDoIcs, agoraMs: number = Date.now()): st
     `DTEND:${dataIcsUtc(fimMs)}`,
     `SUMMARY:${escaparTextoIcs(evento.titulo)}`,
   );
+  if (evento.livre) linhas.push("TRANSP:TRANSPARENT");
   const local = evento.local?.trim();
   if (local) {
     linhas.push(`LOCATION:${escaparTextoIcs(local)}`);

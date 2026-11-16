@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 process.env.DATABASE_URL ??= "mysql://teste:teste@localhost/teste";
@@ -23,6 +23,10 @@ const banco = vi.hoisted(() => ({
   insertDuplicado: false,
   // Qualquer outra recusa do banco ao guardar a tradução.
   insertFalha: null as Error | null,
+  // Os nomes das vozes (H3) da reunião travada no nomearFalante; undefined é sem a reunião.
+  nomesDaReuniao: undefined as unknown,
+  // As próximas ações presas a itens da reunião: id, texto, detalhe, responsavel (H5c).
+  acoesDaReuniao: [] as unknown[][],
 }));
 vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
   const original = await importOriginal<typeof import("drizzle-orm/mysql2")>();
@@ -41,6 +45,8 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
         return [[banco.transcricao], []];
       }
       if (sql.includes("from `meeting_transcript_translations`")) return [banco.traducaoGuardada ? [banco.traducaoGuardada] : [], []];
+      if (sql.startsWith("select") && sql.includes("from `meetings`") && banco.nomesDaReuniao !== undefined) return [[[banco.nomesDaReuniao]], []];
+      if (sql.startsWith("select") && sql.includes("from `proximas_acoes`")) return [banco.acoesDaReuniao, []];
       return [[], []];
     },
   } as never;
@@ -62,6 +68,7 @@ const {
   MAX_MEETING_DURATION_SECONDS,
   MENSAGEM_REUNIAO_LONGA_DEMAIS,
   MEETING_TRANSCRIPT_LANGUAGES,
+  nomearFalante,
   translatePrivateMeetingTranscript,
 } = await import("./meeting-service");
 const { ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
@@ -464,5 +471,51 @@ describe("Reunião longa em janelas (G8)", () => {
     await vi.waitFor(() => expect(console.error).toHaveBeenCalled());
     expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(false);
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "fr")).rejects.toThrow("Não foi possível traduzir a transcrição.");
+  });
+});
+
+describe("O nome de uma voz e as próximas ações que a citam (H3 e H5c)", () => {
+  const DONA = "dona-1";
+  const REUNIAO = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+  const atualizacoesDasAcoes = () => banco.consultas.filter(c => c.sql.startsWith("update `proximas_acoes`"));
+  beforeEach(() => {
+    banco.consultas.length = 0;
+    banco.nomesDaReuniao = null;
+    banco.acoesDaReuniao = [
+      ["acao-1", "{F2} envia a proposta", null, null],
+      ["acao-2", "Ligar para o importador", "Antes de sexta", "{F2}"],
+      ["acao-3", "{F3} reserva a sala", null, "{F3}"],
+    ];
+  });
+  afterEach(() => {
+    banco.nomesDaReuniao = undefined;
+    banco.acoesDaReuniao = [];
+  });
+
+  it("dar nome à voz: as ações que a citam ganham a última mudança (o SEQUENCE do .ics) e as que estão na Google ficam 'falhou', com 'Tentar de novo'", async () => {
+    expect(await nomearFalante(DONA, REUNIAO, "F2", " Carla ")).toEqual({ F2: "Carla" });
+    // Só as presas a itens da reunião (o join com os itens), na mesma transação do nome.
+    const leitura = banco.consultas.find(c => c.sql.startsWith("select") && c.sql.includes("from `proximas_acoes`"))!;
+    expect(leitura.sql).toContain("inner join `meeting_summary_items`");
+    expect(leitura.params).toEqual(expect.arrayContaining([DONA, REUNIAO]));
+    const [mudanca, naGoogle, ...resto] = atualizacoesDasAcoes();
+    expect(resto).toEqual([]);
+    expect(mudanca.sql).toMatch(/^update `proximas_acoes` set `updated_at` = \? where/);
+    // A acao-3 cita outra voz: o texto dela não muda, e ela fica de fora.
+    expect(mudanca.params.slice(1)).toEqual([DONA, "acao-1", "acao-2"]);
+    expect(naGoogle.sql).toMatch(/^update `proximas_acoes` set `google` = \? where .*`proximas_acoes`\.`google` is not null/);
+    expect(naGoogle.params).toEqual(["falhou", DONA, "acao-1", "acao-2"]);
+    expect(banco.consultas.at(-1)?.sql).toBe("commit");
+  });
+
+  it("o mesmo nome de novo, ou o nome de uma voz que nenhuma ação cita: as ações ficam como estão", async () => {
+    banco.nomesDaReuniao = JSON.stringify({ F2: "Carla" });
+    await nomearFalante(DONA, REUNIAO, "F2", "Carla");
+    expect(atualizacoesDasAcoes()).toEqual([]);
+    await nomearFalante(DONA, REUNIAO, "F7", "Bia");
+    expect(atualizacoesDasAcoes()).toEqual([]);
+    // Tirar o nome muda o texto de novo ("Falante 2"): as ações que citam a voz andam.
+    await nomearFalante(DONA, REUNIAO, "F2", "");
+    expect(atualizacoesDasAcoes()).toHaveLength(2);
   });
 });

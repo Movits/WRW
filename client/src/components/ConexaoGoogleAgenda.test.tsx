@@ -98,6 +98,17 @@ describe("conectar", () => {
     expect(screen.queryByRole("button", { name: /Desconectar/ })).not.toBeInTheDocument();
   });
 
+  it("antes de autorizar, o subtítulo e a nota de privacidade dizem tudo em que a WRW mexe: as reuniões e as próximas ações com prazo (H5c)", () => {
+    duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
+    render(<ConexaoGoogleAgenda />);
+    expect(screen.getByText(
+      "Conecte a sua conta Google para a WRW pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      "A WRW só mexe nos eventos das reuniões que você marcar na agenda de reuniões da WRW e das suas próximas ações com prazo. Você pode desconectar quando quiser.",
+    )).toBeInTheDocument();
+  });
+
   it("noutro endereço (o do Render, por exemplo): sem o botão, com o caminho para o endereço certo", () => {
     duble.estado.mockReturnValue(consulta({ disponivel: true, origem: "https://wrwglobal.org", conectada: false }));
     render(<ConexaoGoogleAgenda />);

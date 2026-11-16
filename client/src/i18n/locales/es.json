@@ -1928,7 +1928,23 @@
     "undoConfirm": "Deshacer la confirmación",
     "undoConfirmQuestion": "Deshacer la confirmación también borra la próxima acción creada a partir de este elemento. ¿Deshacer de todos modos?",
     "undoConfirmYes": "Sí, deshacer",
-    "inNextActions": "En Próximas acciones"
+    "inNextActions": "En Próximas acciones",
+    "agenda": {
+      "group": "En la agenda",
+      "pageHint": "Con plazo, la acción puede ir a tu agenda: el evento queda a las 9:00 del día del plazo, con aviso a esa hora.",
+      "pageHintGoogle": "Con Google Calendar conectado en tu Perfil, la acción va sola.",
+      "downloadIcs": "Agenda del móvil (.ics)",
+      "toast": {
+        "sent": "La acción está en tu Google Calendar.",
+        "notSent": "La acción está guardada en WRW, pero no llegó a tu Google Calendar.",
+        "pastNotSent": "El plazo de esta acción ya pasó, así que se queda solo en WRW.",
+        "removed": "El evento de la acción se quitó de tu Google Calendar.",
+        "notRemoved": "El evento de esta acción sigue en tu Google Calendar."
+      },
+      "errors": {
+        "stillOpen": "Esta acción sigue abierta y con plazo, y su evento se queda en tu Google Calendar. Actualiza la página."
+      }
+    }
   },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",
@@ -2063,14 +2079,14 @@
   },
   "googleAgenda": {
     "title": "Google Calendar",
-    "subtitle": "Conecta tu cuenta de Google para que WRW añada a tu Google Calendar las reuniones que programes.",
+    "subtitle": "Conecta tu cuenta de Google para que WRW añada a tu Google Calendar las reuniones que programes y tus próximas acciones con plazo.",
     "notConnected": "No hay ninguna cuenta de Google conectada.",
     "connect": "Conectar Google Calendar",
     "connected": "Conectado a una cuenta de Google.",
     "connectedAs": "Conectado a la cuenta de Google {{email}}.",
     "broken": "Esta conexión dejó de funcionar. Vuelve a conectar para que WRW pueda usar de nuevo tu Google Calendar.",
     "reconnect": "Volver a conectar",
-    "privacyNote": "WRW solo modifica los eventos de las reuniones que programes en la agenda de reuniones de WRW. Puedes desconectarlo cuando quieras.",
+    "privacyNote": "WRW solo modifica los eventos de las reuniones que programes en la agenda de reuniones de WRW y de tus próximas acciones con plazo. Puedes desconectarlo cuando quieras.",
     "wrongAddress": "Para conectar Google Calendar, entra en WRW desde la dirección {{address}}.",
     "openAddress": "Abrir {{address}}",
     "inApp": "Desde la app no se puede conectar Google Calendar. Abre {{address}} en el navegador, inicia sesión y conéctalo desde tu Perfil.",

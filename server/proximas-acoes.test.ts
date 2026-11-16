@@ -324,7 +324,7 @@ describe("a reunião que sai: as ações se soltam", () => {
 describe("a lista: o que vai à tela", () => {
   const LINHA = {
     id: "acao-1", texto: "{F2} envia a proposta", detalhe: null, responsavel: "{F2}", prazo: "2026-11-20", prazoDito: "até sexta",
-    origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta", createdAt: 1, meetingId: "reuniao-1", contactId: null,
+    origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta", google: "ok", createdAt: 1, updatedAt: 2, meetingId: "reuniao-1", contactId: null,
     tituloDaReuniao: "Reunião com a Carla", vozesDaReuniao: { F2: "Carla", bad: "x" }, itemVivo: "item-1", nomeDoContato: null,
   };
   const lerLista = (linhas: Record<string, unknown>[], contatos: Record<string, unknown>[] = [], abertas = 4) => {
@@ -343,7 +343,7 @@ describe("a lista: o que vai à tela", () => {
     expect(limite).toBe(servico.LIMITE_DA_LISTA);
     expect(acoes).toEqual([{
       id: "acao-1", texto: "{F2} envia a proposta", detalhe: null, responsavel: "{F2}", prazo: "2026-11-20", prazoDito: "até sexta",
-      origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta", createdAt: 1,
+      origem: "reuniao", feita: false, feitaEm: null, trecho: "eu mando a proposta", google: "ok", createdAt: 1, updatedAt: 2,
       reuniao: { id: "reuniao-1", titulo: "Reunião com a Carla", itemId: "item-1" },
       vozes: { F2: "Carla" }, contato: null, contatoSugerido: { id: 7, nome: "Carla Souza" },
     }]);
@@ -583,5 +583,87 @@ describe("o lembrete no sino (H15) anda com a ação", () => {
     await servico.marcarProximaAcaoFeita(DONA, "acao-1", true);
     expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
     expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
+  });
+});
+
+describe("o estado na Google Agenda anda com as escritas (H5c)", () => {
+  // Um dia que ainda vem e um que já passou, para qualquer relógio de quem roda o teste.
+  const FUTURO = "2099-12-31";
+  const PASSADO = "2001-01-01";
+  const google = (naGoogle: boolean) => ({ naGoogle, fuso: "America/Sao_Paulo", agora: Date.now() });
+  const comAcao = (linha: Record<string, unknown>) => estado.tabelas.set(schema.proximasAcoes, [linha]);
+
+  it("anotar com a Google Agenda conectada nasce 'pendente'; sem ela, nulo", async () => {
+    await servico.criarProximaAcao(DONA, { texto: "Mandar o contrato", prazo: FUTURO }, { naGoogle: true });
+    expect(de("insert", schema.proximasAcoes)[0].linhas?.[0]).toMatchObject({ google: "pendente" });
+    estado.operacoes = [];
+    await servico.criarProximaAcao(DONA, { texto: "Mandar o contrato", prazo: FUTURO });
+    expect(de("insert", schema.proximasAcoes)[0].linhas?.[0]).toMatchObject({ google: null });
+  });
+
+  it("editar com a Google lê a ação travada, com a dona, antes de gravar o estado na mesma escrita", async () => {
+    comAcao({ prazo: FUTURO, feita: false, google: "ok" });
+    const passo = await servico.editarProximaAcao(DONA, "acao-1", { texto: "Outro texto" }, google(true));
+    expect(passo).toEqual({ destino: "gravar", googleAntes: "ok" });
+    const [leitura] = de("select", schema.proximasAcoes);
+    expect(leitura).toMatchObject({ travada: true, params: ["acao-1", DONA] });
+    const [editou] = de("update", schema.proximasAcoes);
+    expect(editou.valores).toMatchObject({ texto: "Outro texto", google: "pendente" });
+    expect(editou.params).toEqual(["acao-1", DONA]);
+    expect(estado.transacoes).toBe(1);
+  });
+
+  it("tirar o prazo tira a ação da agenda: o estado zera, e o destino diz a quem chama que o evento sai", async () => {
+    comAcao({ prazo: FUTURO, feita: false, google: "ok" });
+    expect(await servico.editarProximaAcao(DONA, "acao-1", { prazo: null }, google(true))).toEqual({ destino: "tirar", googleAntes: "ok" });
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ prazo: null, google: null });
+  });
+
+  it("sem a Google Agenda agora, a que estava lá fica 'falhou' (a Google ficou com a versão antiga); a que nunca foi continua nula", async () => {
+    comAcao({ prazo: FUTURO, feita: false, google: "ok" });
+    await servico.editarProximaAcao(DONA, "acao-1", { texto: "x" }, google(false));
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ google: "falhou" });
+    estado.operacoes = [];
+    comAcao({ prazo: FUTURO, feita: false, google: null });
+    await servico.editarProximaAcao(DONA, "acao-1", { texto: "x" }, google(false));
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ google: null });
+  });
+
+  it("o dia do prazo já passou: a que nunca foi não vai (nulo), e a que está lá só muda ('pendente')", async () => {
+    comAcao({ prazo: PASSADO, feita: false, google: null });
+    expect(await servico.editarProximaAcao(DONA, "acao-1", { texto: "x" }, google(true))).toEqual({ destino: "atualizar", googleAntes: null });
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ google: null });
+    estado.operacoes = [];
+    comAcao({ prazo: PASSADO, feita: false, google: "ok" });
+    expect(await servico.editarProximaAcao(DONA, "acao-1", { texto: "x" }, google(true))).toEqual({ destino: "atualizar", googleAntes: "ok" });
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ google: "pendente" });
+  });
+
+  it("o prazo novo que chega na edição decide o destino, não o de antes", async () => {
+    comAcao({ prazo: null, feita: false, google: null });
+    expect(await servico.editarProximaAcao(DONA, "acao-1", { prazo: FUTURO, fuso: "America/Sao_Paulo" }, google(true))).toEqual({ destino: "gravar", googleAntes: null });
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ prazo: FUTURO, google: "pendente" });
+  });
+
+  it("a ação que não é da dona, com a Google: NOT_FOUND na leitura travada, e nada se grava", async () => {
+    estado.tabelas.set(schema.proximasAcoes, []);
+    await expect(servico.editarProximaAcao(DONA, "acao-1", { texto: "x" }, google(true))).rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_ACAO_NAO_ENCONTRADA });
+    expect(de("update")).toEqual([]);
+    expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
+  });
+
+  it("marcar feita zera o estado na mesma escrita da feita (a feita sai da agenda); desmarcar não mexe nele", async () => {
+    await servico.escreverFeita(db, DONA, { itemId: "item-1" }, true, 3_000);
+    expect(de("update", schema.proximasAcoes)[0].valores).toMatchObject({ feita: true, google: null });
+    estado.operacoes = [];
+    await servico.escreverFeita(db, DONA, { acaoId: "acao-1", itemId: null }, false, 3_000);
+    expect(de("update", schema.proximasAcoes)[0].valores).not.toHaveProperty("google");
+  });
+
+  it("marcar e apagar devolvem o prazo e o estado de antes, para quem chama tirar o evento", async () => {
+    comAcao({ id: "acao-1", itemId: null, meetingId: null, prazo: FUTURO, google: "ok" });
+    expect(await servico.marcarProximaAcaoFeita(DONA, "acao-1", true)).toEqual({ prazo: FUTURO, googleAntes: "ok" });
+    comAcao({ id: "acao-1", itemId: null, meetingId: null, prazo: null, google: null });
+    expect(await servico.apagarProximaAcao(DONA, "acao-1")).toEqual({ prazo: null, googleAntes: null });
   });
 });

@@ -14,7 +14,7 @@ import { ResumoGuardado } from "./ResumoGuardado";
  * O que o servidor faz está em server/resumo-guardado.ts e nos testes dele.
  */
 
-type Opcoes = { onError?: (erro: unknown) => void; onSettled?: () => unknown };
+type Opcoes = { onError?: (erro: unknown) => void; onSettled?: () => unknown; onSuccess?: (resultado: unknown, variaveis: unknown) => void };
 const duble = vi.hoisted(() => {
   const mutacoes: Record<string, { mutate: ReturnType<typeof vi.fn>; opcoes: Opcoes; isPending: boolean; isError: boolean; error: unknown }> = {};
   const registrar = (nome: string) => ({
@@ -30,11 +30,12 @@ const duble = vi.hoisted(() => {
     utils: {
       meetings: { resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
+      googleAgenda: { estado: { invalidate: vi.fn() } },
     },
   };
 });
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
@@ -45,10 +46,14 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink") },
+    // O "Tentar de novo" do evento que ficou na Google Agenda (H5c, useAvisosDaAgenda).
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
   },
 }));
 
 const REUNIAO = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+/** O fuso do aparelho e os rótulos da tela, em pt-BR (H5c). */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
 
 // Os itens como a dona os recebe (server/resumo-guardado.ts), fora da ordem do
@@ -119,11 +124,12 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
   it("a caixa da ação marca e desmarca pelo marcarAcaoFeita, com o id do item", () => {
     daDona(pronto(), { nomes: { F2: "Carla" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
-    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao", feito: true });
+    // Com o fuso e os rótulos da tela: reabrir a ação com prazo a manda de novo à Google Agenda (H5c).
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao", feito: true, ...PEDIDO });
     const feita = screen.getByRole("checkbox", { name: "Reservar a sala de reunião" });
     expect(feita).toBeChecked();
     fireEvent.click(feita);
-    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", feito: false });
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", feito: false, ...PEDIDO });
     // Só as ações têm caixa.
     expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   });
@@ -466,5 +472,42 @@ describe("Resumo guardado — o item pedido pelo link (?item)", () => {
   it("enquanto o resumo é gerado, não há aviso de item sumido: ele ainda vai chegar", () => {
     daDona(comEstado("gerando"), { itemDestacado: "i-decisao" });
     expect(screen.queryByText("O item deste link não está mais no resumo.")).not.toBeInTheDocument();
+  });
+});
+
+describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.warning).mockClear();
+    duble.utils.googleAgenda.estado.invalidate.mockClear();
+    mutacao("tirarDaGoogle")?.mutate.mockClear();
+  });
+
+  it("desconfirmar o item cuja ação ficou na Google porque ela falhou: o aviso traz 'Tentar de novo', que tira o evento pela ação", () => {
+    daDona(pronto());
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", status: "pending" }));
+    const [texto, opcoes] = vi.mocked(toast.warning).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => void } }];
+    expect(texto).toBe("O evento desta ação continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
+    expect(opcoes.action.label).toBe("Tentar de novo");
+    // A ação já saiu do banco (ou está feita): nenhuma lista oferece a retirada, só este aviso.
+    act(() => opcoes.action.onClick());
+    expect(mutacao("tirarDaGoogle").mutate).toHaveBeenCalledWith({ id: "acao-9" });
+  });
+
+  it("quando só reconectar resolve, o aviso manda apagar por lá e o estado da conexão é relido; reabrir que não chega à Google diz o porquê", () => {
+    daDona(pronto());
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "revogada" }, { itemId: "i-acao", feito: true }));
+    expect(toast.warning).toHaveBeenLastCalledWith("O evento desta ação continua na sua Google Agenda. Se quiser, apague o evento por lá.", { duration: 15_000 });
+    expect(duble.utils.googleAgenda.estado.invalidate).toHaveBeenCalled();
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", feito: false }));
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      "A ação está salva na WRW, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+  });
+
+  it("deu certo, ou o item não tinha ação com evento: nenhum aviso", () => {
+    daDona(pronto());
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "ok" }, { itemId: "i-acao-feita", status: "pending" }));
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: null, naGoogle: null }, { itemId: "i-decisao", status: "confirmed" }));
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: null, naGoogle: null }, { itemId: "i-acao", feito: false }));
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });

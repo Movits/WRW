@@ -18,6 +18,13 @@ const servico = vi.hoisted(() => ({
   pedirResumoPeloLink: vi.fn(),
 }));
 vi.mock("./resumo-guardado", () => servico);
+// A Google Agenda da próxima ação do item (H5c) é dublê: o que ela faz está em acoes-na-google.test.ts.
+const PREPARO = { acaoId: "acao-1", estavaNaGoogle: true, acesso: { token: "t" }, ligada: true };
+const naGoogle = vi.hoisted(() => ({
+  prepararAcaoDoItem: vi.fn(async (..._args: unknown[]): Promise<unknown> => null),
+  depoisDeMexerNoItem: vi.fn(async (..._args: unknown[]) => ({ acaoId: null as string | null, naGoogle: null })),
+}));
+vi.mock("./acoes-na-google", () => naGoogle);
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");
@@ -33,7 +40,7 @@ const daDona = (openId = `dona-${Math.random()}`) => meetingsRouter.createCaller
 const doLink = () => reuniaoAbertaRouter.createCaller({ user: null, req: { headers: {}, socket: { remoteAddress: "203.0.113.9" }, ip: "203.0.113.9" }, res: { cookie: () => {} } } as never);
 
 beforeEach(() => {
-  for (const f of Object.values(servico)) f.mockClear();
+  for (const f of [...Object.values(servico), ...Object.values(naGoogle)]) f.mockClear();
   // O serviço real chama o "antes de criar" só quando há trabalho novo.
   servico.pedirResumoDaDona.mockImplementation(async (_dona: string, _id: string, antesDeCriar: () => void) => { antesDeCriar(); return { estado: "pendente" }; });
   servico.pedirResumoPeloLink.mockImplementation(async (_token: string, antesDeCriar: (reuniaoId: string) => void) => { antesDeCriar("reuniao-do-link"); return { estado: "pendente" }; });
@@ -50,6 +57,29 @@ describe("rotas do resumo guardado da dona", () => {
     expect(servico.decidirItemDoResumo).toHaveBeenCalledWith("dona-1", ID, "ignored");
     expect(servico.confirmarItensDoResumo).toHaveBeenCalledWith("dona-1", ID);
     expect(servico.marcarAcaoFeita).toHaveBeenCalledWith("dona-1", ID, true);
+  });
+
+  it("desconfirmar e marcar a ação no resumo passam pela Google Agenda da ação do item (H5c); confirmar, não", async () => {
+    const rota = daDona("dona-1");
+    const CONTA = { id: 7, openId: "dona-1" };
+    naGoogle.prepararAcaoDoItem.mockResolvedValueOnce(PREPARO);
+    naGoogle.depoisDeMexerNoItem.mockResolvedValueOnce({ acaoId: "acao-1", naGoogle: "falhou", motivo: "google" } as never);
+    // O token vem antes da decisão; o evento sai depois, e o id da ação volta para o "Tentar de novo".
+    expect(await rota.decidirItemDoResumo({ itemId: ID, status: "pending" })).toEqual({ ok: true, acaoId: "acao-1", naGoogle: "falhou", motivo: "google" });
+    expect(naGoogle.prepararAcaoDoItem).toHaveBeenCalledWith(CONTA, ID);
+    expect(naGoogle.prepararAcaoDoItem.mock.invocationCallOrder[0]).toBeLessThan(servico.decidirItemDoResumo.mock.invocationCallOrder[0]);
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenCalledWith(CONTA, PREPARO, false);
+    // Confirmar cria a ação sem prazo: nada vai à Google.
+    naGoogle.prepararAcaoDoItem.mockClear();
+    await rota.decidirItemDoResumo({ itemId: ID, status: "confirmed" });
+    expect(naGoogle.prepararAcaoDoItem).not.toHaveBeenCalled();
+    // Reabrir no resumo manda de novo, com o fuso e os rótulos da tela.
+    const rotulos = { voz: "Falante {n}", responsavel: "Responsável: {nome}" };
+    await rota.marcarAcaoFeita({ itemId: ID, feito: false, fuso: "America/Recife", rotulos });
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenLastCalledWith(CONTA, null, true, { fuso: "America/Recife", rotulos });
+    await rota.marcarAcaoFeita({ itemId: ID, feito: true });
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenLastCalledWith(CONTA, null, false, { fuso: undefined, rotulos: undefined });
+    await expect(rota.marcarAcaoFeita({ itemId: ID, feito: true, fuso: "z".repeat(65) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("pedir o resumo novo gasta uma vaga do teto de pedidos à IA da dona", async () => {

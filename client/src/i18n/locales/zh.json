@@ -1928,7 +1928,23 @@
     "undoConfirm": "撤销确认",
     "undoConfirmQuestion": "撤销确认也会删除由此条目创建的后续行动。仍要撤销吗？",
     "undoConfirmYes": "是，撤销",
-    "inNextActions": "已在后续行动中"
+    "inNextActions": "已在后续行动中",
+    "agenda": {
+      "group": "日历",
+      "pageHint": "有截止日期的行动可以加入您的日历：活动安排在截止日期当天上午 9 点，并在那时提醒。",
+      "pageHintGoogle": "如果您在个人资料中连接了 Google 日历，行动会自动加入。",
+      "downloadIcs": "手机日历（.ics）",
+      "toast": {
+        "sent": "该行动已在您的 Google 日历中。",
+        "notSent": "行动已保存在 WRW，但没有添加到您的 Google 日历。",
+        "pastNotSent": "该行动的截止日期已过，因此只保留在 WRW 中。",
+        "removed": "该行动的活动已从您的 Google 日历中移除。",
+        "notRemoved": "该行动的活动仍在您的 Google 日历中。"
+      },
+      "errors": {
+        "stillOpen": "该行动仍未完成且有截止日期，因此其活动保留在您的 Google 日历中。请刷新页面。"
+      }
+    }
   },
   "errorBoundary": {
     "title": "发生了意外情况",
@@ -2063,14 +2079,14 @@
   },
   "googleAgenda": {
     "title": "Google 日历",
-    "subtitle": "关联您的 Google 账号，WRW 就能把您安排的会议添加到您的 Google 日历。",
+    "subtitle": "关联您的 Google 账号，WRW 就能把您安排的会议和有截止日期的后续行动添加到您的 Google 日历。",
     "notConnected": "尚未关联 Google 账号。",
     "connect": "关联 Google 日历",
     "connected": "已关联 Google 账号。",
     "connectedAs": "已关联 Google 账号 {{email}}。",
     "broken": "此关联已失效。请重新关联，以便 WRW 再次使用您的 Google 日历。",
     "reconnect": "重新关联",
-    "privacyNote": "WRW 只会修改您在 WRW 会议日程中安排的会议对应的活动。您可以随时取消关联。",
+    "privacyNote": "WRW 只会修改您在 WRW 会议日程中安排的会议，以及您有截止日期的后续行动所对应的活动。您可以随时取消关联。",
     "wrongAddress": "要关联 Google 日历，请通过 {{address}} 打开 WRW。",
     "openAddress": "打开 {{address}}",
     "inApp": "无法在应用内关联 Google 日历。请在浏览器中打开 {{address}}，登录您的账号，然后在个人资料中关联。",
