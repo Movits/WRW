@@ -2107,6 +2107,8 @@
       "have": "Ce Que J'ai : {{valor}}",
       "need": "Ce Dont J'ai Besoin : {{valor}}",
       "confirmed": "Qui Je Suis confirmé : {{valor}}",
+      "jobTitleConfirmed": "Poste confirmé : {{valor}}",
+      "companyConfirmed": "Entreprise confirmée : {{valor}}",
       "availableYes": "Rendu disponible pour les opportunités du réseau",
       "availableNo": "Autorisation pour le réseau retirée",
       "connection": "Connexion enregistrée par la plateforme",

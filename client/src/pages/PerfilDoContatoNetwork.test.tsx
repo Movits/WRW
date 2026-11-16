@@ -307,6 +307,21 @@ describe("perfil do contato — reuniões, conexões e memória de relacionament
     expect(within(linha).getByText("Contato cadastrado")).toBeInTheDocument();
   });
 
+  // Revisão da IA3: cargo e empresa nunca são QUEM SOU (item 6 da spec da Glenda).
+  it("cargo e empresa confirmados aparecem na linha do tempo com o nome deles, não como Quem Sou", () => {
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "apoio_confirmado", em: Date.UTC(2026, 10, 16), campo: "cargo", valor: "gerente de compras", origem: "reuniao" },
+      { tipo: "apoio_confirmado", em: Date.UTC(2026, 10, 16), campo: "empresa", valor: "Farmabras", origem: "reuniao" },
+      { tipo: "quem_sou_confirmado", em: Date.UTC(2026, 10, 15), campo: "telefone", valor: "+55 11 98765-4321", origem: "voz" },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText("Cargo confirmado: gerente de compras")).toBeInTheDocument();
+    expect(within(linha).getByText("Empresa confirmada: Farmabras")).toBeInTheDocument();
+    expect(within(linha).getByText("Quem Sou confirmado: +55 11 98765-4321")).toBeInTheDocument();
+    expect(within(linha).queryByText(/Quem Sou confirmado: (gerente|Farmabras)/)).not.toBeInTheDocument();
+  });
+
   it("sem o termo do Smart Match: sem conexões e sem busca na rede global", () => {
     responde(perfil({ conexoes: { termoAceito: false }, contato: { ...perfil().contato, disponivelRedeGlobal: true } }));
     render(<PerfilDoContatoNetwork />);

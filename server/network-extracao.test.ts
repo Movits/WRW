@@ -580,3 +580,63 @@ describe("cargo e empresa da pessoa da reunião — pendência, nunca dado diret
     expect(valorParaGravar("empresa", "  Ponte Sul Consultoria ")).toBe("Ponte Sul Consultoria");
   });
 });
+
+/**
+ * Revisão da IA3: o contato criado pela reunião nasce sem empresa (ela espera
+ * a dona como pendência). Sem olhar a reunião, "Chocolate da Cacau Tupinã"
+ * passava na confirmação e no completar, e podia circular na rede global.
+ */
+describe("a empresa que a reunião deu ao contato, ainda não gravada nele, não entra em Tenho/Preciso", () => {
+  // id, owner_id, contact_id, meeting_id, meeting_suggestion_id, origem, campo, valor, categoria, trecho, confianca, status, decidida_em, created_at, updated_at
+  const pendencia = (valor: string) => ["p-1", "dona-1", 5, "m-1", "s-1", "texto", "tenho", valor, null, "trecho", "0.900", "pendente", null, 1, 1];
+
+  function banco(opcoes: { daReuniao?: unknown[][]; pendenciasDoContato?: unknown[][] }) {
+    estado.responder = sql => {
+      // fullName, company, phone das pessoas da reunião ligadas ao contato
+      if (/from `meeting_contact_suggestions`/.test(sql)) return opcoes.daReuniao ?? [];
+      // campo, valor das pendências de nome, empresa e telefone do contato
+      if (/from `network_sugestoes`/.test(sql) && /`campo` in \(/.test(sql)) return opcoes.pendenciasDoContato ?? [];
+      if (/from `network_sugestoes`/.test(sql)) return [pendencia("Chocolate da Cacau Tupinã em barras")];
+      // id, fullName, company, phone, whatsapp: criado pela reunião, sem empresa
+      if (/from `private_contacts`/.test(sql)) return [[5, "Camila Duarte", null, null, null]];
+      return undefined;
+    };
+  }
+
+  it("confirmar: a empresa da pessoa da reunião que virou o contato recusa o item, também corrigido pela dona", async () => {
+    banco({ daReuniao: [["Camila Duarte", "Cacau Tupinã", null]] });
+    await expect(confirmarPendencia("dona-1", "p-1")).rejects.toThrow(MENSAGEM_ITEM_COM_IDENTIFICACAO);
+    await expect(confirmarPendencia("dona-1", "p-1", "Barras de chocolate da Cacau Tupina")).rejects.toBeInstanceOf(ValorInvalido);
+    expect(estado.consultas.some(c => /^(update|insert|begin)/.test(c.sql))).toBe(false);
+    // posse no WHERE: a dona e o contato
+    const daReuniao = estado.consultas.find(c => /from `meeting_contact_suggestions`/.test(c.sql))!;
+    expect(daReuniao.sql).toContain("`meeting_contact_suggestions`.`existing_contact_id` = ?");
+    expect(daReuniao.params).toEqual(expect.arrayContaining(["dona-1", 5]));
+    // sem a empresa no texto, confirma
+    await confirmarPendencia("dona-1", "p-1", "Chocolate de origem em barras");
+    expect(estado.consultas.some(c => /^insert into `contact_assets`/.test(c.sql))).toBe(true);
+  });
+
+  it("confirmar: a pendência de empresa do contato, em qualquer status (ignorada também), recusa o item", async () => {
+    banco({ pendenciasDoContato: [["empresa", "Cacau Tupinã"]] });
+    await expect(confirmarPendencia("dona-1", "p-1")).rejects.toBeInstanceOf(ValorInvalido);
+    const leitura = estado.consultas.find(c => /from `network_sugestoes`/.test(c.sql) && /`campo` in \(/.test(c.sql))!;
+    expect(leitura.params).toEqual(expect.arrayContaining(["dona-1", 5, "nome", "empresa", "telefone"]));
+    expect(leitura.sql).not.toContain("`status`");
+  });
+
+  it("completar por texto: a identificação que a chamada passa tira o item com a empresa", async () => {
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({
+      quemSou: { tipoPessoa: "nao_informado", nome: null, telefone: null, email: null },
+      oQueTenho: [
+        { texto: "Chocolate da Cacau Tupinã em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+        { texto: "Chocolate em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+      ],
+      oQuePreciso: [],
+    }) } }] });
+    const proposta = await interpretarComplemento("A Camila vende chocolate da Cacau Tupinã em barras.", {
+      nomeDoContato: "Camila Duarte", identificacao: { nomes: ["Cacau Tupinã"] },
+    });
+    expect(proposta.oQueTenho.map(i => i.texto)).toEqual(["Chocolate em barras"]);
+  });
+});

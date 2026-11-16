@@ -2107,6 +2107,8 @@
       "have": "我拥有的：{{valor}}",
       "need": "我需要的：{{valor}}",
       "confirmed": "已确认“我是谁”：{{valor}}",
+      "jobTitleConfirmed": "已确认职位：{{valor}}",
+      "companyConfirmed": "已确认公司：{{valor}}",
       "availableYes": "已开放给网络中的机会",
       "availableNo": "已撤回对网络的授权",
       "connection": "平台已记录连接",

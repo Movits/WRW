@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { and, desc, eq, or } from "drizzle-orm";
-import { contactAssets, contactNeeds, networkSugestoes, privateContacts } from "../drizzle/schema";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { contactAssets, contactNeeds, meetingContactSuggestions, networkSugestoes, privateContacts } from "../drizzle/schema";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
@@ -123,21 +123,41 @@ const ALCANCE_DA_NEGACAO = 3;
 const JANELA_DO_TRECHO = 5;
 
 /**
+ * Artigo ou determinante: o que vem logo antes de um nome ("UMA embalagem",
+ * "UM tecido", "THE supplier"). "Outro", "esse" e "cada" ficam de fora porque
+ * também são pronome ("o outro acha que não").
+ */
+const DETERMINANTES = new Set(["um", "uma", "uns", "umas", "o", "a", "os", "as", "algum", "alguma", "alguns", "algumas", "an", "the"]);
+
+/**
  * A negação que RESTRINGE um nome não desmente a declaração (achado 5 da
  * bancada de 16/11): "uma embalagem QUE NÃO seja de plástico" pede uma
  * embalagem, e a restrição é parte do item. O "não" derrubava o item nas 6
  * rodadas, e com ele o resto da frase ("um distribuidor em São Paulo").
  *
  * Restringe o "não" que vem logo depois de "que" (ou com uma palavra no
- * meio: "que ainda não"), com um nome antes do "que", tudo na mesma oração.
- * Não restringe — desmente — "o que não temos", "a gente que não tem", "isso
- * que não" (antes do "que" não há nome) nem "um distribuidor que não temos"
- * (o verbo depois do "não" é a própria declaração de quem fala).
+ * meio: "que ainda não"), com um NOME antes do "que", tudo na mesma oração.
+ * Nome é a palavra que vem logo depois de um artigo ("UMA embalagem que não
+ * seja", "UM tecido que não tenha"). Sem essa exigência, "acho que não", "a
+ * gente acha que não", "eu sinto que não" e "I think that not" passavam o
+ * verbo por nome, e a necessidade negada virava item (revisão da IA3). O
+ * artigo e o nome podem vir logo antes do trecho: a leitura é feita na fonte.
+ *
+ * Não restringe — desmente — "o que não temos", "a gente que não tem", "uma
+ * vez que não", "tenho a impressão que não" (antes do "que" não há nome) nem
+ * "um distribuidor que não temos" (o verbo depois do "não" é a própria
+ * declaração de quem fala). Sem artigo na fonte ("procuro embalagem que não
+ * seja de plástico"), o "não" desmente e o item cai, do lado conservador.
  */
 const RELATIVOS = new Set(["que", "that", "which", "who"]);
 const NAO_SAO_NOME = new Set([
   "isso", "isto", "aquilo", "tudo", "algo", "nada", "coisa", "coisas", "gente",
+  // locuções e opinião: "uma vez que não", "é uma pena que não", "tenho a impressão (a sensação, a certeza) que não"
+  "vez", "pena", "medida", "impressao", "sensacao", "certeza", "ideia", "opiniao", "sentimento",
+  // o assunto da conversa, não um item: "investidor é um assunto (um tema) que não está na pauta"
+  "assunto", "tema", "questao", "prioridade", "momento", "verdade", "realidade", "situacao",
   "what", "all", "something", "anything", "nothing", "everything", "thing", "things",
+  "feeling", "impression", "sense", "idea", "opinion", "issue", "topic", "priority", "matter", "truth",
 ]);
 const VERBOS_DA_DECLARACAO = new Set([
   "tenho", "temos", "possuo", "possuimos", "preciso", "precisamos", "procuro", "procuramos", "busco", "buscamos",
@@ -146,43 +166,90 @@ const VERBOS_DA_DECLARACAO = new Set([
 ]);
 function negacaoRestringeUmNome(lista: readonly string[], oracao: readonly number[], k: number): boolean {
   if (!negaEm(lista, k, NEGACOES_NO_TRECHO) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
-  return [k - 1, k - 2].some(j => j >= 1 && RELATIVOS.has(lista[j]) && oracao[j - 1] === oracao[k]
-    && ehConteudo(lista[j - 1]) && !NAO_SAO_NOME.has(lista[j - 1]));
+  return [k - 1, k - 2].some(j => j >= 2 && RELATIVOS.has(lista[j]) && oracao[j - 2] === oracao[k]
+    && DETERMINANTES.has(lista[j - 2]) && ehConteudo(lista[j - 1]) && !NAO_SAO_NOME.has(lista[j - 1]));
 }
 
 /**
- * O trecho desmente a própria declaração? A negação dentro dele derruba
- * ("não precisamos de investidores"), salvo a que restringe um nome e o
- * "nem" que continua uma restrição na mesma oração ("sem plástico nem
- * isopor", "que não seja de plástico nem de isopor").
+ * Como o trecho se lê no lugar em que aparece na fonte (das unidades `inicio`
+ * a `fim`). A negação dentro dele desmente a declaração ("não precisamos de
+ * investidores"), salvo a que restringe um nome e o "nem" que continua uma
+ * restrição na mesma oração ("sem plástico nem isopor", "que não seja de
+ * plástico nem de isopor"). "restringe": o trecho só vale por causa de uma
+ * restrição com "que não".
  */
-function trechoSeDesmente(lista: readonly string[], oracao: readonly number[]): boolean {
+function leituraDoTrecho(lista: readonly string[], oracao: readonly number[], inicio: number, fim: number): "desmente" | "restringe" | "afirma" {
   let restricao: number | null = null;
-  for (let k = 0; k < lista.length; k += 1) {
+  let restringe = false;
+  for (let k = inicio; k < fim; k += 1) {
     if (restricao !== null && restricao !== oracao[k]) restricao = null;
     if (lista[k] === "sem" || lista[k] === "without") restricao = oracao[k];
     else if (lista[k] === "nem" && restricao !== null) continue;
-    else if (negacaoRestringeUmNome(lista, oracao, k)) restricao = oracao[k];
-    else if (negaEm(lista, k, NEGACOES_NO_TRECHO)) return true;
+    else if (negacaoRestringeUmNome(lista, oracao, k)) {
+      restricao = oracao[k];
+      restringe = true;
+    } else if (negaEm(lista, k, NEGACOES_NO_TRECHO)) return "desmente";
   }
-  return false;
+  return restringe ? "restringe" : "afirma";
 }
 
+/** "E" e "ou" seguidos de artigo abrem outro item: "uma embalagem sem plástico | e um distribuidor em São Paulo". */
+const COORDENACOES = new Set(["e", "ou", "and", "or"]);
+/** A preposição que abre outro complemento fecha o "sem": "produtos sem glúten | para hotéis". "De" não fecha: "sem adição de açúcar". */
+const FECHAM_O_SEM = new Set(["para", "em", "no", "na", "nos", "nas", "com", "for", "in", "with"]);
+
+type AlcanceDaNegacao = { negada: boolean[]; marca: boolean[]; complemento: boolean[]; abertaPor: number[] };
+
 /**
- * Até onde vai cada negação de um texto: a marca ("não", "sem", "nem"...,
- * fora "não só") alcança da palavra seguinte ao fim da oração.
+ * Até onde vai cada negação de um texto, da unidade `de` até antes da `ate`
+ * (o texto inteiro, se a faixa não for dada). A marca ("não", "sem",
+ * "nem"..., fora "não só") alcança da palavra seguinte ao fim da oração.
+ * O "sem" e a restrição com "que não" (com o "nem" que os continua) param
+ * antes em dois lugares (revisão da IA3):
+ * - no "e" ou "ou" seguido de artigo, que abre outro item ("uma embalagem
+ *   sem plástico | e um distribuidor em São Paulo");
+ * - só o "sem", na preposição que abre outro complemento ("produtos sem
+ *   glúten | para hotéis").
+ * O "não" que nega a frase vai até o fim da oração, como antes: depois da
+ * normalização, "é" e "e" são a mesma unidade, e "o que não temos É UM
+ * distribuidor" não pode virar "e um", outro item afirmado.
+ * O que vem depois da preposição que fecha o "sem" é `complemento`: a fonte o
+ * afirma, mas sozinho ele não faz um item ("estamos sem distribuidor | no
+ * Chile" não sustenta o item "Chile"). `abertaPor` é a posição da marca cujo
+ * alcance chega à palavra, ou -1. As listas devolvidas começam na unidade `de`.
  */
-function alcanceDaNegacao(lista: readonly string[], oracao: readonly number[]) {
-  const negada: boolean[] = [];
-  const marca: boolean[] = [];
-  let aberta: number | null = null;
-  lista.forEach((_, k) => {
-    if (aberta !== null && aberta !== oracao[k]) aberta = null;
-    negada.push(aberta !== null);
-    marca.push(negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO));
-    if (marca[k]) aberta = oracao[k];
-  });
-  return { negada, marca };
+function alcanceDaNegacao(
+  lista: readonly string[],
+  oracao: readonly number[],
+  faixa: { de: number; ate: number } = { de: 0, ate: lista.length },
+  ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO),
+): AlcanceDaNegacao {
+  const alcance: AlcanceDaNegacao = { negada: [], marca: [], complemento: [], abertaPor: [] };
+  // A asserção evita que o tsc estreite `aberta` para null no laço.
+  let aberta = null as { em: number; tipo: "sem" | "restricao" | "frase" } | null;
+  let complemento: number | null = null;
+  for (let k = faixa.de; k < faixa.ate; k += 1) {
+    const outroItem = COORDENACOES.has(lista[k]) && DETERMINANTES.has(lista[k + 1]);
+    if (aberta !== null && (oracao[aberta.em] !== oracao[k] || (outroItem && aberta.tipo !== "frase"))) aberta = null;
+    if (complemento !== null && (complemento !== oracao[k] || outroItem)) complemento = null;
+    if (aberta?.tipo === "sem" && FECHAM_O_SEM.has(lista[k])) {
+      aberta = null;
+      complemento = oracao[k];
+    }
+    const marca = ehMarca(k);
+    alcance.negada.push(aberta !== null);
+    alcance.abertaPor.push(aberta ? aberta.em : -1);
+    alcance.complemento.push(complemento !== null);
+    alcance.marca.push(marca);
+    if (marca) {
+      const tipo = lista[k] === "sem" || lista[k] === "without" ? "sem"
+        : lista[k] === "nem" && aberta ? aberta.tipo
+          : negacaoRestringeUmNome(lista, oracao, k) ? "restricao" : "frase";
+      aberta = { em: k, tipo };
+      complemento = null;
+    }
+  }
+  return alcance;
 }
 
 /**
@@ -190,11 +257,11 @@ function alcanceDaNegacao(lista: readonly string[], oracao: readonly number[]) {
  * dela. A mesma transcrição é conferida item a item, pessoa a pessoa: a
  * última leitura fica guardada.
  */
-let ultimaFonteLida: { fonte: string; daFonte: string[]; oracao: number[]; negada: boolean[] } | null = null;
+let ultimaFonteLida: ({ fonte: string; daFonte: string[]; oracao: number[] } & AlcanceDaNegacao) | null = null;
 function fonteLida(fonte: string) {
   if (ultimaFonteLida?.fonte === fonte) return ultimaFonteLida;
   const { lista: daFonte, oracao } = unidadesPorOracao(fonte);
-  ultimaFonteLida = { fonte, daFonte, oracao, negada: alcanceDaNegacao(daFonte, oracao).negada };
+  ultimaFonteLida = { fonte, daFonte, oracao, ...alcanceDaNegacao(daFonte, oracao) };
   return ultimaFonteLida;
 }
 
@@ -202,9 +269,11 @@ function fonteLida(fonte: string) {
  * Uma palavra da fonte em volta do trecho. `negada`: está no alcance de uma
  * negação que o PRÓPRIO trecho traz ("embalagem que não seja de PLÁSTICO");
  * `marca`: é essa negação. Negação de fora do trecho não entra aqui: a que
- * vem logo antes já derruba a ocorrência inteira.
+ * vem logo antes já derruba a ocorrência inteira. `complemento`: vem depois
+ * do "sem X" e de uma preposição ("sem glúten para HOTÉIS"), seja o "sem" do
+ * trecho ou de antes dele.
  */
-type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean };
+type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean; complemento: boolean };
 
 /**
  * O que a fonte diz em volta do trecho citado, ou null se o trecho não a
@@ -213,33 +282,41 @@ type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean };
  * palavras inteiras. Pedaço com menos de 4 letras não prova nada e é
  * ignorado; o trecho inteiro precisa de pelo menos DUAS palavras de conteúdo
  * (uma palavra solta — "para", "pessoas" — é palavra-chave, não declaração,
- * como em citacaoConfere). Ocorrência negada não conta, nem trecho que se
+ * como em citacaoConfere). Ocorrência negada não conta, nem a que se
  * desmente.
  */
 function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null {
   if (typeof trecho !== "string") return null;
-  const { daFonte, oracao } = fonteLida(fonte);
-  const pedacos = trecho.split(/\.{3}|…/).map(unidadesPorOracao).filter(pedaco => pedaco.lista.join("").length >= 4);
-  if (!pedacos.length || pedacos.reduce((soma, pedaco) => soma + pedaco.lista.filter(ehConteudo).length, 0) < 2) return null;
+  const lida = fonteLida(fonte);
+  const { daFonte, oracao } = lida;
+  const pedacos = trecho.split(/\.{3}|…/).map(parte => unidadesPorOracao(parte).lista).filter(pedaco => pedaco.join("").length >= 4);
+  if (!pedacos.length || pedacos.reduce((soma, pedaco) => soma + pedaco.filter(ehConteudo).length, 0) < 2) return null;
   const apoio: PalavraDoApoio[] = [];
-  for (const { lista: pedaco, oracao: oracaoDoPedaco } of pedacos) {
-    if (trechoSeDesmente(pedaco, oracaoDoPedaco)) return null;
+  for (const pedaco of pedacos) {
     let achou = false;
     for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
       if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
-      let negado = false;
-      for (let k = Math.max(0, inicio - ALCANCE_DA_NEGACAO); k < inicio; k += 1) {
-        if (oracao[k] === oracao[inicio] && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO)) negado = true;
-      }
-      if (negado) continue;
-      achou = true;
       const fim = inicio + pedaco.length;
-      let aberta: number | null = null;
-      for (let k = Math.max(0, inicio - JANELA_DO_TRECHO); k < Math.min(daFonte.length, fim + JANELA_DO_TRECHO); k += 1) {
-        if (aberta !== null && aberta !== oracao[k]) aberta = null;
-        const marca = k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO);
-        apoio.push({ unidade: daFonte[k], negada: aberta !== null, marca });
-        if (marca) aberta = oracao[k];
+      const leitura = leituraDoTrecho(daFonte, oracao, inicio, fim);
+      if (leitura === "desmente") continue;
+      // A negação logo antes do trecho, se o alcance dela ainda chega a ele
+      // ("não tem um | distribuidor"). Se o trecho só vale pela restrição,
+      // também a de qualquer ponto antes, na mesma oração: em "Não precisamos
+      // de um investidor que não entenda do setor", o primeiro "não" desmente
+      // a declaração, e o segundo só restringiria o nome.
+      const abertaPor = lida.abertaPor[inicio];
+      if ((abertaPor >= 0 && inicio - abertaPor <= ALCANCE_DA_NEGACAO) || (leitura === "restringe" && lida.negada[inicio])) continue;
+      achou = true;
+      const de = Math.max(0, inicio - JANELA_DO_TRECHO);
+      const ate = Math.min(daFonte.length, fim + JANELA_DO_TRECHO);
+      const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO));
+      for (let k = de; k < ate; k += 1) {
+        apoio.push({
+          unidade: daFonte[k],
+          negada: doTrecho.negada[k - de],
+          marca: doTrecho.marca[k - de],
+          complemento: doTrecho.complemento[k - de] || lida.complemento[k],
+        });
       }
     }
     if (!achou) return null;
@@ -283,7 +360,8 @@ function mesmaRaiz(a: string, b: string): boolean {
  * plástico" (o "sem" faz as vezes do "que não seja") e "Embalagem"; não passa
  * "Embalagem de plástico". A palavra que fica sob a negação no item precisa
  * estar sob a negação no trecho, a que fica fora, fora; e o item afirma
- * alguma coisa ("Sem distribuidor no Chile" não é item).
+ * alguma coisa ("Sem distribuidor no Chile" não é item), que não seja só o
+ * complemento do "sem" ("Chile", de "estamos sem distribuidor no Chile").
  */
 export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte: string): boolean {
   if (typeof texto !== "string") return false;
@@ -306,8 +384,9 @@ export function textoSustentadoPeloTrecho(texto: unknown, trecho: unknown, fonte
     if (sobNegacao[k]) {
       if (!apoio.some(daFonte => daFonte.negada && !daFonte.marca && casa(unidade, daFonte))) return false;
     } else {
-      if (!apoio.some(daFonte => !daFonte.negada && !daFonte.marca && casa(unidade, daFonte))) return false;
-      if (ehConteudo(unidade)) afirma = true;
+      const afirmadas = apoio.filter(daFonte => !daFonte.negada && !daFonte.marca && casa(unidade, daFonte));
+      if (!afirmadas.length) return false;
+      if (ehConteudo(unidade) && afirmadas.some(daFonte => !daFonte.complemento)) afirma = true;
     }
   }
   return afirma;
@@ -512,7 +591,10 @@ export const ESQUEMA_DO_PERFIL = {
  * contato e devolve o que a fonte sustenta. A resposta do modelo passa pelo
  * portão aqui dentro: quem chama nunca recebe item sem prova.
  */
-export async function interpretarComplemento(fonte: string, contexto: { nomeDoContato: string }): Promise<PerfilProposto> {
+export async function interpretarComplemento(
+  fonte: string,
+  contexto: { nomeDoContato: string; identificacao?: Identificacao },
+): Promise<PerfilProposto> {
   const resposta = await invokeLLM({
     timeoutMs: 45_000,
     orcamentoMs: 60_000,
@@ -530,7 +612,10 @@ export async function interpretarComplemento(fonte: string, contexto: { nomeDoCo
   } catch {
     throw new Error("A IA não retornou uma interpretação válida.");
   }
-  return filtrarPelaFonte(bruto, fonte.slice(0, 8000), { nomes: [contexto.nomeDoContato] });
+  return filtrarPelaFonte(bruto, fonte.slice(0, 8000), {
+    nomes: [contexto.nomeDoContato, ...(contexto.identificacao?.nomes ?? [])],
+    telefones: contexto.identificacao?.telefones,
+  });
 }
 
 // ─── Pendências ───────────────────────────────────────────────────────────────
@@ -667,6 +752,44 @@ export async function retratoDoContato(db: Banco, ownerId: string, contactId: nu
   return { ...contato, tenho: tenho.map(t => t.label), preciso: preciso.map(p => p.label) };
 }
 
+/**
+ * Quem o contato é, para O QUE TENHO e O QUE PRECISO não levarem a
+ * identificação dele: o nome, a empresa e os telefones gravados no contato e,
+ * além deles, o que a reunião disse dele e ainda não foi gravado (revisão da
+ * IA3). O contato criado pela reunião nasce sem empresa, que espera a dona
+ * como pendência; sem isto, "Chocolate da Cacau Tupinã" passava na
+ * confirmação e no completar por texto ou voz. Entram o nome, a empresa e o
+ * telefone das pessoas da reunião ligadas ao contato e as pendências de nome,
+ * empresa e telefone dele em qualquer status: ignorar a pendência não deixa a
+ * empresa anônima. Posse no WHERE.
+ */
+export async function identificacaoDoContato(db: Banco, ownerId: string, contato: {
+  id: number; fullName: string | null; company: string | null; phone: string | null; whatsapp: string | null;
+}): Promise<Identificacao> {
+  const [daReuniao, pendencias] = await Promise.all([
+    db.select({ fullName: meetingContactSuggestions.fullName, company: meetingContactSuggestions.company, phone: meetingContactSuggestions.phone })
+      .from(meetingContactSuggestions)
+      .where(and(eq(meetingContactSuggestions.ownerId, ownerId), eq(meetingContactSuggestions.existingContactId, contato.id))),
+    db.select({ campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
+      .where(and(
+        eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.contactId, contato.id),
+        inArray(networkSugestoes.campo, ["nome", "empresa", "telefone"]),
+      )),
+  ]);
+  return {
+    nomes: [
+      contato.fullName, contato.company,
+      ...daReuniao.flatMap(pessoa => [pessoa.fullName, pessoa.company]),
+      ...pendencias.filter(pendencia => pendencia.campo !== "telefone").map(pendencia => pendencia.valor),
+    ],
+    telefones: [
+      contato.phone, contato.whatsapp,
+      ...daReuniao.map(pessoa => pessoa.phone),
+      ...pendencias.filter(pendencia => pendencia.campo === "telefone").map(pendencia => pendencia.valor),
+    ],
+  };
+}
+
 /** Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro. */
 export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string }) {
   const db = await exigirDb();
@@ -723,7 +846,8 @@ export const MENSAGEM_ITEM_COM_IDENTIFICACAO =
  * Tenho/Preciso que o contato já tem (mesmo slug OU mesmo rótulo, como na
  * confirmação do enriquecimento em db.ts) não é inserido de novo: a pendência
  * só é confirmada. E item que carrega nome, empresa, telefone ou e-mail do
- * contato é recusado antes de qualquer escrita.
+ * contato — também os que a reunião deu e ainda não foram gravados nele
+ * (identificacaoDoContato) — é recusado antes de qualquer escrita.
  */
 export async function confirmarPendencia(ownerId: string, id: string, valorCorrigido?: string) {
   const db = await exigirDb();
@@ -741,7 +865,7 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
     .where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId))).limit(1);
   if (!contato) throw new PendenciaNaoEncontrada();
   const ehTenhoOuPreciso = campo === "tenho" || campo === "preciso";
-  if (ehTenhoOuPreciso && itemIdentificaOContato(valor, { nomes: [contato.fullName, contato.company], telefones: [contato.phone, contato.whatsapp] })) {
+  if (ehTenhoOuPreciso && itemIdentificaOContato(valor, await identificacaoDoContato(db, ownerId, { ...contato, id: contactId }))) {
     throw new ValorInvalido(MENSAGEM_ITEM_COM_IDENTIFICACAO);
   }
 

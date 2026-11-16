@@ -2107,6 +2107,8 @@
       "have": "持っているもの：{{valor}}",
       "need": "必要なもの：{{valor}}",
       "confirmed": "「私は誰か」を確認：{{valor}}",
+      "jobTitleConfirmed": "役職を確認：{{valor}}",
+      "companyConfirmed": "会社を確認：{{valor}}",
       "availableYes": "ネットワークの機会に公開",
       "availableNo": "ネットワークへの許可を取り消し",
       "connection": "プラットフォームがコネクションを記録",

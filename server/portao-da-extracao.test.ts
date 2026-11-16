@@ -148,6 +148,93 @@ describe("achado 5 — o 'não' que restringe o item não o derruba, nem troca d
   });
 });
 
+/**
+ * Revisão da IA3 (16/11): três furos do portão novo, cada um com as frases
+ * que o abriram. O "não" que desmente a necessidade não pode virar restrição,
+ * o alcance da negação para no item seguinte, e a negação de antes do trecho
+ * não é salva pela restrição de dentro dele.
+ */
+describe("revisão da IA3 — a necessidade negada não vira item", () => {
+  it("verbo de opinião antes do 'que' não é nome: 'acho que não' desmente a necessidade", () => {
+    const casos: Array<[fonte: string, trecho: string, texto: string]> = [
+      ["E vocês precisam de distribuidor no Chile? Acho que não.", "precisam de distribuidor no Chile? Acho que não", "Distribuidor no Chile"],
+      ["Investidor, por enquanto acho que não é prioridade.", "Investidor, por enquanto acho que não é prioridade", "Investidor"],
+      ["Sobre investidor a gente acha que não precisa agora.", "Sobre investidor a gente acha que não precisa agora", "Investidor"],
+      ["Um distribuidor no Chile eu sinto que não é o momento.", "Um distribuidor no Chile eu sinto que não é o momento", "Distribuidor no Chile"],
+      // outros verbos e locuções do mesmo jeito
+      ["Investidor eu sei que nunca vamos precisar.", "Investidor eu sei que nunca vamos precisar", "Investidor"],
+      ["Investidor o pessoal acha que não é prioridade.", "Investidor o pessoal acha que não é prioridade", "Investidor"],
+      ["Distribuidor no Chile tenho a impressão que não é necessário.", "Distribuidor no Chile tenho a impressão que não é necessário", "Distribuidor no Chile"],
+      ["Investidor é um assunto que não está na pauta.", "Investidor é um assunto que não está na pauta", "Investidor"],
+      ["An investor I think that not now.", "An investor I think that not now", "Investor"],
+    ];
+    for (const [fonte, trecho, texto] of casos) {
+      expect(trechoEstaNaFonte(trecho, fonte), fonte).toBe(false);
+      expect(textoSustentadoPeloTrecho(texto, trecho, fonte), fonte).toBe(false);
+    }
+    // o cenário inteiro, com as falas em linhas, como a transcrição montada: a pendência não nasce
+    expect(pendenciasDaPessoaNaReuniao({
+      oQuePreciso: [{ texto: "Distribuidor no Chile", categoria: null, trecho: "precisam de distribuidor no Chile? Acho que não", confianca: 1 }],
+    }, "E vocês precisam de distribuidor no Chile?\nAcho que não.")).toEqual([]);
+  });
+
+  it("a restrição pede o artigo antes do nome, lido na fonte: o trecho pode começar no nome", () => {
+    const fonte = "Procuro uma embalagem que não seja de plástico.";
+    expect(textoSustentadoPeloTrecho("Embalagem que não seja de plástico", "embalagem que não seja de plástico", fonte)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Supplier that does not use plastic", "a supplier that does not use plastic", "We need a supplier that does not use plastic.")).toBe(true);
+    // sem artigo na fonte, o "não" desmente: o item cai, do lado conservador
+    expect(trechoEstaNaFonte("embalagem que não seja de plástico", "Procuro embalagem que não seja de plástico.")).toBe(false);
+  });
+
+  it("o alcance do 'sem' e do 'que não' para no 'e um…'; o do 'sem', também na preposição do complemento", () => {
+    const semPrimeiro = "O que eu procuro: uma embalagem sem plástico e um distribuidor em São Paulo.";
+    const restricaoPrimeiro = "O que eu procuro: uma embalagem que não seja de plástico e um distribuidor em São Paulo.";
+    for (const fonte of [semPrimeiro, restricaoPrimeiro]) {
+      // a frase inteira de trecho, como o Lite (r2) e o Flash (r1, r3) citaram na bancada, e o trecho curto
+      expect(textoSustentadoPeloTrecho("Distribuidor em São Paulo", fonte, fonte), fonte).toBe(true);
+      expect(textoSustentadoPeloTrecho("Distribuidor em São Paulo", "um distribuidor em São Paulo", fonte), fonte).toBe(true);
+      expect(textoSustentadoPeloTrecho("Embalagem sem plástico", fonte, fonte), fonte).toBe(true);
+      expect(textoSustentadoPeloTrecho("Embalagem de plástico", fonte, fonte), fonte).toBe(false);
+    }
+    const hoteis = "Vendemos produtos sem glúten para hotéis.";
+    expect(textoSustentadoPeloTrecho("Produtos para hotéis", hoteis, hoteis)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Venda de produtos para hotéis", hoteis, hoteis)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Produtos com glúten para hotéis", hoteis, hoteis)).toBe(false);
+    const brasil = "Distribuímos produtos sem glúten em todo o Brasil.";
+    expect(textoSustentadoPeloTrecho("Distribuição de produtos no Brasil", brasil, brasil)).toBe(true);
+    // "de" não fecha o "sem"
+    expect(textoSustentadoPeloTrecho("Chocolate com açúcar", "chocolate sem adição de açúcar", "Fazemos chocolate sem adição de açúcar.")).toBe(false);
+    // duas restrições em seguida: a primeira não alcança a segunda
+    const duas = "Quero uma embalagem que não seja de plástico e uma caixa que não seja de isopor.";
+    expect(textoSustentadoPeloTrecho("Caixa que não seja de isopor", "uma caixa que não seja de isopor", duas)).toBe(true);
+    // o "não" que nega a frase segue até o fim da oração: normalizado, "é um" seria "e um"
+    expect(trechoEstaNaFonte("um distribuidor no Chile", "O que não temos é um distribuidor no Chile.")).toBe(false);
+  });
+
+  it("o complemento do 'sem' sozinho não é item: 'Chile', de 'estamos sem distribuidor no Chile'", () => {
+    const chile = "Hoje estamos sem distribuidor no Chile e na Argentina.";
+    expect(textoSustentadoPeloTrecho("Chile", "estamos sem distribuidor no Chile", chile)).toBe(false);
+    expect(textoSustentadoPeloTrecho("Chile e Argentina", "Chile e na Argentina", chile)).toBe(false);
+    expect(textoSustentadoPeloTrecho("Distribuidor no Chile", "estamos sem distribuidor no Chile", chile)).toBe(false);
+    expect(textoSustentadoPeloTrecho("Hotéis", "Vendemos produtos sem glúten para hotéis", "Vendemos produtos sem glúten para hotéis.")).toBe(false);
+  });
+
+  it("a negação de antes do trecho, mesmo longe dele, não é salva pela restrição de dentro", () => {
+    expect(pendenciasDaPessoaNaReuniao({
+      oQuePreciso: [
+        { texto: "Investidor que não entenda do setor", categoria: null, trecho: "investidor que não entenda do setor", confianca: 1 },
+        { texto: "Investidor", categoria: null, trecho: "investidor que não entenda do setor", confianca: 1 },
+      ],
+    }, "Não precisamos de um investidor que não entenda do setor.")).toEqual([]);
+    expect(trechoEstaNaFonte("um investidor que não entenda do setor", "Não precisamos agora de um investidor que não entenda do setor.")).toBe(false);
+    expect(textoSustentadoPeloTrecho("Sócio", "um sócio que não entenda do setor", "Não temos um distribuidor e um sócio que não entenda do setor.")).toBe(false);
+    // sem a negação de fora, a mesma restrição vale
+    const precisamos = "Precisamos de um investidor que não entenda só de finanças.";
+    expect(textoSustentadoPeloTrecho("Investidor que não entenda só de finanças", "um investidor que não entenda só de finanças", precisamos)).toBe(true);
+    expect(textoSustentadoPeloTrecho("Investidor", "um investidor que não entenda só de finanças", precisamos)).toBe(true);
+  });
+});
+
 describe("achado 6 — cargo e empresa só como a transcrição diz", () => {
   it("o que a reunião disse fica; o cargo deduzido cai", () => {
     for (const dito of ["mentor convidado", "Mentor convidado", "Ponte Sul Consultoria", "Cacau Tupinã", "CACAU TUPINA", "Tecelagem Aurora", "Embalagens Girassol"]) {

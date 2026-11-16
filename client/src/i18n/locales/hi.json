@@ -2107,6 +2107,8 @@
       "have": "मेरे पास क्या है: {{valor}}",
       "need": "मुझे क्या चाहिए: {{valor}}",
       "confirmed": "\"मैं कौन हूँ\" की पुष्टि: {{valor}}",
+      "jobTitleConfirmed": "पद की पुष्टि: {{valor}}",
+      "companyConfirmed": "कंपनी की पुष्टि: {{valor}}",
       "availableYes": "नेटवर्क के अवसरों के लिए उपलब्ध किया गया",
       "availableNo": "नेटवर्क की अनुमति वापस ली गई",
       "connection": "प्लेटफ़ॉर्म ने कनेक्शन दर्ज किया",

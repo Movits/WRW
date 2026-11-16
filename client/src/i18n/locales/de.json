@@ -2107,6 +2107,8 @@
       "have": "Was Ich Habe: {{valor}}",
       "need": "Was Ich Brauche: {{valor}}",
       "confirmed": "Wer Ich Bin bestätigt: {{valor}}",
+      "jobTitleConfirmed": "Position bestätigt: {{valor}}",
+      "companyConfirmed": "Unternehmen bestätigt: {{valor}}",
       "availableYes": "Für Chancen im Netzwerk freigegeben",
       "availableNo": "Freigabe für das Netzwerk widerrufen",
       "connection": "Verbindung von der Plattform erfasst",
