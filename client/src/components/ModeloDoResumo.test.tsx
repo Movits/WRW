@@ -117,7 +117,8 @@ describe("Modelos do resumo — 'Refazer como…'", () => {
     expect(screen.getAllByRole("radio").map(radio => radio.getAttribute("value"))).toEqual(["general", "networking", "mentoring", "sales", "one_on_one"]);
     expect(screen.getByRole("radio", { name: "Vendas" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Networking" })).toHaveAccessibleDescription(/Quem é quem, o que cada pessoa oferece e procura/);
-    expect(screen.getByText(/Os itens que você confirmou e as ações marcadas como feitas ficam\. Os itens para conferir e os ignorados são trocados/)).toBeInTheDocument();
+    // Fica também o que a dona escreveu ou editou (H4f), mesmo ignorado: é o que a fila guarda.
+    expect(screen.getByText(/Ficam os itens que você confirmou, as ações marcadas como feitas e os itens que você escreveu ou editou, mesmo ignorados\. Os outros itens para conferir e os ignorados são trocados/)).toBeInTheDocument();
   });
 
   it("escolher outro modelo e 'Refazer o resumo' pede o refazer nele; Cancelar fecha sem pedir", () => {
@@ -168,7 +169,7 @@ describe("Modelos do resumo — 'Refazer como…'", () => {
 describe("Modelos do resumo — a versão anterior enquanto a nova é escrita", () => {
   it.each(["pendente", "gerando"])("%s com a versão anterior (refazendo): o aviso com o modelo e os itens só para ler", estado => {
     daDona(daDonaCom(estado, "sales", ITENS, true));
-    expect(screen.getByRole("status")).toHaveTextContent("Refazendo o resumo como Vendas. Os itens que você confirmou ficam; os outros serão trocados. Espere terminar para conferir.");
+    expect(screen.getByRole("status")).toHaveTextContent("Refazendo o resumo como Vendas. Ficam os itens que você confirmou, escreveu ou editou; os outros serão trocados. Espere terminar para conferir.");
     // A versão anterior na tela, sem decidir nada.
     expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
     expect(screen.getByText("Não renovar com a transportadora antiga.")).toBeInTheDocument();
@@ -246,7 +247,8 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
     expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
     expect(screen.getByText("Reservar a sala de reunião")).toBeInTheDocument();
     expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(2);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // Nenhum botão de decidir: só o "Ouvir o resumo" (H19), que lê a versão que está na tela.
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
@@ -257,7 +259,8 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
     expect(screen.getByText("Não renovar com a transportadora antiga.")).toBeInTheDocument();
     expect(screen.queryByText(/Não foi possível/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // Só o "Ouvir o resumo" (H19): a versão anterior segue valendo e se ouve.
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
     unmount();
     // Também quando a versão anterior não tem item para mostrar.
     doLink(doLinkCom("falhou", [], true));
@@ -280,7 +283,7 @@ describe("Modelos do resumo — no idioma da tela", () => {
     expect(screen.getByText("Template: 1:1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Redo as…" }));
     expect(screen.getAllByRole("radio").map(radio => radio.labels?.[0]?.textContent)).toEqual(["General", "Networking", "Mentoring", "Sales", "1:1"]);
-    expect(screen.getByText(/Items you confirmed and actions marked as done stay\./)).toBeInTheDocument();
+    expect(screen.getByText(/Items you confirmed, actions marked as done and items you wrote or edited stay, even if ignored\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Redo summary/ })).toBeInTheDocument();
   });
 });

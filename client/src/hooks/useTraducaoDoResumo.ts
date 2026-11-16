@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 
 /**
@@ -29,6 +30,11 @@ import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from 
  * - O servidor que responde "sem resumo" ou "original" sabe de um resumo que a
  *   tela ainda não leu (refeito, reprocessado, em outro idioma): não há o que
  *   traduzir, a tela para de perguntar e relê o resumo.
+ * - A versão anterior do resumo refeito (H4d, `versaoAnterior`) vale como o
+ *   resumo pronto: ela fica na tela, e a tradução dela também. Enquanto o
+ *   refazer escreve a nova, o servidor responde com a tradução guardada.
+ * - O mapa pronto com o resumo vazio (a conferência tirou todos os itens, ou
+ *   pelo link a dona ignorou todos) também se traduz: os rótulos dele bastam.
  */
 
 type Saidas = inferRouterOutputs<AppRouter>;
@@ -56,6 +62,27 @@ export type TraducaoDoResumoNaTela = {
 };
 
 type Alvo = { meetingId: string; token?: undefined } | { token: string; meetingId?: undefined };
+type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * A falha da tradução do resumo, dita no idioma da tela, para o resumo e para o
+ * mapa mental: o teto e a reunião que sumiu pelo código, o banco fora do ar
+ * pela frase do servidor; o resto, a frase `padrao` de quem mostra (o resumo
+ * ou o mapa aparecem no idioma original).
+ */
+export function mensagemDaFalhaDaTraducao(t: TranslateFn, erro: unknown, peloLink: boolean, padrao: string) {
+  switch ((erro as { data?: { code?: string } } | null)?.data?.code) {
+    case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
+    case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
+    case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
+    default: return padrao;
+  }
+}
+
+/** O resumo que está na tela: o pronto, ou a versão anterior do resumo refeito (H4d). */
+function resumoNaTela<T extends Resumo>(resumo: T | undefined): T | null {
+  return resumo && (resumo.estado === "pronto" || resumo.versaoAnterior) ? resumo : null;
+}
 
 /** `rotulosDoMapa`: os rótulos do mapa mental pronto (H10), que entram na tradução; sem mapa, nada. */
 export function useTraducaoDoResumo(alvo: Alvo, resumo: Resumo | undefined, rotulosDoMapa?: readonly string[]): TraducaoDoResumoNaTela {
@@ -68,16 +95,20 @@ export function useTraducaoDoResumo(alvo: Alvo, resumo: Resumo | undefined, rotu
   const [escolhido, setEscolhido] = useState<IdiomaDaReuniao | null>(null);
   const idioma = escolhido ?? idiomaDaTela;
 
-  const pronto = resumo?.estado === "pronto" ? resumo : null;
+  const pronto = resumoNaTela(resumo);
   // Como o servidor: o resumo sem idioma gravado conta como o padrão.
   const idiomaOriginal = pronto ? idiomaDaReuniao(pronto.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO : null;
-  const ativa = !!pronto && pronto.itens.length > 0;
+  // Há o que traduzir: um item à vista ou um rótulo do mapa pronto.
+  const ativa = !!pronto && (pronto.itens.length > 0 || (rotulosDoMapa?.length ?? 0) > 0);
   const precisa = ativa && idioma !== idiomaOriginal;
   // Os textos do resumo: mudou um, a tradução guardada não serve mais. Pelo
-  // link, que recebe o resumo inteiro traduzido, o estado também conta.
+  // link, que recebe o resumo inteiro traduzido e o põe no lugar do que leu,
+  // conta também o que a tela mostra de cada item e a tradução não muda: o
+  // estado, o responsável e a marca do que a dona escreveu (H4f).
   const itens = pronto?.itens;
   const assinatura = useMemo(() => (itens ?? []).map(item => [
-    "id" in item ? item.id : "", item.subject ?? "", item.text, item.due ?? "", peloLink ? item.status : "",
+    "id" in item ? item.id : "", item.subject ?? "", item.text, item.due ?? "",
+    ...(peloLink ? [item.status, item.assignee ?? "", "escritoPelaDona" in item && item.escritoPelaDona ? "1" : ""] : []),
   ].join("\u0001")).join("\u0002"), [itens, peloLink]);
 
   // A tradução vale para estes textos, neste idioma, nesta reunião.
@@ -149,7 +180,7 @@ export function useTraducaoDoResumo(alvo: Alvo, resumo: Resumo | undefined, rotu
       : erro ? "erro" : valida ? "pronta" : "traduzindo";
 
   const aplicar = useCallback(<T extends Resumo>(dados: T | undefined): T | undefined => {
-    if (!dados || dados.estado !== "pronto" || !valida) return dados;
+    if (!dados || !resumoNaTela(dados) || !valida) return dados;
     if (!peloLink) {
       const porId = new Map((valida.itens as Array<{ id?: string; subject: string | null; text: string; due: string | null }>).map(item => [item.id, item]));
       return {

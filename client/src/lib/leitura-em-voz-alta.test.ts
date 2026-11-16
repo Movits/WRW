@@ -7,14 +7,29 @@ import { escolherVoz, falasCurtas, type VozDoAparelho } from "./leitura-em-voz-a
  * está em components/OuvirOResumo.test.tsx.
  */
 
-const voz = (name: string, lang: string, padrao = false): VozDoAparelho => ({ name, lang, default: padrao });
+const voz = (name: string, lang: string, padrao = false): VozDoAparelho => ({ name, lang, default: padrao, localService: true });
+// A voz de rede do navegador: o texto vai a um servidor do Google ou da Microsoft para virar som.
+const deRede = (name: string, lang: string, padrao = false): VozDoAparelho => ({ name, lang, default: padrao, localService: false });
 
 describe("escolherVoz", () => {
   it("só serve voz do idioma do resumo: sem nenhuma, null (a tela explica em vez de ler com outra pronúncia)", () => {
-    const vozes = [voz("Microsoft David", "en-US", true), voz("Google Deutsch", "de-DE")];
+    const vozes = [voz("Microsoft David", "en-US", true), voz("Microsoft Hedda", "de-DE")];
     expect(escolherVoz(vozes, "pt-BR")).toBeNull();
     expect(escolherVoz([], "en")).toBeNull();
-    expect(escolherVoz(vozes, "de")?.name).toBe("Google Deutsch");
+    expect(escolherVoz(vozes, "de")?.name).toBe("Microsoft Hedda");
+  });
+
+  it("a voz de rede (as \"Google …\" do Chrome, as \"Online (Natural)\" do Edge) nunca serve: o idioma que só tem ela fica sem voz", () => {
+    // O Chrome num Windows em português: a Maria é local, as do Google são de rede.
+    const doChrome = [voz("Microsoft Maria", "pt-BR", true), deRede("Google 日本語", "ja-JP"), deRede("Google Deutsch", "de-DE"), deRede("Google US English", "en-US")];
+    expect(escolherVoz(doChrome, "ja")).toBeNull();
+    expect(escolherVoz(doChrome, "de")).toBeNull();
+    expect(escolherVoz(doChrome, "pt-BR")?.name).toBe("Microsoft Maria");
+    // Mesmo da região preferida e marcada como padrão, a de rede perde para a local.
+    const doEdge = [deRede("Microsoft Francisca Online (Natural) - Portuguese (Brazil)", "pt-BR", true), voz("Microsoft Helia", "pt-PT")];
+    expect(escolherVoz(doEdge, "pt-BR")?.name).toBe("Microsoft Helia");
+    // Sem a informação (navegador antigo), a voz conta como local.
+    expect(escolherVoz([{ name: "Antiga", lang: "en-US", default: false }], "en")?.name).toBe("Antiga");
   });
 
   it("o português do resumo prefere a voz do Brasil, mesmo depois de uma de Portugal ou de uma padrão", () => {

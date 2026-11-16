@@ -13,7 +13,7 @@ import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/Reunia
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { LANGUAGES } from "@/i18n";
-import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
+import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
@@ -66,9 +66,11 @@ type Saidas = inferRouterOutputs<AppRouter>;
 type ResumoDaDona = Saidas["meetings"]["resumoGuardado"];
 type ResumoDoLink = Saidas["reuniaoAberta"]["resumoGuardado"];
 // O link não recebe o id, a caixa de feito, a origem nem a marca da edição
-// (server/resumo-guardado.ts).
+// (server/resumo-guardado.ts): do que a dona escreveu (H4f), só a marca
+// `escritoPelaDona`, que a dona não recebe (ela tem a origem e a edição).
 type ItemDaDona = ResumoDaDona["itens"][number];
-type ItemNaTela = ResumoDoLink["itens"][number] & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt">>;
+type ItemNaTela = Omit<ResumoDoLink["itens"][number], "escritoPelaDona"> & { escritoPelaDona?: boolean }
+  & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt">>;
 type Secao = ItemNaTela["section"];
 type ConsultaDoResumo<T> = { data?: T; isError: boolean; error: unknown; refetch: () => unknown };
 
@@ -92,6 +94,8 @@ type DaDona = {
    */
   registroDoDestaque?: { current: string | null };
   traducao?: TraducaoDoResumoNaTela;
+  /** O link aberto está ligado: o formulário do item avisa que o que ela escreve aparece para quem tem o link. */
+  comLinkAberto?: boolean;
 };
 type DoLink = {
   token: string;
@@ -135,30 +139,33 @@ function mensagemDaDecisao(t: TranslateFn, erro: unknown) {
   }
 }
 
-// A falha da tradução do resumo: o resumo segue no original, e a frase diz por quê.
-function mensagemDaTraducao(t: TranslateFn, erro: unknown, peloLink: boolean) {
-  switch (codigoDoErro(erro)) {
-    case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
-    case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
-    case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
-    default: return t("meetings.summary.translation.error");
+const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
+
+// O nome de um idioma dito em outro ("português", "Portuguese"): a voz o lê
+// no idioma da fala. Só a base, como a voz.
+function nomeDoIdiomaEm(lingua: string, codigo: string) {
+  const base = codigo.split("-")[0];
+  try {
+    return new Intl.DisplayNames([lingua], { type: "language" }).of(base) ?? base;
+  } catch {
+    return base;
   }
 }
-
-const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
 
 /**
  * O que "Ouvir o resumo" lê, fala por fala, com o `t` do idioma do resumo:
  * cada seção com o título e os itens, o responsável e o prazo. O item ainda
  * não conferido não pode soar como conferido: com todos pendentes, um aviso
  * no começo basta; com alguns, o aviso explica e cada pendente começa com
- * "Para conferir", o selo que a dona vê na tela.
+ * "Para conferir", o selo que a dona vê na tela. O resumo traduzido (H11)
+ * começa dizendo que a IA o traduziu e de que idioma, como o aviso da tela.
  */
-function falasDoResumo(t: TranslateFn, itens: ItemNaTela[], nomes: Readonly<Record<string, string>>): string[] {
+function falasDoResumo(t: TranslateFn, itens: ItemNaTela[], nomes: Readonly<Record<string, string>>, traduzidoDe: string | null = null): string[] {
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
   const pendentes = itens.filter(item => item.status === "pending").length;
   const todosPendentes = pendentes === itens.length;
   const falas: string[] = [];
+  if (traduzidoDe) falas.push(t("meetings.summary.listenTranslated", { idioma: traduzidoDe }));
   if (pendentes) falas.push(todosPendentes ? t("meetings.summary.listenNoneReviewed") : t("meetings.summary.listenSomeToReview"));
   for (const secao of ORDEM_DAS_SECOES) {
     const daSecao = itens.filter(item => item.section === secao);
@@ -283,13 +290,17 @@ export function ResumoGuardado(props: DaDona | DoLink) {
 
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
 
-  // Ouvir o resumo: o pronto com algo à vista, no idioma em que a IA o
-  // escreveu (o resumo sem idioma gravado é de reunião antiga, em pt-BR).
-  const podeOuvir = dados?.estado === "pronto" && visiveis.length > 0;
+  // Ouvir o resumo: o que está na tela com algo à vista (o pronto, ou a versão
+  // anterior do resumo refeito, H4d), no idioma em que a IA o escreveu (o
+  // resumo sem idioma gravado é de reunião antiga, em pt-BR).
+  const podeOuvir = (dados?.estado === "pronto" || versaoAnterior) && visiveis.length > 0;
   // Com a tradução pronta (H11), o texto à vista é o traduzido: a voz, os
-  // títulos e os rótulos vão no idioma dela.
-  const idiomaDoResumo = idiomaDaReuniao(traducao?.estado === "pronta" ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
-  const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDoResumo), visiveis, nomes) : [];
+  // títulos e os rótulos vão no idioma dela, e a leitura começa dizendo que é
+  // uma tradução da IA.
+  const traduzido = traducao?.estado === "pronta";
+  const idiomaDoResumo = idiomaDaReuniao(traduzido ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const traduzidoDe = traduzido && traducao.idiomaOriginal ? nomeDoIdiomaEm(idiomaDoResumo, traducao.idiomaOriginal) : null;
+  const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDoResumo), visiveis, nomes, traduzidoDe) : [];
 
   // Editar e acrescentar (H4f), só para a dona. O formulário recebe o que a
   // tela mostra no lugar de cada voz, para a dona editar o texto como o lê.
@@ -299,10 +310,12 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // guardado está no idioma do resumo: o formulário edita o original, para a
   // edição não gravar a tradução no lugar dele.
   const noOriginal = (item: ItemNaTela) => (original?.itens as ItemNaTela[] | undefined)?.find(daConsulta => daConsulta.id === item.id) ?? item;
+  // Com o link ligado, o formulário avisa que o que ela escreve sai no link.
+  const comLinkAberto = props.token === undefined && !!props.comLinkAberto;
   const formularioDoItem = (item: ItemNaTela, fechar: () => void) => item.id
     ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
         item={{ id: item.id, section: item.section, subject: noOriginal(item).subject, text: noOriginal(item).text, assignee: noOriginal(item).assignee, due: noOriginal(item).due }}
-        reler={reler} aoFalhar={aoFalharDecisao} aoFechar={fechar} decidindo={decidindo}
+        reler={reler} aoFalhar={aoFalharDecisao} aoFechar={fechar} decidindo={decidindo} comLinkAberto={comLinkAberto}
         aoIgnorar={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "ignored" }); }}/>
     : null;
   const [acrescentando, setAcrescentando] = useState(false);
@@ -399,7 +412,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
       })}
       {/* Editar e acrescentar (H4f) somem, como as decisões, enquanto o resumo é refeito (H4d). */}
       {!peloLink && !somenteLeitura && (acrescentando
-        ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
+        ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)} comLinkAberto={comLinkAberto}
             reler={reler} aoFalhar={aoFalharDecisao} aoFechar={() => { focarAcrescentar.current = true; setAcrescentando(false); }}/>
         : <button ref={botaoDeAcrescentar} type="button" onClick={() => setAcrescentando(true)}
             className="inline-flex items-center gap-2 rounded-lg border border-dashed border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10">
@@ -451,7 +464,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     {traducao?.estado === "traduzindo" && <p role="status" className="mt-3 text-xs text-amber-100/70"><Loader2 size={13} className="mr-1.5 inline animate-spin"/>{t("meetings.summary.translation.translating")}</p>}
     {traducao?.estado === "pronta" && <p className="mt-3 text-xs text-white/45">{t("meetings.summary.translation.notice", { idioma: nomeNaTela(traducao.idiomaOriginal) })}</p>}
     {traducao?.estado === "erro" && <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-xs text-amber-200/80">
-      <span>{mensagemDaTraducao(t, traducao.erro, peloLink)}</span>
+      <span>{mensagemDaFalhaDaTraducao(t, traducao.erro, peloLink, t("meetings.summary.translation.error"))}</span>
       <button type="button" onClick={traducao.tentarDeNovo} className="rounded-lg border border-amber-300/30 px-3 py-1 font-semibold text-amber-200 hover:bg-amber-300/10">{t("meetings.summary.retry")}</button>
     </div>}
     {!esperando && erroDaConsulta}
@@ -487,6 +500,9 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
   const pendente = item.status === "pending";
   // A caixa é só da dona: o link não recebe o feito, e não decide nada.
   const comCaixa = item.section === "action" && !peloLink;
+  // O item da IA que a dona editou (H4f); pelo link, o escrito por ela que tem
+  // trecho (o acrescentado não tem).
+  const editadoPelaDona = peloLink ? !!item.escritoPelaDona && !!item.excerpt : item.origin !== "owner" && item.editedAt != null;
   // Confirmar, Ignorar e Editar se repetem em todo item: o texto do item os descreve.
   const idDoTexto = useId();
   const [editando, setEditando] = useState(false);
@@ -536,17 +552,21 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
           </button>
         : <span className="px-1.5 py-0.5 font-mono text-xs text-white/40">{mmss(item.startSeconds)}</span>)}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
-      {/* O que a dona escreveu (H4f), marcado só para ela. */}
+      {/* O que a dona escreveu (H4f): para ela, se acrescentou ou editou; pelo
+          link, uma marca só, de que não é texto da IA, sem dizer quem é. */}
       {!peloLink && item.origin === "owner" && <span className="text-[11px] text-white/45">{t("meetings.summary.addedByOwner")}</span>}
       {!peloLink && item.origin !== "owner" && item.editedAt != null && <span className="text-[11px] text-white/45">{t("meetings.summary.editedByOwner")}</span>}
+      {peloLink && item.escritoPelaDona && <span className="text-[11px] text-white/45">{t("meetings.summary.linkWrittenByOwner")}</span>}
       {!pendente && editar && <span className="ms-auto">{editar}</span>}
     </div>
     {/* O trecho fica aberto enquanto o item espera a conferência; depois,
-        recolhido. O item que a dona acrescentou não tem trecho. */}
+        recolhido. O item que a dona acrescentou não tem trecho. O do item que
+        ela editou é o da versão da IA: "trecho original", porque pode não
+        sustentar mais o que ela escreveu. */}
     {item.excerpt ? (pendente
       ? <Trecho texto={item.excerpt}/>
       : <details className="mt-2">
-          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.ai.excerptLabel")}</summary>
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{editadoPelaDona ? t("meetings.summary.originalExcerptLabel") : t("meetings.ai.excerptLabel")}</summary>
           <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>) : null}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}

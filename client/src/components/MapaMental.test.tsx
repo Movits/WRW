@@ -218,6 +218,22 @@ describe("Mapa mental — os estados", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("A IA não encontrou assuntos suficientes nesta reunião para montar um mapa mental.");
   });
 
+  it("no refazer do resumo que falhou (H4d), sem mapa pronto: a dona lê que o refazer falhou e tenta de novo; pelo link, o aviso de que a dona pediu uma nova versão, sem botão que não faria nada", () => {
+    const doRefazer = consulta({ estado: "falhou", idioma: "pt-BR", erro: "RESPOSTA_CORTADA", mapa: null, versaoAnterior: true });
+    const { unmount } = daDona(doRefazer);
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível refazer o resumo, e o mapa mental vem com ele. Tente de novo.");
+    fireEvent.click(screen.getByRole("button", { name: /Tentar de novo/ }));
+    expect(mutacao("pedirMapa").mutate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    unmount();
+
+    preparar("pedirMapaPeloLink", { isError: true, error: { data: { code: "TOO_MANY_REQUESTS" } } });
+    doLink(doRefazer);
+    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão do resumo, que ainda não está pronta. O mapa mental aparece aqui quando ela ficar pronta.");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mutacao("pedirMapaPeloLink").mutate).not.toHaveBeenCalled();
+  });
+
   it("pedindo: o botão fica travado; o pedido relê o mapa e o resumo (pedir o mapa pode criar ou reabrir o resumo) e só termina com as duas releituras", async () => {
     preparar("pedirMapa", { isPending: true });
     daDona(comEstado("sem_mapa"));
@@ -302,8 +318,9 @@ describe("Mapa mental — os estados", () => {
  */
 describe("Mapa mental — a tradução do resumo (H11)", () => {
   const EM_ARABE: Record<string, string> = { "Exportação de café": "تصدير القهوة", "Transportadora": "شركة النقل" };
-  const traducao = (estado: "pronta" | "traduzindo" | "erro" | "original") => ({
-    estado, idioma: "ar" as const, traduzirRotulo: (rotulo: string) => EM_ARABE[rotulo] ?? rotulo,
+  const traducao = (estado: "pronta" | "traduzindo" | "erro" | "original", erro: unknown = null) => ({
+    estado, idioma: "ar" as const, idiomaOriginal: "pt-BR" as const, erro, tentarDeNovo: vi.fn(),
+    traduzirRotulo: (rotulo: string) => EM_ARABE[rotulo] ?? rotulo,
   });
 
   it("o mapa pronto avisa a página dos rótulos dele, uma vez cada, na ordem da árvore; sem mapa pronto, nada", () => {
@@ -335,6 +352,34 @@ describe("Mapa mental — a tradução do resumo (H11)", () => {
     duble.doLink.mockReturnValue(pronto("pt-BR"));
     render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} traducao={traducao("pronta")}/>);
     expect(ramo("تصدير القهوة")).toBeInTheDocument();
+  });
+
+  it("com a tradução pronta, a aba diz que os rótulos são tradução da IA, e de que idioma, como a aba Resumo", () => {
+    duble.daDona.mockReturnValue(pronto("pt-BR"));
+    render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} traducao={traducao("pronta")}/>);
+    expect(screen.getByText("Rótulos traduzidos automaticamente pela IA. Original: Português.")).toBeInTheDocument();
+  });
+
+  it("traduzindo: o aviso é anunciado, e a árvore fica no original até a tradução chegar", () => {
+    duble.daDona.mockReturnValue(pronto("pt-BR"));
+    render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} traducao={traducao("traduzindo")}/>);
+    expect(screen.getByRole("status")).toHaveTextContent("Traduzindo o mapa mental…");
+    expect(ramo("Exportação de café")).toBeInTheDocument();
+    expect(screen.queryByText(/traduzidos automaticamente/)).not.toBeInTheDocument();
+  });
+
+  it("erro: a frase sai pelo código, a árvore fica no original, e 'Tentar de novo' pede a tradução outra vez", () => {
+    duble.daDona.mockReturnValue(pronto("pt-BR"));
+    const t = traducao("erro", { message: "A tradução do resumo não respondeu agora.", data: { code: "SERVICE_UNAVAILABLE" } });
+    const { unmount } = render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} traducao={t}/>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível traduzir o mapa mental agora. Ele aparece no idioma original.");
+    expect(ramo("Exportação de café")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Tentar de novo" }));
+    expect(t.tentarDeNovo).toHaveBeenCalledTimes(1);
+    unmount();
+    duble.doLink.mockReturnValue(pronto("pt-BR"));
+    render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} traducao={traducao("erro", { data: { code: "TOO_MANY_REQUESTS" } })}/>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Muitos pedidos em sequência. Aguarde alguns minutos e tente de novo.");
   });
 
   it("com a tradução que não está pronta (traduzindo, erro ou o original), o mapa fica no idioma e na direção dele", () => {

@@ -14,12 +14,15 @@ type Item = {
   id: string; section: "action" | "focus" | "task" | "decision" | "blocker" | "question";
   subject: string | null; text: string; assignee: string | null; due: string | null;
   excerpt: string; startSeconds: number | null; status: "pending" | "confirmed" | "ignored";
+  origin: "ai" | "owner"; editedAt: number | null;
 };
 
 const banco = vi.hoisted(() => ({
   resposta: "pronto" as "pronto" | "original" | "sem_resumo",
   resumoId: "resumo-1",
   versao: 1,
+  // O resumo sendo refeito (H4d): o banco manda servir só a tradução guardada.
+  soGuardada: false,
   idiomaOriginal: "pt-BR",
   itens: [] as Item[],
   rotulos: [] as string[],
@@ -41,7 +44,7 @@ vi.mock("./traducao-do-resumo-banco", () => ({
     const vale = !!guardada && guardada.resumoId === banco.resumoId && guardada.versao === banco.versao;
     return {
       estado: "pronto", resumoId: banco.resumoId, versao: banco.versao, idiomaOriginal: banco.idiomaOriginal,
-      itens: copia(banco.itens), rotulosDoMapa: [...banco.rotulos], guardado: vale ? copia(guardada.conteudo) : null,
+      itens: copia(banco.itens), rotulosDoMapa: [...banco.rotulos], guardado: vale ? copia(guardada.conteudo) : null, soGuardada: banco.soGuardada,
     };
   }),
   gravarTraducaoDoResumo: vi.fn(async (alvo: { idioma: string; resumoId: string; versao: number }, montar: (atual: unknown) => unknown, modelo: string | null) => {
@@ -90,7 +93,7 @@ function tradutor(traduzir: (texto: string) => string) {
 const paraIngles = (texto: string) => `EN ${texto}`;
 
 function item(id: string, extra: Partial<Item> = {}): Item {
-  return { id, section: "decision", subject: null, text: `Texto ${id}`, assignee: null, due: null, excerpt: `trecho literal ${id} da transcrição`, startSeconds: 12, status: "pending", ...extra };
+  return { id, section: "decision", subject: null, text: `Texto ${id}`, assignee: null, due: null, excerpt: `trecho literal ${id} da transcrição`, startSeconds: 12, status: "pending", origin: "ai", editedAt: null, ...extra };
 }
 
 /** Um adiado que o teste resolve na hora que quiser: a IA "ainda traduzindo". */
@@ -103,7 +106,7 @@ function adiado<T>() {
 
 beforeEach(() => {
   Object.assign(banco, {
-    resposta: "pronto", resumoId: "resumo-1", versao: 1, idiomaOriginal: "pt-BR", itens: [], rotulos: [],
+    resposta: "pronto", resumoId: "resumo-1", versao: 1, soGuardada: false, idiomaOriginal: "pt-BR", itens: [], rotulos: [],
     guardados: {}, gravarDevolve: true, erroAoGravar: null, gravacoes: [], leituras: 0,
   });
   pedirJsonAIA.mockReset();
@@ -265,8 +268,8 @@ describe("traduzir o resumo", () => {
     expect(resposta).toEqual({
       estado: "pronta", idioma: "en", mapa: {},
       itens: [
-        { section: "action", subject: null, text: "EN {F2} envia a proposta", assignee: "{F2}", due: "EN até sexta", excerpt: "trecho literal id-acao da transcrição", startSeconds: 12, status: "pending" },
-        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "trecho literal id-tarefa da transcrição", startSeconds: 12, status: "pending" },
+        { section: "action", subject: null, text: "EN {F2} envia a proposta", assignee: "{F2}", due: "EN até sexta", excerpt: "trecho literal id-acao da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false },
+        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "trecho literal id-tarefa da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false },
       ],
     });
     expect(banco.gravacoes).toHaveLength(1);
@@ -297,10 +300,23 @@ describe("traduzir o resumo", () => {
     });
     const peloLink = await traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", vi.fn());
     expect(peloLink.estado === "pronta" && peloLink.itens.map(i => i.text)).toEqual(["EN Texto a", "EN Texto c"]);
-    expect(JSON.stringify(peloLink)).not.toMatch(/"id"|"done"|ignored/);
+    expect(JSON.stringify(peloLink)).not.toMatch(/"id"|"done"|ignored|"origin"|"editedAt"/);
   });
 
-  it("item editado depois (outra impressão digital) é traduzido sozinho; o resto vem guardado", async () => {
+  it("pelo link, o item que a dona escreveu ou editou (H4f) vai só com a marca, sem a origem nem a hora da edição", async () => {
+    banco.itens = [item("a", { status: "confirmed", origin: "owner" }), item("b", { status: "confirmed", editedAt: 1_800_000_000_000 }), item("c")];
+    pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+    const peloLink = await traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", vi.fn());
+    expect(peloLink.estado === "pronta" && peloLink.itens.map(i => [i.text, i.escritoPelaDona])).toEqual([
+      ["EN Texto a", true], ["EN Texto b", true], ["EN Texto c", false],
+    ]);
+    expect(JSON.stringify(peloLink)).not.toMatch(/"origin"|"editedAt"|1800000000000/);
+  });
+
+  // A edição da dona (H4f) não muda a versão do resumo (server/resumo-guardado.ts):
+  // o item editado volta com outra impressão digital na mesma versão. O caminho
+  // de verdade, editarItemDoResumo e depois a tradução, está no teste de integração.
+  it("item editado depois (outra impressão digital, a mesma versão) é traduzido sozinho; o resto vem guardado", async () => {
     banco.itens = [item("a"), item("b")];
     pedirJsonAIA.mockImplementation(tradutor(paraIngles));
     await traduzirResumoDaDona("dona-1", "r1", "en");
@@ -462,6 +478,23 @@ describe("traduzir o resumo", () => {
     expect(depois.estado === "pronta" && depois.mapa).toEqual({ Prazos: "EN Prazos", Riscos: "EN Riscos" });
   });
 
+  it("a dona também gasta a vaga do teto só quando a IA é chamada: a guardada não gasta, e a recusa do teto não começa nada", async () => {
+    banco.itens = [item("a")];
+    pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+    const antes = vi.fn();
+    await expect(traduzirResumoDaDona("dona-1", "r1", "en", antes)).resolves.toMatchObject({ estado: "pronta" });
+    expect(antes).toHaveBeenCalledTimes(1);
+    await traduzirResumoDaDona("dona-1", "r1", "en", antes);
+    expect(antes).toHaveBeenCalledTimes(1);
+
+    banco.itens = [item("a"), item("b")];
+    pedirJsonAIA.mockClear();
+    const recusa = new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Muitos pedidos à IA em sequência." });
+    await expect(traduzirResumoDaDona("dona-1", "r1", "en", () => { throw recusa; })).rejects.toBe(recusa);
+    expect(pedirJsonAIA).not.toHaveBeenCalled();
+    expect(_paraTestes.emCurso.size).toBe(0);
+  });
+
   it("o teto do link recusa antes da IA: nada começa, e o erro do teto sai como está", async () => {
     banco.itens = [item("a")];
     const recusa = new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Muitos pedidos à IA em sequência." });
@@ -477,6 +510,39 @@ describe("traduzir o resumo", () => {
     banco.erroAoGravar = queda;
     vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(traduzirResumoDaDona("dona-1", "r1", "en")).rejects.toBe(queda);
+  });
+
+  describe("o resumo sendo refeito (H4d): a versão anterior fica na tela, e só a tradução guardada dela vale", () => {
+    it("com a tradução guardada: ela sai sem IA e sem vaga, e o item que ela não cobre fica no original", async () => {
+      banco.itens = [item("a")];
+      banco.rotulos = ["Prazos"];
+      pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+      await traduzirResumoDaDona("dona-1", "r1", "en");
+      banco.soGuardada = true;
+      banco.itens = [item("a"), item("b", { status: "confirmed", origin: "owner" })];
+      pedirJsonAIA.mockClear();
+      const antes = vi.fn();
+
+      await expect(traduzirResumoDaDona("dona-1", "r1", "en", antes)).resolves.toEqual({
+        estado: "pronta", idioma: "en", mapa: { Prazos: "EN Prazos" },
+        itens: [{ id: "a", subject: null, text: "EN Texto a", due: null }, { id: "b", subject: null, text: "Texto b", due: null }],
+      });
+      const peloLink = await traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", antes);
+      expect(peloLink.estado === "pronta" && peloLink.itens.map(i => i.text)).toEqual(["EN Texto a", "Texto b"]);
+      expect(pedirJsonAIA).not.toHaveBeenCalled();
+      expect(antes).not.toHaveBeenCalled();
+      expect(banco.gravacoes).toHaveLength(1);
+    });
+
+    it("sem tradução guardada: 'traduzindo', sem IA e sem vaga (a versão nova, quando chega, é traduzida)", async () => {
+      banco.itens = [item("a")];
+      banco.soGuardada = true;
+      const antes = vi.fn();
+      await expect(traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", antes)).resolves.toEqual({ estado: "traduzindo", idioma: "en" });
+      expect(pedirJsonAIA).not.toHaveBeenCalled();
+      expect(antes).not.toHaveBeenCalled();
+      expect(_paraTestes.emCurso.size).toBe(0);
+    });
   });
 
   it("o resumo mudou enquanto a IA traduzia: nada vale, e a resposta é 'traduzindo' (o próximo pedido traduz o novo)", async () => {

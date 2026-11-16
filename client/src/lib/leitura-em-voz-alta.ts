@@ -3,9 +3,10 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 /**
  * Ler um texto em voz alta com a voz do próprio aparelho (a speechSynthesis
  * do navegador), sem IA e sem custo: a H19 do plano do gravador, "Ouvir o
- * resumo". Aqui moram só as partes puras: qual voz do aparelho fala o idioma
- * pedido e como cortar o texto em falas curtas. Tocar, pausar e continuar
- * moram em components/OuvirOResumo.tsx.
+ * resumo". Só com voz local: o texto não sai do aparelho. Aqui moram só as
+ * partes puras: qual voz do aparelho fala o idioma pedido e como cortar o
+ * texto em falas curtas. Tocar, pausar e continuar moram em
+ * components/OuvirOResumo.tsx.
  */
 
 /**
@@ -14,8 +15,14 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
  */
 export const PRAZO_DAS_VOZES = 2_000;
 
-/** O que se lê de cada voz do aparelho (SpeechSynthesisVoice). */
-export type VozDoAparelho = Pick<SpeechSynthesisVoice, "name" | "lang" | "default">;
+/**
+ * O que se lê de cada voz do aparelho (SpeechSynthesisVoice). `localService`
+ * false é a voz de rede do navegador (as "Google …" do Chrome no computador, as
+ * "Online (Natural)" do Edge): o texto vai a um servidor do Google ou da
+ * Microsoft para virar som. Essas não servem: o resumo (itens, prazos e os
+ * nomes das vozes) não sai do aparelho, e o aviso de gravação não fala delas.
+ */
+export type VozDoAparelho = Pick<SpeechSynthesisVoice, "name" | "lang" | "default"> & Partial<Pick<SpeechSynthesisVoice, "localService">>;
 
 // "pt_BR" (o Android às vezes escreve assim), "pt-br" e "pt-BR" são a mesma
 // etiqueta.
@@ -49,9 +56,11 @@ const vozDeSegunda = (voz: VozDoAparelho) => VOZES_DE_BRINCADEIRA.has(nomeDaVoz(
 /**
  * A voz do aparelho que lê o idioma pedido, ou null quando o aparelho não tem
  * nenhuma (a tela explica, em vez de ler o texto com a pronúncia de outro
- * idioma). Entre as que servem: a da região preferida, depois uma que não seja
- * de brincadeira nem da Eloquence, depois a voz padrão do aparelho e, por fim,
- * a ordem da lista.
+ * idioma). Só a voz local serve: a de rede (`localService` false) manda o texto
+ * para fora, e o idioma que só tem voz de rede conta como "sem voz". Entre as
+ * que servem: a da região preferida, depois uma que não seja de brincadeira
+ * nem da Eloquence, depois a voz padrão do aparelho e, por fim, a ordem da
+ * lista.
  */
 export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma: IdiomaDaReuniao): V | null {
   const bases = BASES[idioma] ?? [idioma.split("-")[0].toLowerCase()];
@@ -59,6 +68,7 @@ export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma
     : POR_ULTIMO[idioma]?.some(ultima => tag === ultima || tag.startsWith(`${ultima}-`)) ? 2 : 1;
   const candidatas = vozes
     .map((voz, ordem) => ({ voz, ordem, tag: etiqueta(voz.lang ?? "") }))
+    .filter(({ voz }) => voz.localService !== false)
     .filter(({ tag }) => bases.includes(tag.split("-")[0]))
     .map(({ voz, ordem, tag }) => ({
       voz,

@@ -222,6 +222,41 @@ describe("useTraducaoDoResumo — para a dona", () => {
     });
   });
 
+  it("a versão anterior do resumo refeito (H4d) vale como o pronto: no refazer que falhou e no que está em curso, pede a tradução e a põe no resumo", async () => {
+    await telaEm("en");
+    const anterior = (estado: string) => ({ estado, emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: true, itens: [itemDaDona("a", "Renovar o contrato", { status: "confirmed" })] }) as never;
+    for (const estado of ["falhou", "pendente", "gerando"]) {
+      duble.daDona.mutate.mockReset();
+      const { result, unmount } = renderHook(() => useTraducaoDoResumo({ meetingId: REUNIAO }, anterior(estado)));
+      expect(duble.daDona.mutate).toHaveBeenCalledTimes(1);
+      act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "pronta", idioma: "en", mapa: {}, itens: [{ id: "a", subject: null, text: "Renew the contract", due: null }] }));
+      expect(result.current.estado).toBe("pronta");
+      expect(textos(result.current.aplicar(anterior(estado)))).toEqual(["Renew the contract"]);
+      unmount();
+    }
+    // O primeiro resumo que falhou, sem versão anterior: nada a traduzir.
+    duble.daDona.mutate.mockReset();
+    const { result } = renderHook(() => useTraducaoDoResumo({ meetingId: REUNIAO }, { estado: "falhou", emoji: null, idioma: null, erro: "X", versaoAnterior: false, itens: [] } as never));
+    expect(result.current.estado).toBe("inativa");
+    expect(duble.daDona.mutate).not.toHaveBeenCalled();
+  });
+
+  it("o resumo pronto sem item à vista, com o mapa pronto (H10): pede a tradução, e os rótulos saem traduzidos", async () => {
+    await telaEm("en");
+    const { result, rerender } = renderHook(({ rotulos }) => useTraducaoDoResumo({ meetingId: REUNIAO }, resumoDaDona([]), rotulos), {
+      initialProps: { rotulos: undefined as string[] | undefined },
+    });
+    expect(result.current.estado).toBe("inativa");
+    expect(duble.daDona.mutate).not.toHaveBeenCalled();
+
+    rerender({ rotulos: ["Prazos", "Lojas"] });
+    expect(duble.daDona.mutate).toHaveBeenCalledTimes(1);
+    expect(result.current.estado).toBe("traduzindo");
+    act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines", Lojas: "Stores" }, itens: [] }));
+    expect(result.current.estado).toBe("pronta");
+    expect(result.current.traduzirRotulo("Prazos")).toBe("Deadlines");
+  });
+
   it("'sem_resumo' do servidor (a reunião foi reprocessada): não fica em 'traduzindo', para de perguntar e relê o resumo", async () => {
     await telaEm("en");
     vi.useFakeTimers();
@@ -266,6 +301,23 @@ describe("useTraducaoDoResumo — pelo link", () => {
     const { rerender } = renderHook(({ resumo }) => useTraducaoDoResumo({ token: TOKEN }, resumo), { initialProps: { resumo: resumoDoLink() } });
     rerender({ resumo: resumoDoLink([itemDoLink("Enviar a proposta", "confirmed")]) });
     expect(duble.doLink.mutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("pelo link, o que a tela mostra e a tradução não muda também conta: a dona mudou só o responsável, ou o item passou a ser dela, e a página pede de novo", async () => {
+    await telaEm("fr");
+    const comResponsavel = (assignee: string | null, escritoPelaDona = false) => resumoDoLink([{ ...itemDoLink("Enviar a proposta", "confirmed"), assignee, escritoPelaDona }]);
+    const { result, rerender } = renderHook(({ resumo }) => useTraducaoDoResumo({ token: TOKEN }, resumo), { initialProps: { resumo: comResponsavel("{F1}") } });
+    act(() => ultimoPedido(duble.doLink)[1].onSuccess({
+      estado: "pronta", idioma: "fr", mapa: {}, itens: [{ ...itemDoLink("Envoyer la proposition", "confirmed"), assignee: "{F1}", escritoPelaDona: false }],
+    }));
+
+    const outroResponsavel = comResponsavel("{F2}", true);
+    rerender({ resumo: outroResponsavel });
+    expect(duble.doLink.mutate).toHaveBeenCalledTimes(2);
+    // Até a resposta, o original, que já tem o responsável novo: nunca o nome velho com o texto traduzido.
+    expect((result.current.aplicar(outroResponsavel) as unknown as { itens: Array<{ assignee: string | null }> }).itens[0].assignee).toBe("{F2}");
+    rerender({ resumo: comResponsavel("{F2}", false) });
+    expect(duble.doLink.mutate).toHaveBeenCalledTimes(3);
   });
 
   it("pelo link, 'sem_resumo' (a dona refez o resumo) relê o resumo do link, que não relê sozinho", async () => {

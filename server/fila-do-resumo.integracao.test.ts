@@ -352,7 +352,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(visto.idioma).toBe("pt-BR");
     expect(visto.itens).toEqual([{
       section: "action", subject: null, text: "Avisar a transportadora", assignee: "{F2}", due: null,
-      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending",
+      excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending", escritoPelaDona: false,
     }]);
     await expect(servico.resumoGuardadoPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
   });

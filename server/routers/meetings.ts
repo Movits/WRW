@@ -76,6 +76,19 @@ export const tetoDaIADaReuniao = criarTeto(
   "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
 );
 
+// A tradução do resumo guardado (H11) para a dona: cada pedido que chama a IA
+// de fato (o item editado ou acrescentado, outro idioma, o mapa que chegou)
+// gasta uma vaga; a tradução guardada e a que já está na IA, não. Teto próprio,
+// por dona e em memória como os outros: a tela pede a tradução de novo a cada
+// item que a dona corrige, e corrigir o resumo não pode gastar as vagas do
+// Pergunte. Sem ele, editar e traduzir em laço chamava a IA sem limite.
+export const TRADUCOES_DO_RESUMO_POR_JANELA = 30;
+export const tetoDaTraducaoDoResumo = criarTeto(
+  TRADUCOES_DO_RESUMO_POR_JANELA,
+  10 * 60_000,
+  "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
+);
+
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
   const vagas = reprocessosPorDona.get(openId);
@@ -272,8 +285,9 @@ export const meetingsRouter = router({
     .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
 
   // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
-  // confirmados e os feitos ficam, os pendentes e os ignorados são trocados.
-  // Gasta uma vaga do mesmo teto de pedidos à IA.
+  // confirmados, os feitos e os que a dona escreveu ou editou (H4f) ficam, os
+  // outros pendentes e ignorados são trocados. Gasta uma vaga do mesmo teto de
+  // pedidos à IA.
   refazerResumo: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
     .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
@@ -310,15 +324,18 @@ export const meetingsRouter = router({
 
   // A tradução do resumo guardado (H11) para o idioma de quem lê, em segundo
   // plano como a da transcrição: responde "traduzindo" enquanto a IA trabalha,
-  // e a tela pergunta de novo. A tradução guardada não chama a IA, e como a da
-  // transcrição não conta no teto de pedidos (server/traducao-do-resumo.ts).
+  // e a tela pergunta de novo. A tradução guardada não chama a IA e não gasta
+  // vaga; a que chama gasta uma do teto próprio da tradução
+  // (tetoDaTraducaoDoResumo), só quando a IA é chamada de fato.
   traduzirResumo: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(IDIOMAS_DA_REUNIAO) }))
-    .mutation(({ ctx, input }) => traduzirResumoDaDona(ctx.user.openId, input.meetingId, input.idioma)),
+    .mutation(({ ctx, input }) => traduzirResumoDaDona(ctx.user.openId, input.meetingId, input.idioma,
+      () => { tetoDaTraducaoDoResumo.reservar(ctx.user.openId); })),
 
   // A dona edita um item e acrescenta item à mão (H4f): o que ela escreve vale
   // como confirmado. Sem IA, então sem teto de pedidos; o resumo guarda até
-  // ITENS_DO_RESUMO_MAX itens.
+  // ITENS_DO_RESUMO_MAX itens. A tradução que a tela pede depois traduz só o
+  // item que mudou, e gasta a vaga dela.
   editarItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), ...camposDoItemDoResumo }))
     .mutation(async ({ ctx, input }) => {

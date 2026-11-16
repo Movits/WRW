@@ -217,6 +217,16 @@ describe("Ouvir o resumo — sem voz para o idioma, o botão explica", () => {
     expect(principal).toHaveAccessibleName("Ouvir o resumo");
   });
 
+  it("só a voz de rede do navegador no idioma (a do Google, no Chrome): o botão fica desligado e explica, e nada vai a ela", () => {
+    const voz = instalarSinteseFalsa({ vozes: [...VOZES, { name: "Google 日本語", lang: "ja-JP", localService: false }] });
+    render(<OuvirOResumo falas={FALAS} idioma="ja"/>);
+    const principal = botao("Ouvir o resumo");
+    expect(principal).toHaveAttribute("aria-disabled", "true");
+    expect(principal).toHaveAccessibleDescription("Este aparelho não tem voz no idioma do resumo (japonês). Instale uma voz desse idioma nas configurações do aparelho para ouvir.");
+    fireEvent.click(principal);
+    expect(voz.pedidas).toEqual([]);
+  });
+
   it("as vozes que chegam depois (o Chrome avisa pelo voiceschanged) ligam o botão, sem a explicação no meio", () => {
     const voz = instalarSinteseFalsa({ vozes: [] });
     ouvir();

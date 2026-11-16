@@ -5,10 +5,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 /**
  * As rotas da tradução do resumo guardado (H11), com o serviço dublado: a dona é
- * a da sessão e não gasta o teto de pedidos à IA (como a tradução da
- * transcrição); pelo link aberto, a vaga dos dois tetos sai só quando o
- * serviço chama a IA de fato, e o erro que não é do teto, da IA ou do banco não
- * vai cru a quem não tem conta. O serviço está em traducao-do-resumo.test.ts.
+ * a da sessão e gasta a vaga do teto próprio da tradução só quando o serviço
+ * chama a IA de fato (nunca a do teto de pedidos à IA, o do Pergunte); pelo
+ * link aberto, a vaga dos dois tetos sai do mesmo jeito, e o erro que não é do
+ * teto, da IA ou do banco não vai cru a quem não tem conta. O serviço está em
+ * traducao-do-resumo.test.ts.
  */
 const servico = vi.hoisted(() => ({
   traduzirResumoDaDona: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock("./link-aberto-da-reuniao", async importOriginal => ({
 }));
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
-const { meetingsRouter, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA, tetoDaIADaReuniao } = await import("./routers/meetings");
+const { meetingsRouter, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA, TRADUCOES_DO_RESUMO_POR_JANELA, tetoDaIADaReuniao } = await import("./routers/meetings");
 const { reuniaoAbertaRouter, MENSAGEM_TRADUCAO_INDISPONIVEL, PEDIDOS_A_IA_POR_VISITANTE_POR_JANELA } = await import("./routers/reuniaoAberta");
 const { LinkAbertoRecusado, MENSAGEM_LINK_NAO_ENCONTRADO } = await import("./link-aberto-da-reuniao");
 const { BancoIndisponivel } = await import("./banco-indisponivel");
@@ -51,14 +52,21 @@ beforeEach(() => {
 describe("meetings.traduzirResumo, da dona", () => {
   it("a dona é a da sessão, e a resposta do serviço sai como está", async () => {
     await expect(daDona("dona-1").traduzirResumo({ meetingId: ID, idioma: "en" })).resolves.toEqual(PRONTA);
-    expect(servico.traduzirResumoDaDona).toHaveBeenCalledWith("dona-1", ID, "en");
+    expect(servico.traduzirResumoDaDona).toHaveBeenCalledWith("dona-1", ID, "en", expect.any(Function));
   });
 
-  it("não gasta o teto de pedidos à IA da dona, como a tradução da transcrição", async () => {
-    const rota = daDona(`dona-${Math.random()}`);
-    for (let i = 0; i <= PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA; i++) await rota.traduzirResumo({ meetingId: ID, idioma: "es" });
-    expect(tetoDaIADaReuniao).toBeDefined();
-    expect(servico.traduzirResumoDaDona).toHaveBeenCalledTimes(PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA + 1);
+  it("a tradução guardada não gasta vaga; a que chama a IA gasta a do teto próprio da tradução, e não a do Pergunte", async () => {
+    const dona = `dona-${Math.random()}`;
+    const rota = daDona(dona);
+    // Guardada: o serviço não chama o "antes", e nada conta.
+    for (let i = 0; i < TRADUCOES_DO_RESUMO_POR_JANELA + 5; i++) await rota.traduzirResumo({ meetingId: ID, idioma: "es" });
+    // Na IA: cada pedido gasta uma vaga, até o teto (editar e traduzir em laço não chama a IA sem limite).
+    servico.traduzirResumoDaDona.mockImplementation(async (_dona: string, _id: string, idioma: string, antes: () => void) => { antes(); return { estado: "traduzindo", idioma }; });
+    for (let i = 0; i < TRADUCOES_DO_RESUMO_POR_JANELA; i++) await rota.traduzirResumo({ meetingId: ID, idioma: "es" });
+    await expect(rota.traduzirResumo({ meetingId: ID, idioma: "es" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // O teto dos pedidos à IA (o Pergunte, o resumo, o e-mail) segue inteiro.
+    expect(PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA).toBeGreaterThan(0);
+    expect(() => tetoDaIADaReuniao.conferir(dona)).not.toThrow();
   });
 
   it("entrada inválida é recusada antes do serviço: id que não é uuid e idioma fora dos 10", async () => {

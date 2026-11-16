@@ -274,19 +274,43 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     expect(within(acrescentado).queryByText("Para conferir")).not.toBeInTheDocument();
     const editado = itemDoTexto("A reunião tratou da exportação de café para a Alemanha.");
     expect(within(editado).getByText("Editado por você")).toBeInTheDocument();
-    expect(within(editado).getByText("Trecho da transcrição")).toBeInTheDocument();
+    // O trecho é o da versão da IA: pode não sustentar mais o que a dona escreveu.
+    expect(within(editado).getByText("Trecho original da transcrição")).toBeInTheDocument();
     expect(screen.getAllByText(/ por você$/)).toHaveLength(2);
+    // O item da IA que ela não editou segue com o rótulo de sempre.
+    expect(within(itemDoTexto("A licença de exportação ainda não saiu.")).getByText("Trecho da transcrição")).toBeInTheDocument();
   });
 
-  it("pelo link, o que a dona escreveu aparece como confirmado: sem o aviso da IA, sem marca, sem trecho vazio e sem botões", () => {
-    const peloLink = COM_ORIGEM.filter(item => item.status !== "ignored").map(({ id: _i, position: _p, done: _d, origin: _o, editedAt: _e, ...item }) => item);
+  it("pelo link, o que a dona escreveu aparece como confirmado e com a marca de que quem gravou o escreveu: sem o aviso da IA, sem trecho vazio e sem botões", () => {
+    // O que o servidor manda ao link: sem ids, sem a origem e sem a hora da edição, só a marca.
+    const peloLink = COM_ORIGEM.filter(item => item.status !== "ignored")
+      .map(({ id: _i, position: _p, done: _d, origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: origin === "owner" || editedAt !== null }));
     doLink(pronto(peloLink));
     const acrescentado = itemDoTexto("Ligar para o importador");
     expect(within(acrescentado).queryByText(/ainda não conferiu/)).not.toBeInTheDocument();
+    expect(within(acrescentado).getByText("Escrito ou editado por quem gravou a reunião")).toBeInTheDocument();
     expect(acrescentado.querySelector("details, q")).toBeNull();
+    // O item da IA que a dona editou: a marca, e o trecho é o original.
+    const editado = itemDoTexto("A reunião tratou da exportação de café para a Alemanha.");
+    expect(within(editado).getByText("Escrito ou editado por quem gravou a reunião")).toBeInTheDocument();
+    expect(within(editado).getByText("Trecho original da transcrição")).toBeInTheDocument();
+    expect(screen.getAllByText("Escrito ou editado por quem gravou a reunião")).toHaveLength(2);
     expect(screen.queryByText(/ por você$/)).not.toBeInTheDocument();
     // Nenhum botão da dona: o único botão do link é o "Ouvir o resumo" (H19).
     expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
+  });
+
+  it("com o link ligado, editar e acrescentar avisam que o que a dona salva aparece para quem tem o link; sem link, não", () => {
+    const { unmount } = render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto() as never} comLinkAberto/>);
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Não renovar com a transportadora antiga." }));
+    const aviso = "O link desta reunião está ligado: o que você salvar aqui aparece também para quem tem o link.";
+    expect(screen.getByRole("form", { name: "Editar" })).toHaveAccessibleDescription(aviso);
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(screen.getByRole("form", { name: "Acrescentar item" })).toHaveAccessibleDescription(aviso);
+    unmount();
+    daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(screen.queryByText(aviso)).not.toBeInTheDocument();
   });
 
   it("Editar abre o formulário no lugar do item, com o texto como a tela mostra; Cancelar fecha e devolve o foco ao Editar", () => {
@@ -753,6 +777,21 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     expect(voz.pedidas.at(-1)?.voice?.name).toBe("Samantha");
   });
 
+  it("no refazer (H4d), a versão anterior que está na tela também se ouve: a do refazer que falhou e a do refazer em curso, para a dona e pelo link", () => {
+    const voz = instalarSinteseFalsa({ vozes: VOZES });
+    const anterior = (estado: string) => consulta({ estado, emoji: "☕", idioma: "pt-BR", erro: estado === "falhou" ? "RESPOSTA_CORTADA" : null, modelo: "sales", versaoAnterior: true, itens: ITENS });
+    const { unmount } = daDona(anterior("falhou"), { nomes: { F2: "Carla" } });
+    ouvir();
+    expect(voz.lerAteOFim()).toContain("Carla envia a proposta revisada");
+    unmount();
+    const tela = daDona(anterior("pendente"));
+    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+    tela.unmount();
+    doLink(consulta({ estado: "falhou", emoji: "☕", idioma: "pt-BR", versaoAnterior: true, itens: ITENS_DO_LINK }));
+    ouvir();
+    expect(voz.lerAteOFim()).toContain("Falante 2 envia a proposta revisada");
+  });
+
   it("o botão só aparece com o resumo pronto e algo à vista", () => {
     instalarSinteseFalsa({ vozes: VOZES });
     const soIgnorados = ITENS.filter(item => item.status === "ignored");
@@ -802,6 +841,8 @@ describe("Resumo guardado — a tradução com o ouvir e o editar (pacote P2)", 
     render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto(ITENS.filter(item => item.id === "i-acao")) as never} nomes={{ F2: "Carla" }} traducao={traducaoPronta() as never}/>);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
     expect(voz.lerAteOFim()).toEqual([
+      // Como o aviso da tela: é uma tradução da IA, e o original é outro idioma.
+      "This summary was translated by the AI.", "The original is in Portuguese.",
       "This summary was written by the AI, and no item has been reviewed yet.",
       "Actions", "Carla sends the revised proposal", "Assigned to: Carla", "Due: by Friday",
     ]);

@@ -189,7 +189,7 @@ afterEach(() => {
 });
 
 describe("editarItemDoResumo (H4f)", () => {
-  it("o item pendente editado fica confirmado, com edited_at, e a versão do resumo sobe", async () => {
+  it("o item pendente editado fica confirmado, com edited_at; a versão do resumo não sobe (a tradução da H11 acha o item pela impressão digital)", async () => {
     const acao = item();
     montar({ itens: [acao] });
     await servico.editarItemDoResumo(DONA, acao.id as string, { ...CAMPOS, prazo: "até segunda-feira" });
@@ -199,10 +199,11 @@ describe("editarItemDoResumo (H4f)", () => {
       // O que não é da edição fica: a origem, o trecho, o tempo e a caixa.
       origin: "ai", excerpt: "eu mando a proposta até sexta-feira", startSeconds: 75, done: false,
     });
-    expect(versao()).toBe(2);
+    // Subir a versão jogava fora a tradução guardada inteira (achado da revisão do pacote P2).
+    expect(versao()).toBe(1);
   });
 
-  it("salvar sem mudar nada é confirmar: sem edited_at e sem subir a versão", async () => {
+  it("salvar sem mudar nada é confirmar: sem edited_at", async () => {
     const acao = item({ text: CAMPOS.texto });
     montar({ itens: [acao] });
     await servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS);
@@ -263,7 +264,7 @@ describe("editarItemDoResumo (H4f)", () => {
     montar({ resumo: "failed", versao: 1, itens: [acao] });
     await servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS);
     expect(itens()[0]).toMatchObject({ status: "confirmed", text: CAMPOS.texto, editedAt: AGORA });
-    expect(versao()).toBe(2);
+    expect(versao()).toBe(1);
   });
 
   it("a reunião apagada: o item 'não existe'", async () => {
@@ -272,17 +273,17 @@ describe("editarItemDoResumo (H4f)", () => {
     await expect(servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS)).rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   });
 
-  it("trava a reunião e depois o resumo, a ordem da fila do resumo, antes de escrever", async () => {
+  it("trava a reunião e depois o resumo, a ordem da fila do resumo, antes de escrever; a linha do resumo não muda", async () => {
     const acao = item();
     montar({ itens: [acao] });
     await servico.editarItemDoResumo(DONA, acao.id as string, { ...CAMPOS, texto: "outro" });
     expect(banco.travas).toEqual(["meetings", "meeting_summaries"]);
-    expect(banco.escritas).toEqual(["update meeting_summary_items", "update meeting_summaries"]);
+    expect(banco.escritas).toEqual(["update meeting_summary_items"]);
   });
 });
 
 describe("acrescentarItemDoResumo (H4f)", () => {
-  it("entra no fim do resumo, confirmado, com a origem da dona, sem trecho, sem tempo e sem confiança; a versão sobe", async () => {
+  it("entra no fim do resumo, confirmado, com a origem da dona, sem trecho, sem tempo e sem confiança; a versão não sobe", async () => {
     montar({ itens: [item({ position: 0 }), item({ position: 7, section: "question", status: "ignored" })] });
     const id = await servico.acrescentarItemDoResumo(DONA, REUNIAO, "task", { texto: "{F1} revisa o contrato", assunto: "Contrato", responsavel: "{F1}", prazo: "dia 20" });
     const novo = itens().find(linha => linha.id === id);
@@ -295,7 +296,8 @@ describe("acrescentarItemDoResumo (H4f)", () => {
     // Sem confiança: fica o padrão da coluna (0), e não um número inventado.
     expect(novo).not.toHaveProperty("confidence");
     expect(typeof id).toBe("string");
-    expect(versao()).toBe(2);
+    // O item novo tem id novo: a tradução (H11) o acha sem a versão subir.
+    expect(versao()).toBe(1);
   });
 
   it("no resumo sem itens, o primeiro fica na posição 0", async () => {
@@ -339,7 +341,7 @@ describe("acrescentarItemDoResumo (H4f)", () => {
     montar({ resumo: "failed", versao: 1 });
     await servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Novo", assunto: null, responsavel: null, prazo: null });
     expect(itens()).toEqual([expect.objectContaining({ text: "Novo", status: "confirmed", origin: "owner" })]);
-    expect(versao()).toBe(2);
+    expect(versao()).toBe(1);
   });
 
   it("a reunião de outra dona, ou apagada: 'reunião não encontrada', e nada é gravado", async () => {
@@ -352,11 +354,11 @@ describe("acrescentarItemDoResumo (H4f)", () => {
     expect(itens()).toEqual([]);
   });
 
-  it("trava a reunião e depois o resumo antes de contar e gravar", async () => {
+  it("trava a reunião e depois o resumo antes de contar e gravar; a linha do resumo não muda", async () => {
     montar();
     await servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Novo", assunto: null, responsavel: null, prazo: null });
     expect(banco.travas).toEqual(["meetings", "meeting_summaries"]);
-    expect(banco.escritas).toEqual(["insert meeting_summary_items", "update meeting_summaries"]);
+    expect(banco.escritas).toEqual(["insert meeting_summary_items"]);
   });
 });
 

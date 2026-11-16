@@ -15,7 +15,7 @@ const banco = vi.hoisted(() => ({
   consultas: [] as { sql: string; params: unknown[] }[],
   // status, resumoId, statusDoResumo, versao, idiomaDoResumo (e, se vierem, statusDoMapa e mapa)
   reuniao: ["ready", "resumo-1", "ready", 3, "pt-BR"] as unknown[] | null,
-  // id, section, subject, text, assignee, due, excerpt, startSeconds, status
+  // id, section, subject, text, assignee, due, excerpt, startSeconds, status, origin, editedAt
   itens: [] as unknown[][],
   // summaryId, sourceVersion, content
   traducao: null as unknown[] | null,
@@ -51,7 +51,7 @@ vi.mock("drizzle-orm/mysql2", async importOriginal => {
 
 const { gravarTraducaoDoResumo, lerResumoParaTraduzir } = await import("./traducao-do-resumo-banco");
 
-const ITEM = ["item-1", "action", null, "{F2} envia a proposta", "{F2}", "até sexta", "vou mandar a proposta até sexta", 30, "pending"];
+const ITEM = ["item-1", "action", null, "{F2} envia a proposta", "{F2}", "até sexta", "vou mandar a proposta até sexta", 30, "pending", "ai", null];
 const ALVO = { ownerId: "dona-1", meetingId: "reuniao-1", idioma: "en" as const, resumoId: "resumo-1", versao: 3 };
 const consultasCom = (trecho: string) => banco.consultas.filter(c => c.sql.includes(trecho));
 
@@ -68,8 +68,8 @@ describe("ler o resumo para traduzir", () => {
     const leitura = await lerResumoParaTraduzir("dona-1", "reuniao-1", "en");
 
     expect(leitura).toEqual({
-      estado: "pronto", resumoId: "resumo-1", versao: 3, idiomaOriginal: "pt-BR", rotulosDoMapa: [], guardado: { itens: {}, mapa: {} },
-      itens: [{ id: "item-1", section: "action", subject: null, text: "{F2} envia a proposta", assignee: "{F2}", due: "até sexta", excerpt: "vou mandar a proposta até sexta", startSeconds: 30, status: "pending" }],
+      estado: "pronto", resumoId: "resumo-1", versao: 3, idiomaOriginal: "pt-BR", rotulosDoMapa: [], guardado: { itens: {}, mapa: {} }, soGuardada: false,
+      itens: [{ id: "item-1", section: "action", subject: null, text: "{F2} envia a proposta", assignee: "{F2}", due: "até sexta", excerpt: "vou mandar a proposta até sexta", startSeconds: 30, status: "pending", origin: "ai", editedAt: null }],
     });
     const [reuniao] = consultasCom("from `meetings` left join");
     expect(reuniao.sql).toContain("`meeting_summaries`.`owner_id` = `meetings`.`owner_id`");
@@ -113,10 +113,22 @@ describe("ler o resumo para traduzir", () => {
   });
 
   it("sem resumo pronto, ou com a reunião fora de 'ready': 'sem_resumo'", async () => {
-    for (const linha of [["ready", null, null, null, null], ["ready", "resumo-1", "pending", 0, null], ["processing", "resumo-1", "ready", 3, "pt-BR"]]) {
+    for (const linha of [
+      ["ready", null, null, null, null], ["ready", "resumo-1", "pending", 0, null], ["ready", "resumo-1", "failed", 0, null],
+      ["processing", "resumo-1", "ready", 3, "pt-BR"], ["processing", "resumo-1", "failed", 3, "pt-BR"],
+    ]) {
       banco.reuniao = linha;
-      expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toEqual({ estado: "sem_resumo" });
+      expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en"), JSON.stringify(linha)).toEqual({ estado: "sem_resumo" });
     }
+  });
+
+  it("no refazer (H4d), a versão anterior que fica na tela: a do refazer que falhou se traduz como a pronta; a do refazer em curso, só com a tradução guardada", async () => {
+    const guardado = { itens: { "item-1": { h: "x", subject: null, text: "EN", due: null } }, mapa: {} };
+    banco.traducao = ["resumo-1", 3, JSON.stringify(guardado)];
+    banco.reuniao = ["ready", "resumo-1", "failed", 3, "pt-BR"];
+    expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", versao: 3, guardado, soGuardada: false });
+    banco.reuniao = ["ready", "resumo-1", "pending", 3, "pt-BR"];
+    expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", versao: 3, guardado, soGuardada: true });
   });
 
   it("reunião que não existe, de outra dona ou apagada: NOT_FOUND", async () => {
@@ -163,6 +175,13 @@ describe("gravar a tradução", () => {
     const montar = vi.fn(() => ({ itens: {}, mapa: {} }));
     await gravarTraducaoDoResumo(ALVO, montar, null);
     expect(montar).toHaveBeenCalledWith(null);
+  });
+
+  it("o refazer que falhou (H4d) aceita a gravação, como o pronto: é a versão que vale na tela", async () => {
+    banco.resumoTravado = ["resumo-1", "failed", 3];
+    const montar = vi.fn(() => ({ itens: {}, mapa: {} }));
+    await expect(gravarTraducaoDoResumo(ALVO, montar, null)).resolves.toBe(true);
+    expect(consultasCom("insert into `meeting_summary_translations`")).toHaveLength(1);
   });
 
   it("resumo refeito, reprocessado ou apagado no meio, ou reunião fora de 'ready': nada é escrito", async () => {

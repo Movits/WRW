@@ -15,6 +15,11 @@ import { gravarTraducaoDoResumo, lerResumoParaTraduzir, type ItemParaTraduzir, t
  * - A tradução fica guardada por dona, reunião e idioma, e cada item por id,
  *   com a impressão digital do texto de que saiu. Item novo ou editado não acha
  *   tradução e é traduzido sozinho; a tradução de outra versão do resumo não vale.
+ *   Editar e acrescentar (H4f) não mudam a versão: só a fila a sobe, ao gravar
+ *   um resumo (server/resumo-guardado.ts).
+ * - No refazer (H4d), a versão anterior segue na tela, e a tradução dela também:
+ *   a do refazer que falhou se traduz como a do resumo pronto; enquanto o refazer
+ *   escreve a nova, vale só a tradução guardada, sem IA.
  * - O trecho nunca é traduzido, nem vai à IA: ele é a prova, no idioma original.
  * - Os rótulos de voz ({F2}) são preservados: a tradução que perde, troca ou
  *   inventa um rótulo é recusada. O nome da voz nunca vai ao prompt; quem troca o
@@ -22,8 +27,8 @@ import { gravarTraducaoDoResumo, lerResumoParaTraduzir, type ItemParaTraduzir, t
  * - O mapa mental (H10) vai junto, rótulo por rótulo.
  * - O lote que falha não leva os outros: o que a IA já traduziu fica guardado,
  *   quem pediu recebe o erro, e o "Tentar de novo" manda à IA só o que faltou.
- * - O link aberto recebe a tradução sem ids e sem os itens ignorados, e só gasta
- *   vaga do teto quando a IA é chamada de fato (`antesDeChamarAIA`).
+ * - O link aberto recebe a tradução sem ids e sem os itens ignorados. A dona e o
+ *   link só gastam vaga do teto quando a IA é chamada de fato (`antesDeChamarAIA`).
  */
 
 export const MENSAGEM_TRADUCAO_DO_RESUMO_INDISPONIVEL = "A tradução do resumo não respondeu agora. Tente de novo em instantes.";
@@ -421,9 +426,22 @@ function pronta(idioma: IdiomaDaReuniao, leitura: Pronto, conteudo: ConteudoDaTr
 }
 
 /**
+ * Enquanto o refazer (H4d) escreve a versão nova, a anterior fica na tela, e
+ * a IA não é chamada: os itens dela vão ser trocados. Vale a tradução
+ * guardada, mesmo que falte um item (o que falta fica no original). Sem
+ * nenhuma tradução guardada, "traduzindo": a tela pergunta de novo, e a
+ * versão nova, quando chega, é traduzida.
+ */
+function soAGuardada(idioma: IdiomaDaReuniao, leitura: Pronto, conteudo: ConteudoDaTraducao): TraducaoDoResumo {
+  const temAlguma = leitura.itens.some(item => conteudo.itens.get(item.id)?.h === impressaoDoItem(item))
+    || leitura.rotulosDoMapa.some(rotulo => conteudo.mapa.has(rotulo));
+  return temAlguma ? pronta(idioma, leitura, conteudo) : { estado: "traduzindo", idioma };
+}
+
+/**
  * O resumo da reunião no idioma pedido. `antesDeChamarAIA` roda só quando a IA
  * vai ser chamada de fato (nada guardado para o texto atual, nenhuma tradução
- * igual em curso) e pode recusar lançando: é o teto do link aberto.
+ * igual em curso) e pode recusar lançando: é o teto da dona e o do link aberto.
  */
 async function traduzirResumo(alvo: Alvo, idioma: IdiomaDaReuniao, antesDeChamarAIA?: () => void): Promise<TraducaoDoResumo> {
   const leitura = await lerResumoParaTraduzir(alvo.ownerId, alvo.meetingId, idioma);
@@ -431,6 +449,7 @@ async function traduzirResumo(alvo: Alvo, idioma: IdiomaDaReuniao, antesDeChamar
   const guardado = lerConteudo(leitura.guardado);
   const falta = oQueFalta(leitura.itens, leitura.rotulosDoMapa, guardado);
   if (!falta.itens.length && !falta.rotulos.length) return pronta(idioma, leitura, guardado);
+  if (leitura.soGuardada) return soAGuardada(idioma, leitura, guardado);
 
   // Quem pede a mesma tradução enquanto ela está na IA (a página recarregada,
   // duas pessoas com o link) espera por ela, sem outra chamada nem outra vaga.
@@ -461,7 +480,9 @@ async function traduzirResumo(alvo: Alvo, idioma: IdiomaDaReuniao, antesDeChamar
   if (depois.estado !== "pronto") return { estado: depois.estado, idioma };
   const conteudo = lerConteudo(depois.guardado);
   const aindaFalta = oQueFalta(depois.itens, depois.rotulosDoMapa, conteudo);
-  return aindaFalta.itens.length || aindaFalta.rotulos.length ? { estado: "traduzindo", idioma } : pronta(idioma, depois, conteudo);
+  if (!aindaFalta.itens.length && !aindaFalta.rotulos.length) return pronta(idioma, depois, conteudo);
+  // A dona pediu "Refazer como…" enquanto a IA traduzia: a tradução não foi gravada.
+  return depois.soGuardada ? soAGuardada(idioma, depois, conteudo) : { estado: "traduzindo", idioma };
 }
 
 export type TraducaoDoResumoDaDona =
@@ -471,10 +492,13 @@ export type TraducaoDoResumoDaDona =
 /**
  * A tradução para a dona: os textos de cada item, pelo id. A tela os põe sobre
  * o resumo que ela já lê (meetings.resumoGuardado), que segue dizendo o estado
- * de cada item: decidir não pede outra tradução.
+ * de cada item: decidir não pede outra tradução. `antesDeChamarAIA` é o teto
+ * da tradução da dona (routers/meetings.ts): a tradução guardada não o gasta.
  */
-export async function traduzirResumoDaDona(ownerId: string, meetingId: string, idioma: IdiomaDaReuniao): Promise<TraducaoDoResumoDaDona> {
-  const traducao = await traduzirResumo({ ownerId, meetingId }, idioma);
+export async function traduzirResumoDaDona(
+  ownerId: string, meetingId: string, idioma: IdiomaDaReuniao, antesDeChamarAIA?: () => void,
+): Promise<TraducaoDoResumoDaDona> {
+  const traducao = await traduzirResumo({ ownerId, meetingId }, idioma, antesDeChamarAIA);
   if (traducao.estado !== "pronta") return traducao;
   return {
     estado: "pronta",
@@ -484,7 +508,7 @@ export async function traduzirResumoDaDona(ownerId: string, meetingId: string, i
   };
 }
 
-type ItemDoLink = Omit<ItemParaTraduzir, "id">;
+type ItemDoLink = Omit<ItemParaTraduzir, "id" | "origin" | "editedAt"> & { escritoPelaDona: boolean };
 export type TraducaoDoResumoPeloLink =
   | { estado: "original" | "sem_resumo" | "traduzindo"; idioma: IdiomaDaReuniao }
   | { estado: "pronta"; idioma: IdiomaDaReuniao; itens: ItemDoLink[]; mapa: Record<string, string> };
@@ -492,8 +516,9 @@ export type TraducaoDoResumoPeloLink =
 /**
  * A tradução para quem tem o link aberto, como o resumo pelo link
  * (resumoGuardadoPeloLink): o resumo inteiro, já traduzido, sem ids, sem a
- * caixa de feito e sem os itens que a dona ignorou. Quem chama já conferiu o
- * link (exigirReuniaoDoLink).
+ * caixa de feito e sem os itens que a dona ignorou; o que ela escreveu (H4f)
+ * vai só com a marca `escritoPelaDona`. Quem chama já conferiu o link
+ * (exigirReuniaoDoLink).
  */
 export async function traduzirResumoPeloLink(
   reuniao: { id: string; ownerId: string }, idioma: IdiomaDaReuniao, antesDeChamarAIA: () => void,
@@ -504,7 +529,9 @@ export async function traduzirResumoPeloLink(
     estado: "pronta",
     idioma: traducao.idioma,
     itens: traducao.itens.filter(item => item.status !== "ignored")
-      .map(({ section, subject, text, assignee, due, excerpt, startSeconds, status }) => ({ section, subject, text, assignee, due, excerpt, startSeconds, status })),
+      .map(({ section, subject, text, assignee, due, excerpt, startSeconds, status, origin, editedAt }) => ({
+        section, subject, text, assignee, due, excerpt, startSeconds, status, escritoPelaDona: origin === "owner" || editedAt != null,
+      })),
     mapa: traducao.mapa,
   };
 }

@@ -50,9 +50,9 @@ const COLUNAS_DO_RESUMO = {
  * O resumo que já teve uma versão gravada e não está pronto: está sendo
  * refeito ("Refazer como…", H4d) ou o refazer falhou. Os itens no banco são
  * os da versão anterior, que segue valendo até a nova ser gravada: a dona e o
- * link continuam a vê-la. A versão sobe quando a fila grava um resumo e quando
- * a dona edita ou acrescenta um item (H4f), sempre com uma versão já gravada:
- * fora de 'ready', versão acima de zero quer dizer que houve uma.
+ * link continuam a vê-la. A versão sobe só quando a fila grava um resumo:
+ * fora de 'ready', versão acima de zero quer dizer que houve uma. Editar e
+ * acrescentar (H4f) não a sobem (ver editarItemDoResumo).
  */
 function temVersaoAnterior(linha: { status: string; version: number } | undefined): boolean {
   return !!linha && linha.status !== "ready" && linha.version > 0;
@@ -200,9 +200,10 @@ export async function pedirResumoDaDona(ownerId: string, meetingId: string, ante
 
 /**
  * "Refazer como…" (H4d): a dona manda refazer o resumo da reunião pronta em
- * outro modelo (ou no mesmo, para uma versão nova). Os itens que ela confirmou
- * e as ações feitas ficam; os pendentes e os ignorados são trocados quando a
- * fila gravar a versão nova. Gasta uma vaga do teto, como pedir o resumo.
+ * outro modelo (ou no mesmo, para uma versão nova). Os itens que ela confirmou,
+ * as ações feitas e os itens que ela escreveu ou editou (H4f), mesmo ignorados,
+ * ficam; os outros pendentes e ignorados são trocados quando a fila gravar a
+ * versão nova. Gasta uma vaga do teto, como pedir o resumo.
  */
 export async function refazerResumoDaDona(ownerId: string, meetingId: string, modelo: ModeloDeResumo, antesDeCriar: AntesDeCriar) {
   const db = await exigirDb();
@@ -378,18 +379,17 @@ async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: str
   return resumo;
 }
 
-/** O conteúdo do resumo mudou: a versão sobe (a tradução da H11 é refeita). */
-async function subirVersao(tx: Transacao, ownerId: string, summaryId: string, agora: number) {
-  await tx.update(meetingSummaries).set({ version: sql`${meetingSummaries.version} + 1`, updatedAt: agora })
-    .where(and(eq(meetingSummaries.id, summaryId), eq(meetingSummaries.ownerId, ownerId)));
-}
-
 /**
  * A dona edita o texto, o assunto (das tarefas), o responsável e o prazo de um
  * item do resumo pronto (H4f). O item editado vale como confirmado: é a palavra
  * dela, e o link aberto o mostra assim, sem o aviso de que a IA o gerou. A
  * origem não muda; o edited_at marca a edição, só quando algo mudou (salvar
  * sem mudar nada é confirmar). A marca de feito da ação fica como estava.
+ *
+ * A versão do resumo não sobe: ela marca a geração da fila. A tradução (H11)
+ * acha o item editado pela impressão digital do texto e o acrescentado pelo id
+ * novo, e manda à IA só ele. Subir a versão aqui jogava fora a tradução
+ * guardada inteira, e cada correção custava a tradução do resumo e do mapa.
  */
 export async function editarItemDoResumo(ownerId: string, itemId: string, campos: CamposDoItem) {
   const db = await exigirDb();
@@ -421,7 +421,6 @@ export async function editarItemDoResumo(ownerId: string, itemId: string, campos
       updatedAt: agora,
     }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
     if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-    if (mudou) await subirVersao(tx, ownerId, resumo.id, agora);
   });
 }
 
@@ -446,7 +445,6 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
       ...camposDaSecao(secao, campos), excerpt: "", startSeconds: null,
       origin: "owner", status: "confirmed", done: false, decidedAt: agora, createdAt: agora, updatedAt: agora,
     });
-    await subirVersao(tx, ownerId, resumo.id, agora);
   });
   return id;
 }
@@ -463,6 +461,11 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  *
  * Enquanto a dona refaz o resumo (H4d), ou se o refazer falhou, o link segue
  * mostrando a versão anterior (`versaoAnterior`), com o que ela já confirmou.
+ *
+ * O item que a dona escreveu, acrescentado ou editado (H4f), vai com a marca
+ * `escritoPelaDona`, um sim ou não, sem a origem nem a hora da edição: quem
+ * tem o link sabe que o texto é de quem gravou e não da IA, e que o trecho do
+ * item editado é o da versão da IA.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
@@ -470,7 +473,7 @@ export async function resumoGuardadoPeloLink(token: string) {
   const linha = await linhaDoResumo(db, reuniao.ownerId, reuniao.id);
   const estado = estadoDe(linha, Date.now());
   const versaoAnterior = temVersaoAnterior(linha);
-  const itens = linha && (estado === "pronto" || versaoAnterior)
+  const lidos = linha && (estado === "pronto" || versaoAnterior)
     ? await db.select({
       section: meetingSummaryItems.section,
       subject: meetingSummaryItems.subject,
@@ -480,10 +483,13 @@ export async function resumoGuardadoPeloLink(token: string) {
       excerpt: meetingSummaryItems.excerpt,
       startSeconds: meetingSummaryItems.startSeconds,
       status: meetingSummaryItems.status,
+      origin: meetingSummaryItems.origin,
+      editedAt: meetingSummaryItems.editedAt,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
+  const itens = lidos.map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
   return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 

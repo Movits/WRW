@@ -10,7 +10,12 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
  * em que a IA o escreveu, com pausar, continuar e parar. Não passa pelo
  * servidor nem pela IA: custo zero. Baixar o áudio fica para outra PR.
  *
- * Sem voz no aparelho para o idioma, o botão fica desligado e explica (ler
+ * Só a voz local do aparelho: a voz de rede do navegador (as "Google …" do
+ * Chrome no computador, as "Online (Natural)" do Edge) mandaria o texto do
+ * resumo a um servidor do Google ou da Microsoft, e ela fica de fora
+ * (escolherVoz, em lib/leitura-em-voz-alta.ts).
+ *
+ * Sem voz local para o idioma, o botão fica desligado e explica (ler
  * português com a pronúncia do inglês não serve). Sem leitura em voz alta no
  * navegador, também.
  *

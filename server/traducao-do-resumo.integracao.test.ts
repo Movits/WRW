@@ -9,7 +9,8 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * DATABASE_URL_TESTES, se pula). A IA é dublê; o que se prova é o banco: a
  * linha por dona, reunião e idioma, a dona no WHERE, o que o link recebe, a
  * versão do resumo e a impressão digital de cada item, a gravação que confere
- * o resumo na transação e a exclusão que leva as traduções.
+ * o resumo na transação e a exclusão que leva as traduções. A edição da dona
+ * (H4f) e o refazer (H4d) vão pelos caminhos de verdade (server/resumo-guardado.ts).
  */
 const pedirJsonAIA = vi.hoisted(() => vi.fn());
 vi.mock("./ia-em-json", async original => ({ ...(await original<typeof import("./ia-em-json")>()), pedirJsonAIA: (...a: unknown[]) => pedirJsonAIA(...a) }));
@@ -17,6 +18,7 @@ vi.mock("./ia-em-json", async original => ({ ...(await original<typeof import(".
 const { getDb } = await import("./db");
 const { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, users } = await import("../drizzle/schema");
 const traducao = await import("./traducao-do-resumo");
+const guardado = await import("./resumo-guardado");
 const { deletePrivateMeeting } = await import("./meeting-service");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
@@ -161,8 +163,8 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(resposta).toEqual({
       estado: "pronta", idioma: "en", mapa: {},
       itens: [
-        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending" },
-        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed" },
+        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending", escritoPelaDona: false },
+        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed", escritoPelaDona: false },
       ],
     });
     expect(antes).toHaveBeenCalledTimes(1);
@@ -178,16 +180,50 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(pedirJsonAIA).not.toHaveBeenCalled();
   });
 
-  it("item editado é traduzido sozinho; o resumo refeito (outra versão) é traduzido de novo e a linha fica só com os itens novos", async () => {
-    const { meetingId, resumoId, ids } = await reuniaoComResumo();
+  it("a dona edita um item pelo caminho de verdade (H4f): só ele vai à IA, sem o resto do resumo nem o mapa, e a vaga sai uma vez", async () => {
+    const { meetingId, ids } = await reuniaoComResumo();
+    const MAPA = { ramos: [{ rotulo: "Transportadora", folhas: [{ rotulo: "Contrato", filhos: [] }] }, { rotulo: "Lojas", folhas: [] }] };
+    await (await db()).update(meetingSummaries).set({ mindMap: MAPA, mindMapStatus: "ready", mindMapGeneratedAt: AGORA() }).where(eq(meetingSummaries.meetingId, meetingId));
+    await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
+    pedirJsonAIA.mockClear();
+    const antes = vi.fn();
+
+    await guardado.editarItemDoResumo(DONA, ids[2], { texto: "Quem paga o frete e o seguro?", assunto: null, responsavel: null, prazo: null });
+    const editada = await traducao.traduzirResumoDaDona(DONA, meetingId, "en", antes);
+
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(1);
+    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido)).toEqual({ itens: [{ chave: "i1", assunto: null, texto: "Quem paga o frete e o seguro?", prazo: null }], rotulos: [] });
+    expect(antes).toHaveBeenCalledTimes(1);
+    expect(editada).toMatchObject({ estado: "pronta", mapa: { Transportadora: "EN Transportadora", Contrato: "EN Contrato", Lojas: "EN Lojas" } });
+    expect(editada.estado === "pronta" && editada.itens.map(i => i.text)).toEqual(["EN {F2} avisa a transportadora", "EN Publicar o app com {F1}", "EN Quem paga o frete e o seguro?"]);
+
+    // Só o responsável mudou: nenhum texto traduzido mudou, e nada vai à IA.
+    pedirJsonAIA.mockClear();
+    await guardado.editarItemDoResumo(DONA, ids[0], { texto: "{F2} avisa a transportadora", assunto: null, responsavel: "{F1}", prazo: "até sexta" });
+    await expect(traducao.traduzirResumoDaDona(DONA, meetingId, "en", antes)).resolves.toMatchObject({ estado: "pronta" });
+    expect(pedirJsonAIA).not.toHaveBeenCalled();
+    expect(antes).toHaveBeenCalledTimes(1);
+  });
+
+  it("a dona acrescenta um item (H4f): só ele vai à IA; pelo link, ele sai com a marca do que a dona escreveu", async () => {
+    const { meetingId } = await reuniaoComResumo();
+    await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
+    pedirJsonAIA.mockClear();
+
+    await guardado.acrescentarItemDoResumo(DONA, meetingId, "action", { texto: "Ligar para o importador", assunto: null, responsavel: null, prazo: "amanhã" });
+    const acrescentada = await traducao.traduzirResumoPeloLink({ id: meetingId, ownerId: DONA }, "en", vi.fn());
+
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(1);
+    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).itens).toEqual([{ chave: "i1", assunto: null, texto: "Ligar para o importador", prazo: "amanhã" }]);
+    expect(acrescentada.estado === "pronta" && acrescentada.itens.map(i => [i.text, i.escritoPelaDona])).toEqual([
+      ["EN {F2} avisa a transportadora", false], ["EN Publicar o app com {F1}", false], ["EN Ligar para o importador", true],
+    ]);
+  });
+
+  it("o resumo refeito pela fila (outra versão) é traduzido de novo, e a linha fica só com os itens novos", async () => {
+    const { meetingId, resumoId } = await reuniaoComResumo();
     await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
     const banco = await db();
-
-    await banco.update(meetingSummaryItems).set({ text: "Quem paga o frete e o seguro?" }).where(eq(meetingSummaryItems.id, ids[2]));
-    pedirJsonAIA.mockClear();
-    const editada = await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
-    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).itens.map(i => i.texto)).toEqual(["Quem paga o frete e o seguro?"]);
-    expect(editada.estado === "pronta" && editada.itens.map(i => i.text)).toEqual(["EN {F2} avisa a transportadora", "EN Publicar o app com {F1}", "EN Quem paga o frete e o seguro?"]);
 
     // A fila refaz o resumo: itens novos e a versão sobe.
     await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.summaryId, resumoId));
@@ -202,6 +238,36 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const [linha] = await traducoesDe(meetingId);
     expect(linha.sourceVersion).toBe(2);
     expect(Object.keys((linha.content as { itens: object }).itens)).toEqual([novo]);
+  });
+
+  it("no refazer que falhou (H4d), a tradução guardada da versão anterior volta, e a dona a corrige; enquanto o refazer está em curso, só a guardada, sem IA", async () => {
+    const { meetingId, resumoId, ids } = await reuniaoComResumo();
+    await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
+    const banco = await db();
+    // A última falha do refazer: 'failed', a mesma versão e os mesmos itens.
+    await banco.update(meetingSummaries).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS" }).where(eq(meetingSummaries.id, resumoId));
+    pedirJsonAIA.mockClear();
+    const antes = vi.fn();
+
+    await expect(traducao.traduzirResumoDaDona(DONA, meetingId, "en", antes)).resolves.toMatchObject({ estado: "pronta", itens: [{ text: "EN {F2} avisa a transportadora" }, {}, {}] });
+    const peloLink = await traducao.traduzirResumoPeloLink({ id: meetingId, ownerId: DONA }, "en", antes);
+    expect(peloLink.estado === "pronta" && peloLink.itens.map(i => i.text)).toEqual(["EN {F2} avisa a transportadora", "EN Publicar o app com {F1}"]);
+    expect(pedirJsonAIA).not.toHaveBeenCalled();
+    expect(antes).not.toHaveBeenCalled();
+
+    // A dona corrige um item da versão que vale: só ele vai à IA, e a tradução fica guardada.
+    await guardado.editarItemDoResumo(DONA, ids[1], { texto: "Publicar o app nas duas lojas", assunto: "Lojas", responsavel: null, prazo: null });
+    await expect(traducao.traduzirResumoDaDona(DONA, meetingId, "en", antes)).resolves.toMatchObject({ estado: "pronta", itens: [{}, { text: "EN Publicar o app nas duas lojas" }, {}] });
+    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).itens.map(i => i.texto)).toEqual(["Publicar o app nas duas lojas"]);
+    pedirJsonAIA.mockClear();
+
+    // A dona pede de novo: o refazer está em curso. A versão anterior segue na tela, traduzida, sem IA.
+    await banco.update(meetingSummaries).set({ status: "pending", lastError: null }).where(eq(meetingSummaries.id, resumoId));
+    await expect(traducao.traduzirResumoDaDona(DONA, meetingId, "en", antes)).resolves.toMatchObject({ estado: "pronta", itens: [{}, { text: "EN Publicar o app nas duas lojas" }, {}] });
+    // Outro idioma, sem nada guardado: espera a versão nova, sem IA.
+    await expect(traducao.traduzirResumoPeloLink({ id: meetingId, ownerId: DONA }, "es", antes)).resolves.toEqual({ estado: "traduzindo", idioma: "es" });
+    expect(pedirJsonAIA).not.toHaveBeenCalled();
+    expect(antes).toHaveBeenCalledTimes(1);
   });
 
   it("o resumo refeito enquanto a IA traduzia: a tradução velha não é gravada", async () => {

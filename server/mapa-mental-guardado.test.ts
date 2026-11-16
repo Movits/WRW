@@ -110,26 +110,34 @@ describe("o estado do mapa pela linha do resumo", () => {
 describe("ler o mapa", () => {
   it("pronto: a árvore conferida, com o idioma do resumo", async () => {
     estado.linha = linha({ mindMapStatus: "ready", mindMap: MAPA, language: "ar" });
-    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pronto", idioma: "ar", erro: null, mapa: MAPA });
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pronto", idioma: "ar", erro: null, mapa: MAPA, versaoAnterior: false });
   });
 
   it("a árvore guardada é conferida de novo: o que não passa vira falha, nunca um mapa pela metade", async () => {
     estado.linha = linha({ mindMapStatus: "ready", mindMap: { ramos: [{ rotulo: "{F1} fala", folhas: [] }, { rotulo: "Só um", folhas: [] }] } });
-    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "falhou", idioma: "pt-BR", erro: "MAPA_INVALIDO", mapa: null });
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "falhou", idioma: "pt-BR", erro: "MAPA_INVALIDO", mapa: null, versaoAnterior: false });
     estado.linha = linha({ mindMapStatus: "ready", mindMap: "não é JSON de mapa" });
     expect((await mapaMentalDaDona("dona-1", ID)).estado).toBe("falhou");
   });
 
   it("fora de 'pronto', a árvore não sai, mesmo se a coluna tiver uma", async () => {
     estado.linha = linha({ mindMapStatus: "pending", mindMap: MAPA });
-    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pendente", idioma: "pt-BR", erro: null, mapa: null });
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pendente", idioma: "pt-BR", erro: null, mapa: null, versaoAnterior: false });
   });
 
   it("enquanto o resumo é refeito (H4d), e se o refazer falhar, o mapa pronto sai para a dona e para o link", async () => {
-    estado.linha = linha({ status: "pending", mindMapStatus: "ready", mindMap: MAPA });
-    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
-    estado.linha = linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: "ready", mindMap: MAPA });
-    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
+    estado.linha = { ...linha({ status: "pending", mindMapStatus: "ready", mindMap: MAPA }), version: 1 };
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: true });
+    estado.linha = { ...linha({ status: "failed", lastError: "RESPOSTA_CORTADA", mindMapStatus: "ready", mindMap: MAPA }), version: 1 };
+    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: true });
+  });
+
+  it("no refazer que falhou sem mapa pronto, a falha é a do refazer: a dona e o link recebem a marca da versão anterior; o primeiro resumo que falhou, não", async () => {
+    estado.linha = { ...linha({ status: "failed", lastError: "RESPOSTA_CORTADA" }), version: 1 };
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "falhou", idioma: "pt-BR", erro: "RESPOSTA_CORTADA", mapa: null, versaoAnterior: true });
+    expect(await mapaMentalPeloLink("t".repeat(32))).toMatchObject({ estado: "falhou", versaoAnterior: true });
+    estado.linha = { ...linha({ status: "failed", lastError: "IA_INDISPONIVEL" }), version: 0 };
+    expect(await mapaMentalPeloLink("t".repeat(32))).toMatchObject({ estado: "falhou", versaoAnterior: false });
   });
 
   it("reunião de outra dona (ou apagada): NOT_FOUND", async () => {
@@ -139,7 +147,7 @@ describe("ler o mapa", () => {
 
   it("pelo link: o mesmo formato; link que não abre é recusado", async () => {
     estado.linha = linha({ mindMapStatus: "ready", mindMap: MAPA });
-    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
+    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false });
     await expect(mapaMentalPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
   });
 });

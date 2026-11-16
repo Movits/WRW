@@ -7,7 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { AvisoDeConferir, mensagemDoErroDaIA } from "@/components/ReuniaoComIA";
-import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
+import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { rotulosDoMapaMental, type MapaMental } from "@shared/mapa-mental";
 
@@ -34,13 +34,21 @@ import { rotulosDoMapaMental, type MapaMental } from "@shared/mapa-mental";
  *
  * A tradução (H11) é a do resumo, que mora na página (useTraducaoDoResumo):
  * o mapa pronto avisa a página dos rótulos dele, ela os traduz junto com o
- * resumo, e a árvore os mostra no idioma escolhido, com a direção dele.
+ * resumo, e a árvore os mostra no idioma escolhido, com a direção dele. Como
+ * na aba Resumo, a aba do mapa diz que os rótulos foram traduzidos pela IA (e
+ * de que idioma), que a tradução está em curso, e se ela falhou, com o
+ * "Tentar de novo".
+ *
+ * No refazer do resumo que falhou (H4d), sem mapa pronto, a falha é a do
+ * refazer: a dona lê isso e tenta de novo (o mapa vem com o resumo); pelo link,
+ * que não reabre o refazer da dona, o aviso de que ela pediu uma nova versão,
+ * sem botão.
  */
 
 type MapaNaTela = inferRouterOutputs<AppRouter>["meetings"]["mapaMental"];
 type ConsultaDoMapa = { data?: MapaNaTela; isError: boolean; error: unknown; refetch: () => unknown };
 type PedidoDoMapa = { isPending: boolean; isError: boolean; error: unknown };
-type TraducaoDoMapa = Pick<TraducaoDoResumoNaTela, "estado" | "idioma" | "traduzirRotulo">;
+type TraducaoDoMapa = Pick<TraducaoDoResumoNaTela, "estado" | "idioma" | "idiomaOriginal" | "erro" | "tentarDeNovo" | "traduzirRotulo">;
 type Extras = {
   /** O título da reunião: a raiz do mapa. */
   titulo: string;
@@ -124,7 +132,10 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
   // senão giraria para sempre; com o mapa pronto, falho ou ausente, ele vai
   // acima do conteúdo (a releitura que falha deixa o dado velho no cache).
   const esperando = !dados || dados.estado === "pendente" || dados.estado === "gerando";
-  const comBotaoDePedir = dados?.estado === "sem_mapa" || dados?.estado === "falhou";
+  // O refazer da dona que falhou antes do mapa (H4d): pelo link, pedir não
+  // reabre o refazer, e o botão não faria nada.
+  const refazerQueFalhou = dados?.estado === "falhou" && dados.versaoAnterior;
+  const comBotaoDePedir = dados?.estado === "sem_mapa" || (dados?.estado === "falhou" && !(peloLink && refazerQueFalhou));
 
   let corpo: ReactNode;
   if (esperando && erroDaConsulta) {
@@ -138,14 +149,17 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
     </div>;
   } else if (dados.estado === "pendente" || dados.estado === "gerando") {
     corpo = <p role="status" className="mt-4 text-sm text-white/60"><Loader2 size={15} className="me-2 inline animate-spin"/>{t("meetings.mindMap.generating")}</p>;
+  } else if (refazerQueFalhou && peloLink) {
+    corpo = <p role="status" className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">{t("meetings.mindMap.linkPreviousVersion")}</p>;
   } else if (dados.estado === "falhou" || !dados.mapa) {
     corpo = <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-red-200">{dados.erro === "MAPA_INVALIDO" ? t("meetings.mindMap.notEnough") : t("meetings.mindMap.failed")}</p>
+      <p className="text-sm text-red-200">{refazerQueFalhou ? t("meetings.mindMap.redoFailed") : dados.erro === "MAPA_INVALIDO" ? t("meetings.mindMap.notEnough") : t("meetings.mindMap.failed")}</p>
       <BotaoDePedir aoClicar={aoPedir} pedindo={pedido.isPending}>{t("meetings.mindMap.retry")}</BotaoDePedir>
     </div>;
   } else {
     corpo = <div className="mt-4 space-y-4">
       <AvisoDeConferir>{t("meetings.mindMap.notice")}</AvisoDeConferir>
+      {traducao && <EstadoDaTraducao traducao={traducao} peloLink={peloLink}/>}
       {/* Com a tradução pronta (H11), os rótulos e a direção são os do idioma dela. */}
       <ArvoreDoMapa raiz={titulo} emoji={emoji} mapa={dados.mapa} idioma={traducao?.estado === "pronta" ? traducao.idioma : dados.idioma}
         traduzir={traducao?.estado === "pronta" ? traducao.traduzirRotulo : undefined}/>
@@ -160,6 +174,28 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
         caminho (a fila, outro pedido), ele sai da tela com o botão. */}
     {comBotaoDePedir && pedido.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, pedido.error, t("meetings.mindMap.requestError"), peloLink)}</p>}
   </section>;
+}
+
+const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
+
+/**
+ * O estado da tradução dos rótulos (H11), como a aba Resumo o mostra: em curso,
+ * pronta (os rótulos são tradução da IA, e de que idioma) ou com a falha, que
+ * deixa o mapa no original e oferece "Tentar de novo".
+ */
+function EstadoDaTraducao({ traducao, peloLink }: { traducao: TraducaoDoMapa; peloLink: boolean }) {
+  const { t } = useTranslation();
+  if (traducao.estado === "traduzindo") {
+    return <p role="status" className="text-xs text-amber-100/70"><Loader2 size={13} className="me-1.5 inline animate-spin"/>{t("meetings.mindMap.translating")}</p>;
+  }
+  if (traducao.estado === "pronta") {
+    return <p className="text-xs text-white/45">{t("meetings.mindMap.translationNotice", { idioma: nomeNaTela(traducao.idiomaOriginal) })}</p>;
+  }
+  if (traducao.estado !== "erro") return null;
+  return <div role="alert" className="flex flex-wrap items-center gap-3 text-xs text-amber-200/80">
+    <span>{mensagemDaFalhaDaTraducao(t, traducao.erro, peloLink, t("meetings.mindMap.translationError"))}</span>
+    <button type="button" onClick={traducao.tentarDeNovo} className="rounded-lg border border-amber-300/30 px-3 py-1 font-semibold text-amber-200 hover:bg-amber-300/10">{t("meetings.mindMap.retry")}</button>
+  </div>;
 }
 
 function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; pedindo: boolean; children: ReactNode }) {

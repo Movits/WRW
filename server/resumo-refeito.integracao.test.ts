@@ -399,7 +399,8 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
       "Mandar o contrato assinado": { status: "confirmed", origin: "owner" },
     });
     // A edição não tira o resumo de 'failed': o "Tentar de novo" segue no modelo pedido.
-    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", version: 3 });
+    // Nem sobe a versão, que marca a geração da fila (a tradução da H11 fica).
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", version: 1 });
   });
 
   it("o teto que recusa impede o refazer: o resumo pronto fica como estava", async () => {

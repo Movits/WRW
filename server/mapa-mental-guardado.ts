@@ -70,6 +70,7 @@ const COLUNAS_DO_MAPA = {
   mindMap: meetingSummaries.mindMap,
   mindMapStatus: meetingSummaries.mindMapStatus,
   mindMapError: meetingSummaries.mindMapError,
+  version: meetingSummaries.version,
 };
 
 async function linhaDoMapa(db: Banco, ownerId: string, meetingId: string) {
@@ -83,15 +84,23 @@ async function linhaDoMapa(db: Banco, ownerId: string, meetingId: string) {
  * resumo, que decide a direção da árvore), o código do erro e, pronto, a
  * árvore conferida de novo. A árvore guardada que não passa mais na
  * conferência é falha, nunca um mapa pela metade.
+ *
+ * `versaoAnterior`, como no resumo (server/resumo-guardado.ts): o resumo
+ * já teve uma versão e está sendo refeito (H4d), ou o refazer falhou. Sem mapa
+ * pronto, a falha é a do refazer, e não a do mapa: a tela da dona diz isso, e
+ * a do link troca o "Tentar de novo", que não reabre o refazer da dona, pelo
+ * aviso de que ela pediu uma nova versão.
  */
 function paraATela(linha: Awaited<ReturnType<typeof linhaDoMapa>>, agora: number): {
-  estado: EstadoDoMapa; idioma: string | null; erro: string | null; mapa: MapaMental | null;
+  estado: EstadoDoMapa; idioma: string | null; erro: string | null; mapa: MapaMental | null; versaoAnterior: boolean;
 } {
   const { estado, erro } = estadoDoMapa(linha, agora);
-  if (estado !== "pronto") return { estado, idioma: linha?.language ?? null, erro, mapa: null };
+  const idioma = linha?.language ?? null;
+  const versaoAnterior = !!linha && linha.status !== "ready" && Number(linha.version) > 0;
+  if (estado !== "pronto") return { estado, idioma, erro, mapa: null, versaoAnterior };
   const mapa = conferirMapaMental(linha?.mindMap);
-  if (!mapa) return { estado: "falhou", idioma: linha?.language ?? null, erro: "MAPA_INVALIDO", mapa: null };
-  return { estado, idioma: linha?.language ?? null, erro: null, mapa };
+  if (!mapa) return { estado: "falhou", idioma, erro: "MAPA_INVALIDO", mapa: null, versaoAnterior };
+  return { estado, idioma, erro: null, mapa, versaoAnterior };
 }
 
 /** O mapa mental da reunião para a dona. */

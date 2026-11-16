@@ -100,10 +100,18 @@ vi.mock("@/lib/trpc", () => ({
 // (e provada em lib/duracao-no-navegador.test.ts).
 vi.mock("@/lib/duracao-no-navegador", () => ({ lerDuracaoNoNavegador: (...args: unknown[]) => duble.duracao(...args) }));
 // O mapa mental (H10) vira um marcador que mostra o que recebeu; o
-// comportamento dele está em components/MapaMental.test.tsx.
+// comportamento dele está em components/MapaMental.test.tsx. A tradução (H11)
+// que a página passa aparece nele (o estado e o rótulo "Prazos" traduzido), e
+// o botão faz o papel do mapa que fica pronto e avisa a página dos rótulos.
+type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ meetingId, titulo, emoji }: { meetingId: string; titulo: string; emoji?: string | null }) => (
-    <div data-testid="mapa-mental">{meetingId} | {titulo} | {emoji ?? "sem emoji"}</div>
+  MapaMentalDaReuniao: ({ meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
+    meetingId: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
+  }) => (
+    <div data-testid="mapa-mental">{meetingId} | {titulo} | {emoji ?? "sem emoji"}
+      <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
+      {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
+    </div>
   ),
 }));
 
@@ -1195,5 +1203,63 @@ describe("Detalhe da reunião — a aba Mapa mental (H10)", () => {
     fireEvent.click(abaDoMapa());
     expect(screen.queryByTestId("mapa-mental")).not.toBeInTheDocument();
     expect(screen.getByText("O mapa mental aparece aqui quando a transcrição da reunião estiver pronta.")).toBeInTheDocument();
+  });
+});
+
+/**
+ * A tradução do resumo (H11) ligada na página da dona: a página pede a
+ * tradução, passa ao resumo e ao mapa mental, e o mapa que fica pronto pede de
+ * novo. Os componentes têm os próprios testes; aqui se prova que a página os
+ * liga (sem as props, nada disto acontece e a suíte ficava verde).
+ */
+describe("Detalhe da reunião — a tradução do resumo e do mapa (H11), ligada na página", () => {
+  const TRANSCRICAO = { id: "t1", meetingId: REUNIAO.id, transcript: "We will close the contract by Friday.", language: "en" };
+  const ITENS_EM_INGLES = [
+    { id: "a0000000-0000-4000-8000-000000000001", section: "decision", position: 0, subject: null, text: "Close the contract by Friday.", assignee: null, due: null, excerpt: "we will close the contract by Friday", startSeconds: 5, status: "confirmed", done: false, origin: "ai", editedAt: null },
+  ];
+  // O resumo foi escrito em inglês; a tela está em português.
+  const resumoEmIngles = () => ({ data: { estado: "pronto", emoji: "📄", idioma: "en", erro: null, versaoAnterior: false, itens: ITENS_EM_INGLES }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  type Opcoes = { onSuccess: (resposta: unknown) => void; onError: (erro: unknown) => void };
+  const pedidos = () => (duble.mutacoes.traduzirResumo?.mutate.mock.calls ?? []) as Array<[{ meetingId: string; idioma: string }, Opcoes]>;
+
+  it("a página pede a tradução no idioma da tela, e o resumo traduzido entra na aba Resumo", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    expect(pedidos().map(([entrada]) => entrada)).toEqual([{ meetingId: REUNIAO.id, idioma: "pt-BR" }]);
+    expect(screen.getByText("Close the contract by Friday.")).toBeInTheDocument();
+
+    act(() => pedidos()[0][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: {}, itens: [{ id: ITENS_EM_INGLES[0].id, subject: null, text: "Fechar o contrato até sexta-feira.", due: null }] }));
+
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    expect(within(resumo).getByText("Fechar o contrato até sexta-feira.")).toBeInTheDocument();
+    expect(within(resumo).getByText("Tradução automática pela IA. Original: English. Os trechos citados ficam no idioma original.")).toBeInTheDocument();
+    expect(within(resumo).getByRole("combobox", { name: "Idioma do resumo" })).toHaveValue("pt-BR");
+  });
+
+  it("com a reunião em processamento, o resumo é da tentativa anterior: a página não pede tradução", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "processing" }, { transcript: TRANSCRICAO });
+    expect(pedidos()).toEqual([]);
+  });
+
+  it("o mapa mental recebe a tradução da página; o mapa que avisa os rótulos pede a tradução de novo, e os rótulos chegam traduzidos", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
+    act(() => pedidos()[0][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: {}, itens: [] }));
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Prazos");
+
+    fireEvent.click(screen.getByRole("button", { name: "rótulos do mapa" }));
+    expect(pedidos()).toHaveLength(2);
+    expect(pedidos()[1][0]).toEqual({ meetingId: REUNIAO.id, idioma: "pt-BR" });
+    act(() => pedidos()[1][1].onSuccess({ estado: "pronta", idioma: "pt-BR", mapa: { Prazos: "Deadlines em português" }, itens: [] }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines em português");
+  });
+
+  it("com o link ligado, o formulário do item avisa que o que a dona salva aparece para quem tem o link", () => {
+    duble.resumoGuardado.mockReturnValue(resumoEmIngles());
+    abrirDetalhe({ status: "ready", shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345" } as never, { transcript: TRANSCRICAO });
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
+    expect(screen.getByRole("form", { name: "Acrescentar item" })).toHaveAccessibleDescription("O link desta reunião está ligado: o que você salvar aqui aparece também para quem tem o link.");
   });
 });

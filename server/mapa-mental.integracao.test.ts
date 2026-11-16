@@ -109,7 +109,7 @@ describe.skipIf(!temBanco)("O mapa mental na fila do resumo (integração)", () 
     expect(gerarMapaMental).toHaveBeenCalledWith({ transcricao: TEXTO, idioma: "pt-BR" });
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, mindMapStatus: "ready", mindMapError: null });
     expect(Number((await linhaDoResumo(id)).mindMapGeneratedAt)).toBeGreaterThan(0);
-    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
+    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false });
     expect((await resumoGuardado.resumoGuardadoDaDona(DONA, id)).estado).toBe("pronto");
   });
 
@@ -286,7 +286,7 @@ describe.skipIf(!temBanco)("O mapa mental na fila do resumo (integração)", () 
     const id = await reuniaoPronta({ shareToken: token });
     await pedirResumo(id);
     await rodar();
-    expect(await servico.mapaMentalPeloLink(token)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA });
+    expect(await servico.mapaMentalPeloLink(token)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false });
 
     await (await db()).update(meetingSummaries).set({ mindMap: null, mindMapStatus: null }).where(eq(meetingSummaries.meetingId, id));
     const vagaDoLink = vi.fn();

@@ -79,7 +79,7 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     expect((await itensDe(id)).map(item => [item.origin, item.editedAt])).toEqual([["ai", null], ["ai", null]]);
   });
 
-  it("editar confirma, marca a edição e sobe a versão; salvar sem mudar nada só confirma", async () => {
+  it("editar confirma e marca a edição, sem subir a versão; salvar sem mudar nada só confirma", async () => {
     const { id } = await reuniaoComResumo();
     const [acao, decisao] = await itensDe(id);
     await servico.editarItemDoResumo(DONA, acao.id, { texto: "{F2} avisa a transportadora hoje", assunto: null, responsavel: "{F2}", prazo: "hoje" });
@@ -89,13 +89,14 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     expect(Number(a.editedAt)).toBeGreaterThan(0);
     expect(Number(a.decidedAt)).toBeGreaterThan(0);
     expect(d).toMatchObject({ status: "confirmed", editedAt: null });
-    expect(await versaoDe(id)).toBe(2);
+    // A versão marca a geração da fila: editar não a sobe, e a tradução (H11) não se perde.
+    expect(await versaoDe(id)).toBe(1);
     // A leitura da dona traz a origem e a edição, para a tela marcar.
     const lido = await servico.resumoGuardadoDaDona(DONA, id);
     expect(lido.itens.map(item => [item.origin, item.editedAt !== null])).toEqual([["ai", true], ["ai", false]]);
   });
 
-  it("acrescentar entra no fim, confirmado, com a origem da dona, sem trecho e sem tempo; a versão sobe", async () => {
+  it("acrescentar entra no fim, confirmado, com a origem da dona, sem trecho e sem tempo; a versão não sobe", async () => {
     const { id, resumoId } = await reuniaoComResumo();
     const novoId = await servico.acrescentarItemDoResumo(DONA, id, "action", NOVO);
     const itens = await itensDe(id);
@@ -105,7 +106,7 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
       excerpt: "", startSeconds: null, origin: "owner", status: "confirmed", done: false, editedAt: null,
     });
     expect(Number(itens[2].confidence)).toBe(0);
-    expect(await versaoDe(id)).toBe(2);
+    expect(await versaoDe(id)).toBe(1);
   });
 
   it("duas inclusões ao mesmo tempo: a trava do resumo as põe em fila, e as posições não se repetem", async () => {
@@ -115,7 +116,7 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
       servico.acrescentarItemDoResumo(DONA, id, "action", { ...NOVO, texto: "Segundo" }),
     ]);
     expect((await itensDe(id)).map(item => item.position)).toEqual([0, 1, 2, 3]);
-    expect(await versaoDe(id)).toBe(3);
+    expect(await versaoDe(id)).toBe(1);
   });
 
   it("o teto conta todos os itens do resumo, ignorados inclusive", async () => {
@@ -174,7 +175,7 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     expect(Number(desfeita.doneAt)).toBe(Number(feita.doneAt));
   });
 
-  it("o link aberto vê o que a dona escreveu como confirmado, sem ids, sem a origem e sem a marca da edição", async () => {
+  it("o link aberto vê o que a dona escreveu como confirmado, sem ids, sem a origem e sem a hora da edição: só a marca de que foi ela", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     const { id } = await reuniaoComResumo({ shareToken: token });
     const [acao] = await itensDe(id);
@@ -182,9 +183,9 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     await servico.acrescentarItemDoResumo(DONA, id, "action", NOVO);
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.itens).toEqual([
-      { section: "action", subject: null, text: "{F2} avisa a transportadora hoje", assignee: "{F2}", due: "hoje", excerpt: "eu aviso a transportadora até sexta-feira", startSeconds: 5, status: "confirmed" },
-      { section: "decision", subject: null, text: "Não renovar com a transportadora", assignee: null, due: null, excerpt: "decidimos não renovar o contrato", startSeconds: 9, status: "pending" },
-      { section: "action", subject: null, text: "Ligar para o importador", assignee: null, due: "amanhã", excerpt: "", startSeconds: null, status: "confirmed" },
+      { section: "action", subject: null, text: "{F2} avisa a transportadora hoje", assignee: "{F2}", due: "hoje", excerpt: "eu aviso a transportadora até sexta-feira", startSeconds: 5, status: "confirmed", escritoPelaDona: true },
+      { section: "decision", subject: null, text: "Não renovar com a transportadora", assignee: null, due: null, excerpt: "decidimos não renovar o contrato", startSeconds: 9, status: "pending", escritoPelaDona: false },
+      { section: "action", subject: null, text: "Ligar para o importador", assignee: null, due: "amanhã", excerpt: "", startSeconds: null, status: "confirmed", escritoPelaDona: true },
     ]);
   });
 

@@ -75,9 +75,17 @@ vi.mock("@/components/ResumoGuardado", () => ({
 }));
 // O mapa mental (H10) vira um marcador que mostra o que recebeu; o
 // comportamento dele está em components/MapaMental.test.tsx.
+// A tradução (H11) que a página passa aparece nele (o estado e o rótulo
+// "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
+type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji }: { token?: string; meetingId?: string; titulo: string; emoji?: string | null }) => (
-    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}</div>
+  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
+  }) => (
+    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
+      <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
+      {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
+    </div>
   ),
 }));
 
@@ -516,5 +524,23 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
     abrir();
     expect(duble.traduzirResumo.mutate).not.toHaveBeenCalled();
     expect(screen.getByTestId("traducao-do-resumo")).toHaveTextContent("inativa");
+  });
+
+  it("o mapa mental recebe a mesma tradução; o mapa que avisa os rótulos pede de novo pelo link, e os rótulos chegam traduzidos", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.ver.mockReturnValue(pronta());
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrir();
+    const [, { onSuccess }] = duble.traduzirResumo.mutate.mock.calls[0] as Pedido;
+    act(() => onSuccess({ estado: "pronta", idioma: "en", mapa: {}, itens: ITENS }));
+    fireEvent.click(screen.getByRole("button", { name: "Mind map" }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Prazos");
+
+    fireEvent.click(screen.getByRole("button", { name: "rótulos do mapa" }));
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(2);
+    expect(duble.traduzirResumo.mutate.mock.calls[1][0]).toEqual({ token: TOKEN, idioma: "en" });
+    const [, segundo] = duble.traduzirResumo.mutate.mock.calls[1] as Pedido;
+    act(() => segundo.onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines" }, itens: ITENS }));
+    expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
   });
 });

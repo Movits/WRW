@@ -103,6 +103,8 @@ export function CompartilharReuniao({ meetingId, titulo, token }: { meetingId: s
         <div>
           <h2 id="compartilhar-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><Share2 size={16} className="text-amber-300"/>{t("meetings.share.title")}</h2>
           <p className="mt-1 text-sm text-white/55">{t("meetings.share.intro")}</p>
+          {/* O link mostra também o resumo (H4) como a dona o deixar, com o que ela escrever (H4f), e o mapa mental (H10). */}
+          <p className="mt-1 text-sm text-white/55">{t("meetings.share.summaryNotice")}</p>
         </div>
         {!pedindo && <button ref={botaoCompartilhar} type="button" onClick={() => setPedindo(true)}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/40 px-4 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10">

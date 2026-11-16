@@ -55,6 +55,11 @@ type Props = {
   aoIgnorar?: () => void;
   /** Outra decisão do resumo no ar: o Ignorar espera por ela. */
   decidindo?: boolean;
+  /**
+   * O link aberto da reunião está ligado: quem tem o link vê o que ela salva
+   * aqui, e o formulário avisa antes de ela escrever.
+   */
+  comLinkAberto?: boolean;
 };
 
 // 16 px no celular: com menos, o iPhone aproxima a página ao tocar no campo.
@@ -63,9 +68,10 @@ const CAMPO = "mt-1 w-full rounded-lg border border-white/15 px-3 py-2 text-base
 const CAMPO_DE_TEXTO = `${CAMPO} bg-white/5`;
 const ROTULO = "block text-xs font-semibold text-white/60";
 
-export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, tituloDaSecao, reler, aoFalhar, aoFechar, aoIgnorar, decidindo = false }: Props) {
+export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, tituloDaSecao, reler, aoFalhar, aoFechar, aoIgnorar, decidindo = false, comLinkAberto = false }: Props) {
   const { t } = useTranslation();
   const idDasVozes = useId();
+  const idDoAvisoDoLink = useId();
   const [secao, setSecao] = useState<SecaoDoItem>(item?.section ?? "action");
   const [texto, setTexto] = useState(() => item ? textoExibido(item.text, exibir) : "");
   const [assunto, setAssunto] = useState(() => item?.subject ? textoExibido(item.subject, exibir) : "");
@@ -96,10 +102,13 @@ export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, titul
     else acrescentar.mutate({ meetingId, secao, ...campos });
   }
 
-  // Esc cancela, como no nome da voz (TranscricaoPorFalante).
+  // Esc cancela, como no nome da voz (TranscricaoPorFalante). Com o link
+  // ligado, o aviso descreve o formulário, e o leitor de tela o lê ao entrar.
   return <form onSubmit={salvar} aria-label={item ? t("meetings.summary.edit") : t("meetings.summary.addItem")}
+    aria-describedby={comLinkAberto ? idDoAvisoDoLink : undefined}
     onKeyDown={evento => { if (evento.key === "Escape" && !salvando) aoFechar(); }}
     className="space-y-3 rounded-xl border border-amber-300/30 bg-black/20 p-3">
+    {comLinkAberto && <p id={idDoAvisoDoLink} className="text-xs text-amber-100/75">{t("meetings.summary.linkHint")}</p>}
     {!item && <label className={ROTULO}>{t("meetings.summary.sectionLabel")}
       <select value={secao} onChange={evento => setSecao(evento.target.value as SecaoDoItem)} className={`${CAMPO} bg-[#211e1b]`}>
         {SECOES_DO_RESUMO.map(opcao => <option key={opcao} value={opcao} className="bg-white text-[#322C26]">{tituloDaSecao(opcao)}</option>)}
