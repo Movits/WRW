@@ -10,6 +10,7 @@ import {
   proximasAcoesDoPainel,
 } from "../proximas-acoes";
 import { DETALHE_DA_ACAO_MAX, prazoValido, RESPONSAVEL_DA_ACAO_MAX, TEXTO_DA_ACAO_MAX } from "@shared/proximas-acoes";
+import { FUSO_MAX } from "@shared/agenda";
 
 /**
  * As próximas ações da dona (H5a): a página /proximas-acoes e o cartão do
@@ -24,6 +25,10 @@ const opcional = (max: number) => z.string().trim().max(max).nullable().optional
 const prazo = z.string().nullable().optional().refine(valor => !valor || prazoValido(valor), { message: "Prazo inválido." })
   .transform(valor => (valor ? valor : valor === undefined ? undefined : null));
 const id = z.string().uuid();
+// O fuso do aparelho, para o lembrete do prazo sair às 9h no relógio de quem
+// marcou (H15). O que o Intl não conhece cai no padrão (server/lembretes.ts):
+// por ele, nada se recusa.
+const fuso = z.string().trim().max(FUSO_MAX).nullish();
 
 export const proximasAcoesRouter = router({
   listar: protectedProcedure
@@ -39,6 +44,7 @@ export const proximasAcoesRouter = router({
       responsavel: opcional(RESPONSAVEL_DA_ACAO_MAX),
       prazo,
       contactId: z.number().int().positive().nullable().optional(),
+      fuso,
     }))
     .mutation(({ ctx, input }) => criarProximaAcao(ctx.user.openId, input)),
 
@@ -49,6 +55,7 @@ export const proximasAcoesRouter = router({
       detalhe: opcional(DETALHE_DA_ACAO_MAX),
       responsavel: opcional(RESPONSAVEL_DA_ACAO_MAX),
       prazo,
+      fuso,
     }))
     .mutation(async ({ ctx, input }) => {
       const { id: acaoId, ...campos } = input;

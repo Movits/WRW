@@ -5,6 +5,7 @@ import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reu
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
+import { avisarReuniaoPronta } from "./lembretes";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
@@ -52,7 +53,8 @@ function codigoDoErro(erro: unknown): string {
 /**
  * Resumo pendente vencido o prazo das tentativas, sem reserva viva (o processo
  * caiu em todas, sem o SIGTERM): ninguém mais o reservaria. Vira falha, e a
- * tela oferece tentar de novo.
+ * tela oferece tentar de novo. Aqui não sai o aviso de reunião pronta no sino
+ * (H15), que registrarFalha dá: é o caso raro, e a varredura é em lote.
  */
 async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   await db.update(meetingSummaries).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
@@ -109,16 +111,24 @@ async function devolverReserva(db: Banco, id: string, token: string) {
     .where(and(eq(meetingSummaries.id, id), eq(meetingSummaries.lockToken, token)));
 }
 
-/** Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez. */
-async function registrarFalha(db: Banco, alvo: { id: string }, token: string, codigo: string, definitiva: boolean) {
+/**
+ * Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez. A
+ * falha de vez avisa no sino que a reunião ficou pronta sem o resumo (H15): a
+ * transcrição está lá, e a tela oferece tentar de novo. A marca e o aviso vão
+ * juntos, numa transação.
+ */
+async function registrarFalha(db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string, codigo: string, definitiva: boolean) {
   const [linha] = await db.select({ attempts: meetingSummaries.attempts }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).limit(1);
   if (!linha) return;
   const deVez = definitiva || linha.attempts >= TENTATIVAS_DO_RESUMO;
-  await db.update(meetingSummaries).set({
-    status: deVez ? "failed" : "pending", lastError: codigo, lockToken: null,
-    lockedUntil: deVez ? null : Date.now() + linha.attempts * 60_000, updatedAt: Date.now(),
-  }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
+  await db.transaction(async tx => {
+    const r = await tx.update(meetingSummaries).set({
+      status: deVez ? "failed" : "pending", lastError: codigo, lockToken: null,
+      lockedUntil: deVez ? null : Date.now() + linha.attempts * 60_000, updatedAt: Date.now(),
+    }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
+    if (deVez && linhas(r)) await avisarReuniaoPronta(tx, alvo.ownerId, alvo.meetingId, "falhou");
+  });
 }
 
 async function gerarUm(db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string) {
@@ -212,7 +222,11 @@ async function gravarResumo(
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
-    return linhas(r) > 0 ? "gravou" : "sem_reserva";
+    if (!linhas(r)) return "sem_reserva";
+    // O aviso "a reunião ficou pronta" no sino (H15), na mesma transação: o
+    // resumo pronto e o aviso saem juntos, e a reunião segue travada.
+    await avisarReuniaoPronta(tx, alvo.ownerId, alvo.meetingId, "pronto");
+    return "gravou";
   });
 }
 

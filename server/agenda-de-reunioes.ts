@@ -4,6 +4,7 @@ import { and, asc, count, desc, eq, ne, sql } from "drizzle-orm";
 import type { ParticipanteDaAgenda } from "@shared/agenda";
 import { agendaReunioes, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { agendarLembreteDaAgenda, esquecerLembrete } from "./lembretes";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 
 /**
@@ -158,24 +159,41 @@ export async function criarNaAgenda(ownerId: string, dados: DadosDaAgendada): Pr
   }
   const agora = Date.now();
   const id = crypto.randomUUID();
-  await db.insert(agendaReunioes).values({ id, ownerId, ...dados, meetingId: null, createdAt: agora, updatedAt: agora });
+  await db.transaction(async tx => {
+    await tx.insert(agendaReunioes).values({ id, ownerId, ...dados, meetingId: null, createdAt: agora, updatedAt: agora });
+    // O lembrete no sino (H15), junto com a reunião: os minutos escolhidos antes do início.
+    await agendarLembreteDaAgenda(tx, ownerId, id, dados, agora);
+  });
   return { id };
 }
 
-/** Muda o que a dona escreveu. A gravação ligada fica como está. */
+/**
+ * Muda o que a dona escreveu. A gravação ligada fica como está; a hora ou o
+ * lembrete novos reagendam o lembrete no sino, na mesma transação (H15).
+ */
 export async function atualizarNaAgenda(ownerId: string, id: string, dados: DadosDaAgendada): Promise<{ id: string }> {
   const db = await exigirDb();
-  const resultado = await db.update(agendaReunioes).set({ ...dados, updatedAt: Date.now() })
-    .where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
-  if (!linhasAfetadas(resultado)) throw naoEncontrada();
+  const agora = Date.now();
+  await db.transaction(async tx => {
+    const resultado = await tx.update(agendaReunioes).set({ ...dados, updatedAt: agora })
+      .where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
+    if (!linhasAfetadas(resultado)) throw naoEncontrada();
+    await agendarLembreteDaAgenda(tx, ownerId, id, dados, agora);
+  });
   return { id };
 }
 
-/** Tira a reunião da agenda. A gravação, se houver, continua em Reuniões. */
+/**
+ * Tira a reunião da agenda. A gravação, se houver, continua em Reuniões; o
+ * lembrete no sino e os avisos dela saem junto (H15).
+ */
 export async function excluirDaAgenda(ownerId: string, id: string): Promise<void> {
   const db = await exigirDb();
-  const resultado = await db.delete(agendaReunioes).where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
-  if (!linhasAfetadas(resultado)) throw naoEncontrada();
+  await db.transaction(async tx => {
+    const resultado = await tx.delete(agendaReunioes).where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
+    if (!linhasAfetadas(resultado)) throw naoEncontrada();
+    await esquecerLembrete(tx, ownerId, "agenda", id);
+  });
 }
 
 /**

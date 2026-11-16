@@ -5,7 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
 const { getDb } = await import("./db");
-const { agendaReunioes, meetings, users } = await import("../drizzle/schema");
+const { agendaReunioes, lembretes, meetings, users } = await import("../drizzle/schema");
 const servico = await import("./agenda-de-reunioes");
 const { deletePrivateMeeting } = await import("./meeting-service");
 const { excluirConta } = await import("./exclusao-de-conta");
@@ -57,6 +57,8 @@ describe.skipIf(!temBanco)("Agenda de reuniões (integração)", () => {
     if (!db) return;
     const donas = [DONA, OUTRA, EXCLUIDA];
     await db.delete(agendaReunioes).where(inArray(agendaReunioes.ownerId, donas));
+    // A reunião marcada com lembrete agenda o aviso no sino (H15).
+    await db.delete(lembretes).where(inArray(lembretes.ownerId, donas));
     await db.delete(meetings).where(inArray(meetings.ownerId, donas));
     await db.delete(users).where(inArray(users.openId, donas));
   });

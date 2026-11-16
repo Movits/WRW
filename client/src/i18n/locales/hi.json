@@ -2684,7 +2684,15 @@
     "timeNow": "अभी",
     "timeMinutes": "{{count}} मिनट पहले",
     "timeHours": "{{count}} घंटे पहले",
-    "timeDays": "{{count}} दिन पहले"
+    "timeDays": "{{count}} दिन पहले",
+    "reminder": {
+      "actionTitle": "रिमाइंडर: अगली कार्रवाई की समय-सीमा {{data}}",
+      "meetingTitle": "बैठक का रिमाइंडर: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "आपकी बैठक तैयार है: ट्रांसक्रिप्ट और सारांश",
+      "titleNoSummary": "आपकी बैठक तैयार है, पर सारांश नहीं बना: फिर से कोशिश करने के लिए इसे खोलें"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "पहुँच जाँची जा रही है...",

@@ -386,19 +386,22 @@ async function startServer() {
   });
 
   // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
-  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas.
-  // As duas rodam no próprio processo, a cada poucos segundos, cada uma com o
-  // seu laço. Sem banco (dev sem DATABASE_URL), não ligam.
+  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas;
+  // o laço dos lembretes (H15) põe no sino os da próxima ação e os da agenda.
+  // Os três rodam no próprio processo, cada um com o seu laço. Sem banco (dev
+  // sem DATABASE_URL), não ligam.
   if (process.env.DATABASE_URL) {
     const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
     const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
+    const { iniciarLembretes, pararLembretes } = await import("../lembretes");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
+    iniciarLembretes();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
-    // SIGINT. As duas filas param de reservar e devolvem as reservas desta
+    // SIGINT. Os três laços param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
-    // depois de a reserva vencer); a falha de uma não segura a outra. Depois, o
+    // depois de a reserva vencer); a falha de um não segura os outros. Depois, o
     // servidor fecha e o processo sai.
     let saindo = false;
     const desligar = (sinal: string) => {
@@ -412,6 +415,9 @@ async function startServer() {
         pararFilaDoResumo()
           .then(r => console.log(`[Resumo] devolvidos: ${r.resumos} resumo(s).`))
           .catch(erro => console.error("[Resumo] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararLembretes()
+          .then(r => console.log(`[Lembretes] devolvidos: ${r.lembretes} lembrete(s).`))
+          .catch(erro => console.error("[Lembretes] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
       ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.

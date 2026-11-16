@@ -2684,7 +2684,15 @@
     "timeNow": "now",
     "timeMinutes": "{{count}}min ago",
     "timeHours": "{{count}}h ago",
-    "timeDays": "{{count}}d ago"
+    "timeDays": "{{count}}d ago",
+    "reminder": {
+      "actionTitle": "Reminder: next action due {{data}}",
+      "meetingTitle": "Meeting reminder: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Your meeting is ready: transcript and summary",
+      "titleNoSummary": "Your meeting is ready, without the summary: open it to try again"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Checking access...",

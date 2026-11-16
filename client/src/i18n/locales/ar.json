@@ -2684,7 +2684,15 @@
     "timeNow": "الآن",
     "timeMinutes": "قبل {{count}} دقيقة",
     "timeHours": "قبل {{count}} ساعة",
-    "timeDays": "قبل {{count}} يوم"
+    "timeDays": "قبل {{count}} يوم",
+    "reminder": {
+      "actionTitle": "تذكير: الإجراء التالي مستحق في {{data}}",
+      "meetingTitle": "تذكير بالاجتماع: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "اجتماعك جاهز: النص المكتوب والملخص",
+      "titleNoSummary": "اجتماعك جاهز، لكن من دون الملخص: افتحه لإعادة المحاولة"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "جارٍ التحقق من الوصول...",

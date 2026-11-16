@@ -2684,7 +2684,15 @@
     "timeNow": "ahora",
     "timeMinutes": "hace {{count}}min",
     "timeHours": "hace {{count}}h",
-    "timeDays": "hace {{count}}d"
+    "timeDays": "hace {{count}}d",
+    "reminder": {
+      "actionTitle": "Recordatorio: próxima acción para el {{data}}",
+      "meetingTitle": "Recordatorio de reunión: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Tu reunión está lista: transcripción y resumen",
+      "titleNoSummary": "Tu reunión está lista, sin el resumen: ábrela para intentarlo de nuevo"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Verificando acceso...",

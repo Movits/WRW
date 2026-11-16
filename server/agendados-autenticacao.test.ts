@@ -87,6 +87,9 @@ const fila = vi.hoisted(() => ({ iniciarFila: vi.fn(), pararFila: vi.fn(async ()
 vi.mock("./fila-de-transcricao", () => fila);
 const filaDoResumo = vi.hoisted(() => ({ iniciarFilaDoResumo: vi.fn(), pararFilaDoResumo: vi.fn(async () => ({ resumos: 1 })) }));
 vi.mock("./fila-do-resumo", () => filaDoResumo);
+// O laço dos lembretes no sino (H15) liga junto; aqui é dublê.
+const lacoDosLembretes = vi.hoisted(() => ({ iniciarLembretes: vi.fn(), pararLembretes: vi.fn(async () => ({ lembretes: 1 })) }));
+vi.mock("./lembretes", () => lacoDosLembretes);
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -136,14 +139,16 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a fila da reunião em partes no index.ts real (G7)", () => {
-  it("as duas filas ligam no boot com banco, e o SIGTERM devolve as reservas das duas ANTES de o processo sair", async () => {
+  it("as duas filas e o laço dos lembretes ligam no boot com banco, e o SIGTERM devolve as reservas dos três ANTES de o processo sair", async () => {
     expect(fila.iniciarFila).toHaveBeenCalledTimes(1);
     expect(filaDoResumo.iniciarFilaDoResumo).toHaveBeenCalledTimes(1);
+    expect(lacoDosLembretes.iniciarLembretes).toHaveBeenCalledTimes(1);
     const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const ordem: string[] = [];
     fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
     // A falha da fila do resumo não segura a saída nem a devolução da outra.
     filaDoResumo.pararFilaDoResumo.mockImplementationOnce(async () => { ordem.push("pararFilaDoResumo"); throw new Error("banco caiu"); });
+    lacoDosLembretes.pararLembretes.mockImplementationOnce(async () => { ordem.push("pararLembretes"); return { lembretes: 1 }; });
     vi.spyOn(console, "error").mockImplementation(() => {});
     sair.mockImplementation(((codigo?: number) => { ordem.push(`exit ${codigo}`); }) as never);
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -151,7 +156,7 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     // Só microtarefas: o setInterval deste arquivo é falso, e o vi.waitFor o
     // avançaria, disparando a varredura que o teste seguinte conta.
     for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve));
-    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "exit 0"]);
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes", "exit 0"]);
     // O SIGINT do dev também está ligado (process.once: um por sinal).
     expect(process.listenerCount("SIGINT")).toBeGreaterThanOrEqual(1);
   });

@@ -101,6 +101,16 @@ describe("rotas das próximas ações", () => {
     expect(servico.editarProximaAcao).toHaveBeenCalledTimes(1);
   });
 
+  it("o fuso do aparelho vai ao serviço com o prazo, para o lembrete no sino (H15); ausente, não vai; comprido demais, recusa", async () => {
+    await daDona().criar({ texto: "x", prazo: "2026-11-20", fuso: " America/Recife " });
+    expect(servico.criarProximaAcao).toHaveBeenLastCalledWith("dona-1", expect.objectContaining({ prazo: "2026-11-20", fuso: "America/Recife" }));
+    await daDona().editar({ id: ID, prazo: "2026-11-21", fuso: "Asia/Tokyo" });
+    expect(servico.editarProximaAcao).toHaveBeenLastCalledWith("dona-1", ID, { prazo: "2026-11-21", fuso: "Asia/Tokyo" });
+    await daDona().editar({ id: ID, prazo: "2026-11-22" });
+    expect(servico.editarProximaAcao).toHaveBeenLastCalledWith("dona-1", ID, { prazo: "2026-11-22" });
+    await expect(daDona().criar({ texto: "x", fuso: "z".repeat(65) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("tirar o contato é contactId null; id que não é número positivo é recusado", async () => {
     await daDona().ligarContato({ id: ID, contactId: null });
     expect(servico.ligarContato).toHaveBeenCalledWith("dona-1", ID, null);
