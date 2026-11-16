@@ -64,8 +64,8 @@ function temVersaoAnterior(linha: { status: string; version: number } | undefine
  */
 const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
-/** A reunião da dona, não apagada, ou NOT_FOUND. */
-async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
+/** A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental (server/mapa-mental-guardado.ts) usa a mesma. */
+export async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
   const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
@@ -132,9 +132,12 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * que falhou é da dona: reabri-lo gastaria a vaga do link e trocaria os itens
  * que ela ainda não conferiu. O pedido não muda nada, e o link segue mostrando
  * a versão anterior.
+ *
+ * O pedido do mapa mental passa por aqui quando ainda não há resumo pronto: o
+ * mapa vem com ele.
  */
-type AntesDeCriar = () => (() => void) | void;
-async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: { modelo?: ModeloDeResumo; refazer?: boolean; peloLink?: boolean } = {}) {
+export type AntesDeCriar = () => (() => void) | void;
+export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: { modelo?: ModeloDeResumo; refazer?: boolean; peloLink?: boolean } = {}) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });

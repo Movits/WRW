@@ -1493,6 +1493,7 @@
     "deleteConfirmButton": "Delete meeting",
     "summaryTab": "Summary",
     "transcriptTab": "Transcript",
+    "mindMapTab": "Mind map",
     "contactsTab": "Contacts ({{count}})",
     "entitiesHeading": "Names and companies mentioned in the conversation",
     "noEntities": "No entities pending.",
@@ -1592,6 +1593,22 @@
       "errorRegenerating": "This meeting's summary is being regenerated. Wait for it to finish before deciding.",
       "errorItemGone": "This summary item no longer exists. Refresh the page.",
       "errorOnlyActions": "Only the summary's actions have a checkbox."
+    },
+    "mindMap": {
+      "title": "Meeting mind map",
+      "loading": "Loading the mind map…",
+      "none": "This meeting does not have a mind map yet.",
+      "generate": "Generate mind map",
+      "requestLink": "Request mind map",
+      "generating": "The AI is building this meeting's mind map. It will appear here when it is ready.",
+      "failed": "Could not generate this meeting's mind map.",
+      "notEnough": "The AI did not find enough topics in this meeting to build a mind map.",
+      "retry": "Try again",
+      "requestError": "Could not request the mind map.",
+      "notice": "Built by the AI from the transcript. Check it against the transcript before using it.",
+      "expandAll": "Expand all branches",
+      "collapseAll": "Collapse all branches",
+      "waitTranscript": "The mind map will appear here once the meeting's transcript is ready."
     },
     "entity": {
       "person": "Person",

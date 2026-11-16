@@ -1493,6 +1493,7 @@
     "deleteConfirmButton": "Meeting löschen",
     "summaryTab": "Zusammenfassung",
     "transcriptTab": "Transkription",
+    "mindMapTab": "Mindmap",
     "contactsTab": "Kontakte ({{count}})",
     "entitiesHeading": "Im Gespräch genannte Namen und Unternehmen",
     "noEntities": "Keine ausstehende Entität.",
@@ -1592,6 +1593,22 @@
       "errorRegenerating": "Die Zusammenfassung dieses Meetings wird gerade neu erstellt. Warten Sie, bis sie fertig ist, bevor Sie entscheiden.",
       "errorItemGone": "Dieser Punkt der Zusammenfassung existiert nicht mehr. Laden Sie die Seite neu.",
       "errorOnlyActions": "Nur die Maßnahmen der Zusammenfassung haben ein Kontrollkästchen."
+    },
+    "mindMap": {
+      "title": "Mindmap des Meetings",
+      "loading": "Mindmap wird geladen…",
+      "none": "Für dieses Meeting gibt es noch keine Mindmap.",
+      "generate": "Mindmap erstellen",
+      "requestLink": "Mindmap anfordern",
+      "generating": "Die KI erstellt die Mindmap dieses Meetings. Sie erscheint hier, sobald sie fertig ist.",
+      "failed": "Die Mindmap dieses Meetings konnte nicht erstellt werden.",
+      "notEnough": "Die KI hat in diesem Meeting nicht genug Themen für eine Mindmap gefunden.",
+      "retry": "Erneut versuchen",
+      "requestError": "Die Mindmap konnte nicht angefordert werden.",
+      "notice": "Von der KI aus der Transkription erstellt. Prüfen Sie sie anhand der Transkription, bevor Sie sie verwenden.",
+      "expandAll": "Alle Zweige aufklappen",
+      "collapseAll": "Alle Zweige zuklappen",
+      "waitTranscript": "Die Mindmap erscheint hier, sobald die Transkription des Meetings fertig ist."
     },
     "entity": {
       "person": "Person",

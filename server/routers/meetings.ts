@@ -32,6 +32,7 @@ import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
+import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -261,6 +262,18 @@ export const meetingsRouter = router({
   refazerResumo: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
     .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // O mapa mental (H10), na linha do resumo guardado: a fila o gera logo
+  // depois do resumo, numa chamada à parte (server/fila-do-resumo.ts). Pedir
+  // serve à reunião resumida antes do mapa e ao mapa que falhou, e gasta uma
+  // vaga do mesmo teto de pedidos à IA (server/mapa-mental-guardado.ts).
+  mapaMental: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => mapaMentalDaDona(ctx.user.openId, input.meetingId)),
+
+  pedirMapa: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => pedirMapaDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
 
   decidirItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))

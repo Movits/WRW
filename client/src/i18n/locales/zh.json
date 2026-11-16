@@ -1493,6 +1493,7 @@
     "deleteConfirmButton": "删除会议",
     "summaryTab": "摘要",
     "transcriptTab": "转录内容",
+    "mindMapTab": "思维导图",
     "contactsTab": "联系人（{{count}}）",
     "entitiesHeading": "对话中提及的姓名与公司",
     "noEntities": "没有待处理的信息。",
@@ -1592,6 +1593,22 @@
       "errorRegenerating": "这次会议的摘要正在重新生成。请等它完成后再做决定。",
       "errorItemGone": "此摘要条目已不存在。请刷新页面。",
       "errorOnlyActions": "只有摘要中的行动项才有复选框。"
+    },
+    "mindMap": {
+      "title": "会议思维导图",
+      "loading": "正在加载思维导图…",
+      "none": "这次会议还没有思维导图。",
+      "generate": "生成思维导图",
+      "requestLink": "请求思维导图",
+      "generating": "AI 正在为这次会议生成思维导图，完成后会显示在这里。",
+      "failed": "无法生成这次会议的思维导图。",
+      "notEnough": "AI 在这次会议中没有找到足够的主题来生成思维导图。",
+      "retry": "重试",
+      "requestError": "无法请求思维导图。",
+      "notice": "由 AI 根据转录内容生成。使用前请对照转录内容核对。",
+      "expandAll": "展开所有分支",
+      "collapseAll": "收起所有分支",
+      "waitTranscript": "会议的转录内容准备好后，思维导图会显示在这里。"
     },
     "entity": {
       "person": "人物",
