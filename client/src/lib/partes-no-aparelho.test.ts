@@ -1,63 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apagarParte, apagarTodasAsPartes, guardarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
+import { indexedDBEmMemoria } from "@/test/indexeddb-em-memoria";
+import {
+  aoMudarAsPartes, apagarParte, apagarPartesDaReuniao, apagarTodasAsPartes, contarPartesDa, guardarParte, parteNoAparelho, partesGuardadas, type ParteNoAparelho,
+} from "./partes-no-aparelho";
 
-/**
- * Um IndexedDB mínimo em memória (o jsdom não traz um): só o que o módulo usa
- * (open com upgrade, put, delete, getAll, clear e o oncomplete da transação,
- * que chega depois, como no navegador).
- */
-function indexedDBEmMemoria() {
-  const tabelas = new Map<string, Map<string, unknown>>();
-  const chave = (valor: Record<string, unknown>, caminho: string[]) => JSON.stringify(caminho.map(c => valor[c]));
-  const caminhos = new Map<string, string[]>();
-  const pedido = <T>(resultado: () => T) => {
-    const r = { result: undefined as T | undefined, error: null };
-    return { r, rodar: () => { r.result = resultado(); } };
-  };
-  const banco = {
-    objectStoreNames: { contains: (nome: string) => tabelas.has(nome) },
-    createObjectStore: (nome: string, { keyPath }: { keyPath: string[] }) => {
-      tabelas.set(nome, new Map());
-      caminhos.set(nome, keyPath);
-    },
-    close: vi.fn(),
-    transaction: (nome: string) => {
-      const linhas = tabelas.get(nome)!;
-      const caminho = caminhos.get(nome)!;
-      const transacao: { oncomplete?: () => void; onerror?: () => void; onabort?: () => void; objectStore: () => unknown } = {
-        objectStore: () => ({
-          put: (valor: Record<string, unknown>) => fazer(() => void linhas.set(chave(valor, caminho), valor)),
-          delete: (k: unknown[]) => fazer(() => void linhas.delete(JSON.stringify(k))),
-          getAll: () => fazer(() => Array.from(linhas.values())),
-          clear: () => fazer(() => void linhas.clear()),
-        }),
-      };
-      const fazer = <T>(resultado: () => T) => {
-        const { r, rodar } = pedido(resultado);
-        setTimeout(() => { rodar(); transacao.oncomplete?.(); }, 0);
-        return r;
-      };
-      return transacao;
-    },
-  };
-  return {
-    open: () => {
-      const r: { result: typeof banco; onupgradeneeded?: () => void; onsuccess?: () => void } = { result: banco };
-      setTimeout(() => {
-        if (!tabelas.size) r.onupgradeneeded?.();
-        r.onsuccess?.();
-      }, 0);
-      return r;
-    },
-  };
-}
+// Quantas vezes o getAll trouxe as partes inteiras (com o áudio) para a memória.
+let leiturasComOAudio = 0;
 
 const parte = (meetingId: string, seq: number, dona = "dona-1"): ParteNoAparelho => ({
   meetingId, seq, dona, blob: new Blob(["som"]), mimeType: "audio/mp4", duracaoMs: 600_000, guardadaEm: 1,
 });
 
 beforeEach(() => {
-  vi.stubGlobal("indexedDB", indexedDBEmMemoria());
+  leiturasComOAudio = 0;
+  vi.stubGlobal("indexedDB", indexedDBEmMemoria({ aoLerComOAudio: () => { leiturasComOAudio++; } }));
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -93,5 +49,90 @@ describe("partes-no-aparelho (G9)", () => {
   it("sem IndexedDB, falha (quem chama segue da memória)", async () => {
     vi.stubGlobal("indexedDB", undefined);
     await expect(guardarParte(parte("r-1", 0))).rejects.toThrow("Sem IndexedDB");
+  });
+
+  it("a gravação descartada (G13b): saem do aparelho só as partes dela, de qualquer conta, e as outras ficam", async () => {
+    await guardarParte(parte("r-1", 0));
+    await guardarParte(parte("r-1", 1));
+    await guardarParte(parte("r-2", 0));
+    await guardarParte(parte("r-9", 0, "outra-conta"));
+    await apagarPartesDaReuniao("r-1");
+    expect((await partesGuardadas("dona-1")).map(p => `${p.meetingId}#${p.seq}`)).toEqual(["r-2#0"]);
+    expect(await partesGuardadas("outra-conta")).toHaveLength(1);
+  });
+
+  it("apagar a gravação descartada lê só as chaves: o áudio das partes guardadas não vem para a memória (revisão da G13b)", async () => {
+    await guardarParte(parte("r-1", 0));
+    await guardarParte(parte("r-1", 1));
+    await guardarParte(parte("r-2", 0));
+    await apagarPartesDaReuniao("r-1");
+    expect(leiturasComOAudio).toBe(0);
+    expect((await partesGuardadas("dona-1")).map(p => `${p.meetingId}#${p.seq}`)).toEqual(["r-2#0"]);
+  });
+
+  it("sem IndexedDB nada foi guardado: apagar a gravação descartada não tem o que apagar e não falha", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(apagarPartesDaReuniao("r-1")).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * G13c: a retomada de toda tela logada precisa saber quando a tela que grava
+ * deixa uma parte no aparelho (o IndexedDB não avisa sozinho), e quem envia
+ * confere, já com a trava, se a parte ainda está aqui.
+ */
+describe("partes-no-aparelho — o aviso de mudança e a conferência (G13c)", () => {
+  it("avisa quem ouve a cada parte guardada, apagada ou limpa, e para de avisar quando pedem", async () => {
+    const ouvinte = vi.fn();
+    const pararDeOuvir = aoMudarAsPartes(ouvinte);
+    await guardarParte(parte("r-1", 0));
+    expect(ouvinte).toHaveBeenCalledTimes(1);
+    await guardarParte(parte("r-1", 1));
+    await apagarParte("r-1", 0);
+    expect(ouvinte).toHaveBeenCalledTimes(3);
+    await apagarPartesDaReuniao("r-1");
+    expect(ouvinte).toHaveBeenCalledTimes(4);
+    await apagarTodasAsPartes();
+    expect(ouvinte).toHaveBeenCalledTimes(5);
+    pararDeOuvir();
+    await guardarParte(parte("r-2", 0));
+    expect(ouvinte).toHaveBeenCalledTimes(5);
+  });
+
+  it("o que falhou não avisa: nada mudou", async () => {
+    const ouvinte = vi.fn();
+    const pararDeOuvir = aoMudarAsPartes(ouvinte);
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(guardarParte(parte("r-1", 0))).rejects.toThrow("Sem IndexedDB");
+    expect(ouvinte).not.toHaveBeenCalled();
+    pararDeOuvir();
+  });
+
+  it("parteNoAparelho conta só a chave, sem trazer o áudio para a memória", async () => {
+    await guardarParte(parte("r-1", 0));
+    expect(await parteNoAparelho("r-1", 0)).toBe(true);
+    expect(await parteNoAparelho("r-1", 1)).toBe(false);
+    await apagarParte("r-1", 0);
+    expect(await parteNoAparelho("r-1", 0)).toBe(false);
+    expect(leiturasComOAudio).toBe(0);
+  });
+});
+
+describe("partes-no-aparelho — a conta das partes sem o áudio de todas (revisão da G13c)", () => {
+  it("contarPartesDa conta as da conta pelas chaves, lendo uma parte por reunião, e pula as reuniões pedidas sem ler nada delas", async () => {
+    // Quantas partes inteiras (com o áudio) cada leitura trouxe, e quantas leituras foram só de chaves.
+    const lidasComOAudio: number[] = [];
+    let leiturasDeChaves = 0;
+    vi.stubGlobal("indexedDB", indexedDBEmMemoria({ aoLerComOAudio: partes => { lidasComOAudio.push(partes); }, aoLerAsChaves: () => { leiturasDeChaves++; } }));
+    for (const seq of [0, 1, 2]) await guardarParte(parte("r-1", seq));
+    await guardarParte(parte("r-2", 0, "outra-conta"));
+    await guardarParte(parte("r-3", 0));
+    await guardarParte(parte("r-3", 1));
+    expect(await contarPartesDa("dona-1")).toBe(5);
+    expect(await contarPartesDa("outra-conta")).toBe(1);
+    expect(await contarPartesDa("dona-1", meetingId => meetingId === "r-3")).toBe(3);
+    // Nenhuma leitura de todas as partes: uma parte por reunião contada (3, 3 e 2).
+    expect(lidasComOAudio).toEqual(Array(8).fill(1));
+    expect(leiturasDeChaves).toBe(3);
   });
 });

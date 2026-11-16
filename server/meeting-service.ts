@@ -11,7 +11,7 @@ import {
   meetingSummaries,
   meetingSummaryItems,
 } from "../drizzle/schema";
-import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
@@ -28,8 +28,16 @@ import {
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 
-export const MAX_MEETING_AUDIO_BYTES = 10 * 1024 * 1024;
-export const MAX_MEETING_DURATION_SECONDS = 10 * 60;
+/**
+ * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
+ * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
+ * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
+ * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
+ * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
+ * reunião do painel de minutos (server/minutos-de-reuniao.ts).
+ */
+export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
+export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
 export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "No modo atual, cada reunião pode ter no máximo 10 minutos.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";

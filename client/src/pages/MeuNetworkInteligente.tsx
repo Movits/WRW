@@ -12,6 +12,7 @@ import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { rotuloDoCampo } from "@/components/CompletudeDoContato";
 import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
+import { ENVIO_UNICO_SEGUNDOS_MAX } from "@shared/const";
 
 /**
  * Meu Network Inteligente — o painel da rede particular (pedido do Nicolas,
@@ -35,6 +36,12 @@ import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
 // 20 s de reunião não são "0 min".
 function emMinutos(segundos: number) {
   return segundos > 0 ? Math.max(1, Math.round(segundos / 60)) : 0;
+}
+
+// O limite por reunião é o da gravação em partes desde a G13b (12 h): em horas
+// inteiras e para baixo, para a tela nunca prometer mais do que o servidor aceita.
+function emHoras(segundos: number) {
+  return Math.floor(segundos / 3600);
 }
 
 const CARTAO = "rounded-2xl border border-white/[0.08] bg-[#211e1b]/90";
@@ -150,7 +157,7 @@ export default function MeuNetworkInteligente() {
     onError: () => toast.error(t("networkInteligente.global.error")),
   });
   const dados = resumo.data;
-  const limite = emMinutos(minutos.data?.limitePorReuniaoSegundos ?? dados?.minutos.limitePorReuniaoSegundos ?? 0);
+  const limiteEmHoras = emHoras(minutos.data?.limitePorReuniaoSegundos ?? dados?.minutos.limitePorReuniaoSegundos ?? 0);
   const registro = conexoes.data;
   const contagem = registro?.termoAceito ? registro.contagem : null;
   // Com o termo e o registro lido, o número; sem o termo, o traço; em erro ou carregando, o traço também — nunca um zero inventado.
@@ -233,8 +240,9 @@ export default function MeuNetworkInteligente() {
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/50">{t("networkPanel.minutesLimit")}</p>
-                    <p className="mt-1 text-2xl font-black tabular-nums">{t("networkPanel.minutesValue", { minutos: limite })}</p>
-                    <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkPanel.minutesLimitHelp")}</p>
+                    <p className="mt-1 text-2xl font-black tabular-nums">{t("networkPanel.hoursValue", { horas: limiteEmHoras })}</p>
+                    {/* O arquivo enviado inteiro segue no envio único (10 min) até a H9a: o limite em horas é o da gravação. */}
+                    <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkPanel.minutesLimitHelp", { minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60 })}</p>
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/50">{t("networkInteligente.minutes.monthlyLimit")}</p>
@@ -246,7 +254,7 @@ export default function MeuNetworkInteligente() {
                 </div>
                 <div className="mt-5 rounded-xl border border-[#c98f70]/25 bg-[#c98f70]/[0.06] p-4">
                   <p className="font-semibold text-[#efcba8]">{t("networkPanel.moreTime")}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-white/55">{t("networkPanel.moreTimeUnavailable", { minutos: limite })}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-white/55">{t("networkPanel.moreTimeUnavailable", { horas: limiteEmHoras })}</p>
                   {(!minutos.data || !minutos.data.ampliacao.disponivel) && (
                     <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkInteligente.minutes.dependsOnPayment")}</p>
                   )}
@@ -257,7 +265,7 @@ export default function MeuNetworkInteligente() {
                 <h2 id="nwi-atalhos" className="mb-3 text-lg font-bold">{t("networkPanel.actionsTitle")}</h2>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Atalho href={ROTA_GRAVAR} icone={Mic} titulo={t("networkPanel.actionRecord")}
-                    descricao={t("networkPanel.actionRecordDesc", { minutos: limite })}>
+                    descricao={t("networkPanel.actionRecordDesc", { horas: limiteEmHoras })}>
                     <span className="mt-3 block rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-white/50">
                       {t("networkPanel.consentNotice")}
                     </span>

@@ -16,8 +16,12 @@ vi.mock("./storage", async (original) => ({
 
 const { getDb } = await import("./db");
 const { meetingAudioSlices, meetings, users } = await import("../drizzle/schema");
-const { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, RecusaDaParte, receberParte, FalhaPassageiraDaParte } = await import("./fatias-de-reuniao");
-const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas, MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
+const {
+  encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, RecusaDaParte, receberParte, FalhaPassageiraDaParte,
+  DURACAO_MAXIMA_DA_PARTE_SEGUNDOS, FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS, PARTES_NO_MAXIMO,
+} = await import("./fatias-de-reuniao");
+const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
+const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 const { TRPCError } = await import("@trpc/server");
 
@@ -30,15 +34,19 @@ const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-partes-${crypto.randomUUID()}`;
 const OUTRA = `teste-partes-${crypto.randomUUID()}`;
 
-/** Um WAV válido de `segundos` (8 kHz, mono, 16 bits): a duração é medida nos bytes. */
-function wav(segundos: number, semente = 0): Buffer {
-  const amostras = 8000 * segundos;
+/**
+ * Um WAV válido de `segundos` (mono, 16 bits; 8 kHz salvo a `taxa` pedida): a
+ * duração é medida nos bytes. A parte longa (12 min) vai com taxa baixa, para o
+ * teste não montar 11 MB de áudio.
+ */
+function wav(segundos: number, semente = 0, taxa = 8000): Buffer {
+  const amostras = taxa * segundos;
   const dados = Buffer.alloc(amostras * 2);
   for (let i = 0; i < amostras; i++) dados.writeInt16LE(((i * 37 + semente) % 2000) - 1000, i * 2);
   const cabecalho = Buffer.alloc(44);
   cabecalho.write("RIFF", 0); cabecalho.writeUInt32LE(36 + dados.length, 4); cabecalho.write("WAVE", 8);
   cabecalho.write("fmt ", 12); cabecalho.writeUInt32LE(16, 16); cabecalho.writeUInt16LE(1, 20); cabecalho.writeUInt16LE(1, 22);
-  cabecalho.writeUInt32LE(8000, 24); cabecalho.writeUInt32LE(16000, 28); cabecalho.writeUInt16LE(2, 32); cabecalho.writeUInt16LE(16, 34);
+  cabecalho.writeUInt32LE(taxa, 24); cabecalho.writeUInt32LE(taxa * 2, 28); cabecalho.writeUInt16LE(2, 32); cabecalho.writeUInt16LE(16, 34);
   cabecalho.write("data", 36); cabecalho.writeUInt32LE(dados.length, 40);
   return Buffer.concat([cabecalho, dados]);
 }
@@ -144,11 +152,39 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     expect(await partes(id)).toHaveLength(0);
   });
 
-  it("até a G13, a soma das partes segue o teto de 10 min da reunião", async () => {
+  it("G13a: a soma das partes vai até 12 h + 10 min; no limite entra, um segundo além é recusado", async () => {
     const { id } = await iniciar();
-    const primeira = Math.round(MAX_MEETING_DURATION_SECONDS * 0.6);
-    await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(primeira) });
-    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(MAX_MEETING_DURATION_SECONDS - primeira + 10) }))).toBe("LONGA_DEMAIS");
+    const teto = GRAVACAO_EM_PARTES_SEGUNDOS_MAX + FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS;
+    expect(teto).toBe(12 * 3600 + 10 * 60);
+    // As horas já recebidas entram direto no banco: 72 partes de áudio de
+    // verdade seriam centenas de MB só para chegar perto do teto. A soma lê a
+    // duração gravada em cada linha, que é o que importa aqui.
+    const agora = Date.now();
+    await (await getDb())!.insert(meetingAudioSlices).values({
+      id: crypto.randomUUID(), meetingId: id, ownerId: DONA, seq: 0, status: "received",
+      storageKey: `meetings/${DONA}/${id}/partes/0000-horas.wav`, storageUrl: `/manus-storage/meetings/${DONA}/${id}/partes/0000-horas.wav`,
+      mimeType: "audio/wav", sizeBytes: 1, sha256: "0".repeat(64), durationMs: (teto - 3) * 1000,
+      expiresAt: agora + 60_000, createdAt: agora, updatedAt: agora,
+    });
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(4) }))).toBe("LONGA_DEMAIS");
+    expect(await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(3) })).toEqual({ seq: 1, repetida: false });
+  });
+
+  it("G13a: a parte de 12 min (720 s) entra inteira; a de 721 s é recusada", async () => {
+    expect(DURACAO_MAXIMA_DA_PARTE_SEGUNDOS).toBe(720);
+    const { id } = await iniciar();
+    expect(await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(720, 0, 1000) })).toEqual({ seq: 0, repetida: false });
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(721, 0, 1000) }))).toBe("LONGA_DEMAIS");
+    expect((await partes(id)).map(p => [p.seq, p.durationMs])).toEqual([[0, 720_000]]);
+  });
+
+  it("G13a: até 200 partes — a posição 199 entra e a 200 é recusada; encerrar com 200 vale, com 201 não", async () => {
+    expect(PARTES_NO_MAXIMO).toBe(200);
+    const { id } = await iniciar();
+    expect(await receberParte({ ownerId: DONA, meetingId: id, seq: 199, mimeType: "audio/wav", bytes: wav(1) })).toEqual({ seq: 199, repetida: false });
+    expect(await recusa(receberParte({ ownerId: DONA, meetingId: id, seq: 200, mimeType: "audio/wav", bytes: wav(1) }))).toBe("POSICAO");
+    expect(await recusa(encerrarGravacaoEmPartes(DONA, id, 201))).toBe("POSICAO");
+    expect(await encerrarGravacaoEmPartes(DONA, id, 200)).toEqual({ partes: 200 });
   });
 
   it("encerrar guarda o total e fecha a reunião para partes novas; repetir o mesmo fim é aceito", async () => {
@@ -223,6 +259,8 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     expect(linha).toMatchObject({ audioPipeline: "slices", status: "recording", origem: "gravacao", language: "en" });
     const codigo = (e: unknown) => (e instanceof TRPCError ? e.code : String(e));
     expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: crypto.randomUUID(), partes: 1 }).catch(e => e))).toBe("NOT_FOUND");
+    // O procedimento tem o mesmo teto de partes do serviço (G13a: 200).
+    expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: PARTES_NO_MAXIMO + 1 }).catch(e => e))).toBe("BAD_REQUEST");
     await receberParte({ ownerId: DONA, meetingId: id, seq: 3, mimeType: "audio/wav", bytes: wav(1) });
     expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 2 }).catch(e => e))).toBe("BAD_REQUEST");
     expect(await caller.meetings.encerrarGravacao({ meetingId: id, partes: 4 })).toEqual({ partes: 4 });

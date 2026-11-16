@@ -4,7 +4,8 @@ import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { storageDelete, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
-import { ALLOWED_MEETING_AUDIO_TYPES, MAX_MEETING_DURATION_SECONDS, MEETING_AUDIO_TTL_MS } from "./meeting-service";
+import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS } from "./meeting-service";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
  * A reunião gravada em partes (G5 do desenho do gravador,
@@ -21,11 +22,23 @@ import { ALLOWED_MEETING_AUDIO_TYPES, MAX_MEETING_DURATION_SECONDS, MEETING_AUDI
  */
 
 export const TAMANHO_MAXIMO_DA_PARTE = 16 * 1024 * 1024;
-// 10 min de parte, com folga para o fim que passa um pouco.
-export const DURACAO_MAXIMA_DA_PARTE_SEGUNDOS = 11 * 60;
-export const PARTES_NO_MAXIMO = 1_000;
+// 10 min de parte, com 2 min de folga: a tela troca de parte pelo relógio dela,
+// e a aba em segundo plano atrasa esse relógio (o navegador espaça os timers),
+// então a parte de 10 min pode chegar com mais.
+export const DURACAO_MAXIMA_DA_PARTE_SEGUNDOS = 12 * 60;
+// 12 h em partes de 10 min são 72; 200 deixam folga para partes mais curtas sem
+// deixar uma reunião acumular linhas e objetos no bucket sem fim.
+export const PARTES_NO_MAXIMO = 200;
+/**
+ * A folga sobre as 12 h da gravação em partes, só aqui no servidor: a tela para
+ * nas 12 h pelo relógio dela, e a soma é das durações MEDIDAS nos bytes, que não
+ * batem ao segundo com aquele relógio (nem com o atraso da aba em segundo plano).
+ */
+export const FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS = 10 * 60;
 
-export type CodigoDaRecusa = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "FORMATO" | "SEM_DURACAO" | "LONGA_DEMAIS" | "POSICAO";
+// Os códigos moram em shared/const.ts porque a tela os traduz (G13b); o nome de
+// sempre fica aqui para os imports do servidor não mudarem.
+export type CodigoDaRecusa = CodigoDaRecusaDaParte;
 
 /** Recusa definitiva da parte: reenviar a mesma coisa não muda a resposta. */
 export class RecusaDaParte extends Error {
@@ -74,10 +87,11 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     if (existente && existente.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
     if (existente) return existente.status === "uploading" ? { linha: existente } : { repetida: true as const };
 
-    // O teto de tempo da reunião em partes segue o do envio único até a G13.
+    // O teto da reunião em partes é técnico, contra gasto (G13a): 12 h, com a
+    // folga do servidor. O envio único segue com os 10 min dele.
     const [soma] = await tx.select({ ms: sql<number>`coalesce(sum(${meetingAudioSlices.durationMs}), 0)` })
       .from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId));
-    if (Number(soma?.ms ?? 0) / 1000 + duracao > MAX_MEETING_DURATION_SECONDS + 5) {
+    if (Number(soma?.ms ?? 0) / 1000 + duracao > GRAVACAO_EM_PARTES_SEGUNDOS_MAX + FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS) {
       throw new RecusaDaParte("LONGA_DEMAIS", "A gravação passou do limite de tempo por reunião.");
     }
     // A chave é EXATA (sem o sufixo aleatório do storagePut) e leva o id da

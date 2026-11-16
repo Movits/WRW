@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { TRPCClientError } from "@trpc/client";
-import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
+import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
  * O que a tela mostra quando a consulta falha (revisão da PR-A): só a
@@ -111,5 +111,46 @@ describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da 
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
     expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+/**
+ * A parte da gravação em partes que o servidor recusou de vez (G13b): a rota
+ * das partes responde só o código, e a tela avisa a dona no idioma dela. Todo
+ * código do servidor tem aviso traduzido, e nenhum sai cru.
+ */
+describe("mensagemDaRecusaDaParte — o código da recusa vira aviso no idioma da tela", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  const AVISO: Array<[CodigoDaRecusaDaParte, string]> = [
+    ["SEM_REUNIAO", "Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio."],
+    ["FORA_DO_ESTADO", "Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio."],
+    ["GRANDE_DEMAIS", "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição."],
+    ["LONGA_DEMAIS", "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição."],
+    ["FORMATO", "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição."],
+    ["SEM_DURACAO", "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição."],
+    ["CONTEUDO_DIFERENTE", "O servidor recusou um trecho da gravação, que ficou de fora da transcrição."],
+    ["POSICAO", "O servidor recusou um trecho da gravação, que ficou de fora da transcrição."],
+  ];
+
+  it.each(AVISO)("%s: o aviso em português, nunca o código", (codigo, aviso) => {
+    expect(mensagemDaRecusaDaParte(codigo, c => i18n.t(c))).toBe(aviso);
+  });
+
+  it.each(AVISO)("%s: em inglês sai traduzido", async (codigo, aviso) => {
+    await i18n.changeLanguage("en");
+    const emIngles = mensagemDaRecusaDaParte(codigo, c => i18n.t(c));
+    expect(emIngles).not.toBe(aviso);
+    expect(emIngles).not.toContain(codigo);
+    expect(emIngles).toMatch(/recording/);
+  });
+
+  it("código desconhecido ou ausente: o aviso genérico, sem o código cru", () => {
+    expect(mensagemDaRecusaDaParte("OUTRA_COISA", t)).toBe("[meetings.partRejected]");
+    expect(mensagemDaRecusaDaParte(undefined, t)).toBe("[meetings.partRejected]");
+    // O que vem do protótipo do objeto não é código da tabela.
+    expect(mensagemDaRecusaDaParte("toString", t)).toBe("[meetings.partRejected]");
   });
 });

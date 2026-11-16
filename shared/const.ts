@@ -64,6 +64,44 @@ export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
 
 /**
+ * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
+ * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
+ * os mesmos antes de enviar, para a dona ver o aviso no idioma dela. Valem até
+ * a G14 tirar o envio único (docs/arquitetura/gravador-de-reunioes.md); a
+ * gravação em partes tem o teto dela, logo abaixo.
+ */
+export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
+export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
+
+/**
+ * A gravação em partes não tem teto de tempo para quem grava (decisão do
+ * Roberto de 15/11/2026): no lugar dele fica o aviso de hora, abaixo. As 12 h
+ * são um teto técnico, contra gasto (uma gravação esquecida ligada). A tela
+ * para nas 12 h pelo relógio dela; o servidor aceita a soma das partes com uma
+ * folga própria (server/fatias-de-reuniao.ts), porque a duração medida nos
+ * bytes e o relógio da tela não batem ao segundo.
+ */
+export const GRAVACAO_EM_PARTES_SEGUNDOS_MAX = 12 * 60 * 60;
+
+/**
+ * O aviso de hora da gravação em partes: a cada hora cheia de gravação (sem as
+ * pausas) ele pede um OK. Sem o OK em 10 minutos, contados no relógio de
+ * parede, a gravação para sozinha e entrega o que gravou, como no Encerrar.
+ */
+export const AVISO_DE_HORA_SEGUNDOS = 60 * 60;
+export const PRAZO_DO_AVISO_DE_HORA_MS = 10 * 60 * 1000;
+
+/**
+ * Os códigos da recusa DEFINITIVA de uma parte da gravação em partes
+ * (RecusaDaParte, em server/fatias-de-reuniao.ts): a rota das partes devolve
+ * só o código, em JSON, e não frase. Moram aqui porque a tela os traduz
+ * (client/src/lib/mensagem-de-erro.ts) para avisar a dona no idioma dela: o
+ * servidor não sabe o idioma de quem grava. Código novo no servidor obriga a
+ * tela a ter o aviso dele (o Record da tela é por este tipo).
+ */
+export type CodigoDaRecusaDaParte = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "FORMATO" | "SEM_DURACAO" | "LONGA_DEMAIS" | "POSICAO";
+
+/**
  * As recusas do resumo guardado da reunião (H4), nas palavras que chegam ao
  * navegador. Moram aqui pelo mesmo motivo de MENSAGEM_BANCO_INDISPONIVEL: o
  * servidor (server/resumo-guardado.ts, que as reexporta) escreve sem saber o

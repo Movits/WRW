@@ -47,7 +47,7 @@ vi.mock("./routers/consent", () => ({ hasValidConsent }));
 
 const { AMOSTRA_DE_INCOMPLETOS } = await import("./network-inteligente");
 const { networkInteligenteRouter } = await import("./routers/networkInteligente");
-const { MAX_MEETING_DURATION_SECONDS } = await import("./meeting-service");
+const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
 
 const DONA = "dona-9";
 const ctx = {
@@ -177,12 +177,12 @@ describe("networkInteligente.resumo — o ID anônimo dos contatos antigos", () 
 });
 
 describe("networkInteligente.resumo — os números são os do banco", () => {
-  it("reuniões por status, duração guardada e o limite que o servidor aplica", async () => {
+  it("reuniões por status, duração guardada e o limite que o servidor aplica (o da gravação em partes desde a G13b)", async () => {
     bancoComDados();
     const r = await resumo();
     expect(r.reunioes).toEqual({ total: 7, transcritas: 3, emAndamento: 2, comFalha: 2 });
-    expect(r.minutos).toEqual({ segundosEmReunioesGuardadas: 1530, limitePorReuniaoSegundos: MAX_MEETING_DURATION_SECONDS });
-    expect(r.minutos.limitePorReuniaoSegundos).toBe(600);
+    expect(r.minutos).toEqual({ segundosEmReunioesGuardadas: 1530, limitePorReuniaoSegundos: GRAVACAO_EM_PARTES_SEGUNDOS_MAX });
+    expect(r.minutos.limitePorReuniaoSegundos).toBe(12 * 60 * 60);
   });
 
   it("incompletos pela régua de shared/, com a amostra limitada e na ordem do banco", async () => {
@@ -218,7 +218,7 @@ describe("networkInteligente.resumo — os números são os do banco", () => {
     const r = await resumo();
     expect(r).toEqual({
       reunioes: { total: 0, transcritas: 0, emAndamento: 0, comFalha: 0 },
-      minutos: { segundosEmReunioesGuardadas: 0, limitePorReuniaoSegundos: 600 },
+      minutos: { segundosEmReunioesGuardadas: 0, limitePorReuniaoSegundos: 12 * 60 * 60 },
       contatos: { total: 0, incompletos: 0, disponibilizados: 0, amostraIncompletos: [] },
       matchesInternos: { termoAceito: true, novos: 0, total: 0 },
     });

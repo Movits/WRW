@@ -333,6 +333,13 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
     expect(screen.getByText("Escolha o idioma em que você quer ler a transcrição.")).toBeInTheDocument();
   });
 
+  it("gravação de mais de 1 h mostra a duração em H:MM:SS, como no detalhe da dona (G13a)", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: { ...VISTA.gravacao, durationSeconds: 4_500 } }));
+    abrir();
+    expect(screen.getByText(/1:15:00/)).toBeInTheDocument();
+    expect(screen.queryByText(/75:00/)).not.toBeInTheDocument();
+  });
+
   it("a linha da gravação tem um separador só", () => {
     duble.ver.mockReturnValue(pronta());
     abrir();
