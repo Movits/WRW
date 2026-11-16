@@ -2760,7 +2760,15 @@
     "timeNow": "à l'instant",
     "timeMinutes": "il y a {{count}} min",
     "timeHours": "il y a {{count}} h",
-    "timeDays": "il y a {{count}} j"
+    "timeDays": "il y a {{count}} j",
+    "reminder": {
+      "actionTitle": "Rappel : prochaine action pour le {{data}}",
+      "meetingTitle": "Rappel de réunion : {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Votre réunion est prête : transcription et résumé",
+      "titleNoSummary": "Votre réunion est prête, sans le résumé : ouvrez-la pour réessayer"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Vérification de l'accès...",

@@ -2760,7 +2760,15 @@
     "timeNow": "gerade eben",
     "timeMinutes": "vor {{count}} Min.",
     "timeHours": "vor {{count}} Std.",
-    "timeDays": "vor {{count}} T."
+    "timeDays": "vor {{count}} T.",
+    "reminder": {
+      "actionTitle": "Erinnerung: nächster Schritt fällig am {{data}}",
+      "meetingTitle": "Meeting-Erinnerung: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Ihr Meeting ist fertig: Transkription und Zusammenfassung",
+      "titleNoSummary": "Ihr Meeting ist fertig, aber ohne Zusammenfassung: Öffnen Sie es, um es erneut zu versuchen"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Zugriff wird geprüft...",

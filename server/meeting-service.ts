@@ -32,6 +32,7 @@ import {
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
+import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { soltarAcoesDaReuniao } from "./proximas-acoes";
 
@@ -1866,6 +1867,8 @@ export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   if (!linhasAfetadas(marcada)) return false;
   await apagarDerivadosDaReuniao(db, ownerId, meetingId);
+  // Os avisos da reunião no sino (H15: o de pronta, com o título) saem com ela.
+  await apagarAvisosDaReuniao(db, ownerId, meetingId);
   // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
   // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
   await soltarGravacaoDaAgenda(db, ownerId, meetingId);

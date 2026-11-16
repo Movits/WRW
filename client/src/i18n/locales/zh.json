@@ -2760,7 +2760,15 @@
     "timeNow": "刚刚",
     "timeMinutes": "{{count}} 分钟前",
     "timeHours": "{{count}} 小时前",
-    "timeDays": "{{count}} 天前"
+    "timeDays": "{{count}} 天前",
+    "reminder": {
+      "actionTitle": "提醒：后续行动截止于 {{data}}",
+      "meetingTitle": "会议提醒：{{quando}}"
+    },
+    "meetingReady": {
+      "title": "您的会议已就绪：转录内容和摘要",
+      "titleNoSummary": "您的会议已就绪，但没有摘要：打开会议即可重试"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "正在验证访问权限...",

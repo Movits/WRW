@@ -62,7 +62,7 @@ import {
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingTranscriptTranslations, meetingTranscripts,
-  meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
@@ -167,6 +167,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingTranscripts, coluna: meetingTranscripts.ownerId, origem: "openId" },
   // As próximas ações (H5a): o que a dona confirmou nos resumos (com o trecho) e o que anotou.
   { tabela: proximasAcoes, coluna: proximasAcoes.ownerId, origem: "openId" },
+  // Os lembretes no sino (H15): a hora de cada aviso da próxima ação e da agenda.
+  // Os avisos que já saíram estão em platform_notifications, que sai pelo id.
+  { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
   // O resumo guardado da reunião (H4) e os itens dele, que carregam trechos da transcrição.
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },

@@ -1,16 +1,23 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearch } from "wouter";
 import { toast } from "sonner";
 import { ListChecks, Loader2, Plus } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { FormularioDaAcao, mensagemDoErroDaAcao, ProximasAcoes } from "@/components/ProximasAcoes";
+import { fusoDoAparelho } from "@shared/agenda";
+import { PARAMETRO_DA_ACAO } from "@shared/lembretes";
 
 /**
  * A página /proximas-acoes (H5a do desenho do gravador): o que a dona confirmou
  * como ação ou tarefa nos resumos das reuniões e o que anotou aqui, as abertas
  * primeiro e por prazo. O menu global vem da rota (App.tsx); a lista é o
  * componente ProximasAcoes, o mesmo do cartão do Dashboard.
+ *
+ * O lembrete no sino (H15) abre esta página com ?acao=<id>: a lista rola até a
+ * ação e a destaca. Se ela não está entre as abertas (foi feita depois do
+ * aviso), a lista passa a mostrar todas, uma vez por link.
  */
 
 type Filtro = "abertas" | "todas";
@@ -21,12 +28,22 @@ export default function PaginaDasProximasAcoes() {
   const [filtro, setFiltro] = useState<Filtro>("abertas");
   const [anotando, setAnotando] = useState(false);
   const consulta = trpc.proximasAcoes.listar.useQuery({ filtro });
+  // Lido pelo useSearch: o aviso tocado com a página já aberta troca só a busca.
+  const busca = useSearch();
+  const acaoPedida = useMemo(() => new URLSearchParams(busca).get(PARAMETRO_DA_ACAO) || null, [busca]);
+  const jaProcurouEmTodas = useRef<string | null>(null);
   const utils = trpc.useUtils();
   const criar = trpc.proximasAcoes.criar.useMutation({
     onError: erro => toast.error(mensagemDoErroDaAcao(t, erro)),
     onSettled: () => utils.proximasAcoes.invalidate(),
   });
   const dados = consulta.data;
+  useEffect(() => {
+    if (!acaoPedida || filtro !== "abertas" || !dados || jaProcurouEmTodas.current === acaoPedida) return;
+    if (dados.acoes.some(acao => acao.id === acaoPedida)) return;
+    jaProcurouEmTodas.current = acaoPedida;
+    setFiltro("todas");
+  }, [acaoPedida, filtro, dados]);
 
   const botaoDoFiltro = (valor: Filtro, rotulo: string) => <button type="button" aria-pressed={filtro === valor} onClick={() => setFiltro(valor)}
     className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${filtro === valor ? "bg-[#c98f70] text-[#1a120c]" : "border border-white/15 text-white/65 hover:bg-white/5"}`}>
@@ -45,7 +62,7 @@ export default function PaginaDasProximasAcoes() {
     </p>;
   } else {
     lista = <>
-      <ProximasAcoes acoes={dados.acoes}/>
+      <ProximasAcoes acoes={dados.acoes} destacada={acaoPedida}/>
       {dados.acoes.length >= dados.limite && <p className="mt-3 text-xs text-white/45">{t("proximasAcoes.limitNotice", { n: dados.limite })}</p>}
     </>;
   }
@@ -72,6 +89,8 @@ export default function PaginaDasProximasAcoes() {
       <FormularioDaAcao inicial={VAZIO} salvando={criar.isPending} aoCancelar={() => setAnotando(false)}
         aoSalvar={valores => criar.mutate({
           texto: valores.texto, detalhe: valores.detalhe, responsavel: valores.responsavel, prazo: valores.prazo,
+          // O lembrete do prazo sai às 9h no relógio deste aparelho (H15).
+          fuso: fusoDoAparelho(),
         }, { onSuccess: () => setAnotando(false) })}/>
     </div>}
 

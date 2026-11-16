@@ -2760,7 +2760,15 @@
     "timeNow": "たった今",
     "timeMinutes": "{{count}}分前",
     "timeHours": "{{count}}時間前",
-    "timeDays": "{{count}}日前"
+    "timeDays": "{{count}}日前",
+    "reminder": {
+      "actionTitle": "リマインダー：次のアクションの期限は{{data}}です",
+      "meetingTitle": "ミーティングのリマインダー：{{quando}}"
+    },
+    "meetingReady": {
+      "title": "ミーティングの準備ができました：文字起こしと要約",
+      "titleNoSummary": "ミーティングの準備ができましたが、要約はありません。開いてもう一度お試しください"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "アクセスを確認しています...",

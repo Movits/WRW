@@ -109,6 +109,13 @@ const fakeDb = {
   transaction: async <T>(trabalho: (tx: typeof fakeDb) => Promise<T>) => { estado.transacoes += 1; return trabalho(fakeDb); },
 };
 vi.mock("./db", () => ({ getDb: async () => fakeDb, exigirDb: async () => fakeDb }));
+// O lembrete no sino (H15) é dublê: aqui se prova que as escritas da ação o
+// chamam, na transação delas. A regra das horas está em server/lembretes.test.ts.
+const lembretes = vi.hoisted(() => ({
+  agendarLembreteDaAcao: vi.fn(async (..._args: unknown[]) => {}),
+  esquecerLembrete: vi.fn(async (..._args: unknown[]) => {}),
+}));
+vi.mock("./lembretes", () => lembretes);
 
 const servico = await import("./proximas-acoes");
 const { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } = await import("@shared/proximas-acoes");
@@ -123,6 +130,8 @@ beforeEach(() => {
   estado.tabelas = new Map();
   estado.afetadas = 1;
   estado.transacoes = 0;
+  lembretes.agendarLembreteDaAcao.mockClear();
+  lembretes.esquecerLembrete.mockClear();
 });
 
 describe("do item do resumo à ação", () => {
@@ -513,5 +522,66 @@ describe("o que a dona faz na lista", () => {
     expect(Object.keys(editou.valores ?? {}).sort()).toEqual(["prazo", "texto", "updatedAt"]);
     expect(editou.valores).toMatchObject({ texto: "Novo texto", prazo: null });
     expect(editou.params).toEqual(["acao-1", DONA]);
+  });
+});
+
+describe("o lembrete no sino (H15) anda com a ação", () => {
+  it("anotar com prazo agenda o lembrete na mesma transação, depois da ação, com o fuso do aparelho", async () => {
+    lembretes.agendarLembreteDaAcao.mockImplementationOnce(async () => { estado.operacoes.push({ tipo: "select", tabela: "lembrete", sql: "", params: [] }); });
+    const { id } = await servico.criarProximaAcao(DONA, { texto: "Mandar o contrato", prazo: "2026-12-01", fuso: "Europe/Lisbon" });
+    expect(estado.transacoes).toBe(1);
+    expect(lembretes.agendarLembreteDaAcao).toHaveBeenCalledWith(fakeDb, DONA, id, "2026-12-01", "Europe/Lisbon", expect.any(Number));
+    expect(estado.operacoes.map(o => o.tabela)).toEqual([schema.proximasAcoes, "lembrete"]);
+  });
+
+  it("anotar sem prazo também passa por ele (sem prazo, nenhum lembrete); o contato de outra rede não chega lá", async () => {
+    await servico.criarProximaAcao(DONA, { texto: "Ligar para a Bia" });
+    expect(lembretes.agendarLembreteDaAcao).toHaveBeenCalledWith(fakeDb, DONA, expect.any(String), null, undefined, expect.any(Number));
+    lembretes.agendarLembreteDaAcao.mockClear();
+    await expect(servico.criarProximaAcao(DONA, { texto: "x", prazo: "2026-12-01", contactId: 99 })).rejects.toBeDefined();
+    expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
+  });
+
+  it("mudar o prazo reagenda (e tirar o prazo tira o lembrete); mudar só o texto não toca no lembrete", async () => {
+    await servico.editarProximaAcao(DONA, "acao-1", { prazo: "2026-12-05", fuso: "America/Manaus" });
+    expect(lembretes.agendarLembreteDaAcao).toHaveBeenLastCalledWith(fakeDb, DONA, "acao-1", "2026-12-05", "America/Manaus", expect.any(Number));
+    await servico.editarProximaAcao(DONA, "acao-1", { prazo: null });
+    expect(lembretes.agendarLembreteDaAcao).toHaveBeenLastCalledWith(fakeDb, DONA, "acao-1", null, undefined, expect.any(Number));
+    lembretes.agendarLembreteDaAcao.mockClear();
+    await servico.editarProximaAcao(DONA, "acao-1", { texto: "Outro texto" });
+    expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
+  });
+
+  it("a ação que não é da dona: nem o lembrete muda", async () => {
+    estado.afetadas = 0;
+    await expect(servico.editarProximaAcao(DONA, "acao-1", { prazo: "2026-12-05" })).rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_ACAO_NAO_ENCONTRADA });
+    expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
+  });
+
+  it("apagar a ação esquece o lembrete e os avisos dela, na transação da exclusão", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: null, meetingId: null }]);
+    await servico.apagarProximaAcao(DONA, "acao-1");
+    expect(estado.transacoes).toBe(1);
+    expect(lembretes.esquecerLembrete).toHaveBeenCalledWith(fakeDb, DONA, "acao", "acao-1");
+  });
+
+  it("desconfirmar o item esquece o lembrete de cada ação que sai; sem ação, nada a esquecer", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-7" }]);
+    await servico.apagarAcaoDoItem(db, DONA, "item-1");
+    const [leitura] = de("select", schema.proximasAcoes);
+    expect(leitura.params).toEqual([DONA, "item-1"]);
+    expect(de("delete", schema.proximasAcoes)[0].params).toEqual([DONA, "item-1"]);
+    expect(lembretes.esquecerLembrete).toHaveBeenCalledWith(db, DONA, "acao", "acao-7");
+    lembretes.esquecerLembrete.mockClear();
+    estado.tabelas.set(schema.proximasAcoes, []);
+    await servico.apagarAcaoDoItem(db, DONA, "item-1");
+    expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
+  });
+
+  it("marcar feita não mexe no lembrete: o laço confere a ação no disparo", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: null, meetingId: null }]);
+    await servico.marcarProximaAcaoFeita(DONA, "acao-1", true);
+    expect(lembretes.agendarLembreteDaAcao).not.toHaveBeenCalled();
+    expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
   });
 });

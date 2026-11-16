@@ -51,6 +51,16 @@ export function prazoValido(texto: string): boolean {
   return data.getUTCFullYear() === ano && data.getUTCMonth() === mes - 1 && data.getUTCDate() === dia;
 }
 
+/**
+ * "2026-11-20" no idioma de quem lê; o ano só quando não é o corrente. Mora
+ * aqui para a lista das ações e o lembrete no sino (H15) dizerem o prazo igual.
+ */
+export function prazoNaTela(prazo: string, idioma: string, agora: Date = new Date()): string {
+  const [ano, mes, dia] = prazo.split("-").map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  return data.toLocaleDateString(idioma, { day: "numeric", month: "short", ...(ano === agora.getFullYear() ? {} : { year: "numeric" }) });
+}
+
 /** O dia de hoje no relógio de quem lê, como "AAAA-MM-DD". */
 export function hojeNoRelogio(agora: Date = new Date()): string {
   const doisDigitos = (n: number) => String(n).padStart(2, "0");

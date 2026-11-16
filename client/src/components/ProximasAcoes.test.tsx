@@ -195,7 +195,35 @@ describe("a lista da página", () => {
     expect(screen.getByLabelText("Prazo (opcional)")).toHaveValue("2026-11-20");
     fireEvent.change(screen.getByLabelText("Prazo (opcional)"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", prazo: "" });
+    // O prazo mudou: vai com o fuso do aparelho, para o lembrete no sino (H15).
+    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", prazo: "", fuso: expect.any(String) });
+  });
+
+  it("editar só o texto não manda o prazo nem o fuso: o lembrete fica como está", () => {
+    render(<ProximasAcoes acoes={[acao({ prazo: "2026-11-20" })]}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    fireEvent.change(screen.getByLabelText("O que fazer"), { target: { value: "Carla envia o contrato" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", texto: "Carla envia o contrato" });
+  });
+
+  it("a ação do lembrete no sino (?acao=, H15) fica destacada e a lista rola até ela uma vez", () => {
+    const rolar = vi.fn();
+    Element.prototype.scrollIntoView = rolar;
+    try {
+      const lista = [acao(), acao({ id: "acao-2", texto: "Ligar para a Bia", responsavel: null })];
+      const { rerender } = render(<ProximasAcoes acoes={lista} destacada="acao-2"/>);
+      const destacada = document.getElementById("proxima-acao-acao-2");
+      expect(destacada).toHaveAttribute("data-destacada", "true");
+      expect(document.getElementById("proxima-acao-acao-1")).not.toHaveAttribute("data-destacada");
+      expect(rolar).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(destacada);
+      // A mesma ação de novo (a lista relida depois de marcar): não rola outra vez.
+      rerender(<ProximasAcoes acoes={[...lista]} destacada="acao-2"/>);
+      expect(rolar).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("o recuo segue a direção do idioma (o início da linha, não a esquerda): no árabe, fica do lado da caixa", () => {

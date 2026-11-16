@@ -2760,7 +2760,15 @@
     "timeNow": "только что",
     "timeMinutes": "{{count}} мин назад",
     "timeHours": "{{count}} ч назад",
-    "timeDays": "{{count}} дн назад"
+    "timeDays": "{{count}} дн назад",
+    "reminder": {
+      "actionTitle": "Напоминание: срок следующего действия — {{data}}",
+      "meetingTitle": "Напоминание о встрече: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Ваша встреча готова: транскрипция и резюме",
+      "titleNoSummary": "Ваша встреча готова, но без резюме: откройте её, чтобы попробовать снова"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Проверка доступа...",

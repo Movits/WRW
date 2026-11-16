@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, privateContacts, proximasAcoes } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { agendarLembreteDaAcao, esquecerLembrete } from "./lembretes";
 import { nomesDosFalantes } from "@shared/const";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
@@ -30,6 +31,10 @@ import {
  * Quem decide trava a reunião antes (SELECT ... FOR UPDATE): a exclusão, que
  * marca a reunião 'deleted' antes de apagar os derivados, espera a decisão, e a
  * ação que ela criar se solta junto com o resto (soltarAcoesDaReuniao).
+ *
+ * O lembrete no sino (H15, server/lembretes.ts) anda com o prazo: anotar e
+ * editar o prazo o agendam, na mesma transação; apagar a ação o esquece. A
+ * feita não precisa de escrita: o laço confere a ação no disparo.
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -171,9 +176,15 @@ export async function garantirAcoesDaDona(ownerId: string): Promise<number> {
   return criadas;
 }
 
-/** O item deixou de estar confirmado: a ação dele sai (na transação de quem desconfirma). */
+/**
+ * O item deixou de estar confirmado: a ação dele sai (na transação de quem
+ * desconfirma), e o lembrete no sino e os avisos dela saem junto (H15).
+ */
 export async function apagarAcaoDoItem(ex: Executor, ownerId: string, itemId: string) {
-  await ex.delete(proximasAcoes).where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.itemId, itemId)));
+  const daDona = and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.itemId, itemId));
+  const saem = await ex.select({ id: proximasAcoes.id }).from(proximasAcoes).where(daDona);
+  await ex.delete(proximasAcoes).where(daDona);
+  for (const acao of saem) await esquecerLembrete(ex, ownerId, "acao", acao.id);
 }
 
 /**
@@ -413,6 +424,11 @@ export type DadosDaAcao = {
   responsavel?: string | null;
   prazo?: string | null;
   contactId?: number | null;
+  /**
+   * O fuso do aparelho de quem marca o prazo (IANA): o lembrete no sino sai às
+   * 9h do dia do prazo nesse relógio (H15). Não fica na ação.
+   */
+  fuso?: string | null;
 };
 
 /** A ação que a dona anota à mão. */
@@ -421,14 +437,22 @@ export async function criarProximaAcao(ownerId: string, dados: DadosDaAcao): Pro
   if (dados.contactId) await exigirContatoDaDona(db, ownerId, dados.contactId);
   const agora = Date.now();
   const id = crypto.randomUUID();
-  await db.insert(proximasAcoes).values({
-    id, ownerId, origem: "manual", texto: dados.texto, detalhe: dados.detalhe || null, responsavel: dados.responsavel || null,
-    prazo: dados.prazo || null, contactId: dados.contactId ?? null, feita: false, createdAt: agora, updatedAt: agora,
+  await db.transaction(async tx => {
+    await tx.insert(proximasAcoes).values({
+      id, ownerId, origem: "manual", texto: dados.texto, detalhe: dados.detalhe || null, responsavel: dados.responsavel || null,
+      prazo: dados.prazo || null, contactId: dados.contactId ?? null, feita: false, createdAt: agora, updatedAt: agora,
+    });
+    // O lembrete no sino (H15), junto com a ação: às 9h do dia do prazo.
+    await agendarLembreteDaAcao(tx, ownerId, id, dados.prazo || null, dados.fuso, agora);
   });
   return { id };
 }
 
-/** Texto, detalhe, responsável e prazo, de qualquer ação da dona. Só muda o que veio. */
+/**
+ * Texto, detalhe, responsável e prazo, de qualquer ação da dona. Só muda o que
+ * veio. O prazo novo (ou nenhum) reagenda o lembrete no sino na mesma
+ * transação (H15); o texto novo não precisa: o lembrete o lê no disparo.
+ */
 export async function editarProximaAcao(ownerId: string, acaoId: string, campos: Partial<Omit<DadosDaAcao, "contactId">>) {
   const db = await exigirDb();
   const valores = {
@@ -437,9 +461,13 @@ export async function editarProximaAcao(ownerId: string, acaoId: string, campos:
     ...(campos.responsavel !== undefined ? { responsavel: campos.responsavel || null } : {}),
     ...(campos.prazo !== undefined ? { prazo: campos.prazo || null } : {}),
   };
-  const r = await db.update(proximasAcoes).set({ ...valores, updatedAt: Date.now() })
-    .where(and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId)));
-  if (!linhasAfetadas(r)) throw acaoNaoEncontrada();
+  const agora = Date.now();
+  await db.transaction(async tx => {
+    const r = await tx.update(proximasAcoes).set({ ...valores, updatedAt: agora })
+      .where(and(eq(proximasAcoes.id, acaoId), eq(proximasAcoes.ownerId, ownerId)));
+    if (!linhasAfetadas(r)) throw acaoNaoEncontrada();
+    if (campos.prazo !== undefined) await agendarLembreteDaAcao(tx, ownerId, acaoId, campos.prazo || null, campos.fuso, agora);
+  });
 }
 
 /**
@@ -483,6 +511,8 @@ export async function apagarProximaAcao(ownerId: string, acaoId: string) {
         .where(and(eq(meetingSummaryItems.id, acao.itemId), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "confirmed")));
     }
     await tx.delete(proximasAcoes).where(and(eq(proximasAcoes.id, acao.id), eq(proximasAcoes.ownerId, ownerId)));
+    // O lembrete no sino e os avisos dela saem junto (H15).
+    await esquecerLembrete(tx, ownerId, "acao", acao.id);
   });
 }
 

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
 import PaginaDasProximasAcoes from "./ProximasAcoes";
 
@@ -89,12 +89,43 @@ describe("a página das próximas ações", () => {
     fireEvent.change(screen.getByLabelText("O que fazer"), { target: { value: "Ligar para a Bia" } });
     fireEvent.change(screen.getByLabelText("Prazo (opcional)"), { target: { value: "2026-12-01" } });
     fireEvent.click(salvar);
-    expect(duble.chamadas.criar?.[0]?.[0]).toEqual({ texto: "Ligar para a Bia", detalhe: "", responsavel: "", prazo: "2026-12-01" });
+    // O fuso do aparelho vai junto, para o lembrete do prazo sair às 9h no relógio dela (H15).
+    expect(duble.chamadas.criar?.[0]?.[0]).toEqual({ texto: "Ligar para a Bia", detalhe: "", responsavel: "", prazo: "2026-12-01", fuso: expect.any(String) });
   });
 
   it("no teto da lista, avisa que mostra só as primeiras", () => {
     duble.respostas.listar = { data: { acoes: [ACAO, { ...ACAO, id: "acao-2", texto: "Outra" }], abertas: 2, limite: 2 } };
     render(<PaginaDasProximasAcoes/>);
     expect(screen.getByText("Mostrando as primeiras 2.")).toBeInTheDocument();
+  });
+});
+
+describe("o link do lembrete no sino (?acao=, H15)", () => {
+  const abrirCom = (busca: string) => window.history.replaceState({}, "", `/proximas-acoes${busca}`);
+  afterEach(() => window.history.replaceState({}, "", "/"));
+
+  it("a ação aberta pedida fica destacada, nas abertas", () => {
+    abrirCom("?acao=acao-2");
+    duble.respostas.listar = { data: { acoes: [ACAO, { ...ACAO, id: "acao-2", texto: "Ligar para a Bia" }], abertas: 2, limite: 300 } };
+    render(<PaginaDasProximasAcoes/>);
+    expect(document.getElementById("proxima-acao-acao-2")).toHaveAttribute("data-destacada", "true");
+    expect(duble.entradas.at(-1)).toEqual({ filtro: "abertas" });
+  });
+
+  it("a ação que não está entre as abertas (feita depois do aviso): a lista passa a todas, uma vez só", () => {
+    abrirCom("?acao=acao-9");
+    duble.respostas.listar = { data: { acoes: [ACAO], abertas: 1, limite: 300 } };
+    render(<PaginaDasProximasAcoes/>);
+    expect(duble.entradas.at(-1)).toEqual({ filtro: "todas" });
+    // A dona volta às abertas: a página não a puxa de novo para todas.
+    fireEvent.click(screen.getByRole("button", { name: "Abertas" }));
+    expect(duble.entradas.at(-1)).toEqual({ filtro: "abertas" });
+  });
+
+  it("sem ?acao=, nada se destaca e o filtro fica nas abertas", () => {
+    duble.respostas.listar = { data: { acoes: [ACAO], abertas: 1, limite: 300 } };
+    render(<PaginaDasProximasAcoes/>);
+    expect(document.querySelector("[data-destacada]")).toBeNull();
+    expect(duble.entradas.at(-1)).toEqual({ filtro: "abertas" });
   });
 });

@@ -41,6 +41,8 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // As próximas ações (H5a), que nascem dos itens do resumo ou à mão.
   { tabela: "proximas_acoes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os lembretes no sino (H15) da próxima ação e da agenda.
+  { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // O resumo guardado da reunião (H4) e os itens dele.
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },

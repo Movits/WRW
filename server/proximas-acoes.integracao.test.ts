@@ -17,7 +17,7 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 
 const { getDb, createPrivateContact, deletePrivateContact } = await import("./db");
 const {
-  consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, privateContacts, proximasAcoes, users,
+  consumoDeMinutos, lembretes, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, privateContacts, proximasAcoes, users,
 } = await import("../drizzle/schema");
 const resumo = await import("./resumo-guardado");
 const acoes = await import("./proximas-acoes");
@@ -65,6 +65,8 @@ async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
     await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
+    // A ação com prazo agenda o lembrete no sino (H15).
+    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
     await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
     await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));

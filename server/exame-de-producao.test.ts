@@ -623,9 +623,11 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 69: as próximas ações (H5a) somaram proximas_acoes.owner_id.
     // 70: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
     // 71: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
-    expect(paresDeUsuariaNoSchema).toHaveLength(71);
+    // 72: os lembretes no sino (H15) somaram lembretes.owner_id.
+    expect(paresDeUsuariaNoSchema).toHaveLength(72);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "agenda_reunioes", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "lembretes", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "gold_access_grants", coluna: "revokedBy" });

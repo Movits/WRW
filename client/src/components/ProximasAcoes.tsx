@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
@@ -9,12 +9,14 @@ import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { rotaDaReuniao } from "@shared/rotas";
+import { fusoDoAparelho } from "@shared/agenda";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
   DETALHE_DA_ACAO_MAX,
   hojeNoRelogio,
   MENSAGEM_ACAO_NAO_ENCONTRADA,
   MENSAGEM_CONTATO_FORA_DA_REDE,
+  prazoNaTela,
   RESPONSAVEL_DA_ACAO_MAX,
   ROTA_DAS_PROXIMAS_ACOES,
   situacaoDoPrazo,
@@ -48,13 +50,6 @@ export function mensagemDoErroDaAcao(t: TranslateFn, erro: unknown): string {
   const codigo = (erro as { data?: { code?: string } } | null)?.data?.code;
   if (codigo === "INTERNAL_SERVER_ERROR" || codigo === "TOO_MANY_REQUESTS") return mensagemDeErroParaTela(erro, t);
   return t("proximasAcoes.saveError");
-}
-
-/** "2026-11-20" no idioma de quem lê; o ano só quando não é o corrente. */
-export function prazoNaTela(prazo: string, idioma: string, agora: Date = new Date()): string {
-  const [ano, mes, dia] = prazo.split("-").map(Number);
-  const data = new Date(ano, mes - 1, dia);
-  return data.toLocaleDateString(idioma, { day: "numeric", month: "short", ...(ano === agora.getFullYear() ? {} : { year: "numeric" }) });
 }
 
 export type ValoresDaAcao = { texto: string; detalhe: string; responsavel: string; prazo: string };
@@ -105,19 +100,34 @@ export function FormularioDaAcao({ inicial, salvando, aoSalvar, aoCancelar }: {
   </form>;
 }
 
+const idDaAcao = (id: string) => `proxima-acao-${id}`;
+const movimentoReduzido = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
 /**
  * A lista de ações. `compacto` é o cartão do Dashboard: só a caixa, o texto, o
  * prazo e o contato. `contatoDaPagina` é o contato do perfil em que a lista
- * está: o link para ele mesmo não aparece.
+ * está: o link para ele mesmo não aparece. `destacada` é a ação do lembrete no
+ * sino (?acao=, H15): a lista rola até ela uma vez por link e a marca.
  */
-export function ProximasAcoes({ acoes, compacto = false, contatoDaPagina }: {
+export function ProximasAcoes({ acoes, compacto = false, contatoDaPagina, destacada = null }: {
   acoes: readonly ProximaAcao[];
   compacto?: boolean;
   contatoDaPagina?: number;
+  destacada?: string | null;
 }) {
   const hoje = hojeNoRelogio();
+  const achada = !!destacada && acoes.some(acao => acao.id === destacada);
+  const jaRolou = useRef<string | null>(null);
+  useEffect(() => {
+    if (!destacada || !achada || jaRolou.current === destacada) return;
+    const elemento = document.getElementById(idDaAcao(destacada));
+    if (!elemento) return;
+    jaRolou.current = destacada;
+    elemento.scrollIntoView?.({ block: "center", behavior: movimentoReduzido() ? "auto" : "smooth" });
+    elemento.focus({ preventScroll: true });
+  }, [destacada, achada]);
   return <ul className="space-y-3">
-    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} contatoDaPagina={contatoDaPagina}/>)}
+    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} contatoDaPagina={contatoDaPagina} destacada={acao.id === destacada}/>)}
   </ul>;
 }
 
@@ -129,7 +139,7 @@ function Selo({ cor, children }: { cor: "vermelho" | "ambar"; children: ReactNod
 
 const BOTAO_DE_TEXTO = "inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50";
 
-function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina }: { acao: ProximaAcao; compacto: boolean; hoje: string; contatoDaPagina?: number }) {
+function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina, destacada }: { acao: ProximaAcao; compacto: boolean; hoje: string; contatoDaPagina?: number; destacada: boolean }) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   // A ação e o item do resumo mudam juntos: relê as telas. O perfil do contato
@@ -165,7 +175,8 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina }: { acao: Pr
             ...(mudou("texto") ? { texto: valores.texto } : {}),
             ...(mudou("detalhe") ? { detalhe: valores.detalhe } : {}),
             ...(mudou("responsavel") ? { responsavel: valores.responsavel } : {}),
-            ...(mudou("prazo") ? { prazo: valores.prazo } : {}),
+            // O prazo novo reagenda o lembrete no sino, às 9h no relógio deste aparelho (H15).
+            ...(mudou("prazo") ? { prazo: valores.prazo, fuso: fusoDoAparelho() } : {}),
           }, { onSuccess: () => setModo("ver") });
         }}/>
     </li>;
@@ -175,7 +186,8 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina }: { acao: Pr
   // quebra: a linha quebra em qualquer lugar (a regra vale para o item inteiro),
   // e o texto, item de flex, encolhe abaixo da palavra mais longa. Sem isso, a
   // palavra passa da largura do celular e a página ganha rolagem lateral.
-  return <li className={`rounded-xl border p-3 wrap-anywhere ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"}`}>
+  return <li id={idDaAcao(acao.id)} tabIndex={destacada ? -1 : undefined} data-destacada={destacada ? "true" : undefined}
+    className={`rounded-xl border p-3 wrap-anywhere ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"} ${destacada ? "ring-2 ring-amber-300/70" : ""}`}>
     <label className="flex cursor-pointer items-start gap-3">
       <input type="checkbox" checked={acao.feita} disabled={ocupado} onChange={evento => marcar.mutate({ id: acao.id, feita: evento.target.checked })}
         className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
