@@ -1359,6 +1359,42 @@ export const proximasAcoes = mysqlTable("proximas_acoes", {
   ownerContactIdx: index("proximas_acoes_owner_contact_idx").on(table.ownerId, table.contactId),
 }));
 
+// A agenda de reuniões da dona (H16a do plano do gravador): a reunião marcada
+// para depois, com o convite por WhatsApp e por e-mail aberto no app da própria
+// dona e o .ics feito no navegador. Só a dona lê e escreve: owner_id no WHERE de
+// tudo (server/agenda-de-reunioes.ts). A gravação só nasce quando ela toca em
+// "Gravar agora"; aqui fica só o ponteiro (meeting_id), que a exclusão da
+// reunião volta a nulo.
+export const agendaReunioes = mysqlTable("agenda_reunioes", {
+  id:              varchar("id", { length: 36 }).primaryKey(),
+  ownerId:         varchar("owner_id", { length: 128 }).notNull(),
+  titulo:          varchar("titulo", { length: 200 }).notNull(),
+  // O início em UTC (ms) e a duração em minutos. O fuso (IANA, como
+  // "America/Sao_Paulo") é o do aparelho de quem marcou: o convite diz a hora
+  // como ela marcou, com o nome do fuso.
+  inicioEm:        bigint("inicio_em", { mode: "number" }).notNull(),
+  duracaoMinutos:  int("duracao_minutos").notNull(),
+  fuso:            varchar("fuso", { length: 64 }).notNull(),
+  // O endereço ou o link da chamada (Meet, Zoom, Teams), como a dona escreveu.
+  local:           varchar("local", { length: 500 }),
+  // Quem vai: o nome e o e-mail, cada um opcional, nunca os dois vazios. É dado
+  // de terceiros na base particular da dona, como os contatos: sai com a conta
+  // dela (server/exclusao-de-conta.ts).
+  participantes:   jsonCompat("participantes").$type<Array<{ nome: string | null; email: string | null }>>().notNull(),
+  // Minutos antes do início; nulo é sem lembrete. Vai no .ics (VALARM).
+  lembreteMinutos: int("lembrete_minutos"),
+  // A gravação feita pelo "Gravar agora". Nulo enquanto ninguém gravou; a
+  // exclusão da reunião volta a nulo (deletePrivateMeeting).
+  meetingId:       varchar("meeting_id", { length: 36 }),
+  createdAt:       bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:       bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // A tela lê a agenda da dona pela data.
+  ownerInicioIdx: index("agenda_reunioes_owner_inicio_idx").on(table.ownerId, table.inicioEm),
+  // Uma gravação liga a uma reunião da agenda só; o MySQL aceita vários nulos.
+  meetingUnique:  uniqueIndex("agenda_reunioes_meeting_unique").on(table.meetingId),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é

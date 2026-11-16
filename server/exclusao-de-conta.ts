@@ -53,7 +53,7 @@ import type { exigirDb } from "./db";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
@@ -180,6 +180,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a gravação cujo áudio não saiu do bucket fica como o único ponteiro para o objeto",
   },
+  // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
+  // (nome e e-mail de terceiros) que a dona marcou.
+  { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },

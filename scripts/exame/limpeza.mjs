@@ -51,6 +51,9 @@ export const PLANO_DE_LIMPEZA = [
   // sair depois dele.
   { tabela: "meeting_audio_slices", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_recordings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
+  // marcar sai com o resto.
+  { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_messages", coluna: "owner_id", chave: "openId", acao: "apagar" },

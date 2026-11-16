@@ -584,6 +584,26 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 
+  it("a reunião marcada na agenda (H16a) fica e só perde o ponteiro: UPDATE com owner_id E meeting_id, antes de a linha da reunião sair", async () => {
+    await servico.deletePrivateMeeting("dona-1", "reuniao-1");
+    const naAgenda = atualizacoes.filter(operacao => operacao.tabela === schema.agendaReunioes);
+    expect(naAgenda).toHaveLength(1);
+    expect(naAgenda[0].valores).toMatchObject({ meetingId: null });
+    expect(typeof naAgenda[0].valores.updatedAt).toBe("number");
+    // `or` soltaria todas as reuniões da agenda da dona, ou a de outra dona com a mesma gravação.
+    expect(predicadoDe(naAgenda[0])).toEqual({ sql: "(`agenda_reunioes`.`owner_id` = ? and `agenda_reunioes`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
+    // A agenda não é apagada: nenhum DELETE nela.
+    expect(tabelasApagadas()).not.toContain(schema.agendaReunioes);
+    // O ponteiro sai antes da linha da reunião, a última a sair.
+    expect(sequencia.slice(-2)).toEqual(["update", "delete"]);
+  });
+
+  it("reunião de outra dona não solta nada da agenda", async () => {
+    tabelas.set(schema.meetings, []);
+    await servico.deletePrivateMeeting("dona-2", "reuniao-1");
+    expect(atualizacoes.filter(operacao => operacao.tabela === schema.agendaReunioes)).toHaveLength(0);
+  });
+
   it("falha no bucket não impede a reunião de ser excluída, mas a linha da gravação FICA, vencida, como ponteiro para a varredura", async () => {
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     apagarAudio.mockRejectedValueOnce(new Error("bucket fora do ar"));

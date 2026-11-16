@@ -38,6 +38,18 @@ export function rotaDaReuniao(id: string, opcoes: { t?: number; q?: string; item
 }
 
 /**
+ * A agenda de reuniões (H16a): as reuniões marcadas, com convite e .ics. O
+ * "Gravar agora" de uma delas abre o gravador com `?agendada=<id>`: o título
+ * vem preenchido, e a gravação fica ligada à reunião marcada (Meetings.tsx).
+ */
+export const ROTA_DA_AGENDA = "/agenda";
+export const PARAMETRO_DA_AGENDADA = "agendada";
+
+export function rotaGravarDaAgenda(agendaId: string) {
+  return `${ROTA_GRAVAR}?${PARAMETRO_DA_AGENDADA}=${encodeURIComponent(agendaId)}`;
+}
+
+/**
  * O link aberto de uma reunião (pedido do Roberto em 12/11/2026, "por
  * enquanto"): quem recebe o endereço ouve, lê e pergunta à IA sem conta na WRW.
  * Curto porque viaja em mensagem de WhatsApp e de e-mail, e não muda: os links
