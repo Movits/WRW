@@ -25,8 +25,13 @@ export async function pedirJsonAIA(pedido: {
   schema: Record<string, unknown>;
   timeoutMs: number;
   orcamentoMs: number;
-  /** A função escolhe o modelo (LLM_MODEL_RESUMO, LLM_MODEL_PERGUNTA...); sem ela, vale o LLM_MODEL. */
-  funcao?: FuncaoDeTexto;
+  /**
+   * A função escolhe o modelo (LLM_MODEL_RESUMO, LLM_MODEL_PERGUNTA...).
+   * Obrigatória: num merge que reescreva quem chama, o pnpm check acusa a
+   * função que sumiu, em vez de o pedido voltar ao LLM_MODEL em silêncio
+   * enquanto a linha [IA] do boot mostra o modelo da função.
+   */
+  funcao: FuncaoDeTexto;
 }): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
   let resposta: Awaited<ReturnType<typeof invokeLLM>>;
   try {

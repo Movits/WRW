@@ -252,13 +252,16 @@ sem ele).
   errado). Os ids que a chave do Gemini enxerga saem de
   `node scripts/listar-modelos-gemini.mjs`.
 - **Modelo de texto por função:** quem chama `invokeLLM` (ou `pedirJsonAIA`, de
-  `server/ia-em-json.ts`) passa a `funcao`, e não o id. A ordem é `LLM_MODEL_<FUNÇÃO>` > o
-  padrão da função no código > `LLM_MODEL` > o padrão (`FUNCOES_DE_TEXTO`, em
-  `_core/modelos-de-ia.ts`). Hoje são três: a extração da reunião (`extracao`, padrão
-  `gemini-3.5-flash-lite`, pela bancada A de texto de 16/11), o resumo guardado (`resumo`) e
-  o Pergunte (`pergunta`), estes dois sem padrão próprio. Chamada nova de texto sem função
-  fica no `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example`
-  (um teste confere os dois).
+  `server/ia-em-json.ts`, onde a função é obrigatória) passa a `funcao`, e não o id. A
+  ordem é `LLM_MODEL_<FUNÇÃO>` > o padrão da função no código > `LLM_MODEL` > o padrão
+  (`FUNCOES_DE_TEXTO`, em `_core/modelos-de-ia.ts`); o padrão da função só vale com o
+  `LLM_API_URL` na API do Gemini. Hoje são três, todas sem padrão próprio (seguem o
+  `LLM_MODEL`): a extração da reunião (`extracao`), o resumo guardado (`resumo`) e o
+  Pergunte (`pergunta`). O Lite que a bancada A de texto (16/11) indicou para a extração
+  não devolveu as entidades de cargo, ativo, necessidade e oportunidade, que a tela usa:
+  leia o `docs/deploy.md` antes de trocar. Chamada nova de texto sem função fica no
+  `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example` (um
+  teste confere os dois).
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas

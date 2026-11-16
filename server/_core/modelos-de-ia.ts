@@ -20,7 +20,8 @@
 // entrou no lugar do 2.5 Flash, descontinuado para chaves novas; que ele seja
 // id concreto ainda está em aberto: não constava da página de preços do Gemini
 // em outubro de 2026. A bancada A de texto (16/11/2026) manteve o Flash como
-// padrão do texto e levou só a extração ao Lite (FUNCOES_DE_TEXTO, abaixo).
+// padrão do texto; o Lite que ela indicou para a extração espera uma decisão
+// (FUNCOES_DE_TEXTO, abaixo).
 export const MODELO_DE_AUDIO_PADRAO = "gemini-3.5-flash";
 export const MODELO_DE_TEXTO_PADRAO = "gemini-3.5-flash";
 // Reserva para quando o modelo de áudio está lotado (503) ou com a cota do dia
@@ -41,9 +42,11 @@ export const MODELO_DE_AUDIO_RESERVA_PADRAO = "gemini-3.5-flash-lite";
 // O TEXTO POR FUNÇÃO. Cada função que a bancada A de texto mediu (16/11/2026)
 // tem a sua variável e pode ter um padrão no código. A ordem, sempre pela
 // guarda do texto:
-//   LLM_MODEL_<FUNÇÃO> > o padrão da função no código, se houver >
-//   LLM_MODEL > MODELO_DE_TEXTO_PADRAO.
+//   LLM_MODEL_<FUNÇÃO> > o padrão da função no código, se houver e se o texto
+//   for à API do Gemini > LLM_MODEL > MODELO_DE_TEXTO_PADRAO.
 // A variável recusada cai no degrau seguinte, e não direto no padrão fixo.
+// Hoje nenhuma função tem padrão no código: sem variável, as três seguem o
+// LLM_MODEL, e o deploy não troca o modelo de nenhuma.
 // Quem chama sem função (tradução, FAQ, Memória, recomendações, complementos
 // de contato...) fica no LLM_MODEL, como antes: a bancada não os mediu.
 export type FuncaoDeTexto = "extracao" | "resumo" | "pergunta";
@@ -58,12 +61,18 @@ type ModeloDaFuncao = {
 };
 
 export const FUNCOES_DE_TEXTO: Readonly<Record<FuncaoDeTexto, ModeloDaFuncao>> = {
-  // Extração da reunião (Tenho/Preciso e contatos): o Lite ganhou nos dois
-  // juízes e nas 3 rodadas (média 8,5 contra 7,25 do Flash), respondeu 5 vezes
-  // mais rápido e custou 78% menos por chamada. Com o padrão aqui, o deploy
-  // leva a extração ao Lite sem mexer no painel; LLM_MODEL_EXTRACAO a devolve
-  // ao Flash sem deploy.
-  extracao: { variavel: "LLM_MODEL_EXTRACAO", padrao: "gemini-3.5-flash-lite", nomeNoLog: "extração" },
+  // Extração da reunião (Tenho/Preciso e contatos): segue o LLM_MODEL. Na
+  // bancada, o Lite ganhou nos dois juízes e nas 3 rodadas (média 8,5 contra
+  // 7,25 do Flash), respondeu 5 vezes mais rápido e custou 78% menos por
+  // chamada. Mas, nas 3 rodadas, só devolveu entidades de pessoa e de empresa.
+  // Sem as de cargo, ativo, necessidade e oportunidade, somem em silêncio a
+  // linha "Assuntos" do perfil do contato (network-perfil-do-contato.ts), os
+  // chips da reunião (Meetings.tsx) e os destaques da transcrição
+  // (transcricao-destacada.ts). A troca espera a decisão do Roberto: aceitar a
+  // perda (LLM_MODEL_EXTRACAO no painel, sem deploy), gerar essas entidades no
+  // código ou ajustar o prompt e medir de novo. O padrão no código só volta
+  // depois dela.
+  extracao: { variavel: "LLM_MODEL_EXTRACAO", padrao: null, nomeNoLog: "extração" },
   // Resumo guardado: segue o LLM_MODEL (o Flash). Na bancada, o Flash esqueceu
   // menos (o próximo encontro, o perfil), e a espera não pesa: o resumo roda
   // na fila.
@@ -153,6 +162,23 @@ export function modeloDeAudioReserva(): string {
   return exigirModeloDeAudio(process.env.LLM_AUDIO_MODEL_RESERVA, MODELO_DE_AUDIO_RESERVA_PADRAO, "LLM_AUDIO_MODEL_RESERVA");
 }
 
+// O padrão de uma função é id cru do Gemini (gemini-3.5-flash-lite, por
+// exemplo) e só serve quando o texto vai à API do Gemini. Decide o destino, o
+// host do LLM_API_URL (lido a cada chamada, como o LLM_MODEL), e não o formato
+// do id no LLM_MODEL: um proxy compatível com a OpenAI, como o LiteLLM, aceita
+// "gemini/gemini-2.5-flash", que parece id do Gemini, e recusaria o id cru; a
+// Vertex AI pede "google/...". Fora da API do Gemini, ou com a URL vazia ou
+// inválida, vale o LLM_MODEL: na dúvida, o lado que já funcionava.
+const HOST_DA_API_DO_GEMINI = "generativelanguage.googleapis.com";
+
+function textoVaiAApiDoGemini(): boolean {
+  try {
+    return new URL(process.env.LLM_API_URL ?? "").hostname === HOST_DA_API_DO_GEMINI;
+  } catch {
+    return false;
+  }
+}
+
 // O modelo de uma chamada de texto, pela função (ver FUNCOES_DE_TEXTO). Sem
 // função, vale o LLM_MODEL, e sem ele o padrão. Quem chama não escolhe o id:
 // o `model` que invokeLLM aceitava, herança do proxy Manus, saiu, porque
@@ -161,11 +187,9 @@ export function modeloDeTexto(funcao?: FuncaoDeTexto): string {
   const geral = exigirModeloDeTexto(process.env.LLM_MODEL, MODELO_DE_TEXTO_PADRAO, "LLM_MODEL");
   if (!funcao) return geral;
   const { variavel, padrao } = FUNCOES_DE_TEXTO[funcao];
-  // O padrão da função é id do Gemini, e só serve quando o texto vai ao
-  // Gemini. Com o LLM_MODEL em outro provedor (o LLM_API_URL aponta para ele),
-  // esse id daria erro lá: vale o LLM_MODEL, até alguém definir a variável da
-  // função.
-  const degrauSeguinte = padrao && PARECE_ID_DO_GEMINI.test(geral) ? padrao : geral;
+  // Fora da API do Gemini, o padrão da função daria erro em toda chamada dela:
+  // vale o LLM_MODEL, até alguém definir a variável da função.
+  const degrauSeguinte = padrao && textoVaiAApiDoGemini() ? padrao : geral;
   return exigirModeloDeTexto(process.env[variavel], degrauSeguinte, variavel);
 }
 

@@ -156,8 +156,8 @@ código conseguia assinar uma sessão válida.
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
-| `LLM_MODEL` | opcional: modelo das chamadas de texto (tradução, FAQ, Memória, recomendações, complementos de contato), que vão ao `LLM_API_URL`; é também o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
-| `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | padrão no código `gemini-3.5-flash-lite`, que vale mesmo com o `LLM_MODEL` definido (com o `LLM_MODEL` em outro provedor, vale ele); a mesma guarda do `LLM_MODEL` |
+| `LLM_MODEL` | opcional: modelo das chamadas de texto (tradução, FAQ, Memória, recomendações, complementos de contato), que vão ao `LLM_API_URL`; é também o da extração, o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
+| `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL`. Antes de pôr o `gemini-3.5-flash-lite` aqui, leia o parágrafo abaixo da tabela: ele não devolve todas as entidades da reunião |
 | `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 
@@ -169,13 +169,29 @@ embeddings com a chave errada: chaves separadas ainda não existem no código.
 
 O texto tem um modelo por função, na ordem: a variável da função
 (`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO` ou `LLM_MODEL_PERGUNTA`) > o padrão
-da função no código, quando houver > `LLM_MODEL` > o padrão. Variável recusada
-cai no degrau seguinte. Só a extração tem padrão no código, o
-`gemini-3.5-flash-lite` (bancada A de texto, 16/11/2026: nota melhor, 5 vezes
-mais rápida e 78% mais barata por chamada): o deploy já a leva ao Lite, sem
-mexer no painel, e `LLM_MODEL_EXTRACAO` a devolve ao Flash sem deploy. Quem
-chama sem função (tradução, FAQ, Memória, recomendações, complementos de
-contato) fica no `LLM_MODEL`.
+da função no código, quando houver e o `LLM_API_URL` for a API do Gemini
+(`generativelanguage.googleapis.com`) > `LLM_MODEL` > o padrão. Variável
+recusada cai no degrau seguinte. Hoje nenhuma função tem padrão no código: sem
+variável, as três seguem o `LLM_MODEL`, e o deploy não troca o modelo de
+nenhuma. Quem chama sem função (tradução, FAQ, Memória, recomendações,
+complementos de contato) fica no `LLM_MODEL`.
+
+A bancada A de texto (16/11/2026) indicou o `gemini-3.5-flash-lite` para a
+extração: nota melhor, 5 vezes mais rápido e 78% mais barato por chamada. Mas,
+nas 3 rodadas (uma reunião sintética só, em pt-BR), ele só devolveu entidades
+de pessoa e de empresa. As de cargo, ativo, necessidade e oportunidade
+alimentam a linha "Assuntos" do perfil do contato, os chips da reunião e os
+destaques da transcrição: com o Lite, elas tendem a sumir das reuniões novas e
+das reprocessadas, sem erro na tela. Por isso o Lite não é o padrão da
+extração: a troca espera essa decisão, ou uma extração que não dependa do
+modelo para esses tipos.
+
+Antes de definir uma variável de função no Render, confira o id com a chave
+de produção, pela receita do cabeçalho de `scripts/listar-modelos-gemini.mjs`
+(`--conferir <id>`): se a chave não servir o id, toda chamada da função falha
+(na extração, toda reunião nova) até a variável sair. Na extração, com a
+variável no ar, confira numa reunião nova que os chips Cargo, Oferece, Procura
+e Oportunidade aparecem: se sumirem, é falha.
 
 No boot, o log mostra `[IA] áudio … · reserva … · texto … · extração … ·
 resumo … · pergunta …` com os modelos que valem depois da guarda, sem a chave

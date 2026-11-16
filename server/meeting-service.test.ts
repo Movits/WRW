@@ -142,7 +142,7 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     expect(gravacao.params).toEqual(expect.arrayContaining(["dona-1", "reuniao-1", "en", "Long talk from the meeting."]));
   });
 
-  it("a extração pede o modelo da função dela (LLM_MODEL_EXTRACAO, o Lite por padrão); a tradução fica no modelo geral", async () => {
+  it("a extração pede o modelo da função dela (LLM_MODEL_EXTRACAO; sem ela, o LLM_MODEL); a tradução fica no modelo geral", async () => {
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] });
     await extractMeetingData("Reunião com a Ana sobre a mina de lítio.");
     expect(invokeLLM).toHaveBeenCalledTimes(1);
