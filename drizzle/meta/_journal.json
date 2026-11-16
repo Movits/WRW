@@ -134,6 +134,13 @@
       "when": 1794808794946,
       "tag": "0018_chaves-de-acesso",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1794839620997,
+      "tag": "0019_qualidade-da-ia",
+      "breakpoints": true
     }
   ]
 }

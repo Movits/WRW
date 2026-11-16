@@ -1,0 +1,1 @@
+ALTER TABLE `meeting_contact_suggestions` ADD `presence` varchar(12);
