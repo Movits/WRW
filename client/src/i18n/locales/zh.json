@@ -2229,7 +2229,9 @@
       "topics": "话题：{{lista}}",
       "connectionsTitle": "连接与撮合",
       "connectionsNoConsent": "开启智能连接后即可查看此联系人的连接。",
-      "searchGlobal": "在全球网络中查找此联系人的连接"
+      "searchGlobal": "在全球网络中查找此联系人的连接",
+      "actionsEmpty": "没有与此联系人关联的后续行动。可以在这里记下一项，或在“后续行动”中将行动关联到此联系人。",
+      "actionsAll": "查看您的全部后续行动"
     },
     "availability": {
       "title": "将此联系人开放给网络中的机会",
@@ -2286,7 +2288,9 @@
       "availableYes": "已开放给网络中的机会",
       "availableNo": "已撤回对网络的授权",
       "connection": "平台已记录连接",
-      "stage": "连接阶段：{{etapa}}"
+      "stage": "连接阶段：{{etapa}}",
+      "nextAction": "后续行动：{{texto}}",
+      "nextActionDone": "后续行动已完成：{{texto}}"
     },
     "connections": {
       "title": "已记录的连接",

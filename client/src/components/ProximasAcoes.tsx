@@ -24,7 +24,8 @@ import {
 /**
  * As próximas ações da dona (H5a do desenho do gravador,
  * docs/arquitetura/gravador-de-reunioes.md): a lista que a página
- * /proximas-acoes (pages/ProximasAcoes.tsx) e o cartão do Dashboard usam.
+ * /proximas-acoes (pages/ProximasAcoes.tsx), o cartão do Dashboard e, desde a
+ * H5b, o perfil do contato (pages/PerfilDoContatoNetwork.tsx) usam.
  *
  * Cada ação tem a caixa de feita, que marca também o item do resumo de onde ela
  * veio. Os rótulos de voz ({F2}) viram o nome que a dona deu, enquanto a ação
@@ -104,11 +105,19 @@ export function FormularioDaAcao({ inicial, salvando, aoSalvar, aoCancelar }: {
   </form>;
 }
 
-/** A lista de ações. `compacto` é o cartão do Dashboard: só a caixa, o texto, o prazo e o contato. */
-export function ProximasAcoes({ acoes, compacto = false }: { acoes: readonly ProximaAcao[]; compacto?: boolean }) {
+/**
+ * A lista de ações. `compacto` é o cartão do Dashboard: só a caixa, o texto, o
+ * prazo e o contato. `contatoDaPagina` é o contato do perfil em que a lista
+ * está: o link para ele mesmo não aparece.
+ */
+export function ProximasAcoes({ acoes, compacto = false, contatoDaPagina }: {
+  acoes: readonly ProximaAcao[];
+  compacto?: boolean;
+  contatoDaPagina?: number;
+}) {
   const hoje = hojeNoRelogio();
   return <ul className="space-y-3">
-    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje}/>)}
+    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} contatoDaPagina={contatoDaPagina}/>)}
   </ul>;
 }
 
@@ -120,11 +129,14 @@ function Selo({ cor, children }: { cor: "vermelho" | "ambar"; children: ReactNod
 
 const BOTAO_DE_TEXTO = "inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50";
 
-function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compacto: boolean; hoje: string }) {
+function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina }: { acao: ProximaAcao; compacto: boolean; hoje: string; contatoDaPagina?: number }) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
-  // A ação e o item do resumo mudam juntos: relê as duas telas.
-  const reler = () => Promise.all([utils.proximasAcoes.invalidate(), utils.meetings.resumoGuardado.invalidate()]);
+  // A ação e o item do resumo mudam juntos: relê as telas. O perfil do contato
+  // mostra as ações ligadas a ele e as põe na linha do tempo (H5b).
+  const reler = () => Promise.all([
+    utils.proximasAcoes.invalidate(), utils.meetings.resumoGuardado.invalidate(), utils.networkInteligente.contato.invalidate(),
+  ]);
   const aoFalhar = (erro: unknown) => toast.error(mensagemDoErroDaAcao(t, erro));
   const marcar = trpc.proximasAcoes.marcarFeita.useMutation({ onError: aoFalhar, onSettled: reler });
   const ligar = trpc.proximasAcoes.ligarContato.useMutation({ onError: aoFalhar, onSettled: reler });
@@ -159,11 +171,15 @@ function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compac
     </li>;
   }
 
-  return <li className={`rounded-xl border p-3 ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"}`}>
+  // Um e-mail ou um link no texto, no detalhe ou no responsável não tem ponto de
+  // quebra: a linha quebra em qualquer lugar (a regra vale para o item inteiro),
+  // e o texto, item de flex, encolhe abaixo da palavra mais longa. Sem isso, a
+  // palavra passa da largura do celular e a página ganha rolagem lateral.
+  return <li className={`rounded-xl border p-3 wrap-anywhere ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"}`}>
     <label className="flex cursor-pointer items-start gap-3">
       <input type="checkbox" checked={acao.feita} disabled={ocupado} onChange={evento => marcar.mutate({ id: acao.id, feita: evento.target.checked })}
         className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-      <span id={idDoTexto} dir="auto" className={`text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
+      <span id={idDoTexto} dir="auto" className={`min-w-0 text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
     </label>
 
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 ps-7 text-xs text-white/55">
@@ -171,7 +187,7 @@ function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compac
       {situacao === "hoje" && <Selo cor="ambar">{t("proximasAcoes.dueToday")}</Selo>}
       {acao.prazo && <span>{t("proximasAcoes.dueDate", { data: prazoNaTela(acao.prazo, i18n.language) })}</span>}
       {acao.responsavel && <span dir="auto">{t("proximasAcoes.owner", { nome: comVozes(acao.responsavel) })}</span>}
-      {acao.contato && <Link href={`/meu-network-inteligente/contatos/${acao.contato.id}`} className="inline-flex items-center gap-1 text-amber-200 hover:text-amber-100">
+      {acao.contato && acao.contato.id !== contatoDaPagina && <Link href={`/meu-network-inteligente/contatos/${acao.contato.id}`} className="inline-flex items-center gap-1 text-amber-200 hover:text-amber-100">
         <UserRound size={12} aria-hidden/> {t("proximasAcoes.contact", { nome: acao.contato.nome })}
       </Link>}
       {!compacto && acao.prazoDito && <span dir="auto">{t("proximasAcoes.spokenDue", { prazo: acao.prazoDito })}</span>}

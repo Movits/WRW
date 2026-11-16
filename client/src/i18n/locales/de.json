@@ -2229,7 +2229,9 @@
       "topics": "Themen: {{lista}}",
       "connectionsTitle": "Verbindungen und Vermittlungen",
       "connectionsNoConsent": "Aktivieren Sie Intelligente Verbindungen, um die Verbindungen dieses Kontakts zu sehen.",
-      "searchGlobal": "Verbindungen dieses Kontakts im globalen Netzwerk suchen"
+      "searchGlobal": "Verbindungen dieses Kontakts im globalen Netzwerk suchen",
+      "actionsEmpty": "Keine nächsten Schritte mit diesem Kontakt verknüpft. Notieren Sie hier einen, oder verknüpfen Sie unter Nächste Schritte einen Schritt mit diesem Kontakt.",
+      "actionsAll": "Alle Ihre nächsten Schritte ansehen"
     },
     "availability": {
       "title": "Diesen Kontakt für Chancen im Netzwerk freigeben",
@@ -2286,7 +2288,9 @@
       "availableYes": "Für Chancen im Netzwerk freigegeben",
       "availableNo": "Freigabe für das Netzwerk widerrufen",
       "connection": "Verbindung von der Plattform erfasst",
-      "stage": "Phase der Verbindung: {{etapa}}"
+      "stage": "Phase der Verbindung: {{etapa}}",
+      "nextAction": "Nächster Schritt: {{texto}}",
+      "nextActionDone": "Nächster Schritt erledigt: {{texto}}"
     },
     "connections": {
       "title": "Erfasste Verbindungen",

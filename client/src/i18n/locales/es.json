@@ -2229,7 +2229,9 @@
       "topics": "Temas: {{lista}}",
       "connectionsTitle": "Conexiones e intermediaciones",
       "connectionsNoConsent": "Activa las Conexiones Inteligentes para ver las conexiones de este contacto.",
-      "searchGlobal": "Buscar conexiones de este contacto en la red global"
+      "searchGlobal": "Buscar conexiones de este contacto en la red global",
+      "actionsEmpty": "Ninguna próxima acción vinculada a este contacto. Anota una aquí, o vincula una acción a este contacto en Próximas acciones.",
+      "actionsAll": "Ver todas tus próximas acciones"
     },
     "availability": {
       "title": "Poner este contacto a disposición de las oportunidades de la red",
@@ -2286,7 +2288,9 @@
       "availableYes": "Puesto a disposición de las oportunidades de la red",
       "availableNo": "Autorización para la red retirada",
       "connection": "Conexión registrada por la plataforma",
-      "stage": "Etapa de la conexión: {{etapa}}"
+      "stage": "Etapa de la conexión: {{etapa}}",
+      "nextAction": "Próxima acción: {{texto}}",
+      "nextActionDone": "Próxima acción completada: {{texto}}"
     },
     "connections": {
       "title": "Conexiones registradas",
