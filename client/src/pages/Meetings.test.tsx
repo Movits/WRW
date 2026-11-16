@@ -870,6 +870,22 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     expect(document.querySelector("main")!.className).toContain("pb-36");
   });
 
+  it("a parte do meio que não carrega pula para a seguinte, e o aviso segue na barra quando a seguinte carrega (D1b)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const partes = [...PARTES, { seq: 2, url: "/manus-storage/meetings/dona/r/partes/0002-c.m4a", mimeType: "audio/mp4", inicioSegundos: 900, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 }];
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, recording: { ...GRAVACAO, durationSeconds: 1200, partes } });
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio")!;
+    fireEvent.click(within(barra).getByRole("button", { name: "Tocar" }));
+    fireEvent.ended(audio);
+    fireEvent.error(audio);
+    expect(audio.getAttribute("src")).toBe(partes[2].url);
+    fireEvent.loadedMetadata(audio);
+    fireEvent.loadedData(audio);
+    // Sem o aviso, o salto de 10 a 15 min ficaria sem explicação.
+    expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
+  });
+
   it("a transcrição antiga, sem falantes, segue como texto corrido", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt", segments: [] } });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));

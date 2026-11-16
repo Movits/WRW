@@ -1680,7 +1680,17 @@
     "playFrom": "الاستماع من {{tempo}}",
     "progressRecording": "التسجيل جارٍ: يصل الصوت شيئًا فشيئًا.",
     "progressUploading": "جارٍ استلام الصوت: {{recebidas}} من {{esperadas}}",
-    "progressTranscribing": "جارٍ التفريغ: {{transcritas}} من {{total}}"
+    "progressTranscribing": "جارٍ التفريغ: {{transcritas}} من {{total}}",
+    "player": {
+      "play": "تشغيل",
+      "pause": "إيقاف مؤقت",
+      "rewind": "الرجوع {{segundos}} ثانية",
+      "forward": "التقديم {{segundos}} ثانية",
+      "speed": "سرعة التشغيل: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "الموضع في التسجيل",
+      "positionValue": "{{atual}} من {{total}}"
+    }
   },
   "connections": {
     "messageSent": "تم إرسال الرسالة",

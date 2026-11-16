@@ -136,7 +136,8 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText("REUNIÃO COMPARTILHADA")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Reunião com a Ana" })).toBeInTheDocument();
     expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
-    expect(screen.getByText(/01:35/)).toBeInTheDocument();
+    // A linha da duração; o 01:35 aparece também na barra do player (o total, D1b).
+    expect(screen.getByText(/Duração: 01:35/)).toBeInTheDocument();
     expect(screen.getByTestId("resumo")).toHaveTextContent(`${TOKEN} sem_resumo`);
     expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
     fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
@@ -242,6 +243,23 @@ describe("Reunião aberta pelo link", () => {
     expect(barra.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
     expect(container.querySelector("main")!.className).toContain("pb-36");
     fireEvent.error(barra.querySelector("audio")!);
+    expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
+  });
+
+  it("em partes, a do meio que não carrega pula para a seguinte, e o aviso segue na barra quando a seguinte carrega (D1b)", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const parte = (seq: number) => ({ seq, url: `/reuniao-aberta/${TOKEN}/audio?parte=${seq}`, mimeType: "audio/mp4", inicioSegundos: seq * 600, duracaoSegundos: 600 });
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: { ...VISTA.gravacao, durationSeconds: 1800, partes: [parte(0), parte(1), parte(2)] } }));
+    abrir();
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    const audio = barra.querySelector("audio")!;
+    fireEvent.click(within(barra).getByRole("button", { name: "Tocar" }));
+    fireEvent.ended(audio);
+    fireEvent.error(audio);
+    expect(audio.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=2`);
+    fireEvent.loadedMetadata(audio);
+    fireEvent.loadedData(audio);
+    // Sem o aviso, o salto de 10 a 20 min ficaria sem explicação.
     expect(within(barra).getByRole("status")).toHaveTextContent("Não foi possível carregar o áudio agora.");
   });
 
@@ -373,14 +391,15 @@ describe("Reunião aberta pelo link — o erro da tradução diz o que houve e d
   it("gravação de mais de 1 h mostra a duração em H:MM:SS, como no detalhe da dona (G13a)", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: { ...VISTA.gravacao, durationSeconds: 4_500 } }));
     abrir();
-    expect(screen.getByText(/1:15:00/)).toBeInTheDocument();
+    // A linha da duração; o 1:15:00 aparece também na barra do player (o total, D1b).
+    expect(screen.getByText(/Duração: 1:15:00/)).toBeInTheDocument();
     expect(screen.queryByText(/75:00/)).not.toBeInTheDocument();
   });
 
   it("a linha da gravação tem um separador só", () => {
     duble.ver.mockReturnValue(pronta());
     abrir();
-    const linha = screen.getByText(/01:35/);
+    const linha = screen.getByText(/Duração: 01:35/);
     expect(linha.textContent).not.toMatch(/·\s*·/);
   });
 });

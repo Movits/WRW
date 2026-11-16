@@ -1680,7 +1680,17 @@
     "playFrom": "{{tempo}} から再生",
     "progressRecording": "録音中：音声は少しずつ届きます。",
     "progressUploading": "音声を受信中：{{esperadas}} 中 {{recebidas}}",
-    "progressTranscribing": "文字起こし中：{{total}} 中 {{transcritas}}"
+    "progressTranscribing": "文字起こし中：{{total}} 中 {{transcritas}}",
+    "player": {
+      "play": "再生",
+      "pause": "一時停止",
+      "rewind": "{{segundos}} 秒戻る",
+      "forward": "{{segundos}} 秒進む",
+      "speed": "再生速度：{{velocidade}}",
+      "speedValue": "{{velocidade}}倍",
+      "position": "再生位置",
+      "positionValue": "{{total}} 中 {{atual}}"
+    }
   },
   "connections": {
     "messageSent": "メッセージを送信しました",

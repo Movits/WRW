@@ -1680,7 +1680,17 @@
     "playFrom": "Слушать с {{tempo}}",
     "progressRecording": "Идёт запись: аудио поступает постепенно.",
     "progressUploading": "Получаем аудио: {{recebidas}} из {{esperadas}}",
-    "progressTranscribing": "Расшифровка: {{transcritas}} из {{total}}"
+    "progressTranscribing": "Расшифровка: {{transcritas}} из {{total}}",
+    "player": {
+      "play": "Воспроизвести",
+      "pause": "Пауза",
+      "rewind": "Назад на {{segundos}} секунд",
+      "forward": "Вперёд на {{segundos}} секунд",
+      "speed": "Скорость воспроизведения: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "Позиция в записи",
+      "positionValue": "{{atual}} из {{total}}"
+    }
   },
   "connections": {
     "messageSent": "Сообщение отправлено",

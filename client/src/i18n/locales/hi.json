@@ -1680,7 +1680,17 @@
     "playFrom": "{{tempo}} से सुनें",
     "progressRecording": "रिकॉर्डिंग जारी है: ऑडियो धीरे-धीरे आ रहा है।",
     "progressUploading": "ऑडियो मिल रहा है: {{esperadas}} में से {{recebidas}}",
-    "progressTranscribing": "ट्रांसक्राइब हो रहा है: {{total}} में से {{transcritas}}"
+    "progressTranscribing": "ट्रांसक्राइब हो रहा है: {{total}} में से {{transcritas}}",
+    "player": {
+      "play": "चलाएँ",
+      "pause": "रोकें",
+      "rewind": "{{segundos}} सेकंड पीछे जाएँ",
+      "forward": "{{segundos}} सेकंड आगे जाएँ",
+      "speed": "प्लेबैक की गति: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "रिकॉर्डिंग में स्थिति",
+      "positionValue": "{{total}} में से {{atual}}"
+    }
   },
   "connections": {
     "messageSent": "संदेश भेजा गया",

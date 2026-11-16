@@ -1680,7 +1680,17 @@
     "playFrom": "Listen from {{tempo}}",
     "progressRecording": "Recording in progress: the audio arrives a little at a time.",
     "progressUploading": "Receiving audio: {{recebidas}} of {{esperadas}}",
-    "progressTranscribing": "Transcribing: {{transcritas}} of {{total}}"
+    "progressTranscribing": "Transcribing: {{transcritas}} of {{total}}",
+    "player": {
+      "play": "Play",
+      "pause": "Pause",
+      "rewind": "Back {{segundos}} seconds",
+      "forward": "Forward {{segundos}} seconds",
+      "speed": "Playback speed: {{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "Position in the recording",
+      "positionValue": "{{atual}} of {{total}}"
+    }
   },
   "connections": {
     "messageSent": "Message sent",
