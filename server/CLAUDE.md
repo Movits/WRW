@@ -252,10 +252,14 @@ sem ele).
   enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
 - **Raciocínio:** o `invokeLLM` manda `reasoning_effort`, no nível de cima do corpo, só
   quando recebe `raciocinio`. Os campos `reasoning` e `thinking` saíram: o endpoint do
-  Gemini compatível com a OpenAI recusa os dois com 400. A extração, o resumo guardado e o
-  Pergunte pedem o nível da variável da própria função (`LLM_RACIOCINIO_EXTRACAO`,
-  `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA`, guarda em `_core/raciocinio-de-ia.ts`,
-  lidas a cada chamada); sem ela, nada vai e o modelo raciocina no padrão dele.
+  Gemini compatível com a OpenAI recusa os dois com 400. Passados por fora do tipo (de um
+  script em JS), eles e o `reasoning_effort` falham antes do fetch, em vez de sumirem em
+  silêncio. A extração, o resumo guardado e o Pergunte pedem o nível da variável da
+  própria função (`LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e
+  `LLM_RACIOCINIO_PERGUNTA`, guarda em `_core/raciocinio-de-ia.ts`, lidas a cada chamada);
+  sem ela, nada vai e o modelo raciocina no padrão dele. Função de texto que a bancada não
+  mediu chama o `pedirJsonAIA` sem `funcao` (opcional) e não lê nenhuma das três:
+  rotulá-la com uma delas a faria seguir a variável de outra função.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas

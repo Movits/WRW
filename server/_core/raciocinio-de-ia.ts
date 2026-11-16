@@ -49,12 +49,15 @@ const recusasAvisadas = new Set<string>();
 
 /**
  * O nível que a função pede, ou undefined para o pedido sair sem o campo.
- * Ausente ou vazia, a variável deixa o padrão do modelo, em silêncio. Caixa e
- * espaços em volta não contam ("LOW" vale "low"). Valor fora da lista avisa no
- * log uma vez por variável e valor, e também não manda nada: um nível que o
- * endpoint recusasse derrubaria a função inteira com 400.
+ * Sem função (quem chama o pedirJsonAIA fora das três que a bancada mede),
+ * undefined: nenhuma das variáveis vale para ela. Ausente ou vazia, a variável
+ * deixa o padrão do modelo, em silêncio. Caixa e espaços em volta não contam
+ * ("LOW" vale "low"). Valor fora da lista avisa no log uma vez por variável e
+ * valor, e também não manda nada: um nível que o endpoint recusasse derrubaria
+ * a função inteira com 400.
  */
-export function raciocinioDaFuncao(funcao: FuncaoComRaciocinio): NivelDeRaciocinio | undefined {
+export function raciocinioDaFuncao(funcao?: FuncaoComRaciocinio): NivelDeRaciocinio | undefined {
+  if (!funcao) return undefined;
   const variavel = VARIAVEL_DO_RACIOCINIO[funcao];
   const valor = process.env[variavel];
   if (valor === undefined || valor === "") return undefined;

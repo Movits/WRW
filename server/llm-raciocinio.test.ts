@@ -18,10 +18,12 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *    que o endpoint recusa: em produção nada muda;
  * 2. com `raciocinio`, o nível sobe como `reasoning_effort`, sozinho (nunca com
  *    `extra_body`, que a documentação proíbe junto); nível fora da lista nem
- *    sai, falha antes do fetch;
+ *    sai, falha antes do fetch, e os campos antigos (`reasoning`, `thinking`) ou
+ *    o nome do corpo (`reasoning_effort`), passados por fora do tipo, também;
  * 3. a extração, o resumo guardado e o Pergunte pedem o nível da variável da
  *    PRÓPRIA função (LLM_RACIOCINIO_EXTRACAO, _RESUMO e _PERGUNTA), lida a cada
- *    chamada, como a bancada precisa para trocar de braço num processo só;
+ *    chamada, como a bancada precisa para trocar de braço num processo só; quem
+ *    chama o pedirJsonAIA sem função não lê nenhuma delas;
  * 4. valor recusado avisa no log uma vez, sem levar ao log o que pode ser uma
  *    chave, e não manda nada;
  * 5. o boot mostra o que cada função pede.
@@ -136,11 +138,17 @@ describe("invokeLLM: o corpo do pedido", () => {
     expect(fetchFalso).not.toHaveBeenCalled();
   });
 
-  it("os campos que o endpoint recusava não sobem mais, nem passados por fora do tipo", async () => {
+  it("os campos que o endpoint recusava e o nome do corpo, passados por fora do tipo, falham antes do fetch", async () => {
     const { invokeLLM } = await import("./_core/llm");
-    await invokeLLM({ messages: mensagens, reasoning: { effort: "low" }, thinking: { thinking_level: "low" } } as never);
-
-    expect(camposDoRaciocinio(corpos[0])).toEqual([]);
+    // A sondagem antiga da bancada manda os dois primeiros. Descartados em
+    // silêncio, o pedido voltaria 200, com o raciocínio padrão, e a medida
+    // pareceria a do nível pedido.
+    const porForaDoTipo = [{ reasoning: { effort: "low" } }, { thinking: { thinking_level: "low" } }, { reasoning_effort: "low" }];
+    for (const extra of porForaDoTipo) {
+      const campo = Object.keys(extra)[0];
+      await expect(invokeLLM({ messages: mensagens, ...extra } as never)).rejects.toThrow(`não aceita "${campo}": o raciocínio vai em raciocinio`);
+    }
+    expect(fetchFalso).not.toHaveBeenCalled();
   });
 });
 
@@ -183,6 +191,24 @@ describe("a variável de cada função", () => {
 
     expect(corpos).toHaveLength(1);
     expect(corpos[0].reasoning_effort).toBe("low");
+  });
+
+  it("quem chama o pedirJsonAIA sem função não pede raciocínio, nem com as três variáveis definidas", async () => {
+    for (const nome of VARIAVEIS_DO_RACIOCINIO) vi.stubEnv(nome, "low");
+    const { pedirJsonAIA } = await import("./ia-em-json");
+    // Como chamam o mapa mental, a tradução do resumo e o e-mail de retorno,
+    // funções que a bancada não mediu.
+    const pedido = { sistema: "Responda em JSON.", usuario: "Monte o mapa da reunião.", nome: "mapa_mental", schema: { type: "object" }, timeoutMs: 5_000, orcamentoMs: 5_000 };
+    await pedirJsonAIA(pedido);
+    // O controle: a mesma chamada, com a função, pede o nível da variável dela.
+    await pedirJsonAIA({ ...pedido, funcao: "resumo" });
+
+    // Mutante "sem função vale a do resumo": o mapa mental passaria a
+    // raciocinar menos quando alguém ligasse LLM_RACIOCINIO_RESUMO.
+    expect(corpos).toHaveLength(2);
+    expect(camposDoRaciocinio(corpos[0])).toEqual([]);
+    expect(corpos[1].reasoning_effort).toBe("low");
+    expect(avisosDoRaciocinio()).toEqual([]);
   });
 
   it("cada função lê só a sua variável: ligar uma não liga as outras", async () => {

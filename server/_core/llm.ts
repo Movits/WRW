@@ -502,6 +502,17 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.max_tokens = resolvedMaxTokens;
   }
 
+  // Os campos antigos (`reasoning` e `thinking`, que o endpoint recusa com 400)
+  // e o nome do campo no corpo (`reasoning_effort`) não existem no tipo. Passados
+  // por fora dele, de um script em JS como a sondagem da bancada, seriam
+  // descartados em silêncio: o pedido voltaria 200, com o raciocínio padrão, e a
+  // medida pareceria a do nível pedido. Falham aqui, antes do fetch.
+  for (const campo of ["reasoning", "thinking", "reasoning_effort"]) {
+    if ((params as Record<string, unknown>)[campo] !== undefined) {
+      throw new Error(`O invokeLLM não aceita "${campo}": o raciocínio vai em raciocinio (${NIVEIS_DE_RACIOCINIO.join(", ")}).`);
+    }
+  }
+
   // Só sobe quando pedido, e sozinho: a documentação do Gemini proíbe
   // `reasoning_effort` e o extra_body.google.thinking_config na mesma chamada.
   // Nível fora da lista falha aqui, antes do fetch: no endpoint seria um 400,

@@ -26,11 +26,16 @@ export async function pedirJsonAIA(pedido: {
   timeoutMs: number;
   orcamentoMs: number;
   /**
-   * Quem pede: o resumo guardado ou o Pergunte. Decide o raciocínio que vai ao
-   * modelo, o da variável da função (server/_core/raciocinio-de-ia.ts); sem
-   * ela, o pedido sai sem o campo, como sempre saiu.
+   * Quem pede, entre as funções que a bancada de texto mede: o resumo guardado
+   * ("resumo") ou o Pergunte ("pergunta"). Decide o raciocínio que vai ao
+   * modelo, o da variável da função (server/_core/raciocinio-de-ia.ts).
+   * Opcional de propósito: função que a bancada não mediu (o mapa mental, a
+   * tradução do resumo, o e-mail de retorno) chama sem ela e sai sem o campo,
+   * como sempre saiu. Rotulá-la com uma das três a faria seguir a variável de
+   * outra função. Quem pega a função perdida num merge são os testes do resumo
+   * e do Pergunte em server/llm-raciocinio.test.ts, e não o tipo.
    */
-  funcao: FuncaoComRaciocinio;
+  funcao?: FuncaoComRaciocinio;
 }): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
   const raciocinio = raciocinioDaFuncao(pedido.funcao);
   let resposta: Awaited<ReturnType<typeof invokeLLM>>;
