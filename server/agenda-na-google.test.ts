@@ -60,9 +60,20 @@ vi.mock("./db", async () => {
         return [{ affectedRows: estado.afetadas.shift() ?? 1 }];
       },
     }),
+    // A exclusão da agenda roda numa transação (H15, com o lembrete): a mesma
+    // conexão falsa faz de transação, e os efeitos seguem na mesma ordem.
+    transaction: async (trabalho: (tx: unknown) => Promise<unknown>) => trabalho(db),
   };
   return { getDb: async () => db, exigirDb: async () => db };
 });
+
+// O lembrete no sino (H15) é dublê: que a exclusão o esquece, na transação dela,
+// está provado em server/agenda-de-reunioes.test.ts. Aqui contam só o banco da
+// agenda e a Google.
+vi.mock("./lembretes", () => ({
+  agendarLembreteDaAgenda: vi.fn(async () => {}),
+  esquecerLembrete: vi.fn(async () => {}),
+}));
 
 const servico = await import("./agenda-na-google");
 const { GoogleAgendaIndisponivel, GoogleAgendaNaoConectada } = await import("./google-agenda");

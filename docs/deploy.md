@@ -230,6 +230,41 @@ vão acontecer voltam a oferecer "Pôr na Google Agenda". A reunião que já aca
 criada lá: mudá-la só muda o evento que já existe, sem aviso aos convidados, e excluí-la
 deixa o evento na Google como histórico.
 
+### Para entrar com Face ID ou digital (chaves de acesso)
+
+Sem estas duas, o app sobe e a função fica desligada: o `chavesDeAcesso.estado`
+responde `disponivel: false` (é por ele que a tela da A7, ainda por fazer, vai
+decidir se mostra o botão), e os outros procedimentos `chavesDeAcesso.*`
+respondem `CHAVE_INDISPONIVEL` (`server/chaves-de-acesso.ts`).
+
+| Variável | Para quê | Valor em produção |
+|---|---|---|
+| `WEBAUTHN_RP_ID` | o domínio a que cada chave de acesso fica presa | `wrwglobal.org` |
+| `WEBAUTHN_ORIGENS` | os endereços que podem usar as chaves, separados por vírgula | `https://wrwglobal.org,https://www.wrwglobal.org` |
+
+- **Decidido pelo Roberto em 15/11/2026.** A chave presa a `wrwglobal.org` vale
+  com e sem www. Quem põe as duas no painel do Render é o Roberto; até lá, a
+  função fica invisível em produção.
+- **No `.onrender.com` a função não aparece:** a chave presa a `wrwglobal.org`
+  não vale lá, e o pedido que vem de uma origem fora da lista recebe
+  `disponivel: false`.
+- **O RP ID não muda depois da primeira chave cadastrada:** trocá-lo invalida
+  todas as chaves de todas as contas, e cada pessoa volta a entrar com e-mail e
+  senha.
+- **Valor errado desliga a função**, e o log avisa uma vez, no primeiro pedido
+  (`[Chaves de acesso] ...`): o RP ID é só o domínio, sem `https://`; cada origem é
+  `https://` (http só em `localhost`), sem caminho, e o domínio dela é o RP ID ou
+  um subdomínio dele. No desenvolvimento: `WEBAUTHN_RP_ID=localhost` e
+  `WEBAUTHN_ORIGENS=http://localhost:3000`.
+- **Como conferir que ligou**, depois de pôr as duas e de o deploy subir: abra
+  `https://wrwglobal.org/api/trpc/chavesDeAcesso.estado` no navegador. A resposta
+  é `{"result":{"data":{"json":{"disponivel":true}}}}`. Com `false`, a função
+  segue desligada: ou as variáveis não chegaram ao serviço, ou uma delas tem um
+  valor errado, e aí o log do Render traz o aviso `[Chaves de acesso]` (o
+  primeiro pedido depois do deploy o escreve). O mesmo endereço em
+  `https://www.wrwglobal.org` também dá `true`, e em
+  `https://mmm-gud5.onrender.com` dá `false`, como deve.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

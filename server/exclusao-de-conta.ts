@@ -53,18 +53,20 @@ import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona } from "./storage";
 import {
-  agendaReunioes, aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingTranscriptTranslations, meetingTranscripts,
-  meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
   strategicGroups, trustedDevices, userProfiles, users,
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
   googleAgendaConexoes,
+  proximasAcoes,
 } from "../drizzle/schema";
 
 /**
@@ -158,6 +160,11 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },
   { tabela: meetingTranscriptTranslations, coluna: meetingTranscriptTranslations.ownerId, origem: "openId" },
   { tabela: meetingTranscripts, coluna: meetingTranscripts.ownerId, origem: "openId" },
+  // As próximas ações (H5a): o que a dona confirmou nos resumos (com o trecho) e o que anotou.
+  { tabela: proximasAcoes, coluna: proximasAcoes.ownerId, origem: "openId" },
+  // Os lembretes no sino (H15): a hora de cada aviso da próxima ação e da agenda.
+  // Os avisos que já saíram estão em platform_notifications, que sai pelo id.
+  { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
   // O resumo guardado da reunião (H4) e os itens dele, que carregam trechos da transcrição.
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
@@ -210,6 +217,11 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: matches, coluna: matches.userId, origem: "id" },
   { tabela: matches, coluna: matches.matchedUserId, origem: "id" },
   { tabela: passwordResetTokens, coluna: passwordResetTokens.userId, origem: "id" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas: a chave pública e
+  // o identificador da conta que o aparelho guarda. O desafio de ENTRADA nasce
+  // sem conta e vence em 5 minutos; sai pelo prazo.
+  { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
+  { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
   { tabela: trustedDevices, coluna: trustedDevices.userId, origem: "id" },
   { tabela: securityEvents, coluna: securityEvents.userId, origem: "id" },
   { tabela: sessions, coluna: sessions.userId, origem: "id" },

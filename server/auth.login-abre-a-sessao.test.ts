@@ -22,6 +22,10 @@ const banco = vi.hoisted(() => ({
   ordem: [] as string[],
   /** O erro que o INSERT da sessão lança, quando definido. */
   falhaNaSessao: null as null | Error,
+  /** O erro que a gravação da tentativa lança para este resultado (certa ou errada), quando definido. */
+  falhaNaTentativa: null as null | ((sucesso: boolean) => Error | null),
+  /** O e-mail não é de conta nenhuma: o SELECT da conta volta vazio. */
+  semConta: false,
 }));
 
 vi.mock("./db", async importOriginal => {
@@ -35,6 +39,7 @@ vi.mock("./db", async importOriginal => {
             const nome = getTableName(tabela);
             if (nome !== "users") throw new Error(`SELECT inesperado em ${nome}`);
             banco.ordem.push(campos ? `SELECT users (${Object.keys(campos).join(",")})` : "SELECT users");
+            if (banco.semConta) return [];
             const linha = { ...banco.conta };
             return [campos ? Object.fromEntries(Object.keys(campos).map(coluna => [coluna, linha[coluna]])) : linha];
           },
@@ -66,11 +71,13 @@ vi.mock("./security", async importOriginal => ({
   ...(await importOriginal<typeof import("./security")>()),
   checkLoginRateLimit: async () => ({ allowed: true, remainingAttempts: 5 }),
   recordLoginAttempt: async (_identificador: string, _chave: string, sucesso: boolean) => {
+    const erro = banco.falhaNaTentativa?.(sucesso);
+    if (erro) throw erro;
     banco.ordem.push(`LOGIN_ATTEMPT ${sucesso}`);
   },
 }));
 
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
 import { loginUser } from "./auth";
 import { DURACAO_DA_SESSAO_MS } from "./duracao-da-sessao";
 import { authRouter, tetoDeLogin, tetoDeLoginPorEmail } from "./routers/auth";
@@ -105,6 +112,8 @@ beforeEach(() => {
   banco.sessoes = [];
   banco.ordem = [];
   banco.falhaNaSessao = null;
+  banco.falhaNaTentativa = null;
+  banco.semConta = false;
   tetoDeLogin.esquecer();
   tetoDeLoginPorEmail.esquecer();
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -177,7 +186,24 @@ describe("auth.login abre a sessão por abrirSessao, sem mudar o que se vê", ()
     expect(ctx.res.cookie).not.toHaveBeenCalled();
   });
 
-  it("a sessão não grava: a mensagem de sempre, sem cookie e sem auditoria de LOGIN", async () => {
+  it("a sessão não grava por erro de consulta: a mensagem de sempre, sem cookie e sem auditoria de LOGIN", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    banco.falhaNaSessao = new DrizzleQueryError(
+      "insert into `sessions` (...) values (...)",
+      [],
+      Object.assign(new Error("Duplicate entry 'x' for key 'sessions.sessionToken'"), { code: "ER_DUP_ENTRY", errno: 1062 }),
+    );
+    const ctx = contexto();
+
+    await expect(entrar(ctx)).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      message: "Erro interno ao criar sessão. Tente novamente.",
+    });
+    expect(banco.ordem).toEqual(["SELECT users", "LOGIN_ATTEMPT true", "UPDATE users (lastSignedIn)"]);
+    expect(ctx.res.cookie).not.toHaveBeenCalled();
+  });
+
+  it("a sessão não grava porque o banco caiu: 'banco indisponível' (não 'erro interno'), sem cookie e sem auditoria de LOGIN", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     banco.falhaNaSessao = new DrizzleQueryError(
       "insert into `sessions` (...) values (...)",
@@ -187,10 +213,69 @@ describe("auth.login abre a sessão por abrirSessao, sem mudar o que se vê", ()
     const ctx = contexto();
 
     await expect(entrar(ctx)).rejects.toMatchObject({
-      code: "UNAUTHORIZED",
-      message: "Erro interno ao criar sessão. Tente novamente.",
+      code: "INTERNAL_SERVER_ERROR",
+      message: MENSAGEM_BANCO_INDISPONIVEL,
     });
     expect(banco.ordem).toEqual(["SELECT users", "LOGIN_ATTEMPT true", "UPDATE users (lastSignedIn)"]);
+    expect(ctx.res.cookie).not.toHaveBeenCalled();
+  });
+});
+
+describe("as gravações de tentativa do login: banco fora do ar é erro, e outra falha vai para o log", () => {
+  // Eram `.catch(() => {})`: a queda virava "senha incorreta" sem a tentativa
+  // contar para o bloqueio, e nada ia para o log.
+  const queda = () =>
+    new DrizzleQueryError(
+      "update `login_attempts` set (...) where (...)",
+      [],
+      Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:3306"), { code: "ECONNREFUSED" }),
+    );
+
+  it.each([
+    ["a senha errada", false],
+    ["o e-mail de conta nenhuma", true],
+  ] as const)("%s com o banco fora do ar ao contar a tentativa: 'banco indisponível', e não 'senha incorreta'", async (_caso, semConta) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    banco.semConta = semConta;
+    banco.falhaNaTentativa = sucesso => (sucesso ? null : queda());
+    const ctx = contexto();
+
+    await expect(entrar(ctx, "errada")).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+    expect(banco.ordem).toEqual(["SELECT users"]);
+    expect(ctx.res.cookie).not.toHaveBeenCalled();
+  });
+
+  it("a senha errada com outra falha ao contar a tentativa: a mensagem de sempre, e a falha no log", async () => {
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => {});
+    banco.falhaNaTentativa = sucesso => (sucesso ? null : new Error("falha qualquer da gravação"));
+    const ctx = contexto();
+
+    await expect(entrar(ctx, "errada")).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      message: "E-mail ou senha incorretos. (4 tentativas restantes)",
+    });
+    expect(avisos).toHaveBeenCalledWith(expect.stringMatching(/^\[Auth\] a tentativa errada não foi registrada: .*falha qualquer da gravação/));
+    expect(ctx.res.cookie).not.toHaveBeenCalled();
+  });
+
+  it("a entrada certa com outra falha ao zerar as tentativas: entra, e a falha vai para o log", async () => {
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => {});
+    banco.falhaNaTentativa = sucesso => (sucesso ? new Error("falha qualquer da gravação") : null);
+    const ctx = contexto();
+
+    await expect(entrar(ctx)).resolves.toMatchObject({ success: true });
+    expect(ctx.res.cookie).toHaveBeenCalledTimes(1);
+    expect(avisos).toHaveBeenCalledWith(expect.stringMatching(/^\[Auth\] as tentativas erradas não foram zeradas: .*falha qualquer da gravação/));
+  });
+
+  it("a entrada certa com o banco fora do ar ao zerar as tentativas: 'banco indisponível', sem sessão e sem cookie", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    banco.falhaNaTentativa = sucesso => (sucesso ? queda() : null);
+    const ctx = contexto();
+
+    await expect(entrar(ctx)).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+    expect(banco.ordem).toEqual(["SELECT users"]);
+    expect(banco.sessoes).toEqual([]);
     expect(ctx.res.cookie).not.toHaveBeenCalled();
   });
 });

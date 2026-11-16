@@ -41,7 +41,7 @@ vi.mock("./db", async () => {
   };
 });
 
-import { BancoIndisponivel } from "./banco-indisponivel";
+import { BancoIndisponivel, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { DURACAO_DA_SESSAO_MS } from "./duracao-da-sessao";
 import { abrirSessao, identificadorDoAplicativo, ipGravadoNaSessao } from "./sessao";
 
@@ -221,9 +221,37 @@ describe("abrirSessao: banco fora do ar é erro", () => {
     expect(banco.linhas).toEqual([]);
   });
 
-  it("queda do driver no INSERT: lança o erro de sempre do login e não devolve token", async () => {
-    banco.falhaNoInsert = quedaNoInsert;
-    await expect(abrirSessao({ usuaria: USUARIA })).rejects.toThrow(new Error("Erro interno ao criar sessão. Tente novamente."));
+  it("queda do driver no INSERT: lança BancoIndisponivel, sem os parâmetros do Drizzle e sem token", async () => {
+    let tokenTentado = "";
+    banco.falhaNoInsert = valores => {
+      tokenTentado = valores.sessionToken as string;
+      return quedaNoInsert(valores);
+    };
+    const erro = await abrirSessao({ usuaria: USUARIA, ip: "198.51.100.23" }).then(
+      () => null,
+      (motivo: unknown) => motivo,
+    );
+
+    // O middleware de _core/trpc.ts reconhece a queda e diz "banco indisponível".
+    expect(erro).toBeInstanceOf(BancoIndisponivel);
+    expect(ehErroDeBancoIndisponivel(erro)).toBe(true);
+    // A cadeia não leva o erro original: a mensagem dele tem o token e o IP.
+    expect((erro as Error).cause).toBeUndefined();
+    expect(JSON.stringify(erro)).not.toContain(tokenTentado);
+    expect(String(erro)).not.toContain(tokenTentado);
+    expect(banco.linhas).toEqual([]);
+  });
+
+  it("erro de consulta no INSERT (não é queda): a frase genérica de sempre", async () => {
+    banco.falhaNoInsert = () =>
+      new DrizzleQueryError(
+        "insert into `sessions` (...) values (...)",
+        [],
+        Object.assign(new Error("Duplicate entry 'x' for key 'sessions.sessionToken'"), { code: "ER_DUP_ENTRY", errno: 1062 }),
+      );
+    const erro = await abrirSessao({ usuaria: USUARIA }).then(() => null, (motivo: unknown) => motivo);
+    expect(erro).toEqual(new Error("Erro interno ao criar sessão. Tente novamente."));
+    expect(ehErroDeBancoIndisponivel(erro)).toBe(false);
     expect(banco.linhas).toEqual([]);
   });
 });

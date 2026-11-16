@@ -19,6 +19,7 @@ import {
   contactAssets, contactNeeds, aiMatchSuggestions,
   meetings, meetingContactSuggestions,
   networkSugestoes, conexoesParticipantes,
+  proximasAcoes,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import nodeCrypto from "node:crypto";
@@ -1247,6 +1248,9 @@ export async function apagarRastroDoContato(
     .where(and(eq(meetings.ownerId, ownerId), eq(meetings.contactId, contactId)));
   await db.update(contextParticipants).set({ convertedContactId: null })
     .where(and(eq(contextParticipants.ownerId, ownerId), eq(contextParticipants.convertedContactId, contactId)));
+  // As próximas ações (H5a) também são da dona: ficam, sem o contato.
+  await db.update(proximasAcoes).set({ contactId: null, updatedAt: Date.now() })
+    .where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.contactId, contactId)));
 }
 
 export async function deletePrivateContact(

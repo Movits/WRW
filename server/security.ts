@@ -92,13 +92,22 @@ export function hashData(data: string): string {
 // ============================================================
 // RATE LIMITING E PROTEÇÃO CONTRA BRUTE FORCE
 // ============================================================
+/**
+ * A janela do bloqueio por tentativas (a última hora), pelo relógio do BANCO.
+ * `updatedAt` é gravado pelo próprio banco (DEFAULT e ON UPDATE
+ * CURRENT_TIMESTAMP, no fuso da sessão dele), e a comparação com uma data do
+ * Node só acertava com o banco em UTC. No MariaDB local, em
+ * America/Buenos_Aires, nenhuma tentativa caía na janela: a contagem não
+ * somava, o bloqueio nunca chegava e o login certo não zerava nada (achado na
+ * A6, nos testes da entrada com chave de acesso, que usa este mesmo balde).
+ */
+const dentroDaJanelaDeTentativas = () => sql`${loginAttempts.updatedAt} >= NOW() - INTERVAL 1 HOUR`;
+
 export async function checkLoginRateLimit(
   identifier: string,
   ipAddress: string
 ): Promise<{ allowed: boolean; remainingAttempts: number; blockedUntil?: Date }> {
   const db = await exigirDb();
-
-  const windowStart = new Date(Date.now() - 60 * 60 * 1000); // Última hora
 
   const existing = await db
     .select()
@@ -107,7 +116,7 @@ export async function checkLoginRateLimit(
       and(
         eq(loginAttempts.identifier, identifier),
         eq(loginAttempts.ipAddress, ipAddress),
-        gte(loginAttempts.updatedAt, windowStart)
+        dentroDaJanelaDeTentativas()
       )
     )
     .limit(1);
@@ -138,8 +147,6 @@ export async function recordLoginAttempt(
 ): Promise<void> {
   const db = await exigirDb();
 
-  const windowStart = new Date(Date.now() - 60 * 60 * 1000);
-
   const existing = await db
     .select()
     .from(loginAttempts)
@@ -147,7 +154,7 @@ export async function recordLoginAttempt(
       and(
         eq(loginAttempts.identifier, identifier),
         eq(loginAttempts.ipAddress, ipAddress),
-        gte(loginAttempts.updatedAt, windowStart)
+        dentroDaJanelaDeTentativas()
       )
     )
     .limit(1);

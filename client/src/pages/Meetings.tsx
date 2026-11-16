@@ -153,6 +153,11 @@ export default function Meetings() {
   // se a URL perder o ?agendada, e o envio único só cria a reunião no fim.
   const agendaNaTela = useRef<string | null>(null);
   const agendaDaGravacao = useRef<string | null>(null);
+  // O ?agendada da URL quando a gravação começou (nulo sem ele): a reunião que
+  // a faixa ler depois só ganha a gravação se for essa. O lembrete da agenda no
+  // sino (H15) abre /gravar?agendada=<id> nesta mesma página, e tocado com uma
+  // gravação na tela traria a faixa de outra reunião.
+  const agendadaNoInicio = useRef<string | null>(null);
   // O endereço do gravador quando a gravação começou, com a busca (?agendada,
   // ?emPartes): é para ele que a URL volta se sair de /gravar no meio da
   // gravação (o efeito mais abaixo). Assim a faixa da reunião da agenda, com o
@@ -329,12 +334,18 @@ export default function Meetings() {
   // perguntar: a sessão ocupada (lib/sessao-ocupada.ts) confirma só o Sair da
   // conta e o fechar ou recarregar da aba. Por isso o "Gravar agora" da agenda
   // põe a lista no histórico antes do gravador (pages/Agenda.tsx).
+  // O lembrete de outra reunião da agenda, tocado no sino no meio da gravação,
+  // fica no /gravar e só troca o ?agendada: a URL volta do mesmo jeito, e a
+  // gravação segue com a reunião de quando começou. Sem o ?agendada, a faixa só
+  // sai da tela, e a ligação continua (a decisão 2 da H16a).
   useEffect(() => {
-    if (!recording || naGravacao) return;
+    if (!recording) return;
+    const outraDaAgenda = agendada !== null && agendada !== agendadaNoInicio.current;
+    if (naGravacao && !outraDaAgenda) return;
     navigate(urlDaGravacao.current, { replace: true });
     // Um aviso só, com o mesmo id, mesmo com vários toques no menu ou no voltar.
     toast.info(t("meetings.stopRecordingToLeave"), { id: "gravacao-em-curso" });
-  }, [recording, naGravacao]);
+  }, [recording, naGravacao, agendada]);
 
   // A página não remonta entre as três rotas, e criar a reunião não relê a lista:
   // quem chega à lista vinda do gravador ou de um detalhe vê o estado atual,
@@ -364,6 +375,7 @@ export default function Meetings() {
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
     agendaDaGravacao.current = agendaNaTela.current;
+    agendadaNoInicio.current = agendada;
     // O Iniciar só aparece no gravador: o caminho é o /gravar (com ou sem a barra final).
     urlDaGravacao.current = `${ROTA_GRAVAR}${window.location.search}`;
     let reuniaoEmPartes: string | null = null;
@@ -441,8 +453,12 @@ export default function Meetings() {
         readAsDataUrl(t, capturedAudio.blob),
       ]);
       reuniaoCriada = created.id;
-      // A agenda de quando a gravação começou; ou a que terminou de carregar depois.
-      ligarAAgenda(agendaDaGravacao.current ?? agendaNaTela.current, created.id);
+      // A agenda de quando a gravação começou; ou a que terminou de carregar
+      // depois, se for a do ?agendada de quando ela começou. A faixa de outra
+      // reunião (o lembrete dela tocado no sino depois do Encerrar) não leva a
+      // gravação.
+      const carregouDepois = agendaNaTela.current !== null && agendaNaTela.current === agendadaNoInicio.current ? agendaNaTela.current : null;
+      ligarAAgenda(agendaDaGravacao.current ?? carregouDepois, created.id);
       await submitRecording.mutateAsync({
         meetingId: created.id,
         audioBase64,

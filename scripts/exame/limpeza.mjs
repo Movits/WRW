@@ -39,6 +39,10 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcript_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As próximas ações (H5a), que nascem dos itens do resumo ou à mão.
+  { tabela: "proximas_acoes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os lembretes no sino (H15) da próxima ação e da agenda.
+  { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // O resumo guardado da reunião (H4) e os itens dele.
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
@@ -115,6 +119,11 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "matches", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "matches", coluna: "matchedUserId", chave: "id", acao: "apagar" },
   { tabela: "password_reset_tokens", coluna: "userId", chave: "id", acao: "apagar" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas. O exame não
+  // cadastra chave, então os DELETEs não encontram nada; se um dia cadastrar, a
+  // chave sintética sai junto com o resto.
+  { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "resolvedBy", chave: "id", acao: "alertar", excetoSe: { coluna: "userId", chave: "id" } },

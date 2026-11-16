@@ -19,7 +19,16 @@ const estado = vi.hoisted(() => ({
   afetadas: 1,
   erroNoUpdate: null as unknown,
   erroNoSelect: null as unknown,
+  transacoes: 0,
 }));
+
+// O lembrete no sino (H15) é dublê aqui: o que se prova é que a agenda o chama
+// na mesma transação da escrita. A regra das horas está em server/lembretes.test.ts.
+const lembretes = vi.hoisted(() => ({
+  agendarLembreteDaAgenda: vi.fn(async () => {}),
+  esquecerLembrete: vi.fn(async () => {}),
+}));
+vi.mock("./lembretes", () => lembretes);
 
 vi.mock("./db", async () => {
   const { MySqlDialect: Dialeto } = await import("drizzle-orm/mysql-core");
@@ -70,6 +79,11 @@ vi.mock("./db", async () => {
         return [{ affectedRows: estado.afetadas }];
       },
     }),
+    // A transação entrega o próprio dublê: as escritas dela se registram como as outras.
+    transaction: async (trabalho: (tx: unknown) => Promise<unknown>) => {
+      estado.transacoes += 1;
+      return trabalho(db);
+    },
   };
   return { getDb: async () => db, exigirDb: async () => db };
 });
@@ -109,6 +123,9 @@ beforeEach(() => {
   estado.afetadas = 1;
   estado.erroNoUpdate = null;
   estado.erroNoSelect = null;
+  estado.transacoes = 0;
+  lembretes.agendarLembreteDaAgenda.mockClear();
+  lembretes.esquecerLembrete.mockClear();
 });
 
 describe("listarAgendaDaDona", () => {
@@ -243,6 +260,57 @@ describe("atualizarNaAgenda e excluirDaAgenda", () => {
     expect(await servico.excluirDaAgenda("dona-1", ID)).toEqual({ google: "ok", googleConvites: true });
     fila(schema.agendaReunioes, [{ google: null, googleConvites: false }]);
     expect(await servico.excluirDaAgenda("dona-1", ID)).toEqual({ google: null, googleConvites: false });
+  });
+});
+
+describe("o lembrete no sino (H15) anda com a reunião da agenda", () => {
+  it("marcar agenda o lembrete na transação da inserção, com a hora, a duração e os minutos do lembrete", async () => {
+    fila(schema.agendaReunioes, [{ total: 0 }]);
+    const { exigirDb } = await import("./db");
+    const banco = await exigirDb();
+    lembretes.agendarLembreteDaAgenda.mockImplementationOnce(async () => { estado.operacoes.push({ tipo: "lembrete" }); });
+    const { id } = await servico.criarNaAgenda("dona-1", dados);
+    expect(estado.transacoes).toBe(1);
+    expect(lembretes.agendarLembreteDaAgenda).toHaveBeenCalledTimes(1);
+    expect(lembretes.agendarLembreteDaAgenda).toHaveBeenCalledWith(banco, "dona-1", id, dados, expect.any(Number));
+    // A contagem, a reunião e depois o lembrete, que a lê pela id nova.
+    expect(estado.operacoes.map(operacao => operacao.tipo)).toEqual(["select", "insert", "lembrete"]);
+  });
+
+  it("no teto, nem a reunião nem o lembrete", async () => {
+    fila(schema.agendaReunioes, [{ total: servico.AGENDA_MAXIMO_POR_DONA }]);
+    await expect(servico.criarNaAgenda("dona-1", dados)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(lembretes.agendarLembreteDaAgenda).not.toHaveBeenCalled();
+  });
+
+  it("mudar reagenda com o que a dona escreveu agora; a de outra dona (zero linhas) não toca no lembrete", async () => {
+    const mudada = { ...dados, inicioEm: dados.inicioEm + 3_600_000, lembreteMinutos: 60 };
+    await servico.atualizarNaAgenda("dona-1", ID, mudada);
+    expect(estado.transacoes).toBe(1);
+    expect(lembretes.agendarLembreteDaAgenda).toHaveBeenCalledWith(expect.anything(), "dona-1", ID, mudada, expect.any(Number));
+    lembretes.agendarLembreteDaAgenda.mockClear();
+    estado.afetadas = 0;
+    await expect(servico.atualizarNaAgenda("dona-2", ID, mudada)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(lembretes.agendarLembreteDaAgenda).not.toHaveBeenCalled();
+  });
+
+  it("tirar da agenda esquece o lembrete e os avisos dela, na transação da exclusão; a de outra dona, não", async () => {
+    // A exclusão lê antes o estado na Google da linha (H16c), na mesma transação.
+    fila(schema.agendaReunioes, [{ google: null, googleConvites: false }]);
+    await servico.excluirDaAgenda("dona-1", ID);
+    expect(estado.transacoes).toBe(1);
+    expect(lembretes.esquecerLembrete).toHaveBeenCalledWith(expect.anything(), "dona-1", "agenda", ID);
+    lembretes.esquecerLembrete.mockClear();
+    estado.afetadas = 0;
+    await expect(servico.excluirDaAgenda("dona-2", ID)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
+  });
+
+  it("ligar a gravação (o \"Gravar agora\") não mexe no lembrete", async () => {
+    fila(schema.meetings, [{ id: REUNIAO }]);
+    await servico.ligarGravacaoNaAgenda("dona-1", ID, REUNIAO);
+    expect(lembretes.agendarLembreteDaAgenda).not.toHaveBeenCalled();
+    expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
   });
 });
 

@@ -3,9 +3,25 @@ import { eq } from "drizzle-orm";
 import { exigirDb } from "./db";
 import { users, sessions } from "../drizzle/schema";
 import { checkLoginRateLimit, recordLoginAttempt } from "./security";
+import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { filaDoBcrypt } from "./fila-do-bcrypt";
 import { abrirSessao, ipGravadoNaSessao } from "./sessao";
 import crypto from "crypto";
+
+/**
+ * O `.catch` das gravações de tentativa do login (`recordLoginAttempt`). Banco
+ * fora do ar é erro: sobe como é, e a tela diz "banco indisponível" (o
+ * middleware de _core/trpc.ts), e não "senha incorreta" com a tentativa sem
+ * contar. Outra falha vai para o log, e o login segue como antes. Era
+ * `.catch(() => {})`, que engolia tudo, sem uma linha no log (revisão da A6, que
+ * usa a mesma regra em server/chaves-de-acesso.ts).
+ */
+function relancarSeOBancoCaiu(oQueNaoFoiGravado: string) {
+  return (erro: unknown): void => {
+    if (ehErroDeBancoIndisponivel(erro)) throw erro;
+    console.warn(`[Auth] ${oQueNaoFoiGravado}: ${descreverErroDeBanco(erro)}`);
+  };
+}
 
 // ─── Gerar openId único para usuários de email ───────────────
 function generateOpenId(): string {
@@ -124,7 +140,7 @@ export async function loginUser(params: {
 
   if (userRows.length === 0) {
     // Registrar tentativa falha mesmo para e-mails inexistentes (evita timing attack)
-    await recordLoginAttempt(identifier, chaveDoBloqueio, false).catch(() => {});
+    await recordLoginAttempt(identifier, chaveDoBloqueio, false).catch(relancarSeOBancoCaiu("a tentativa errada não foi registrada"));
     throw new Error("E-mail ou senha incorretos.");
   }
 
@@ -143,14 +159,15 @@ export async function loginUser(params: {
   const passwordOk = await filaDoBcrypt.executar(() => bcrypt.compare(params.password, passwordHash));
   if (!passwordOk) {
     // Registrar tentativa falha no banco
-    await recordLoginAttempt(identifier, chaveDoBloqueio, false).catch(() => {});
+    await recordLoginAttempt(identifier, chaveDoBloqueio, false).catch(relancarSeOBancoCaiu("a tentativa errada não foi registrada"));
     const remaining = rateCheck.remainingAttempts - 1;
     const hint = remaining > 0 ? ` (${remaining} tentativa${remaining !== 1 ? "s" : ""} restante${remaining !== 1 ? "s" : ""})` : " Conta será bloqueada na próxima tentativa.";
     throw new Error(`E-mail ou senha incorretos.${hint}`);
   }
 
-  // Login bem-sucedido: limpar tentativas anteriores
-  await recordLoginAttempt(identifier, chaveDoBloqueio, true).catch(() => {});
+  // Login bem-sucedido: limpar tentativas anteriores. A sessão ainda não foi
+  // aberta: com o banco fora do ar, o login para aqui.
+  await recordLoginAttempt(identifier, chaveDoBloqueio, true).catch(relancarSeOBancoCaiu("as tentativas erradas não foram zeradas"));
 
   // Atualizar lastSignedIn
   await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));

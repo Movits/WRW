@@ -27,7 +27,9 @@ import {
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
+import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
+import { soltarAcoesDaReuniao } from "./proximas-acoes";
 
 export const MAX_MEETING_AUDIO_BYTES = 10 * 1024 * 1024;
 export const MAX_MEETING_DURATION_SECONDS = 10 * 60;
@@ -891,7 +893,7 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   }
   if (viva.status !== "processing" || Number(viva.updatedAt) !== ficha) throw new ReuniaoTomadaPorOutraExecucao();
 
-  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId);
+  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId, false);
 
   const completedAt = now();
   // O resumo guardado (mais abaixo) nasce apontando para esta transcrição.
@@ -1457,7 +1459,7 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
   for (const parte of partes) await apagarArquivoDaGravacao(parte.storageKey);
 
-  await apagarDerivadosSemGravacao(db, ownerId, meetingId);
+  await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
   await db.delete(meetingRecordings).where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
   await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 }
@@ -1467,8 +1469,13 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
  * traduções e resumo guardado —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
  * fica, porque é dele que sai o resultado novo. Mora dentro da lista única de
  * apagarDerivadosDaReuniao para as duas nunca divergirem.
+ *
+ * As próximas ações (H5a) não saem: são da dona. Elas se soltam primeiro,
+ * enquanto a reunião e os nomes das vozes ainda existem (`reuniaoSai` é a
+ * exclusão; sem ele, o reprocesso, que zera os nomes e refaz os itens).
  */
-async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string) {
+async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string, reuniaoSai: boolean) {
+  await soltarAcoesDaReuniao(db, ownerId, meetingId, reuniaoSai);
   await db.delete(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId)));
   // As pendências de Quem Sou / Tenho / Preciso tiradas desta reunião carregam
   // trechos literais da transcrição: saem com ela.
@@ -1496,6 +1503,8 @@ export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   if (!linhasAfetadas(marcada)) return false;
   await apagarDerivadosDaReuniao(db, ownerId, meetingId);
+  // Os avisos da reunião no sino (H15: o de pronta, com o título) saem com ela.
+  await apagarAvisosDaReuniao(db, ownerId, meetingId);
   // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
   // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
   await soltarGravacaoDaAgenda(db, ownerId, meetingId);

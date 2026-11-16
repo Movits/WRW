@@ -18,6 +18,7 @@ import { SmartMatchConsent } from "@/components/SmartMatchConsent";
 import { GlobalMenu } from "@/components/AppHeader";
 import { BrandMark } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { CartaoDeProximasAcoes } from "@/components/ProximasAcoes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1226,6 +1227,11 @@ export default function Dashboard() {
             <Mic size={18} /> {t("dashboard.recordMeeting")}
           </Link>
         </div>
+
+        {/* ─── PRÓXIMAS AÇÕES (H5a) ───
+            As 5 abertas por prazo, do que a dona confirmou nos resumos das
+            reuniões e do que anotou; a lista inteira mora em /proximas-acoes. */}
+        <CartaoDeProximasAcoes />
 
         {/* ─── STATS ─── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">

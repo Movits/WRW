@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucide-react";
@@ -10,6 +11,7 @@ import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/Reunia
 import { mmss } from "@/components/TranscricaoPorFalante";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { ROTA_DAS_PROXIMAS_ACOES, viraProximaAcao } from "@shared/proximas-acoes";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -23,7 +25,9 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * Nada extraído por IA entra sozinho: cada item nasce "para conferir", com o
  * trecho da transcrição que o sustenta, e a dona confirma ou ignora. Os
  * ignorados ficam recolhidos, com Desfazer. O "▶ mm:ss" leva o player da barra
- * do rodapé ao ponto do trecho.
+ * do rodapé ao ponto do trecho. A ação ou tarefa confirmada vira próxima ação
+ * (H5a, server/proximas-acoes.ts): o confirmado tem "Desfazer a confirmação",
+ * que nela pede confirmação antes, porque apaga a próxima ação.
  *
  * Serve às duas telas: o detalhe da dona (pages/Meetings.tsx), que decide, e o
  * link aberto (pages/ReuniaoAberta.tsx), só de leitura: sem os botões de
@@ -261,7 +265,7 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
   aoIrPara?: (segundo: number) => void;
   destacado: boolean;
   decidindo: boolean;
-  aoDecidir: (status: "confirmed" | "ignored") => void;
+  aoDecidir: (status: "confirmed" | "ignored" | "pending") => void;
   aoMarcar: (feito: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -303,6 +307,8 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
           <q dir="auto" className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
+    {item.status === "confirmed" && !peloLink && <DesfazerConfirmacao viraAcao={viraProximaAcao(item.section)} desabilitado={decidindo}
+      descritoPor={idDoTexto} aoDesfazer={() => aoDecidir("pending")}/>}
     {pendente && !peloLink && <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("confirmed")}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50"><Check size={14}/> {t("meetings.summary.confirm")}</button>
@@ -310,4 +316,37 @@ function ItemDoResumo({ item, peloLink, comVozes, aoIrPara, destacado, decidindo
         className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/65 disabled:opacity-50"><X size={14}/> {t("meetings.summary.ignore")}</button>
     </div>}
   </li>;
+}
+
+/**
+ * O item confirmado volta a "para conferir" (H5a). A ação ou tarefa confirmada
+ * virou próxima ação, e desconfirmar a apaga no servidor: antes, a tela pede a
+ * confirmação. Os outros itens voltam direto.
+ */
+function DesfazerConfirmacao({ viraAcao, desabilitado, descritoPor, aoDesfazer }: {
+  viraAcao: boolean;
+  desabilitado: boolean;
+  descritoPor: string;
+  aoDesfazer: () => void;
+}) {
+  const { t } = useTranslation();
+  const [perguntando, setPerguntando] = useState(false);
+  if (perguntando) {
+    return <div className="mt-3 rounded-lg border border-amber-300/30 bg-amber-300/[0.06] p-3 text-xs text-amber-100">
+      <p>{t("proximasAcoes.undoConfirmQuestion")}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" aria-describedby={descritoPor} disabled={desabilitado} onClick={() => { setPerguntando(false); aoDesfazer(); }}
+          className="rounded-lg bg-amber-400 px-3 py-1.5 font-bold text-[#1a120c] disabled:opacity-50">{t("proximasAcoes.undoConfirmYes")}</button>
+        <button type="button" onClick={() => setPerguntando(false)}
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-white/70">{t("proximasAcoes.cancel")}</button>
+      </div>
+    </div>;
+  }
+  return <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+    {viraAcao && <Link href={ROTA_DAS_PROXIMAS_ACOES} className="font-semibold text-amber-200 hover:text-amber-100">{t("proximasAcoes.inNextActions")}</Link>}
+    <button type="button" aria-describedby={descritoPor} disabled={desabilitado} onClick={() => (viraAcao ? setPerguntando(true) : aoDesfazer())}
+      className="inline-flex items-center gap-1 text-white/45 hover:text-white/75 disabled:opacity-50">
+      <RotateCcw size={12} aria-hidden/> {t("proximasAcoes.undoConfirm")}
+    </button>
+  </div>;
 }

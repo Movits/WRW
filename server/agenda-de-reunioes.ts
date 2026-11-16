@@ -5,6 +5,7 @@ import type { ParticipanteDaAgenda } from "@shared/agenda";
 import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { agendaReunioes, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { agendarLembreteDaAgenda, esquecerLembrete } from "./lembretes";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 
 /**
@@ -190,15 +191,20 @@ export async function criarNaAgenda(ownerId: string, dados: DadosDaAgendada, opc
   }
   const agora = Date.now();
   const id = crypto.randomUUID();
-  await db.insert(agendaReunioes).values({
-    id, ownerId, ...dados, googleConvites: dados.googleConvites === true,
-    google: opcoes.naGoogle ? "pendente" : null, meetingId: null, createdAt: agora, updatedAt: agora,
+  await db.transaction(async tx => {
+    await tx.insert(agendaReunioes).values({
+      id, ownerId, ...dados, googleConvites: dados.googleConvites === true,
+      google: opcoes.naGoogle ? "pendente" : null, meetingId: null, createdAt: agora, updatedAt: agora,
+    });
+    // O lembrete no sino (H15), junto com a reunião: os minutos escolhidos antes do início.
+    await agendarLembreteDaAgenda(tx, ownerId, id, dados, agora);
   });
   return { id, updatedAt: agora };
 }
 
 /**
- * Muda o que a dona escreveu. A gravação ligada fica como está.
+ * Muda o que a dona escreveu. A gravação ligada fica como está; a hora ou o
+ * lembrete novos reagendam o lembrete no sino, na mesma transação (H15).
  *
  * O estado na Google muda na mesma escrita: com a Google Agenda conectada,
  * "pendente" (a rota manda a versão nova em seguida); sem ela, a reunião que já
@@ -212,26 +218,33 @@ export async function atualizarNaAgenda(ownerId: string, id: string, dados: Dado
   const google = opcoes.naGoogle
     ? "pendente" as const
     : sql`CASE WHEN ${agendaReunioes.google} IS NULL THEN NULL ELSE ${"falhou"} END`;
-  const resultado = await db.update(agendaReunioes).set({ ...dados, google, updatedAt: agora })
-    .where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
-  if (!linhasAfetadas(resultado)) throw naoEncontrada();
+  await db.transaction(async tx => {
+    const resultado = await tx.update(agendaReunioes).set({ ...dados, google, updatedAt: agora })
+      .where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
+    if (!linhasAfetadas(resultado)) throw naoEncontrada();
+    await agendarLembreteDaAgenda(tx, ownerId, id, dados, agora);
+  });
   return { id, updatedAt: agora };
 }
 
 /**
- * Tira a reunião da agenda. A gravação, se houver, continua em Reuniões.
+ * Tira a reunião da agenda. A gravação, se houver, continua em Reuniões; o
+ * lembrete no sino e os avisos dela saem junto (H15).
  * Devolve o estado na Google e a escolha do convite da linha que saiu: a rota
  * tira o evento da Google em seguida (primeiro o banco), quando ele foi para lá.
  */
 export async function excluirDaAgenda(ownerId: string, id: string): Promise<{ google: EstadoNaGoogle | null; googleConvites: boolean }> {
   const db = await exigirDb();
   const daDona = and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId));
-  const [linha] = await db.select({ google: agendaReunioes.google, googleConvites: agendaReunioes.googleConvites })
-    .from(agendaReunioes).where(daDona).limit(1);
-  if (!linha) throw naoEncontrada();
-  const resultado = await db.delete(agendaReunioes).where(daDona);
-  if (!linhasAfetadas(resultado)) throw naoEncontrada();
-  return { google: estadoNaGoogle(linha.google), googleConvites: convitesPelaGoogle(linha.googleConvites) };
+  return db.transaction(async tx => {
+    const [linha] = await tx.select({ google: agendaReunioes.google, googleConvites: agendaReunioes.googleConvites })
+      .from(agendaReunioes).where(daDona).limit(1);
+    if (!linha) throw naoEncontrada();
+    const resultado = await tx.delete(agendaReunioes).where(daDona);
+    if (!linhasAfetadas(resultado)) throw naoEncontrada();
+    await esquecerLembrete(tx, ownerId, "agenda", id);
+    return { google: estadoNaGoogle(linha.google), googleConvites: convitesPelaGoogle(linha.googleConvites) };
+  });
 }
 
 /**

@@ -446,6 +446,27 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(sequencia.slice(-2)).toEqual(["update", "delete"]);
   });
 
+  it("os avisos da reunião no sino (H15) saem com ela: só os do gravador, da conta da dona, pelo link da reunião, antes de soltar a agenda", async () => {
+    tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    await servico.deletePrivateMeeting("dona-1", "reuniao-1");
+    expect(leituras.find(operacao => operacao.tabela === schema.users)?.params).toEqual(["dona-1"]);
+    const avisos = delecoes.filter(operacao => operacao.tabela === schema.platformNotifications);
+    expect(avisos.map(predicadoDe)).toEqual([{
+      sql: "(`platform_notifications`.`userId` = ? and `platform_notifications`.`type` in (?, ?) and `platform_notifications`.`actionUrl` = ?)",
+      params: [7, "lembrete", "reuniao_pronta", "/meetings/reuniao-1"],
+    }]);
+    // Os avisos, o ponteiro da agenda e, por último, a reunião.
+    expect(sequencia.slice(-3)).toEqual(["delete", "update", "delete"]);
+    expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
+  });
+
+  it("reunião de outra dona não apaga aviso nenhum", async () => {
+    tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.meetings, []);
+    await servico.deletePrivateMeeting("dona-2", "reuniao-1");
+    expect(delecoes.filter(operacao => operacao.tabela === schema.platformNotifications)).toHaveLength(0);
+  });
+
   it("reunião de outra dona não solta nada da agenda", async () => {
     tabelas.set(schema.meetings, []);
     await servico.deletePrivateMeeting("dona-2", "reuniao-1");
@@ -464,5 +485,21 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(await servico.deletePrivateMeeting("dona-2", "reuniao-1")).toBe(false);
     expect(storageDelete).not.toHaveBeenCalled();
     expect(tabelasApagadas()).toHaveLength(0);
+  });
+
+  it("as próximas ações (H5a) ficam com a dona e se soltam ANTES de qualquer delete: o nome da voz vira texto, e reunião, item e trecho saem", async () => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, speakerNames: { F2: "Carla" } }]);
+    tabelas.set(schema.proximasAcoes, [{ id: "acao-1", texto: "{F2} envia a proposta", detalhe: null, responsavel: "{F2}", itemId: "item-1" }]);
+    await servico.deletePrivateMeeting("dona-1", "reuniao-1");
+    const soltura = atualizacoes.filter(operacao => operacao.tabela === schema.proximasAcoes);
+    expect(soltura).toHaveLength(1);
+    expect(soltura[0].valores).toEqual({
+      texto: "Carla envia a proposta", detalhe: null, responsavel: "Carla", itemId: null, meetingId: null, trecho: null, updatedAt: expect.any(Number),
+    });
+    expect(predicadoDe(soltura[0])).toEqual({ sql: "(`proximas_acoes`.`id` = ? and `proximas_acoes`.`owner_id` = ?)", params: ["acao-1", "dona-1"] });
+    // A ação nunca é apagada, e a soltura vem logo depois da marca 'deleted', antes dos derivados.
+    expect(tabelasApagadas()).not.toContain(schema.proximasAcoes);
+    expect(sequencia.slice(0, 3)).toEqual(["update", "update", "delete"]);
+    expect(atualizacoes[1].tabela).toBe(schema.proximasAcoes);
   });
 });

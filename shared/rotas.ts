@@ -21,9 +21,10 @@ export const ROTA_DAS_REUNIOES = "/meetings";
  * O detalhe de uma reunião. As opções abrem a tela já num ponto: `t` é o
  * segundo de uma fala (o player vai até ele), `q` o termo buscado na
  * transcrição e `item` o id de um item do resumo guardado (a aba Resumo abre
- * nele, destacado). Servem aos links da busca entre reuniões (H7), das próximas
- * ações (H5) e dos lembretes (H15); a tela os lê pelo useSearch
- * (client/src/pages/Meetings.tsx). Sem opções, é o endereço de sempre.
+ * nele, destacado). Servem aos links da busca entre reuniões (H7) e das próximas
+ * ações (H5); a tela os lê pelo useSearch (client/src/pages/Meetings.tsx). Sem
+ * opções, é o endereço de sempre, que o aviso de reunião pronta no sino (H15)
+ * usa e pelo qual ele sai quando a reunião é excluída (server/lembretes.ts).
  */
 export function rotaDaReuniao(id: string, opcoes: { t?: number; q?: string; item?: string } = {}) {
   const caminho = `${ROTA_DAS_REUNIOES}/${encodeURIComponent(id)}`;
