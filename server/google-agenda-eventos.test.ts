@@ -26,6 +26,7 @@ const reuniao = (extra: Partial<Parameters<typeof eventos.corpoDoEvento>[0]> = {
   local: "https://meet.google.com/abc-defg-hij",
   participantes: [{ nome: "Ana", email: "Ana@Exemplo.com" }, { nome: "Bia", email: null }, { nome: null, email: "cris@exemplo.com" }],
   lembreteMinutos: 15,
+  googleConvites: true,
   ...extra,
 });
 
@@ -86,6 +87,14 @@ describe("o id e o corpo do evento", () => {
     expect(eventos.corpoDoEvento(reuniao({ lembreteMinutos: 0 })).reminders.overrides).toEqual([{ method: "popup", minutes: 0 }]);
   });
 
+  // Convidado no evento ganha uma cópia dele na própria Google Agenda, mesmo
+  // com sendUpdates=none: sem a dona marcar o convite, ninguém entra no evento.
+  it("sem o convite marcado, o evento vai sem convidados, e a lista vazia tira no PATCH quem estava", () => {
+    const corpo = eventos.corpoDoEvento(reuniao({ googleConvites: false }));
+    expect(corpo.attendees).toEqual([]);
+    expect(corpo).toMatchObject({ summary: "Conversa com a Bia", location: "https://meet.google.com/abc-defg-hij" });
+  });
+
   it("o mesmo e-mail duas vezes vira um convidado só", () => {
     const corpo = eventos.corpoDoEvento(reuniao({ participantes: [{ nome: "Ana", email: "ana@exemplo.com" }, { nome: "Ana Souza", email: " ANA@exemplo.com " }] }));
     expect(corpo.attendees).toEqual([{ email: "ana@exemplo.com", displayName: "Ana" }]);
@@ -93,15 +102,16 @@ describe("o id e o corpo do evento", () => {
 });
 
 describe("gravar o evento", () => {
-  it("cria com o id da reunião, o token no cabeçalho e, sem a escolha da dona, sem convite (sendUpdates=none)", async () => {
+  it("cria com o id da reunião, o token no cabeçalho e, sem a escolha da dona, sem convite nem convidados (sendUpdates=none)", async () => {
     const google = dubleDaGoogle(json({ id: EVENTO_ID }));
-    await eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao(), false);
+    await eventos.gravarEventoNaGoogle(sessao(google).sessao, reuniao({ googleConvites: false }), false);
     expect(google.chamadas).toHaveLength(1);
     const [criacao] = google.chamadas;
     expect(criacao.metodo).toBe("POST");
     expect(criacao.url).toBe(`${eventos.URL_DOS_EVENTOS}?sendUpdates=none`);
     expect(criacao.cabecalhos).toMatchObject({ Authorization: "Bearer token-1", "Content-Type": "application/json" });
-    expect(criacao.corpo).toEqual({ id: EVENTO_ID, ...eventos.corpoDoEvento(reuniao()) });
+    expect(criacao.corpo).toEqual({ id: EVENTO_ID, ...eventos.corpoDoEvento(reuniao({ googleConvites: false })) });
+    expect(criacao.corpo).toMatchObject({ attendees: [] });
     // O token nunca vai na URL.
     expect(criacao.url).not.toContain("token-1");
   });

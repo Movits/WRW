@@ -464,7 +464,8 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     expect(screen.getByText("A reunião vai também para a sua Google Agenda.")).toBeInTheDocument();
     const convite = screen.getByLabelText("A Google manda o convite pela sua conta");
     expect(convite).not.toBeChecked();
-    expect(convite).toHaveAccessibleDescription(/a Google não manda o convite por e-mail/);
+    // Desmarcado, os participantes nem entram no evento (server/google-agenda-eventos.ts).
+    expect(convite).toHaveAccessibleDescription(/Desmarcado, o evento fica só na sua agenda, sem os convidados./);
     fireEvent.change(screen.getByLabelText("Título"), { target: { value: "Reunião com investidor" } });
     fireEvent.click(convite);
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));

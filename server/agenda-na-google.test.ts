@@ -325,7 +325,13 @@ describe("a ficha: a linha mudou durante a chamada", () => {
   });
 
   it("o mesmo evento compara pelo que vai à Google: participantes iguais, mesmo vindos do banco", () => {
-    expect(JSON.stringify(corpoDoEvento(linha()))).toBe(JSON.stringify(corpoDoEvento({ ...linha(), participantes: [{ nome: "Ana", email: "ana@exemplo.com" }] })));
+    const comConvite = linha({ googleConvites: true });
+    expect(JSON.stringify(corpoDoEvento(comConvite))).toBe(JSON.stringify(corpoDoEvento({ ...comConvite, participantes: [{ nome: "Ana", email: "ana@exemplo.com" }] })));
+  });
+
+  it("sem o convite marcado, os participantes não vão à Google: o evento só fica na agenda da dona", () => {
+    expect(corpoDoEvento(linha()).attendees).toEqual([]);
+    expect(corpoDoEvento(linha({ googleConvites: true })).attendees).toEqual([{ email: "ana@exemplo.com", displayName: "Ana" }]);
   });
 });
 

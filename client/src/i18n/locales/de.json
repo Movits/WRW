@@ -2165,7 +2165,7 @@
     "google": {
       "formNote": "Das Meeting wird auch in Ihren Google Kalender eingetragen.",
       "invitesLabel": "Google verschickt die Einladung über Ihr Konto",
-      "invitesHint": "Nicht angehakt: Die Gäste stehen im Termin, aber Google schickt ihnen keine Einladung per E-Mail. Angehakt: Google verschickt über Ihr Konto die Einladung und später die Hinweise zu Änderungen und Absagen an alle mit E-Mail-Adresse in der Liste.",
+      "invitesHint": "Nicht angehakt: Der Termin steht nur in Ihrem Kalender, ohne die Gäste. Angehakt: Die Gäste stehen im Termin, und Google verschickt über Ihr Konto die Einladung und später die Hinweise zu Änderungen und Absagen an alle mit E-Mail-Adresse in der Liste.",
       "onCalendar": "In Ihrem Google Kalender",
       "notOnCalendar": "Noch nicht in Ihrem Google Kalender",
       "send": "In Google Kalender eintragen",

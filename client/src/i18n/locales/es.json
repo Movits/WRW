@@ -2165,7 +2165,7 @@
     "google": {
       "formNote": "La reunión también va a tu Google Calendar.",
       "invitesLabel": "Google envía la invitación desde tu cuenta",
-      "invitesHint": "Sin marcar, los invitados quedan en el evento, pero Google no les envía la invitación por correo. Marcado, Google envía la invitación, y después los avisos de cambio y de cancelación, desde tu cuenta a quienes tienen correo en la lista.",
+      "invitesHint": "Sin marcar, el evento queda solo en tu agenda, sin los invitados. Marcado, los invitados quedan en el evento, y Google envía la invitación, y después los avisos de cambio y de cancelación, desde tu cuenta a quienes tienen correo en la lista.",
       "onCalendar": "En tu Google Calendar",
       "notOnCalendar": "Todavía no está en tu Google Calendar",
       "send": "Añadir a Google Calendar",

@@ -2165,7 +2165,7 @@
     "google": {
       "formNote": "La réunion est aussi ajoutée à votre Google Agenda.",
       "invitesLabel": "Google envoie l’invitation depuis votre compte",
-      "invitesHint": "Décoché, les invités figurent dans l’événement, mais Google ne leur envoie pas l’invitation par e-mail. Coché, Google envoie l’invitation, puis les avis de modification et d’annulation, depuis votre compte, à chaque personne qui a un e-mail dans la liste.",
+      "invitesHint": "Décoché, l’événement reste seulement dans votre agenda, sans les invités. Coché, les invités figurent dans l’événement, et Google envoie l’invitation, puis les avis de modification et d’annulation, depuis votre compte, à chaque personne qui a un e-mail dans la liste.",
       "onCalendar": "Dans votre Google Agenda",
       "notOnCalendar": "Pas encore dans votre Google Agenda",
       "send": "Ajouter à Google Agenda",

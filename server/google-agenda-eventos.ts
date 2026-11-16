@@ -12,10 +12,14 @@ import { PRAZO_DAS_CHAMADAS_MS, RecusaDaGoogle, type Fetch } from "./google-oaut
  *   0-9 e a-f, dentro do que a Google aceita (base32hex, de 5 a 1024). Não há
  *   coluna para ele, e criar o que já existe dá 409, que vira PATCH: a resposta
  *   perdida de uma criação nunca duplica o evento.
- * - Os convidados são os participantes com e-mail. A Google só manda o convite
- *   (e depois os avisos de mudança e de cancelamento) quando a dona marcou
- *   "A Google manda o convite pela sua conta" (sendUpdates=all); desmarcado, o
- *   padrão, sendUpdates=none.
+ * - Os convidados são os participantes com e-mail, e só com "A Google manda o
+ *   convite pela sua conta" marcado: aí a Google manda o convite (e depois os
+ *   avisos de mudança e de cancelamento) pela conta da dona (sendUpdates=all).
+ *   Desmarcado, o padrão, o evento vai sem convidados e com sendUpdates=none:
+ *   convidado no evento ganha uma cópia dele na própria Google Agenda, com o
+ *   e-mail da dona, mesmo sem e-mail nenhum, e a WRW não faz a Google mostrar
+ *   nada a terceiros sem a dona marcar. O PATCH manda a lista vazia, e quem
+ *   tinha sido convidado sai do evento quando a dona desmarca.
  * - Os convidados não veem os e-mails uns dos outros (guestsCanSeeOtherGuests
  *   falso), como no e-mail do convite da H16a, que os põe em cópia oculta.
  * - O lembrete é um aviso (popup) na agenda da dona; sem lembrete na WRW,
@@ -52,12 +56,15 @@ export type ReuniaoParaGoogle = {
   local: string | null;
   participantes: ParticipanteDaAgenda[];
   lembreteMinutos: number | null;
+  /** "A Google manda o convite pela sua conta": só com ela marcada os participantes viram convidados. */
+  googleConvites: boolean;
 };
 
 /**
  * O corpo do evento (sem o id, que só vai na criação). A hora vai em UTC, com o
  * fuso em que a reunião foi marcada: quem abre o evento vê a hora certa e o
- * fuso dela.
+ * fuso dela. Os convidados, só com o convite marcado; desmarcado, a lista vai
+ * vazia, para o PATCH tirar quem estava.
  */
 export function corpoDoEvento(reuniao: ReuniaoParaGoogle) {
   const fimEm = reuniao.inicioEm + reuniao.duracaoMinutos * 60_000;
@@ -76,7 +83,7 @@ export function corpoDoEvento(reuniao: ReuniaoParaGoogle) {
     location: reuniao.local?.trim() ?? "",
     start: { dateTime: new Date(reuniao.inicioEm).toISOString(), timeZone: reuniao.fuso },
     end: { dateTime: new Date(fimEm).toISOString(), timeZone: reuniao.fuso },
-    attendees: convidados,
+    attendees: reuniao.googleConvites ? convidados : [],
     guestsCanSeeOtherGuests: false,
     reminders: {
       useDefault: false,

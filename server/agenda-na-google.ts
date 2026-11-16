@@ -66,10 +66,9 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 /** A conta da sessão: a agenda é da dona pelo openId, e a conexão Google pelo id. */
 export type ContaDaAgenda = { id: number; openId: string };
 
-/** A reunião como o envio precisa: o evento, o estado na Google, a escolha do convite e a ficha. */
+/** A reunião como o envio precisa: o evento (com a escolha do convite), o estado na Google e a ficha. */
 export type LinhaParaGoogle = ReuniaoParaGoogle & {
   google: EstadoNaGoogle | null;
-  googleConvites: boolean;
   updatedAt: number;
 };
 

@@ -1464,9 +1464,11 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   // sem os hífens (server/google-agenda-eventos.ts): não há coluna para ele.
   // Enum só no TypeScript, como em google_agenda_conexoes.falha.
   google:          varchar("google", { length: 16, enum: ["pendente", "ok", "falhou"] }),
-  // A Google manda o convite (e os avisos de mudança e de cancelamento), pela
-  // conta da dona, a quem tem e-mail na lista. Falso por padrão: a WRW não faz
-  // a Google mandar nada em nome dela sem ela marcar.
+  // "A Google manda o convite pela sua conta": só com ela marcada os
+  // participantes com e-mail entram no evento como convidados, e a Google manda
+  // o convite (e os avisos de mudança e de cancelamento) pela conta da dona.
+  // Falso por padrão: o evento fica só na agenda dela, sem convidados, e a WRW
+  // não faz a Google mostrar nem mandar nada a terceiros sem ela marcar.
   googleConvites:  boolean("google_convites").default(false).notNull(),
   createdAt:       bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:       bigint("updated_at", { mode: "number" }).notNull(),

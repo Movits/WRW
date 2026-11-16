@@ -450,3 +450,97 @@ describe("sem a reunião da agenda, o gravador de sempre", () => {
     expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeEnabled();
   });
 });
+
+/**
+ * A reunião da agenda que termina de carregar depois do toque da dona (a rede
+ * lenta, ou a primeira leitura que falhou e foi repetida): a gravação liga do
+ * mesmo jeito, nos três caminhos, e uma vez só. A faixa de outra reunião não
+ * leva a gravação.
+ */
+describe("a reunião da agenda que carrega depois do Iniciar ou do arquivo", () => {
+  const CARREGANDO = { data: undefined, isLoading: true, isError: false, error: null };
+  const CARREGADA = { data: DA_AGENDA, isLoading: false, isError: false, error: null };
+  const OUTRA = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+  const respirar = () => act(async () => { await new Promise(resolver => setTimeout(resolver, 50)); });
+
+  function escreverEAutorizar() {
+    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+  }
+
+  it("em partes, a faixa que carrega depois do Iniciar liga a gravação em curso, e o Encerrar não liga de novo", async () => {
+    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
+    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
+    escreverEAutorizar();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    expect(ligar()).not.toHaveBeenCalled();
+    duble.obterDaAgenda.mockReturnValue(CARREGADA);
+    rerender(<Meetings />);
+    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await waitFor(() => expect(duble.utils.client.meetings.encerrarGravacao.mutate).toHaveBeenCalled());
+    await respirar();
+    expect(ligar()).toHaveBeenCalledTimes(1);
+  });
+
+  it("em partes, a faixa que carrega enquanto o servidor cria a reunião liga a gravação quando o microfone abre", async () => {
+    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
+    let soltar: (reuniao: { id: string }) => void = () => {};
+    duble.utils.client.meetings.iniciarGravacao.mutate.mockReset().mockImplementation(() => new Promise(resolver => { soltar = resolver; }));
+    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
+    escreverEAutorizar();
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    duble.obterDaAgenda.mockReturnValue(CARREGADA);
+    rerender(<Meetings />);
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
+    await act(async () => { soltar({ id: VINICOLA }); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+    await respirar();
+    expect(ligar()).toHaveBeenCalledTimes(1);
+  });
+
+  it("no envio único, a faixa que carrega depois do Iniciar liga no Transcrever", async () => {
+    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
+    const { rerender } = abrir(`/gravar?${ENVIO_UNICO}&agendada=${AGENDADA}`);
+    escreverEAutorizar();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    duble.obterDaAgenda.mockReturnValue(CARREGADA);
+    rerender(<Meetings />);
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Transcrever áudio/ })); });
+    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+  });
+
+  it("o arquivo: a faixa que carrega enquanto o arquivo é lido liga a reunião criada", async () => {
+    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
+    let soltarDuracao: (segundos: number) => void = () => {};
+    duble.duracao.mockImplementation(() => new Promise(resolver => { soltarDuracao = resolver; }));
+    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
+    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
+    enviarArquivo();
+    duble.obterDaAgenda.mockReturnValue(CARREGADA);
+    rerender(<Meetings />);
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
+    await act(async () => { soltarDuracao(30); });
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+    expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA });
+    expect(ligar()).toHaveBeenCalledTimes(1);
+  });
+
+  it("a faixa que carrega depois com outra reunião da agenda não leva a gravação", async () => {
+    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
+    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
+    escreverEAutorizar();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+    duble.obterDaAgenda.mockReturnValue({ ...CARREGADA, data: { ...DA_AGENDA, id: OUTRA } });
+    rerender(<Meetings />);
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
+    await respirar();
+    expect(ligar()).not.toHaveBeenCalled();
+  });
+});

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { NotificationBell } from "./NotificationBell";
@@ -15,17 +16,21 @@ const duble = vi.hoisted(() => {
   const lista: { data: unknown[] | undefined; isError: boolean; error: unknown } = { data: [], isError: false, error: null };
   const marcarUm = vi.fn();
   const marcarTodos = vi.fn();
+  // As opções de cada mutação, para o teste chamar o onError como o React Query.
+  type Opcoes = { onError?: (erro: unknown) => void };
+  const opcoes: Record<"markRead" | "markAllRead", Opcoes> = { markRead: {}, markAllRead: {} };
   const trpc = {
     notifications: {
       list: { useQuery: () => ({ data: lista.data, isLoading: false, isError: lista.isError, error: lista.error, refetch: vi.fn() }) },
-      markRead: { useMutation: () => ({ mutate: marcarUm, isPending: false }) },
-      markAllRead: { useMutation: () => ({ mutate: marcarTodos, isPending: false }) },
+      markRead: { useMutation: (o: Opcoes = {}) => { opcoes.markRead = o; return { mutate: marcarUm, isPending: false }; } },
+      markAllRead: { useMutation: (o: Opcoes = {}) => { opcoes.markAllRead = o; return { mutate: marcarTodos, isPending: false }; } },
     },
   };
-  return { lista, marcarUm, marcarTodos, trpc };
+  return { lista, marcarUm, marcarTodos, opcoes, trpc };
 });
 
 vi.mock("@/lib/trpc", () => ({ trpc: duble.trpc }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 // O <Link> do wouter vira um <a> com o mesmo href: o teste lê para onde o aviso leva.
 vi.mock("wouter", () => ({
   Link: ({ href, onClick, children }: { href: string; onClick?: () => void; children: React.ReactNode }) =>
@@ -69,6 +74,7 @@ beforeEach(() => {
   duble.lista.error = null;
   duble.marcarUm.mockClear();
   duble.marcarTodos.mockClear();
+  vi.mocked(toast.error).mockClear();
 });
 afterEach(async () => {
   vi.useRealTimers();
@@ -108,6 +114,18 @@ describe("os avisos do gravador no sino (H15)", () => {
     fireEvent.click(screen.getAllByRole("button")[0]);
     fireEvent.click(screen.getByText("Comitê de exportação"));
     expect(duble.marcarUm).toHaveBeenCalledTimes(1);
+  });
+
+  // Marcar lido que falha (o banco fora do ar, a rede caindo) não pode deixar
+  // o aviso voltar como novo sem explicação: a falha sai na tela, traduzida.
+  it("marcar lido que falha avisa na tela, no idioma dela, e o marcar todos também", () => {
+    abrirSino();
+    fireEvent.click(screen.getByText("Falante 2 manda a proposta"));
+    expect(duble.marcarUm).toHaveBeenCalledWith({ id: 1 });
+    act(() => duble.opcoes.markRead.onError!(new Error("Failed to fetch")));
+    expect(toast.error).toHaveBeenLastCalledWith("O servidor não respondeu. Tente de novo em instantes.");
+    act(() => duble.opcoes.markAllRead.onError!(new Error("Failed to fetch")));
+    expect(toast.error).toHaveBeenCalledTimes(2);
   });
 
   it("o aviso sem link, novo: tocar marca lido e a lista fica aberta", () => {

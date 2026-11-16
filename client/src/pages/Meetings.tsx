@@ -191,6 +191,16 @@ export default function Meetings() {
   // sino (H15) abre /gravar?agendada=<id> nesta mesma página, e tocado com uma
   // gravação na tela traria a faixa de outra reunião.
   const agendadaNoInicio = useRef<string | null>(null);
+  // A reunião em partes desta gravação que nasceu no Iniciar sem a reunião da
+  // agenda lida (a faixa ainda carregava): a faixa que carregar depois, se for a
+  // do ?agendada de quando a gravação começou, liga esta gravação (aoCarregar).
+  // Uma vez só: ligada, descartada ou com outra gravação, volta a nula.
+  const emPartesSemAgenda = useRef<string | null>(null);
+  // A reunião da agenda que a faixa leu, se for a do ?agendada dado (a de
+  // quando a gravação ou o envio começou): a faixa de outra reunião (o lembrete
+  // dela tocado no sino no meio) não leva a gravação.
+  const agendaQueCarregou = (agendadaDoInicio: string | null) =>
+    agendaNaTela.current !== null && agendaNaTela.current === agendadaDoInicio ? agendaNaTela.current : null;
   // O endereço do gravador quando a gravação começou, com a busca (?agendada,
   // ?emPartes): é para ele que a URL volta se sair de /gravar no meio da
   // gravação (o efeito mais abaixo). Assim a faixa da reunião da agenda, com o
@@ -245,12 +255,17 @@ export default function Meetings() {
   const gravacaoEmPartes = useGravacaoEmPartes({
     ativo: emPartes,
     aoEncerrar: meetingId => {
+      // A gravação acabou: a faixa que carregar agora não a liga mais.
+      emPartesSemAgenda.current = null;
       void utils.meetings.list.invalidate();
       setTitle("");
       setConsent(false);
       if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
     },
-    aoFalhar: () => toast.error(t("meetings.sendRecordingError")),
+    aoFalhar: () => {
+      emPartesSemAgenda.current = null;
+      toast.error(t("meetings.sendRecordingError"));
+    },
     // O trecho que o servidor recusou de vez fica de fora da transcrição (G13b).
     // O servidor manda só o código; a frase sai no idioma da tela. O aviso fica
     // até ser fechado, porque quem grava pode não estar olhando.
@@ -440,6 +455,7 @@ export default function Meetings() {
     setMicrophoneIssue(null);
     agendaDaGravacao.current = agendaNaTela.current;
     agendadaNoInicio.current = agendada;
+    emPartesSemAgenda.current = null;
     // O Iniciar só aparece no gravador: o caminho é o /gravar (com ou sem a barra final).
     urlDaGravacao.current = `${ROTA_GRAVAR}${window.location.search}`;
     iniciandoAgora.current = true;
@@ -478,8 +494,19 @@ export default function Meetings() {
       // tentativa sai, e só ela. Se a exclusão falhar agora, ela fica guardada e
       // a retomada a repete; a dona já viu o aviso do microfone.
       if (reuniao && !comecou) await gravacaoEmPartes.cancelar(reuniao);
-      // Em partes, a reunião nasce no Iniciar: é aqui que ela vai para a agenda.
-      else if (reuniao) ligarAAgenda(agendaDaGravacao.current, reuniao);
+      // Em partes, a reunião nasce no Iniciar: é aqui que ela vai para a agenda,
+      // com a reunião da agenda de quando o Iniciar foi tocado ou a que terminou
+      // de carregar enquanto o servidor criava a reunião. Sem nenhuma, a faixa
+      // que carregar depois liga esta gravação (aoCarregar, abaixo).
+      else if (reuniao) {
+        const agendaId = agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current);
+        if (agendaId) {
+          agendaDaGravacao.current = agendaId;
+          ligarAAgenda(agendaId, reuniao);
+        } else if (agendadaNoInicio.current) {
+          emPartesSemAgenda.current = reuniao;
+        }
+      }
     } finally {
       iniciandoAgora.current = false;
       setIniciando(false);
@@ -493,6 +520,7 @@ export default function Meetings() {
   // de sempre: nada vai para a transcrição. O título fica, para gravar de novo;
   // a autorização volta desmarcada, como no Encerrar: ela vale para uma gravação.
   async function discardRecording() {
+    emPartesSemAgenda.current = null;
     gravador.descartar();
     // Os avisos da parte recusada e da cópia que faltou falavam desta gravação,
     // que deixou de existir.
@@ -523,7 +551,11 @@ export default function Meetings() {
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
     if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
-    const agendaId = agendaNaTela.current;
+    // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
+    // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
+    // criar a reunião, abaixo).
+    const agendaNoClique = agendaNaTela.current;
+    const agendadaNoClique = agendada;
     let reuniaoCriada: string | undefined;
     // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
     const liberarEnvio = ocupar("enviando");
@@ -537,6 +569,7 @@ export default function Meetings() {
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
       if (durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) return toast.error(t("meetings.audioTooLong"));
+      const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
       ligarAAgenda(agendaId, created.id);
@@ -580,8 +613,7 @@ export default function Meetings() {
       // depois, se for a do ?agendada de quando ela começou. A faixa de outra
       // reunião (o lembrete dela tocado no sino depois do Encerrar) não leva a
       // gravação.
-      const carregouDepois = agendaNaTela.current !== null && agendaNaTela.current === agendadaNoInicio.current ? agendaNaTela.current : null;
-      ligarAAgenda(agendaDaGravacao.current ?? carregouDepois, created.id);
+      ligarAAgenda(agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current), created.id);
       await submitRecording.mutateAsync({
         meetingId: created.id,
         audioBase64,
@@ -632,7 +664,18 @@ export default function Meetings() {
       daAgenda={agendada && naGravacao ? (
         // key: outra reunião da agenda lê e preenche de novo.
         <ReuniaoDaAgendaNoGravador key={agendada} id={agendada} tituloAtual={title} aoPreencherTitulo={setTitle}
-          aoCarregar={id => { agendaNaTela.current = id; }} />
+          aoCarregar={id => {
+            agendaNaTela.current = id;
+            // A gravação em partes que nasceu sem a reunião da agenda (a faixa
+            // ainda carregava no Iniciar) é ligada agora, se a faixa é a do
+            // ?agendada de quando ela começou. Uma vez só.
+            const semAgenda = emPartesSemAgenda.current;
+            if (id && semAgenda && id === agendadaNoInicio.current) {
+              emPartesSemAgenda.current = null;
+              agendaDaGravacao.current = id;
+              ligarAAgenda(id, semAgenda);
+            }
+          }} />
       ) : null}
     />
   ) : screen === "detail" && reuniaoAberta ? (

@@ -2165,7 +2165,7 @@
     "google": {
       "formNote": "This meeting also goes to your Google Calendar.",
       "invitesLabel": "Google sends the invitation from your account",
-      "invitesHint": "Unchecked, the guests are added to the event, but Google doesn't email them the invitation. Checked, Google emails the invitation, and later the change and cancellation notices, from your account to everyone with an email on the list.",
+      "invitesHint": "Unchecked, the event stays only on your calendar, without the guests. Checked, the guests are added to the event, and Google emails the invitation, and later the change and cancellation notices, from your account to everyone with an email on the list.",
       "onCalendar": "In your Google Calendar",
       "notOnCalendar": "Not in your Google Calendar yet",
       "send": "Add to Google Calendar",

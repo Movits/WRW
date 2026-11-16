@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { textoDoAviso } from "@/lib/aviso-do-sino";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { Link } from "wouter";
@@ -65,13 +67,19 @@ export function NotificationBell() {
     refetchInterval: 30_000, // poll a cada 30s
     staleTime: 15_000,
   });
+  // Marcar como lido que falha (o banco fora do ar, a rede caindo) é dito na
+  // tela, no idioma dela: sem isso, o aviso voltava como novo na consulta
+  // seguinte, sem explicação.
+  const aoFalharAoMarcar = (erro: unknown) => toast.error(mensagemDeErroParaTela(erro, t));
   const markAllReadMutation = trpc.notifications.markAllRead.useMutation({
     onSuccess: () => notificationsQuery.refetch(),
+    onError: aoFalharAoMarcar,
   });
   // Aviso por aviso (H15): tocar um aviso novo o marca lido, e os outros
   // continuam novos.
   const markReadMutation = trpc.notifications.markRead.useMutation({
     onSuccess: () => notificationsQuery.refetch(),
+    onError: aoFalharAoMarcar,
   });
 
   const notifications: Notification[] = (notificationsQuery.data || []) as Notification[];

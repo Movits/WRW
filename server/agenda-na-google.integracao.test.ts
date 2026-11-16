@@ -144,17 +144,19 @@ describe.skipIf(!temBanco)("Agenda na Google Agenda (integração)", () => {
     expect(await linhaDaAgenda(resultado.id)).toMatchObject({ google: "ok", googleConvites: false });
     expect(chamadas).toHaveLength(1);
     expect(chamadas[0]).toMatchObject({ metodo: "POST", url: `${URL_DOS_EVENTOS}?sendUpdates=none` });
-    expect(chamadas[0].corpo).toMatchObject({ id: hex(resultado.id), summary: "Conversa com a Bia", attendees: [{ email: "ana@exemplo.com", displayName: "Ana" }] });
+    // Sem o convite marcado, os participantes não entram no evento: a Google daria a cada um uma cópia dele.
+    expect(chamadas[0].corpo).toMatchObject({ id: hex(resultado.id), summary: "Conversa com a Bia", attendees: [] });
     // A tela lê o estado e o convite pela lista.
     const { proximas } = await rota().agenda.listar();
     expect(proximas.find(r => r.id === resultado.id)).toMatchObject({ google: "ok", googleConvites: false });
   });
 
-  it("mudar com o convite marcado: 409 vira PATCH com sendUpdates=all, e a linha volta a 'ok'", async () => {
+  it("mudar com o convite marcado: 409 vira PATCH com sendUpdates=all e os convidados, e a linha volta a 'ok'", async () => {
     google(json({ id: "evento" }));
     const { id } = await rota().agenda.criar(entrada());
     google(erroDaGoogle(409, "duplicate"), json({ id: "evento" }));
     expect(await rota().agenda.atualizar({ ...entrada({ titulo: "Conversa com a Bia e a Cris" }), googleConvites: true, id })).toMatchObject({ naGoogle: "ok" });
+    expect(chamadas.at(-1)?.corpo).toMatchObject({ attendees: [{ email: "ana@exemplo.com", displayName: "Ana" }] });
     expect(chamadas.slice(1).map(c => [c.metodo, c.url])).toEqual([
       ["POST", `${URL_DOS_EVENTOS}?sendUpdates=all`],
       ["PATCH", `${URL_DOS_EVENTOS}/${hex(id)}?sendUpdates=all`],
