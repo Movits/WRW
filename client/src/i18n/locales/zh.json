@@ -2032,6 +2032,41 @@
       "sendInvite": "发送邀请"
     }
   },
+  "googleAgenda": {
+    "title": "Google 日历",
+    "subtitle": "关联您的 Google 账号，WRW 就能把您安排的会议添加到您的 Google 日历。",
+    "notConnected": "尚未关联 Google 账号。",
+    "connect": "关联 Google 日历",
+    "connected": "已关联 Google 账号。",
+    "connectedAs": "已关联 Google 账号 {{email}}。",
+    "broken": "此关联已失效。请重新关联，以便 WRW 再次使用您的 Google 日历。",
+    "reconnect": "重新关联",
+    "privacyNote": "WRW 只会修改您在 WRW 会议日程中安排的会议对应的活动。您可以随时取消关联。",
+    "wrongAddress": "要关联 Google 日历，请通过 {{address}} 打开 WRW。",
+    "openAddress": "打开 {{address}}",
+    "inApp": "无法在应用内关联 Google 日历。请在浏览器中打开 {{address}}，登录您的账号，然后在个人资料中关联。",
+    "disconnect": "取消关联",
+    "disconnecting": "正在取消关联…",
+    "disconnectConfirm": "要取消关联 Google 日历吗？已在您 Google 日历中的活动会保留。",
+    "disconnectYes": "取消关联",
+    "disconnectNo": "保留",
+    "result": {
+      "connected": "Google 日历已关联。",
+      "denied": "未授权关联 Google 日历。",
+      "missingPermission": "缺少日历权限。请重新关联，并保持勾选 Google 日历选项。",
+      "expired": "关联耗时过长，请重试。",
+      "wrongAddress": "Google 日历关联只能通过 WRW 的官方网址进行。",
+      "error": "无法关联 Google 日历，请稍后重试。",
+      "errorAccessLeft": "无法关联 Google 日历，且 Google 尚未确认已撤销您刚才授予的权限。如有需要，请在您的 Google 账号设置中移除 WRW 的访问权限。"
+    },
+    "toast": {
+      "disconnected": "Google 日历已取消关联。",
+      "disconnectedPending": "WRW 已删除该关联，但 Google 尚未确认。如有需要，请在您的 Google 账号设置中移除 WRW 的访问权限。"
+    },
+    "errors": {
+      "unavailable": "Google 日历关联目前不可用。"
+    }
+  },
   "appHeader": {
     "menuButton": "菜单",
     "navigation": "导航",
@@ -2080,7 +2115,8 @@
       "confirmar": "永久删除",
       "excluindo": "正在删除...",
       "sucesso": "你的账户和数据已删除。",
-      "sucessoComPendencias": "你的账户和数据已删除。还有 {{quantidade}} 个文件尚未从存储中删除，可能需要更长时间；其删除已记录。"
+      "sucessoComPendencias": "你的账户和数据已删除。还有 {{quantidade}} 个文件尚未从存储中删除，可能需要更长时间；其删除已记录。",
+      "googleNaoConfirmou": "Google 日历关联已随你的账户一并删除，但 Google 尚未确认已移除 WRW 的访问权限。如有需要，请在你的 Google 账号设置中移除该访问权限。"
     }
   },
   "termoGeral": {

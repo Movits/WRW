@@ -1395,6 +1395,45 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   meetingUnique:  uniqueIndex("agenda_reunioes_meeting_unique").on(table.meetingId),
 }));
 
+// A conta Google que a dona conectou para a Google Agenda (H16b do plano do
+// gravador), por OAuth com PKCE e sem biblioteca (server/google-oauth.ts). Só o
+// refresh token fica no banco, cifrado com a VAULT_ENCRYPTION_KEY (encryptData,
+// server/security.ts); o token de acesso vive só na memória do processo, menos
+// de 1 hora. Uma conexão por conta: reconectar troca a linha. A Google revoga
+// por conta Google e projeto, não por token, então o token anterior só é
+// revogado quando a conta Google mudou e nenhuma outra conexão usa a anterior.
+// Desconectar e excluir a conta revogam o token (menos quando outra conta da
+// WRW usa a mesma conta Google) e apagam a linha (server/google-agenda.ts e
+// server/exclusao-de-conta.ts).
+export const googleAgendaConexoes = mysqlTable("google_agenda_conexoes", {
+  id:                  varchar("id", { length: 36 }).primaryKey(),
+  userId:              int("userId").notNull(),
+  // O `sub` do id_token: o id da conta Google, que nunca muda nem é reusado (o
+  // e-mail pode mudar). Duas linhas com o mesmo sub dividem a mesma
+  // autorização na Google: revogar o token de uma derruba a outra. É por ele
+  // que a WRW decide se pode revogar.
+  googleSub:           varchar("google_sub", { length: 255 }).notNull(),
+  // O e-mail da conta Google, tirado do id_token, só para a dona saber qual
+  // conta está ligada. Nulo quando a Google não o manda.
+  emailGoogle:         varchar("email_google", { length: 320 }),
+  // "iv:authTag:dados", o formato de encryptData. Nunca vai à tela nem ao log.
+  refreshTokenCifrado: text("refresh_token_cifrado").notNull(),
+  // Os escopos que a Google devolveu na troca do código, separados por espaço.
+  escopos:             varchar("escopos", { length: 1000 }).notNull(),
+  // Nulo enquanto a conexão vale. "revogada" quando ela parou de funcionar: a
+  // Google recusou o refresh token (invalid_grant) ou ele não se decifra mais.
+  // A tela pede "Reconectar". Enum só no TypeScript, como em chaves_de_acesso.
+  falha:               varchar("falha", { length: 32, enum: ["revogada"] }),
+  createdAt:           bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:           bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma conexão por conta: o reconectar é INSERT ... ON DUPLICATE KEY UPDATE.
+  userUnique: uniqueIndex("google_agenda_conexoes_user_unique").on(table.userId),
+  // Antes de revogar, a WRW procura outra conexão com a mesma conta Google.
+  // Não é único: duas contas da WRW podem ligar a mesma conta Google.
+  subIdx: index("google_agenda_conexoes_sub_idx").on(table.googleSub),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é

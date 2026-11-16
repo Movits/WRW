@@ -8,6 +8,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -238,6 +239,10 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
+  // Vite e do estático, que responderiam a página no lugar delas. Sem as
+  // variáveis, 404 (server/rotas-da-google-agenda.ts).
+  registrarRotasDaGoogleAgenda(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas

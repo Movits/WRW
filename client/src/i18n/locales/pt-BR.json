@@ -2032,6 +2032,41 @@
       "sendInvite": "Mandar o convite"
     }
   },
+  "googleAgenda": {
+    "title": "Google Agenda",
+    "subtitle": "Conecte a sua conta Google para a WRW pôr na sua Google Agenda as reuniões que você marcar.",
+    "notConnected": "Nenhuma conta Google conectada.",
+    "connect": "Conectar a Google Agenda",
+    "connected": "Conectada a uma conta Google.",
+    "connectedAs": "Conectada à conta Google {{email}}.",
+    "broken": "Esta conexão parou de funcionar. Conecte de novo para a WRW voltar a usar a sua Google Agenda.",
+    "reconnect": "Reconectar",
+    "privacyNote": "A WRW só mexe nos eventos das reuniões que você marcar na agenda de reuniões da WRW. Você pode desconectar quando quiser.",
+    "wrongAddress": "Para conectar a Google Agenda, entre na WRW pelo endereço {{address}}.",
+    "openAddress": "Abrir {{address}}",
+    "inApp": "Pelo app não dá para conectar a Google Agenda. Abra {{address}} no navegador, entre na sua conta e conecte no Perfil.",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando…",
+    "disconnectConfirm": "Desconectar a Google Agenda? Os eventos que já estão na sua Google Agenda continuam lá.",
+    "disconnectYes": "Desconectar",
+    "disconnectNo": "Manter",
+    "result": {
+      "connected": "Google Agenda conectada.",
+      "denied": "A conexão com a Google Agenda não foi autorizada.",
+      "missingPermission": "Faltou a permissão da agenda. Conecte de novo e deixe marcada a opção da Google Agenda.",
+      "expired": "A conexão demorou demais. Tente de novo.",
+      "wrongAddress": "A conexão com a Google Agenda só funciona pelo endereço oficial da WRW.",
+      "error": "Não deu para conectar a Google Agenda. Tente de novo em instantes.",
+      "errorAccessLeft": "Não deu para conectar a Google Agenda, e a Google não confirmou que desfez a autorização que você acabou de dar. Se quiser, tire o acesso da WRW nas configurações da sua conta Google."
+    },
+    "toast": {
+      "disconnected": "Google Agenda desconectada.",
+      "disconnectedPending": "A WRW apagou a conexão, mas a Google não confirmou. Se quiser, tire o acesso da WRW nas configurações da sua conta Google."
+    },
+    "errors": {
+      "unavailable": "A conexão com a Google Agenda não está disponível agora."
+    }
+  },
   "appHeader": {
     "menuButton": "Menu",
     "navigation": "Navegação",
@@ -2080,7 +2115,8 @@
       "confirmar": "Excluir definitivamente",
       "excluindo": "Excluindo...",
       "sucesso": "Sua conta e seus dados foram excluídos.",
-      "sucessoComPendencias": "Sua conta e seus dados foram excluídos. {{quantidade}} arquivo(s) ainda não saíram do armazenamento e podem levar mais tempo; a remoção deles ficou registrada."
+      "sucessoComPendencias": "Sua conta e seus dados foram excluídos. {{quantidade}} arquivo(s) ainda não saíram do armazenamento e podem levar mais tempo; a remoção deles ficou registrada.",
+      "googleNaoConfirmou": "A conexão com a Google Agenda saiu junto com a conta, mas a Google não confirmou que tirou o acesso da WRW. Se quiser, tire esse acesso nas configurações da sua conta Google."
     }
   },
   "termoGeral": {

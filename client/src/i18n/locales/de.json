@@ -2032,6 +2032,41 @@
       "sendInvite": "Einladung senden"
     }
   },
+  "googleAgenda": {
+    "title": "Google Kalender",
+    "subtitle": "Verbinden Sie Ihr Google-Konto, damit WRW die Meetings, die Sie planen, in Ihren Google Kalender einträgt.",
+    "notConnected": "Kein Google-Konto verbunden.",
+    "connect": "Google Kalender verbinden",
+    "connected": "Mit einem Google-Konto verbunden.",
+    "connectedAs": "Mit dem Google-Konto {{email}} verbunden.",
+    "broken": "Diese Verbindung funktioniert nicht mehr. Verbinden Sie sich erneut, damit WRW Ihren Google Kalender wieder nutzen kann.",
+    "reconnect": "Erneut verbinden",
+    "privacyNote": "WRW ändert nur die Termine der Meetings, die Sie in den geplanten Meetings von WRW anlegen. Sie können die Verbindung jederzeit trennen.",
+    "wrongAddress": "Um Google Kalender zu verbinden, öffnen Sie WRW unter der Adresse {{address}}.",
+    "openAddress": "{{address}} öffnen",
+    "inApp": "In der App lässt sich Google Kalender nicht verbinden. Öffnen Sie {{address}} im Browser, melden Sie sich an und verbinden Sie ihn in Ihrem Profil.",
+    "disconnect": "Trennen",
+    "disconnecting": "Wird getrennt…",
+    "disconnectConfirm": "Google Kalender trennen? Die Termine, die bereits in Ihrem Google Kalender stehen, bleiben dort.",
+    "disconnectYes": "Trennen",
+    "disconnectNo": "Behalten",
+    "result": {
+      "connected": "Google Kalender verbunden.",
+      "denied": "Die Verbindung mit Google Kalender wurde nicht erlaubt.",
+      "missingPermission": "Die Berechtigung für den Kalender fehlte. Verbinden Sie sich erneut und lassen Sie die Option für Google Kalender aktiviert.",
+      "expired": "Die Verbindung hat zu lange gedauert. Bitte versuchen Sie es erneut.",
+      "wrongAddress": "Die Verbindung mit Google Kalender funktioniert nur über die offizielle Adresse von WRW.",
+      "error": "Google Kalender konnte nicht verbunden werden. Bitte versuchen Sie es gleich noch einmal.",
+      "errorAccessLeft": "Google Kalender konnte nicht verbunden werden, und Google hat nicht bestätigt, dass die gerade erteilte Berechtigung zurückgenommen wurde. Wenn Sie möchten, entziehen Sie WRW den Zugriff in den Einstellungen Ihres Google-Kontos."
+    },
+    "toast": {
+      "disconnected": "Google Kalender getrennt.",
+      "disconnectedPending": "WRW hat die Verbindung gelöscht, aber Google hat es nicht bestätigt. Wenn Sie möchten, entziehen Sie WRW den Zugriff in den Einstellungen Ihres Google-Kontos."
+    },
+    "errors": {
+      "unavailable": "Die Verbindung mit Google Kalender ist gerade nicht verfügbar."
+    }
+  },
   "appHeader": {
     "menuButton": "Menü",
     "navigation": "Navigation",
@@ -2080,7 +2115,8 @@
       "confirmar": "Endgültig löschen",
       "excluindo": "Wird gelöscht...",
       "sucesso": "Ihr Konto und Ihre Daten wurden gelöscht.",
-      "sucessoComPendencias": "Ihr Konto und Ihre Daten wurden gelöscht. {{quantidade}} Datei(en) sind noch nicht aus dem Speicher entfernt und können länger dauern; ihre Entfernung wurde protokolliert."
+      "sucessoComPendencias": "Ihr Konto und Ihre Daten wurden gelöscht. {{quantidade}} Datei(en) sind noch nicht aus dem Speicher entfernt und können länger dauern; ihre Entfernung wurde protokolliert.",
+      "googleNaoConfirmou": "Die Verbindung mit Google Kalender wurde zusammen mit Ihrem Konto gelöscht, aber Google hat nicht bestätigt, dass der Zugriff von WRW entzogen wurde. Wenn Sie möchten, entziehen Sie diesen Zugriff in den Einstellungen Ihres Google-Kontos."
     }
   },
   "termoGeral": {

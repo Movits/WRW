@@ -2032,6 +2032,41 @@
       "sendInvite": "Send the invitation"
     }
   },
+  "googleAgenda": {
+    "title": "Google Calendar",
+    "subtitle": "Connect your Google account so WRW can add the meetings you schedule to your Google Calendar.",
+    "notConnected": "No Google account connected.",
+    "connect": "Connect Google Calendar",
+    "connected": "Connected to a Google account.",
+    "connectedAs": "Connected to the Google account {{email}}.",
+    "broken": "This connection has stopped working. Connect again so WRW can use your Google Calendar again.",
+    "reconnect": "Reconnect",
+    "privacyNote": "WRW only changes the events of meetings you schedule in the WRW meeting schedule. You can disconnect at any time.",
+    "wrongAddress": "To connect Google Calendar, open WRW at {{address}}.",
+    "openAddress": "Open {{address}}",
+    "inApp": "Google Calendar can't be connected from the app. Open {{address}} in your browser, sign in, and connect it from your Profile.",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "disconnectConfirm": "Disconnect Google Calendar? Events already in your Google Calendar will stay there.",
+    "disconnectYes": "Disconnect",
+    "disconnectNo": "Keep",
+    "result": {
+      "connected": "Google Calendar connected.",
+      "denied": "The connection to Google Calendar was not authorized.",
+      "missingPermission": "The calendar permission was missing. Connect again and leave the Google Calendar option checked.",
+      "expired": "The connection took too long. Please try again.",
+      "wrongAddress": "The Google Calendar connection only works from WRW's official address.",
+      "error": "Couldn't connect Google Calendar. Please try again in a moment.",
+      "errorAccessLeft": "Couldn't connect Google Calendar, and Google didn't confirm that it undid the authorization you just gave. If you want, remove WRW's access in your Google account settings."
+    },
+    "toast": {
+      "disconnected": "Google Calendar disconnected.",
+      "disconnectedPending": "WRW deleted the connection, but Google didn't confirm it. If you want, remove WRW's access in your Google account settings."
+    },
+    "errors": {
+      "unavailable": "The Google Calendar connection isn't available right now."
+    }
+  },
   "appHeader": {
     "menuButton": "Menu",
     "navigation": "Navigation",
@@ -2080,7 +2115,8 @@
       "confirmar": "Delete permanently",
       "excluindo": "Deleting...",
       "sucesso": "Your account and your data have been deleted.",
-      "sucessoComPendencias": "Your account and your data have been deleted. {{quantidade}} file(s) have not left storage yet and may take longer; their removal has been logged."
+      "sucessoComPendencias": "Your account and your data have been deleted. {{quantidade}} file(s) have not left storage yet and may take longer; their removal has been logged.",
+      "googleNaoConfirmou": "The Google Calendar connection was deleted with your account, but Google didn't confirm that WRW's access was removed. If you want, remove that access in your Google account settings."
     }
   },
   "termoGeral": {

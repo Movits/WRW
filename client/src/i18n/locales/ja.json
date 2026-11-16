@@ -2032,6 +2032,41 @@
       "sendInvite": "招待を送る"
     }
   },
+  "googleAgenda": {
+    "title": "Google カレンダー",
+    "subtitle": "Google アカウントを連携すると、予定に入れたミーティングを WRW が Google カレンダーに追加できます。",
+    "notConnected": "Google アカウントは連携されていません。",
+    "connect": "Google カレンダーを連携",
+    "connected": "Google アカウントと連携しています。",
+    "connectedAs": "Google アカウント {{email}} と連携しています。",
+    "broken": "この連携は機能しなくなりました。WRW が再び Google カレンダーを使えるよう、もう一度連携してください。",
+    "reconnect": "再連携",
+    "privacyNote": "WRW が変更するのは、WRW で予定に入れたミーティングのイベントだけです。連携はいつでも解除できます。",
+    "wrongAddress": "Google カレンダーを連携するには、{{address}} から WRW を開いてください。",
+    "openAddress": "{{address}} を開く",
+    "inApp": "アプリからは Google カレンダーを連携できません。ブラウザで {{address}} を開いてログインし、プロフィールから連携してください。",
+    "disconnect": "連携を解除",
+    "disconnecting": "連携を解除しています…",
+    "disconnectConfirm": "Google カレンダーとの連携を解除しますか？すでに Google カレンダーにあるイベントはそのまま残ります。",
+    "disconnectYes": "解除する",
+    "disconnectNo": "そのままにする",
+    "result": {
+      "connected": "Google カレンダーを連携しました。",
+      "denied": "Google カレンダーとの連携は許可されませんでした。",
+      "missingPermission": "カレンダーへのアクセス許可が不足しています。もう一度連携し、Google カレンダーの項目にチェックを入れたままにしてください。",
+      "expired": "連携に時間がかかりすぎました。もう一度お試しください。",
+      "wrongAddress": "Google カレンダーとの連携は WRW の公式アドレスからのみ行えます。",
+      "error": "Google カレンダーを連携できませんでした。しばらくしてからもう一度お試しください。",
+      "errorAccessLeft": "Google カレンダーを連携できませんでした。また、たった今許可したアクセス権の取り消しを Google から確認できませんでした。必要に応じて、Google アカウントの設定で WRW のアクセス権を削除してください。"
+    },
+    "toast": {
+      "disconnected": "Google カレンダーとの連携を解除しました。",
+      "disconnectedPending": "WRW は連携を削除しましたが、Google からの確認はありませんでした。必要に応じて、Google アカウントの設定で WRW のアクセス権を削除してください。"
+    },
+    "errors": {
+      "unavailable": "現在、Google カレンダーとの連携は利用できません。"
+    }
+  },
   "appHeader": {
     "menuButton": "メニュー",
     "navigation": "ナビゲーション",
@@ -2080,7 +2115,8 @@
       "confirmar": "完全に削除",
       "excluindo": "削除中...",
       "sucesso": "アカウントとデータを削除しました。",
-      "sucessoComPendencias": "アカウントとデータを削除しました。{{quantidade}} 件のファイルはまだストレージから削除されておらず、時間がかかる場合があります。削除は記録済みです。"
+      "sucessoComPendencias": "アカウントとデータを削除しました。{{quantidade}} 件のファイルはまだストレージから削除されておらず、時間がかかる場合があります。削除は記録済みです。",
+      "googleNaoConfirmou": "Google カレンダーとの連携はアカウントと一緒に削除されましたが、WRW のアクセス権の削除を Google から確認できませんでした。必要に応じて、Google アカウントの設定でこのアクセス権を削除してください。"
     }
   },
   "termoGeral": {

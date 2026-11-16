@@ -53,6 +53,12 @@ export function ExcluirMinhaConta() {
       } else {
         toast.success(t("conta.excluir.sucesso"));
       }
+      // A conexão com a Google Agenda saiu com a conta, mas a Google não
+      // confirmou a revogação (H16b): a WRW aparece ainda na conta Google
+      // dela, com acesso à agenda, até ela tirar.
+      if (resultado.googleNaoConfirmou) {
+        toast.warning(t("conta.excluir.googleNaoConfirmou"), { duration: 15000 });
+      }
       // As ocupações da sessão saem com a conta (lib/sessao-ocupada.ts), como
       // no logout do useAuth: o envio avulso que segue no ar não pode deixar a
       // aba deslogada ocupada, nem fazer o navegador perguntar ao fechá-la ou

@@ -106,6 +106,11 @@ vi.mock("./meeting-service", () => ({
   limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...(args as [])),
   marcarReunioesInterrompidas: (...args: unknown[]) => marcarReunioesInterrompidas(...(args as [])),
 }));
+// A ida e a volta da conexão com a Google Agenda (H16b) sobem junto; aqui só se
+// confere que foram montadas no app (o comportamento está em
+// server/rotas-da-google-agenda.test.ts).
+const googleAgenda = vi.hoisted(() => ({ registrarRotasDaGoogleAgenda: vi.fn() }));
+vi.mock("./rotas-da-google-agenda", () => googleAgenda);
 
 const { autenticarCron } = await import("./_core/cron");
 
@@ -120,6 +125,8 @@ vi.spyOn(console, "log").mockImplementation(() => {});
 await import("./_core/index");
 await jarra.noAr;
 const varredurasNoBoot = marcarReunioesInterrompidas.mock.calls.length;
+// Lido antes do restoreAllMocks, que zera o histórico dos dublês.
+const appsDaGoogleAgendaNoBoot = googleAgenda.registrarRotasDaGoogleAgenda.mock.calls.map(chamada => chamada[0]);
 vi.restoreAllMocks();
 afterAll(() => {
   vi.useRealTimers();
@@ -184,6 +191,12 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     expect(jarra.ordem.filter(item => item === "iniciarVarredura")).toHaveLength(1);
     expect(jarra.ordem.indexOf("listen")).toBeGreaterThanOrEqual(0);
     expect(jarra.ordem.indexOf("iniciarVarredura")).toBeGreaterThan(jarra.ordem.indexOf("listen"));
+  });
+});
+
+describe("as rotas da Google Agenda no index.ts real (H16b)", () => {
+  it("são montadas uma vez, no app do servidor", () => {
+    expect(appsDaGoogleAgendaNoBoot).toEqual([jarra.app]);
   });
 });
 
