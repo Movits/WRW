@@ -1,5 +1,5 @@
 import { descreverErroDeBanco } from "./banco-indisponivel";
-import { limparGravacoesVencidas, type ResultadoDaVarredura } from "./meeting-service";
+import { limparGravacoesVencidas, VarreduraInterrompida, type ResultadoDaVarredura } from "./meeting-service";
 import { createAuditLog } from "./security";
 
 /**
@@ -22,7 +22,12 @@ import { createAuditLog } from "./security";
  *   passada é pulada, em vez de deixar cada áudio vencido como aviso no log.
  * - Toda passada que apagou algo vai para a auditoria (CRON_CLEANUP_RECORDINGS,
  *   com a origem): é a prova de que o prazo foi cumprido. A que não apagou nada
- *   não enche audit_logs.
+ *   não enche audit_logs. A passada que um erro parou no meio registra o que já
+ *   tinha apagado antes de o erro subir.
+ * - O descumprimento também fica: a passada que achou áudio vencido e não
+ *   conseguiu tirá-lo do bucket vai para o log de erro e para a auditoria
+ *   (status 'failure', só as contagens), no máximo uma vez por hora enquanto a
+ *   falha durar, para um bucket fora do ar não encher audit_logs a cada 5 min.
  * - Desligamento (SIGTERM do Render): pararVarreduraDeGravacoes, chamado no
  *   desligar de server/_core/index.ts junto com as filas.
  */
@@ -38,27 +43,63 @@ export const INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS = 5 * 60_000;
  */
 export const ESPERA_DA_PASSADA_NO_DESLIGAMENTO_MS = 5_000;
 
+/**
+ * De quanto em quanto tempo, no máximo, a falha em tirar áudio vencido do bucket
+ * vai para a auditoria enquanto dura. O log de erro sai a cada passada.
+ */
+export const INTERVALO_DA_AUDITORIA_DA_FALHA_MS = 60 * 60_000;
+
 let parada = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let passadaEmCurso: Promise<void> | null = null;
+let ultimaAuditoriaDaFalha: number | null = null;
 
 type Origem = "Boot" | "Varredura";
 
+/** A prova de que o prazo foi cumprido: só as contagens e a origem. */
+async function auditarApagadas(origem: Origem, resultado: ResultadoDaVarredura) {
+  await createAuditLog({
+    userId: null,
+    action: "CRON_CLEANUP_RECORDINGS",
+    resource: "meeting_recordings",
+    status: "success",
+    riskLevel: "low",
+    details: { ...resultado, origem },
+  }).catch(() => {});
+}
+
 async function umaPassada(origem: Origem): Promise<ResultadoDaVarredura | null> {
   if (!process.env.STORAGE_BUCKET) return null;
-  const resultado = await limparGravacoesVencidas({ deveParar: () => parada });
+  let resultado: ResultadoDaVarredura;
+  try {
+    resultado = await limparGravacoesVencidas({ deveParar: () => parada });
+  } catch (erro) {
+    // O erro sobe (o rodar o registra), mas o que já tinha saído do bucket e do
+    // banco nesta passada não pode sumir do registro.
+    if (erro instanceof VarreduraInterrompida && erro.resultado.apagadas > 0) {
+      console.warn(`[${origem}] Gravações de reunião vencidas: ${erro.resultado.apagadas} apagadas do bucket antes de a passada parar por erro.`);
+      await auditarApagadas(origem, erro.resultado);
+    }
+    throw erro;
+  }
   if (resultado.encontradas) {
     console.warn(`[${origem}] Gravações de reunião vencidas: ${resultado.apagadas} de ${resultado.encontradas} apagadas do bucket.`);
   }
-  if (resultado.apagadas > 0) {
-    await createAuditLog({
-      userId: null,
-      action: "CRON_CLEANUP_RECORDINGS",
-      resource: "meeting_recordings",
-      status: "success",
-      riskLevel: "low",
-      details: { ...resultado, origem },
-    }).catch(() => {});
+  if (resultado.apagadas > 0) await auditarApagadas(origem, resultado);
+  if (resultado.encontradas > resultado.apagadas) {
+    console.error(`[${origem}] ${resultado.encontradas - resultado.apagadas} gravação(ões) de reunião vencida(s) NÃO saíram do bucket nesta passada; a próxima tenta de novo.`);
+    const agora = Date.now();
+    if (ultimaAuditoriaDaFalha === null || agora - ultimaAuditoriaDaFalha >= INTERVALO_DA_AUDITORIA_DA_FALHA_MS) {
+      ultimaAuditoriaDaFalha = agora;
+      await createAuditLog({
+        userId: null,
+        action: "CRON_CLEANUP_RECORDINGS",
+        resource: "meeting_recordings",
+        status: "failure",
+        riskLevel: "medium",
+        details: { ...resultado, origem },
+      }).catch(() => {});
+    }
   }
   return resultado;
 }

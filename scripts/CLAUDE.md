@@ -77,6 +77,17 @@ Três rotinas tocam a produção por desenho: `migrar.mjs` no boot do servidor,
 `checar-producao.mjs` depois de todo deploy e `publicar-documento.mjs` quando o jurídico
 entrega texto novo.
 
+## Script que apaga do bucket: produção só com o Roberto
+
+`expurgar-audio-escondido.ts` (`npx tsx`) é o único script que APAGA do bucket. Lista, só
+sob `meetings/`, as chaves de áudio de reunião que o DELETE antigo (sem `VersionId`) só
+escondeu no B2 e, com `--apagar`, tira cada uma com todas as versões, pela mesma função do
+servidor (`storageApagarTodasAsVersoes`); sem `--apagar` só lista. Lê as `STORAGE_*` do
+arquivo de `--env`, obrigatório, e a variável que já estiver no ambiente vale no lugar da
+do arquivo. É o passivo de antes da retenção do áudio (novembro de 2026), que a varredura
+não alcança porque as linhas já saíram: rode uma vez com o Roberto, ou aplique a regra de
+ciclo de vida do B2 no prefixo `meetings/`, e registre no cartão qual das duas foi feita.
+
 ## O exame de produção (`checar-producao.mjs`)
 
 `node scripts/checar-producao.mjs --env .env.producao` depois de todo deploy na `main`

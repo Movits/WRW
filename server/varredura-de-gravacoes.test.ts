@@ -13,7 +13,17 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 const limparGravacoesVencidas = vi.hoisted(() => vi.fn());
 const createAuditLog = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("./meeting-service", () => ({ limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...args) }));
+// O erro da passada que parou no meio, com o mesmo contrato da classe real
+// (meeting-service.ts): o laço reconhece pelo instanceof e lê o `resultado`.
+const { VarreduraInterrompida } = vi.hoisted(() => ({
+  VarreduraInterrompida: class VarreduraInterrompida extends Error {
+    constructor(readonly resultado: { encontradas: number; apagadas: number }, causa: unknown) {
+      super("A varredura das gravações vencidas parou no meio.", { cause: causa });
+      this.name = "VarreduraInterrompida";
+    }
+  },
+}));
+vi.mock("./meeting-service", () => ({ limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...args), VarreduraInterrompida }));
 vi.mock("./security", () => ({ createAuditLog: (...args: unknown[]) => createAuditLog(...(args as [])) }));
 
 type Laco = typeof import("./varredura-de-gravacoes");
@@ -89,19 +99,78 @@ describe("o laço da varredura das gravações", () => {
   });
 
   it("a passada que apagou algo vai para a auditoria (CRON_CLEANUP_RECORDINGS, com a origem) e para o log; a que não apagou nada, não", async () => {
-    limparGravacoesVencidas.mockResolvedValueOnce({ encontradas: 3, apagadas: 2 });
+    limparGravacoesVencidas.mockResolvedValueOnce({ encontradas: 2, apagadas: 2 });
     laco.iniciarVarreduraDeGravacoes();
     await esvaziar();
     expect(createAuditLog).toHaveBeenCalledTimes(1);
     expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({
       userId: null, action: "CRON_CLEANUP_RECORDINGS", resource: "meeting_recordings", status: "success",
-      details: { encontradas: 3, apagadas: 2, origem: "Boot" },
+      details: { encontradas: 2, apagadas: 2, origem: "Boot" },
     }));
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).toContain("2 de 3");
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).toContain("2 de 2");
+    expect(console.error).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
     expect(limparGravacoesVencidas).toHaveBeenCalledTimes(2);
     expect(createAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("o áudio vencido que NÃO saiu também fica registrado: log de erro e auditoria 'failure' só com as contagens, além da de sucesso", async () => {
+    limparGravacoesVencidas.mockResolvedValueOnce({ encontradas: 3, apagadas: 2 });
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(createAuditLog.mock.calls.map(([linha]) => linha)).toEqual([
+      expect.objectContaining({ action: "CRON_CLEANUP_RECORDINGS", status: "success", details: { encontradas: 3, apagadas: 2, origem: "Boot" } }),
+      expect.objectContaining({
+        userId: null, action: "CRON_CLEANUP_RECORDINGS", resource: "meeting_recordings", status: "failure",
+        details: { encontradas: 3, apagadas: 2, origem: "Boot" },
+      }),
+    ]);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("NÃO saíram do bucket");
+  });
+
+  it("a falha que dura não enche audit_logs: no máximo uma auditoria 'failure' por hora, e o log de erro a cada passada", async () => {
+    limparGravacoesVencidas.mockResolvedValue({ encontradas: 5, apagadas: 0 });
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    const falhas = () => createAuditLog.mock.calls.filter(([linha]) => (linha as { status?: string }).status === "failure").length;
+    expect(falhas()).toBe(1);
+
+    // Mais 11 passadas, de 5 em 5 min: ainda dentro da hora.
+    for (let i = 0; i < 11; i++) await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(limparGravacoesVencidas).toHaveBeenCalledTimes(12);
+    expect(falhas()).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.filter(chamada => String(chamada[0]).includes("NÃO saíram do bucket"))).toHaveLength(12);
+    // Nenhuma de sucesso: nada saiu.
+    expect(createAuditLog).toHaveBeenCalledTimes(1);
+
+    // A 13ª passada já passou de uma hora desde a primeira auditoria.
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(falhas()).toBe(2);
+  });
+
+  it("a passada que um erro parou no meio: o que já tinha saído vai para a auditoria e para o log, e o erro é registrado como erro", async () => {
+    const causa = Object.assign(new Error("Connection lost: The server closed the connection."), { code: "PROTOCOL_CONNECTION_LOST" });
+    limparGravacoesVencidas.mockRejectedValueOnce(new VarreduraInterrompida({ encontradas: 151, apagadas: 150 }, causa));
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(createAuditLog).toHaveBeenCalledTimes(1);
+    expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: "CRON_CLEANUP_RECORDINGS", status: "success", details: { encontradas: 151, apagadas: 150, origem: "Boot" },
+    }));
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).toContain("150 apagadas do bucket antes de a passada parar");
+    // O erro continua sendo erro, com a causa do banco no log.
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("PROTOCOL_CONNECTION_LOST");
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(limparGravacoesVencidas).toHaveBeenCalledTimes(2);
+  });
+
+  it("a passada parada no meio sem nada apagado não inventa auditoria de sucesso", async () => {
+    limparGravacoesVencidas.mockRejectedValueOnce(new VarreduraInterrompida({ encontradas: 1, apagadas: 0 }, new Error("banco fora")));
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(createAuditLog).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("banco fora");
   });
 
   it("a auditoria fora do ar não derruba o laço", async () => {

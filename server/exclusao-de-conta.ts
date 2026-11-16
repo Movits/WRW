@@ -50,7 +50,8 @@
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
 import type { exigirDb } from "./db";
-import { chaveDoStorageDaDona } from "./storage";
+import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
+import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
@@ -468,16 +469,26 @@ export async function excluirConta(
   conta: { id: number; openId: string; email: string | null },
   opcoes: { apagarArquivo?: (chave: string) => Promise<void> } = {},
 ): Promise<RelatorioDeExclusao> {
-  // Import tardio do bucket: sem ele, importar este módulo puxaria o SDK da AWS
-  // para dentro do teste, que injeta o próprio apagador e nunca fala com o B2.
-  // O áudio de reunião (chaves meetings/) sai com todas as versões; os outros
-  // arquivos (fotos, contextos, Sala, SIVC) seguem com o DELETE simples.
-  const apagarArquivo = opcoes.apagarArquivo
-    ?? (async (chave: string) => {
-      const bucket = await import("./storage");
-      return chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave);
-    });
+  // O apagador do bucket só é montado quando o teste não injeta o próprio, e
+  // UMA vez, antes do laço que roda vários arquivos ao mesmo tempo (imports
+  // dinâmicos simultâneos de um módulo dublado chegavam a devolver o módulo
+  // real no Vitest). O áudio de reunião (chaves meetings/) sai com todas as
+  // versões; os outros arquivos (fotos, contextos, Sala, SIVC) seguem com o
+  // DELETE simples.
+  const apagarArquivo = opcoes.apagarArquivo ?? await (async () => {
+    const bucket = await import("./storage");
+    return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
+  })();
   const chaves = await lerChavesDaConta(db, conta);
+
+  // As reuniões da conta viram 'deleted' ANTES de ler as chaves, como na
+  // exclusão de uma reunião (deletePrivateMeeting): é o sinal que uma parte
+  // ainda subindo de outro aparelho lê depois do upload (receberParte), para
+  // tirar o próprio objeto em vez de virar 'received' e perder a linha no plano
+  // abaixo, com a voz no bucket; nenhuma parte nova entra numa reunião
+  // 'deleted', e o processamento em curso também para.
+  await db.update(meetings).set({ status: "deleted", updatedAt: Date.now() })
+    .where(eq(meetings.ownerId, chaves.openId));
   const arquivos = await chavesDeArquivosDaConta(db, chaves);
 
   // Os objetos saem ANTES das linhas, porque é aqui que a linha ainda diz onde o
@@ -492,17 +503,22 @@ export async function excluirConta(
   // no log (aqui) e na auditoria (server/routers/conta.ts, que grava o
   // procedimento com status "failure"), e a tela mostra aviso em vez de
   // "excluídos" (client/src/components/ExcluirMinhaConta.tsx).
-  const arquivosComFalha: string[] = [];
-  let arquivosApagados = 0;
-  for (const chave of arquivos) {
+  //
+  // Até CONCORRENCIA_DO_EXPURGO_DO_AUDIO arquivos por vez: a dona espera a
+  // resposta, e cada áudio de reunião custa 4 a 5 chamadas ao bucket (uma conta
+  // com reuniões longas tem centenas de partes). Todos são tentados, e o
+  // relatório segue a ordem de `arquivos`.
+  const tentativas = await comConcorrenciaLimitada(arquivos, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, async chave => {
     try {
       await apagarArquivo(chave);
-      arquivosApagados++;
+      return true;
     } catch (erro) {
-      arquivosComFalha.push(chave);
       console.error(`[ExclusãoDeConta] o bucket recusou apagar um objeto (userId ${conta.id}):`, erro instanceof Error ? erro.message : erro);
+      return false;
     }
-  }
+  });
+  const arquivosComFalha = arquivos.filter((_chave, posicao) => !tentativas[posicao]?.valor);
+  const arquivosApagados = arquivos.length - arquivosComFalha.length;
   if (arquivosComFalha.length) {
     // Uma linha com a LISTA das chaves, e não só a contagem: daqui a pouco as
     // linhas que citavam esses objetos não existem mais (fora as do áudio de

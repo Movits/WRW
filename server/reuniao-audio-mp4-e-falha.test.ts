@@ -545,6 +545,27 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
 
     expect(apagarAudio).toHaveBeenCalledWith("k");
     expect(tabelasInseridas()).toEqual([]);
+    // O expurgo deu certo: nenhum pedido de remoção manual.
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("remoção manual");
+  });
+
+  it("o banco recusa a linha E o bucket recusa a compensação: o erro do banco sobe, e o log de ERRO diz qual objeto ficou sem ponteiro", async () => {
+    // Sem linha nenhuma, nem a varredura nem as exclusões acham o objeto: o log
+    // é o único lugar que ainda diz qual chave precisa sair à mão.
+    const recusaDoBanco = new Error("Lock wait timeout exceeded");
+    recusarInsert = tabela => (tabela === schema.meetingRecordings ? recusaDoBanco : null);
+    apagarAudio.mockRejectedValueOnce(new Error("socket hang up"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(processMeetingRecording(entradaValida)).rejects.toThrow("Lock wait timeout exceeded");
+
+    expect(apagarAudio).toHaveBeenCalledWith("k");
+    const pedido = vi.mocked(console.error).mock.calls.map(chamada => chamada.map(String).join(" ")).find(linha => linha.includes("remoção manual"));
+    expect(pedido).toBeDefined();
+    expect(pedido).toContain("SEM ponteiro");
+    expect(pedido).toMatch(/remoção manual: k$/);
+    expect(pedido).toContain("reuniao-1");
+    expect(tabelasInseridas()).toEqual([]);
   });
 
   it("toda leitura é da reunião DA dona: a de entrada, a releitura antes das escritas e a das gravações na compensação", async () => {

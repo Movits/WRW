@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, getTableName, inArray } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { MySqlDialect, type MySqlTable } from "drizzle-orm/mysql-core";
 import { drizzle } from "drizzle-orm/mysql2";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -55,9 +55,10 @@ import {
   MOTIVO_DA_PARTE_QUE_FICOU,
 } from "./exclusao-de-conta";
 import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
+import { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import {
   contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingRecordings,
-  opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
+  meetings, opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
   strategicGroups, users,
 } from "../drizzle/schema";
 
@@ -192,7 +193,9 @@ function selecionar(tabela: unknown) {
 }
 
 const fakeDb = {
-  select: () => ({ from: (tabela: unknown) => selecionar(tabela) }),
+  // A leitura também entra na ordem dos efeitos, com o nome da tabela: é como se
+  // prova que as reuniões viram 'deleted' ANTES de as chaves do bucket serem lidas.
+  select: () => ({ from: (tabela: unknown) => { ordemDosEfeitos.push(`select:${getTableName(tabela as MySqlTable)}`); return selecionar(tabela); } }),
   delete: (tabela: unknown) => ({
     where: async (condicao: unknown) => {
       delecoes.push({ tabela, colunas: colunasDe(condicao), sql: textoDe(condicao), condicao });
@@ -205,7 +208,7 @@ const fakeDb = {
     set: (valores: Record<string, unknown>) => ({
       where: async (condicao?: unknown) => {
         atualizacoes.push({ tabela, valores, condicao });
-        ordemDosEfeitos.push("update");
+        ordemDosEfeitos.push(`update:${getTableName(tabela as MySqlTable)}`);
         return [{ affectedRows: 1 }];
       },
     }),
@@ -531,7 +534,7 @@ describe("B6) a parte de áudio cujo objeto ficou no bucket fica, só como ponte
   it("o ponteiro é gravado depois do bucket e antes do primeiro DELETE", async () => {
     bucketFalha.add(PARTE_1);
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
-    const ponteiro = ordemDosEfeitos.indexOf("update");
+    const ponteiro = ordemDosEfeitos.indexOf("update:meeting_audio_slices");
     expect(ponteiro).toBeGreaterThan(ordemDosEfeitos.lastIndexOf("bucket"));
     expect(ponteiro).toBeLessThan(ordemDosEfeitos.indexOf("delete"));
   });
@@ -606,6 +609,63 @@ describe("B7) a gravação inteira cujo objeto ficou no bucket fica, só como po
     const simples = bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave);
     expect(simples).toContain("sivc/7/9/1234-rg.png");
     expect(simples.filter(chave => chave.startsWith("meetings/"))).toEqual([]);
+  });
+});
+
+// ═══ B8) a parte que ainda sobe de outro aparelho não perde o ponteiro ═══════
+// Achado da revisão da retenção do áudio: uma parte que terminava de subir
+// durante o laço do bucket virava 'received' e perdia a linha no plano, com o
+// objeto (que ainda não existia quando a chave dela foi expurgada) no bucket. As
+// reuniões da conta viram 'deleted' antes de as chaves serem lidas, e
+// receberParte relê a reunião depois do upload e tira o próprio objeto.
+describe("B8) as reuniões da conta viram 'deleted' antes de as chaves do bucket serem lidas", () => {
+  it("o UPDATE é o primeiro efeito sobre as reuniões, só da conta, e vem antes da leitura das chaves e do bucket", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    const marcacoes = atualizacoes.filter(a => a.tabela === meetings);
+    expect(marcacoes).toHaveLength(1);
+    expect(marcacoes[0].valores).toMatchObject({ status: "deleted" });
+    expect(typeof marcacoes[0].valores.updatedAt).toBe("number");
+    expect(renderizar(marcacoes[0].condicao)).toEqual({ sql: "`meetings`.`owner_id` = ?", params: ["open-7"] });
+
+    const marcou = ordemDosEfeitos.indexOf("update:meetings");
+    expect(marcou).toBeGreaterThanOrEqual(0);
+    expect(marcou).toBeLessThan(ordemDosEfeitos.indexOf("select:meeting_audio_slices"));
+    expect(marcou).toBeLessThan(ordemDosEfeitos.indexOf("select:meeting_recordings"));
+    expect(marcou).toBeLessThan(ordemDosEfeitos.indexOf("bucket"));
+  });
+});
+
+// ═══ B9) o bucket com alguns arquivos por vez, e o relatório em ordem ═══════
+describe("B9) os arquivos saem até CONCORRENCIA_DO_EXPURGO_DO_AUDIO por vez", () => {
+  it("nunca passa do limite, roda mais de um por vez, tenta todos e relata as falhas na ordem das chaves", async () => {
+    let emCurso = 0;
+    let maximo = 0;
+    const tentadas: string[] = [];
+    // A primeira chave falha DEVAGAR e a segunda falha na hora: o relatório
+    // segue a ordem das chaves, não a de quem terminou primeiro.
+    const lento = async (chave: string) => {
+      emCurso += 1;
+      maximo = Math.max(maximo, emCurso);
+      tentadas.push(chave);
+      try {
+        await new Promise(resolver => setTimeout(resolver, chave.startsWith("contacts/") ? 30 : 5));
+        if (chave.startsWith("contacts/") || chave.startsWith("contexts/open-7/ctx/imagem")) throw new Error("bucket recusou");
+      } finally {
+        emCurso -= 1;
+      }
+    };
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo: lento });
+
+      expect(tentadas).toHaveLength(8);
+      expect(maximo).toBeGreaterThan(1);
+      expect(maximo).toBeLessThanOrEqual(CONCORRENCIA_DO_EXPURGO_DO_AUDIO);
+      expect(relatorio.arquivosComFalha).toEqual(["contacts/open-7/foto.jpg", "contexts/open-7/ctx/imagem.png"]);
+      expect(relatorio.arquivosApagados).toBe(6);
+    } finally {
+      erro.mockRestore();
+    }
   });
 });
 

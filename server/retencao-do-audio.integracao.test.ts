@@ -39,6 +39,7 @@ const {
   MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, ReprocessamentoRecusado,
 } = await import("./meeting-service");
 const { iniciarReuniaoEmPartes, receberParte } = await import("./fatias-de-reuniao");
+const { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } = await import("./storage");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-retencao-${crypto.randomUUID()}`;
@@ -58,9 +59,9 @@ async function reuniao(status: Status, extra: Record<string, unknown> = {}) {
   return id;
 }
 
-async function gravacao(meetingId: string, expiresAt: number) {
-  const id = crypto.randomUUID();
-  const chave = `meetings/${DONA}/${meetingId}/recording_${id.slice(0, 8)}.m4a`;
+/** `id` escolhido pelo teste quando a ORDEM da varredura importa (ela pagina pelo id). */
+async function gravacao(meetingId: string, expiresAt: number, id: string = crypto.randomUUID()) {
+  const chave = `meetings/${DONA}/${meetingId}/recording_${id.slice(-8)}.m4a`;
   await (await db()).insert(meetingRecordings).values({
     id, meetingId, ownerId: DONA, storageKey: chave, storageUrl: `/manus-storage/${chave}`,
     mimeType: "audio/mp4", sizeBytes: 10, durationSeconds: 60, expiresAt, createdAt: agora(),
@@ -248,30 +249,86 @@ describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integraç
       expect(chavesExpurgadas().sort()).toEqual([semReuniao.chave, parteDaExcluida.chave].sort());
       expect(await gravacoesDe(viva)).toHaveLength(1);
     });
+
+    it("cinco áudios que o bucket recusa SEMPRE não travam os outros: as partes são visitadas na mesma passada, e a gravação depois deles sai na seguinte", async () => {
+      // Antes, as cinco recusas encerravam a passada inteira, e toda passada
+      // recomeçava do primeiro id: as mesmas cinco ficavam na frente para sempre,
+      // e nem as partes eram visitadas. Ids com o mesmo começo, para a ordem ser a
+      // do teste: as cinco recusadas, depois a boa.
+      const prefixo = crypto.randomUUID().slice(0, 8);
+      const recusadas: string[] = [];
+      for (let i = 0; i < 5; i++) recusadas.push((await gravacao(await reuniao("ready"), agora() - 1, `${prefixo}-a${i}`)).chave);
+      const daBoa = await reuniao("ready");
+      const boa = await gravacao(daBoa, agora() - 1, `${prefixo}-b`);
+      const emPartes = await reuniao("ready", { audioPipeline: "slices", expectedSlices: 1 });
+      const parteBoa = await parte(emPartes, 0, agora() - 1);
+      storageApagarTodasAsVersoes.mockImplementation(async (chave: string) => {
+        if (recusadas.includes(chave)) throw new Error("o bucket recusa sempre esta chave");
+      });
+
+      // 1ª passada: as gravações param nas cinco recusas; as partes são visitadas assim mesmo.
+      expect(await varrer()).toEqual({ encontradas: 6, apagadas: 1 });
+      expect(chavesExpurgadas()).toEqual([...recusadas, parteBoa.chave]);
+      expect(await partesDe(emPartes)).toEqual([]);
+      expect(await gravacoesDe(daBoa)).toHaveLength(1);
+
+      // 2ª: retoma DEPOIS da última recusada; a boa sai, e as recusadas ficam por último.
+      storageApagarTodasAsVersoes.mockClear();
+      expect(await varrer()).toEqual({ encontradas: 6, apagadas: 1 });
+      expect(chavesExpurgadas()).toEqual([boa.chave, ...recusadas]);
+      expect(await gravacoesDe(daBoa)).toEqual([]);
+      expect(await (await db()).select().from(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA))).toHaveLength(5);
+    });
+
+    it("para entre um áudio e outro quando deveParar diz (o desligamento): nenhum áudio novo começa, e a passada seguinte retoma de onde parou", async () => {
+      for (let i = 0; i < 3; i++) await gravacao(await reuniao("ready"), agora() - 1);
+
+      const parcial = await limparGravacoesVencidas({ ownerId: DONA, deveParar: () => storageApagarTodasAsVersoes.mock.calls.length >= 1 });
+
+      expect(parcial).toEqual({ encontradas: 1, apagadas: 1 });
+      expect(storageApagarTodasAsVersoes).toHaveBeenCalledTimes(1);
+      expect(await (await db()).select().from(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA))).toHaveLength(2);
+
+      expect(await varrer()).toEqual({ encontradas: 2, apagadas: 2 });
+      expect(await (await db()).select().from(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA))).toEqual([]);
+    });
+
+    it("com deveParar já valendo, nada é tentado, nem nas gravações nem nas partes", async () => {
+      await gravacao(await reuniao("ready"), agora() - 1);
+      await parte(await reuniao("ready", { audioPipeline: "slices" }), 0, agora() - 1);
+
+      expect(await limparGravacoesVencidas({ ownerId: DONA, deveParar: () => true })).toEqual({ encontradas: 0, apagadas: 0 });
+      expect(storageApagarTodasAsVersoes).not.toHaveBeenCalled();
+    });
   });
 
   describe("a exclusão da reunião com o bucket recusando", () => {
-    it("a reunião sai; o áudio fica como ponteiro (vencido e, na parte, sem a transcrição e fora da fila), e a varredura o tira depois", async () => {
-      const id = await reuniao("ready", { audioPipeline: "slices", expectedSlices: 2 });
+    it("a reunião sai; o áudio que o bucket recusou, e o que nem chegou a ser tentado, fica como ponteiro (vencido e, na parte, sem a transcrição e fora da fila), e a varredura o tira depois", async () => {
+      const id = await reuniao("ready", { audioPipeline: "slices", expectedSlices: 8 });
       await parte(id, 0, agora() + 10 * DIA, { lockToken: "reserva-da-fila".padEnd(36, "x"), lockedUntil: agora() + 60_000 });
-      await parte(id, 1, agora() + 10 * DIA);
+      for (let seq = 1; seq < 8; seq++) await parte(id, seq, agora() + 10 * DIA);
       storageApagarTodasAsVersoes.mockRejectedValueOnce(new Error("B2 fora do ar"));
       const antes = agora();
 
       expect(await deletePrivateMeeting(DONA, id)).toBe(true);
 
-      // Parou na primeira recusa: a segunda nem foi tentada, e as duas ficaram.
-      expect(storageApagarTodasAsVersoes).toHaveBeenCalledTimes(1);
+      // Até CONCORRENCIA_DO_EXPURGO_DO_AUDIO por vez, e nenhum começa depois da
+      // recusa: os que estavam em curso terminaram (e saíram), e os últimos nem
+      // foram tentados.
+      expect(storageApagarTodasAsVersoes).toHaveBeenCalledTimes(CONCORRENCIA_DO_EXPURGO_DO_AUDIO);
       expect(await (await db()).select().from(meetings).where(eq(meetings.id, id))).toEqual([]);
       const ponteiros = await partesDe(id);
-      expect(ponteiros).toHaveLength(2);
+      expect(ponteiros).toHaveLength(8 - (CONCORRENCIA_DO_EXPURGO_DO_AUDIO - 1));
+      const [recusada, ...aceitas] = chavesExpurgadas();
+      expect(ponteiros.map(ponteiro => ponteiro.storageKey)).toContain(recusada);
+      for (const aceita of aceitas) expect(ponteiros.map(ponteiro => ponteiro.storageKey)).not.toContain(aceita);
       for (const ponteiro of ponteiros) {
         expect(ponteiro).toMatchObject({ status: "failed", lastError: MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, result: null, lockToken: null, lockedUntil: null });
         expect(ponteiro.expiresAt).toBeGreaterThanOrEqual(antes);
         expect(ponteiro.expiresAt).toBeLessThanOrEqual(agora());
       }
 
-      expect(await varrer()).toEqual({ encontradas: 2, apagadas: 2 });
+      expect(await varrer()).toEqual({ encontradas: ponteiros.length, apagadas: ponteiros.length });
       expect(await partesDe(id)).toEqual([]);
     });
 

@@ -1,6 +1,6 @@
 import { DeleteObjectCommand, HeadObjectCommand, ListObjectVersionsCommand, S3Client } from "@aws-sdk/client-s3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { storageApagarTodasAsVersoes } from "./storage";
+import { ehAcessoNegadoNoBucket, storageApagarTodasAsVersoes, storageListarChavesEscondidas } from "./storage";
 
 /**
  * storageApagarTodasAsVersoes: o áudio de reunião sai do bucket de verdade
@@ -300,5 +300,61 @@ describe("storageApagarTodasAsVersoes: o que pode dar errado no bucket", () => {
     delete process.env.STORAGE_BUCKET;
     await expect(storageApagarTodasAsVersoes(CHAVE)).rejects.toThrow(/STORAGE_BUCKET/);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("ehAcessoNegadoNoBucket: permissão negada é falha do sistema, não de um arquivo", () => {
+  it("reconhece AccessDenied pelo nome, pelo código e pelo 403; não confunde com 404, prazo ou erro qualquer", () => {
+    expect(ehAcessoNegadoNoBucket(negado())).toBe(true);
+    expect(ehAcessoNegadoNoBucket({ Code: "AccessDenied" })).toBe(true);
+    expect(ehAcessoNegadoNoBucket({ name: "Forbidden", $metadata: { httpStatusCode: 403 } })).toBe(true);
+    expect(ehAcessoNegadoNoBucket(ausente())).toBe(false);
+    expect(ehAcessoNegadoNoBucket(Object.assign(new Error("prazo"), { name: "TimeoutError" }))).toBe(false);
+    expect(ehAcessoNegadoNoBucket(new Error("socket hang up"))).toBe(false);
+    expect(ehAcessoNegadoNoBucket(null)).toBe(false);
+  });
+});
+
+describe("storageListarChavesEscondidas: o passivo que o DELETE antigo só escondeu", () => {
+  it("devolve só as chaves cuja versão MAIS RECENTE é um marcador, em ordem, seguindo as páginas", async () => {
+    const escondida = "meetings/dona-1/reuniao-1/recording_aaaa1111.webm";
+    const outraEscondida = "meetings/dona-2/reuniao-9/partes/0003-bbbb2222.m4a";
+    const visivel = "meetings/dona-1/reuniao-2/recording_cccc3333.webm";
+    bucketCom(
+      {
+        IsTruncated: true, NextKeyMarker: outraEscondida, NextVersionIdMarker: "m-2",
+        Versions: [{ Key: escondida, VersionId: "v-1", IsLatest: false }, { Key: visivel, VersionId: "v-3", IsLatest: true }],
+        DeleteMarkers: [{ Key: outraEscondida, VersionId: "m-2", IsLatest: true }],
+      },
+      {
+        IsTruncated: false,
+        // A chave visível já foi apagada uma vez e voltou: o marcador dela é antigo.
+        DeleteMarkers: [{ Key: escondida, VersionId: "m-1", IsLatest: true }, { Key: visivel, VersionId: "m-0", IsLatest: false }],
+      },
+    );
+
+    expect(await storageListarChavesEscondidas("/meetings/")).toEqual([escondida, outraEscondida]);
+
+    expect(nomesDasChamadas()).toEqual(["ListObjectVersionsCommand", "ListObjectVersionsCommand"]);
+    expect(listagens()).toEqual([
+      { Bucket: "bucket-de-teste", Prefix: "meetings/", KeyMarker: undefined, VersionIdMarker: undefined },
+      { Bucket: "bucket-de-teste", Prefix: "meetings/", KeyMarker: outraEscondida, VersionIdMarker: "m-2" },
+    ]);
+    // Só lê: nenhum DELETE.
+    expect(apagamentos()).toEqual([]);
+    // Cada página com o seu prazo.
+    for (const [, opcoes] of chamadas()) expect(opcoes?.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("prefixo vazio é recusado antes de qualquer chamada: a listagem nunca varre o bucket inteiro", async () => {
+    await expect(storageListarChavesEscondidas("")).rejects.toThrow(/Prefixo obrigatório/);
+    await expect(storageListarChavesEscondidas("/")).rejects.toThrow(/Prefixo obrigatório/);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a recusa do bucket SOBE: o script não pode dizer \"nada a apagar\" sem ter listado", async () => {
+    const recusa = negado();
+    send.mockRejectedValue(recusa);
+    await expect(storageListarChavesEscondidas("meetings/")).rejects.toBe(recusa);
   });
 });

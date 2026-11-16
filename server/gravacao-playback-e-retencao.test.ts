@@ -68,6 +68,8 @@ const predicadoDe = ({ sql, params }: Operacao) => ({ sql, params });
 // A ordem de TODAS as escritas: o "deleted" precisa vir antes do primeiro
 // delete, e só a sequência prova isso.
 const sequencia: string[] = [];
+// O n-ésimo DELETE (a partir de 0) que o banco recusa, e com qual erro.
+let deleteQueFalha: ((ordem: number) => Error | null) | null = null;
 
 /** where() do drizzle é "thenable": dá para aguardar direto ou encadear. */
 const consulta = (linhas: Record<string, unknown>[]) => ({
@@ -109,7 +111,13 @@ const fakeDb = {
     };
   },
   delete: (tabela: unknown) => ({
-    where: async (condicao?: SQL) => { delecoes.push({ tabela, ...renderizar(condicao) }); sequencia.push("delete"); },
+    where: async (condicao?: SQL) => {
+      const ordem = delecoes.length;
+      delecoes.push({ tabela, ...renderizar(condicao) });
+      sequencia.push("delete");
+      const erro = deleteQueFalha?.(ordem);
+      if (erro) throw erro;
+    },
   }),
   // O mysql2 devolve [ResultSetHeader, campos]; aqui a linha "existe" se a
   // tabela simulada tem alguma — é como o fake responde "não é dela".
@@ -149,6 +157,7 @@ beforeEach(() => {
   ordenacoes.length = 0;
   atualizacoes.length = 0;
   sequencia.length = 0;
+  deleteQueFalha = null;
   // mockReset (não mockClear): um mockRejectedValueOnce não consumido por um
   // teste vazaria para o próximo e o faria falhar por motivo errado.
   storageDelete.mockReset();
@@ -376,6 +385,44 @@ describe("Retenção — a varredura faz os 30 dias valerem sem depender de algu
     expect(tabelasApagadas()).not.toContain(schema.meetingRecordings);
   });
 
+  it("o bucket NEGOU a permissão: é erro do sistema, com a chave no log de erro; a recusa comum é aviso, também com a chave", async () => {
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA - 1)]);
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      apagarAudio.mockRejectedValueOnce(Object.assign(new Error("Access Denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } }));
+      expect(await servico.limparGravacoesVencidas()).toEqual({ encontradas: 1, apagadas: 0 });
+      expect(erro).toHaveBeenCalledTimes(1);
+      expect(String(erro.mock.calls[0][0])).toContain("NEGOU a permissão");
+      expect(String(erro.mock.calls[0][0])).toContain("meetings/dona-1/reuniao-1/recording_abc.webm");
+      expect(aviso).not.toHaveBeenCalled();
+
+      apagarAudio.mockRejectedValueOnce(new Error("socket hang up"));
+      await servico.limparGravacoesVencidas();
+      expect(aviso).toHaveBeenCalledTimes(1);
+      expect(String(aviso.mock.calls[0][0])).toContain("meetings/dona-1/reuniao-1/recording_abc.webm");
+      expect(erro).toHaveBeenCalledTimes(1);
+    } finally {
+      erro.mockRestore();
+      aviso.mockRestore();
+    }
+  });
+
+  it("o banco cai no meio da passada: o erro sobe como VarreduraInterrompida, com o que já tinha saído e a causa", async () => {
+    tabelas.set(schema.meetingRecordings, [
+      gravacaoCom(AGORA - 1),
+      { ...gravacaoCom(AGORA - 1), id: "grav-2", storageKey: "meetings/dona-1/reuniao-1/recording_def.webm" },
+    ]);
+    const queda = Object.assign(new Error("Connection lost: The server closed the connection."), { code: "PROTOCOL_CONNECTION_LOST" });
+    deleteQueFalha = ordem => (ordem === 1 ? queda : null);
+
+    const erro = await servico.limparGravacoesVencidas().catch(falha => falha);
+
+    expect(erro).toBeInstanceOf(servico.VarreduraInterrompida);
+    expect(erro.resultado).toEqual({ encontradas: 2, apagadas: 1 });
+    expect(erro.cause).toBe(queda);
+  });
+
   it("o WHERE não sai apagando a base inteira: só o vencido (expires_at <= agora) e fora de 'processing', ou o áudio sem reunião", async () => {
     tabelas.set(schema.meetingRecordings, []);
     const antes = Date.now();
@@ -439,12 +486,27 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     }
   });
 
-  it("o áudio sai do bucket ANTES de qualquer linha: é a linha que diz onde o arquivo está", async () => {
+  it("a linha do áudio só sai DEPOIS do bucket (é ela que diz onde o arquivo está); o que a IA gerou sai ANTES, porque não aponta para objeto nenhum", async () => {
+    // Antes, a transcrição e o resto esperavam o expurgo de todo o áudio (4 a 5
+    // chamadas por arquivo): um deploy no meio deixava a reunião 'deleted' com
+    // a transcrição, e nada retomava. O áudio que ficar a varredura retoma.
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     await servico.deletePrivateMeeting("dona-1", "reuniao-1");
-    // Depois do 'deleted' (o UPDATE), o primeiro efeito é o bucket.
-    expect(sequencia.slice(0, 2)).toEqual(["update", "bucket"]);
-    expect(sequencia.indexOf("bucket")).toBeLessThan(sequencia.indexOf("delete"));
+    // O k-ésimo "delete" de `sequencia` é delecoes[k].
+    const posicaoDoDelete = (tabela: unknown) => {
+      const ordem = delecoes.findIndex(operacao => operacao.tabela === tabela);
+      return sequencia.flatMap((efeito, posicao) => (efeito === "delete" ? [posicao] : []))[ordem];
+    };
+    const bucket = sequencia.indexOf("bucket");
+    expect(sequencia[0]).toBe("update");
+    expect(bucket).toBeGreaterThan(0);
+    expect(posicaoDoDelete(schema.meetingRecordings)).toBeGreaterThan(bucket);
+    expect(posicaoDoDelete(schema.meetings)).toBeGreaterThan(bucket);
+    const derivados = [
+      schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts,
+      schema.meetingTranscriptTranslations, schema.meetingSummaryItems, schema.meetingSummaries,
+    ];
+    for (const tabela of derivados) expect(posicaoDoDelete(tabela)).toBeLessThan(bucket);
   });
 
   it("a reunião é marcada 'deleted' ANTES do primeiro delete: é o sinal que um processamento em curso lê", async () => {

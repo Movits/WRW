@@ -19,7 +19,11 @@ import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { dividirEmJanelas } from "./janelas-de-texto";
-import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageApagarTodasAsVersoes, storageGetBytes, storagePut } from "./storage";
+import {
+  chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, ehAcessoNegadoNoBucket, ObjetoAusenteNoStorageError,
+  storageApagarTodasAsVersoes, storageGetBytes, storagePut,
+} from "./storage";
+import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
   apagarPendenciasDaReuniao, emailEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
@@ -788,8 +792,12 @@ export async function processMeetingRecording(input: {
     } catch (erro) {
       // Objeto no bucket sem linha no banco não é achado por varredura
       // nenhuma: a voz ficaria lá para sempre. Sai antes de a falha ser marcada
-      // (trazido da PR #134).
-      await apagarArquivoDaGravacao(uploaded.key);
+      // (trazido da PR #134). Se o bucket também recusar, não há linha para
+      // servir de ponteiro (foi o banco que recusou), e o log de erro é o único
+      // lugar que ainda diz qual objeto precisa sair à mão.
+      if (!(await apagarArquivoDaGravacao(uploaded.key))) {
+        console.error(`[Reuniões] o áudio ficou no bucket SEM ponteiro no banco (reunião ${input.meetingId}); remoção manual: ${uploaded.key}`);
+      }
       throw erro;
     }
 
@@ -1261,13 +1269,23 @@ export async function listPrivateMeetings(ownerId: string) {
  * o áudio está, e apagá-la com o objeto intacto deixaria a voz no bucket para
  * sempre, invisível. Quando o bucket recusa, a linha fica e a varredura
  * (limparGravacoesVencidas) tenta de novo.
+ *
+ * O log leva a CHAVE (montada pelo servidor: o openId aleatório, o id da reunião
+ * e um sufixo, sem nome nem dado de ninguém): é o que diz qual objeto ficou. A
+ * permissão negada (a chave do B2 sem listFiles ou deleteFiles) é erro do
+ * sistema, não aviso de um arquivo: nenhum áudio sai até alguém mexer no painel.
  */
 async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
   try {
     await storageApagarTodasAsVersoes(storageKey);
     return true;
   } catch (erro) {
-    console.warn("[Reuniões] o áudio ficou no bucket:", erro instanceof Error ? erro.message : erro);
+    const motivo = erro instanceof Error ? erro.message : erro;
+    if (ehAcessoNegadoNoBucket(erro)) {
+      console.error(`[Reuniões] o bucket NEGOU a permissão de apagar o áudio (a chave precisa de listFiles e deleteFiles); ficou: ${storageKey}`, motivo);
+    } else {
+      console.warn(`[Reuniões] o áudio ficou no bucket: ${storageKey}`, motivo);
+    }
     return false;
   }
 }
@@ -1276,20 +1294,25 @@ async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
 type LinhaDeAudio = { id: string; storageKey: string };
 
 /**
- * Tira do bucket os áudios da lista, um por vez, e PARA na primeira recusa: com
- * o bucket fora ou travado (até 30 s por chamada), insistir em cada áudio
- * prenderia por minutos a tela da reunião ou a exclusão. O que não saiu, ou nem
- * foi tentado, fica para a varredura. Devolve os ids que saíram e os que ficaram.
+ * Tira do bucket os áudios da lista, até CONCORRENCIA_DO_EXPURGO_DO_AUDIO por
+ * vez (uma requisição da tela espera por eles), e para de começar outros na
+ * primeira recusa: com o bucket fora ou travado (até 30 s por chamada),
+ * insistir em cada áudio prenderia por minutos a tela da reunião ou a exclusão.
+ * Os que já estavam em curso terminam. O que não saiu, ou nem foi tentado, fica
+ * para a varredura. Devolve os ids que saíram e os que ficaram, na ordem da
+ * lista.
  */
 async function tirarDoBucket(linhas: LinhaDeAudio[]): Promise<{ sairam: string[]; ficaram: string[] }> {
+  let houveRecusa = false;
+  const resultados = await comConcorrenciaLimitada(linhas, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, async linha => {
+    const saiu = await apagarArquivoDaGravacao(linha.storageKey);
+    if (!saiu) houveRecusa = true;
+    return saiu;
+  }, () => houveRecusa);
   const sairam: string[] = [];
-  for (let posicao = 0; posicao < linhas.length; posicao++) {
-    if (!(await apagarArquivoDaGravacao(linhas[posicao].storageKey))) {
-      return { sairam, ficaram: linhas.slice(posicao).map(linha => linha.id) };
-    }
-    sairam.push(linhas[posicao].id);
-  }
-  return { sairam, ficaram: [] };
+  const ficaram: string[] = [];
+  resultados.forEach((resultado, posicao) => (resultado?.valor ? sairam : ficaram).push(linhas[posicao].id));
+  return { sairam, ficaram };
 }
 
 /** Uma parte do áudio para o player: o contrato `recording.partes` do desenho. */
@@ -1300,9 +1323,16 @@ export type AudioDaReuniao = {
   recording: { url: string; mimeType: string; durationSeconds: number; sizeBytes: number; expiresAt: number; partes: ParteParaOuvir[] } | null;
   /**
    * O áudio passou do prazo e SAIU do bucket. Sem linha nenhuma, vale para a
-   * reunião mais velha que o prazo: a linha só sai depois do objeto, então ou o
-   * áudio saiu, ou nunca houve (a tela só diz "foi apagada" quando há
-   * transcrição, que só existe se houve áudio).
+   * reunião mais velha que o prazo: desde a retenção do áudio (novembro de 2026)
+   * a linha só sai depois do objeto com todas as versões, então ou o áudio saiu,
+   * ou nunca houve (a tela só diz "foi apagada" quando há transcrição, que só
+   * existe se houve áudio).
+   *
+   * Exceção que o código não alcança: o áudio cuja linha saiu ANTES dessa regra.
+   * O DELETE antigo (storageDelete, sem VersionId) só escondia o arquivo no B2,
+   * e a versão com a voz ficou guardada sem ponteiro. Para esse passivo, a
+   * regra de ciclo de vida do bucket no prefixo meetings/ ou o expurgo único de
+   * scripts/expurgar-audio-escondido.ts (os dois só com o Roberto).
    */
   recordingExpired: boolean;
   /** O áudio passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
@@ -1464,25 +1494,53 @@ const LOTE_DA_VARREDURA = 200;
 /** Teto de lotes por tabela numa passada: o que sobrar sai na passada seguinte. */
 const MAXIMO_DE_LOTES_DA_VARREDURA = 20;
 /**
- * Recusas SEGUIDAS do bucket que encerram a passada. Um áudio que o bucket
- * recusa não trava os outros, mas um bucket fora do ar ou travado (até 30 s por
- * chamada) não pode prender a passada por horas: a próxima tenta de novo.
+ * Recusas SEGUIDAS do bucket que encerram a volta de UMA tabela: um bucket fora
+ * do ar ou travado (até 30 s por chamada) não pode prender a passada por horas.
+ * A conta é por tabela (as partes são visitadas mesmo quando as gravações batem
+ * no teto) e zera a cada áudio que sai.
  */
-const RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_PASSADA = 5;
+const RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA = 5;
 
 export type ResultadoDaVarredura = { encontradas: number; apagadas: number };
+
+/**
+ * A passada da varredura parou no meio por um erro (o banco caiu, por exemplo).
+ * O erro continua sendo erro (banco fora do ar nunca vira "nada a apagar"), mas
+ * leva o que JÁ saiu do bucket e do banco nessa passada, para o laço
+ * (server/varredura-de-gravacoes.ts) registrar na auditoria antes de relançar.
+ */
+export class VarreduraInterrompida extends Error {
+  constructor(readonly resultado: ResultadoDaVarredura, causa: unknown) {
+    super("A varredura das gravações vencidas parou no meio.", { cause: causa });
+    this.name = "VarreduraInterrompida";
+  }
+}
+
+/**
+ * Onde cada tabela retoma na passada seguinte quando a anterior parou no meio
+ * (recusas seguidas, teto de lotes ou desligamento): o id da última linha
+ * tentada. Sem isto, toda passada recomeçava do primeiro id, e cinco áudios que
+ * o bucket recusa sempre ficavam na frente e travavam todos os outros. Na
+ * memória do processo: perder a marca num deploy só faz a passada seguinte
+ * começar do começo. Por tabela e, nos testes de integração, por dona.
+ */
+const retomadaDaVarredura = new Map<string, string>();
 
 /** A reunião DO áudio: mesmo id E mesma dona. Sem esse par, o áudio é de reunião que já não existe. */
 const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
 const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
 
+/** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
+type TrechoDaVarredura = { depoisDe: string; ate?: string };
+
 /** As gravações do envio único que saem nesta passada (ver limparGravacoesVencidas). */
-function gravacoesQueSaem(db: Banco, agora: number, depoisDe: string, lote: number, ownerId?: string) {
+function gravacoesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
   return db.select({ id: meetingRecordings.id, storageKey: meetingRecordings.storageKey })
     .from(meetingRecordings)
     .leftJoin(meetings, reuniaoDaGravacao)
     .where(and(
-      gt(meetingRecordings.id, depoisDe),
+      gt(meetingRecordings.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingRecordings.id, trecho.ate) : undefined,
       ownerId ? eq(meetingRecordings.ownerId, ownerId) : undefined,
       or(
         isNull(meetings.id),
@@ -1495,12 +1553,13 @@ function gravacoesQueSaem(db: Banco, agora: number, depoisDe: string, lote: numb
 }
 
 /** As partes da gravação em partes que saem nesta passada (ver limparGravacoesVencidas). */
-function partesQueSaem(db: Banco, agora: number, depoisDe: string, lote: number, ownerId?: string) {
+function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
   return db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey })
     .from(meetingAudioSlices)
     .leftJoin(meetings, reuniaoDaParte)
     .where(and(
-      gt(meetingAudioSlices.id, depoisDe),
+      gt(meetingAudioSlices.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingAudioSlices.id, trecho.ate) : undefined,
       ownerId ? eq(meetingAudioSlices.ownerId, ownerId) : undefined,
       or(
         isNull(meetings.id),
@@ -1532,10 +1591,16 @@ function partesQueSaem(db: Banco, agora: number, depoisDe: string, lote: number,
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
- * não volta na mesma passada. Para entre um áudio e outro quando `deveParar`
- * diz (o desligamento do servidor) ou depois de
- * RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_PASSADA. Rodar de novo sem nada vencido não
- * faz nada.
+ * não volta na mesma passada. Em cada tabela, a volta para depois de
+ * RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA, e a tabela seguinte é visitada assim
+ * mesmo. A passada inteira para entre um áudio e outro quando `deveParar` diz
+ * (o desligamento do servidor). A tabela que parou no meio retoma na passada
+ * seguinte DEPOIS da última linha tentada e dá a volta: o que ficou recusado
+ * passa para o fim da fila, em vez de travar os outros áudios a cada passada.
+ * Rodar de novo sem nada vencido não faz nada.
+ *
+ * Erro no meio (o banco caiu, por exemplo) sobe como VarreduraInterrompida,
+ * com o que já tinha saído.
  *
  * Varredura de SISTEMA, sem owner_id de propósito, como
  * marcarReunioesInterrompidas: não lê nem devolve dado de reunião. `ownerId` só
@@ -1557,38 +1622,65 @@ export async function limparGravacoesVencidas(opcoes: {
   const maximoDeLotes = opcoes.maximoDeLotes ?? MAXIMO_DE_LOTES_DA_VARREDURA;
   const deveParar = opcoes.deveParar ?? (() => false);
   const resultado: ResultadoDaVarredura = { encontradas: 0, apagadas: 0 };
-  let recusasSeguidas = 0;
-  const encerrar = () => deveParar() || recusasSeguidas >= RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_PASSADA;
 
   const tabelas = [
     {
-      ler: (depoisDe: string) => gravacoesQueSaem(db, agora, depoisDe, lote, opcoes.ownerId),
+      nome: "gravacoes",
+      ler: (trecho: TrechoDaVarredura) => gravacoesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingRecordings).where(eq(meetingRecordings.id, id)),
     },
     {
-      ler: (depoisDe: string) => partesQueSaem(db, agora, depoisDe, lote, opcoes.ownerId),
+      nome: "partes",
+      ler: (trecho: TrechoDaVarredura) => partesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, id)),
     },
   ];
-  for (const tabela of tabelas) {
-    let depoisDe = "";
-    for (let lotes = 0; lotes < maximoDeLotes; lotes++) {
-      if (encerrar()) return resultado;
-      const linhas = await tabela.ler(depoisDe);
-      for (const linha of linhas) {
-        if (encerrar()) return resultado;
-        resultado.encontradas += 1;
-        if (await apagarArquivoDaGravacao(linha.storageKey)) {
-          await tabela.apagarLinha(linha.id);
-          resultado.apagadas += 1;
-          recusasSeguidas = 0;
-        } else {
-          recusasSeguidas += 1;
+
+  /** Uma volta por uma tabela. Devolve se parou antes do fim e a última linha que tentou. */
+  const varrerTabela = async (tabela: (typeof tabelas)[number], retomada: string) => {
+    // Com marca, a volta começa depois da linha em que a passada anterior parou
+    // e, no fim da tabela, continua do começo até essa linha (inclusive), que
+    // fica por último. Sem marca, do começo ao fim.
+    const trechos: TrechoDaVarredura[] = retomada ? [{ depoisDe: retomada }, { depoisDe: "", ate: retomada }] : [{ depoisDe: "" }];
+    let recusasSeguidas = 0;
+    let lotes = 0;
+    let ultimaTentada: string | null = null;
+    const parar = () => deveParar() || recusasSeguidas >= RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA;
+    for (const trecho of trechos) {
+      let depoisDe = trecho.depoisDe;
+      for (;;) {
+        if (parar() || lotes >= maximoDeLotes) return { parou: true, ultimaTentada };
+        const linhas = await tabela.ler({ depoisDe, ate: trecho.ate });
+        lotes += 1;
+        for (const linha of linhas) {
+          if (parar()) return { parou: true, ultimaTentada };
+          resultado.encontradas += 1;
+          ultimaTentada = linha.id;
+          if (await apagarArquivoDaGravacao(linha.storageKey)) {
+            await tabela.apagarLinha(linha.id);
+            resultado.apagadas += 1;
+            recusasSeguidas = 0;
+          } else {
+            recusasSeguidas += 1;
+          }
         }
+        if (linhas.length < lote) break;
+        depoisDe = linhas[linhas.length - 1].id;
       }
-      if (linhas.length < lote) break;
-      depoisDe = linhas[linhas.length - 1].id;
     }
+    return { parou: false, ultimaTentada };
+  };
+
+  try {
+    for (const tabela of tabelas) {
+      if (deveParar()) break;
+      const chave = `${tabela.nome}|${opcoes.ownerId ?? ""}`;
+      const volta = await varrerTabela(tabela, retomadaDaVarredura.get(chave) ?? "");
+      if (!volta.parou) retomadaDaVarredura.delete(chave);
+      else if (volta.ultimaTentada !== null) retomadaDaVarredura.set(chave, volta.ultimaTentada);
+    }
+  } catch (erro) {
+    throw new VarreduraInterrompida({ ...resultado }, erro);
   }
   return resultado;
 }
@@ -1628,42 +1720,61 @@ export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio
  * leitura vem primeiro porque é a linha que diz onde o arquivo está: apagá-la
  * antes tornaria o objeto inalcançável para sempre.
  *
- * Pelo mesmo motivo, só sai a linha do áudio cujo objeto saiu, pelo id (e pela
- * dona). Se o bucket recusar (B2 fora, chave sem permissão de listar), a
- * exclusão não trava: a reunião sai do mesmo jeito, mas a linha fica como
- * ponteiro, já vencida e, na parte, sem a transcrição (`result`) e fora da
- * fila; sem a reunião, a varredura a acha na passada seguinte e tenta o bucket
- * de novo. Apagar pelo id também poupa o áudio que uma execução ainda em curso
- * gravou depois desta leitura: ela relê a reunião, a acha excluída e o leva
- * junto (ou, se falhar antes, a varredura o acha sem reunião).
+ * O que a IA gerou (transcrição, sugestões, traduções, resumo) sai ANTES do
+ * bucket: não aponta para objeto nenhum, e o expurgo do áudio, com 4 a 5
+ * chamadas por arquivo, é a parte longa. Um deploy (SIGTERM) no meio do expurgo
+ * deixava a reunião 'deleted' ainda com a transcrição, e nada retomava isso; o
+ * áudio que ficar a varredura retoma.
+ *
+ * Só sai a linha do áudio cujo objeto saiu, pelo id (e pela dona). Se o bucket
+ * recusar (B2 fora, chave sem permissão de listar), a exclusão não trava: a
+ * reunião sai do mesmo jeito, mas a linha fica como ponteiro, já vencida e, na
+ * parte, sem a transcrição (`result`) e fora da fila; sem a reunião, a
+ * varredura a acha na passada seguinte e tenta o bucket de novo. Apagar pelo id
+ * também poupa o áudio que uma execução ainda em curso gravou depois desta
+ * leitura: ela relê a reunião, a acha excluída e o leva junto (ou, se falhar
+ * antes, a varredura o acha sem reunião).
  */
 async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: string) {
   const gravacoes = await db.select({ id: meetingRecordings.id, storageKey: meetingRecordings.storageKey })
     .from(meetingRecordings)
     .where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
-  // As partes da reunião gravada em partes (G5) são áudio também. A linha
-  // 'uploading' cujo objeto ainda não subiu sai igual (o expurgo de chave
-  // inexistente não é erro), e receberParte confere a reunião de novo depois do
-  // upload, para não deixar objeto de reunião apagada.
-  const partes = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey })
+  // As partes da reunião gravada em partes (G5) são áudio também.
+  const partes = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey, status: meetingAudioSlices.status })
     .from(meetingAudioSlices)
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
-  // Para na primeira recusa (tirarDoBucket): com o bucket fora, a dona não espera
-  // um prazo inteiro por parte, e o resto fica como ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes]);
-  const saiu = new Set(sairam);
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId);
 
+  // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
+  // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
+  // ponteiro para a varredura.
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes]);
+  const saiu = new Set(sairam);
+
   const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
   const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
-  const partesQueSairam = partes.filter(parte => saiu.has(parte.id)).map(parte => parte.id);
+  // A parte lida 'uploading' ainda está subindo: o expurgo dela aqui pode ter
+  // rodado ANTES de o objeto existir (e "dado certo" sem apagar nada). Ela é de
+  // receberParte, que relê a reunião depois do upload, a acha 'deleted' (gravado
+  // antes desta leitura) e tira o próprio objeto. Por isso a linha dela só sai
+  // aqui se continuar 'uploading' (o upload não terminou; se terminar, o
+  // receberParte não acha a linha e tira o objeto do mesmo jeito): se o upload
+  // terminou nesse meio-tempo, a linha é o ponteiro de que receberParte precisa
+  // se o bucket recusar o expurgo dele.
+  const partesQueSairam = partes.filter(parte => saiu.has(parte.id) && parte.status !== "uploading").map(parte => parte.id);
+  const partesSubindoQueSairam = partes.filter(parte => saiu.has(parte.id) && parte.status === "uploading").map(parte => parte.id);
   const partesQueFicam = partes.filter(parte => !saiu.has(parte.id)).map(parte => parte.id);
   if (gravacoesQueSairam.length) {
     await db.delete(meetingRecordings).where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueSairam)));
   }
   if (partesQueSairam.length) {
     await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesQueSairam)));
+  }
+  if (partesSubindoQueSairam.length) {
+    await db.delete(meetingAudioSlices).where(and(
+      eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesSubindoQueSairam), eq(meetingAudioSlices.status, "uploading"),
+    ));
   }
   const agora = now();
   if (gravacoesQueFicam.length) {

@@ -450,14 +450,18 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     await reprocessar();
     expect(de("insert")).toEqual([]);
     // O arquivo sai do bucket com todas as versões, e só então a linha da
-    // gravação, pelo id; sem partes, não há DELETE de partes.
+    // gravação, pelo id; sem partes, não há DELETE de partes. O que a IA gerou
+    // sai antes do bucket (não aponta para objeto nenhum, e o expurgo é a parte
+    // longa da exclusão).
     expect(apagarAudio).toHaveBeenCalledWith(CHAVE);
     expect(storageDelete).not.toHaveBeenCalled();
     expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
     expect(soPredicado(de("delete", schema.meetingRecordings)[0])).toEqual({
       sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: [DONA, "gravacao-1"],
     });
-    expect(primeira(o => o.tipo === "bucket" && o.tabela === "expurgo")).toBeLessThan(primeira(o => o.tipo === "delete"));
+    const expurgo = primeira(o => o.tipo === "bucket" && o.tabela === "expurgo");
+    expect(expurgo).toBeGreaterThan(primeira(o => o.tipo === "delete"));
+    expect(expurgo).toBeLessThan(primeira(o => o.tipo === "delete" && o.tabela === schema.meetingRecordings));
     expect(falhasGravadas()).toEqual([]);
   });
 
