@@ -254,6 +254,9 @@ function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtract
 
 async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
   const response = await invokeLLM({
+    // Segue o LLM_MODEL; LLM_MODEL_EXTRACAO troca sem deploy (FUNCOES_DE_TEXTO,
+    // em _core/modelos-de-ia.ts, diz por que o Lite ainda não é o padrão).
+    funcao: "extracao",
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
     messages: [

@@ -72,6 +72,8 @@ describe("o que vai à IA", () => {
     expect(usuario.content).toContain("{F3}: Decidimos não renovar o contrato com a transportadora antiga.");
     expect(usuario.content).toContain("Eu preparo a planilha de custos do frete");
     expect(pedido().response_format.json_schema.strict).toBe(true);
+    // A função escolhe o modelo do resumo (LLM_MODEL_RESUMO; sem ela, o LLM_MODEL).
+    expect(invokeLLM.mock.calls[0][0]).toMatchObject({ funcao: "resumo" });
   });
 
   it("transcrição vazia não chama a IA", async () => {
@@ -180,6 +182,8 @@ describe("reunião longa", () => {
     expect(pedido(2).messages[1].content).toContain("Parcial 1");
     expect(pedido(2).messages[0].content).toContain("Copie cada \"trecho\" exatamente");
     expect(itens.map(i => i.text)).toEqual(["Preparar a planilha"]);
+    // As janelas e a junção são todas do resumo: LLM_MODEL_RESUMO vale para as três.
+    for (const [chamada] of invokeLLM.mock.calls) expect(chamada).toMatchObject({ funcao: "resumo" });
   });
 });
 

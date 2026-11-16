@@ -1,4 +1,5 @@
 import { invokeLLM } from "./_core/llm";
+import type { FuncaoDeTexto } from "./_core/modelos-de-ia";
 
 /**
  * O pedido à IA de texto que responde em JSON (schema strict), usado no que a
@@ -24,10 +25,18 @@ export async function pedirJsonAIA(pedido: {
   schema: Record<string, unknown>;
   timeoutMs: number;
   orcamentoMs: number;
+  /**
+   * A função escolhe o modelo (LLM_MODEL_RESUMO, LLM_MODEL_PERGUNTA...).
+   * Obrigatória: num merge que reescreva quem chama, o pnpm check acusa a
+   * função que sumiu, em vez de o pedido voltar ao LLM_MODEL em silêncio
+   * enquanto a linha [IA] do boot mostra o modelo da função.
+   */
+  funcao: FuncaoDeTexto;
 }): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
   let resposta: Awaited<ReturnType<typeof invokeLLM>>;
   try {
     resposta = await invokeLLM({
+      funcao: pedido.funcao,
       timeoutMs: pedido.timeoutMs,
       orcamentoMs: pedido.orcamentoMs,
       messages: [{ role: "system", content: pedido.sistema }, { role: "user", content: pedido.usuario }],

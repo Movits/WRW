@@ -258,7 +258,7 @@ export function conferirResumo(dados: Record<string, unknown>, contexto: Context
 }
 
 async function pedirResumo(sistema: string, usuario: string) {
-  return pedirJsonAIA({ sistema, usuario, nome: "resumo_guardado", schema: SCHEMA_DO_RESUMO_GUARDADO, timeoutMs: TIMEOUT_DO_RESUMO_MS, orcamentoMs: ORCAMENTO_DO_RESUMO_MS });
+  return pedirJsonAIA({ sistema, usuario, nome: "resumo_guardado", schema: SCHEMA_DO_RESUMO_GUARDADO, timeoutMs: TIMEOUT_DO_RESUMO_MS, orcamentoMs: ORCAMENTO_DO_RESUMO_MS, funcao: "resumo" });
 }
 
 /**
