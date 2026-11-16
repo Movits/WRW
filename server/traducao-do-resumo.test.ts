@@ -358,7 +358,7 @@ describe("traduzir o resumo", () => {
     expect(banco.gravacoes).toEqual([]);
   });
 
-  it("resposta cortada no teto de saída: o lote vai em duas metades; o lote de um só falha", async () => {
+  it("resposta cortada no teto de saída: o lote vai em duas metades; a entrada única que sempre corta, sem nada aceito, é falha", async () => {
     banco.itens = [item("a"), item("b")];
     pedirJsonAIA.mockImplementation(async (pedido: Pedido) => {
       if (enviadoEm(pedido).itens.length > 1) throw new FalhaDaIA("RESPOSTA_CORTADA");
@@ -370,11 +370,79 @@ describe("traduzir o resumo", () => {
 
     _paraTestes.limpar();
     banco.guardados = {};
+    banco.gravacoes = [];
     banco.itens = [item("c")];
     pedirJsonAIA.mockReset();
     pedirJsonAIA.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(traduzirResumoDaDona("dona-1", "r1", "en")).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(banco.gravacoes).toEqual([]);
+  });
+
+  it("a entrada que sozinha passa do teto de saída fica no original, sem levar as outras, e não volta à IA", async () => {
+    banco.itens = [item("a"), item("b")];
+    pedirJsonAIA.mockImplementation(async (pedido: Pedido) => {
+      if (enviadoEm(pedido).itens.some(enviado => enviado.texto === "Texto b")) throw new FalhaDaIA("RESPOSTA_CORTADA");
+      return tradutor(paraIngles)(pedido);
+    });
+
+    const resposta = await traduzirResumoDaDona("dona-1", "r1", "en");
+    // [a, b] cortado; as metades [a] e [b]; e o [b] sozinho, que cortaria de novo, não vai à segunda passada.
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(3);
+    expect(resposta.estado === "pronta" && resposta.itens.map(i => i.text)).toEqual(["EN Texto a", "Texto b"]);
+    pedirJsonAIA.mockClear();
+    await traduzirResumoDaDona("dona-1", "r1", "en");
+    expect(pedirJsonAIA).not.toHaveBeenCalled();
+  });
+
+  it("um lote que falha não leva os outros: o que voltou fica guardado, quem pediu recebe o erro, e o pedido seguinte manda à IA só o que faltou", async () => {
+    // Três itens grandes: um lote para cada.
+    const grande = (letra: string) => `${letra} ${"x".repeat(4_000)}`;
+    banco.itens = [item("a", { text: grande("A") }), item("b", { text: grande("B") }), item("c", { text: grande("C") })];
+    const letrasEnviadas = () => pedirJsonAIA.mock.calls.flatMap(([pedido]) => enviadoEm(pedido as Pedido).itens.map(enviado => enviado.texto[0]));
+    // A IA traduz o lote do "a" e cai no do "b", já sem retentativas.
+    pedirJsonAIA.mockImplementation(async (pedido: Pedido) => {
+      if (enviadoEm(pedido).itens.some(enviado => enviado.texto.startsWith("B "))) throw new FalhaDaIA("IA_INDISPONIVEL");
+      return tradutor(paraIngles)(pedido);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(traduzirResumoDaDona("dona-1", "r1", "en")).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    // Com a IA fora, o lote do "c" nem foi.
+    expect(letrasEnviadas()).toEqual(["A", "B"]);
+    expect(banco.gravacoes).toHaveLength(1);
+    expect(Object.keys((banco.gravacoes[0].conteudo as { itens: object }).itens)).toEqual(["a"]);
+
+    // O "Tentar de novo": só o que ficou sem resposta vai à IA.
+    pedirJsonAIA.mockReset();
+    pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+    const resposta = await traduzirResumoDaDona("dona-1", "r1", "en");
+    expect(letrasEnviadas()).toEqual(["B", "C"]);
+    expect(resposta.estado === "pronta" && resposta.itens.map(i => i.text.slice(0, 4))).toEqual(["EN A", "EN B", "EN C"]);
+  });
+
+  it("a segunda passada que falha não leva o que a primeira aceitou", async () => {
+    banco.itens = [item("a"), item("b", { text: "{F2} recusou" })];
+    let chamada = 0;
+    pedirJsonAIA.mockImplementation(async (pedido: Pedido) => {
+      chamada += 1;
+      if (chamada === 2) throw new FalhaDaIA("RESPOSTA_INVALIDA");
+      // Na primeira passada, o "b" perde o rótulo de voz e vai à segunda.
+      return tradutor(texto => `EN ${texto.replace("{F2}", "Ana")}`)(pedido);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(traduzirResumoDaDona("dona-1", "r1", "en")).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(2);
+    // O "b" ficou sem resposta na segunda passada: não é guardado nem como original.
+    expect(Object.keys((banco.gravacoes[0].conteudo as { itens: object }).itens)).toEqual(["a"]);
+
+    pedirJsonAIA.mockReset();
+    pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+    const resposta = await traduzirResumoDaDona("dona-1", "r1", "en");
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(1);
+    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).itens.map(enviado => enviado.texto)).toEqual(["{F2} recusou"]);
+    expect(resposta.estado === "pronta" && resposta.itens.map(i => i.text)).toEqual(["EN Texto a", "EN {F2} recusou"]);
   });
 
   it("o mapa mental vai junto, rótulo por rótulo, e volta como dicionário", async () => {

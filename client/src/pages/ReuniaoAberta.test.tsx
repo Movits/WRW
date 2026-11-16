@@ -37,6 +37,8 @@ const duble = vi.hoisted(() => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // A tradução do resumo relê o resumo quando o servidor diz que ele mudou.
+    useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } }),
     meetings: { traduzirResumo: { useMutation: () => duble.traduzirResumoDaDona } },
     reuniaoAberta: {
       ver: {

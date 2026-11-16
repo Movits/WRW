@@ -10,9 +10,14 @@ import { useTraducaoDoResumo } from "./useTraducaoDoResumo";
  * dublê: cada mutate fica registrado com as opções, e o teste responde por elas.
  */
 type Opcoes = { onSuccess: (resposta: unknown) => void; onError: (erro: unknown) => void };
-const duble = vi.hoisted(() => ({ daDona: { mutate: vi.fn() }, doLink: { mutate: vi.fn() } }));
+const duble = vi.hoisted(() => ({
+  daDona: { mutate: vi.fn() },
+  doLink: { mutate: vi.fn() },
+  utils: { meetings: { resumoGuardado: { invalidate: vi.fn() } }, reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } },
+}));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    useUtils: () => duble.utils,
     meetings: { traduzirResumo: { useMutation: () => duble.daDona } },
     reuniaoAberta: { traduzirResumo: { useMutation: () => duble.doLink } },
   },
@@ -26,10 +31,13 @@ const itemDaDona = (id: string, text: string, extra: Record<string, unknown> = {
 const resumoDaDona = (itens = [itemDaDona("a", "Renovar o contrato"), itemDaDona("b", "{F2} manda a proposta")], idioma: string | null = "pt-BR") =>
   ({ estado: "pronto", emoji: null, idioma, erro: null, itens }) as never;
 const ultimoPedido = (m: { mutate: ReturnType<typeof vi.fn> }) => m.mutate.mock.calls.at(-1) as [Record<string, unknown>, Opcoes];
+const textos = (resumo: unknown) => (resumo as { itens: Array<{ text: string }> }).itens.map(item => item.text);
 
 beforeEach(() => {
   duble.daDona.mutate.mockReset();
   duble.doLink.mutate.mockReset();
+  duble.utils.meetings.resumoGuardado.invalidate.mockReset();
+  duble.utils.reuniaoAberta.resumoGuardado.invalidate.mockReset();
 });
 afterEach(async () => {
   vi.useRealTimers();
@@ -168,6 +176,74 @@ describe("useTraducaoDoResumo — para a dona", () => {
     expect(result.current.estado).toBe("traduzindo");
     expect((result.current.aplicar(editado) as unknown as { itens: Array<{ text: string }> }).itens[0].text).toBe("Renovar o contrato por dois anos");
   });
+
+  describe("o mapa mental que fica pronto depois do resumo (H10)", () => {
+    const EM_INGLES = [{ id: "a", subject: null, text: "Renew the contract", due: null }];
+    const montar = async () => {
+      await telaEm("en");
+      const resumo = resumoDaDona();
+      const tela = renderHook(({ rotulos }) => useTraducaoDoResumo({ meetingId: REUNIAO }, resumo, rotulos), { initialProps: { rotulos: undefined as string[] | undefined } });
+      act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "pronta", idioma: "en", mapa: {}, itens: EM_INGLES }));
+      expect(tela.result.current.estado).toBe("pronta");
+      return { ...tela, resumo };
+    };
+
+    it("o mapa que chega pede de novo; os itens seguem traduzidos até a resposta, e o mesmo mapa não pede outra vez", async () => {
+      const { result, rerender, resumo } = await montar();
+
+      rerender({ rotulos: ["Prazos", "Lojas"] });
+      expect(duble.daDona.mutate).toHaveBeenCalledTimes(2);
+      expect(ultimoPedido(duble.daDona)[0]).toEqual({ meetingId: REUNIAO, idioma: "en" });
+      expect(result.current.estado).toBe("pronta");
+      expect(textos(result.current.aplicar(resumo))[0]).toBe("Renew the contract");
+      expect(result.current.traduzirRotulo("Prazos")).toBe("Prazos");
+
+      act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines", Lojas: "Stores" }, itens: EM_INGLES }));
+      expect(result.current.traduzirRotulo("Prazos")).toBe("Deadlines");
+      expect(result.current.traduzirRotulo("Lojas")).toBe("Stores");
+
+      // Os mesmos rótulos, em outra ordem, repetidos ou num array novo.
+      rerender({ rotulos: ["Lojas", "Prazos", "Lojas"] });
+      expect(duble.daDona.mutate).toHaveBeenCalledTimes(2);
+    });
+
+    it("o pedido dos rótulos que falha mostra o erro com o resumo no original; 'Tentar de novo' volta à tradução enquanto pede", async () => {
+      const { result, rerender, resumo } = await montar();
+      rerender({ rotulos: ["Prazos"] });
+
+      act(() => ultimoPedido(duble.daDona)[1].onError({ data: { code: "SERVICE_UNAVAILABLE" } }));
+      expect(result.current.estado).toBe("erro");
+      expect(textos(result.current.aplicar(resumo))[0]).toBe("Renovar o contrato");
+
+      act(() => result.current.tentarDeNovo());
+      expect(duble.daDona.mutate).toHaveBeenCalledTimes(3);
+      expect(result.current.estado).toBe("pronta");
+      expect(textos(result.current.aplicar(resumo))[0]).toBe("Renew the contract");
+    });
+  });
+
+  it("'sem_resumo' do servidor (a reunião foi reprocessada): não fica em 'traduzindo', para de perguntar e relê o resumo", async () => {
+    await telaEm("en");
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useTraducaoDoResumo({ meetingId: REUNIAO }, resumoDaDona()));
+    act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "sem_resumo", idioma: "en" }));
+    expect(result.current.estado).toBe("inativa");
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(duble.daDona.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("'original' do servidor (o resumo foi refeito no idioma pedido): mostra o original e relê; o resumo relido não pede de novo", async () => {
+    await telaEm("en");
+    const { result, rerender } = renderHook(({ resumo }) => useTraducaoDoResumo({ meetingId: REUNIAO }, resumo), { initialProps: { resumo: resumoDaDona() } });
+    act(() => ultimoPedido(duble.daDona)[1].onSuccess({ estado: "original", idioma: "en" }));
+    expect(result.current.estado).toBe("original");
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+
+    rerender({ resumo: resumoDaDona([itemDaDona("a2", "Renew the contract")], "en") });
+    expect(result.current.estado).toBe("original");
+    expect(duble.daDona.mutate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useTraducaoDoResumo — pelo link", () => {
@@ -190,5 +266,14 @@ describe("useTraducaoDoResumo — pelo link", () => {
     const { rerender } = renderHook(({ resumo }) => useTraducaoDoResumo({ token: TOKEN }, resumo), { initialProps: { resumo: resumoDoLink() } });
     rerender({ resumo: resumoDoLink([itemDoLink("Enviar a proposta", "confirmed")]) });
     expect(duble.doLink.mutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("pelo link, 'sem_resumo' (a dona refez o resumo) relê o resumo do link, que não relê sozinho", async () => {
+    await telaEm("fr");
+    const { result } = renderHook(() => useTraducaoDoResumo({ token: TOKEN }, resumoDoLink()));
+    act(() => ultimoPedido(duble.doLink)[1].onSuccess({ estado: "sem_resumo", idioma: "fr" }));
+    expect(result.current.estado).toBe("inativa");
+    expect(duble.utils.reuniaoAberta.resumoGuardado.invalidate).toHaveBeenCalledWith({ token: TOKEN });
+    expect(duble.utils.meetings.resumoGuardado.invalidate).not.toHaveBeenCalled();
   });
 });

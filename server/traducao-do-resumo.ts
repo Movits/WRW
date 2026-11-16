@@ -20,6 +20,8 @@ import { gravarTraducaoDoResumo, lerResumoParaTraduzir, type ItemParaTraduzir, t
  *   inventa um rótulo é recusada. O nome da voz nunca vai ao prompt; quem troca o
  *   rótulo pelo nome é a tela (shared/vozes-no-texto.ts).
  * - O mapa mental (H10) vai junto, rótulo por rótulo.
+ * - O lote que falha não leva os outros: o que a IA já traduziu fica guardado,
+ *   quem pediu recebe o erro, e o "Tentar de novo" manda à IA só o que faltou.
  * - O link aberto recebe a tradução sem ids e sem os itens ignorados, e só gasta
  *   vaga do teto quando a IA é chamada de fato (`antesDeChamarAIA`).
  */
@@ -243,50 +245,79 @@ function mensagemDoLote(lote: readonly EntradaDaTraducao[]): string {
   return `Notas a traduzir, em JSON:\n\n${JSON.stringify({ itens, rotulos })}`;
 }
 
-type Traduzidas = { aceitas: Map<string, TextosDoItem | string>; modelo: string | null };
+type Traduzidas = {
+  aceitas: Map<string, TextosDoItem | string>;
+  modelo: string | null;
+  // As chaves das entradas que ficaram sem resposta, porque o lote delas
+  // falhou (a IA fora, o JSON inválido). Elas não são guardadas, nem como
+  // original: o próximo pedido as manda de novo.
+  semResposta: Set<string>;
+  // A falha desses lotes, para quem pediu; null quando toda entrada teve resposta.
+  falha: FalhaDaIA | null;
+};
 
-async function traduzirLote(lote: EntradaDaTraducao[], destino: IdiomaDaReuniao, origem: IdiomaDaReuniao): Promise<Traduzidas> {
-  try {
-    const { dados, modelo } = await pedirJsonAIA({
-      sistema: instrucoesDaTraducao(destino, origem),
-      usuario: mensagemDoLote(lote),
-      nome: "traducao_do_resumo",
-      schema: SCHEMA_DA_TRADUCAO,
-      timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
-      orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
-    });
-    return { aceitas: conferirLote(lote, dados), modelo };
-  } catch (erro) {
-    // Cortada no teto de saída, a mesma entrada cortaria de novo: cada metade cabe.
-    if (erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA" && lote.length > 1) {
-      const meio = Math.ceil(lote.length / 2);
-      const primeira = await traduzirLote(lote.slice(0, meio), destino, origem);
-      const segunda = await traduzirLote(lote.slice(meio), destino, origem);
-      return { aceitas: new Map([...Array.from(primeira.aceitas), ...Array.from(segunda.aceitas)]), modelo: segunda.modelo ?? primeira.modelo };
-    }
-    throw erro;
-  }
+function pedirTraducaoDoLote(lote: readonly EntradaDaTraducao[], destino: IdiomaDaReuniao, origem: IdiomaDaReuniao) {
+  return pedirJsonAIA({
+    sistema: instrucoesDaTraducao(destino, origem),
+    usuario: mensagemDoLote(lote),
+    nome: "traducao_do_resumo",
+    schema: SCHEMA_DA_TRADUCAO,
+    timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
+    orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
+  });
 }
 
 /**
  * Traduz as entradas em lotes, um por vez. O que volta faltando ou não passa na
- * conferência vai numa segunda passada; o que falha de novo fica de fora. Se
- * nada passou, é falha da IA (a resposta não serviu), e nada é guardado.
+ * conferência vai numa segunda passada; o que falha de novo fica de fora. A
+ * falha de um lote não leva os outros:
+ * - cortada no teto de saída, a resposta vem pela metade: o lote vai em duas
+ *   metades. A entrada que sozinha passa do teto cortaria de novo: ela teve
+ *   resposta, que não serve, e não vai à segunda passada;
+ * - com a IA fora ou o JSON inválido, as entradas do lote ficam sem resposta
+ *   (`semResposta`). A IA fora já esgotou as retentativas: os lotes seguintes
+ *   nem vão, e a espera de quem pediu não cresce a cada lote.
+ * Se nada passou, é falha da IA (a resposta não serviu), e nada é guardado.
  */
 export async function traduzirEntradas(entradas: readonly EntradaDaTraducao[], destino: IdiomaDaReuniao, origem: IdiomaDaReuniao): Promise<Traduzidas> {
   const aceitas = new Map<string, TextosDoItem | string>();
+  const semResposta = new Set<string>();
+  const cortadas = new Set<string>();
   let modelo: string | null = null;
+  let falha: FalhaDaIA | null = null;
   for (let passada = 0; passada < 2; passada++) {
-    const faltando = entradas.filter(entrada => !aceitas.has(entrada.chave));
+    // Nem a entrada cortada sozinha, nem a do lote que falhou, que fica para o próximo pedido.
+    const faltando = entradas.filter(entrada => !aceitas.has(entrada.chave) && !semResposta.has(entrada.chave) && !cortadas.has(entrada.chave));
     if (!faltando.length) break;
-    for (const lote of emLotes(faltando)) {
-      const traduzidas = await traduzirLote(lote, destino, origem);
-      traduzidas.aceitas.forEach((valor, chave) => aceitas.set(chave, valor));
-      modelo = traduzidas.modelo ?? modelo;
+    const fila = emLotes(faltando);
+    while (fila.length) {
+      const lote = fila.shift()!;
+      if (falha?.codigo === "IA_INDISPONIVEL") {
+        lote.forEach(entrada => semResposta.add(entrada.chave));
+        continue;
+      }
+      try {
+        const resposta = await pedirTraducaoDoLote(lote, destino, origem);
+        conferirLote(lote, resposta.dados).forEach((valor, chave) => aceitas.set(chave, valor));
+        modelo = resposta.modelo ?? modelo;
+      } catch (erro) {
+        if (!(erro instanceof FalhaDaIA)) throw erro;
+        if (erro.codigo === "RESPOSTA_CORTADA") {
+          if (lote.length > 1) {
+            const meio = Math.ceil(lote.length / 2);
+            fila.unshift(lote.slice(0, meio), lote.slice(meio));
+          } else {
+            cortadas.add(lote[0].chave);
+          }
+          continue;
+        }
+        falha = erro;
+        lote.forEach(entrada => semResposta.add(entrada.chave));
+      }
     }
   }
-  if (entradas.length && !aceitas.size) throw new FalhaDaIA("RESPOSTA_INVALIDA");
-  return { aceitas, modelo };
+  if (entradas.length && !aceitas.size) throw falha ?? new FalhaDaIA("RESPOSTA_INVALIDA");
+  return { aceitas, modelo, semResposta, falha };
 }
 
 // ─── o trabalho em segundo plano ────────────────────────────────────────────
@@ -299,9 +330,11 @@ export type TraducaoDoResumo =
   | { estado: "pronta"; idioma: IdiomaDaReuniao; itens: ItemParaTraduzir[]; mapa: Record<string, string> };
 
 /**
- * Traduz o que falta e grava junto com o que já estava guardado. O item que nem
- * a segunda passada traduziu fica guardado com o texto original: pedir de novo a
- * cada leitura gastaria IA sem fim com o mesmo texto.
+ * Traduz o que falta e grava junto com o que já estava guardado. O item que a
+ * IA respondeu e nem a segunda passada traduziu fica guardado com o texto
+ * original: pedir de novo a cada leitura gastaria IA sem fim com o mesmo texto.
+ * O que ficou sem resposta (o lote falhou) não é guardado: o que voltou fica, e
+ * quem pediu recebe a falha. O "Tentar de novo" manda à IA só o resto.
  */
 async function traduzirEGuardar(alvo: Alvo, idioma: IdiomaDaReuniao, leitura: Pronto, guardado: ConteudoDaTraducao): Promise<void> {
   const falta = oQueFalta(leitura.itens, leitura.rotulosDoMapa, guardado);
@@ -309,9 +342,10 @@ async function traduzirEGuardar(alvo: Alvo, idioma: IdiomaDaReuniao, leitura: Pr
     ...falta.itens.map((item, i) => ({ tipo: "item" as const, chave: `i${i + 1}`, id: item.id, assunto: item.subject, texto: item.text, prazo: item.due })),
     ...falta.rotulos.map((rotulo, i) => ({ tipo: "rotulo" as const, chave: `m${i + 1}`, rotulo })),
   ];
-  const { aceitas, modelo } = await traduzirEntradas(entradas, idioma, leitura.idiomaOriginal);
+  const { aceitas, modelo, semResposta, falha } = await traduzirEntradas(entradas, idioma, leitura.idiomaOriginal);
   const novo = vazio();
   for (const entrada of entradas) {
+    if (semResposta.has(entrada.chave)) continue;
     if (entrada.tipo === "item") {
       const original = { subject: entrada.assunto, text: entrada.texto, due: entrada.prazo };
       const traduzido = aceitas.get(entrada.chave);
@@ -326,6 +360,9 @@ async function traduzirEGuardar(alvo: Alvo, idioma: IdiomaDaReuniao, leitura: Pr
     atual => paraGuardar(juntarConteudo(lerConteudo(atual), novo, leitura.itens, leitura.rotulosDoMapa)),
     modelo,
   );
+  // Só há falha com entrada sem resposta. Ela vai a quem pediu, e não fica a
+  // resposta "traduzindo": com a IA fora, a tela pediria de novo a cada 5 s.
+  if (falha) throw falha;
 }
 
 // As traduções na IA agora e as que falharam em segundo plano, em memória,
