@@ -65,6 +65,8 @@ function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
 export const MENSAGEM_TRADUCAO_INDISPONIVEL = "A tradução não respondeu agora. Tente de novo em instantes.";
 
 export const reuniaoAbertaRouter = router({
+  // A reunião do link, com os nomes que a dona deu às vozes só quando ela
+  // ligou o link com a confirmação que fala deles (H3b, verReuniaoPeloLink).
   ver: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .query(({ input }) => comRecusaTraduzida(() => verReuniaoPeloLink(input.token))),
@@ -90,8 +92,9 @@ export const reuniaoAbertaRouter = router({
     })),
 
   // O resumo guardado (H4), só leitura: sem ids, sem os itens ignorados e
-  // com as vozes como rótulo. Pedir o resumo que a reunião ainda não tem gasta
-  // uma vaga dos dois tetos; pedir o que já está na fila, não.
+  // com as vozes como rótulo, que a página troca com o `vozes` do `ver`. Pedir
+  // o resumo que a reunião ainda não tem gasta uma vaga dos dois tetos; pedir
+  // o que já está na fila, não.
   resumoGuardado: publicProcedure
     .input(z.object({ token: tokenDoLink }))
     .query(({ input }) => comRecusaTraduzida(() => resumoGuardadoPeloLink(input.token))),

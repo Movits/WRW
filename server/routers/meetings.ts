@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
@@ -320,6 +320,10 @@ export const meetingsRouter = router({
       // prova, porque a frase muda com a revisão jurídica.
       idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
       textoExibido: z.string().trim().min(1).max(1000),
+      // A versão da caixa (H3b): a 2 fala dos nomes que a dona der às vozes, e
+      // só com ela o link mostra os nomes. A aba aberta antes do deploy não
+      // manda nada, e o serviço grava 1: a frase dela não falava dos nomes.
+      versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
@@ -328,6 +332,7 @@ export const meetingsRouter = router({
         userAgent: ctx.req.headers["user-agent"],
         idioma: input.idioma,
         textoExibido: input.textoExibido,
+        versaoDaAutorizacao: input.versaoDaAutorizacao,
       }));
       return { token };
     }),

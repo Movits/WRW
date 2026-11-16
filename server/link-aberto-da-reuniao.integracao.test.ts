@@ -15,10 +15,12 @@ import {
   ACAO_LINK_LIGADO,
   chaveDoAudioDoLink,
   desligarLinkAberto,
+  gerarTokenDoLink,
   ligarLinkAberto,
   LinkAbertoRecusado,
   verReuniaoPeloLink,
 } from "./link-aberto-da-reuniao";
+import { getPrivateMeeting } from "./meeting-service";
 
 /**
  * O link aberto da reunião contra um banco real DE TESTE (migração 0015). No CI
@@ -33,7 +35,9 @@ import {
  * - conta desativada e gravação vencida param de ser servidas;
  * - o token vale com a caixa exata, embora a coluna herde a collation que não
  *   distingue maiúsculas;
- * - a confirmação da dona entra na auditoria junto com o link.
+ * - a confirmação da dona entra na auditoria junto com o link, com a versão;
+ * - os nomes das vozes saem pelo link só quando a última confirmação da dona,
+ *   naquela reunião, é a que fala deles (H3b), e o detalhe dela diz se é o caso.
  *
  * Donas e reuniões com id aleatório: a limpeza no fim só alcança o que este
  * arquivo criou.
@@ -43,6 +47,12 @@ const DONA = `teste-link-${crypto.randomUUID()}`;
 const OUTRA = `teste-link-${crypto.randomUUID()}`;
 const PRONTA = crypto.randomUUID();
 const COM_FALHA = crypto.randomUUID();
+// Os nomes das vozes (H3b) moram numa reunião à parte, para os testes do link
+// da PRONTA não dependerem deles. A coluna é JSON livre: só F1 a F99 com texto
+// valem, aparados e cortados em 60 caracteres.
+const COM_NOMES = crypto.randomUUID();
+const NOMES_GRAVADOS = { F1: "  Ana Voz  ", F2: "   ", F0: "Zero", X1: "Fora", F3: 7, F12: "x".repeat(80), F100: "Cem" };
+const NOMES_NO_LINK = { F1: "Ana Voz", F12: "x".repeat(60) };
 const AGORA = Date.now();
 const CHAVE = `meetings/${DONA}/${PRONTA}/recording.mp4`;
 // userId fora de qualquer conta real: a limpeza das linhas de auditoria vai por ele.
@@ -83,7 +93,10 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   beforeAll(async () => {
     const db = (await getDb())!;
     await db.insert(users).values([{ openId: DONA, name: NOME_DA_DONA, email: EMAIL_DA_DONA }, { openId: OUTRA }]);
-    await db.insert(meetings).values([reuniao(PRONTA, "ready"), reuniao(COM_FALHA, "failed")]);
+    await db.insert(meetings).values([
+      reuniao(PRONTA, "ready"), reuniao(COM_FALHA, "failed"),
+      { ...reuniao(COM_NOMES, "ready"), speakerNames: NOMES_GRAVADOS as never },
+    ]);
     await db.insert(meetingTranscripts).values({
       id: crypto.randomUUID(), meetingId: PRONTA, ownerId: DONA, transcript: "Combinamos a entrega na sexta.",
       language: "pt-BR", createdAt: AGORA, updatedAt: AGORA,
@@ -141,6 +154,88 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     expect(texto).not.toContain(CHAVE);
     expect(texto).not.toContain(PRONTA);
     expect(await chaveDoAudioDoLink(token)).toBe(CHAVE);
+  });
+
+  it("a resposta do link tem a lista fechada de chaves: nada além do que a página mostra", async () => {
+    const vista = await verReuniaoPeloLink(await ligarLinkAberto(DONA, PRONTA, PROVA));
+    expect(Object.keys(vista).sort()).toEqual(["criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "vozes"]);
+    expect(Object.keys(vista.transcricao!).sort()).toEqual(["idioma", "segmentos", "texto"]);
+    expect(Object.keys(vista.gravacao!).sort()).toEqual(["durationSeconds", "expiresAt", "mimeType", "partes", "url"]);
+  });
+
+  it("com a confirmação que fala dos nomes (versão 2), o link traz os nomes que a dona deu às vozes, só os pares válidos (H3b)", async () => {
+    const token = await ligarLinkAberto(DONA, COM_NOMES, { ...PROVA, versaoDaAutorizacao: 2 });
+    try {
+      const vista = await verReuniaoPeloLink(token);
+      expect(vista.vozes).toEqual(NOMES_NO_LINK);
+      // O mapa e mais nada da dona: nem o nome, nem o e-mail, nem a conta, nem a reunião.
+      const texto = JSON.stringify(vista);
+      for (const daDona of [NOME_DA_DONA, EMAIL_DA_DONA, DONA, COM_NOMES]) expect(texto).not.toContain(daDona);
+      expect((await getPrivateMeeting(DONA, COM_NOMES))?.meeting.linkMostraNomes).toBe(true);
+    } finally {
+      await desligarLinkAberto(DONA, COM_NOMES);
+    }
+  });
+
+  it("com a confirmação antiga (versão 1), o link segue sem os nomes até a dona desligar e ligar com a caixa nova", async () => {
+    const antigo = await ligarLinkAberto(DONA, COM_NOMES, PROVA);
+    try {
+      expect((await verReuniaoPeloLink(antigo)).vozes).toEqual({});
+      expect((await getPrivateMeeting(DONA, COM_NOMES))?.meeting.linkMostraNomes).toBe(false);
+      await desligarLinkAberto(DONA, COM_NOMES);
+      expect((await getPrivateMeeting(DONA, COM_NOMES))?.meeting.linkMostraNomes).toBe(false);
+      const novo = await ligarLinkAberto(DONA, COM_NOMES, { ...PROVA, versaoDaAutorizacao: 2 });
+      expect(novo).not.toBe(antigo);
+      expect((await verReuniaoPeloLink(novo)).vozes).toEqual(NOMES_NO_LINK);
+    } finally {
+      await desligarLinkAberto(DONA, COM_NOMES);
+    }
+  });
+
+  it("a última vez que a dona ligou decide: confirmar de novo pela aba antiga, sem a versão, volta a esconder os nomes", async () => {
+    const token = await ligarLinkAberto(DONA, COM_NOMES, { ...PROVA, versaoDaAutorizacao: 2 });
+    try {
+      expect((await verReuniaoPeloLink(token)).vozes).toEqual(NOMES_NO_LINK);
+      // Ligar o que já está ligado devolve o mesmo link, e a confirmação nova é a da frase antiga.
+      expect(await ligarLinkAberto(DONA, COM_NOMES, PROVA)).toBe(token);
+      expect((await verReuniaoPeloLink(token)).vozes).toEqual({});
+    } finally {
+      await desligarLinkAberto(DONA, COM_NOMES);
+    }
+  });
+
+  // Os dois testes abaixo provam que a versão se lê reunião por reunião: a
+  // linha mais nova de ligar o link, na tabela inteira, é de OUTRA reunião da
+  // mesma dona. Uma consulta que perdesse o filtro da reunião passaria nos
+  // testes acima, que só mexem numa reunião de cada vez.
+  it("link sem linha de auditoria não mostra os nomes, nem com a versão 2 de outra reunião da dona como a linha mais nova", async () => {
+    const db = (await getDb())!;
+    const SEM_PROVA = crypto.randomUUID();
+    const token = gerarTokenDoLink();
+    await db.insert(meetings).values({ ...reuniao(SEM_PROVA, "ready"), speakerNames: { F1: "Bia" }, shareToken: token });
+    // A COM_NOMES ligada com a caixa nova vira a linha mais nova de ligar o link.
+    await ligarLinkAberto(DONA, COM_NOMES, { ...PROVA, versaoDaAutorizacao: 2 });
+    try {
+      expect((await getPrivateMeeting(DONA, COM_NOMES))?.meeting.linkMostraNomes).toBe(true);
+      // Sem prova da confirmação, vale a versão 1.
+      expect((await verReuniaoPeloLink(token)).vozes).toEqual({});
+      expect((await getPrivateMeeting(DONA, SEM_PROVA))?.meeting.linkMostraNomes).toBe(false);
+    } finally {
+      await desligarLinkAberto(DONA, COM_NOMES);
+    }
+  });
+
+  it("religar outra reunião da dona pela aba antiga não esconde os nomes do link que ela ligou com a caixa nova", async () => {
+    const token = await ligarLinkAberto(DONA, COM_NOMES, { ...PROVA, versaoDaAutorizacao: 2 });
+    try {
+      // A PRONTA religada sem a versão (vale 1) vira a linha mais nova de ligar o link.
+      await ligarLinkAberto(DONA, PRONTA, PROVA);
+      expect((await verReuniaoPeloLink(token)).vozes).toEqual(NOMES_NO_LINK);
+      expect((await getPrivateMeeting(DONA, COM_NOMES))?.meeting.linkMostraNomes).toBe(true);
+      expect((await getPrivateMeeting(DONA, PRONTA))?.meeting.linkMostraNomes).toBe(false);
+    } finally {
+      await desligarLinkAberto(DONA, COM_NOMES);
+    }
   });
 
   it("reunião em partes pelo link (D1): falas no contrato (sem campo extra), cada parte por ?parte, e só as da reunião do token", async () => {
@@ -247,7 +342,8 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   it("a confirmação da dona entra na auditoria, com IP e navegador, a cada vez que ela liga", async () => {
     const db = (await getDb())!;
     const linhas = () => db.select().from(auditLogs)
-      .where(and(eq(auditLogs.userId, PROVA.userId), eq(auditLogs.action, ACAO_LINK_LIGADO), eq(auditLogs.resourceId, PRONTA)));
+      .where(and(eq(auditLogs.userId, PROVA.userId), eq(auditLogs.action, ACAO_LINK_LIGADO), eq(auditLogs.resourceId, PRONTA)))
+      .orderBy(auditLogs.id);
     const antes = (await linhas()).length;
     await ligarLinkAberto(DONA, PRONTA, PROVA);
     const depois = await linhas();
@@ -256,12 +352,17 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       resource: "meetings", ipAddress: PROVA.ipAddress, userAgent: PROVA.userAgent, status: "success", riskLevel: "medium",
     });
     // A frase e o idioma que a dona viu, com o hash: a frase vai mudar com a revisão jurídica.
+    // Sem a versão (a aba de antes da H3b), a linha leva a 1.
     expect(depois.at(-1)!.details).toEqual({
       autorizacaoDasPessoas: true,
+      versaoDaAutorizacao: 1,
       idioma: PROVA.idioma,
       textoExibido: PROVA.textoExibido,
       textoHash: crypto.createHash("sha256").update(PROVA.textoExibido).digest("hex"),
     });
+    // A caixa que fala dos nomes das vozes grava a versão 2 (H3b).
+    await ligarLinkAberto(DONA, PRONTA, { ...PROVA, versaoDaAutorizacao: 2 });
+    expect((await linhas()).at(-1)!.details).toMatchObject({ autorizacaoDasPessoas: true, versaoDaAutorizacao: 2, textoExibido: PROVA.textoExibido });
   });
 
   it("recusado, o link não liga e nada vai para a auditoria", async () => {

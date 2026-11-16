@@ -23,7 +23,10 @@ import { ResumoGuardado } from "@/components/ResumoGuardado";
  * faz perguntas à IA, sem conta na WRW. Só leitura:
  * excluir, reprocessar e o que é da rede particular da dona (contatos e
  * entidades) ficam no detalhe dela, em Meetings.tsx, e o servidor nem manda
- * esses dados para cá (server/link-aberto-da-reuniao.ts).
+ * esses dados para cá (server/link-aberto-da-reuniao.ts). Os nomes que a dona
+ * deu às vozes chegam no `vozes` (H3b, decisão do Roberto de 16/11/2026), só
+ * quando ela ligou o link com a confirmação que fala deles; sem nome, cada voz
+ * é "Falante n".
  *
  * O player e a tradução repetem os do detalhe da dona; o detalhe único da D1
  * (docs/arquitetura/gravador-de-reunioes.md) junta as duas telas.
@@ -72,7 +75,8 @@ export default function ReuniaoAberta() {
     refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
   });
   // O resumo guardado (H4), só leitura: sem ids, sem os ignorados e com as
-  // vozes como "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
+  // vozes como rótulo ({F2}), que o componente troca pelo nome do `vozes` ou
+  // por "Falante n". Pergunta de novo a cada 5 s enquanto ele está na
   // fila ou sendo gerado, e para em qualquer erro, não só no link desligado: a
   // página não pede conta, e um 500 que persiste deixaria cada visitante
   // perguntando ao servidor para sempre. O erro só chega ao estado depois das
@@ -137,6 +141,9 @@ export default function ReuniaoAberta() {
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
+  // Os nomes das vozes, os mesmos no resumo, na pergunta e na transcrição. A
+  // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
+  const nomes = data.vozes ?? {};
   const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
   const falas = segmentosValidos(transcricao?.segmentos);
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
@@ -157,9 +164,9 @@ export default function ReuniaoAberta() {
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
-        {/* Sem os nomes das vozes: o link não os recebe. */}
-        <PergunteAReuniao token={token} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
+        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
       </div>}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
@@ -197,7 +204,7 @@ export default function ReuniaoAberta() {
               </button>
             </div>}
             {mostraFalas
-              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}

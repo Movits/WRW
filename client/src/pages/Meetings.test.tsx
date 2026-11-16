@@ -1168,4 +1168,36 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
     abrirDetalhe({ status });
     expect(screen.queryByRole("heading", { name: /Compartilhar por link|Compartilhada por link/ })).not.toBeInTheDocument();
   });
+
+  // Os nomes das vozes pelo link (H3b): o detalhe diz se o link ligado os mostra (meeting.linkMostraNomes).
+  const TOKEN_DO_LINK = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const COM_FALAS = { id: "t1", transcript: "x", language: "pt-BR", segments: [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ] };
+  const abrirCampoDoNome = () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Dar nome a esta voz: Ana" }));
+    return screen.getByRole("textbox", { name: "Nome do falante 1" });
+  };
+
+  // O aviso do painel fica acima das abas, fora da vista de quem nomeia a voz na
+  // aba Transcrição: o próprio campo do nome diz que o nome não sai pelo link.
+  it("link da confirmação antiga com vozes nomeadas: o painel avisa que o link não mostra os nomes, e o campo do nome também, com o jeito de mostrá-los (H3b)", () => {
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkMostraNomes: false, speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.getByText(/não vê os nomes que você deu às vozes/)).toBeInTheDocument();
+    expect(abrirCampoDoNome()).toHaveAccessibleDescription("Quem tem o link da reunião não vê este nome. Para mostrá-lo, desligue o link e compartilhe de novo.");
+  });
+
+  it("link que mostra os nomes: sem o aviso, e o campo do nome diz que o nome aparece também para quem tem o link (H3b)", () => {
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkMostraNomes: true, speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
+    expect(abrirCampoDoNome()).toHaveAccessibleDescription("Este nome aparece também para quem tem o link da reunião.");
+  });
+
+  it("sem link, nem aviso nem dica: o nome fica só com a dona (H3b)", () => {
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
+    expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
+    expect(abrirCampoDoNome()).not.toHaveAccessibleDescription();
+  });
 });

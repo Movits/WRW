@@ -342,15 +342,21 @@ describe("Resumo guardado — os estados", () => {
 });
 
 describe("Resumo guardado — pelo link aberto, só leitura", () => {
-  it("as vozes são sempre 'Falante n', e os pendentes levam o aviso de que a dona ainda não conferiu", () => {
-    // Nem um nome que chegasse por engano aparece: o link não mostra os nomes da dona.
-    render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} {...({ nomes: { F2: "Carla" } } as never)}/>);
-    expect(screen.queryByText(/Carla/)).not.toBeInTheDocument();
+  it("as vozes levam os nomes que o link recebeu, a voz sem nome é 'Falante n', e os pendentes levam o aviso de que a dona ainda não conferiu (H3b)", () => {
+    render(<ResumoGuardado token={TOKEN} consulta={pronto(ITENS_DO_LINK) as never} nomes={{ F2: "Carla" }}/>);
+    expect(screen.getByText("Carla envia a proposta revisada")).toBeInTheDocument();
+    expect(screen.getByText("Responsável: Carla")).toBeInTheDocument();
+    expect(itemDoTexto(/Falante 1 fecha o contrato com o importador\./)).toHaveTextContent("Responsável: Falante 1");
+    expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(4);
+    expect(within(itemDoTexto("A reunião tratou da exportação de café para a Alemanha.")).queryByText(/a dona da reunião ainda não conferiu/)).not.toBeInTheDocument();
+  });
+
+  it("sem os nomes (o link ligado antes da confirmação que fala deles), toda voz é 'Falante n'", () => {
+    doLink(pronto(ITENS_DO_LINK));
     expect(itemDoTexto(/Falante 1 fecha o contrato com o importador\./)).toHaveTextContent("Responsável: Falante 1");
     expect(screen.getByText("Falante 2 envia a proposta revisada")).toBeInTheDocument();
     expect(screen.getByText("Responsável: Falante 2")).toBeInTheDocument();
-    expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(4);
-    expect(within(itemDoTexto("A reunião tratou da exportação de café para a Alemanha.")).queryByText(/a dona da reunião ainda não conferiu/)).not.toBeInTheDocument();
   });
 
   it("sem os botões de decidir: nem caixa, nem Confirmar, Ignorar, Confirmar todos ou os ignorados; só o '▶'", () => {

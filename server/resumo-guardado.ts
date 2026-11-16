@@ -212,8 +212,9 @@ export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: bo
  * O resumo guardado pelo link aberto (decisão do Roberto de 12/11/2026): só
  * leitura, sem ids, sem a caixa de feito e sem os itens que a dona ignorou.
  * Os pendentes vão com o estado, para a tela avisar que a dona ainda não os
- * conferiu. Os rótulos de voz ({F2}) vão crus: a tela do link mostra
- * "Falante 2", e os nomes que a dona deu às vozes não saem por aqui.
+ * conferiu. Os rótulos de voz ({F2}) vão crus: a página do link os troca pelo
+ * nome com o `vozes` de reuniaoAberta.ver (H3b), que só traz os nomes quando o
+ * link foi ligado com a confirmação que fala deles; sem nome, "Falante 2".
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
