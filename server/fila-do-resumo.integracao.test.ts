@@ -14,7 +14,7 @@ const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
 
 const { getDb } = await import("./db");
-const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, proximasAcoes, users } = await import("../drizzle/schema");
 const fila = await import("./fila-do-resumo");
 const servico = await import("./resumo-guardado");
 const { FalhaDaIA } = await import("./ia-em-json");
@@ -62,6 +62,8 @@ const pedir = (meetingId: string) => servico.pedirResumoDaDona(DONA, meetingId, 
 async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
+    // Confirmar uma ação no resumo cria a próxima ação dela (H5a).
+    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
     await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
     await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
@@ -291,11 +293,15 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(d.status).toBe("ignored");
     expect(a).toMatchObject({ status: "confirmed", done: true });
     expect(Number(a.decidedAt)).toBeGreaterThan(0);
+    // A ação marcada como feita vira próxima ação já feita (H5a).
+    const acoesDaDona = async () => (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    expect(await acoesDaDona()).toMatchObject([{ itemId: acao.id, feita: true }]);
 
-    // Voltar a pendente tira a marca de feito.
+    // Voltar a pendente tira a marca de feito, e a próxima ação sai.
     await servico.decidirItemDoResumo(DONA, acao.id, "pending");
     [a] = await itensDe(id);
     expect(a).toMatchObject({ status: "pending", done: false, doneAt: null, decidedAt: null });
+    expect(await acoesDaDona()).toEqual([]);
 
     await expect(servico.marcarAcaoFeita(DONA, decisao.id, true)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(await servico.confirmarItensDoResumo(DONA, id)).toBe(1);

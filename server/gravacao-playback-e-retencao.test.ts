@@ -445,4 +445,20 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(storageDelete).not.toHaveBeenCalled();
     expect(tabelasApagadas()).toHaveLength(0);
   });
+
+  it("as próximas ações (H5a) ficam com a dona e se soltam ANTES de qualquer delete: o nome da voz vira texto, e reunião, item e trecho saem", async () => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, speakerNames: { F2: "Carla" } }]);
+    tabelas.set(schema.proximasAcoes, [{ id: "acao-1", texto: "{F2} envia a proposta", detalhe: null, responsavel: "{F2}", itemId: "item-1" }]);
+    await servico.deletePrivateMeeting("dona-1", "reuniao-1");
+    const soltura = atualizacoes.filter(operacao => operacao.tabela === schema.proximasAcoes);
+    expect(soltura).toHaveLength(1);
+    expect(soltura[0].valores).toEqual({
+      texto: "Carla envia a proposta", detalhe: null, responsavel: "Carla", itemId: null, meetingId: null, trecho: null, updatedAt: expect.any(Number),
+    });
+    expect(predicadoDe(soltura[0])).toEqual({ sql: "(`proximas_acoes`.`id` = ? and `proximas_acoes`.`owner_id` = ?)", params: ["acao-1", "dona-1"] });
+    // A ação nunca é apagada, e a soltura vem logo depois da marca 'deleted', antes dos derivados.
+    expect(tabelasApagadas()).not.toContain(schema.proximasAcoes);
+    expect(sequencia.slice(0, 3)).toEqual(["update", "update", "delete"]);
+    expect(atualizacoes[1].tabela).toBe(schema.proximasAcoes);
+  });
 });

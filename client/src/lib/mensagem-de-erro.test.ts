@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { TRPCClientError } from "@trpc/client";
+import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
@@ -111,5 +112,29 @@ describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da 
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
     expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// As recusas das próximas ações (H5a, server/proximas-acoes.ts), pela mesma tabela.
+describe("mensagemDeErroParaTela — as recusas das próximas ações no idioma da tela", () => {
+  const recusa = (mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32004, message: mensagem, data: { code: "NOT_FOUND", httpStatus: 404 } } });
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_ACAO_NAO_ENCONTRADA, "proximasAcoes.errorGone", "This next action no longer exists. Refresh the page."],
+    [MENSAGEM_CONTATO_FORA_DA_REDE, "proximasAcoes.errorContactOutside", "This contact isn't in your network."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
   });
 });
