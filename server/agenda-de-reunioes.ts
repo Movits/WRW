@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, asc, count, desc, eq, ne, sql } from "drizzle-orm";
 import type { ParticipanteDaAgenda } from "@shared/agenda";
+import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { agendaReunioes, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
@@ -14,6 +15,10 @@ import { ehColisaoDeChave } from "./network-codigo-anonimo";
  *
  * As recusas saem com o código do tRPC, e a tela escolhe a frase no idioma de
  * quem lê pelo código (pages/Agenda.tsx); as frases daqui ficam para o log.
+ *
+ * A Google Agenda (H16c): primeiro o banco, depois a Google. Marcar e mudar já
+ * gravam o estado na Google ("pendente" quando a dona tem a Google Agenda
+ * conectada), e a rota manda o evento em seguida (server/agenda-na-google.ts).
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -38,7 +43,15 @@ export type DadosDaAgendada = {
   local: string | null;
   participantes: ParticipanteDaAgenda[];
   lembreteMinutos: number | null;
+  /** A Google manda o convite pela conta da dona (H16c); falso por padrão. */
+  googleConvites: boolean;
 };
+
+/**
+ * A reunião vai para a Google Agenda da dona (H16c)? A rota responde antes de
+ * gravar (googleAgendaConectada, em server/google-agenda.ts).
+ */
+export type OpcoesDaGoogle = { naGoogle: boolean };
 
 /**
  * A gravação ligada, só quando ainda é da dona e não foi excluída. A exclusão
@@ -60,6 +73,8 @@ const COLUNAS = {
   local: agendaReunioes.local,
   participantes: agendaReunioes.participantes,
   lembreteMinutos: agendaReunioes.lembreteMinutos,
+  google: agendaReunioes.google,
+  googleConvites: agendaReunioes.googleConvites,
   createdAt: agendaReunioes.createdAt,
   updatedAt: agendaReunioes.updatedAt,
   gravacaoId: meetings.id,
@@ -75,19 +90,29 @@ type Linha = {
   local: string | null;
   participantes: unknown;
   lembreteMinutos: number | null;
+  google: string | null;
+  googleConvites: unknown;
   createdAt: number;
   updatedAt: number;
   gravacaoId: string | null;
   gravacaoStatus: string | null;
 };
 
-export type ReuniaoDaAgenda = Omit<Linha, "participantes" | "gravacaoId" | "gravacaoStatus"> & {
+export type ReuniaoDaAgenda = Omit<Linha, "participantes" | "google" | "googleConvites" | "gravacaoId" | "gravacaoStatus"> & {
   participantes: ParticipanteDaAgenda[];
+  /** O estado na Google Agenda da dona (H16c); nulo quando a reunião nunca foi para lá. */
+  google: EstadoNaGoogle | null;
+  googleConvites: boolean;
   gravacao: { id: string; status: string } | null;
 };
 
+/** O tinyint(1) chega como booleano pelo Drizzle, mas pode chegar como 0 e 1. */
+export function convitesPelaGoogle(valor: unknown): boolean {
+  return valor === true || valor === 1;
+}
+
 /** A coluna JSON chega como texto no MariaDB e como objeto no MySQL (jsonCompat); aqui só passa o que tem a forma certa. */
-function participantesDe(valor: unknown): ParticipanteDaAgenda[] {
+export function participantesDe(valor: unknown): ParticipanteDaAgenda[] {
   if (!Array.isArray(valor)) return [];
   return valor
     .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
@@ -99,13 +124,15 @@ function participantesDe(valor: unknown): ParticipanteDaAgenda[] {
 }
 
 function paraTela(linha: Linha): ReuniaoDaAgenda {
-  const { gravacaoId, gravacaoStatus, participantes, ...resto } = linha;
+  const { gravacaoId, gravacaoStatus, participantes, google, googleConvites, ...resto } = linha;
   return {
     ...resto,
     inicioEm: Number(resto.inicioEm),
     createdAt: Number(resto.createdAt),
     updatedAt: Number(resto.updatedAt),
     participantes: participantesDe(participantes),
+    google: estadoNaGoogle(google),
+    googleConvites: convitesPelaGoogle(googleConvites),
     gravacao: gravacaoId && gravacaoStatus ? { id: gravacaoId, status: gravacaoStatus } : null,
   };
 }
@@ -150,7 +177,12 @@ export async function obterDaAgenda(ownerId: string, id: string): Promise<Reunia
   return paraTela(linha as Linha);
 }
 
-export async function criarNaAgenda(ownerId: string, dados: DadosDaAgendada): Promise<{ id: string }> {
+/**
+ * Marca a reunião. Com a Google Agenda conectada, ela nasce "pendente" na
+ * Google, e a rota manda o evento em seguida. O `updatedAt` devolvido é a
+ * ficha do envio: a Google só fica "ok" se a linha ainda for esta versão.
+ */
+export async function criarNaAgenda(ownerId: string, dados: DadosDaAgendada, opcoes: OpcoesDaGoogle = { naGoogle: false }): Promise<{ id: string; updatedAt: number }> {
   const db = await exigirDb();
   const [contagem] = await db.select({ total: count() }).from(agendaReunioes).where(eq(agendaReunioes.ownerId, ownerId));
   if (Number(contagem?.total ?? 0) >= AGENDA_MAXIMO_POR_DONA) {
@@ -158,24 +190,48 @@ export async function criarNaAgenda(ownerId: string, dados: DadosDaAgendada): Pr
   }
   const agora = Date.now();
   const id = crypto.randomUUID();
-  await db.insert(agendaReunioes).values({ id, ownerId, ...dados, meetingId: null, createdAt: agora, updatedAt: agora });
-  return { id };
+  await db.insert(agendaReunioes).values({
+    id, ownerId, ...dados, googleConvites: dados.googleConvites === true,
+    google: opcoes.naGoogle ? "pendente" : null, meetingId: null, createdAt: agora, updatedAt: agora,
+  });
+  return { id, updatedAt: agora };
 }
 
-/** Muda o que a dona escreveu. A gravação ligada fica como está. */
-export async function atualizarNaAgenda(ownerId: string, id: string, dados: DadosDaAgendada): Promise<{ id: string }> {
+/**
+ * Muda o que a dona escreveu. A gravação ligada fica como está.
+ *
+ * O estado na Google muda na mesma escrita: com a Google Agenda conectada,
+ * "pendente" (a rota manda a versão nova em seguida); sem ela, a reunião que já
+ * foi para lá fica "falhou", porque a Google ficou com a versão antiga, e a que
+ * nunca foi continua nula. O `updatedAt` devolvido é a ficha do envio, como em
+ * criarNaAgenda.
+ */
+export async function atualizarNaAgenda(ownerId: string, id: string, dados: DadosDaAgendada, opcoes: OpcoesDaGoogle = { naGoogle: false }): Promise<{ id: string; updatedAt: number }> {
   const db = await exigirDb();
-  const resultado = await db.update(agendaReunioes).set({ ...dados, updatedAt: Date.now() })
+  const agora = Date.now();
+  const google = opcoes.naGoogle
+    ? "pendente" as const
+    : sql`CASE WHEN ${agendaReunioes.google} IS NULL THEN NULL ELSE ${"falhou"} END`;
+  const resultado = await db.update(agendaReunioes).set({ ...dados, google, updatedAt: agora })
     .where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
   if (!linhasAfetadas(resultado)) throw naoEncontrada();
-  return { id };
+  return { id, updatedAt: agora };
 }
 
-/** Tira a reunião da agenda. A gravação, se houver, continua em Reuniões. */
-export async function excluirDaAgenda(ownerId: string, id: string): Promise<void> {
+/**
+ * Tira a reunião da agenda. A gravação, se houver, continua em Reuniões.
+ * Devolve o estado na Google e a escolha do convite da linha que saiu: a rota
+ * tira o evento da Google em seguida (primeiro o banco), quando ele foi para lá.
+ */
+export async function excluirDaAgenda(ownerId: string, id: string): Promise<{ google: EstadoNaGoogle | null; googleConvites: boolean }> {
   const db = await exigirDb();
-  const resultado = await db.delete(agendaReunioes).where(and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId)));
+  const daDona = and(eq(agendaReunioes.id, id), eq(agendaReunioes.ownerId, ownerId));
+  const [linha] = await db.select({ google: agendaReunioes.google, googleConvites: agendaReunioes.googleConvites })
+    .from(agendaReunioes).where(daDona).limit(1);
+  if (!linha) throw naoEncontrada();
+  const resultado = await db.delete(agendaReunioes).where(daDona);
   if (!linhasAfetadas(resultado)) throw naoEncontrada();
+  return { google: estadoNaGoogle(linha.google), googleConvites: convitesPelaGoogle(linha.googleConvites) };
 }
 
 /**

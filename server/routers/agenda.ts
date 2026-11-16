@@ -12,6 +12,8 @@ import {
   FUSO_MAX,
 } from "@shared/agenda";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
   atualizarNaAgenda,
@@ -21,12 +23,29 @@ import {
   listarAgendaDaDona,
   obterDaAgenda,
 } from "../agenda-de-reunioes";
+import {
+  enviarParaGoogle,
+  existeNaAgenda,
+  lerParaGoogle,
+  MENSAGEM_AINDA_NA_AGENDA,
+  tirarEventoDaGoogle,
+  type ContaDaAgenda,
+} from "../agenda-na-google";
+import { googleAgendaConectada } from "../google-agenda";
 
 /**
  * A agenda de reuniões (H16a do plano do gravador). Só a dona: a conta é sempre
  * a da sessão, e o serviço (server/agenda-de-reunioes.ts) a leva no WHERE de
  * tudo. A entrada é conferida aqui, antes de chegar ao banco.
+ *
+ * Com a Google Agenda conectada (H16c), marcar, mudar e excluir também criam,
+ * mudam e tiram o evento lá: primeiro o banco, depois a Google
+ * (server/agenda-na-google.ts). A falha da Google não desfaz o que a dona
+ * salvou: a resposta diz `naGoogle: "falhou"` com o motivo, e a tela mostra
+ * "Tentar de novo".
  */
+
+const contaDa = (usuaria: { id: number; openId: string }): ContaDaAgenda => ({ id: usuaria.id, openId: usuaria.openId });
 
 // Inícios fora disto são erro de digitação ou de relógio, não reunião.
 const INICIO_MIN = Date.UTC(2020, 0, 1);
@@ -61,6 +80,8 @@ export const entradaDaAgendada = z.object({
   // Nulo (ou ausente) é sem lembrete.
   lembreteMinutos: z.number().int().nullish().transform(valor => valor ?? null)
     .refine(valor => valor === null || (LEMBRETES_DA_AGENDA as readonly number[]).includes(valor), "Lembrete fora das opções."),
+  // "A Google manda o convite pela sua conta" (H16c): desmarcado por padrão.
+  googleConvites: z.boolean().default(false),
 });
 
 const idDaAgendada = z.string().uuid();
@@ -72,22 +93,63 @@ export const agendaRouter = router({
     .input(z.object({ id: idDaAgendada }))
     .query(({ ctx, input }) => obterDaAgenda(ctx.user.openId, input.id)),
 
+  // Com a Google Agenda conectada, a reunião nasce "pendente" na Google, e o
+  // evento é criado logo depois de o banco gravar.
   criar: protectedProcedure
     .input(entradaDaAgendada)
-    .mutation(({ ctx, input }) => criarNaAgenda(ctx.user.openId, input)),
+    .mutation(async ({ ctx, input }): Promise<{ id: string } & ResultadoNaGoogle> => {
+      const conta = contaDa(ctx.user);
+      const naGoogle = await googleAgendaConectada(conta.id);
+      const { id, updatedAt } = await criarNaAgenda(conta.openId, input, { naGoogle });
+      if (!naGoogle) return { id, naGoogle: null };
+      return { id, ...(await enviarParaGoogle(conta, { ...input, id, google: "pendente", updatedAt })) };
+    }),
 
   atualizar: protectedProcedure
     .input(entradaDaAgendada.extend({ id: idDaAgendada }))
-    .mutation(({ ctx, input }) => {
+    .mutation(async ({ ctx, input }): Promise<{ id: string } & ResultadoNaGoogle> => {
       const { id, ...dados } = input;
-      return atualizarNaAgenda(ctx.user.openId, id, dados);
+      const conta = contaDa(ctx.user);
+      const naGoogle = await googleAgendaConectada(conta.id);
+      const { updatedAt } = await atualizarNaAgenda(conta.openId, id, dados, { naGoogle });
+      if (!naGoogle) return { id, naGoogle: null };
+      return { id, ...(await enviarParaGoogle(conta, { ...dados, id, google: "pendente", updatedAt })) };
     }),
 
+  // Primeiro a linha sai; depois o evento, se a reunião foi para a Google.
+  // Sem a Google Agenda conectada agora, o evento fica lá (nada é tentado):
+  // é o que o Perfil avisa ao desconectar. A escolha do convite volta à tela
+  // para o "Tentar de novo" (tirarDaGoogle), já que a linha não existe mais.
   excluir: protectedProcedure
     .input(z.object({ id: idDaAgendada }))
-    .mutation(async ({ ctx, input }) => {
-      await excluirDaAgenda(ctx.user.openId, input.id);
-      return { ok: true as const };
+    .mutation(async ({ ctx, input }): Promise<{ ok: true; avisarConvidados: boolean } & ResultadoNaGoogle> => {
+      const conta = contaDa(ctx.user);
+      const { google, googleConvites } = await excluirDaAgenda(conta.openId, input.id);
+      const avisarConvidados = googleConvites;
+      if (google === null) return { ok: true, avisarConvidados, naGoogle: null };
+      const resultado = await tirarEventoDaGoogle(conta, input.id, googleConvites);
+      if (resultado.naGoogle === "falhou" && resultado.motivo === "nao-conectada") return { ok: true, avisarConvidados, naGoogle: null };
+      return { ok: true, avisarConvidados, ...resultado };
+    }),
+
+  // "Tentar de novo" e "Pôr na Google Agenda": manda a versão que está no banco.
+  mandarParaGoogle: protectedProcedure
+    .input(z.object({ id: idDaAgendada }))
+    .mutation(async ({ ctx, input }): Promise<ResultadoNaGoogle> => {
+      const conta = contaDa(ctx.user);
+      return enviarParaGoogle(conta, await lerParaGoogle(conta.openId, input.id));
+    }),
+
+  // O "Tentar de novo" da exclusão que não tirou o evento da Google: a linha já
+  // saiu, então a tela manda a escolha do convite que a reunião tinha. Só tira o
+  // evento de reunião que não está mais na agenda, e só da Google da própria
+  // dona (o token é o dela).
+  tirarDaGoogle: protectedProcedure
+    .input(z.object({ id: idDaAgendada, avisarConvidados: z.boolean() }))
+    .mutation(async ({ ctx, input }): Promise<ResultadoNaGoogle> => {
+      const conta = contaDa(ctx.user);
+      if (await existeNaAgenda(conta.openId, input.id)) throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_AINDA_NA_AGENDA });
+      return tirarEventoDaGoogle(conta, input.id, input.avisarConvidados);
     }),
 
   // O "Gravar agora" (Meetings.tsx): a gravação recém-criada fica ligada à reunião marcada.

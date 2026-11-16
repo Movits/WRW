@@ -1945,6 +1945,34 @@
       "notFound": "这场会议已不在您的日程中。录音将继续，但不会关联。",
       "loadError": "无法读取日程中的会议。录音将继续，但不会关联。",
       "sendInvite": "发送邀请"
+    },
+    "google": {
+      "formNote": "这场会议也会添加到您的 Google 日历。",
+      "invitesLabel": "由 Google 从您的账号发送邀请",
+      "invitesHint": "不勾选时，受邀者会出现在活动中，但 Google 不会通过电子邮件向他们发送邀请。勾选后，Google 会从您的账号向名单中有电子邮件的每个人发送邀请，之后还会发送变更和取消通知。",
+      "onCalendar": "已在您的 Google 日历中",
+      "notOnCalendar": "尚未添加到您的 Google 日历",
+      "send": "添加到 Google 日历",
+      "retry": "重试",
+      "sending": "正在发送…",
+      "broken": "与 Google 日历的关联已失效，会议没有添加到那里。请在个人资料中重新关联。",
+      "openProfile": "打开个人资料",
+      "statusError": "无法确认您的 Google 日历是否已关联。",
+      "toast": {
+        "sent": "会议已在您的 Google 日历中。",
+        "notSent": "会议已保存在 WRW，但没有添加到您的 Google 日历。",
+        "removed": "会议已从您的 Google 日历中移除。",
+        "notRemoved": "会议已从 WRW 日程中移除，但仍在您的 Google 日历中。",
+        "removeThere": "如有需要，请在那里删除该活动。"
+      },
+      "reason": {
+        "notConnected": "请在个人资料中关联 Google 日历。",
+        "revoked": "请在个人资料中重新关联 Google 日历。",
+        "google": "Google 没有响应。请稍后重试。"
+      },
+      "errors": {
+        "stillInAgenda": "这场会议仍在您的日程中。请刷新页面。"
+      }
     }
   },
   "googleAgenda": {

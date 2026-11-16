@@ -443,3 +443,40 @@ describe("a conta Google em uso (para a volta decidir se pode revogar)", () => {
     expect(await servico.contaGoogleEmUso("sub-da-dona")).toBe(true);
   });
 });
+
+describe("para a H16c: a conexão em uso e a renovação depois do 401", () => {
+  it("conectada é a função disponível para a conta E a linha gravada, mesmo marcada como revogada", async () => {
+    expect(await servico.googleAgendaConectada(7)).toBe(false);
+    expect(renderizar(efeitos[0].condicao).params).toEqual([7]);
+    linhas = [{ id: "conexao-1" }];
+    expect(await servico.googleAgendaConectada(7)).toBe(true);
+  });
+
+  it("sem as variáveis, ou com a conta fora da lista, não está conectada, e o banco nem é lido", async () => {
+    linhas = [{ id: "conexao-1" }];
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "8");
+    expect(await servico.googleAgendaConectada(7)).toBe(false);
+    vi.stubEnv("GOOGLE_AGENDA_LIBERADA_PARA", "todas");
+    vi.stubEnv("VAULT_ENCRYPTION_KEY", "curta");
+    expect(await servico.googleAgendaConectada(7)).toBe(false);
+    expect(efeitos).toEqual([]);
+  });
+
+  it("renovar esquece o token guardado, que ainda valia, e pede outro à Google", async () => {
+    const versao = encryptData("refresh-1");
+    linhas = [{ versao, falha: null }];
+    const google = dubleDaGoogle(json({ access_token: "acesso-1", expires_in: 3600 }), json({ access_token: "acesso-2", expires_in: 3600 }));
+    expect(await servico.tokenDeAcessoDaGoogleAgenda(7, google)).toBe("acesso-1");
+    expect(await servico.tokenDeAcessoDaGoogleAgenda(7, google)).toBe("acesso-1");
+    expect(await servico.renovarTokenDeAcessoDaGoogleAgenda(7, google)).toBe("acesso-2");
+    expect(google).toHaveBeenCalledTimes(2);
+    // O novo fica guardado para as próximas chamadas.
+    expect(await servico.tokenDeAcessoDaGoogleAgenda(7, google)).toBe("acesso-2");
+  });
+
+  it("a renovação que a Google recusa com invalid_grant marca a conexão, como a renovação de sempre", async () => {
+    linhas = [{ versao: encryptData("refresh-1"), falha: null }];
+    await expect(servico.renovarTokenDeAcessoDaGoogleAgenda(7, dubleDaGoogle(json({ error: "invalid_grant" }, 400)))).rejects.toBeInstanceOf(ConexaoGoogleRevogada);
+    expect(efeitos.find(e => e.tipo === "update")?.valores).toMatchObject({ falha: "revogada" });
+  });
+});

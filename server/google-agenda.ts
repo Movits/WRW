@@ -181,6 +181,36 @@ export async function tokenDeAcessoDaGoogleAgenda(
   return renovacao;
 }
 
+/**
+ * Um token de acesso novo, depois de a API da agenda recusar o guardado com
+ * 401 (a H16c): o guardado é esquecido, e o refresh token pede outro. Os erros
+ * são os de tokenDeAcessoDaGoogleAgenda.
+ */
+export async function renovarTokenDeAcessoDaGoogleAgenda(
+  userId: number,
+  buscar: Fetch = fetchGlobal,
+  agora: () => number = Date.now,
+): Promise<string> {
+  esquecerAcesso(userId);
+  return tokenDeAcessoDaGoogleAgenda(userId, buscar, agora);
+}
+
+/**
+ * A reunião marcada vai para a Google Agenda? Sim quando a função está
+ * disponível para a conta e há uma conexão gravada, mesmo marcada como
+ * revogada: aí o envio falha e a tela pede "Reconectar" (a H16c). Lê só a
+ * linha da conta; banco fora do ar sobe como erro.
+ */
+export async function googleAgendaConectada(userId: number): Promise<boolean> {
+  if (!configuracaoDaGoogleAgendaPara(userId)) return false;
+  const db = await exigirDb();
+  const [linha] = await db.select({ id: googleAgendaConexoes.id })
+    .from(googleAgendaConexoes)
+    .where(eq(googleAgendaConexoes.userId, userId))
+    .limit(1);
+  return Boolean(linha);
+}
+
 // ── a conta Google: quem divide a mesma autorização ───────────────────────
 
 /**

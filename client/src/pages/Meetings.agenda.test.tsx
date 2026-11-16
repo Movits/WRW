@@ -105,6 +105,12 @@ vi.mock("@/lib/trpc", () => ({
       criar: duble.registrar("criarNaAgenda"),
       atualizar: duble.registrar("atualizarNaAgenda"),
       excluir: duble.registrar("excluirDaAgenda"),
+      // A Google Agenda na página da agenda (H16c): aqui, sem a Google Agenda conectada.
+      mandarParaGoogle: duble.registrar("mandarParaGoogle"),
+      tirarDaGoogle: duble.registrar("tirarDaGoogle"),
+    },
+    googleAgenda: {
+      estado: { useQuery: () => ({ data: { disponivel: false }, isLoading: false, isError: false, error: null, refetch: vi.fn() }) },
     },
   },
 }));
@@ -113,7 +119,7 @@ const AGENDADA = "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d";
 const VINICOLA = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const DA_AGENDA = {
   id: AGENDADA, titulo: "Conversa com a Bia", inicioEm: Date.UTC(2026, 10, 20, 17, 0), duracaoMinutos: 60, fuso: "America/Sao_Paulo",
-  local: null, participantes: [], lembreteMinutos: 15, createdAt: 1, updatedAt: 2, gravacao: null,
+  local: null, participantes: [], lembreteMinutos: 15, google: null, googleConvites: false, createdAt: 1, updatedAt: 2, gravacao: null,
 };
 const PLACEHOLDER_DO_TITULO = "Ex.: Conversa com investidor";
 const AVISO_DA_LIGACAO = "A gravação segue, mas não ficou ligada à reunião da agenda.";
