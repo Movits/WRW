@@ -5,6 +5,7 @@ import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } f
 import { exigirDb } from "./db";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
+import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 
@@ -40,7 +41,28 @@ const COLUNAS_DO_RESUMO = {
   emoji: meetingSummaries.emoji,
   language: meetingSummaries.language,
   lastError: meetingSummaries.lastError,
+  template: meetingSummaries.template,
+  version: meetingSummaries.version,
 };
+
+/**
+ * O resumo que já teve uma versão gravada e não está pronto: está sendo
+ * refeito ("Refazer como…", H4d) ou o refazer falhou. Os itens no banco são
+ * os da versão anterior, que segue valendo até a nova ser gravada: a dona e o
+ * link continuam a vê-la. A versão só sobe quando a fila grava um resumo.
+ */
+function temVersaoAnterior(linha: { status: string; version: number } | undefined): boolean {
+  return !!linha && linha.status !== "ready" && linha.version > 0;
+}
+
+/**
+ * Decidir só sobre o resumo que não está na fila: o pronto ou o que falhou.
+ * Na fila, os itens vão ser trocados pela versão nova. No refazer que falhou
+ * (H4d), nenhuma geração está em curso e a versão anterior segue valendo: a
+ * dona confirma, ignora e marca, e o próximo refazer guarda o que ela
+ * confirmar.
+ */
+const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
 /** A reunião da dona, não apagada, ou NOT_FOUND. */
 async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
@@ -57,15 +79,19 @@ async function linhaDoResumo(db: Banco, ownerId: string, meetingId: string) {
 }
 
 /**
- * O resumo da reunião para a dona: o estado e, pronto, todos os itens, na
+ * O resumo da reunião para a dona: o estado, o modelo e todos os itens, na
  * ordem do formato (os ignorados também, que a tela recolhe e deixa desfazer).
+ * Enquanto o resumo é refeito com outro modelo (H4d), ou se a nova versão
+ * falhou, os itens são os da versão anterior (`versaoAnterior`): enquanto a
+ * nova é escrita, a tela os mostra só para ler, porque decidir é recusado até
+ * ela chegar; se a nova falhou, a dona segue decidindo sobre a anterior.
  */
 export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   await reuniaoDaDona(db, ownerId, meetingId);
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const estado = estadoDe(linha, Date.now());
-  const itens = linha && estado === "pronto"
+  const itens = linha
     ? await db.select({
       id: meetingSummaryItems.id,
       section: meetingSummaryItems.section,
@@ -82,7 +108,10 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, erro: estado === "falhou" ? linha?.lastError ?? null : null, itens };
+  return {
+    estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
+    erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
+  };
 }
 
 /**
@@ -91,9 +120,21 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * quando há trabalho novo (é o teto de pedidos à IA, que pode recusar
  * lançando, e devolve como soltar a vaga): pedir de novo o que já está na fila
  * não gasta vaga, e o pedido que perdeu a corrida para outro igual a devolve.
+ *
+ * Com o modelo (H4d), o resumo novo nasce nele, e o que falhou reabre nele.
+ * Com `refazer`, também o resumo pronto volta à fila no modelo pedido: os
+ * itens ficam onde estão até a versão nova ser gravada, e a fila guarda os
+ * confirmados e os feitos (server/fila-do-resumo.ts). Refazer em outro modelo
+ * o resumo que ainda está na fila é conflito: o modelo da geração em curso não
+ * muda no meio; no mesmo modelo, é o pedido repetido e não muda nada.
+ *
+ * Pelo link (`peloLink`), só o primeiro resumo que falhou reabre. O refazer
+ * que falhou é da dona: reabri-lo gastaria a vaga do link e trocaria os itens
+ * que ela ainda não conferiu. O pedido não muda nada, e o link segue mostrando
+ * a versão anterior.
  */
 type AntesDeCriar = () => (() => void) | void;
-async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
+async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: { modelo?: ModeloDeResumo; refazer?: boolean; peloLink?: boolean } = {}) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
@@ -102,19 +143,28 @@ async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: strin
   if (!linha) {
     const soltarVaga = antesDeCriar();
     try {
-      await db.insert(meetingSummaries).values({ id: crypto.randomUUID(), meetingId, ownerId, status: "pending", createdAt: agora, updatedAt: agora });
+      await db.insert(meetingSummaries).values({
+        id: crypto.randomUUID(), meetingId, ownerId, status: "pending", template: pedido.modelo ?? MODELO_DE_RESUMO_PADRAO, createdAt: agora, updatedAt: agora,
+      });
     } catch (erro) {
       // Outro pedido criou o trabalho entre a leitura e aqui (índice único por
       // reunião): o trabalho existe, que é o que se queria, e a vaga volta.
       if (!ehChaveRepetida(erro)) throw erro;
       soltarVaga?.();
     }
-  } else if (linha.status === "failed") {
+  } else if (pedido.peloLink && linha.status === "failed" && temVersaoAnterior(linha)) {
+    // O refazer que falhou é da dona (ver acima): nada muda, nem a vaga.
+    return;
+  } else if (linha.status === "failed" || (pedido.refazer && linha.status === "ready")) {
     const soltarVaga = antesDeCriar();
-    const r = await db.update(meetingSummaries).set({ status: "pending", attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora })
-      .where(and(eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, "failed")));
-    // Outro pedido reabriu antes: a vaga volta.
+    const r = await db.update(meetingSummaries).set({
+      status: "pending", ...(pedido.modelo ? { template: pedido.modelo } : {}),
+      attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora,
+    }).where(and(eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, linha.status)));
+    // Outro pedido reabriu (ou refez) antes: a vaga volta.
     if (!linhasAfetadas(r)) soltarVaga?.();
+  } else if (pedido.refazer && pedido.modelo && linha.status === "pending" && linha.template !== pedido.modelo) {
+    throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   }
 }
 
@@ -126,18 +176,37 @@ function ehChaveRepetida(erro: unknown): boolean {
   return false;
 }
 
-/** A dona pede (ou pede de novo, depois de uma falha) o resumo de uma reunião pronta. */
-export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
+/**
+ * A dona pede (ou pede de novo, depois de uma falha) o resumo de uma reunião
+ * pronta, no modelo que escolheu; sem modelo, o resumo novo é o Geral e o que
+ * falhou reabre no modelo em que estava.
+ */
+export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, modelo?: ModeloDeResumo) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
-  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar);
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo });
   return resumoGuardadoDaDona(ownerId, meetingId);
 }
 
 /**
- * O item da dona e o estado do resumo dele. Só se decide sobre resumo pronto
- * de reunião pronta: enquanto o resumo é refeito, os itens vão ser trocados.
+ * "Refazer como…" (H4d): a dona manda refazer o resumo da reunião pronta em
+ * outro modelo (ou no mesmo, para uma versão nova). Os itens que ela confirmou
+ * e as ações feitas ficam; os pendentes e os ignorados são trocados quando a
+ * fila gravar a versão nova. Gasta uma vaga do teto, como pedir o resumo.
+ */
+export async function refazerResumoDaDona(ownerId: string, meetingId: string, modelo: ModeloDeResumo, antesDeCriar: AntesDeCriar) {
+  const db = await exigirDb();
+  const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
+  if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo, refazer: true });
+  return resumoGuardadoDaDona(ownerId, meetingId);
+}
+
+/**
+ * O item da dona e o estado do resumo dele. Só se decide sobre o resumo fora
+ * da fila (pronto, ou o refazer que falhou) de reunião pronta: enquanto o
+ * resumo é refeito, os itens vão ser trocados.
  */
 async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
   const [item] = await db.select({
@@ -151,7 +220,7 @@ async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
     .innerJoin(meetings, and(eq(meetings.id, meetingSummaryItems.meetingId), eq(meetings.ownerId, meetingSummaryItems.ownerId)))
     .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
   if (!item || item.statusDaReuniao === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  if (item.statusDoResumo !== "ready" || item.statusDaReuniao !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+  if (!foraDaFila(item.statusDoResumo) || item.statusDaReuniao !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   return item;
 }
 
@@ -178,12 +247,12 @@ export async function decidirItemDoResumo(ownerId: string, itemId: string, statu
   if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
 }
 
-/** Confirma de uma vez os itens ainda pendentes do resumo pronto da reunião. */
+/** Confirma de uma vez os itens ainda pendentes do resumo da reunião, fora da fila (pronto, ou o refazer que falhou). */
 export async function confirmarItensDoResumo(ownerId: string, meetingId: string): Promise<number> {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   const linha = await linhaDoResumo(db, ownerId, meetingId);
-  if (!linha || linha.status !== "ready" || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+  if (!linha || !foraDaFila(linha.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   const agora = Date.now();
   const r = await db.update(meetingSummaryItems).set({ status: "confirmed", decidedAt: agora, updatedAt: agora })
     .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "pending")));
@@ -214,13 +283,17 @@ export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: bo
  * Os pendentes vão com o estado, para a tela avisar que a dona ainda não os
  * conferiu. Os rótulos de voz ({F2}) vão crus: a tela do link mostra
  * "Falante 2", e os nomes que a dona deu às vozes não saem por aqui.
+ *
+ * Enquanto a dona refaz o resumo (H4d), ou se o refazer falhou, o link segue
+ * mostrando a versão anterior (`versaoAnterior`), com o que ela já confirmou.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
   const linha = await linhaDoResumo(db, reuniao.ownerId, reuniao.id);
   const estado = estadoDe(linha, Date.now());
-  const itens = linha && estado === "pronto"
+  const versaoAnterior = temVersaoAnterior(linha);
+  const itens = linha && (estado === "pronto" || versaoAnterior)
     ? await db.select({
       section: meetingSummaryItems.section,
       subject: meetingSummaryItems.subject,
@@ -234,13 +307,16 @@ export async function resumoGuardadoPeloLink(token: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  return { estado, emoji: linha?.emoji ?? null, itens };
+  return { estado, emoji: linha?.emoji ?? null, versaoAnterior, itens };
 }
 
-/** Quem tem o link pede o resumo que a reunião ainda não tem (ou que falhou). */
+/**
+ * Quem tem o link pede o resumo que a reunião ainda não tem (ou cujo primeiro
+ * resumo falhou). O refazer que falhou é da dona, e o link não o reabre.
+ */
 export async function pedirResumoPeloLink(token: string, antesDeCriar: (reuniaoId: string) => (() => void) | void) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
-  await pedirResumoDaReuniao(db, reuniao.ownerId, reuniao.id, () => antesDeCriar(reuniao.id));
+  await pedirResumoDaReuniao(db, reuniao.ownerId, reuniao.id, () => antesDeCriar(reuniao.id), { peloLink: true });
   return resumoGuardadoPeloLink(token);
 }

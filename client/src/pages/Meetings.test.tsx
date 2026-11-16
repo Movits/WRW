@@ -931,7 +931,8 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
 
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
 
-    expect(duble.mutacoes.pedirResumo.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    // No modelo escolhido ao lado do botão: o Geral, de início (H4d).
+    expect(duble.mutacoes.pedirResumo.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, modelo: "general" });
   });
 
   it.each([

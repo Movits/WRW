@@ -10,9 +10,12 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * vaga do teto volta. Erro que não é chave repetida sobe, e a vaga fica.
  */
 const estado = vi.hoisted(() => ({
-  resumo: undefined as undefined | { id: string; status: string; lockedUntil: number | null; lockToken: string | null; emoji: null; language: null; lastError: null },
+  resumo: undefined as undefined | { id: string; status: string; lockedUntil: number | null; lockToken: string | null; emoji: null; language: null; lastError: null; template?: string },
   erroNoInsert: null as unknown,
   linhasNoUpdate: 1,
+  // O que o serviço mandou gravar, para os testes dos modelos (H4d).
+  inseridos: [] as Array<Record<string, unknown>>,
+  atualizados: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("./db", async () => {
@@ -28,17 +31,19 @@ vi.mock("./db", async () => {
         const fim = { limit: async () => linhas(), orderBy: async () => [], then: (ok: (v: unknown) => unknown) => Promise.resolve(linhas()).then(ok) };
         return { where: () => fim };
       } }),
-      insert: () => ({ values: async () => { if (estado.erroNoInsert) throw estado.erroNoInsert; } }),
-      update: () => ({ set: () => ({ where: async () => [{ affectedRows: estado.linhasNoUpdate }] }) }),
+      insert: () => ({ values: async (valores: Record<string, unknown>) => { estado.inseridos.push(valores); if (estado.erroNoInsert) throw estado.erroNoInsert; } }),
+      update: () => ({ set: (campos: Record<string, unknown>) => { estado.atualizados.push(campos); return { where: async () => [{ affectedRows: estado.linhasNoUpdate }] }; } }),
+      // Sem delete: pedir ou refazer o resumo nunca apaga item (quem troca os itens é a fila).
     }),
   };
 });
 
-const { pedirResumoDaDona } = await import("./resumo-guardado");
+const { pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } = await import("./resumo-guardado");
+const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 
 beforeEach(() => {
-  Object.assign(estado, { resumo: undefined, erroNoInsert: null, linhasNoUpdate: 1 });
+  Object.assign(estado, { resumo: undefined, erroNoInsert: null, linhasNoUpdate: 1, inseridos: [], atualizados: [] });
 });
 
 describe("pedido de resumo que perde a corrida", () => {
@@ -80,5 +85,72 @@ describe("pedido de resumo que perde a corrida", () => {
       await pedirResumoDaDona("dona-1", ID, teto);
     }
     expect(teto).not.toHaveBeenCalled();
+  });
+});
+
+describe("os modelos do resumo (H4d): pedir e refazer", () => {
+  const resumo = (status: string, template: string) => ({ id: "resumo-1", status, lockedUntil: null, lockToken: null, emoji: null, language: null, lastError: null, template });
+
+  it("pedir com modelo: o resumo novo nasce nele; sem modelo, no Geral", async () => {
+    await pedirResumoDaDona("dona-1", ID, () => undefined, "sales");
+    await pedirResumoDaDona("dona-1", ID, () => undefined);
+    expect(estado.inseridos.map(linha => [linha.status, linha.template])).toEqual([["pending", "sales"], ["pending", "general"]]);
+  });
+
+  it("o que falhou reabre no modelo pedido; sem modelo, fica no de antes", async () => {
+    estado.resumo = resumo("failed", "networking");
+    await pedirResumoDaDona("dona-1", ID, () => undefined, "sales");
+    await pedirResumoDaDona("dona-1", ID, () => undefined);
+    expect(estado.atualizados[0]).toMatchObject({ status: "pending", template: "sales", attempts: 0, lastError: null, lockToken: null, lockedUntil: null });
+    expect(estado.atualizados[1]).toMatchObject({ status: "pending" });
+    expect(estado.atualizados[1]).not.toHaveProperty("template");
+  });
+
+  it("pedir não refaz o resumo pronto, nem com outro modelo: nem chama o teto", async () => {
+    estado.resumo = resumo("ready", "general");
+    const teto = vi.fn();
+    await pedirResumoDaDona("dona-1", ID, teto, "sales");
+    expect(teto).not.toHaveBeenCalled();
+    expect(estado.atualizados).toEqual([]);
+  });
+
+  it("refazer o pronto: volta à fila no modelo pedido, sem apagar item, e gasta a vaga; o modelo sai na leitura", async () => {
+    estado.resumo = resumo("ready", "general");
+    const soltar = vi.fn();
+    const teto = vi.fn(() => soltar);
+    await refazerResumoDaDona("dona-1", ID, "mentoring", teto);
+    expect(teto).toHaveBeenCalledTimes(1);
+    expect(soltar).not.toHaveBeenCalled();
+    expect(estado.atualizados).toEqual([expect.objectContaining({ status: "pending", template: "mentoring", attempts: 0, lastError: null, lockToken: null, lockedUntil: null })]);
+    estado.resumo = resumo("pending", "mentoring");
+    expect(await resumoGuardadoDaDona("dona-1", ID)).toMatchObject({ estado: "pendente", modelo: "mentoring" });
+  });
+
+  it("refazer o que falhou também vale, no modelo pedido", async () => {
+    estado.resumo = resumo("failed", "general");
+    await refazerResumoDaDona("dona-1", ID, "one_on_one", () => undefined);
+    expect(estado.atualizados).toEqual([expect.objectContaining({ status: "pending", template: "one_on_one" })]);
+  });
+
+  it("refazer: outro pedido refez antes (o UPDATE não acha a linha no estado lido), e a vaga volta", async () => {
+    estado.resumo = resumo("ready", "general");
+    estado.linhasNoUpdate = 0;
+    const soltar = vi.fn();
+    await refazerResumoDaDona("dona-1", ID, "sales", () => soltar);
+    expect(soltar).toHaveBeenCalledTimes(1);
+  });
+
+  it("refazer o que ainda está na fila: no mesmo modelo não muda nada nem gasta vaga; em outro é conflito", async () => {
+    estado.resumo = resumo("pending", "sales");
+    const teto = vi.fn();
+    await refazerResumoDaDona("dona-1", ID, "sales", teto);
+    await expect(refazerResumoDaDona("dona-1", ID, "general", teto)).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    expect(teto).not.toHaveBeenCalled();
+    expect(estado.atualizados).toEqual([]);
+  });
+
+  it("refazer sem resumo nenhum cria o trabalho no modelo pedido", async () => {
+    await refazerResumoDaDona("dona-1", ID, "networking", () => undefined);
+    expect(estado.inseridos).toEqual([expect.objectContaining({ status: "pending", template: "networking" })]);
   });
 });

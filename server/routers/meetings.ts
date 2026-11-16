@@ -30,7 +30,8 @@ import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
-import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -248,9 +249,18 @@ export const meetingsRouter = router({
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
 
+  // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
+  // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
   pedirResumo: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO).optional() }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
+
+  // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
+  // confirmados e os feitos ficam, os pendentes e os ignorados são trocados.
+  // Gasta uma vaga do mesmo teto de pedidos à IA.
+  refazerResumo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
+    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
 
   decidirItemDoResumo: protectedProcedure
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))

@@ -11,6 +11,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const servico = vi.hoisted(() => ({
   resumoGuardadoDaDona: vi.fn(async () => ({ estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] })),
   pedirResumoDaDona: vi.fn(),
+  refazerResumoDaDona: vi.fn(),
   decidirItemDoResumo: vi.fn(async () => undefined),
   confirmarItensDoResumo: vi.fn(async () => 2),
   marcarAcaoFeita: vi.fn(async () => undefined),
@@ -36,6 +37,7 @@ beforeEach(() => {
   for (const f of Object.values(servico)) f.mockClear();
   // O serviço real chama o "antes de criar" só quando há trabalho novo.
   servico.pedirResumoDaDona.mockImplementation(async (_dona: string, _id: string, antesDeCriar: () => void) => { antesDeCriar(); return { estado: "pendente" }; });
+  servico.refazerResumoDaDona.mockImplementation(async (_dona: string, _id: string, _modelo: string, antesDeCriar: () => void) => { antesDeCriar(); return { estado: "pendente" }; });
   servico.pedirResumoPeloLink.mockImplementation(async (_token: string, antesDeCriar: (reuniaoId: string) => void) => { antesDeCriar("reuniao-do-link"); return { estado: "pendente" }; });
 });
 
@@ -73,6 +75,35 @@ describe("rotas do resumo guardado da dona", () => {
     await expect(rota.decidirItemDoResumo({ itemId: ID, status: "aprovado" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(servico.resumoGuardadoDaDona).not.toHaveBeenCalled();
     expect(servico.decidirItemDoResumo).not.toHaveBeenCalled();
+  });
+});
+
+describe("os modelos do resumo (H4d)", () => {
+  it("pedir com modelo e refazer: a dona é a da sessão e o modelo chega ao serviço", async () => {
+    const rota = daDona("dona-modelos");
+    await rota.pedirResumo({ meetingId: ID, modelo: "sales" });
+    await rota.pedirResumo({ meetingId: ID });
+    await rota.refazerResumo({ meetingId: ID, modelo: "one_on_one" });
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(1, "dona-modelos", ID, expect.any(Function), "sales");
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(2, "dona-modelos", ID, expect.any(Function), undefined);
+    expect(servico.refazerResumoDaDona).toHaveBeenCalledWith("dona-modelos", ID, "one_on_one", expect.any(Function));
+  });
+
+  it("refazer gasta vaga do mesmo teto de pedidos à IA que pedir o resumo e perguntar", async () => {
+    const rota = daDona();
+    for (let i = 0; i < PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA - 1; i++) await rota.refazerResumo({ meetingId: ID, modelo: "networking" });
+    await rota.pedirResumo({ meetingId: ID });
+    await expect(rota.refazerResumo({ meetingId: ID, modelo: "mentoring" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(rota.pedirResumo({ meetingId: ID })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("modelo que não existe, ou refazer sem modelo, é recusado antes do serviço", async () => {
+    const rota = daDona();
+    await expect(rota.refazerResumo({ meetingId: ID, modelo: "vendas" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(rota.refazerResumo({ meetingId: ID } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(rota.pedirResumo({ meetingId: ID, modelo: "geral" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(servico.refazerResumoDaDona).not.toHaveBeenCalled();
+    expect(servico.pedirResumoDaDona).not.toHaveBeenCalled();
   });
 });
 

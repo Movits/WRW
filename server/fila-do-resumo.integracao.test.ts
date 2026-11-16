@@ -95,7 +95,9 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     await rodar();
 
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR" });
+    // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
+    // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [] });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);
     expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
     expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
@@ -345,7 +347,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("o link de reunião sem resumo diz 'sem_resumo'; sem transcrição, não pede", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     await reuniaoPronta({ shareToken: token }, false);
-    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, itens: [] });
+    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, versaoAnterior: false, itens: [] });
     await expect(servico.pedirResumoPeloLink(token, vi.fn())).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
