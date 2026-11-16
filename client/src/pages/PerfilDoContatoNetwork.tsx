@@ -270,7 +270,8 @@ export default function PerfilDoContatoNetwork() {
                     <li key={`${evento.tipo}-${evento.em}-${indice}`} className="relative">
                       <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[#c98f70]" aria-hidden="true" />
                       <p className="flex items-center gap-1.5 text-xs text-white/40"><Clock3 className="h-3 w-3" aria-hidden="true" />{data(evento.em)}</p>
-                      <p className="text-sm text-white/80">
+                      {/* O texto da ação pode trazer um e-mail ou um link sem ponto de quebra: a palavra longa quebra em vez de passar da largura do celular. */}
+                      <p className="break-words text-sm text-white/80">
                         {evento.tipo === "reuniao"
                           ? <Link href={rotaDaReuniao(evento.meetingId)} className="underline-offset-4 hover:text-white hover:underline">{rotuloDoEvento(t, evento)}</Link>
                           : rotuloDoEvento(t, evento)}

@@ -171,11 +171,15 @@ function ItemDaProximaAcao({ acao, compacto, hoje, contatoDaPagina }: { acao: Pr
     </li>;
   }
 
-  return <li className={`rounded-xl border p-3 ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"}`}>
+  // Um e-mail ou um link no texto, no detalhe ou no responsável não tem ponto de
+  // quebra: a linha quebra em qualquer lugar (a regra vale para o item inteiro),
+  // e o texto, item de flex, encolhe abaixo da palavra mais longa. Sem isso, a
+  // palavra passa da largura do celular e a página ganha rolagem lateral.
+  return <li className={`rounded-xl border p-3 wrap-anywhere ${situacao === "atrasada" ? "border-red-400/25 bg-red-400/[0.04]" : "border-white/10 bg-black/10"}`}>
     <label className="flex cursor-pointer items-start gap-3">
       <input type="checkbox" checked={acao.feita} disabled={ocupado} onChange={evento => marcar.mutate({ id: acao.id, feita: evento.target.checked })}
         className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-      <span id={idDoTexto} dir="auto" className={`text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
+      <span id={idDoTexto} dir="auto" className={`min-w-0 text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
     </label>
 
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 ps-7 text-xs text-white/55">

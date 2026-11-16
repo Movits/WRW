@@ -207,6 +207,19 @@ describe("a lista da página", () => {
     expect(item.querySelector("q")).toHaveClass("border-s-2", "ps-3");
   });
 
+  it("um e-mail no texto, no detalhe ou no responsável quebra a linha em vez de passar da largura do celular", () => {
+    const email = "joana.representante@farmabras.com.br";
+    render(<ProximasAcoes acoes={[acao({ texto: `Mandar a proposta para ${email}`, detalhe: `Cópia para ${email}`, responsavel: email, vozes: {} })]}/>);
+    // O jsdom não calcula layout: o que se trava é a regra de CSS de cada lugar.
+    const texto = screen.getByText(`Mandar a proposta para ${email}`);
+    // O item inteiro quebra a palavra em qualquer ponto (o texto, o detalhe e o responsável herdam a regra)...
+    expect(texto.closest("li")).toHaveClass("wrap-anywhere");
+    // ...e o texto, item de flex ao lado da caixa, pode encolher abaixo da palavra mais longa.
+    expect(texto).toHaveClass("min-w-0");
+    expect(texto.closest("li")).toContainElement(screen.getByText(`Responsável: ${email}`));
+    expect(texto.closest("li")).toContainElement(screen.getByText(`Cópia para ${email}`));
+  });
+
   it("feita fica riscada e a caixa marcada; desmarcar manda feita: false", () => {
     render(<ProximasAcoes acoes={[acao({ feita: true, feitaEm: 5, prazo: ontem })]}/>);
     const caixa = screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" });

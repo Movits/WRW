@@ -24,10 +24,21 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
  * - na reunião, o que a transcrição não sustentou aparece como FALTANDO.
  */
 
+type OpcoesDaMutacao = { onSuccess?: (...args: unknown[]) => unknown; onError?: (erro: unknown) => unknown; onSettled?: (...args: unknown[]) => unknown };
 const duble = vi.hoisted(() => ({
   contato: vi.fn(),
   params: { id: "5" } as { id: string },
   mutacoes: {} as Record<string, ReturnType<typeof vi.fn>>,
+  // As opções da última montagem de cada mutação, para o teste chamar o onSettled.
+  opcoes: {} as Record<string, OpcoesDaMutacao>,
+  // O mesmo objeto em toda montagem: o teste confere o que a tela mandou reler.
+  utils: {
+    networkInteligente: {
+      contato: { invalidate: vi.fn() }, resumo: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
+    },
+    proximasAcoes: { invalidate: vi.fn() },
+    meetings: { resumoGuardado: { invalidate: vi.fn() } },
+  },
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
@@ -35,17 +46,14 @@ vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("wouter", async importOriginal => ({ ...await importOriginal<typeof import("wouter")>(), useParams: () => duble.params }));
 vi.mock("@/lib/trpc", () => {
   const mutacao = (nome: string) => ({
-    useMutation: () => ({ mutate: (duble.mutacoes[nome] ??= vi.fn()), isPending: false }),
+    useMutation: (opcoes: OpcoesDaMutacao = {}) => {
+      duble.opcoes[nome] = opcoes;
+      return { mutate: (duble.mutacoes[nome] ??= vi.fn()), isPending: false };
+    },
   });
   return {
     trpc: {
-      useUtils: () => ({
-        networkInteligente: {
-          contato: { invalidate: vi.fn() }, resumo: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
-        },
-        proximasAcoes: { invalidate: vi.fn() },
-        meetings: { resumoGuardado: { invalidate: vi.fn() } },
-      }),
+      useUtils: () => duble.utils,
       networkInteligente: {
         contato: { useQuery: (...args: unknown[]) => duble.contato(...args) },
         definirDisponibilidade: mutacao("definirDisponibilidade"),
@@ -98,6 +106,11 @@ beforeEach(async () => {
   await i18n.changeLanguage("pt-BR");
   duble.params = { id: "5" };
   for (const m of Object.values(duble.mutacoes)) m.mockReset();
+  for (const chave of Object.keys(duble.opcoes)) delete duble.opcoes[chave];
+  const { networkInteligente, proximasAcoes, meetings } = duble.utils;
+  for (const m of [networkInteligente.contato, networkInteligente.resumo, networkInteligente.conexoes, proximasAcoes, meetings.resumoGuardado]) {
+    m.invalidate.mockClear();
+  }
 });
 
 describe("perfil do contato — Quem Sou, Tenho, Preciso", () => {
@@ -369,6 +382,22 @@ describe("perfil do contato — próximas ações e o link das reuniões (H5b)",
     );
   });
 
+  it("salvar a 'Nova ação' relê o perfil deste contato (a seção e a linha do tempo) e as listas de ações", async () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.change(within(secao).getByLabelText("O que fazer"), { target: { value: "Mandar o catálogo" } });
+    fireEvent.click(within(secao).getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacoes.criar).toHaveBeenCalledTimes(1);
+    expect(duble.utils.networkInteligente.contato.invalidate).not.toHaveBeenCalled();
+
+    // Deu certo ou não, a tela relê: sem isso, a ação salva só aparece aqui ao recarregar a página.
+    await act(async () => { await duble.opcoes.criar.onSettled?.(); });
+    expect(duble.utils.networkInteligente.contato.invalidate).toHaveBeenCalledWith({ contactId: 5 });
+    expect(duble.utils.proximasAcoes.invalidate).toHaveBeenCalled();
+  });
+
   it("as ações ligadas: o nome da voz no lugar do rótulo, a caixa marca pela ação, o link do item na reunião e nenhum link para o próprio contato", () => {
     responde(perfil({ proximasAcoes: { lista: [
       acao(),
@@ -407,6 +436,21 @@ describe("perfil do contato — próximas ações e o link das reuniões (H5b)",
     expect(within(linha).getByText("Próxima ação feita: Falante 3 liga para o importador")).toBeInTheDocument();
     expect(within(linha).getByText("Próxima ação: Carla envia a proposta")).toBeInTheDocument();
     expect(within(linha).queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+  });
+
+  it("um e-mail longo na ação quebra a linha em vez de passar da largura do celular, na seção e na linha do tempo", () => {
+    const texto = "Mandar a proposta para joana.representante@farmabras.com.br";
+    responde(perfil({
+      proximasAcoes: { lista: [acao({ texto, responsavel: null, vozes: {} })], limite: 100 },
+      linhaDoTempo: [{ tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "acao-1", texto, vozes: {} }],
+    }));
+    render(<PerfilDoContatoNetwork />);
+    // O jsdom não calcula layout: o que se trava é a regra de CSS de cada lugar.
+    const naSecao = within(secaoDasAcoes()).getByText(texto);
+    expect(naSecao).toHaveClass("min-w-0");
+    expect(naSecao.closest("li")).toHaveClass("wrap-anywhere");
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText(`Próxima ação: ${texto}`)).toHaveClass("break-words");
   });
 
   it("em inglês, os textos novos saem traduzidos", async () => {

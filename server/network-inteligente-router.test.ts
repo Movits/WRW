@@ -490,4 +490,31 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
     ]);
     expect(perfil.linhaDoTempo[1]).toMatchObject({ acaoId: "acao-1", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } });
   });
+
+  it("o banco caiu só na leitura das ações: o perfil inteiro é erro de banco, nunca a seção vazia", async () => {
+    hasValidConsent.mockResolvedValue(false);
+    const registro = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    estado.responder = sql => {
+      if (/from `private_contacts`/.test(sql)) {
+        return /`fullName`/.test(sql)
+          ? [[5, "Maria Silva", null, null, null, null, null, "NW-1", 0, null, 100]]
+          : [[5, "NW-1"]];
+      }
+      // A queda real chega como o erro do driver mysql2 na consulta que falhou;
+      // o Drizzle o embrulha, e o código fica na causa.
+      if (/from `proximas_acoes`/.test(sql)) throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3306"), { code: "ECONNREFUSED" });
+      return [];
+    };
+    const { MENSAGEM_BANCO_INDISPONIVEL } = await import("@shared/const");
+
+    const erro = await chamar().contato({ contactId: 5 }).then(() => null, (e: unknown) => e);
+
+    // Um catch que devolvesse [] responderia o perfil com "Nenhuma próxima ação
+    // ligada a este contato" e a linha do tempo sem as ações.
+    expect(erro).toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+    expect(estado.consultas.some(c => /from `proximas_acoes`/.test(c.sql))).toBe(true);
+    // Quem traduziu foi o middleware de server/_core/trpc.ts, que registra a queda.
+    expect(registro).toHaveBeenCalledWith(expect.stringContaining("[Banco] indisponível em contato"));
+    registro.mockRestore();
+  });
 });
