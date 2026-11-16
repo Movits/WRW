@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { ListChecks, Loader2, Pencil, Trash2, UserRound, X } from "lucide-react";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
-import { AcaoNaAgenda, pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
+import { AcaoNaAgenda, ErroDoEstadoDaGoogle, pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { rotaDaReuniao } from "@shared/rotas";
@@ -132,6 +132,11 @@ export function ProximasAcoes({ acoes, compacto = false, destacada = null, conta
   // link de criar evento aparece: carregando ou com erro, ele criaria o evento
   // em dobro na agenda de quem está conectada.
   const googleDesligada = Boolean(google) && !googleLigada;
+  // A consulta que falha é erro na tela, nunca "não conectada": sem o aviso, as
+  // ações perdiam em silêncio o estado na Google e o "Tentar de novo". Só com
+  // alguma ação com a linha da agenda (aberta e com prazo): sem ela, o estado
+  // da Google não muda nada na lista.
+  const comLinhaDaAgenda = !compacto && acoes.some(acao => acao.prazo && !acao.feita);
   const achada = !!destacada && acoes.some(acao => acao.id === destacada);
   const jaRolou = useRef<string | null>(null);
   useEffect(() => {
@@ -142,10 +147,13 @@ export function ProximasAcoes({ acoes, compacto = false, destacada = null, conta
     elemento.scrollIntoView?.({ block: "center", behavior: movimentoReduzido() ? "auto" : "smooth" });
     elemento.focus({ preventScroll: true });
   }, [destacada, achada]);
-  return <ul className="space-y-3">
-    {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} destacada={acao.id === destacada} contatoDaPagina={contatoDaPagina}
-      googleLigada={googleLigada} googleDesligada={googleDesligada}/>)}
-  </ul>;
+  return <>
+    {estadoGoogle.isError && comLinhaDaAgenda && <ErroDoEstadoDaGoogle erro={estadoGoogle.error} aoTentarDeNovo={() => void estadoGoogle.refetch()}/>}
+    <ul className="space-y-3">
+      {acoes.map(acao => <ItemDaProximaAcao key={acao.id} acao={acao} compacto={compacto} hoje={hoje} destacada={acao.id === destacada} contatoDaPagina={contatoDaPagina}
+        googleLigada={googleLigada} googleDesligada={googleDesligada}/>)}
+    </ul>
+  </>;
 }
 
 function Selo({ cor, children }: { cor: "vermelho" | "ambar"; children: ReactNode }) {

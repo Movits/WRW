@@ -55,6 +55,11 @@ describe("linkDaGoogleAgenda", () => {
     // O convite (mensagemDoConvite) não passa descrição: o link dele fica como era.
     expect(parametrosDe(linkDaGoogleAgenda(evento)).parametros.has("details")).toBe(false);
   });
+
+  it("livre (a próxima ação, H5c): o evento nasce Livre (crm=AVAILABLE); a reunião, sem ele, fica no padrão da Google", () => {
+    expect(parametrosDe(linkDaGoogleAgenda({ ...evento, livre: true })).parametros.get("crm")).toBe("AVAILABLE");
+    expect(parametrosDe(linkDaGoogleAgenda(evento)).parametros.has("crm")).toBe(false);
+  });
 });
 
 describe("quandoDaReuniao", () => {

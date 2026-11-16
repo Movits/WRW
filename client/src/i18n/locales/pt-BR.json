@@ -1895,7 +1895,8 @@
     "inNextActions": "Em Próximas ações",
     "agenda": {
       "group": "Na agenda",
-      "pageHint": "Com prazo, a ação pode ir para a sua agenda: o evento fica às 9h do dia do prazo, com aviso na hora. Com a Google Agenda conectada no Perfil, ela vai sozinha.",
+      "pageHint": "Com prazo, a ação pode ir para a sua agenda: o evento fica às 9h do dia do prazo, com aviso na hora.",
+      "pageHintGoogle": "Com a Google Agenda conectada no Perfil, a ação vai para lá sozinha.",
       "downloadIcs": "Agenda do celular (.ics)",
       "toast": {
         "sent": "A ação está na sua Google Agenda.",
@@ -2042,14 +2043,14 @@
   },
   "googleAgenda": {
     "title": "Google Agenda",
-    "subtitle": "Conecte a sua conta Google para a WRW pôr na sua Google Agenda as reuniões que você marcar.",
+    "subtitle": "Conecte a sua conta Google para a WRW pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",
     "notConnected": "Nenhuma conta Google conectada.",
     "connect": "Conectar a Google Agenda",
     "connected": "Conectada a uma conta Google.",
     "connectedAs": "Conectada à conta Google {{email}}.",
     "broken": "Esta conexão parou de funcionar. Conecte de novo para a WRW voltar a usar a sua Google Agenda.",
     "reconnect": "Reconectar",
-    "privacyNote": "A WRW só mexe nos eventos das reuniões que você marcar na agenda de reuniões da WRW. Você pode desconectar quando quiser.",
+    "privacyNote": "A WRW só mexe nos eventos das reuniões que você marcar na agenda de reuniões da WRW e das suas próximas ações com prazo. Você pode desconectar quando quiser.",
     "wrongAddress": "Para conectar a Google Agenda, entre na WRW pelo endereço {{address}}.",
     "openAddress": "Abrir {{address}}",
     "inApp": "Pelo app não dá para conectar a Google Agenda. Abra {{address}} no navegador, entre na sua conta e conecte no Perfil.",

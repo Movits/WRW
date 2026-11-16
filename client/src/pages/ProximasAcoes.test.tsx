@@ -15,7 +15,7 @@ const duble = vi.hoisted(() => {
   const registrar = (nome: string) => ({
     useMutation: (_opcoes: Opcoes = {}) => ({ mutate: (...args: unknown[]) => { (chamadas[nome] ??= []).push(args); }, isPending: false }),
   });
-  const respostas: { listar?: { data?: unknown; isError?: boolean; error?: unknown } } = {};
+  const respostas: { listar?: { data?: unknown; isError?: boolean; error?: unknown }; estado?: { data?: unknown; isError?: boolean; error?: unknown } } = {};
   const entradas: unknown[] = [];
   return {
     chamadas, registrar, respostas, entradas,
@@ -36,7 +36,7 @@ const duble = vi.hoisted(() => {
         tirarDaGoogle: registrar("tirarDaGoogle"),
       },
       network: { list: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: () => undefined }) } },
-      googleAgenda: { estado: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: () => undefined }) } },
+      googleAgenda: { estado: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: () => undefined, ...(respostas.estado ?? {}) }) } },
     },
   };
 });
@@ -50,6 +50,7 @@ const ACAO = {
 
 beforeEach(() => {
   delete duble.respostas.listar;
+  delete duble.respostas.estado;
   duble.entradas.length = 0;
   for (const chave of Object.keys(duble.chamadas)) delete duble.chamadas[chave];
 });
@@ -99,6 +100,24 @@ describe("a página das próximas ações", () => {
       texto: "Ligar para a Bia", detalhe: "", responsavel: "", prazo: "2026-12-01", fuso: expect.any(String),
       rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" },
     });
+  });
+
+  it("a dica da agenda: a frase da Google Agenda só para quem tem a seção dela no Perfil (H5c)", () => {
+    duble.respostas.listar = { data: { acoes: [ACAO], abertas: 1, limite: 300 } };
+    const DICA = "Com prazo, a ação pode ir para a sua agenda: o evento fica às 9h do dia do prazo, com aviso na hora.";
+    const DA_GOOGLE = "Com a Google Agenda conectada no Perfil, a ação vai para lá sozinha.";
+    // Sem as variáveis, ou fora da lista do modo Teste: o Perfil não tem a seção, e a página não manda procurá-la.
+    duble.respostas.estado = { data: { disponivel: false } };
+    const { rerender } = render(<PaginaDasProximasAcoes/>);
+    expect(screen.getByText(DICA)).toBeInTheDocument();
+    expect(screen.queryByText(DA_GOOGLE)).not.toBeInTheDocument();
+    // Carregando ou com erro, também não: o aviso do erro é da lista.
+    duble.respostas.estado = { data: undefined, isError: true, error: { data: { code: "INTERNAL_SERVER_ERROR" } } };
+    rerender(<PaginaDasProximasAcoes/>);
+    expect(screen.queryByText(DA_GOOGLE)).not.toBeInTheDocument();
+    duble.respostas.estado = { data: { disponivel: true, conectada: false } };
+    rerender(<PaginaDasProximasAcoes/>);
+    expect(screen.getByText(DA_GOOGLE)).toBeInTheDocument();
   });
 
   it("no teto da lista, avisa que mostra só as primeiras", () => {

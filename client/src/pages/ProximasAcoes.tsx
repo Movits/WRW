@@ -36,6 +36,11 @@ export default function PaginaDasProximasAcoes() {
   const acaoPedida = useMemo(() => new URLSearchParams(busca).get(PARAMETRO_DA_ACAO) || null, [busca]);
   const jaProcurouEmTodas = useRef<string | null>(null);
   const utils = trpc.useUtils();
+  // A mesma consulta (e as mesmas opções) da lista, do Perfil e da Agenda: o
+  // cache é um só. A frase da Google Agenda só aparece para quem tem a seção
+  // dela no Perfil (H16b): sem as variáveis, ou fora da lista do modo Teste, não.
+  const estadoGoogle = trpc.googleAgenda.estado.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const googleNoPerfil = estadoGoogle.data?.disponivel === true;
   const avisos = useAvisosDaAgenda();
   const criar = trpc.proximasAcoes.criar.useMutation({
     onSuccess: resultado => avisos.depoisDeMandar(resultado),
@@ -78,6 +83,7 @@ export default function PaginaDasProximasAcoes() {
     </h1>
     <p className="mt-2 text-sm text-white/55">{t("proximasAcoes.intro")}</p>
     <p className="mt-1 text-xs text-white/40">{t("proximasAcoes.agenda.pageHint")}</p>
+    {googleNoPerfil && <p className="text-xs text-white/40">{t("proximasAcoes.agenda.pageHintGoogle")}</p>}
 
     <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2">

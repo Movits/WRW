@@ -47,8 +47,16 @@ export const ENDERECO_DA_GOOGLE_AGENDA = "https://calendar.google.com/calendar/r
  * convidados: a Google pergunta, ao salvar, se manda o convite pela conta da
  * dona. Só o botão da própria dona passa convidados; o link que vai no convite,
  * não (ver mensagemDoConvite).
+ *
+ * Com `livre`, o evento nasce "Livre" (crm=AVAILABLE), e não "Ocupado", o
+ * padrão da Google para evento com hora: é o da próxima ação (H5c). A Google
+ * não documenta os parâmetros deste link; o crm vem da documentação mantida
+ * pela comunidade (add-event-to-calendar-docs, que diz tê-lo conferido em
+ * 19/08/2026 e dá o antigo trp=false como ignorado). Se a Google deixar de
+ * lê-lo, o evento só volta a nascer ocupado: confira no teste manual da agenda
+ * da ação.
  */
-export function linkDaGoogleAgenda(evento: EventoDoConvite & { convidados?: readonly string[]; detalhes?: string | null }): string {
+export function linkDaGoogleAgenda(evento: EventoDoConvite & { convidados?: readonly string[]; detalhes?: string | null; livre?: boolean }): string {
   const fimMs = evento.inicioMs + evento.duracaoMinutos * 60_000;
   const parametros = new URLSearchParams({
     action: "TEMPLATE",
@@ -61,6 +69,7 @@ export function linkDaGoogleAgenda(evento: EventoDoConvite & { convidados?: read
   const local = evento.local?.trim();
   if (local) parametros.set("location", local);
   if (evento.fuso) parametros.set("ctz", evento.fuso);
+  if (evento.livre) parametros.set("crm", "AVAILABLE");
   const convidados = (evento.convidados ?? []).map(email => email.trim()).filter(Boolean);
   if (convidados.length) parametros.set("add", convidados.join(","));
   return `${ENDERECO_DA_GOOGLE_AGENDA}?${parametros.toString()}`;

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, privateContacts, proximasAcoes } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { agendarLembreteDaAcao, esquecerLembrete } from "./lembretes";
@@ -271,6 +271,38 @@ export async function soltarAcoesDaReuniao(ex: Executor, ownerId: string, meetin
     }).where(and(eq(proximasAcoes.id, acao.id), eq(proximasAcoes.ownerId, ownerId)));
   }
   return aSoltar.length;
+}
+
+/**
+ * A dona deu, trocou ou tirou o nome de uma voz da reunião (H3). As ações presas
+ * a itens dela que citam a voz ({F2}, no texto, no detalhe ou no responsável)
+ * mudam de texto na tela, e o evento delas fica para trás (H5c), porque o
+ * texto do evento leva os nomes das vozes:
+ * - a última mudança sobe, e o .ics baixado de novo sai com o SEQUENCE maior (o
+ *   calendário que já tem o evento fica com a versão nova);
+ * - a que tem estado na Google fica "falhou": a lista mostra "Tentar de novo",
+ *   que manda o texto novo. Daqui nada vai à Google, porque o texto do evento
+ *   leva a voz sem nome e o "Responsável:" no idioma da tela, que esta escrita
+ *   não tem, e o envio que estava no meio perde a ficha (registrar, em
+ *   server/acoes-na-google.ts).
+ * A ação solta já tem os nomes no texto e não muda. Roda na transação do nome,
+ * com a reunião travada.
+ */
+export async function acoesComAVozRenomeada(ex: Executor, ownerId: string, meetingId: string, falante: string, agora = Date.now()): Promise<number> {
+  const rotulo = `{${falante}}`;
+  const acoes = await ex.select({
+    id: proximasAcoes.id, texto: proximasAcoes.texto, detalhe: proximasAcoes.detalhe, responsavel: proximasAcoes.responsavel,
+  }).from(proximasAcoes)
+    .innerJoin(meetingSummaryItems, and(eq(meetingSummaryItems.id, proximasAcoes.itemId), eq(meetingSummaryItems.ownerId, proximasAcoes.ownerId)))
+    .where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.meetingId, meetingId)));
+  const ids = acoes
+    .filter(acao => [acao.texto, acao.detalhe, acao.responsavel].some(texto => typeof texto === "string" && texto.includes(rotulo)))
+    .map(acao => acao.id);
+  if (!ids.length) return 0;
+  const dessas = and(eq(proximasAcoes.ownerId, ownerId), inArray(proximasAcoes.id, ids));
+  await ex.update(proximasAcoes).set({ updatedAt: agora }).where(dessas);
+  await ex.update(proximasAcoes).set({ google: "falhou" }).where(and(dessas, isNotNull(proximasAcoes.google)));
+  return ids.length;
 }
 
 // ── a lista ─────────────────────────────────────────────────────────────────

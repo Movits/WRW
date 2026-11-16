@@ -73,6 +73,8 @@ describe("a linha da agenda", () => {
     expect(url.searchParams.get("action")).toBe("TEMPLATE");
     expect(url.searchParams.get("text")).toBe("Carla envia a proposta");
     expect(url.searchParams.get("details")).toContain("Responsável: Falante 3");
+    // Livre na agenda, como o evento da API: a Google põe "Ocupado" no evento com hora sem isso.
+    expect(url.searchParams.get("crm")).toBe("AVAILABLE");
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("button", { name: "Agenda do celular (.ics)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pôr na Google Agenda" })).not.toBeInTheDocument();
@@ -158,6 +160,8 @@ describe("o .ics e o link", () => {
     expect(desdobrado).toContain("DTEND:20261120T123000Z");
     expect(desdobrado).toContain("SUMMARY:Carla envia a proposta");
     expect(desdobrado).toContain("TRIGGER:PT0S");
+    // Livre na agenda (o padrão da RFC 5545 é ocupado), como o evento da API.
+    expect(desdobrado).toContain("TRANSP:TRANSPARENT");
     expect(desdobrado).toContain("SEQUENCE:60");
     expect(desdobrado).toContain("Responsável: Falante 3");
     expect(ics.nome).toBe("Carla-envia-a-proposta.ics");

@@ -97,6 +97,8 @@ export function icsDaAcao(acao: AcaoParaAAgenda, t: TranslateFn, fuso: string = 
     lembreteMinutos: 0,
     revisao: revisaoDoIcs(acao.createdAt, acao.updatedAt),
     modificadoEmMs: acao.updatedAt,
+    // Livre na agenda, como o evento que o servidor grava na Google (shared/acoes-na-agenda.ts).
+    livre: true,
   }, agora);
   return { conteudo, nome: nomeDoArquivoIcs(titulo) };
 }
@@ -106,7 +108,7 @@ export function linkDaAcaoNaGoogle(acao: AcaoParaAAgenda, t: TranslateFn, fuso: 
   const inicio = acao.prazo ? inicioDoEventoDaAcao(acao.prazo, fuso) : null;
   if (inicio === null) return null;
   const { titulo, descricao } = textosNaTela(acao, t);
-  return linkDaGoogleAgenda({ titulo, inicioMs: inicio, duracaoMinutos: DURACAO_DO_EVENTO_DA_ACAO_MIN, fuso, detalhes: descricao });
+  return linkDaGoogleAgenda({ titulo, inicioMs: inicio, duracaoMinutos: DURACAO_DO_EVENTO_DA_ACAO_MIN, fuso, detalhes: descricao, livre: true });
 }
 
 /** Baixa o .ics. O link temporário sai depois do download. */
@@ -133,7 +135,9 @@ export function mensagemDoErroDeTirarDaAgenda(t: TranslateFn, erro: unknown): st
  * parte, com o porquê. Quando o evento ficou na Google (a ação saiu dela, e a
  * Google não confirmou), o aviso traz "Tentar de novo"; quando só reconectar
  * resolve, ele diz para apagar o evento por lá. A conexão que a Google recusou,
- * ou que saiu em outra aba, faz o estado dela ser relido.
+ * ou que saiu em outra aba, faz o estado dela ser relido. Servem à lista, à
+ * página das ações e ao resumo guardado da reunião (desconfirmar o item, a caixa
+ * da ação dele).
  */
 export function useAvisosDaAgenda() {
   const { t } = useTranslation();
@@ -168,6 +172,22 @@ export function useAvisosDaAgenda() {
       releConexao(resultado);
     },
   };
+}
+
+/**
+ * A consulta do estado da Google Agenda que falhou: é erro na tela, nunca "não
+ * conectada", com o motivo e o "Tentar de novo". O mesmo aviso da página da
+ * Agenda (pages/Agenda.tsx), para a lista das ações (components/ProximasAcoes.tsx).
+ */
+export function ErroDoEstadoDaGoogle({ erro, aoTentarDeNovo }: { erro: unknown; aoTentarDeNovo: () => void }) {
+  const { t } = useTranslation();
+  return <div role="alert" className="mb-3 flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:flex-row sm:items-center sm:justify-between">
+    <p className="text-sm text-white/70">{t("agenda.google.statusError")} <span className="text-white/45">{mensagemDeErroParaTela(erro, t)}</span></p>
+    <button type="button" onClick={aoTentarDeNovo}
+      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/85 hover:bg-white/5">
+      {t("errorBoundary.retryButton")}
+    </button>
+  </div>;
 }
 
 const BOTAO = "inline-flex items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50";

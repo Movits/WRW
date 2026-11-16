@@ -84,6 +84,8 @@ vi.mock("@/lib/trpc", () => ({
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
       perguntar: duble.registrar("perguntarPeloLink"),
     },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },

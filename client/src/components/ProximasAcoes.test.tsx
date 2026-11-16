@@ -255,6 +255,21 @@ describe("a lista da página", () => {
     expect(texto.closest("li")).toContainElement(screen.getByText(`Cópia para ${email}`));
   });
 
+  it("a consulta da Google Agenda que falha é erro, nunca 'não conectada': o aviso da Agenda, com Tentar de novo (H5c)", () => {
+    const refetch = vi.fn();
+    duble.consultas["googleAgenda.estado"] = { isError: true, error: { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR" } }, refetch } as never;
+    const { unmount } = render(<ProximasAcoes acoes={[acao({ prazo: "2099-11-20" })]}/>);
+    const alerta = screen.getByRole("alert");
+    expect(alerta).toHaveTextContent("Não deu para saber se a sua Google Agenda está conectada.");
+    expect(alerta).toHaveTextContent(/Banco de dados indisponível/);
+    fireEvent.click(within(alerta).getByRole("button", { name: "↻ Tentar novamente" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    unmount();
+    // Sem ação aberta com prazo, o estado da Google não muda nada na lista: nenhum aviso.
+    render(<ProximasAcoes acoes={[acao(), acao({ id: "acao-2", texto: "Ligar para a Bia", prazo: "2099-11-20", feita: true, feitaEm: 5 })]}/>);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("feita fica riscada e a caixa marcada; desmarcar manda feita: false", () => {
     render(<ProximasAcoes acoes={[acao({ feita: true, feitaEm: 5, prazo: ontem })]}/>);
     const caixa = screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" });

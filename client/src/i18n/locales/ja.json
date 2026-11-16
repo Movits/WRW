@@ -1895,7 +1895,8 @@
     "inNextActions": "「次のアクション」にあります",
     "agenda": {
       "group": "カレンダー",
-      "pageHint": "期限のあるアクションはカレンダーに追加できます。予定は期限日の午前 9 時で、その時刻に通知します。プロフィールで Google カレンダーを接続していれば、自動で追加されます。",
+      "pageHint": "期限のあるアクションはカレンダーに追加できます。予定は期限日の午前 9 時で、その時刻に通知します。",
+      "pageHintGoogle": "プロフィールで Google カレンダーを接続していれば、アクションは自動で追加されます。",
       "downloadIcs": "スマホのカレンダー（.ics）",
       "toast": {
         "sent": "アクションは Google カレンダーに追加されました。",
@@ -2042,14 +2043,14 @@
   },
   "googleAgenda": {
     "title": "Google カレンダー",
-    "subtitle": "Google アカウントを連携すると、予定に入れたミーティングを WRW が Google カレンダーに追加できます。",
+    "subtitle": "Google アカウントを連携すると、予定に入れたミーティングと期限のある次のアクションを WRW が Google カレンダーに追加できます。",
     "notConnected": "Google アカウントは連携されていません。",
     "connect": "Google カレンダーを連携",
     "connected": "Google アカウントと連携しています。",
     "connectedAs": "Google アカウント {{email}} と連携しています。",
     "broken": "この連携は機能しなくなりました。WRW が再び Google カレンダーを使えるよう、もう一度連携してください。",
     "reconnect": "再連携",
-    "privacyNote": "WRW が変更するのは、WRW で予定に入れたミーティングのイベントだけです。連携はいつでも解除できます。",
+    "privacyNote": "WRW が変更するのは、WRW で予定に入れたミーティングと、期限のある次のアクションのイベントだけです。連携はいつでも解除できます。",
     "wrongAddress": "Google カレンダーを連携するには、{{address}} から WRW を開いてください。",
     "openAddress": "{{address}} を開く",
     "inApp": "アプリからは Google カレンダーを連携できません。ブラウザで {{address}} を開いてログインし、プロフィールから連携してください。",

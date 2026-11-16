@@ -1895,7 +1895,8 @@
     "inNextActions": "Dans Prochaines actions",
     "agenda": {
       "group": "Dans l’agenda",
-      "pageHint": "Avec une échéance, l’action peut aller dans votre agenda : l’événement est à 9 h le jour de l’échéance, avec un rappel à cette heure-là. Si Google Agenda est connecté dans votre Profil, elle y va automatiquement.",
+      "pageHint": "Avec une échéance, l’action peut aller dans votre agenda : l’événement est à 9 h le jour de l’échéance, avec un rappel à cette heure-là.",
+      "pageHintGoogle": "Si Google Agenda est connecté dans votre Profil, l’action y va automatiquement.",
       "downloadIcs": "Agenda du téléphone (.ics)",
       "toast": {
         "sent": "L’action est dans votre Google Agenda.",
@@ -2042,14 +2043,14 @@
   },
   "googleAgenda": {
     "title": "Google Agenda",
-    "subtitle": "Connectez votre compte Google pour que WRW ajoute à votre Google Agenda les réunions que vous planifiez.",
+    "subtitle": "Connectez votre compte Google pour que WRW ajoute à votre Google Agenda les réunions que vous planifiez et vos prochaines actions avec échéance.",
     "notConnected": "Aucun compte Google connecté.",
     "connect": "Connecter Google Agenda",
     "connected": "Connecté à un compte Google.",
     "connectedAs": "Connecté au compte Google {{email}}.",
     "broken": "Cette connexion ne fonctionne plus. Reconnectez-vous pour que WRW puisse de nouveau utiliser votre Google Agenda.",
     "reconnect": "Reconnecter",
-    "privacyNote": "WRW ne modifie que les événements des réunions que vous planifiez dans l’agenda des réunions de WRW. Vous pouvez vous déconnecter à tout moment.",
+    "privacyNote": "WRW ne modifie que les événements des réunions que vous planifiez dans l’agenda des réunions de WRW et de vos prochaines actions avec échéance. Vous pouvez vous déconnecter à tout moment.",
     "wrongAddress": "Pour connecter Google Agenda, ouvrez WRW à l’adresse {{address}}.",
     "openAddress": "Ouvrir {{address}}",
     "inApp": "Impossible de connecter Google Agenda depuis l’application. Ouvrez {{address}} dans votre navigateur, identifiez-vous, puis connectez-le depuis votre Profil.",

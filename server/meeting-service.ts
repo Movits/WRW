@@ -29,7 +29,7 @@ import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
 import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
-import { soltarAcoesDaReuniao } from "./proximas-acoes";
+import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 
 export const MAX_MEETING_AUDIO_BYTES = 10 * 1024 * 1024;
 export const MAX_MEETING_DURATION_SECONDS = 10 * 60;
@@ -1210,7 +1210,9 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
  * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
  * Só a dona: a reunião de outra conta é "não encontrada". Devolve os nomes
  * como ficaram, ou null sem a reunião. A leitura e a gravação vão na mesma
- * transação com a linha travada: dois nomes salvos juntos não se apagam.
+ * transação com a linha travada: dois nomes salvos juntos não se apagam. O nome
+ * que muda de fato muda também o texto das próximas ações que citam a voz, e o
+ * evento delas na agenda fica para trás (acoesComAVozRenomeada, H5c).
  */
 export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
   if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
@@ -1221,9 +1223,12 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
     const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
     const nomes = nomesDosFalantes(reuniao.speakerNames);
+    const antes = nomes[falante] ?? "";
     if (limpo) nomes[falante] = limpo;
     else delete nomes[falante];
-    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: Date.now() }).where(daDona);
+    const agora = Date.now();
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: agora }).where(daDona);
+    if (antes !== limpo) await acoesComAVozRenomeada(tx, ownerId, meetingId, falante, agora);
     return nomes;
   });
 }

@@ -6,7 +6,10 @@
  *
  * - O evento é às 9h do dia do prazo, no fuso do aparelho de quem mexe na ação:
  *   a mesma hora do lembrete no sino (H15, shared/lembretes.ts). Dura 30
- *   minutos, não ocupa a agenda (aparece como livre) e avisa na hora.
+ *   minutos, não ocupa a agenda (aparece como livre) e avisa na hora. O livre
+ *   vai nos três caminhos: transparency na API, TRANSP:TRANSPARENT no .ics e
+ *   crm=AVAILABLE no link de criar evento (este, não documentado pela Google:
+ *   ver linkDaGoogleAgenda).
  * - Só a ação aberta e com prazo tem evento: feita, sem prazo ou apagada, ela
  *   sai da agenda. Depois do fim do dia do prazo, a ação que não está lá não é
  *   criada (como a reunião que já acabou, na H16c): só o evento que já existe

@@ -6,7 +6,7 @@ import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles, X } from "lucid
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
-import { motivoDaAgendaNaTela, pedidoDaTela } from "@/components/AcaoNaAgenda";
+import { pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { AvisoDeConferir, mensagemDoErroDaIA, Trecho } from "@/components/ReuniaoComIA";
@@ -126,11 +126,14 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const aoFalharDecisao = (erro: unknown) => toast.error(mensagemDaDecisao(t, erro));
   // A próxima ação do item, com prazo, anda com a Google Agenda (H5c):
   // desconfirmar o item ou marcá-la feita tira o evento, e reabri-la o manda de
-  // novo. A decisão fica; quando a Google falha, um aviso à parte.
-  const avisarDaAgenda = (resultado: ResultadoNaGoogle | undefined, saiu: boolean) => {
-    if (resultado?.naGoogle !== "falhou") return;
-    if (saiu) toast.warning(`${t("proximasAcoes.agenda.toast.notRemoved")} ${t("agenda.google.toast.removeThere")}`, { duration: 15_000 });
-    else toast.warning(`${t("proximasAcoes.agenda.toast.notSent")} ${motivoDaAgendaNaTela(t, resultado.motivo)}`, { duration: 10_000 });
+  // novo. A decisão fica; quando a Google falha, um aviso à parte, o mesmo da
+  // lista (useAvisosDaAgenda). O evento que ficou lá porque a Google falhou
+  // traz "Tentar de novo", pelo id da ação que a rota devolve: a ação apagada
+  // (ou feita) não está mais em lista nenhuma para oferecê-lo.
+  const avisos = useAvisosDaAgenda();
+  const avisarDaAgenda = (resultado: (ResultadoNaGoogle & { acaoId: string | null }) | undefined, saiu: boolean) => {
+    if (!saiu) avisos.depoisDeMandar(resultado);
+    else if (resultado?.acaoId) avisos.depoisDeTirar(resultado.acaoId, resultado);
   };
   const pedirDaDona = trpc.meetings.pedirResumo.useMutation({ onSettled: reler });
   const pedirPeloLink = trpc.reuniaoAberta.pedirResumo.useMutation({ onSettled: reler });
