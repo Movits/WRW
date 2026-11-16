@@ -15,7 +15,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *   reunião longa, em cada janela e na junção), como dado, e o sistema manda
  *   não os repetir; sem itens que ficam, nada disso aparece;
  * - a numeração do resumo refeito: em cada seção, os que ficam e depois os
- *   novos; o novo que repete um que fica não entra.
+ *   novos; o novo que repete um que fica não entra, e o foco segue um só.
  */
 
 const invokeLLM = vi.fn();
@@ -221,6 +221,19 @@ describe("a numeração do resumo refeito", () => {
       [1, "action", "Mandar o portfólio revisado"],
       [2, "task", "Mandar o portfólio"],
     ]);
+  });
+
+  it("o foco é um só: com o foco confirmado, o foco novo (com outras palavras) não entra; as listas seguem recebendo os novos", () => {
+    const queFicam = [
+      { id: "foco-confirmado", section: "focus" as const, position: 3, text: "A reunião tratou da exportação de café para a Alemanha." },
+      { id: "acao-confirmada", section: "action" as const, position: 0, text: "Mandar o portfólio" },
+    ];
+    const novos = [novo("focus", "O cliente procura um distribuidor e a negociação está no início."), novo("action", "Enviar a proposta comercial")];
+    const numeracao = numeracaoDoResumoRefeito(queFicam, novos);
+    expect(numeracao.queFicam).toEqual([{ id: "acao-confirmada", position: 0 }, { id: "foco-confirmado", position: 2 }]);
+    expect(numeracao.novos.map(item => [item.position, item.section, item.text])).toEqual([[1, "action", "Enviar a proposta comercial"]]);
+    // Sem foco que fica (o de antes estava pendente ou foi ignorado), o novo entra.
+    expect(numeracaoDoResumoRefeito(queFicam.filter(item => item.section !== "focus"), novos).novos.map(item => item.section)).toEqual(["action", "focus"]);
   });
 
   it("primeiro resumo (nada fica): os novos, numerados de 0 na ordem do formato", () => {

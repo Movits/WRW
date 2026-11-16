@@ -1585,6 +1585,7 @@
       "assignee": "Verantwortlich: {{nome}}",
       "due": "Frist: {{prazo}}",
       "linkNotice": "Von der KI erstellt; die Person, die das Meeting aufgenommen hat, hat es noch nicht geprüft.",
+      "linkPreviousVersion": "Die Person, die das Meeting aufgenommen hat, hat eine neue Version dieser Zusammenfassung angefordert, die noch nicht fertig ist. Unten steht die vorherige Version.",
       "showIgnored": "Ignoriert ({{n}})",
       "undo": "Rückgängig",
       "decisionError": "Speichern nicht möglich. Versuchen Sie es erneut.",

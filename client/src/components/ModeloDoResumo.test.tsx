@@ -57,8 +57,14 @@ const ITENS = [
   { id: "i-ignorado", section: "decision", position: 3, subject: null, text: "Abrir um escritório em Berlim.", assignee: null, due: null, excerpt: "talvez abrir um escritório em Berlim", startSeconds: 400, status: "ignored", done: false },
 ] as const;
 
+// Pelo link: sem ids, sem a caixa de feito e sem os ignorados.
+const ITENS_DO_LINK = ITENS.filter(item => item.status !== "ignored").map(({ id: _i, position: _p, done: _d, ...item }) => item);
+
 const consulta = (data: unknown) => ({ data, isError: false, error: null as unknown, refetch: vi.fn() });
-const daDonaCom = (estado: string, modelo: string | null, itens: readonly unknown[] = []) => consulta({ estado, emoji: null, idioma: "pt-BR", modelo, erro: null, itens });
+// versaoAnterior: o resumo está sendo refeito, ou o refazer falhou, e os itens são os da versão anterior.
+const daDonaCom = (estado: string, modelo: string | null, itens: readonly unknown[] = [], versaoAnterior = false) =>
+  consulta({ estado, emoji: null, idioma: "pt-BR", modelo, erro: null, versaoAnterior, itens });
+const doLinkCom = (estado: string, itens: readonly unknown[] = [], versaoAnterior = false) => consulta({ estado, emoji: null, versaoAnterior, itens });
 const daDona = (c: ReturnType<typeof consulta>) => render(<ResumoGuardado meetingId={REUNIAO} consulta={c as never}/>);
 const doLink = (c: ReturnType<typeof consulta>) => render(<ResumoGuardado token={TOKEN} consulta={c as never}/>);
 const mutacao = (nome: string) => duble.mutacoes[nome];
@@ -160,8 +166,8 @@ describe("Modelos do resumo — 'Refazer como…'", () => {
 });
 
 describe("Modelos do resumo — a versão anterior enquanto a nova é escrita", () => {
-  it.each(["pendente", "gerando"])("%s com itens (refazendo): o aviso com o modelo e os itens só para ler", estado => {
-    daDona(daDonaCom(estado, "sales", ITENS));
+  it.each(["pendente", "gerando"])("%s com a versão anterior (refazendo): o aviso com o modelo e os itens só para ler", estado => {
+    daDona(daDonaCom(estado, "sales", ITENS, true));
     expect(screen.getByRole("status")).toHaveTextContent("Refazendo o resumo como Vendas. Os itens que você confirmou ficam; os outros serão trocados. Espere terminar para conferir.");
     // A versão anterior na tela, sem decidir nada.
     expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
@@ -178,14 +184,27 @@ describe("Modelos do resumo — a versão anterior enquanto a nova é escrita", 
     expect(screen.queryByRole("button", { name: "Refazer como…" })).not.toBeInTheDocument();
   });
 
-  it("a versão nova falhou: o aviso com o modelo, 'Tentar de novo' no mesmo modelo e a anterior só para ler; dá para refazer em outro", () => {
-    daDona(daDonaCom("falhou", "networking", ITENS));
+  it("a versão nova falhou: o aviso com o modelo, 'Tentar de novo' no mesmo modelo, e a dona decide sobre a anterior; dá para refazer em outro", () => {
+    daDona(daDonaCom("falhou", "networking", ITENS, true));
     const alerta = screen.getByRole("alert");
     expect(alerta).toHaveTextContent("Não foi possível refazer o resumo como Networking. Abaixo está a versão anterior.");
     fireEvent.click(within(alerta).getByRole("button", { name: /Tentar de novo/ }));
     expect(mutacao("pedirResumo").mutate).toHaveBeenCalledWith({ meetingId: REUNIAO });
-    expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Confirmar$|^Ignorar$/ })).not.toBeInTheDocument();
+    // Nenhuma geração está em curso: a versão anterior vale, e a dona confere,
+    // marca e desfaz como no resumo pronto (o próximo refazer guarda o que ela confirmar).
+    const pendente = screen.getByText("Enviar a proposta revisada").closest("li") as HTMLElement;
+    fireEvent.click(within(pendente).getByRole("button", { name: "Confirmar" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-acao", status: "confirmed" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar todos (2)" }));
+    expect(mutacao("confirmarItensDoResumo").mutate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    const feita = screen.getByRole("checkbox", { name: "Reservar a sala de reunião" });
+    expect(feita).toBeEnabled();
+    fireEvent.click(feita);
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao-feita", feito: false });
+    fireEvent.click(screen.getByRole("button", { name: "Ignorados (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-ignorado", status: "pending" });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     abrirRefazer();
     expect(screen.getByRole("radio", { name: "Networking" })).toBeChecked();
   });
@@ -213,9 +232,44 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
     expect(screen.queryByText(/^Modelo:/)).not.toBeInTheDocument();
   });
 
-  it("pelo link, o resumo sendo gerado não mostra itens (o link só recebe o resumo pronto)", () => {
-    doLink(consulta({ estado: "pendente", emoji: null, itens: [] }));
+  it("pelo link, o primeiro resumo sendo gerado: o aviso de que a IA está escrevendo", () => {
+    doLink(doLinkCom("pendente"));
     expect(screen.getByRole("status")).toHaveTextContent("A IA está escrevendo o resumo desta reunião.");
+  });
+
+  it.each(["pendente", "gerando"])("pelo link, durante o refazer da dona (%s): a versão anterior, com o aviso de que ela pediu uma nova, só para ler", estado => {
+    doLink(doLinkCom(estado, ITENS_DO_LINK, true));
+    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
+    expect(screen.queryByText(/A IA está escrevendo/)).not.toBeInTheDocument();
+    // O link não recebe o modelo: nada de "Refazendo o resumo como Geral".
+    expect(screen.queryByText(/Refazendo o resumo como/)).not.toBeInTheDocument();
+    expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
+    expect(screen.getByText("Reservar a sala de reunião")).toBeInTheDocument();
+    expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(2);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("pelo link, o refazer que falhou: a versão anterior, com o aviso, e sem 'Tentar de novo' (refazer é da dona)", () => {
+    preparar("pedirResumoPeloLink", { isError: true, error: { message: "Muitos pedidos à IA por este link em sequência. Aguarde alguns minutos e tente de novo.", data: { code: "TOO_MANY_REQUESTS" } } });
+    const { unmount } = doLink(doLinkCom("falhou", ITENS_DO_LINK, true));
+    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
+    expect(screen.getByText("Não renovar com a transportadora antiga.")).toBeInTheDocument();
+    expect(screen.queryByText(/Não foi possível/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    unmount();
+    // Também quando a versão anterior não tem item para mostrar.
+    doLink(doLinkCom("falhou", [], true));
+    expect(screen.getByText("Nenhum item para mostrar neste resumo.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tentar de novo/ })).not.toBeInTheDocument();
+  });
+
+  it("pelo link, o primeiro resumo que falhou: 'Tentar de novo' pede pelo token", () => {
+    doLink(doLinkCom("falhou"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível gerar o resumo desta reunião.");
+    fireEvent.click(screen.getByRole("button", { name: /Tentar de novo/ }));
+    expect(mutacao("pedirResumoPeloLink").mutate).toHaveBeenCalledWith({ token: TOKEN });
   });
 });
 

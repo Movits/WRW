@@ -1585,6 +1585,7 @@
       "assignee": "Responsable : {{nome}}",
       "due": "Échéance : {{prazo}}",
       "linkNotice": "Généré par l'IA ; la personne qui a enregistré la réunion ne l'a pas encore vérifié.",
+      "linkPreviousVersion": "La personne qui a enregistré la réunion a demandé une nouvelle version de ce résumé, qui n'est pas encore prête. La version précédente figure ci-dessous.",
       "showIgnored": "Ignorés ({{n}})",
       "undo": "Rétablir",
       "decisionError": "Impossible d'enregistrer. Réessayez.",

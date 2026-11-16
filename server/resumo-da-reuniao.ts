@@ -66,6 +66,12 @@ const SECOES: Array<{ secao: SecaoDoResumo; campo: string; maximo: number }> = [
 /** As seções na ordem do formato: o resumo refeito (H4d) numera os itens nela. */
 export const ORDEM_DAS_SECOES: readonly SecaoDoResumo[] = SECOES.map(({ secao }) => secao);
 
+/**
+ * As seções de um item só (o foco do trabalho): no resumo refeito (H4d), a que
+ * já tem um item que fica não recebe um novo.
+ */
+export const SECOES_DE_UM_ITEM: ReadonlySet<SecaoDoResumo> = new Set(SECOES.filter(({ maximo }) => maximo === 1).map(({ secao }) => secao));
+
 const FALANTE_VALIDO = /^F[1-9]\d?$/;
 const ROTULO_DE_VOZ = /\{(F[1-9]\d?)\}/g;
 const SO_O_ROTULO = /^\{(F[1-9]\d?)\}$/;

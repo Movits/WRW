@@ -10,7 +10,9 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * banco — o pedido no modelo escolhido, o refazer que guarda os itens
  * confirmados e os feitos e troca os pendentes e os ignorados (renumerados,
  * sem repetir o que ficou), a versão anterior intacta enquanto a nova é
- * escrita ou se ela falha, as decisões recusadas no meio e a dona no WHERE.
+ * escrita ou se ela falha (para a dona e para o link), as decisões recusadas
+ * no meio e de volta depois da falha, o link que não reabre o refazer e a
+ * dona no WHERE.
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
@@ -75,6 +77,7 @@ const linhaDoResumo = async (meetingId: string) => (await (await db()).select().
 const itensDe = async (meetingId: string) => (await db()).select().from(meetingSummaryItems).where(eq(meetingSummaryItems.meetingId, meetingId)).orderBy(meetingSummaryItems.position);
 const vaga = vi.fn();
 const porTexto = async (meetingId: string) => Object.fromEntries((await itensDe(meetingId)).map(linha => [linha.text, linha]));
+const tokenDe = async (meetingId: string) => (await (await db()).select({ shareToken: meetings.shareToken }).from(meetings).where(eq(meetings.id, meetingId)))[0].shareToken!;
 
 /** O resumo Geral pronto, com uma ação confirmada, uma feita e uma decisão ignorada. */
 async function resumoDecidido() {
@@ -163,17 +166,88 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     expect(await servico.resumoGuardadoDaDona(DONA, id)).toMatchObject({ estado: "pronto", modelo: "sales", emoji: "💼" });
   });
 
-  it("durante o refazer: decidir é conflito, e o link mostra que o resumo está sendo gerado, sem itens", async () => {
+  it("durante o refazer: decidir é conflito, e o link segue mostrando a versão anterior (sem os ignorados), marcada como anterior", async () => {
     const { id, antes } = await resumoDecidido();
+    const token = await tokenDe(id);
+    expect(await servico.resumoGuardadoPeloLink(token)).toMatchObject({ estado: "pronto", versaoAnterior: false });
     await servico.refazerResumoDaDona(DONA, id, "networking", vaga);
     await expect(servico.decidirItemDoResumo(DONA, antes["Ligar para o despachante"].id, "confirmed")).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(servico.marcarAcaoFeita(DONA, antes["Avisar a transportadora"].id, true)).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(servico.confirmarItensDoResumo(DONA, id)).rejects.toMatchObject({ code: "CONFLICT" });
-    const [{ shareToken }] = await (await db()).select({ shareToken: meetings.shareToken }).from(meetings).where(eq(meetings.id, id));
-    expect(await servico.resumoGuardadoPeloLink(shareToken!)).toEqual({ estado: "pendente", emoji: "☕", itens: [] });
+    expect(await servico.resumoGuardadoDaDona(DONA, id)).toMatchObject({ estado: "pendente", versaoAnterior: true });
+    const peloLink = await servico.resumoGuardadoPeloLink(token);
+    expect(peloLink).toMatchObject({ estado: "pendente", emoji: "☕", versaoAnterior: true });
+    expect(peloLink.itens.map(i => [i.text, i.status])).toEqual([
+      ["Avisar a transportadora", "confirmed"],
+      ["Pedir três cotações de frete", "confirmed"],
+      ["Ligar para o despachante", "pending"],
+      ["Quem paga o seguro da carga?", "pending"],
+    ]);
+    expect(peloLink.itens[0]).not.toHaveProperty("id");
+    expect(peloLink.itens[0]).not.toHaveProperty("done");
   });
 
-  it("a versão nova falhou: a anterior fica inteira, para ler; tentar de novo refaz no mesmo modelo", async () => {
+  it("o refazer falhou: o link segue com a versão anterior e não o reabre; a dona volta a decidir, e o 'Tentar de novo' guarda o que ela confirmou", async () => {
+    const { id, antes } = await resumoDecidido();
+    const token = await tokenDe(id);
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", version: 1 });
+
+    // O link não perde o que via antes do refazer.
+    const peloLink = await servico.resumoGuardadoPeloLink(token);
+    expect(peloLink).toMatchObject({ estado: "falhou", emoji: "☕", versaoAnterior: true });
+    expect(peloLink.itens.map(i => i.text)).toEqual(["Avisar a transportadora", "Pedir três cotações de frete", "Ligar para o despachante", "Quem paga o seguro da carga?"]);
+    // Quem tem o link não reabre o refazer da dona: nem gasta vaga, nem muda a linha.
+    const vagaDoLink = vi.fn();
+    expect(await servico.pedirResumoPeloLink(token, vagaDoLink)).toMatchObject({ estado: "falhou", versaoAnterior: true });
+    expect(vagaDoLink).not.toHaveBeenCalled();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", lastError: "RESPOSTA_CORTADA" });
+
+    // A dona decide sobre a versão anterior: nenhuma geração está em curso.
+    expect(await servico.resumoGuardadoDaDona(DONA, id)).toMatchObject({ estado: "falhou", versaoAnterior: true });
+    await servico.decidirItemDoResumo(DONA, antes["Ligar para o despachante"].id, "confirmed");
+    await servico.marcarAcaoFeita(DONA, antes["Avisar a transportadora"].id, true);
+    expect(await servico.confirmarItensDoResumo(DONA, id)).toBe(1);
+    expect((await itensDe(id)).map(linha => [linha.text, linha.status, linha.done])).toEqual([
+      ["Avisar a transportadora", "confirmed", true],
+      ["Pedir três cotações de frete", "confirmed", true],
+      ["Ligar para o despachante", "confirmed", false],
+      ["Não renovar com a transportadora", "ignored", false],
+      ["Quem paga o seguro da carga?", "confirmed", false],
+    ]);
+
+    // "Tentar de novo" (o da dona, sem modelo): refaz em Vendas e guarda o que ela confirmou.
+    vaga.mockClear();
+    await servico.pedirResumoDaDona(DONA, id, vaga);
+    expect(vaga).toHaveBeenCalledTimes(1);
+    gerarResumoDaReuniao.mockReset();
+    gerarResumoDaReuniao.mockResolvedValue(VENDAS);
+    await rodar();
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith(expect.objectContaining({
+      modelo: "sales",
+      itensQueFicam: [
+        { section: "action", subject: null, text: "Avisar a transportadora" },
+        { section: "action", subject: null, text: "Pedir três cotações de frete" },
+        { section: "action", subject: null, text: "Ligar para o despachante" },
+        { section: "question", subject: null, text: "Quem paga o seguro da carga?" },
+      ],
+    }));
+    expect((await itensDe(id)).map(linha => [linha.position, linha.text, linha.status])).toEqual([
+      [0, "Avisar a transportadora", "confirmed"],
+      [1, "Pedir três cotações de frete", "confirmed"],
+      [2, "Ligar para o despachante", "confirmed"],
+      [3, "Enviar a proposta comercial", "pending"],
+      [4, "Venda de café para a Alemanha", "pending"],
+      [5, "Desconto de 5% no primeiro pedido", "pending"],
+      [6, "Quem paga o seguro da carga?", "confirmed"],
+    ]);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "sales", version: 2 });
+    expect(await servico.resumoGuardadoPeloLink(token)).toMatchObject({ estado: "pronto", emoji: "💼", versaoAnterior: false });
+  });
+
+  it("a versão nova falhou: a anterior fica inteira; tentar de novo refaz no mesmo modelo", async () => {
     const { id } = await resumoDecidido();
     const antes = await itensDe(id);
     await servico.refazerResumoDaDona(DONA, id, "networking", vaga);

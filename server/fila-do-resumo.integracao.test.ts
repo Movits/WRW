@@ -347,7 +347,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("o link de reunião sem resumo diz 'sem_resumo'; sem transcrição, não pede", async () => {
     const token = crypto.randomBytes(24).toString("base64url");
     await reuniaoPronta({ shareToken: token }, false);
-    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, itens: [] });
+    expect(await servico.resumoGuardadoPeloLink(token)).toEqual({ estado: "sem_resumo", emoji: null, versaoAnterior: false, itens: [] });
     await expect(servico.pedirResumoPeloLink(token, vi.fn())).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

@@ -36,7 +36,10 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  *
  * Os modelos (H4d, components/ModeloDoResumo.tsx): a dona escolhe o modelo ao
  * pedir o resumo e pode "Refazer como…" outro. Enquanto a versão nova é
- * escrita (ou se ela falhou), a anterior fica na tela só para ler.
+ * escrita, a anterior fica na tela só para ler, para a dona e para o link. Se
+ * a nova falhou, a anterior segue valendo: a dona decide sobre ela (o próximo
+ * refazer guarda o que ela confirmar), e o link a mostra sem pedir de novo,
+ * porque refazer é da dona.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -149,11 +152,14 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // O resumo que voltou à fila por outro caminho (outra aba, a fila) fecha o painel.
   useEffect(() => { if (!podeRefazer) setRefazerAberto(false); }, [podeRefazer]);
 
-  // A dona recebe os itens também enquanto o resumo é refeito, ou se a versão
-  // nova falhou: são os da versão anterior, mostrados só para ler. O link só
-  // recebe itens do resumo pronto.
-  const itens: ItemNaTela[] = dados && (dados.estado === "pronto" || !peloLink) ? dados.itens : [];
-  const refazendo = !!dados && dados.estado !== "pronto" && itens.length > 0;
+  // A versão anterior do resumo (H4d): ele está sendo refeito em outro modelo,
+  // ou o refazer falhou. A dona e o link recebem os itens dela (o link, sem os
+  // ignorados), e ela fica na tela até a nova chegar.
+  const versaoAnterior = !!dados && dados.estado !== "pronto" && dados.versaoAnterior;
+  // Enquanto a nova é escrita, a anterior é só para ler (decidir é recusado
+  // até ela chegar). Se a nova falhou, a dona decide sobre a anterior.
+  const somenteLeitura = versaoAnterior && dados?.estado !== "falhou";
+  const itens: ItemNaTela[] = dados && (dados.estado === "pronto" || versaoAnterior) ? dados.itens : [];
   const visiveis = itens.filter(item => item.status !== "ignored");
   const ignorados = itens.filter(item => item.status === "ignored");
   const pendentes = visiveis.filter(item => item.status === "pending");
@@ -196,10 +202,11 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // resumo ainda na fila, o erro toma o lugar do aviso, que senão giraria para
   // sempre; com o resumo pronto, falho ou ausente, ele vai acima do conteúdo
   // (e também quando o resumo é refeito, porque a versão anterior está na tela).
-  const esperando = !dados || ((dados.estado === "pendente" || dados.estado === "gerando") && !refazendo);
+  const esperando = !dados || ((dados.estado === "pendente" || dados.estado === "gerando") && !versaoAnterior);
   // O erro do pedido é do botão de pedir: quando o resumo anda por outro
-  // caminho (a fila, outro pedido pelo link), ele sai da tela com o botão.
-  const comBotaoDePedir = dados?.estado === "sem_resumo" || dados?.estado === "falhou";
+  // caminho (a fila, outro pedido pelo link), ele sai da tela com o botão. O
+  // link não tem o botão no refazer que falhou: refazer é da dona.
+  const comBotaoDePedir = dados?.estado === "sem_resumo" || (dados?.estado === "falhou" && !(peloLink && versaoAnterior));
 
   let corpo: ReactNode;
   if (esperando && erroDaConsulta) {
@@ -219,9 +226,9 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         <BotaoDePedir aoClicar={() => pedirResumo(modeloDoPedido)} pedindo={pedir.isPending}>{t("meetings.summary.generate")}</BotaoDePedir>
       </EscolhaDoModelo>
     </div>;
-  } else if ((dados.estado === "pendente" || dados.estado === "gerando") && !refazendo) {
+  } else if ((dados.estado === "pendente" || dados.estado === "gerando") && !versaoAnterior) {
     corpo = <p role="status" className="mt-4 text-sm text-white/60"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.generating")}</p>;
-  } else if (dados.estado === "falhou" && !refazendo) {
+  } else if (dados.estado === "falhou" && !versaoAnterior) {
     corpo = <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-red-200">{t("meetings.summary.failed")}</p>
       <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
@@ -229,15 +236,19 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   } else {
     corpo = <div className="mt-4 space-y-5">
       {/* O resumo refeito em outro modelo (H4d): a versão anterior fica na
-          tela, só para ler, até a nova chegar; se a nova falhou, também. */}
-      {refazendo && dados.estado !== "falhou" && <p role="status" className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+          tela até a nova chegar; se a nova falhou, também. O link não recebe
+          o modelo: o aviso dele é outro, e sem o "Tentar de novo". */}
+      {versaoAnterior && peloLink && <p role="status" className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+        {somenteLeitura && <Loader2 size={15} className="mr-2 inline animate-spin"/>}{t("meetings.summary.linkPreviousVersion")}
+      </p>}
+      {versaoAnterior && !peloLink && dados.estado !== "falhou" && <p role="status" className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
         <Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.redoing", { modelo: nomeDoModelo(t, modeloAtual) })}
       </p>}
-      {refazendo && dados.estado === "falhou" && <div role="alert" className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+      {versaoAnterior && !peloLink && dados.estado === "falhou" && <div role="alert" className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-red-200">{t("meetings.summary.redoFailed", { modelo: nomeDoModelo(t, modeloAtual) })}</p>
         <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
       </div>}
-      {!peloLink && !refazendo && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {!peloLink && !somenteLeitura && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <AvisoDeConferir>{t("meetings.summary.reviewNotice")}</AvisoDeConferir>
         <button type="button" disabled={decidindo} onClick={() => confirmarTodos.mutate({ meetingId })}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:opacity-50">
@@ -253,7 +264,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes}
-              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={refazendo}
+              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}/>)}
           </ul>
@@ -269,7 +280,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             data-destacado={item.id === itemDestacado ? "true" : undefined}
             className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm text-white/45 ${item.id === itemDestacado ? "ring-2 ring-amber-300/70" : ""}`}>
             <span id={`${prefixoDosIgnorados}-${i}`} dir="auto" className="line-through">{item.subject ? `${comVozes(item.subject)}: ` : ""}{comVozes(item.text)}</span>
-            {!refazendo && <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
+            {!somenteLeitura && <button type="button" aria-describedby={`${prefixoDosIgnorados}-${i}`} disabled={decidindo} onClick={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "pending" }); }}
               className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-50">
               <RotateCcw size={13}/> {t("meetings.summary.undo")}
             </button>}

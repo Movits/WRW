@@ -1,4 +1,4 @@
-import { ORDEM_DAS_SECOES, type ItemDoResumo, type SecaoDoResumo } from "./resumo-da-reuniao";
+import { ORDEM_DAS_SECOES, SECOES_DE_UM_ITEM, type ItemDoResumo, type SecaoDoResumo } from "./resumo-da-reuniao";
 import { normalizarParaComparar } from "./trecho-da-transcricao";
 
 /**
@@ -18,14 +18,16 @@ const chave = (secao: SecaoDoResumo, texto: string) => `${secao}\u0000${normaliz
  * primeiro os itens que ficam (na ordem em que já estavam), depois os novos
  * (na ordem da IA). Um item novo que repete um que fica (mesma seção e o mesmo
  * texto, sem contar maiúsculas, pontuação e espaços) não entra: a dona já o
- * confirmou.
+ * confirmou. Na seção de um item só (o foco), o que fica ocupa o lugar: o foco
+ * novo, escrito com outras palavras, também não entra.
  */
 export function numeracaoDoResumoRefeito(
   queFicam: readonly ItemQueFica[],
   novos: readonly ItemDoResumo[],
 ): { queFicam: Array<{ id: string; position: number }>; novos: Array<ItemDoResumo & { position: number }> } {
   const jaNoResumo = new Set(queFicam.map(item => chave(item.section, item.text)));
-  const entram = novos.filter(item => !jaNoResumo.has(chave(item.section, item.text)));
+  const secoesOcupadas = new Set(queFicam.map(item => item.section).filter(secao => SECOES_DE_UM_ITEM.has(secao)));
+  const entram = novos.filter(item => !jaNoResumo.has(chave(item.section, item.text)) && !secoesOcupadas.has(item.section));
   const numerados = { queFicam: [] as Array<{ id: string; position: number }>, novos: [] as Array<ItemDoResumo & { position: number }> };
   let position = 0;
   for (const secao of ORDEM_DAS_SECOES) {

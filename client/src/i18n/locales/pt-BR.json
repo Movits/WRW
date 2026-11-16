@@ -1585,6 +1585,7 @@
       "assignee": "Responsável: {{nome}}",
       "due": "Prazo: {{prazo}}",
       "linkNotice": "Gerado pela IA; a dona da reunião ainda não conferiu.",
+      "linkPreviousVersion": "A dona da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.",
       "showIgnored": "Ignorados ({{n}})",
       "undo": "Desfazer",
       "decisionError": "Não foi possível salvar. Tente de novo.",

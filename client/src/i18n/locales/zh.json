@@ -1585,6 +1585,7 @@
       "assignee": "负责人：{{nome}}",
       "due": "截止时间：{{prazo}}",
       "linkNotice": "由 AI 生成；会议所有者尚未核对。",
+      "linkPreviousVersion": "会议所有者要求生成此摘要的新版本，新版本尚未完成。下方是之前的版本。",
       "showIgnored": "已忽略（{{n}}）",
       "undo": "撤销",
       "decisionError": "无法保存，请重试。",
