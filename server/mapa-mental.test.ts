@@ -128,7 +128,8 @@ describe("a conferência do mapa (shared/mapa-mental.ts)", () => {
   it("irmãos repetidos (sem acento, caixa e pontuação) saem; o mesmo rótulo em ramos diferentes fica", () => {
     const mapa = conferirMapaMental({
       ramos: [
-        ramo("Exportação", ["Prazo", "prazo!", "Prázo", "Seguro"]),
+        // O emoji e o sinal solto dele (o seletor de variação de "⚠️") contam como pontuação.
+        ramo("Exportação", ["Prazo", "prazo!", "Prázo", "⚠️ Prazo", "Seguro"]),
         ramo("EXPORTAÇÃO."),
         ramo("Importação", ["Prazo"]),
       ],
@@ -136,6 +137,27 @@ describe("a conferência do mapa (shared/mapa-mental.ts)", () => {
     expect(mapa.ramos.map(r => r.rotulo)).toEqual(["Exportação", "Importação"]);
     expect(mapa.ramos[0].folhas.map(f => f.rotulo)).toEqual(["Prazo", "Seguro"]);
     expect(mapa.ramos[1].folhas.map(f => f.rotulo)).toEqual(["Prazo"]);
+  });
+
+  it("fora da letra latina, o sinal combinante conta: rótulos que só ele separa não são repetidos, e o repetido de verdade sai", () => {
+    const mapa = conferirMapaMental({
+      ramos: [
+        // Hindi: "mandar a mercadoria" × "mandar o e-mail", que só a matra separa.
+        ramo("अगले कदम", ["माल भेजना", "मेल भेजना", "माल भेजना!"]),
+        // Japonês: "ônibus" × "passe" × "lótus", que só o dakuten e o handakuten separam.
+        ramo("交通", ["バス", "パス", "ハス"]),
+        // Russo: "camada" × "camadas"; o й não é um и com acento.
+        ramo("Архитектура", ["Слой данных", "Слои данных"]),
+        // Árabe com as vogais escritas: "ciência" × "bandeira".
+        ramo("مواضيع", ["عِلْم", "عَلَم"]),
+      ],
+    })!;
+    expect(mapa.ramos.map(r => r.folhas.map(f => f.rotulo))).toEqual([
+      ["माल भेजना", "मेल भेजना"],
+      ["バス", "パス", "ハス"],
+      ["Слой данных", "Слои данных"],
+      ["عِلْم", "عَلَم"],
+    ]);
   });
 
   it("folha e filho valem também como texto solto; filho como objeto usa o rótulo; o que não tem rótulo sai", () => {

@@ -34,7 +34,15 @@ export const NOS_DO_MAPA_MAX = 150;
 // proposta" sem o rótulo viraria outra frase.
 const ROTULO_DE_VOZ = /\{\s*F\s*\d/i;
 // Pelo construtor: o alvo do tsconfig não aceita a flag u num literal.
-const NAO_E_LETRA_NEM_NUMERO = new RegExp("[^\\p{L}\\p{N}]+", "gu");
+// Só a letra latina perde o sinal combinante ("Prázo" = "Prazo"). Nas outras
+// escritas ele muda a palavra e fica na chave: a matra do hindi (माल × मेल),
+// o dakuten do japonês (バス × パス), o breve do russo (й não é и), as vogais
+// escritas do árabe.
+const SINAIS_DA_LETRA_LATINA = new RegExp("(\\p{Script=Latin})\\p{M}+", "gu");
+// As palavras da chave: letras, cada uma com os seus sinais, e números. O
+// sinal solto, sem letra antes (o seletor de variação do emoji em "⚠️"), fica
+// de fora, como a pontuação.
+const PALAVRA_DA_CHAVE = new RegExp("(?:\\p{L}\\p{M}*|\\p{N})+", "gu");
 
 /**
  * O rótulo aparado, com os espaços juntados, ou null: vazio, não texto ou com
@@ -53,9 +61,9 @@ export function rotuloDoMapa(valor: unknown): string | null {
   return `${cortado.trimEnd()}…`;
 }
 
-/** Para achar irmãos repetidos: sem acento, sem caixa e sem pontuação. */
+/** Para achar irmãos repetidos: sem acento na letra latina, sem caixa e sem pontuação. */
 function chaveDoRotulo(rotulo: string): string {
-  return rotulo.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(NAO_E_LETRA_NEM_NUMERO, " ").trim();
+  return (rotulo.normalize("NFD").replace(SINAIS_DA_LETRA_LATINA, "$1").toLowerCase().match(PALAVRA_DA_CHAVE) ?? []).join(" ");
 }
 
 function objeto(valor: unknown): Record<string, unknown> | null {

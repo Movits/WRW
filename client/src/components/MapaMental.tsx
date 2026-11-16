@@ -63,8 +63,13 @@ function MapaDaDona({ meetingId, titulo, emoji }: { meetingId: string; titulo: s
     retry: (tentativas, erro) => !erroDefinitivo(erro) && tentativas < 3,
     refetchInterval: atual => esperaDaConsulta(atual.state.data?.estado, atual.state.error),
   });
-  // Devolvida ao onSettled, a releitura segura o botão até o estado novo chegar.
-  const pedir = trpc.meetings.pedirMapa.useMutation({ onSettled: () => utils.meetings.mapaMental.invalidate({ meetingId }) });
+  // Pedir o mapa pode criar ou reabrir o resumo (sem resumo pronto, o mapa vem
+  // com ele): relê os dois, para a aba Resumo e o emoji do título não ficarem
+  // velhos. Devolvida ao onSettled, a releitura segura o botão até o estado
+  // novo chegar.
+  const pedir = trpc.meetings.pedirMapa.useMutation({
+    onSettled: () => Promise.all([utils.meetings.mapaMental.invalidate({ meetingId }), utils.meetings.resumoGuardado.invalidate({ meetingId })]),
+  });
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} titulo={titulo} emoji={emoji}/>;
 }
 
@@ -76,7 +81,9 @@ function MapaDoLink({ token, titulo, emoji }: { token: string; titulo: string; e
     refetchOnWindowFocus: false,
     refetchInterval: atual => esperaDaConsulta(atual.state.data?.estado, atual.state.error),
   });
-  const pedir = trpc.reuniaoAberta.pedirMapa.useMutation({ onSettled: () => utils.reuniaoAberta.mapaMental.invalidate({ token }) });
+  const pedir = trpc.reuniaoAberta.pedirMapa.useMutation({
+    onSettled: () => Promise.all([utils.reuniaoAberta.mapaMental.invalidate({ token }), utils.reuniaoAberta.resumoGuardado.invalidate({ token })]),
+  });
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink titulo={titulo} emoji={emoji}/>;
 }
 

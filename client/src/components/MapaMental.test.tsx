@@ -34,7 +34,10 @@ const duble = vi.hoisted(() => {
     daDona: vi.fn(),
     doLink: vi.fn(),
     opcoes: {} as { dona?: OpcoesDaConsulta; link?: OpcoesDaConsulta },
-    utils: { meetings: { mapaMental: { invalidate: vi.fn() } }, reuniaoAberta: { mapaMental: { invalidate: vi.fn() } } },
+    utils: {
+      meetings: { mapaMental: { invalidate: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      reuniaoAberta: { mapaMental: { invalidate: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+    },
   };
 });
 
@@ -88,6 +91,10 @@ beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); Object.assign(m, { isPending: false, isError: false, error: null }); }
   duble.daDona.mockReset();
   duble.doLink.mockReset();
+  for (const area of [duble.utils.meetings, duble.utils.reuniaoAberta]) {
+    area.mapaMental.invalidate.mockReset();
+    area.resumoGuardado.invalidate.mockReset();
+  }
   duble.opcoes = {};
 });
 afterEach(async () => {
@@ -211,12 +218,30 @@ describe("Mapa mental — os estados", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("A IA não encontrou assuntos suficientes nesta reunião para montar um mapa mental.");
   });
 
-  it("pedindo: o botão fica travado; o pedido relê o mapa ao terminar", () => {
+  it("pedindo: o botão fica travado; o pedido relê o mapa e o resumo (pedir o mapa pode criar ou reabrir o resumo) e só termina com as duas releituras", async () => {
     preparar("pedirMapa", { isPending: true });
     daDona(comEstado("sem_mapa"));
     expect(screen.getByRole("button", { name: /Gerar mapa mental/ })).toBeDisabled();
-    void mutacao("pedirMapa").opcoes.onSettled?.();
+    let soltarResumo = () => {};
+    duble.utils.meetings.resumoGuardado.invalidate.mockReturnValue(new Promise<void>(ok => { soltarResumo = ok; }));
+    let terminou = false;
+    void Promise.resolve(mutacao("pedirMapa").opcoes.onSettled?.()).then(() => { terminou = true; });
     expect(duble.utils.meetings.mapaMental.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    expect(duble.utils.reuniaoAberta.resumoGuardado.invalidate).not.toHaveBeenCalled();
+    // Com a releitura do resumo ainda no caminho, o pedido não terminou: o botão segue travado.
+    await new Promise(ok => setTimeout(ok, 0));
+    expect(terminou).toBe(false);
+    soltarResumo();
+    await vi.waitFor(() => expect(terminou).toBe(true));
+  });
+
+  it("pelo link, o pedido relê o mapa e o resumo do link, pelo token", () => {
+    doLink(comEstado("sem_mapa"));
+    void mutacao("pedirMapaPeloLink").opcoes.onSettled?.();
+    expect(duble.utils.reuniaoAberta.mapaMental.invalidate).toHaveBeenCalledWith({ token: TOKEN });
+    expect(duble.utils.reuniaoAberta.resumoGuardado.invalidate).toHaveBeenCalledWith({ token: TOKEN });
+    expect(duble.utils.meetings.resumoGuardado.invalidate).not.toHaveBeenCalled();
   });
 
   it("o pedido recusado mostra a frase pelo código, no idioma da tela", () => {

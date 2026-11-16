@@ -13,7 +13,8 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * - a árvore guardada é conferida de novo na leitura, e a que não passa vira
  *   falha, nunca um mapa pela metade;
  * - pedir sem resumo pede o resumo; com o resumo pronto, só o mapa volta à
- *   fila, do zero; o que já está na fila, ou pronto, não gasta vaga; o pedido
+ *   fila, do zero; o que já está na fila, ou pronto, não gasta vaga, mas o
+ *   pronto que a conferência recusa volta à fila como o que falhou; o pedido
  *   que perde a corrida devolve a vaga; sem transcrição, recusa.
  */
 type Linha = {
@@ -161,6 +162,25 @@ describe("pedir o mapa", () => {
       expect(sql).toContain("`owner_id` = ?");
       expect(sql).toContain("`mind_map_status` is null");
       expect(params).toEqual(expect.arrayContaining(["dona-1", "ready", "failed"]));
+    }
+  });
+
+  it("o mapa pronto que não passa mais na conferência (a tela o mostra como falha): o Tentar de novo o refaz, e o UPDATE só acha o mapa pronto", async () => {
+    const invalido = { ramos: [{ rotulo: "Só um assunto", folhas: [] }] };
+    for (const pedir of [(teto: () => void) => pedirMapaDaDona("dona-1", ID, teto), (teto: () => void) => pedirMapaPeloLink("t".repeat(32), teto)]) {
+      estado.updates = [];
+      estado.linha = linha({ mindMapStatus: "ready", mindMap: invalido });
+      const teto = vi.fn();
+      await pedir(teto);
+      expect(teto).toHaveBeenCalledTimes(1);
+      expect(estado.updates).toHaveLength(1);
+      const { set, where } = estado.updates[0];
+      expect(set).toMatchObject({ mindMapStatus: "pending", mindMapError: null, attempts: 0, lockedUntil: null, lockToken: null });
+      expect(set).not.toHaveProperty("status");
+      // Condicional ao estado lido: o pedido que perde a corrida para outro igual não acha a linha.
+      const { sql, params } = sqlDo(where);
+      expect(sql).not.toContain("is null");
+      expect(params.slice(-2)).toEqual(["ready", "ready"]);
     }
   });
 

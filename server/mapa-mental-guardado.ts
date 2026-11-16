@@ -15,9 +15,10 @@ import { pedirResumoDaReuniao, reuniaoDaDona, type AntesDeCriar } from "./resumo
  * pede. Toda consulta leva a dona no WHERE: reunião de outra dona é "não
  * encontrada". Banco fora do ar sobe como erro, nunca vira "sem mapa".
  *
- * Pedir serve à reunião resumida antes de o mapa existir e ao mapa que falhou,
- * e gasta uma vaga do teto de pedidos à IA (o do resumo e das perguntas). Sem
- * resumo pronto, pedir o mapa é pedir o resumo: o mapa vem com ele.
+ * Pedir serve à reunião resumida antes de o mapa existir e ao mapa que falhou
+ * (ou que a conferência não aceita mais), e gasta uma vaga do teto de pedidos
+ * à IA (o do resumo e das perguntas). Sem resumo pronto, pedir o mapa é pedir
+ * o resumo: o mapa vem com ele.
  */
 
 export type EstadoDoMapa = "sem_mapa" | "pendente" | "gerando" | "pronto" | "falhou";
@@ -105,12 +106,15 @@ function linhasAfetadas(resultado: unknown): number {
  * e o mapa vem com ele. Com o resumo na fila, ou com o mapa na fila ou pronto,
  * nada muda e nada se gasta. Com o resumo pronto e o mapa ausente ou falho, o
  * mapa volta à fila do zero, com as tentativas dele; o pedido que perde a
- * corrida para outro igual devolve a vaga.
+ * corrida para outro igual devolve a vaga. O mapa pronto cuja árvore não passa
+ * mais na conferência conta como falho: a tela o mostra como falha
+ * (paraATela), e o "Tentar de novo" tem de refazê-lo.
  */
 async function pedirMapaDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar) {
   const linha = await linhaDoMapa(db, ownerId, meetingId);
   if (!linha || linha.status === "failed") return pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar);
-  if (linha.status !== "ready" || linha.mindMapStatus === "pending" || linha.mindMapStatus === "ready") return;
+  const prontoInvalido = linha.mindMapStatus === "ready" && !conferirMapaMental(linha.mindMap);
+  if (linha.status !== "ready" || linha.mindMapStatus === "pending" || (linha.mindMapStatus === "ready" && !prontoInvalido)) return;
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
@@ -119,7 +123,10 @@ async function pedirMapaDaReuniao(db: Banco, ownerId: string, meetingId: string,
     mindMapStatus: "pending", mindMapError: null, attempts: 0, lockedUntil: null, lockToken: null, updatedAt: Date.now(),
   }).where(and(
     eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, "ready"),
-    or(isNull(meetingSummaries.mindMapStatus), eq(meetingSummaries.mindMapStatus, "failed")),
+    // O estado que foi lido: o pedido que perde a corrida não acha a linha.
+    prontoInvalido
+      ? eq(meetingSummaries.mindMapStatus, "ready")
+      : or(isNull(meetingSummaries.mindMapStatus), eq(meetingSummaries.mindMapStatus, "failed")),
   ));
   if (!linhasAfetadas(r)) soltarVaga?.();
 }
