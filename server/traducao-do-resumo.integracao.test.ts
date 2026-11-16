@@ -114,6 +114,28 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(pedirJsonAIA.mock.calls.map(([p]) => (p as Pedido).usuario).join("")).not.toContain("Decidimos");
   });
 
+  it("o mapa mental pronto (H10) vai junto: o mapa que fica pronto depois manda à IA só os rótulos dele, que voltam no mapa da resposta", async () => {
+    const { meetingId } = await reuniaoComResumo();
+    expect(await traducao.traduzirResumoDaDona(DONA, meetingId, "en")).toMatchObject({ estado: "pronta", mapa: {} });
+    pedirJsonAIA.mockClear();
+    const MAPA = { ramos: [{ rotulo: "Transportadora", folhas: [{ rotulo: "Contrato", filhos: [] }] }, { rotulo: "Lojas", folhas: [] }] };
+    await (await db()).update(meetingSummaries).set({ mindMap: MAPA, mindMapStatus: "ready", mindMapGeneratedAt: AGORA() })
+      .where(eq(meetingSummaries.meetingId, meetingId));
+
+    const resposta = await traducao.traduzirResumoDaDona(DONA, meetingId, "en");
+
+    expect(resposta).toMatchObject({ estado: "pronta", mapa: { Transportadora: "EN Transportadora", Contrato: "EN Contrato", Lojas: "EN Lojas" } });
+    expect(pedirJsonAIA).toHaveBeenCalledTimes(1);
+    const enviado = enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido);
+    expect(enviado.itens).toEqual([]);
+    expect(enviado.rotulos.map(r => r.rotulo).sort()).toEqual(["Contrato", "Lojas", "Transportadora"]);
+    // O mapa ainda na fila não manda rótulo nenhum.
+    await (await db()).update(meetingSummaries).set({ mindMapStatus: "pending" }).where(eq(meetingSummaries.meetingId, meetingId));
+    pedirJsonAIA.mockClear();
+    await traducao.traduzirResumoDaDona(DONA, meetingId, "es");
+    expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).rotulos).toEqual([]);
+  });
+
   it("guardada, volta sem IA; outro idioma é outra linha", async () => {
     const { meetingId } = await reuniaoComResumo();
     await traducao.traduzirResumoDaDona(DONA, meetingId, "en");

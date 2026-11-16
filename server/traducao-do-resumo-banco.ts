@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations } from "../drizzle/schema";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { conferirMapaMental, rotulosDoMapaMental } from "@shared/mapa-mental";
 import { exigirDb } from "./db";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 
@@ -34,13 +35,16 @@ export type LeituraParaTraduzir =
     };
 
 /**
- * Os rótulos do mapa mental da reunião, para traduzir junto com o resumo. O
- * mapa (H10) vem no mesmo pacote de PRs e mora numa coluna de
- * meeting_summaries que esta branch ainda não tem: a integração liga aqui a
- * leitura dele. Sem mapa, não há rótulo a traduzir.
+ * Os rótulos do mapa mental da reunião (H10), para traduzir junto com o
+ * resumo: só os do mapa pronto, e só da árvore que ainda passa na conferência,
+ * a mesma que a tela recebe (server/mapa-mental-guardado.ts). Sem mapa
+ * pronto, não há rótulo a traduzir; o mapa que fica pronto depois pede a
+ * tradução de novo pela tela, e o servidor traduz só os rótulos que faltam.
  */
-function rotulosDoMapa(): string[] {
-  return [];
+function rotulosDoMapa(status: string | null, bruto: unknown): string[] {
+  if (status !== "ready") return [];
+  const mapa = conferirMapaMental(bruto);
+  return mapa ? rotulosDoMapaMental(mapa) : [];
 }
 
 /**
@@ -56,6 +60,8 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     statusDoResumo: meetingSummaries.status,
     versao: meetingSummaries.version,
     idiomaDoResumo: meetingSummaries.language,
+    statusDoMapa: meetingSummaries.mindMapStatus,
+    mapa: meetingSummaries.mindMap,
   }).from(meetings)
     .leftJoin(meetingSummaries, and(eq(meetingSummaries.meetingId, meetings.id), eq(meetingSummaries.ownerId, meetings.ownerId)))
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
@@ -97,7 +103,7 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     versao: linha.versao,
     idiomaOriginal,
     itens,
-    rotulosDoMapa: rotulosDoMapa(),
+    rotulosDoMapa: rotulosDoMapa(linha.statusDoMapa, linha.mapa),
     guardado: valeAinda ? guardada.content : null,
   };
 }

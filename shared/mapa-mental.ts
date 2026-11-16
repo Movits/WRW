@@ -154,3 +154,20 @@ export function conferirMapaMental(bruto: unknown): MapaMental | null {
 export function nosDoMapa(mapa: MapaMental): number {
   return mapa.ramos.reduce((soma, ramo) => soma + 1 + ramo.folhas.reduce((daFolha, folha) => daFolha + 1 + folha.filhos.length, 0), 0);
 }
+
+/**
+ * Os rótulos do mapa (ramos, folhas e filhos; a raiz é o título da reunião e
+ * não entra), uma vez cada, na ordem da árvore: o que a tradução do resumo
+ * (H11) traduz junto com os itens, no servidor e na tela.
+ */
+export function rotulosDoMapaMental(mapa: MapaMental): string[] {
+  const rotulos = new Set<string>();
+  for (const ramo of mapa.ramos) {
+    rotulos.add(ramo.rotulo);
+    for (const folha of ramo.folhas) {
+      rotulos.add(folha.rotulo);
+      for (const filho of folha.filhos) rotulos.add(filho);
+    }
+  }
+  return Array.from(rotulos);
+}

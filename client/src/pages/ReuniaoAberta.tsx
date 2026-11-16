@@ -97,7 +97,10 @@ export default function ReuniaoAberta() {
   // A tradução do resumo (H11) para o idioma de quem lê, como no detalhe da
   // dona: sem ids e sem os ignorados, e só gasta vaga do teto quando a IA
   // traduz de fato.
-  const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined);
+  // Os rótulos do mapa mental pronto (H10), que a aba do mapa informa: a
+  // tradução os traduz junto com o resumo.
+  const [rotulosDoMapa, setRotulosDoMapa] = useState<string[]>();
+  const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined, rotulosDoMapa);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
   // As abas, como no app de referência da cliente (H4c): o resumo abre
@@ -215,7 +218,7 @@ export default function ReuniaoAberta() {
     {/* O mapa mental (H10), como no detalhe da dona: a raiz é o título, com o emoji do resumo. */}
     {aba === "mindmap" && <div className="mt-6">
       {temTextoParaResumir
-        ? <MapaMentalDaReuniao token={token} titulo={titulo} emoji={resumoGuardado.data?.emoji ?? null}/>
+        ? <MapaMentalDaReuniao token={token} titulo={titulo} emoji={resumoGuardado.data?.emoji ?? null} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
         : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>}
     </div>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}

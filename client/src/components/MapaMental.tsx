@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
 import { ChevronsDownUp, ChevronsUpDown, Loader2, Minus, Network, Plus, Sparkles } from "lucide-react";
@@ -7,8 +7,9 @@ import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { AvisoDeConferir, mensagemDoErroDaIA } from "@/components/ReuniaoComIA";
+import type { TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
-import type { MapaMental } from "@shared/mapa-mental";
+import { rotulosDoMapaMental, type MapaMental } from "@shared/mapa-mental";
 
 /**
  * O mapa mental da reunião (H10 do desenho do gravador,
@@ -27,21 +28,31 @@ import type { MapaMental } from "@shared/mapa-mental";
  *   a esquerda (árabe), a árvore cresce para a esquerda. A direção é a do
  *   idioma do mapa (o da reunião), não a da tela.
  *
- * A consulta mora aqui: nada mais da página precisa do mapa. Ela pergunta de
- * novo a cada 5 s enquanto o mapa está na fila, e para em qualquer erro. O
- * mapa não leva quem falou (o servidor recusa rótulo de voz), então dona e
- * link veem o mesmo.
+ * A consulta mora aqui. Ela pergunta de novo a cada 5 s enquanto o mapa está
+ * na fila, e para em qualquer erro. O mapa não leva quem falou (o servidor
+ * recusa rótulo de voz), então dona e link veem o mesmo.
+ *
+ * A tradução (H11) é a do resumo, que mora na página (useTraducaoDoResumo):
+ * o mapa pronto avisa a página dos rótulos dele, ela os traduz junto com o
+ * resumo, e a árvore os mostra no idioma escolhido, com a direção dele.
  */
 
 type MapaNaTela = inferRouterOutputs<AppRouter>["meetings"]["mapaMental"];
 type ConsultaDoMapa = { data?: MapaNaTela; isError: boolean; error: unknown; refetch: () => unknown };
 type PedidoDoMapa = { isPending: boolean; isError: boolean; error: unknown };
-type Props = ({ meetingId: string; token?: undefined } | { token: string; meetingId?: undefined }) & {
+type TraducaoDoMapa = Pick<TraducaoDoResumoNaTela, "estado" | "idioma" | "traduzirRotulo">;
+type Extras = {
   /** O título da reunião: a raiz do mapa. */
   titulo: string;
   /** O emoji do resumo, que vai antes do título, como no cabeçalho da página. */
   emoji?: string | null;
+  /** A tradução do resumo (H11): pronta, os rótulos saem no idioma dela. */
+  traducao?: TraducaoDoMapa;
+  /** Os rótulos do mapa pronto, para a página pedir a tradução deles (H11). */
+  aoMudarRotulos?: (rotulos: string[]) => void;
 };
+type Props = ({ meetingId: string; token?: undefined } | { token: string; meetingId?: undefined }) & Extras;
+type DoCorpo = Omit<Extras, "emoji"> & { emoji: string | null };
 
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
 // A reunião que não existe mais e o link desligado (ou cortado) no meio da
@@ -52,12 +63,13 @@ const erroDefinitivo = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || 
 const esperaDaConsulta = (estado: string | undefined, erro: unknown) => (estado === "pendente" || estado === "gerando") && !erro ? 5_000 : false;
 
 export function MapaMentalDaReuniao(props: Props) {
+  const extras: DoCorpo = { titulo: props.titulo, emoji: props.emoji ?? null, traducao: props.traducao, aoMudarRotulos: props.aoMudarRotulos };
   return props.token !== undefined
-    ? <MapaDoLink token={props.token} titulo={props.titulo} emoji={props.emoji ?? null}/>
-    : <MapaDaDona meetingId={props.meetingId} titulo={props.titulo} emoji={props.emoji ?? null}/>;
+    ? <MapaDoLink token={props.token} {...extras}/>
+    : <MapaDaDona meetingId={props.meetingId} {...extras}/>;
 }
 
-function MapaDaDona({ meetingId, titulo, emoji }: { meetingId: string; titulo: string; emoji: string | null }) {
+function MapaDaDona({ meetingId, ...extras }: { meetingId: string } & DoCorpo) {
   const utils = trpc.useUtils();
   const consulta = trpc.meetings.mapaMental.useQuery({ meetingId }, {
     retry: (tentativas, erro) => !erroDefinitivo(erro) && tentativas < 3,
@@ -70,10 +82,10 @@ function MapaDaDona({ meetingId, titulo, emoji }: { meetingId: string; titulo: s
   const pedir = trpc.meetings.pedirMapa.useMutation({
     onSettled: () => Promise.all([utils.meetings.mapaMental.invalidate({ meetingId }), utils.meetings.resumoGuardado.invalidate({ meetingId })]),
   });
-  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} titulo={titulo} emoji={emoji}/>;
+  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} {...extras}/>;
 }
 
-function MapaDoLink({ token, titulo, emoji }: { token: string; titulo: string; emoji: string | null }) {
+function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
   const utils = trpc.useUtils();
   // A página do link não pede conta: como o resumo dela, não relê na volta à aba.
   const consulta = trpc.reuniaoAberta.mapaMental.useQuery({ token }, {
@@ -84,20 +96,24 @@ function MapaDoLink({ token, titulo, emoji }: { token: string; titulo: string; e
   const pedir = trpc.reuniaoAberta.pedirMapa.useMutation({
     onSettled: () => Promise.all([utils.reuniaoAberta.mapaMental.invalidate({ token }), utils.reuniaoAberta.resumoGuardado.invalidate({ token })]),
   });
-  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink titulo={titulo} emoji={emoji}/>;
+  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink {...extras}/>;
 }
 
-function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji }: {
+function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, traducao, aoMudarRotulos }: {
   consulta: ConsultaDoMapa;
   pedido: PedidoDoMapa;
   aoPedir: () => void;
   peloLink: boolean;
-  titulo: string;
-  emoji: string | null;
-}) {
+} & DoCorpo) {
   const { t } = useTranslation();
   const idDoTitulo = useId();
   const dados = consulta.data;
+  // O mapa pronto avisa a página dos rótulos dele (H11): o mapa que fica
+  // pronto depois do resumo, ou que só agora foi lido, pede a tradução deles.
+  const mapaPronto = dados?.estado === "pronto" ? dados.mapa : null;
+  useEffect(() => {
+    if (mapaPronto) aoMudarRotulos?.(rotulosDoMapaMental(mapaPronto));
+  }, [mapaPronto]);
 
   // Erro de consulta é erro, nunca "sem mapa" nem "gerando".
   const erroDaConsulta = !consulta.isError ? null
@@ -130,7 +146,9 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji }: {
   } else {
     corpo = <div className="mt-4 space-y-4">
       <AvisoDeConferir>{t("meetings.mindMap.notice")}</AvisoDeConferir>
-      <ArvoreDoMapa raiz={titulo} emoji={emoji} mapa={dados.mapa} idioma={dados.idioma}/>
+      {/* Com a tradução pronta (H11), os rótulos e a direção são os do idioma dela. */}
+      <ArvoreDoMapa raiz={titulo} emoji={emoji} mapa={dados.mapa} idioma={traducao?.estado === "pronta" ? traducao.idioma : dados.idioma}
+        traduzir={traducao?.estado === "pronta" ? traducao.traduzirRotulo : undefined}/>
     </div>;
   }
 
@@ -179,8 +197,13 @@ function direcaoDoMapa(idioma: string | null): "ltr" | "rtl" | undefined {
   return LANGUAGES.find(lingua => lingua.code === codigo)?.dir === "rtl" ? "rtl" : "ltr";
 }
 
-export function ArvoreDoMapa({ raiz, emoji, mapa, idioma }: { raiz: string; emoji?: string | null; mapa: MapaMental; idioma: string | null }) {
+export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir }: {
+  raiz: string; emoji?: string | null; mapa: MapaMental; idioma: string | null;
+  /** O rótulo no idioma da tradução do resumo (H11); sem ela, o próprio rótulo. */
+  traduzir?: (rotulo: string) => string;
+}) {
   const { t } = useTranslation();
+  const rotulo = (texto: string) => traduzir ? traduzir(texto) : texto;
   const prefixo = useId();
   const [padrao] = useState(telaLarga);
   // Só o que a pessoa mudou; o resto segue o padrão da tela.
@@ -210,16 +233,16 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma }: { raiz: string; emoj
                 ? <button type="button" aria-expanded={estaAberto} aria-controls={idDasFolhas} onClick={() => alternar(i)}
                     className={`${NO_DO_RAMO} hover:bg-amber-300/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60`}>
                     {estaAberto ? <Minus size={14} aria-hidden="true" className="mt-0.5 shrink-0"/> : <Plus size={14} aria-hidden="true" className="mt-0.5 shrink-0"/>}
-                    <span dir="auto" className="min-w-0">{ramo.rotulo}</span>
+                    <span dir="auto" className="min-w-0">{rotulo(ramo.rotulo)}</span>
                     {!estaAberto && <span aria-hidden="true" className="ms-auto shrink-0 rounded-full bg-amber-300/20 px-1.5 text-[11px] font-semibold text-amber-200">+{ramo.folhas.length}</span>}
                   </button>
-                : <span className={NO_DO_RAMO}><span dir="auto" className="min-w-0">{ramo.rotulo}</span></span>}
+                : <span className={NO_DO_RAMO}><span dir="auto" className="min-w-0">{rotulo(ramo.rotulo)}</span></span>}
               {ramo.folhas.length > 0 && <ul id={idDasFolhas} hidden={!estaAberto}
                 className={`mt-1.5 ms-3 space-y-1 border-s border-amber-300/25 ps-3 md:mt-0 md:space-y-0 md:border-s-0 md:ps-0 ${COLUNA}`}>
                 {ramo.folhas.map((folha, j) => <li key={j} className={ITEM}>
-                  <span dir="auto" className={NO_DA_FOLHA}>{folha.rotulo}</span>
+                  <span dir="auto" className={NO_DA_FOLHA}>{rotulo(folha.rotulo)}</span>
                   {folha.filhos.length > 0 && <ul className={`mt-1 ms-3 space-y-0.5 border-s border-white/10 ps-3 md:mt-0 md:space-y-0 md:border-s-0 md:ps-0 ${COLUNA}`}>
-                    {folha.filhos.map((filho, k) => <li key={k} className={ITEM}><span dir="auto" className={NO_DO_FILHO}>{filho}</span></li>)}
+                    {folha.filhos.map((filho, k) => <li key={k} className={ITEM}><span dir="auto" className={NO_DO_FILHO}>{rotulo(filho)}</span></li>)}
                   </ul>}
                 </li>)}
               </ul>}

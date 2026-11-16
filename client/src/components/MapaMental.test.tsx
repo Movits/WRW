@@ -293,3 +293,58 @@ describe("Mapa mental — os estados", () => {
     expect(retry(3, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
   });
 });
+
+/**
+ * A tradução do mapa (H11): ela é a do resumo, que mora na página
+ * (useTraducaoDoResumo, testado à parte). Aqui se prova o que o mapa faz: avisa
+ * a página dos rótulos do mapa pronto e mostra os rótulos traduzidos, com o
+ * idioma e a direção da tradução, só com ela pronta.
+ */
+describe("Mapa mental — a tradução do resumo (H11)", () => {
+  const EM_ARABE: Record<string, string> = { "Exportação de café": "تصدير القهوة", "Transportadora": "شركة النقل" };
+  const traducao = (estado: "pronta" | "traduzindo" | "erro" | "original") => ({
+    estado, idioma: "ar" as const, traduzirRotulo: (rotulo: string) => EM_ARABE[rotulo] ?? rotulo,
+  });
+
+  it("o mapa pronto avisa a página dos rótulos dele, uma vez cada, na ordem da árvore; sem mapa pronto, nada", () => {
+    const aoMudarRotulos = vi.fn();
+    duble.daDona.mockReturnValue(comEstado("pendente"));
+    const { rerender } = render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} aoMudarRotulos={aoMudarRotulos}/>);
+    expect(aoMudarRotulos).not.toHaveBeenCalled();
+    duble.daDona.mockReturnValue(pronto());
+    rerender(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} aoMudarRotulos={aoMudarRotulos}/>);
+    expect(aoMudarRotulos).toHaveBeenCalledTimes(1);
+    expect(aoMudarRotulos).toHaveBeenLastCalledWith([
+      "Exportação de café", "Contêiner sai de Santos", "12 de março", "Seguro da carga",
+      "Transportadora", "Contrato não será renovado", "Feiras de 2027",
+    ]);
+  });
+
+  it("com a tradução pronta, os rótulos saem traduzidos, com o idioma e a direção dela; a raiz (o título) e o rótulo sem tradução ficam", () => {
+    duble.daDona.mockReturnValue(pronto("pt-BR"));
+    render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} traducao={traducao("pronta")}/>);
+    expect(arvore()).toHaveAttribute("dir", "rtl");
+    expect(arvore()).toHaveAttribute("lang", "ar");
+    expect(ramo("تصدير القهوة")).toBeInTheDocument();
+    expect(within(arvore()).getByText("شركة النقل")).toBeInTheDocument();
+    expect(within(arvore()).getByText("Seguro da carga")).toBeInTheDocument();
+    expect(within(arvore()).getByText(TITULO)).toBeInTheDocument();
+  });
+
+  it("pelo link, a mesma tradução", () => {
+    duble.doLink.mockReturnValue(pronto("pt-BR"));
+    render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} traducao={traducao("pronta")}/>);
+    expect(ramo("تصدير القهوة")).toBeInTheDocument();
+  });
+
+  it("com a tradução que não está pronta (traduzindo, erro ou o original), o mapa fica no idioma e na direção dele", () => {
+    for (const estado of ["traduzindo", "erro", "original"] as const) {
+      duble.daDona.mockReturnValue(pronto("pt-BR"));
+      const { unmount } = render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} traducao={traducao(estado)}/>);
+      expect(arvore()).toHaveAttribute("dir", "ltr");
+      expect(arvore()).toHaveAttribute("lang", "pt-BR");
+      expect(ramo("Exportação de café")).toBeInTheDocument();
+      unmount();
+    }
+  });
+});

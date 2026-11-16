@@ -13,7 +13,7 @@ process.env.DATABASE_URL ??= "mysql://teste:teste@localhost/teste";
  */
 const banco = vi.hoisted(() => ({
   consultas: [] as { sql: string; params: unknown[] }[],
-  // status, resumoId, statusDoResumo, versao, idiomaDoResumo
+  // status, resumoId, statusDoResumo, versao, idiomaDoResumo (e, se vierem, statusDoMapa e mapa)
   reuniao: ["ready", "resumo-1", "ready", 3, "pt-BR"] as unknown[] | null,
   // id, section, subject, text, assignee, due, excerpt, startSeconds, status
   itens: [] as unknown[][],
@@ -89,6 +89,19 @@ describe("ler o resumo para traduzir", () => {
     expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", guardado: null });
     banco.traducao = ["resumo-antigo", 3, JSON.stringify({ itens: { x: {} }, mapa: {} })];
     expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", guardado: null });
+  });
+
+  it("os rótulos do mapa mental (H10) vão junto, só do mapa pronto que ainda passa na conferência", async () => {
+    const MAPA = { ramos: [{ rotulo: "Exportação", folhas: [{ rotulo: "Contêiner", filhos: ["12 de março", "Contêiner"] }] }, { rotulo: "Feiras", folhas: [] }] };
+    banco.reuniao = ["ready", "resumo-1", "ready", 3, "pt-BR", "ready", JSON.stringify(MAPA)];
+    expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", rotulosDoMapa: ["Exportação", "Contêiner", "12 de março", "Feiras"] });
+    const [reuniao] = consultasCom("from `meetings` left join");
+    expect(reuniao.sql).toContain("`meeting_summaries`.`mind_map_status`");
+    // O mapa na fila, o que falhou e o que a conferência não aceita mais: nada a traduzir.
+    for (const [status, mapa] of [["pending", MAPA], ["failed", MAPA], [null, null], ["ready", { ramos: [{ rotulo: "Só um", folhas: [] }] }]]) {
+      banco.reuniao = ["ready", "resumo-1", "ready", 3, "pt-BR", status, mapa === null ? null : JSON.stringify(mapa)];
+      expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", rotulosDoMapa: [] });
+    }
   });
 
   it("o resumo já no idioma pedido: 'original', sem ler itens nem tradução", async () => {

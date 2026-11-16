@@ -557,7 +557,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // A tradução do resumo (H11) para o idioma de quem lê: mora aqui, e não no
   // resumo, porque o mapa mental usa a mesma. Só com a reunião pronta: em
   // processamento, o resumo é da tentativa anterior e está para ser trocado.
-  const traducaoDoResumo = useTraducaoDoResumo({ meetingId }, data?.meeting.status === "ready" ? resumoGuardado.data : undefined);
+  // Os rótulos do mapa mental pronto (H10), que a aba do mapa informa: a
+  // tradução os traduz junto com o resumo, e o mapa que fica pronto depois
+  // pede de novo.
+  const [rotulosDoMapa, setRotulosDoMapa] = useState<string[]>();
+  const traducaoDoResumo = useTraducaoDoResumo({ meetingId }, data?.meeting.status === "ready" ? resumoGuardado.data : undefined, rotulosDoMapa);
   // true só com este detalhe montado e visível: a exclusão que termina depois
   // de a pessoa sair dele não a puxa de volta para a lista. Efeito de layout
   // pelo mesmo motivo do noGravadorAgora: escondido pelo Suspense (a ida a uma
@@ -850,7 +854,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {/* O mapa mental (H10) lê a transcrição, como o resumo: só com a reunião
         pronta e com texto. A raiz é o título, com o emoji do resumo. */}
     {tab === "mindmap" && (prontaComTranscricao
-      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo}/>
+      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
       : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>)}
     {tab === "contacts" && <div className="space-y-3">
       {/* Pendências ainda não lidas: carregando, ou erro com tentar de novo —
