@@ -172,6 +172,32 @@ como "fora do log"). Os ids que a chave do Gemini enxerga saem de
 
 `PORT` a hospedagem injeta sozinha (o Render e o Railway fazem isso). Não defina na mão.
 
+### Para entrar com Face ID ou digital (chaves de acesso)
+
+Sem estas duas, o app sobe e a função não aparece: o botão some da tela, e os
+procedimentos `chavesDeAcesso.*` respondem `CHAVE_INDISPONIVEL`
+(`server/chaves-de-acesso.ts`).
+
+| Variável | Para quê | Valor em produção |
+|---|---|---|
+| `WEBAUTHN_RP_ID` | o domínio a que cada chave de acesso fica presa | `wrwglobal.org` |
+| `WEBAUTHN_ORIGENS` | os endereços que podem usar as chaves, separados por vírgula | `https://wrwglobal.org,https://www.wrwglobal.org` |
+
+- **Decidido pelo Roberto em 15/11/2026.** A chave presa a `wrwglobal.org` vale
+  com e sem www. Quem põe as duas no painel do Render é o Roberto; até lá, a
+  função fica invisível em produção.
+- **No `.onrender.com` a função não aparece:** a chave presa a `wrwglobal.org`
+  não vale lá, e o pedido que vem de uma origem fora da lista recebe
+  `disponivel: false`.
+- **O RP ID não muda depois da primeira chave cadastrada:** trocá-lo invalida
+  todas as chaves de todas as contas, e cada pessoa volta a entrar com e-mail e
+  senha.
+- **Valor errado desliga a função**, e o log avisa uma vez, no primeiro pedido
+  (`[Chaves de acesso] ...`): o RP ID é só o domínio, sem `https://`; cada origem é
+  `https://` (http só em `localhost`), sem caminho, e o domínio dela é o RP ID ou
+  um subdomínio dele. No desenvolvimento: `WEBAUTHN_RP_ID=localhost` e
+  `WEBAUTHN_ORIGENS=http://localhost:3000`.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

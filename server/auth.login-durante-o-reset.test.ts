@@ -79,6 +79,14 @@ vi.mock("./db", async importOriginal => {
         },
       }),
     }),
+    // O reset apaga as chaves de acesso e os desafios da conta (A6); esta conta não tem nenhum.
+    delete: (tabela: Table) => ({
+      where: async () => {
+        const nome = getTableName(tabela);
+        if (nome !== "chaves_de_acesso" && nome !== "desafios_de_chave_de_acesso") throw new Error(`DELETE inesperado em ${nome}`);
+        return [{ affectedRows: 0 }, undefined];
+      },
+    }),
     insert: (tabela: Table) => ({
       values: async (valores: Record<string, unknown>) => {
         const nome = getTableName(tabela);

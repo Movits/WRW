@@ -14,8 +14,9 @@ import { createAuditLog, invalidateSession, linhasAlcancadas, revokeAllUserSessi
 // dinâmico, pedidos simultâneos nos testes pegavam o módulo real no lugar do
 // vi.mock e chamavam a Resend de verdade.
 import { buildPasswordResetEmail, sendEmail } from "../_core/email";
-import { users, passwordResetTokens, passwordResetRequests } from "../../drizzle/schema";
+import { users, passwordResetTokens, passwordResetRequests, sessions } from "../../drizzle/schema";
 import { registerUser, loginUser, toPublicUser } from "../auth";
+import { apagarChavesNaRedefinicaoDeSenha } from "../chaves-de-acesso";
 import { gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../sessao";
 import {
   hashPasswordResetToken,
@@ -312,10 +313,11 @@ export const authRouter = router({
 
   // Redefinir a senha derruba TODAS as sessões da conta, inclusive a deste
   // aparelho: quem redefine muitas vezes desconfia de acesso alheio, e as
-  // sessões de 8 h seguiam vivas. O link é gasto num UPDATE condicional, e só
-  // segue quem alcançou a linha: com o SELECT decidindo e o UPDATE
-  // incondicional, dois envios do mesmo link passavam juntos. Os passos (1) a
-  // (6) abaixo estão na ordem que vale.
+  // sessões de 8 h seguiam vivas. E apaga todas as chaves de acesso (A6): sem
+  // isso, uma chave cadastrada por quem tomou a conta sobreviveria ao reset. O
+  // link é gasto num UPDATE condicional, e só segue quem alcançou a linha: com
+  // o SELECT decidindo e o UPDATE incondicional, dois envios do mesmo link
+  // passavam juntos. Os passos (1) a (6) abaixo estão na ordem que vale.
   resetPassword: publicProcedure
     .input(z.object({
       token: z.string().min(10),
@@ -344,8 +346,10 @@ export const authRouter = router({
       // hash, e um lote do tRPC com o mesmo link paga um por cópia, até lotar a
       // fila.
       const passwordHash = await filaDoBcrypt.executar(() => bcrypt.hash(input.newPassword, 12));
-      // (3) e (4) numa transação: se a troca da senha falhar, o gasto do link é
-      // desfeito, e o mesmo link continua valendo para tentar de novo.
+      const ipAddress = ipDaCliente(ctx.req);
+      const userAgent = ctx.req.headers["user-agent"];
+      // (3), (4) e (4b) numa transação: se a troca da senha falhar, o gasto do
+      // link é desfeito, e o mesmo link continua valendo para tentar de novo.
       await db.transaction(async tx => {
         // (3) Gasta o link, se ainda vale.
         const consumo = await tx.update(passwordResetTokens)
@@ -364,17 +368,27 @@ export const authRouter = router({
         }
         // (4) A senha nova vai para a conta.
         await tx.update(users).set({ passwordHash }).where(eq(users.id, resetToken.userId));
+        // (4b) Na mesma transação, as sessões caem e só DEPOIS as chaves de
+        // acesso saem, com a auditoria delas (server/chaves-de-acesso.ts). A
+        // ordem fecha a corrida com um cadastro de chave em andamento: ele trava
+        // a linha da própria sessão antes de gravar a chave. Ou ele termina
+        // antes, e este DELETE já vê a chave nova; ou espera esta transação, e
+        // encontra a sessão derrubada.
+        await tx.update(sessions).set({ isActive: false }).where(eq(sessions.userId, resetToken.userId));
+        await apagarChavesNaRedefinicaoDeSenha(tx, resetToken.userId, { ip: ipAddress, userAgent });
       });
-      // (5) Todas as sessões caem. Um login que conferiu a senha antiga e grava
-      // a sessão depois daqui é barrado no próprio loginUser (server/auth.ts).
+      // (5) Todas as sessões caem de novo, fora da transação: a do passo (4b)
+      // já derrubou as que existiam, e esta é a de sempre. Um login que conferiu
+      // a senha antiga e grava a sessão depois daqui é barrado no próprio
+      // loginUser (server/auth.ts).
       await revokeAllUserSessions(resetToken.userId);
       // (6) Auditoria, sem o token nem a senha nos detalhes.
       await createAuditLog({
         userId: resetToken.userId,
         action: "PASSWORD_RESET",
         resource: "auth",
-        ipAddress: ipDaCliente(ctx.req),
-        userAgent: ctx.req.headers["user-agent"],
+        ipAddress,
+        userAgent,
         status: "success",
         riskLevel: "medium",
       });

@@ -161,6 +161,27 @@ export function cookieDaSessao(req: Request): string | undefined {
 }
 
 /**
+ * O `sessionToken` da sessão deste pedido: o do cookie, com a assinatura
+ * conferida; null sem cookie, com token inválido ou sem o campo. Não autentica
+ * ninguém (quem decide se o pedido entra é o sdk): serve a quem precisa travar
+ * a linha da sessão dentro de uma transação. É o caso do cadastro da chave de
+ * acesso (server/chaves-de-acesso.ts), que só grava a chave enquanto a sessão
+ * vale, para a redefinição da senha, que derruba as sessões e apaga as chaves,
+ * não deixar uma chave nova para trás.
+ */
+export async function sessionTokenDoPedido(req: Request): Promise<string | null> {
+  const atual = cookieDaSessao(req);
+  if (!atual) return null;
+  try {
+    const { payload } = await jose.jwtVerify(atual, JWT_SECRET, { algorithms: ["HS256"] });
+    const { sessionToken } = payload as Record<string, unknown>;
+    return typeof sessionToken === "string" && sessionToken.length > 0 ? sessionToken : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Mantém a sessão de quem está usando o app: reemite o token e o cookie quando
  * o token atual tem mais de um dia (RENOVAR_O_TOKEN_A_CADA_MS) ou vence antes
  * da janela inteira — é o caso dos tokens de 8 h emitidos antes da sessão

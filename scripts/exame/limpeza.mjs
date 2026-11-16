@@ -108,6 +108,11 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "matches", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "matches", coluna: "matchedUserId", chave: "id", acao: "apagar" },
   { tabela: "password_reset_tokens", coluna: "userId", chave: "id", acao: "apagar" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas. O exame não
+  // cadastra chave, então os DELETEs não encontram nada; se um dia cadastrar, a
+  // chave sintética sai junto com o resto.
+  { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "resolvedBy", chave: "id", acao: "alertar", excetoSe: { coluna: "userId", chave: "id" } },
