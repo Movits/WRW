@@ -1656,7 +1656,17 @@
     "playFrom": "从 {{tempo}} 开始收听",
     "progressRecording": "正在录音：音频会陆续上传。",
     "progressUploading": "正在接收音频：{{recebidas}}/{{esperadas}}",
-    "progressTranscribing": "正在转写：{{transcritas}}/{{total}}"
+    "progressTranscribing": "正在转写：{{transcritas}}/{{total}}",
+    "player": {
+      "play": "播放",
+      "pause": "暂停",
+      "rewind": "快退 {{segundos}} 秒",
+      "forward": "快进 {{segundos}} 秒",
+      "speed": "播放速度：{{velocidade}}",
+      "speedValue": "{{velocidade}}x",
+      "position": "播放进度",
+      "positionValue": "{{atual}}，共 {{total}}"
+    }
   },
   "connections": {
     "messageSent": "消息已发送",
