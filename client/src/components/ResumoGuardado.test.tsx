@@ -285,7 +285,8 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     expect(within(acrescentado).queryByText(/ainda não conferiu/)).not.toBeInTheDocument();
     expect(acrescentado.querySelector("details, q")).toBeNull();
     expect(screen.queryByText(/ por você$/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // Nenhum botão da dona: o único botão do link é o "Ouvir o resumo" (H19).
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
   });
 
   it("Editar abre o formulário no lugar do item, com o texto como a tela mostra; Cancelar fecha e devolve o foco ao Editar", () => {
@@ -772,5 +773,62 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     rerender(<ResumoGuardado meetingId={REUNIAO} consulta={comEstado("gerando") as never}/>);
     expect(voz.fila()).toEqual([]);
     expect(screen.queryByRole("button", { name: /leitura/ })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * As funções do pacote P2 juntas no mesmo resumo: com a tradução pronta (H11),
+ * "Ouvir o resumo" (H19) lê o texto que está à vista, no idioma dele, e o
+ * formulário de edição (H4f) abre com o texto original do item, para salvar
+ * não gravar a tradução no lugar dele.
+ */
+describe("Resumo guardado — a tradução com o ouvir e o editar (pacote P2)", () => {
+  type Dados = { estado: string; itens: Array<Record<string, unknown> & { text: string; subject: string | null; due: string | null }> };
+  const EM_INGLES: Record<string, string> = { "{F2} envia a proposta revisada": "{F2} sends the revised proposal", "até sexta-feira": "by Friday" };
+  const paraIngles = (texto: string | null) => (texto === null ? null : EM_INGLES[texto] ?? texto);
+  const traducaoPronta = () => ({
+    idioma: "en", idiomaOriginal: "pt-BR", estado: "pronta", erro: null,
+    escolher: vi.fn(), tentarDeNovo: vi.fn(), traduzirRotulo: (rotulo: string) => rotulo,
+    aplicar: (dados?: Dados) => dados && dados.estado === "pronto"
+      ? { ...dados, itens: dados.itens.map(item => ({ ...item, text: paraIngles(item.text)!, subject: paraIngles(item.subject), due: paraIngles(item.due) })) }
+      : dados,
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ouvir o resumo traduzido: a voz, os títulos e os rótulos vão no idioma da tradução, que é o texto à vista", () => {
+    const voz = instalarSinteseFalsa({ vozes: [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }] });
+    render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto(ITENS.filter(item => item.id === "i-acao")) as never} nomes={{ F2: "Carla" }} traducao={traducaoPronta() as never}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+    expect(voz.lerAteOFim()).toEqual([
+      "This summary was written by the AI, and no item has been reviewed yet.",
+      "Actions", "Carla sends the revised proposal", "Assigned to: Carla", "Due: by Friday",
+    ]);
+    expect(voz.pedidas.every(fala => fala.voice?.name === "Samantha" && fala.lang === "en-US")).toBe(true);
+  });
+
+  it("editar com o resumo traduzido: o formulário abre com o texto original do item, e não com a tradução", () => {
+    render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto() as never} nomes={{ F2: "Carla" }} traducao={traducaoPronta() as never}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Carla sends the revised proposal" }));
+    const formulario = screen.getByRole("form", { name: "Editar" });
+    expect(within(formulario).getByLabelText("Texto")).toHaveValue("Carla envia a proposta revisada");
+    expect(within(formulario).getByLabelText("Prazo")).toHaveValue("até sexta-feira");
+  });
+});
+
+describe("Resumo guardado — editar e acrescentar no resumo refeito (H4f com a H4d)", () => {
+  const comVersaoAnterior = (estado: string, erro: string | null) =>
+    consulta({ estado, emoji: "☕", idioma: "pt-BR", erro, modelo: "sales", versaoAnterior: true, itens: ITENS });
+
+  it("enquanto o resumo é refeito, Editar e Acrescentar somem, como as decisões; no refazer que falhou, voltam", () => {
+    const { unmount } = render(<ResumoGuardado meetingId={REUNIAO} consulta={comVersaoAnterior("pendente", null) as never}/>);
+    expect(screen.getByText(/envia a proposta revisada/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Acrescentar item" })).not.toBeInTheDocument();
+    unmount();
+    render(<ResumoGuardado meetingId={REUNIAO} consulta={comVersaoAnterior("falhou", "RESPOSTA_CORTADA") as never} nomes={{ F2: "Carla" }}/>);
+    expect(screen.getAllByRole("button", { name: "Editar" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Acrescentar item" })).toBeInTheDocument();
   });
 });
