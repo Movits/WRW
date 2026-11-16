@@ -31,6 +31,8 @@ import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
+import { rascunharEmailDeRetorno } from "../email-de-retorno";
+import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 
 // Reprocessar custa IA (até 10 MB ao Gemini, mais a extração) e roda fora da
 // requisição. A tomada no banco já impede dois reprocessamentos da MESMA
@@ -46,9 +48,10 @@ export function esquecerTentativasDeReprocesso() {
   reprocessosPorDona.clear();
 }
 
-// Cada pergunta manda até 24 mil caracteres da transcrição à IA, e cada
-// resumo pedido é uma geração paga na fila. Teto brando por dona, pedidos de
-// resumo e perguntas somados, em memória como o do reprocesso. A pergunta conta
+// Cada pergunta manda até 24 mil caracteres da transcrição à IA, cada
+// resumo pedido é uma geração paga na fila e cada rascunho de e-mail de
+// retorno (H20) manda os itens confirmados do resumo. Teto brando por dona, os
+// três somados, em memória como o do reprocesso. A pergunta e o rascunho contam
 // todo pedido que passa da validação, até o recusado: a recusa não chama a IA,
 // e assim também não serve de sonda. O pedido de resumo só conta quando cria
 // trabalho novo (server/resumo-guardado.ts).
@@ -279,6 +282,29 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma));
+    }),
+
+  // H20: o rascunho de um e-mail de retorno, escrito pela IA a partir dos itens
+  // que a dona confirmou no resumo guardado (server/email-de-retorno.ts). O
+  // servidor só devolve o texto: nada é gravado nem enviado, e a dona manda
+  // pelo app de e-mail dela. O nome de quem recebe nem chega aqui (a tela o põe
+  // no lugar da marca {DESTINATARIO}); só a voz dela, quando a tela a reconhece.
+  rascunharEmailDeRetorno: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      relacao: z.enum(RELACOES_DO_EMAIL),
+      tom: z.enum(TONS_DO_EMAIL),
+      idioma: z.enum(IDIOMAS_DA_REUNIAO),
+      vozDoDestinatario: z.string().regex(FORMATO_DO_FALANTE).optional(),
+    }))
+    .mutation(({ ctx, input }) => {
+      tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return rascunharEmailDeRetorno(ctx.user.openId, input.meetingId, {
+        relacao: input.relacao,
+        tom: input.tom,
+        idioma: input.idioma,
+        vozDoDestinatario: input.vozDoDestinatario,
+      });
     }),
 
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
