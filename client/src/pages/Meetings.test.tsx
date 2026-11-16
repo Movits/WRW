@@ -164,6 +164,15 @@ function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<De
   return meeting;
 }
 
+// A gravação em duas partes (0 a 600 s e 600 a 900 s). O "▶ mm:ss" e o ?t do
+// link levam o player da barra à parte que cobre o segundo, e o src do único
+// <audio> diz em qual parte ele está (blocos D1 e H4c).
+const PARTES = [
+  { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
+  { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
+];
+const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
+
 const botaoExcluir = () => screen.getByRole("button", { name: /^Excluir$/ });
 const tituloDoModal = () => screen.queryByText("Excluir esta reunião?");
 const botaoConfirmar = () => screen.getByRole("button", { name: "Excluir reunião" });
@@ -699,11 +708,6 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
     { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
   ];
-  const PARTES = [
-    { seq: 0, url: "/manus-storage/meetings/dona/r/partes/0000-a.m4a", mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600, expiresAt: Date.now() + 1e9 },
-    { seq: 1, url: "/manus-storage/meetings/dona/r/partes/0001-b.m4a", mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 300, expiresAt: Date.now() + 1e9 },
-  ];
-  const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
 
   it("a transcrição em partes aparece por falante, e clicar no tempo leva o player à parte certa", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -899,7 +903,7 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
   const ITEM = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
   const ITENS = [
     { id: "a0000000-0000-4000-8000-000000000001", section: "action", position: 0, subject: null, text: "{F1} manda a minuta do contrato", assignee: "{F1}", due: null, excerpt: "eu mando a minuta do contrato", startSeconds: 42, status: "pending", done: false },
-    { id: ITEM, section: "decision", position: 1, subject: null, text: "Fechar o contrato até sexta-feira.", assignee: null, due: null, excerpt: "vamos fechar o contrato até sexta-feira", startSeconds: 95, status: "confirmed", done: false },
+    { id: ITEM, section: "decision", position: 1, subject: null, text: "Fechar o contrato até sexta-feira.", assignee: null, due: null, excerpt: "vamos fechar o contrato até sexta-feira", startSeconds: 620, status: "confirmed", done: false },
   ];
   const resumoPronto = (emoji: string | null = "📄") => ({ data: { estado: "pronto", emoji, idioma: "pt-BR", erro: null, itens: ITENS }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   const opcoesDaConsulta = () => duble.resumoGuardado.mock.calls.at(-1)![1] as {
@@ -909,13 +913,15 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
   };
 
   // O link para dentro da reunião chega direto ao endereço do detalhe.
-  function abrirPeloLink(busca: string, reuniao: Record<string, unknown> = {}) {
+  function abrirPeloLink(busca: string, reuniao: Record<string, unknown> = {}, detalhe: Partial<Detalhe> = {}) {
     const meeting = { ...REUNIAO, status: "ready", ...reuniao };
     duble.list.mockReturnValue({ data: [meeting], isLoading: false });
-    duble.get.mockReturnValue({ data: { meeting, transcript: TRANSCRICAO, entities: [], suggestions: [], recording: null, recordingExpired: false }, isLoading: false });
+    duble.get.mockReturnValue({ data: { meeting, transcript: TRANSCRICAO, entities: [], suggestions: [], recording: null, recordingExpired: false, ...detalhe }, isLoading: false });
     window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
     render(<Meetings />);
   }
+  // O <audio> do player fixo no rodapé, um só para todas as abas.
+  const audioDaBarra = () => screen.getByRole("region", { name: "Gravação" }).querySelector("audio")!;
 
   it("reunião pronta com transcrição: o resumo guardado e o Pergunte à reunião aparecem na aba Resumo; sem resumo, 'Gerar resumo' o pede", () => {
     abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO });
@@ -995,19 +1001,36 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     expect(screen.getByText("Responsável: Ana")).toBeInTheDocument();
   });
 
-  it("?item abre a aba Resumo, mesmo com ?t, rola até o item e o destaca", () => {
+  it("o '▶ mm:ss' de um item do resumo leva o player da barra ao ponto do item, na parte certa", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready" }, { transcript: TRANSCRICAO, recording: GRAVACAO });
+    expect(audioDaBarra().getAttribute("src")).toBe(PARTES[0].url);
+    // O item da decisão começa em 620 s (10:20), na segunda parte.
+    const resumo = screen.getByRole("region", { name: "Resumo da reunião" });
+    fireEvent.click(within(resumo).getByRole("button", { name: "Ouvir a partir de 10:20" }));
+    expect(document.querySelectorAll("audio")).toHaveLength(1);
+    expect(audioDaBarra().getAttribute("src")).toBe(PARTES[1].url);
+  });
+
+  it("?item abre a aba Resumo, mesmo com ?t, rola até o item e o destaca; o ?t ainda leva o player da barra ao ponto", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const rolados: Element[] = [];
     Element.prototype.scrollIntoView = function (this: Element) { rolados.push(this); };
     const antes = window.location.href;
     try {
       duble.resumoGuardado.mockReturnValue(resumoPronto());
-      abrirPeloLink(`?t=95&item=${ITEM}`);
+      // O link da próxima ação ou do lembrete: o ?t é o segundo do item (10:20, na segunda parte).
+      abrirPeloLink(`?t=620&item=${ITEM}`, {}, { recording: GRAVACAO });
       expect(screen.getByRole("heading", { name: "Resumo da reunião" })).toBeInTheDocument();
       expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
       const item = screen.getByText("Fechar o contrato até sexta-feira.").closest("li")!;
       expect(item).toHaveAttribute("data-destacado", "true");
       expect(rolados).toEqual([item]);
       expect(document.querySelectorAll("[data-destacado]")).toHaveLength(1);
+      // O ?item escolheu a aba; o ?t ainda levou o player, um só, à segunda parte.
+      expect(document.querySelectorAll("audio")).toHaveLength(1);
+      expect(audioDaBarra().getAttribute("src")).toBe(PARTES[1].url);
       // Trocar de aba e voltar ao Resumo não rola de novo até o mesmo item.
       fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
       fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
