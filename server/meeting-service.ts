@@ -18,6 +18,7 @@ import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco,
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
+import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
@@ -253,9 +254,13 @@ function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtract
 }
 
 async function extrairDeUmaJanela(transcript: string): Promise<MeetingExtraction> {
+  // O raciocínio só vai com LLM_RACIOCINIO_EXTRACAO (server/_core/raciocinio-de-ia.ts);
+  // sem ela, o pedido sai sem o campo, como sempre saiu.
+  const raciocinio = raciocinioDaFuncao("extracao");
   const response = await invokeLLM({
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
+    ...(raciocinio ? { raciocinio } : {}),
     messages: [
       {
         role: "system",

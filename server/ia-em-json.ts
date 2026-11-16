@@ -1,4 +1,5 @@
 import { invokeLLM } from "./_core/llm";
+import { raciocinioDaFuncao, type FuncaoComRaciocinio } from "./_core/raciocinio-de-ia";
 
 /**
  * O pedido à IA de texto que responde em JSON (schema strict), usado no que a
@@ -24,12 +25,20 @@ export async function pedirJsonAIA(pedido: {
   schema: Record<string, unknown>;
   timeoutMs: number;
   orcamentoMs: number;
+  /**
+   * Quem pede: o resumo guardado ou o Pergunte. Decide o raciocínio que vai ao
+   * modelo, o da variável da função (server/_core/raciocinio-de-ia.ts); sem
+   * ela, o pedido sai sem o campo, como sempre saiu.
+   */
+  funcao: FuncaoComRaciocinio;
 }): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
+  const raciocinio = raciocinioDaFuncao(pedido.funcao);
   let resposta: Awaited<ReturnType<typeof invokeLLM>>;
   try {
     resposta = await invokeLLM({
       timeoutMs: pedido.timeoutMs,
       orcamentoMs: pedido.orcamentoMs,
+      ...(raciocinio ? { raciocinio } : {}),
       messages: [{ role: "system", content: pedido.sistema }, { role: "user", content: pedido.usuario }],
       response_format: { type: "json_schema", json_schema: { name: pedido.nome, strict: true, schema: pedido.schema } },
     });

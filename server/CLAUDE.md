@@ -250,6 +250,12 @@ sem ele).
   sem a chave (id de outro provedor no texto sai como "fora do log", porque a guarda do
   texto não o distingue de uma chave colada no campo errado). Os ids que a chave do Gemini
   enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
+- **Raciocínio:** o `invokeLLM` manda `reasoning_effort`, no nível de cima do corpo, só
+  quando recebe `raciocinio`. Os campos `reasoning` e `thinking` saíram: o endpoint do
+  Gemini compatível com a OpenAI recusa os dois com 400. A extração, o resumo guardado e o
+  Pergunte pedem o nível da variável da própria função (`LLM_RACIOCINIO_EXTRACAO`,
+  `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA`, guarda em `_core/raciocinio-de-ia.ts`,
+  lidas a cada chamada); sem ela, nada vai e o modelo raciocina no padrão dele.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas
