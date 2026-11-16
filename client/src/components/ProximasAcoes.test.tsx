@@ -186,6 +186,15 @@ describe("a lista da página", () => {
     expect(chamadas("editar")[0][0]).toEqual({ id: "acao-1", prazo: "" });
   });
 
+  it("o recuo segue a direção do idioma (o início da linha, não a esquerda): no árabe, fica do lado da caixa", () => {
+    render(<ProximasAcoes acoes={[acao({ detalhe: "Com o desconto combinado" })]}/>);
+    const item = itemDoTexto("Carla envia a proposta revisada");
+    // A linha do prazo e do responsável, o bloco do detalhe e a citação do trecho.
+    expect(within(item).getByText("Responsável: Carla").parentElement).toHaveClass("ps-7");
+    expect(within(item).getByText("Com o desconto combinado").parentElement).toHaveClass("ps-7");
+    expect(item.querySelector("q")).toHaveClass("border-s-2", "ps-3");
+  });
+
   it("feita fica riscada e a caixa marcada; desmarcar manda feita: false", () => {
     render(<ProximasAcoes acoes={[acao({ feita: true, feitaEm: 5, prazo: ontem })]}/>);
     const caixa = screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" });

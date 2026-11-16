@@ -1488,7 +1488,7 @@
     "processingInterrupted": "Die Verarbeitung wurde vor dem Abschluss unterbrochen (der Server wurde zwischendurch neu gestartet).",
     "deleteConfirmProcessing": "Dieses Meeting wird noch verarbeitet: Die laufende Verarbeitung wird verworfen.",
     "deleteConfirmTitle": "Dieses Meeting löschen?",
-    "deleteConfirmText": "Audio, Transkription, Übersetzungen und Kontaktvorschläge werden endgültig gelöscht.",
+    "deleteConfirmText": "Audio, Transkription, Übersetzungen und Kontaktvorschläge werden endgültig gelöscht. Die nächsten Schritte, die Sie bestätigt haben, bleiben in Ihrer Liste, ohne den Auszug aus dem Meeting.",
     "deleteConfirmCancel": "Abbrechen",
     "deleteConfirmButton": "Meeting löschen",
     "summaryTab": "Zusammenfassung",

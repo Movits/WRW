@@ -1488,7 +1488,7 @@
     "processingInterrupted": "处理在完成前被中断（服务器中途重启）。",
     "deleteConfirmProcessing": "此会议仍在处理中：正在进行的处理将被丢弃。",
     "deleteConfirmTitle": "删除此会议？",
-    "deleteConfirmText": "音频、转录内容、翻译和联系人建议将被永久删除。",
+    "deleteConfirmText": "音频、转录内容、翻译和联系人建议将被永久删除。您确认过的后续行动会保留在您的列表中，但不含会议原文片段。",
     "deleteConfirmCancel": "取消",
     "deleteConfirmButton": "删除会议",
     "summaryTab": "摘要",

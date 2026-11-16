@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -10,7 +10,9 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * morre na mesma transação da decisão no resumo, o índice único (dona, item)
  * segura a repetição, o backfill da leitura é idempotente, a data do prazo vai
  * e volta como "AAAA-MM-DD", e a reunião excluída, a reprocessada e o contato
- * excluído soltam a ação sem apagá-la. Tudo com a dona no WHERE.
+ * excluído soltam a ação sem apagá-la. Tudo com a dona no WHERE. E a corrida
+ * entre a decisão no resumo e a exclusão, com duas conexões: a decisão trava a
+ * reunião, e a exclusão a espera.
  */
 
 const { getDb, createPrivateContact, deletePrivateContact } = await import("./db");
@@ -70,6 +72,27 @@ async function limpar() {
     await banco.delete(privateContacts).where(eq(privateContacts.ownerId, dona));
     await banco.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, dona));
   }
+}
+
+/**
+ * Espera, com prazo, um comando de outra conexão parado numa trava. Os comandos
+ * destes testes levam menos de um milissegundo: o parado há um segundo ou mais
+ * está esperando a trava. O molde é o de chaves-de-acesso.integracao.test.ts: a
+ * espera se vê em information_schema.PROCESSLIST, e não em INNODB_TRX, porque
+ * no MariaDB o SELECT ... FOR UPDATE espera antes de a transação aparecer lá.
+ */
+async function esperarParadoNaTrava(padrao: string, falha: string) {
+  const banco = await db();
+  const prazo = Date.now() + 10_000;
+  while (Date.now() < prazo) {
+    const [linhas] = (await banco.execute(sql`
+      SELECT COUNT(*) AS esperando FROM information_schema.PROCESSLIST
+      WHERE ID <> CONNECTION_ID() AND COMMAND IN ('Query', 'Execute') AND TIME >= 1
+        AND INFO LIKE ${padrao}`)) as unknown as [Array<{ esperando: number | string }>, unknown];
+    if (Number(linhas[0]?.esperando ?? 0) > 0) return;
+    await new Promise(resolver => setTimeout(resolver, 50));
+  }
+  throw new Error(falha);
 }
 
 describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
@@ -240,4 +263,60 @@ describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
     await acoes.editarProximaAcao(DONA, id, { texto: "Depois", prazo: null });
     expect((await acoesDa(DONA))[0]).toMatchObject({ texto: "Depois", detalhe: "Fica", prazo: null });
   });
+
+  // A exclusão marca a reunião 'deleted' e logo solta as ações dela. A decisão
+  // no resumo que já tinha travado a reunião (SELECT ... FOR UPDATE) faz a
+  // exclusão esperar o COMMIT dela, e a ação que acabou de nascer sai solta
+  // junto com as outras. Sem a trava, a exclusão soltaria as ações antes de a
+  // nova existir, e ela ficaria com a reunião, o item e o trecho apagados.
+  it.each([
+    ["decidir (confirmar o item)", (itemId: string) => resumo.decidirItemDoResumo(DONA, itemId, "confirmed")],
+    ["marcar a ação feita", (itemId: string) => resumo.marcarAcaoFeita(DONA, itemId, true)],
+    ["confirmar todos", (_itemId: string, meetingId: string) => resumo.confirmarItensDoResumo(DONA, meetingId)],
+  ])("%s com a exclusão no meio: a exclusão espera a decisão e solta a ação nova, sem reunião, item nem trecho", async (_nome, decidir) => {
+    const banco = await db();
+    const { meetingId, ids: [itemId] } = await reuniaoComResumo(
+      [{ section: "action", text: "{F2} envia a proposta", assignee: "{F2}" }],
+      { speakerNames: { F2: "Carla" } },
+    );
+    let decisao: Promise<unknown> | undefined;
+    let exclusao: Promise<boolean> | undefined;
+    await banco.transaction(async tx => {
+      // A alavanca: o item preso por esta conexão. A decisão trava a reunião e o
+      // resumo e para no UPDATE do item, ainda com a reunião presa.
+      await tx.select({ id: meetingSummaryItems.id }).from(meetingSummaryItems).where(eq(meetingSummaryItems.id, itemId)).for("update");
+      decisao = decidir(itemId, meetingId);
+      decisao.catch(() => {});
+      await esperarParadoNaTrava("%update `meeting_summary_items` set%", "a decisão não parou no item preso por este teste");
+      exclusao = deletePrivateMeeting(DONA, meetingId);
+      exclusao.catch(() => {});
+      // Sem o FOR UPDATE da reunião na decisão, a exclusão marcaria 'deleted' na
+      // hora, sem esperar ninguém, e o prazo acabaria aqui.
+      await esperarParadoNaTrava("%update `meetings` set `status`%", "a exclusão não esperou a decisão: a leitura da reunião perdeu o FOR UPDATE?");
+    });
+    await decisao;
+    expect(await exclusao).toBe(true);
+    expect(await acoesDa(DONA)).toMatchObject([{
+      texto: "Carla envia a proposta", responsavel: "Carla", meetingId: null, itemId: null, trecho: null, origem: "reuniao",
+    }]);
+    expect(await itemPorId(itemId)).toBeUndefined();
+  }, 30_000);
+
+  it("a decisão espera a exclusão que marcou a reunião (a trava da linha) e, depois dela, é 'não encontrada' e não cria ação", async () => {
+    const banco = await db();
+    const { meetingId, ids: [itemId] } = await reuniaoComResumo([{ section: "action", text: "Tarde demais" }]);
+    let decisao: Promise<unknown> | undefined;
+    await banco.transaction(async tx => {
+      // A exclusão parada logo depois de marcar 'deleted', sem confirmar.
+      await tx.update(meetings).set({ status: "deleted" }).where(eq(meetings.id, meetingId));
+      decisao = resumo.decidirItemDoResumo(DONA, itemId, "confirmed");
+      decisao.catch(() => {});
+      // Sem o FOR UPDATE, a decisão leria a reunião ainda pronta (a versão
+      // confirmada), criaria a ação sem esperar, e o prazo acabaria aqui.
+      await esperarParadoNaTrava("%from `meetings`%for update%", "a decisão não parou na trava da reunião: a leitura dela perdeu o FOR UPDATE?");
+    });
+    await expect(decisao).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await acoesDa(DONA)).toEqual([]);
+    expect(await itemPorId(itemId)).toMatchObject({ status: "pending" });
+  }, 30_000);
 });

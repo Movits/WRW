@@ -1488,7 +1488,7 @@
     "processingInterrupted": "O processamento foi interrompido antes de terminar (o servidor reiniciou no meio).",
     "deleteConfirmProcessing": "Esta reunião ainda está em processamento: o que estiver sendo transcrito agora será descartado.",
     "deleteConfirmTitle": "Excluir esta reunião?",
-    "deleteConfirmText": "O áudio, a transcrição, as traduções e as sugestões de contato serão apagados de forma definitiva.",
+    "deleteConfirmText": "O áudio, a transcrição, as traduções e as sugestões de contato serão apagados de forma definitiva. As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião.",
     "deleteConfirmCancel": "Cancelar",
     "deleteConfirmButton": "Excluir reunião",
     "summaryTab": "Resumo",

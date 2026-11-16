@@ -1488,7 +1488,7 @@
     "processingInterrupted": "処理が完了する前に中断されました（サーバーが途中で再起動しました）。",
     "deleteConfirmProcessing": "このミーティングはまだ処理中です。進行中の処理は破棄されます。",
     "deleteConfirmTitle": "このミーティングを削除しますか？",
-    "deleteConfirmText": "音声、文字起こし、翻訳、連絡先の提案が完全に削除されます。",
+    "deleteConfirmText": "音声、文字起こし、翻訳、連絡先の提案が完全に削除されます。確定した次のアクションはリストに残りますが、ミーティングの該当箇所は含まれません。",
     "deleteConfirmCancel": "キャンセル",
     "deleteConfirmButton": "ミーティングを削除",
     "summaryTab": "要約",

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TEXTO_DA_ACAO_MAX } from "@shared/proximas-acoes";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
@@ -71,7 +72,7 @@ describe("rotas das próximas ações", () => {
       texto: "Ligar para a Bia", detalhe: null, responsavel: null, prazo: null, contactId: null,
     });
     await expect(daDona().criar({ texto: "   " })).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    await expect(daDona().criar({ texto: "x".repeat(501) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(daDona().criar({ texto: "x".repeat(TEXTO_DA_ACAO_MAX + 1) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(daDona().criar({ texto: "x", responsavel: "r".repeat(121) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(daDona().criar({ texto: "x", contactId: -1 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(servico.criarProximaAcao).toHaveBeenCalledTimes(1);
@@ -90,6 +91,14 @@ describe("rotas das próximas ações", () => {
     await daDona().editar({ id: ID, prazo: "" });
     expect(servico.editarProximaAcao).toHaveBeenCalledWith("dona-1", ID, { prazo: null });
     await expect(daDona().editar({ id: "nao-e-uuid", texto: "x" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("editar a ação que veio de uma tarefa longa do resumo (700 letras, mais os nomes das vozes) passa; acima do teto, não", async () => {
+    const daTarefa = `${"A".repeat(60)} fecha o contrato com ${"B".repeat(60)} ${"x".repeat(670)}`;
+    await daDona().editar({ id: ID, texto: daTarefa });
+    expect(servico.editarProximaAcao).toHaveBeenCalledWith("dona-1", ID, { texto: daTarefa });
+    await expect(daDona().editar({ id: ID, texto: "x".repeat(TEXTO_DA_ACAO_MAX + 1) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(servico.editarProximaAcao).toHaveBeenCalledTimes(1);
   });
 
   it("tirar o contato é contactId null; id que não é número positivo é recusado", async () => {

@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { NOME_DO_FALANTE_MAX } from "@shared/const";
 import {
   hojeNoRelogio,
   palavrasDoNome,
   prazoValido,
   situacaoDoPrazo,
   sugerirContatoPeloNome,
+  TEXTO_DA_ACAO_MAX,
   viraProximaAcao,
 } from "@shared/proximas-acoes";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 const { camposDaAcaoDoItem, textosComNomes } = await import("./proximas-acoes");
+const { conferirResumo } = await import("./resumo-da-reuniao");
 
 /**
  * As funções puras das próximas ações (H5a), que o servidor e a tela dividem
@@ -103,6 +106,24 @@ describe("do item à ação, sem banco", () => {
     });
     expect(camposDaAcaoDoItem({ ...base, subject: "  " })).toMatchObject({ texto: "Paragrafo", detalhe: null });
     expect(camposDaAcaoDoItem({ ...base, subject: null })).toMatchObject({ texto: "Paragrafo", detalhe: null });
+  });
+
+  it("a tarefa sem assunto mais longa que o resumo guarda cabe no texto da ação, também com os nomes das vozes no lugar dos rótulos", () => {
+    // A IA mandou mais do que cabe: o resumo corta o parágrafo da tarefa em 700 letras.
+    const paragrafo = `{F1} fecha o contrato com {F2} 📄 ${"x".repeat(900)}`;
+    const [tarefa] = conferirResumo(
+      { tarefas: [{ assunto: "", texto: paragrafo, responsavel: null, prazo: null, trecho: "fecho o contrato com você", confianca: 0.9 }] },
+      { transcricao: "Eu fecho o contrato com você amanhã.", segmentos: [], rotulada: true, vozes: new Set(["F1", "F2"]) },
+    );
+    expect(tarefa).toMatchObject({ section: "task", subject: null });
+    expect(Array.from(tarefa.text)).toHaveLength(700);
+    // Sem assunto, o parágrafo inteiro é o texto da ação.
+    const campos = camposDaAcaoDoItem(tarefa);
+    expect(campos.texto).toBe(tarefa.text);
+    // A edição devolve o texto com os nomes das vozes (a soltura também os grava), até 60 letras cada.
+    const { texto } = textosComNomes(campos, { F1: "A".repeat(NOME_DO_FALANTE_MAX), F2: "B".repeat(NOME_DO_FALANTE_MAX) });
+    expect(texto.length).toBeGreaterThan(700);
+    expect(texto.length).toBeLessThanOrEqual(TEXTO_DA_ACAO_MAX);
   });
 
   it("textosComNomes: a voz com nome vira o nome; a sem nome fica rótulo; nulo fica nulo", () => {

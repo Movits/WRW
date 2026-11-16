@@ -9,9 +9,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 /**
  * As próximas ações (H5a) com o banco dublado: o que cada função lê e escreve,
  * com a dona no WHERE. O dublê guarda cada operação com o WHERE renderizado
- * pelo dialeto do MySQL, a lista de colunas lidas e se a leitura travou a linha
- * (FOR UPDATE). O que só o banco prova (o índice único, a transação, a ordem dos
- * locks) está em proximas-acoes.integracao.test.ts.
+ * pelo dialeto do MySQL, a lista de colunas lidas, se a leitura travou a linha
+ * (FOR UPDATE) e o LIMIT, que ele aplica às linhas que devolve. O que só o banco
+ * prova (o índice único, a transação, a espera nas travas) está em
+ * proximas-acoes.integracao.test.ts; a ordem das travas da decisão no resumo,
+ * em resumo-guardado.test.ts.
  */
 
 const dialeto = new MySqlDialect();
@@ -23,6 +25,7 @@ type Operacao = Predicado & {
   tabela: unknown;
   campos?: string[];
   travada?: boolean;
+  limite?: number;
   valores?: Record<string, unknown>;
   linhas?: Record<string, unknown>[];
   noDuplicado?: Predicado;
@@ -54,14 +57,17 @@ function selecionar(projecao?: Record<string, unknown>) {
     from: (tabela: unknown) => {
       const operacao: Operacao = { tipo: "select", tabela, sql: "", params: [], campos: projecao ? Object.keys(projecao) : undefined };
       estado.operacoes.push(operacao);
-      const linhas = () => estado.ler?.(operacao) ?? projetar(tabela, projecao, estado.tabelas.get(tabela) ?? []);
+      const linhas = () => {
+        const todas = estado.ler?.(operacao) ?? projetar(tabela, projecao, estado.tabelas.get(tabela) ?? []);
+        return operacao.limite === undefined ? todas : todas.slice(0, operacao.limite);
+      };
       const cadeia: Record<string, unknown> = {};
       Object.assign(cadeia, {
         innerJoin: () => cadeia,
         leftJoin: () => cadeia,
         where: (condicao?: SQL) => { Object.assign(operacao, renderizar(condicao)); return cadeia; },
         orderBy: () => cadeia,
-        limit: () => cadeia,
+        limit: (limite: number) => { operacao.limite = limite; return cadeia; },
         for: (modo: string) => { operacao.travada = modo === "update"; return cadeia; },
         then: (ok: (valor: unknown) => unknown, falha?: (erro: unknown) => unknown) => Promise.resolve(linhas()).then(ok, falha),
       });
@@ -296,6 +302,14 @@ describe("a reunião que sai: as ações se soltam", () => {
     expect(exclusao).toContain("apagarDerivadosSemGravacao(db, ownerId, meetingId, true)");
     expect(fonte).toContain("if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId, false);");
   });
+
+  it("a fila do resumo, ao trocar os itens, solta antes as ações presas a eles, na transação dela, com a reunião já travada", () => {
+    const fonte = readFileSync(join(__dirname, "fila-do-resumo.ts"), "utf8");
+    const corpo = fonte.slice(fonte.indexOf("async function gravarResumo"), fonte.indexOf("export async function rodarUmaVez"));
+    const soltar = corpo.indexOf("await soltarAcoesDaReuniao(tx, alvo.ownerId, alvo.meetingId, false, agora);");
+    expect(soltar).toBeGreaterThan(corpo.indexOf(".from(meetings)"));
+    expect(soltar).toBeLessThan(corpo.indexOf("tx.delete(meetingSummaryItems)"));
+  });
 });
 
 describe("a lista: o que vai à tela", () => {
@@ -356,6 +370,36 @@ describe("a lista: o que vai à tela", () => {
     const { acoes } = await servico.listarProximasAcoes(DONA, "todas");
     expect(acoes.every(acao => acao.contatoSugerido === null)).toBe(true);
     expect(de("select", schema.privateContacts)).toEqual([]);
+  });
+
+  it("a rede é indexada uma vez por leitura: cada nome dela é lido uma vez, por mais ações que perguntem", async () => {
+    let leiturasDoNome = 0;
+    const contato = (id: number, nome: string) => ({ id, get fullName() { leiturasDoNome += 1; return nome; } });
+    const rede = [contato(7, "Carla Souza"), contato(8, "Bia Lima"), ...Array.from({ length: 48 }, (_, i) => contato(100 + i, `Pessoa ${i}`))];
+    lerLista([
+      { ...LINHA, id: "a-1", responsavel: "Carla" },
+      { ...LINHA, id: "a-2", responsavel: "Bia" },
+      { ...LINHA, id: "a-3", responsavel: "Mariana" },
+    ], rede);
+    const { acoes } = await servico.listarProximasAcoes(DONA, "abertas");
+    expect(acoes.map(acao => acao.contatoSugerido?.id ?? null)).toEqual([7, 8, null]);
+    // Uma leitura por contato no índice, e mais uma por sugestão (o nome que vai à tela).
+    expect(leiturasDoNome).toBe(rede.length + 2);
+  });
+
+  it("rede maior que o teto: nenhuma sugestão, porque a homônima de fora da leitura faria apontar a pessoa errada", async () => {
+    const enchimento = Array.from({ length: servico.CONTATOS_PARA_SUGERIR }, (_, i) => ({ id: 1_000 + i, fullName: `Pessoa ${i}` }));
+    const carla = { id: 7, fullName: "Carla Souza" };
+    const sugestaoDaCarla = async () => (await servico.listarProximasAcoes(DONA, "abertas")).acoes[0].contatoSugerido;
+    // A Carla Lima, outra Carla, fica depois do teto da leitura.
+    lerLista([{ ...LINHA, responsavel: "Carla" }], [carla, ...enchimento, { id: 8, fullName: "Carla Lima" }]);
+    expect(await sugestaoDaCarla()).toBeNull();
+    // Uma Carla só no que se leu não basta: a rede passou do teto, e outra pode vir depois.
+    lerLista([{ ...LINHA, responsavel: "Carla" }], [carla, ...enchimento]);
+    expect(await sugestaoDaCarla()).toBeNull();
+    // No teto, a rede foi lida inteira: a sugestão vale.
+    lerLista([{ ...LINHA, responsavel: "Carla" }], [carla, ...enchimento.slice(1)]);
+    expect(await sugestaoDaCarla()).toEqual({ id: 7, nome: "Carla Souza" });
   });
 
   it("o cartão do Dashboard: as abertas, sem a sugestão de contato", async () => {

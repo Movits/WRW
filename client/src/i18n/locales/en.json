@@ -1488,7 +1488,7 @@
     "processingInterrupted": "Processing was interrupted before it finished (the server restarted midway).",
     "deleteConfirmProcessing": "This meeting is still being processed: the processing in progress will be discarded.",
     "deleteConfirmTitle": "Delete this meeting?",
-    "deleteConfirmText": "The audio, the transcript, the translations and the contact suggestions will be permanently deleted.",
+    "deleteConfirmText": "The audio, the transcript, the translations and the contact suggestions will be permanently deleted. The next actions you confirmed stay on your list, without the meeting excerpt.",
     "deleteConfirmCancel": "Cancel",
     "deleteConfirmButton": "Delete meeting",
     "summaryTab": "Summary",

@@ -6,6 +6,7 @@ import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
+import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
 
 /**
@@ -190,6 +191,10 @@ async function gravarResumo(
     const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
     if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    // As próximas ações presas aos itens que saem se soltam antes (H5a), como
+    // no reprocesso: o nome das vozes vai para o texto, e a reunião e o trecho
+    // ficam. Sem isto, o resumo refeito deixaria a ação apontando um item apagado.
+    await soltarAcoesDaReuniao(tx, alvo.ownerId, alvo.meetingId, false, agora);
     await tx.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.summaryId, alvo.id), eq(meetingSummaryItems.ownerId, alvo.ownerId)));
     if (resumo.itens.length) {
       await tx.insert(meetingSummaryItems).values(resumo.itens.map((item, position) => ({

@@ -185,8 +185,9 @@ describe("Detalhe da reunião — excluir pede confirmação", () => {
     fireEvent.click(botaoExcluir());
 
     expect(tituloDoModal()).toBeInTheDocument();
-    // o texto nomeia tudo que some
+    // o texto nomeia tudo que some, e o que fica: as próximas ações confirmadas (H5a), soltas da reunião
     expect(screen.getByText(/áudio, a transcrição, as traduções e as sugestões de contato/)).toBeInTheDocument();
+    expect(screen.getByText(/As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião\./)).toBeInTheDocument();
     expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
   });
 

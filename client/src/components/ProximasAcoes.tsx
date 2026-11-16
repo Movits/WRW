@@ -166,7 +166,7 @@ function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compac
       <span id={idDoTexto} dir="auto" className={`text-sm ${acao.feita ? "text-white/45 line-through" : "text-white/90"}`}>{comVozes(acao.texto)}</span>
     </label>
 
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-7 text-xs text-white/55">
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 ps-7 text-xs text-white/55">
       {situacao === "atrasada" && <Selo cor="vermelho">{t("proximasAcoes.overdue")}</Selo>}
       {situacao === "hoje" && <Selo cor="ambar">{t("proximasAcoes.dueToday")}</Selo>}
       {acao.prazo && <span>{t("proximasAcoes.dueDate", { data: prazoNaTela(acao.prazo, i18n.language) })}</span>}
@@ -177,7 +177,7 @@ function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compac
       {!compacto && acao.prazoDito && <span dir="auto">{t("proximasAcoes.spokenDue", { prazo: acao.prazoDito })}</span>}
     </div>
 
-    {!compacto && <div className="mt-2 space-y-2 pl-7">
+    {!compacto && <div className="mt-2 space-y-2 ps-7">
       {acao.detalhe && <p dir="auto" className="text-sm leading-6 text-white/70">{comVozes(acao.detalhe)}</p>}
       <p className="text-xs text-white/45">
         {acao.reuniao
@@ -188,7 +188,7 @@ function ItemDaProximaAcao({ acao, compacto, hoje }: { acao: ProximaAcao; compac
       </p>
       {acao.trecho && <details>
         <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{t("proximasAcoes.excerpt")}</summary>
-        <q dir="auto" className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{acao.trecho}</q>
+        <q dir="auto" className="mt-1 block border-s-2 border-amber-300/40 ps-3 text-xs italic text-white/55">{acao.trecho}</q>
       </details>}
 
       {!acao.contato && acao.contatoSugerido && modo === "ver" && <p className="flex flex-wrap items-center gap-2 text-xs text-white/70">

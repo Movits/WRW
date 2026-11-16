@@ -6,11 +6,12 @@ import { exigirDb } from "./db";
 import { nomesDosFalantes } from "@shared/const";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
+  indexarRedeParaSugerir,
   MENSAGEM_ACAO_NAO_ENCONTRADA,
   MENSAGEM_CONTATO_FORA_DA_REDE,
   RESPONSAVEL_DA_ACAO_MAX,
   SECOES_QUE_VIRAM_ACAO,
-  sugerirContatoPeloNome,
+  sugerirContatoNaRede,
 } from "@shared/proximas-acoes";
 
 /**
@@ -258,7 +259,7 @@ export const LIMITE_DA_LISTA = 300;
 /** Quantas abertas o cartão do Dashboard mostra. */
 export const ABERTAS_NO_PAINEL = 5;
 /** Os nomes da rede que a sugestão de contato lê, no máximo (só id e nome, pelo índice). */
-const CONTATOS_PARA_SUGERIR = 5000;
+export const CONTATOS_PARA_SUGERIR = 5000;
 
 export type FiltroDasAcoes = "abertas" | "todas";
 
@@ -328,6 +329,12 @@ async function contarAbertas(db: Banco, ownerId: string): Promise<number> {
  * O contato que o responsável de cada ação aberta sem contato aponta
  * (sugerirContatoPeloNome, sem IA). O responsável é lido como a tela o
  * mostra: o rótulo de voz com nome vira o nome; sem nome, não sugere nada.
+ *
+ * A rede é indexada uma vez por leitura, e cada ação só consulta o índice: o
+ * custo é o da rede mais o das ações, não o produto dos dois (a leitura da
+ * lista roda a cada mutação, e o laço de eventos é um só). A rede maior que o
+ * teto não foi lida inteira: a homônima de fora da leitura faria a sugestão
+ * apontar a pessoa errada, e aí não se sugere nada.
  */
 async function sugestoesDeContato(db: Banco, ownerId: string, acoes: readonly ProximaAcaoNaTela[]) {
   const sugestoes = new Map<string, { id: number; nome: string }>();
@@ -336,10 +343,13 @@ async function sugestoesDeContato(db: Banco, ownerId: string, acoes: readonly Pr
     .map(acao => ({ id: acao.id, nome: vozesNoTexto(acao.responsavel as string, acao.vozes, () => "").trim() }))
     .filter(candidata => candidata.nome.length >= 2);
   if (!candidatas.length) return sugestoes;
+  // Um a mais que o teto: é como se sabe que a rede passou dele.
   const contatos = await db.select({ id: privateContacts.id, fullName: privateContacts.fullName }).from(privateContacts)
-    .where(eq(privateContacts.ownerId, ownerId)).limit(CONTATOS_PARA_SUGERIR);
+    .where(eq(privateContacts.ownerId, ownerId)).limit(CONTATOS_PARA_SUGERIR + 1);
+  if (contatos.length > CONTATOS_PARA_SUGERIR) return sugestoes;
+  const rede = indexarRedeParaSugerir(contatos);
   for (const candidata of candidatas) {
-    const contato = sugerirContatoPeloNome(candidata.nome, contatos);
+    const contato = sugerirContatoNaRede(candidata.nome, rede);
     if (contato) sugestoes.set(candidata.id, { id: contato.id, nome: contato.fullName });
   }
   return sugestoes;

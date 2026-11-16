@@ -1488,7 +1488,7 @@
     "processingInterrupted": "Le traitement a été interrompu avant la fin (le serveur a redémarré en cours de route).",
     "deleteConfirmProcessing": "Cette réunion est encore en cours de traitement : le traitement en cours sera abandonné.",
     "deleteConfirmTitle": "Supprimer cette réunion ?",
-    "deleteConfirmText": "L'audio, la transcription, les traductions et les suggestions de contacts seront supprimés définitivement.",
+    "deleteConfirmText": "L'audio, la transcription, les traductions et les suggestions de contacts seront supprimés définitivement. Les prochaines actions que vous avez confirmées restent dans votre liste, sans l'extrait de la réunion.",
     "deleteConfirmCancel": "Annuler",
     "deleteConfirmButton": "Supprimer la réunion",
     "summaryTab": "Résumé",

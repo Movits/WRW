@@ -16,8 +16,14 @@ export function viraProximaAcao(secao: string): boolean {
   return (SECOES_QUE_VIRAM_ACAO as readonly string[]).includes(secao);
 }
 
-/** O que a dona escreve à mão; o servidor recusa acima disso. */
-export const TEXTO_DA_ACAO_MAX = 500;
+/**
+ * O texto que a dona anota ou edita; o servidor recusa acima disso. A ação que
+ * vem do resumo chega a 700 letras (o parágrafo da tarefa sem assunto,
+ * server/resumo-da-reuniao.ts), e a edição a devolve com os nomes das vozes no
+ * lugar dos rótulos (até 60 letras cada) e com o emoji contando dois: a folga
+ * deixa a dona salvar a edição da ação que o próprio resumo criou.
+ */
+export const TEXTO_DA_ACAO_MAX = 1000;
 export const DETALHE_DA_ACAO_MAX = 2000;
 /** O tamanho da coluna proximas_acoes.responsavel (o mesmo do item do resumo). */
 export const RESPONSAVEL_DA_ACAO_MAX = 120;
@@ -98,12 +104,37 @@ export function sugerirContatoPeloNome<T extends { id: number; fullName: string 
   nome: string | null | undefined,
   contatos: readonly T[],
 ): T | null {
+  return sugerirContatoNaRede(nome, indexarRedeParaSugerir(contatos));
+}
+
+/**
+ * A rede pronta para a sugestão: as palavras de cada nome, calculadas uma vez,
+ * agrupadas pela primeira. A lista pergunta por várias ações de uma vez; sem o
+ * índice, cada pergunta normalizaria a rede inteira de novo.
+ */
+export type RedeParaSugerir<T> = ReadonlyMap<string, ReadonlyArray<{ contato: T; palavras: readonly string[] }>>;
+
+export function indexarRedeParaSugerir<T extends { id: number; fullName: string }>(contatos: readonly T[]): RedeParaSugerir<T> {
+  const porPrimeira = new Map<string, Array<{ contato: T; palavras: readonly string[] }>>();
+  for (const contato of contatos) {
+    const palavras = palavrasDoNome(contato.fullName);
+    if (!palavras.length) continue;
+    const grupo = porPrimeira.get(palavras[0]);
+    if (grupo) grupo.push({ contato, palavras });
+    else porPrimeira.set(palavras[0], [{ contato, palavras }]);
+  }
+  return porPrimeira;
+}
+
+/** sugerirContatoPeloNome sobre a rede já indexada (indexarRedeParaSugerir). */
+export function sugerirContatoNaRede<T extends { id: number; fullName: string }>(
+  nome: string | null | undefined,
+  rede: RedeParaSugerir<T>,
+): T | null {
   const procuradas = palavrasDoNome(nome ?? "");
   if (!procuradas.length || procuradas.join("").length < 2) return null;
   const [primeira, ...resto] = procuradas;
-  const parecidos = contatos
-    .map(contato => ({ contato, palavras: palavrasDoNome(contato.fullName) }))
-    .filter(candidato => candidato.palavras[0] === primeira && resto.every(palavra => candidato.palavras.includes(palavra)));
+  const parecidos = (rede.get(primeira) ?? []).filter(candidato => resto.every(palavra => candidato.palavras.includes(palavra)));
   if (parecidos.length === 1) return parecidos[0].contato;
   // "Ana" com duas Anas na rede não diz qual das duas.
   if (!resto.length) return null;
