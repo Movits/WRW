@@ -9,6 +9,7 @@ import {
   UNAUTHED_ERR_MSG,
   type CodigoDaRecusaDaParte,
 } from "@shared/const";
+import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -57,6 +58,9 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_RESUMO_SENDO_GERADO]: "meetings.summary.errorRegenerating",
   [MENSAGEM_ITEM_NAO_ENCONTRADO]: "meetings.summary.errorItemGone",
   [MENSAGEM_SO_ACAO_TEM_CAIXA]: "meetings.summary.errorOnlyActions",
+  // As recusas das próximas ações (server/proximas-acoes.ts).
+  [MENSAGEM_ACAO_NAO_ENCONTRADA]: "proximasAcoes.errorGone",
+  [MENSAGEM_CONTATO_FORA_DA_REDE]: "proximasAcoes.errorContactOutside",
 };
 
 /**

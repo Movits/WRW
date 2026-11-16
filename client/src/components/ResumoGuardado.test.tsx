@@ -180,6 +180,32 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-ignorado", status: "pending" });
   });
 
+  it("desfazer a confirmação de uma ação pede confirmação antes (ela apaga a próxima ação), e então volta o item a pendente", () => {
+    daDona(pronto());
+    const acao = itemDoTexto("Reservar a sala de reunião");
+    // A ação confirmada está em Próximas ações (H5a).
+    expect(within(acao).getByRole("link", { name: "Em Próximas ações" })).toHaveAttribute("href", "/proximas-acoes");
+    fireEvent.click(within(acao).getByRole("button", { name: "Desfazer a confirmação", description: "Reservar a sala de reunião" }));
+    expect(within(acao).getByText(/também apaga a próxima ação criada a partir deste item/)).toBeInTheDocument();
+    expect(mutacao("decidirItemDoResumo").mutate).not.toHaveBeenCalled();
+    fireEvent.click(within(acao).getByRole("button", { name: "Cancelar" }));
+    expect(within(acao).queryByText(/também apaga a próxima ação/)).not.toBeInTheDocument();
+    fireEvent.click(within(acao).getByRole("button", { name: "Desfazer a confirmação" }));
+    fireEvent.click(within(acao).getByRole("button", { name: "Sim, desfazer" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", status: "pending" });
+  });
+
+  it("o item confirmado que não vira ação (foco, bloqueio) desfaz direto, sem pergunta e sem link de Próximas ações", () => {
+    daDona(pronto());
+    const foco = itemDoTexto("A reunião tratou da exportação de café para a Alemanha.");
+    expect(within(foco).queryByRole("link", { name: "Em Próximas ações" })).not.toBeInTheDocument();
+    fireEvent.click(within(foco).getByRole("button", { name: "Desfazer a confirmação" }));
+    expect(screen.queryByText(/também apaga a próxima ação/)).not.toBeInTheDocument();
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-foco", status: "pending" });
+    // O pendente ainda não tem o que desfazer.
+    expect(within(itemDoTexto("Não renovar com a transportadora antiga.")).queryByRole("button", { name: "Desfazer a confirmação" })).not.toBeInTheDocument();
+  });
+
   it("o '▶ mm:ss' leva o player ao segundo do trecho; sem tempo não há botão", () => {
     const aoIrPara = vi.fn();
     daDona(pronto(), { aoIrPara });

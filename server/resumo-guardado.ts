@@ -7,6 +7,7 @@ import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
+import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, type Executor } from "./proximas-acoes";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -42,17 +43,22 @@ const COLUNAS_DO_RESUMO = {
   lastError: meetingSummaries.lastError,
 };
 
-/** A reunião da dona, não apagada, ou NOT_FOUND. */
-async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+/**
+ * A reunião da dona, não apagada, ou NOT_FOUND. `travar`: numa transação, a
+ * linha fica presa até o fim dela, e o estado lido é o mais novo.
+ */
+async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
+  const consulta = db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+  const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   return reuniao;
 }
 
-async function linhaDoResumo(db: Banco, ownerId: string, meetingId: string) {
-  const [linha] = await db.select(COLUNAS_DO_RESUMO).from(meetingSummaries)
+async function linhaDoResumo(db: Executor, ownerId: string, meetingId: string, travar = false) {
+  const consulta = db.select(COLUNAS_DO_RESUMO).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1);
+  const [linha] = await (travar ? consulta.for("update") : consulta);
   return linha;
 }
 
@@ -138,20 +144,28 @@ export async function pedirResumoDaDona(ownerId: string, meetingId: string, ante
 /**
  * O item da dona e o estado do resumo dele. Só se decide sobre resumo pronto
  * de reunião pronta: enquanto o resumo é refeito, os itens vão ser trocados.
+ *
+ * Roda na transação da decisão e trava a reunião e o resumo até o fim dela,
+ * nesta ordem (a da fila do resumo, server/fila-do-resumo.ts). A exclusão, que
+ * marca a reunião 'deleted' antes de apagar, espera a decisão, e a próxima ação
+ * que a decisão criar (H5a) se solta com os outros derivados. Os estados vêm
+ * das leituras travadas, que leem a versão mais nova da linha.
  */
-async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
+async function itemParaDecidir(db: Executor, ownerId: string, itemId: string) {
   const [item] = await db.select({
     id: meetingSummaryItems.id,
     section: meetingSummaryItems.section,
-    status: meetingSummaryItems.status,
-    statusDoResumo: meetingSummaries.status,
-    statusDaReuniao: meetings.status,
+    summaryId: meetingSummaryItems.summaryId,
+    meetingId: meetingSummaryItems.meetingId,
   }).from(meetingSummaryItems)
-    .innerJoin(meetingSummaries, and(eq(meetingSummaries.id, meetingSummaryItems.summaryId), eq(meetingSummaries.ownerId, meetingSummaryItems.ownerId)))
-    .innerJoin(meetings, and(eq(meetings.id, meetingSummaryItems.meetingId), eq(meetings.ownerId, meetingSummaryItems.ownerId)))
     .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
-  if (!item || item.statusDaReuniao === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  if (item.statusDoResumo !== "ready" || item.statusDaReuniao !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+  if (!item) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+    .where(and(eq(meetings.id, item.meetingId), eq(meetings.ownerId, ownerId))).for("update");
+  const [resumo] = await db.select({ status: meetingSummaries.status }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.id, item.summaryId), eq(meetingSummaries.ownerId, ownerId))).for("update");
+  if (!reuniao || !resumo || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  if (resumo.status !== "ready" || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   return item;
 }
 
@@ -164,48 +178,68 @@ function linhasAfetadas(resultado: unknown): number {
 /**
  * Confirma, ignora ou volta a pendente um item do resumo. Item que deixa de
  * estar confirmado perde também a marca de feito: só ação confirmada se marca.
+ *
+ * A próxima ação (H5a) acompanha a decisão, na mesma transação: confirmar uma
+ * ação ou tarefa a cria, e desconfirmar a apaga (a tela pede confirmação antes).
  */
 export async function decidirItemDoResumo(ownerId: string, itemId: string, status: "pending" | "confirmed" | "ignored") {
   const db = await exigirDb();
-  await itemParaDecidir(db, ownerId, itemId);
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({
-    status,
-    decidedAt: status === "pending" ? null : agora,
-    ...(status === "confirmed" ? {} : { done: false, doneAt: null }),
-    updatedAt: agora,
-  }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
-  if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  await db.transaction(async tx => {
+    await itemParaDecidir(tx, ownerId, itemId);
+    const agora = Date.now();
+    const r = await tx.update(meetingSummaryItems).set({
+      status,
+      decidedAt: status === "pending" ? null : agora,
+      ...(status === "confirmed" ? {} : { done: false, doneAt: null }),
+      updatedAt: agora,
+    }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+    if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    if (status === "confirmed") await criarDoItem(tx, ownerId, itemId, agora);
+    else await apagarAcaoDoItem(tx, ownerId, itemId);
+  });
 }
 
-/** Confirma de uma vez os itens ainda pendentes do resumo pronto da reunião. */
+/**
+ * Confirma de uma vez os itens ainda pendentes do resumo pronto da reunião. As
+ * ações e tarefas confirmadas ganham a próxima ação na mesma transação, e as
+ * confirmadas antes da H5a também.
+ */
 export async function confirmarItensDoResumo(ownerId: string, meetingId: string): Promise<number> {
   const db = await exigirDb();
-  const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
-  const linha = await linhaDoResumo(db, ownerId, meetingId);
-  if (!linha || linha.status !== "ready" || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({ status: "confirmed", decidedAt: agora, updatedAt: agora })
-    .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "pending")));
-  return linhasAfetadas(r);
+  return db.transaction(async tx => {
+    // A reunião e o resumo travados até o fim, nesta ordem, como em itemParaDecidir.
+    const reuniao = await reuniaoDaDona(tx, ownerId, meetingId, true);
+    const linha = await linhaDoResumo(tx, ownerId, meetingId, true);
+    if (!linha || linha.status !== "ready" || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    const agora = Date.now();
+    const r = await tx.update(meetingSummaryItems).set({ status: "confirmed", decidedAt: agora, updatedAt: agora })
+      .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "pending")));
+    await garantirAcoesDosItensConfirmados(tx, ownerId, meetingId, agora);
+    return linhasAfetadas(r);
+  });
 }
 
 /**
  * Marca ou desmarca a caixa de uma ação do resumo. Marcar como feita também a
- * confirma: quem marca que fez está dizendo que a ação existiu.
+ * confirma: quem marca que fez está dizendo que a ação existiu. A próxima ação
+ * dela nasce, se ainda não existia, e a marca de feita vai para as duas pela
+ * mesma escrita (escreverFeita), na mesma transação.
  */
 export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: boolean) {
   const db = await exigirDb();
-  const item = await itemParaDecidir(db, ownerId, itemId);
-  if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_SO_ACAO_TEM_CAIXA });
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({
-    done: feito,
-    doneAt: feito ? agora : null,
-    ...(feito ? { status: "confirmed" as const, decidedAt: sql`coalesce(${meetingSummaryItems.decidedAt}, ${agora})` } : {}),
-    updatedAt: agora,
-  }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
-  if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  await db.transaction(async tx => {
+    const item = await itemParaDecidir(tx, ownerId, itemId);
+    if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_SO_ACAO_TEM_CAIXA });
+    const agora = Date.now();
+    if (feito) {
+      const r = await tx.update(meetingSummaryItems).set({
+        status: "confirmed" as const, decidedAt: sql`coalesce(${meetingSummaryItems.decidedAt}, ${agora})`, updatedAt: agora,
+      }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+      if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+      await criarDoItem(tx, ownerId, itemId, agora);
+    }
+    await escreverFeita(tx, ownerId, { itemId }, feito, agora);
+  });
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   float,
   tinyint,
   mediumtext,
+  date,
 } from "drizzle-orm/mysql-core";
 import { decimal } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
@@ -1313,6 +1314,49 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   ownerMeetingIdx: index("meeting_summary_items_owner_meeting_idx").on(table.ownerId, table.meetingId),
   // As próximas ações (H5) leem os itens confirmados de todas as reuniões da dona.
   ownerSectionStatusIdx: index("meeting_summary_items_owner_section_status_idx").on(table.ownerId, table.section, table.status),
+}));
+
+// As próximas ações da dona (H5a do desenho do gravador,
+// docs/arquitetura/gravador-de-reunioes.md): o que ela confirmou como ação ou
+// tarefa no resumo guardado de uma reunião (origem 'reuniao') e o que anotou à
+// mão (origem 'manual'). A da reunião nasce na mesma transação em que a dona
+// confirma o item (server/proximas-acoes.ts) e copia dele o texto, o
+// responsável, o prazo como foi dito e o trecho. Os rótulos de voz ({F2}) ficam
+// como no item, e a tela os troca pelos nomes enquanto a ação está presa a ele.
+// A reunião excluída ou reprocessada solta a ação: os nomes das vozes viram
+// texto e item_id fica nulo; na exclusão, meeting_id e o trecho também. Excluir
+// o contato anula contact_id. Varchar com o enum só no TypeScript, como em
+// network_sugestoes.
+export const proximasAcoes = mysqlTable("proximas_acoes", {
+  id:          varchar("id", { length: 36 }).primaryKey(),
+  ownerId:     varchar("owner_id", { length: 128 }).notNull(),
+  texto:       text("texto").notNull(),
+  detalhe:     text("detalhe"),
+  // Quem ficou responsável: o rótulo da voz ou o nome como foi dito (vem do
+  // item), ou o que a dona escreveu.
+  responsavel: varchar("responsavel", { length: 120 }),
+  // O prazo em data, que a dona escolhe. O que foi dito na reunião ("até
+  // sexta-feira") fica em prazo_dito, como no item.
+  prazo:       date("prazo", { mode: "string" }),
+  prazoDito:   varchar("prazo_dito", { length: 120 }),
+  contactId:   bigint("contact_id", { mode: "number" }),
+  meetingId:   varchar("meeting_id", { length: 36 }),
+  itemId:      varchar("item_id", { length: 36 }),
+  trecho:      text("trecho"),
+  origem:      varchar("origem", { length: 8, enum: ["reuniao", "manual"] }).notNull(),
+  feita:       boolean("feita").default(false).notNull(),
+  feitaEm:     bigint("feita_em", { mode: "number" }),
+  createdAt:   bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:   bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma ação por item: confirmar de novo, ou duas abas ao mesmo tempo, não
+  // duplica. A manual e a solta têm item_id nulo, e nulos não colidem.
+  ownerItemUnique: uniqueIndex("proximas_acoes_owner_item_unique").on(table.ownerId, table.itemId),
+  // A página e o cartão do Dashboard: as abertas da dona, por prazo.
+  ownerFeitaPrazoIdx: index("proximas_acoes_owner_feita_prazo_idx").on(table.ownerId, table.feita, table.prazo),
+  // Soltar as ações da reunião excluída e anular o contato excluído.
+  ownerMeetingIdx: index("proximas_acoes_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  ownerContactIdx: index("proximas_acoes_owner_contact_idx").on(table.ownerId, table.contactId),
 }));
 
 // ============================================================

@@ -99,7 +99,8 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // meeting_summary_items.owner_id.
     // 68: as chaves de acesso (A6) somaram chaves_de_acesso.userId e
     // desafios_de_chave_de_acesso.userId.
-    expect(PARES).toHaveLength(68);
+    // 69: as próximas ações (H5a) somaram proximas_acoes.owner_id.
+    expect(PARES).toHaveLength(69);
     expect(PARES).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
     expect(PARES).toContainEqual({ tabela: "gold_access_grants", coluna: "revokedBy" });
