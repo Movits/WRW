@@ -243,6 +243,43 @@ describe("agendar: a hora do lembrete anda com a origem", () => {
     expect(de("delete", schema.lembretes).map(o => o.params)).toEqual([["l-2", DONA]]);
   });
 
+  // A dona marca às 10h (AGORA) uma reunião para amanhã às 9h, com "1 dia
+  // antes": a hora do lembrete já passou, mas a reunião ainda não começou. O
+  // lembrete fica pendente nessa hora, e a próxima rodada do laço avisa.
+  it("a reunião da agenda com a hora do lembrete já passada, antes do início: fica pendente nessa hora (marcar, e adiantar na edição)", async () => {
+    const amanhaAs9h = utc(2026, 11, 17, 12);
+    await lembretes.agendarLembreteDaAgenda(db, DONA, AGENDA, { inicioEm: amanhaAs9h, duracaoMinutos: 60, lembreteMinutos: 1440 }, AGORA);
+    expect(de("insert", schema.lembretes)[0].linhas?.[0]).toMatchObject({
+      origem: "agenda", origemId: AGENDA, dispararEm: amanhaAs9h - 1440 * 60_000, expiraEm: amanhaAs9h + 60 * 60_000, disparadoEm: null,
+    });
+    // "2 horas antes" de uma reunião adiantada para daqui a 1 h: a linha de outra hora volta a pendente, na hora que passou.
+    estado.operacoes = [];
+    const daquiAUmaHora = AGORA + 60 * 60_000;
+    estado.tabelas.set(schema.lembretes, [{ id: "l-2", dispararEm: utc(2026, 11, 20, 15), expiraEm: utc(2026, 11, 20, 18) }]);
+    await lembretes.agendarLembreteDaAgenda(db, DONA, AGENDA, { inicioEm: daquiAUmaHora, duracaoMinutos: 30, lembreteMinutos: 120 }, AGORA);
+    expect(de("update", schema.lembretes).map(o => o.valores)).toEqual([{
+      dispararEm: daquiAUmaHora - 120 * 60_000, expiraEm: daquiAUmaHora + 30 * 60_000, disparadoEm: null, lockToken: null, lockedUntil: null, updatedAt: AGORA,
+    }]);
+    expect(de("delete")).toEqual([]);
+  });
+
+  it("o lembrete atrasado da agenda, já com a linha nessa hora: editar só o título não repete o aviso", async () => {
+    const amanhaAs9h = utc(2026, 11, 17, 12);
+    estado.tabelas.set(schema.lembretes, [{ id: "l-2", dispararEm: amanhaAs9h - 1440 * 60_000, expiraEm: amanhaAs9h + 60 * 60_000 }]);
+    await lembretes.agendarLembreteDaAgenda(db, DONA, AGENDA, { inicioEm: amanhaAs9h, duracaoMinutos: 60, lembreteMinutos: 1440 }, AGORA);
+    expect(escritas()).toEqual([]);
+  });
+
+  it("a reunião da agenda que já começou, com a hora do lembrete passada: nada a avisar, e o lembrete de outra hora sai", async () => {
+    const comecouHaDezMinutos = AGORA - 10 * 60_000;
+    const reuniao = { inicioEm: comecouHaDezMinutos, duracaoMinutos: 60, lembreteMinutos: 15 };
+    await lembretes.agendarLembreteDaAgenda(db, DONA, AGENDA, reuniao, AGORA);
+    expect(escritas()).toEqual([]);
+    estado.tabelas.set(schema.lembretes, [{ id: "l-2", dispararEm: utc(2026, 11, 20, 15), expiraEm: utc(2026, 11, 20, 18) }]);
+    await lembretes.agendarLembreteDaAgenda(db, DONA, AGENDA, reuniao, AGORA);
+    expect(de("delete", schema.lembretes).map(o => o.params)).toEqual([["l-2", DONA]]);
+  });
+
   it("a mesma hora com outra duração: só a validade acompanha, e a marca fica", async () => {
     const inicioEm = utc(2026, 11, 20, 17);
     estado.tabelas.set(schema.lembretes, [{ id: "l-2", dispararEm: inicioEm - 15 * 60_000, expiraEm: inicioEm + 90 * 60_000 }]);
@@ -430,6 +467,15 @@ describe("o laço: reserva, marca e aviso", () => {
       type: "lembrete", title: "Com a Bia", actionUrl: `/gravar?agendada=${AGENDA}`,
       parametros: { origem: "agenda", titulo: "Com a Bia", inicioEm, fuso: "America/Sao_Paulo" },
     });
+  });
+
+  it("o lembrete da agenda marcado depois da hora dele, com a reunião por vir: avisa na rodada", async () => {
+    const amanhaAs9h = utc(2026, 11, 17, 12);
+    lendo([reservado({ origem: "agenda", origemId: AGENDA, dispararEm: amanhaAs9h - 1440 * 60_000, expiraEm: amanhaAs9h + 60 * 60_000 })], {
+      agenda: [{ titulo: "Com a Bia", inicioEm: amanhaAs9h, duracaoMinutos: 60, fuso: "America/Sao_Paulo", lembreteMinutos: 1440 }],
+    });
+    expect(await lembretes.rodarLembretesUmaVez({}, AGORA)).toEqual({ avisos: 1 });
+    expect(de("insert", schema.platformNotifications)[0].linhas?.[0]).toMatchObject({ type: "lembrete", actionUrl: `/gravar?agendada=${AGENDA}` });
   });
 
   it("a reunião da agenda sem lembrete agora: sai; com outra hora: volta a esperar, sem aviso", async () => {

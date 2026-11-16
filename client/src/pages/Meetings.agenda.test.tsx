@@ -290,6 +290,69 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
   });
 });
 
+// O lembrete da agenda no sino (H15) leva a /gravar?agendada=<id>, que é esta
+// mesma página: o sino fica no cabeçalho do gravador, e tocar o aviso não
+// desmonta a gravação em curso. A reunião da agenda só ganha a gravação que
+// começou com ela (a decisão 2 da H16a); o lembrete de outra reunião, tocado no
+// meio da gravação ou antes do Transcrever, não troca essa reunião.
+describe("o lembrete de outra reunião da agenda, tocado no sino com uma gravação na tela", () => {
+  const OUTRA = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+  const caminho = () => `${window.location.pathname}${window.location.search}`;
+
+  async function gravar(titulo?: string) {
+    if (titulo) fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: titulo } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+  }
+
+  async function encerrarETranscrever() {
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Transcrever áudio/ })); });
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+  }
+
+  it("no meio da gravação sem agenda: a URL volta ao gravador de antes, sem a faixa, e a gravação não é ligada à reunião do lembrete", async () => {
+    abrir("/gravar");
+    await gravar("Reunião A");
+    act(() => window.history.pushState(null, "", `/gravar?agendada=${AGENDADA}`));
+    await waitFor(() => expect(caminho()).toBe("/gravar"));
+    expect(toast.info).toHaveBeenCalledWith("Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" });
+    expect(screen.queryByText(/Da sua agenda:/)).not.toBeInTheDocument();
+    await encerrarETranscrever();
+    expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "Reunião A" }));
+    expect(ligar()).not.toHaveBeenCalled();
+  });
+
+  it("no meio da gravação de uma reunião da agenda: a URL volta à dela, com a faixa, e a gravação fica com ela", async () => {
+    duble.obterDaAgenda.mockImplementation(({ id }: { id: string }) => ({
+      data: { ...DA_AGENDA, id, titulo: id === OUTRA ? "Conversa com o Rui" : DA_AGENDA.titulo }, isLoading: false, isError: false, error: null,
+    }));
+    abrir(`/gravar?agendada=${AGENDADA}`);
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await gravar();
+    act(() => window.history.pushState(null, "", `/gravar?agendada=${OUTRA}`));
+    await waitFor(() => expect(caminho()).toBe(`/gravar?agendada=${AGENDADA}`));
+    expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument();
+    await encerrarETranscrever();
+    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
+    expect(ligar()).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois do Encerrar e antes do Transcrever: a faixa da reunião do lembrete aparece, mas a gravação não vai para ela", async () => {
+    abrir("/gravar");
+    await gravar("Reunião A");
+    fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ }));
+    await screen.findByRole("button", { name: /Transcrever áudio/ });
+    act(() => window.history.pushState(null, "", `/gravar?agendada=${AGENDADA}`));
+    // A faixa leu a reunião do lembrete: é por ela que o gravador a conhece.
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Transcrever áudio/ })); });
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+    expect(ligar()).not.toHaveBeenCalled();
+  });
+});
+
 describe("Gravar agora pela agenda, montado como no App", () => {
   /** A agenda numa rota e as três de Reuniões com a mesma página, como em App.tsx. */
   function abrirAAgenda() {

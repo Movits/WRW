@@ -35,7 +35,10 @@ vi.mock("wouter", () => ({
 const ACAO = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const AGENDA = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const REUNIAO = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
-const AGORA = Date.now();
+// O relógio fica em 16/11/2026: o prazo de 20/11/2026 sai sem o ano só dentro
+// do ano corrente, e o resultado não pode mudar com a data de quem roda (a
+// partir de 2027 o ano entraria no texto e o CI ficaria vermelho).
+const AGORA = new Date(2026, 10, 16, 10).getTime();
 
 const avisos = () => [
   {
@@ -58,6 +61,9 @@ function abrirSino() {
 }
 
 beforeEach(() => {
+  // Só o Date: os timers de verdade seguem para o React e a Testing Library.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(AGORA);
   duble.lista.data = avisos();
   duble.lista.isError = false;
   duble.lista.error = null;
@@ -65,6 +71,7 @@ beforeEach(() => {
   duble.marcarTodos.mockClear();
 });
 afterEach(async () => {
+  vi.useRealTimers();
   await i18n.changeLanguage("pt-BR");
 });
 

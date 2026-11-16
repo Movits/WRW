@@ -80,10 +80,14 @@ function tituloDoAviso(texto: string): string {
  * - A mesma hora de antes: fica como está, pendente ou já disparado. Editar o
  *   texto não repete o aviso, e o laço que está avisando agora não perde a vez.
  * - Outra hora, ainda por vir: o lembrete volta a pendente, nessa hora.
- * - Outra hora, que já passou: nada a avisar, e o lembrete sai.
+ * - Outra hora, que já passou: nada a avisar, e o lembrete sai. Antes de
+ *   `atrasadoAte` (o início da reunião da agenda), não: a dona pediu o lembrete
+ *   e a reunião não começou, então ele fica pendente nessa hora, e a próxima
+ *   rodada do laço avisa.
  */
 async function gravarHorario(
   ex: Executor, ownerId: string, origem: OrigemDoLembrete, origemId: string, horario: HorarioDoLembrete | null, agora: number,
+  atrasadoAte: number | null = null,
 ) {
   const [atual] = await ex.select({ id: lembretes.id, dispararEm: lembretes.dispararEm, expiraEm: lembretes.expiraEm })
     .from(lembretes)
@@ -91,7 +95,8 @@ async function gravarHorario(
     .limit(1);
   const doAtual = atual ? and(eq(lembretes.id, atual.id), eq(lembretes.ownerId, ownerId)) : undefined;
   const mesmaHora = !!atual && !!horario && Number(atual.dispararEm) === horario.dispararEm;
-  if (!horario || horario.expiraEm <= agora || (horario.dispararEm <= agora && !mesmaHora)) {
+  const horaPerdida = !!horario && horario.dispararEm <= agora && !(atrasadoAte !== null && agora < atrasadoAte);
+  if (!horario || horario.expiraEm <= agora || (horaPerdida && !mesmaHora)) {
     if (doAtual) await ex.delete(lembretes).where(doAtual);
     return;
   }
@@ -126,13 +131,18 @@ export async function agendarLembreteDaAcao(
   await gravarHorario(ex, ownerId, "acao", acaoId, horarioDoLembreteDaAcao(prazo, fusoDoLembrete), agora);
 }
 
-/** O lembrete da reunião da agenda: os minutos escolhidos antes do início. Sem lembrete (nulo), sai. */
+/**
+ * O lembrete da reunião da agenda: os minutos escolhidos antes do início. Sem
+ * lembrete (nulo), sai. Marcada ou adiantada depois dessa hora, mas antes do
+ * início ("1 dia antes" de uma reunião amanhã cedo), avisa na próxima rodada:
+ * o cartão da agenda mostra o lembrete, e ele sai.
+ */
 export async function agendarLembreteDaAgenda(
   ex: Executor, ownerId: string, agendaId: string,
   reuniao: { inicioEm: number; duracaoMinutos: number; lembreteMinutos: number | null },
   agora: number = Date.now(),
 ) {
-  await gravarHorario(ex, ownerId, "agenda", agendaId, horarioDoLembreteDaAgenda(reuniao), agora);
+  await gravarHorario(ex, ownerId, "agenda", agendaId, horarioDoLembreteDaAgenda(reuniao), agora, reuniao.inicioEm);
 }
 
 /** O endereço do aviso de cada origem: é por ele que o aviso se acha para sair. */
