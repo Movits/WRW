@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { enviarParte, enviarPendentes, travaDoNavegador } from "@/lib/envio-das-partes";
+import { enviarParte, travaDoNavegador } from "@/lib/envio-das-partes";
 import { apagarParte, guardarParte } from "@/lib/partes-no-aparelho";
-import { aoTerminarUmDescarte, apagarGravacaoDescartada, descartesDa, guardarDescarte, retomarDescartes } from "@/lib/descartes-pendentes";
+import { aoTerminarUmDescarte, apagarGravacaoDescartada, guardarDescarte, retomarDescartes } from "@/lib/descartes-pendentes";
+import { declararFim, fimRecusadoDeVez, guardarFim, retomarPartesEFins, type ServidorDaGravacao } from "@/lib/retomada-das-partes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import type { AudioGravado } from "./useGravadorDeAudio";
 import type { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
@@ -11,8 +12,6 @@ import type { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-grava
 export const PARTE_SEGUNDOS = 600;
 /** De quanto em quanto tempo a tela tenta de novo o que ficou no aparelho. */
 const NOVA_TENTATIVA_MS = 30_000;
-/** Os fins de gravação que o servidor ainda não confirmou: { meetingId: partes }. */
-const CHAVE_DOS_FINS = "wrw:fins-de-gravacao-pendentes";
 
 /**
  * O que o Descartar fez (G13b). "descartada": o servidor excluiu a reunião (a
@@ -26,23 +25,6 @@ export type ResultadoDoDescarte = "descartada" | "pendente" | "nada";
 
 type Inicio = { title: string; language: string; consentNoticeVersion: typeof VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO; contactId?: number | null; contextId?: string | null };
 
-function lerFins(): Record<string, number> {
-  try {
-    const bruto = JSON.parse(localStorage.getItem(CHAVE_DOS_FINS) ?? "{}");
-    return bruto && typeof bruto === "object" ? bruto as Record<string, number> : {};
-  } catch {
-    return {};
-  }
-}
-function gravarFins(fins: Record<string, number>) {
-  try {
-    if (Object.keys(fins).length) localStorage.setItem(CHAVE_DOS_FINS, JSON.stringify(fins));
-    else localStorage.removeItem(CHAVE_DOS_FINS);
-  } catch {
-    // Sem localStorage: o fim é tentado só nesta tela.
-  }
-}
-
 /**
  * A gravação em partes do lado da tela (G9 do desenho do gravador): a reunião
  * nasce no começo (meetings.iniciarGravacao), cada parte que o gravador fecha
@@ -52,10 +34,13 @@ function gravarFins(fins: Record<string, number>) {
  *
  * Queda de rede ou deploy no meio não perdem nada: a cada 30 s, com a tela de
  * reuniões aberta, o que ficou no aparelho vai de novo, e o fim da gravação
- * que o servidor não confirmou é declarado de novo (guardado no localStorage).
- * Uma trava entre abas (Web Locks) impede duas abas de enviarem a mesma
- * gravação. Enquanto há envio, ou parte esperando no aparelho, a sessão fica
- * ocupada: o Sair e o fechar da aba pedem confirmação.
+ * que o servidor não confirmou é declarado de novo (guardado no localStorage,
+ * com a conta). Desde a G13c a mesma retomada (lib/retomada-das-partes.ts)
+ * roda também em toda tela logada (components/RetomadaDasPartes.tsx), para a
+ * dona que saiu de Reuniões; as duas não enviam a mesma parte nem declaram o
+ * mesmo fim duas vezes. Uma trava entre abas (Web Locks) impede duas abas de
+ * enviarem a mesma gravação. Enquanto há envio, ou parte esperando no
+ * aparelho, a sessão fica ocupada: o Sair e o fechar da aba pedem confirmação.
  *
  * Descartar (G13b): a gravação começada por engano sai inteira — a reunião e
  * as partes que subiram, pelo caminho de exclusão de sempre (meetings.delete),
@@ -101,6 +86,13 @@ export function useGravacaoEmPartes(opcoes: {
   const descartadas = useRef(new Set<string>());
   // A gravação que já levou o aviso da cópia que faltou: um aviso por gravação.
   const semCopiaAvisada = useRef<string | null>(null);
+  // A conta que começou cada gravação (do cache da sessão, no Iniciar): a dona
+  // da reunião no servidor. O fim e o descarte guardados levam essa conta
+  // quando a sessão some no meio (o Sair com a gravação no ar, o cache
+  // limpo): sem ela, a primeira conta que entrasse neste aparelho tentaria o
+  // fim de uma reunião alheia (revisão da G13c). A cópia das partes, não:
+  // depois do Sair nenhuma voz fica no aparelho.
+  const donas = useRef(new Map<string, string>());
   const [pendentes, setPendentes] = useState(0);
   const [noAparelho, setNoAparelho] = useState(0);
   useOcupacao("audio-nao-enviado", opcoes.ativo && noAparelho > 0);
@@ -108,23 +100,25 @@ export function useGravacaoEmPartes(opcoes: {
   // A conta: do cache do React Query ou, se ele ainda não a tem, do servidor.
   const dona = useCallback(async () => utils.auth.me.getData()?.openId ?? (await utils.auth.me.fetch().catch(() => null))?.openId ?? null, [utils]);
 
-  const encerrar = useCallback(async (id: string, partes: number) => {
-    if (partes <= 0) {
-      // Nada gravou: a reunião sem áudio sai, em vez de ficar "gravando".
-      await utils.client.meetings.delete.mutate({ meetingId: id });
-      return;
-    }
-    await utils.client.meetings.encerrarGravacao.mutate({ meetingId: id, partes });
-  }, [utils]);
+  // O fim (meetings.encerrarGravacao) e a exclusão no servidor, pelo caminho de
+  // sempre (meetings.delete, que leva as partes que subiram e os objetos delas
+  // no bucket): o mesmo par que a retomada de toda tela logada usa.
+  const servidorDaGravacao = useMemo<ServidorDaGravacao>(() => ({
+    encerrarGravacao: (id, partes) => utils.client.meetings.encerrarGravacao.mutate({ meetingId: id, partes }),
+    excluir: id => utils.client.meetings.delete.mutate({ meetingId: id }),
+  }), [utils]);
+  const excluirNoServidor = servidorDaGravacao.excluir;
+
+  // Sem nenhuma parte com áudio, a reunião sai, em vez de ficar "gravando".
+  const encerrar = useCallback((id: string, partes: number) => declararFim(servidorDaGravacao, id, partes), [servidorDaGravacao]);
 
   const iniciar = useCallback(async (inicio: Inicio) => {
     const { id } = await utils.client.meetings.iniciarGravacao.mutate({ ...inicio, consentGranted: true, origem: "gravacao" });
     meetingId.current = id;
+    const quem = utils.auth.me.getData()?.openId;
+    if (quem) donas.current.set(id, quem);
     return id;
   }, [utils]);
-
-  /** A exclusão no servidor, pelo caminho de sempre (meetings.delete, que leva as partes que subiram e os objetos delas no bucket). */
-  const excluirNoServidor = useCallback((id: string) => utils.client.meetings.delete.mutate({ meetingId: id }), [utils]);
 
   /**
    * Cancela a gravação `id`, e só ela: o microfone que não abriu depois de a
@@ -143,9 +137,9 @@ export function useGravacaoEmPartes(opcoes: {
     descartadas.current.add(id);
     // A conta vem do cache da sessão, sem esperar a rede, para o descarte ficar
     // guardado já no clique (a aba pode fechar logo depois). Sem ela no cache,
-    // do servidor; sem conta nenhuma (a sessão acabou no meio), não há a quem
-    // atribuir o descarte, e a exclusão é tentada só agora.
-    const quem = utils.auth.me.getData()?.openId ?? (await dona());
+    // a que começou a gravação, e só então do servidor; sem conta nenhuma, não
+    // há a quem atribuir o descarte, e a exclusão é tentada só agora.
+    const quem = utils.auth.me.getData()?.openId ?? donas.current.get(id) ?? (await dona());
     if (quem) guardarDescarte(id, quem);
     const exclusao = fila.current.then(() => apagarGravacaoDescartada(id, quem, excluirNoServidor));
     fila.current = exclusao.then(() => undefined, () => undefined);
@@ -201,8 +195,12 @@ export function useGravacaoEmPartes(opcoes: {
           await encerrar(id, total);
           atuais.current.aoEncerrar(id);
         } catch (erro) {
-          // O fim fica guardado e é declarado de novo pela retomada.
-          gravarFins({ ...lerFins(), [id]: total });
+          // O fim fica guardado, com a conta, e a retomada o declara de novo: a
+          // desta tela e a de toda tela logada, para a dona que já saiu de
+          // Reuniões (a última parte chega depois do desmonte, G13b). O que o
+          // servidor recusou de vez (a reunião excluída ou já encerrada) não volta.
+          // Sem a conta agora (a sessão acabou no meio), vai a que começou a gravação.
+          if (!fimRecusadoDeVez(erro)) guardarFim(id, total, quem ?? donas.current.get(id) ?? null);
           throw erro;
         }
       }
@@ -227,24 +225,20 @@ export function useGravacaoEmPartes(opcoes: {
         // de toda a sessão (components/RetomadaDosDescartes.tsx) pode estar
         // repetindo os mesmos, e a exclusão repetida dá NOT_FOUND, que é feito.
         await retomarDescartes(quem, excluirNoServidor);
-        // A cópia de uma gravação descartada que ainda não saiu do aparelho (o
-        // IndexedDB bloqueado por outra aba, por exemplo) volta recusada: não é
-        // aviso para a dona, que a descartou.
-        const descartada = (id: string) => descartadas.current.has(id) || descartesDa(quem).some(descarte => descarte.id === id);
-        const r = await enviarPendentes(quem, {
-          aoRecusar: (parte, codigo) => { if (!descartada(parte.meetingId)) atuais.current.aoRecusarParte?.(codigo); },
-        }).catch(() => null);
-        if (ativo && r) setNoAparelho(r.restantes);
-        for (const [id, partes] of Object.entries(lerFins())) {
-          try {
-            await encerrar(id, partes);
-            // Relê antes de gravar: outro fim pode ter entrado durante o await.
-            const { [id]: _declarado, ...resto } = lerFins();
-            gravarFins(resto);
-          } catch {
-            // Segue guardado para a próxima tentativa.
-          }
-        }
+        // As partes e os fins, pelo mesmo caminho da retomada de toda tela
+        // logada (G13c): se ela já corre nesta aba, esta volta pega carona, e
+        // nada sobe nem é encerrado duas vezes. As gravações descartadas nesta
+        // tela não sobem, nem na volta de toda tela logada em que esta pegar
+        // carona. A cópia de uma gravação descartada que ainda não saiu do
+        // aparelho (o IndexedDB bloqueado por outra aba, por exemplo) e volta
+        // recusada não é aviso para a dona, que a descartou: a retomada não
+        // chama o aoRecusar das gravações que ela pula.
+        const r = await retomarPartesEFins(quem, {
+          servidor: servidorDaGravacao,
+          pular: id => descartadas.current.has(id),
+          aoRecusar: (_parte, codigo) => atuais.current.aoRecusarParte?.(codigo),
+        });
+        if (ativo && r.restantes !== null) setNoAparelho(r.restantes);
       }
       if (ativo) relogio = window.setTimeout(() => void tentar(), NOVA_TENTATIVA_MS);
     };
@@ -253,7 +247,7 @@ export function useGravacaoEmPartes(opcoes: {
       ativo = false;
       window.clearTimeout(relogio);
     };
-  }, [opcoes.ativo, dona, encerrar, excluirNoServidor]);
+  }, [opcoes.ativo, dona, servidorDaGravacao, excluirNoServidor]);
 
   // O descarte guardado que uma retomada terminou de excluir no servidor (a
   // desta tela ou a de toda a sessão): a tela fecha o aviso de que ele não

@@ -528,7 +528,8 @@ describe("Reuniões — gravação em curso", () => {
     await comecarAGravar();
     unmount();
     expect(trilha.stop).toHaveBeenCalled();
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(FINS) ?? "{}")).toEqual({ [VINICOLA]: 1 }));
+    // Com a conta que gravou (G13c): só ela o declara de novo.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(FINS) ?? "{}")).toEqual({ [VINICOLA]: { partes: 1, dona: "dona-1" } }));
     expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
     // A dona volta a Reuniões: a retomada declara o fim guardado.
     abrirEm("/meetings");

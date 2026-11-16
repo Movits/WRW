@@ -1,4 +1,4 @@
-import { apagarParte, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
+import { apagarParte, parteNoAparelho, partesGuardadas, type ParteNoAparelho } from "./partes-no-aparelho";
 
 /**
  * O envio das partes da gravação (G9 do desenho do gravador): cada parte vai
@@ -42,7 +42,7 @@ export async function enviarParte(meetingId: string, seq: number, blob: Blob, mi
   return { tipo: "recusada", codigo };
 }
 
-type Trava = <T>(nome: string, trabalho: () => Promise<T>) => Promise<T | null>;
+export type Trava = <T>(nome: string, trabalho: () => Promise<T>) => Promise<T | null>;
 
 /**
  * A trava entre abas (Web Locks): duas abas abertas não enviam a mesma
@@ -65,18 +65,37 @@ export const travaDoNavegador: Trava = async (nome, trabalho) => {
  * Manda tudo o que ficou no aparelho desta conta, gravação por gravação, na
  * ordem das partes. Para no primeiro passageiro de cada gravação (a próxima
  * tentativa retoma dali). Devolve o que ainda ficou.
+ *
+ * `pular` diz as gravações que não sobem agora (G13c): a descartada, cuja
+ * cópia ainda não saiu do aparelho. Elas nem contam como áudio por enviar, e a
+ * pergunta se repete a cada parte, porque o Descartar pode chegar no meio.
+ *
+ * Duas retomadas (a da tela de Reuniões e a de toda tela logada, ou as de duas
+ * abas) podem ler a lista ao mesmo tempo. Por isso cada parte é conferida de
+ * novo já com a trava da reunião: a que a outra enviou e apagou depois da
+ * leitura não sobe outra vez.
  */
-export async function enviarPendentes(dona: string, opcoes: { buscar?: typeof fetch; trava?: Trava; aoRecusar?: (parte: ParteNoAparelho, codigo?: string) => void } = {}): Promise<{ restantes: number; semSessao: boolean }> {
+export async function enviarPendentes(dona: string, opcoes: { buscar?: typeof fetch; trava?: Trava; aoRecusar?: (parte: ParteNoAparelho, codigo?: string) => void; pular?: (meetingId: string) => boolean } = {}): Promise<{ restantes: number; semSessao: boolean }> {
   const trava = opcoes.trava ?? travaDoNavegador;
+  const pular = opcoes.pular ?? (() => false);
   const partes = await partesGuardadas(dona);
   const porReuniao = new Map<string, ParteNoAparelho[]>();
   for (const p of partes) porReuniao.set(p.meetingId, [...(porReuniao.get(p.meetingId) ?? []), p]);
   let restantes = 0;
   let semSessao = false;
   for (const [meetingId, lista] of Array.from(porReuniao.entries())) {
+    if (pular(meetingId)) continue;
     const enviadas = await trava(`wrw-envio-${meetingId}`, async () => {
       let n = 0;
       for (const parte of lista) {
+        // Descartada no meio: o resto fica para a exclusão, e não conta.
+        if (pular(meetingId)) return lista.length;
+        // Sem como conferir (o IndexedDB bloqueado por outra aba), envia: o
+        // servidor aceita o reenvio da mesma parte sem duplicar.
+        if (!(await parteNoAparelho(meetingId, parte.seq).catch(() => true))) {
+          n += 1;
+          continue;
+        }
         const r = await enviarParte(meetingId, parte.seq, parte.blob, parte.mimeType, opcoes.buscar);
         if (r.tipo === "recebida" || r.tipo === "recusada") {
           if (r.tipo === "recusada") opcoes.aoRecusar?.(parte, r.codigo);

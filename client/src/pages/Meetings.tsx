@@ -18,6 +18,7 @@ import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPl
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { ID_DO_AVISO_DO_DESCARTE_PENDENTE } from "@/components/RetomadaDosDescartes";
+import { ID_DO_AVISO_DA_PARTE_RECUSADA } from "@/components/RetomadaDasPartes";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -44,13 +45,13 @@ const HORAS_DA_GRAVACAO_EM_PARTES = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
 const ID_DO_AVISO_DO_LIMITE = "gravacao-chegou-ao-limite";
 /**
  * Os ids fixos dos avisos da gravação em partes que ficam até ser fechados
- * (G13b): a parte recusada (a recusa seguinte troca o texto, sem empilhar), a
- * cópia no aparelho que faltou e a gravação encerrada ao sair da tela. O do
- * descarte que não terminou (ID_DO_AVISO_DO_DESCARTE_PENDENTE) vive com a
- * retomada de toda a sessão, que também o fecha. A gravação seguinte fecha
+ * (G13b): a cópia no aparelho que faltou e a gravação encerrada ao sair da
+ * tela. Os outros dois vivem com as retomadas de toda a sessão, que também os
+ * abrem ou fecham: o da parte recusada (ID_DO_AVISO_DA_PARTE_RECUSADA, em que
+ * a recusa seguinte troca o texto, sem empilhar) e o do descarte que não
+ * terminou (ID_DO_AVISO_DO_DESCARTE_PENDENTE). A gravação seguinte fecha
  * todos, que falam da anterior.
  */
-const ID_DO_AVISO_DA_PARTE_RECUSADA = "gravacao-parte-recusada";
 const ID_DO_AVISO_SEM_COPIA = "gravacao-sem-copia-no-aparelho";
 const ID_DO_AVISO_ENCERRADA_AO_SAIR = "gravacao-encerrada-ao-sair";
 

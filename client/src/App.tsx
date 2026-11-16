@@ -4,6 +4,7 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { RetomadaDasPartes } from "./components/RetomadaDasPartes";
 import { RetomadaDosDescartes } from "./components/RetomadaDosDescartes";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { PageTransition } from "./components/PageTransition";
@@ -77,9 +78,11 @@ function PageLoader() {
  * Exportada só para o teste montá-la sozinha (App.tela-autenticada.test.tsx);
  * quem usa é o Router logo abaixo.
  *
- * Aqui também mora a retomada dos descartes de gravação que não terminaram
- * (G13b, components/RetomadaDosDescartes.tsx): uma vez por tela logada, no
- * mesmo lugar em todas, para ela seguir montada de uma tela a outra.
+ * Aqui também moram as retomadas da gravação em partes: a dos descartes que não
+ * terminaram (G13b, components/RetomadaDosDescartes.tsx) e a das partes que
+ * ficaram no aparelho e dos fins que o servidor não confirmou (G13c,
+ * components/RetomadaDasPartes.tsx). Uma vez por tela logada, no mesmo lugar em
+ * todas, para elas seguirem montadas de uma tela a outra.
  */
 export function TelaAutenticada({
   children,
@@ -96,6 +99,7 @@ export function TelaAutenticada({
   return (
     <ProtectedRoute {...guarda}>
       <RetomadaDosDescartes />
+      <RetomadaDasPartes />
       {!cabecalhoProprio && <AppHeader />}
       {children}
     </ProtectedRoute>

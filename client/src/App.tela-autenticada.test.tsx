@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { CHAVE_DOS_DESCARTES } from "@/lib/descartes-pendentes";
+import { CHAVE_DOS_FINS } from "@/lib/retomada-das-partes";
 import { sessaoOcupada } from "@/lib/sessao-ocupada";
 import { TelaAutenticada } from "./App";
 
@@ -14,15 +15,16 @@ import { TelaAutenticada } from "./App";
  * autenticada passa por aqui; este confere que passar por aqui basta.
  */
 
-// A conta no cache e a exclusão de reunião: o que a retomada dos descartes de
-// gravação (components/RetomadaDosDescartes.tsx), que vem com toda tela logada, usa.
-const duble = vi.hoisted(() => ({ conta: vi.fn(), excluir: vi.fn() }));
+// A conta no cache, a exclusão de reunião e o fim da gravação: o que as
+// retomadas da gravação em partes (components/RetomadaDosDescartes.tsx e
+// components/RetomadaDasPartes.tsx), que vêm com toda tela logada, usam.
+const duble = vi.hoisted(() => ({ conta: vi.fn(), excluir: vi.fn(), encerrar: vi.fn() }));
 
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 vi.mock("@/components/NotificationBell", () => ({ NotificationBell: () => null }));
 vi.mock("@/lib/trpc", () => {
   // O MESMO objeto a cada render, como o useUtils do tRPC.
-  const utils = { auth: { me: { getData: duble.conta } }, client: { meetings: { delete: { mutate: duble.excluir } } } };
+  const utils = { auth: { me: { getData: duble.conta } }, client: { meetings: { delete: { mutate: duble.excluir }, encerrarGravacao: { mutate: duble.encerrar } } } };
   return {
     trpc: {
       useUtils: () => utils,
@@ -121,8 +123,33 @@ describe("TelaAutenticada — a retomada dos descartes de gravação vem junto",
     } as unknown as ReturnType<typeof useAuth>);
     duble.conta.mockReturnValue({ openId: "dona-1" });
     localStorage.setItem(CHAVE_DOS_DESCARTES, JSON.stringify([{ id: "r-1", dona: "dona-1" }]));
+    localStorage.setItem(CHAVE_DOS_FINS, JSON.stringify({ "r-2": { partes: 2, dona: "dona-1" } }));
     montar();
     await new Promise(r => setTimeout(r, 20));
     expect(duble.excluir).not.toHaveBeenCalled();
+    expect(duble.encerrar).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * A retomada das partes e dos fins da gravação (G13c) também vem com toda tela
+ * logada: a dona que saiu de Reuniões gravando, com a última parte ou o fim
+ * falhando por rede, tem o envio repetido na tela em que estiver.
+ */
+describe("TelaAutenticada — a retomada das partes e dos fins vem junto", () => {
+  afterEach(() => { localStorage.removeItem(CHAVE_DOS_FINS); });
+
+  it.each([{ tela: "com o menu global", cabecalhoProprio: false }, { tela: "com o cabeçalho próprio", cabecalhoProprio: true }])(
+    "tela logada $tela: o fim guardado da conta é declarado, e sai da lista",
+    async ({ cabecalhoProprio }) => {
+      duble.conta.mockReturnValue({ openId: "dona-1" });
+      duble.encerrar.mockResolvedValue({ partes: 2 });
+      localStorage.setItem(CHAVE_DOS_FINS, JSON.stringify({ "r-2": { partes: 2, dona: "dona-1" } }));
+      montar({ cabecalhoProprio });
+      expect(await screen.findByText("miolo da página")).toBeInTheDocument();
+      await waitFor(() => expect(duble.encerrar).toHaveBeenCalledWith({ meetingId: "r-2", partes: 2 }));
+      await waitFor(() => expect(localStorage.getItem(CHAVE_DOS_FINS)).toBeNull());
+      expect(duble.encerrar).toHaveBeenCalledTimes(1);
+    },
+  );
 });

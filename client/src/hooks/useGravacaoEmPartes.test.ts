@@ -121,12 +121,25 @@ describe("useGravacaoEmPartes (G9)", () => {
     act(() => primeira.result.current.receberParte(parte(0, false)));
     act(() => primeira.result.current.receberParte(parte(1, true)));
     await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
-    expect(JSON.parse(localStorage.getItem("wrw:fins-de-gravacao-pendentes")!)).toEqual({ "r-1": 2 });
+    // Com a conta que gravou (G13c): só ela o declara de novo.
+    expect(JSON.parse(localStorage.getItem("wrw:fins-de-gravacao-pendentes")!)).toEqual({ "r-1": { partes: 2, dona: "dona-1" } });
     primeira.unmount();
     // A tela aberta de novo (ou a próxima volta da retomada) declara o fim.
     renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem("wrw:fins-de-gravacao-pendentes")).toBeNull());
     expect(d.encerrar).toHaveBeenLastCalledWith({ meetingId: "r-1", partes: 2 });
+  });
+
+  it("o fim que o servidor recusa de vez (a reunião já encerrada ou excluída) avisa, mas não fica guardado para voltar a cada 30 s (G13c)", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    d.encerrar.mockRejectedValueOnce({ message: "Esta gravação já foi encerrada.", data: { code: "CONFLICT" } });
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, true)));
+    await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
+    expect(localStorage.getItem("wrw:fins-de-gravacao-pendentes")).toBeNull();
   });
 
   it("a última parte vazia (Parar logo depois de uma troca) não vai, e o fim conta só as partes com áudio", async () => {
@@ -478,5 +491,46 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     await act(async () => { await result.current.descartar(); });
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
     expect(aoConcluirDescarte).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A revisão da G13c. O fim e o descarte guardados sem a conta (a sessão que
+ * some no meio da gravação: o Sair com ela no ar, o cache limpo) valiam para a
+ * primeira conta que entrasse no aparelho, e o NOT_FOUND dela apagava o fim da
+ * dona. Agora levam a conta que começou a gravação.
+ */
+describe("useGravacaoEmPartes — a dona desde o Iniciar (revisão da G13c)", () => {
+  const FINS = "wrw:fins-de-gravacao-pendentes";
+
+  it("a sessão que some no meio da gravação: o fim que falha fica guardado com a conta que a começou, e a cópia da parte não", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "sem-sessao" });
+    d.encerrar.mockRejectedValue({ message: "Sessão encerrada.", data: { code: "UNAUTHORIZED" } });
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    // O Sair com a gravação no ar: o cache fica sem a conta, e o servidor não a reconhece mais.
+    d.getData.mockReturnValue(null);
+    d.fetch.mockResolvedValue(null);
+    act(() => result.current.receberParte(parte(0, true)));
+    await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
+    expect(JSON.parse(localStorage.getItem(FINS)!)).toEqual({ "r-1": { partes: 1, dona: "dona-1" } });
+    // Depois do Sair nenhuma voz fica no aparelho.
+    expect(d.guardarParte).not.toHaveBeenCalled();
+  });
+
+  it("descartar sem a conta no cache nem do servidor: o descarte fica guardado com a conta que começou a gravação", async () => {
+    d.excluir.mockRejectedValue(new TypeError("Failed to fetch"));
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    d.getData.mockReturnValue(undefined);
+    d.fetch.mockRejectedValue(new Error("rede"));
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { resultado = await result.current.descartar(); });
+    expect(resultado).toBe("pendente");
+    // Na lista, a retomada de toda tela logada também a vê, e não sobe parte dela.
+    expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1" }]);
   });
 });

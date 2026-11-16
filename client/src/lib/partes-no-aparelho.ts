@@ -53,17 +53,77 @@ async function comTabela<T>(modo: IDBTransactionMode, acao: (tabela: IDBObjectSt
   }
 }
 
-export function guardarParte(parte: ParteNoAparelho): Promise<unknown> {
-  return comTabela("readwrite", tabela => tabela.put(parte));
+// Quem ouve as mudanças feitas nesta aba (G13c): a retomada de toda tela logada
+// (components/RetomadaDasPartes.tsx) reconta o áudio por enviar e ocupa a sessão
+// quando a tela que grava deixa uma parte aqui. O IndexedDB não avisa sozinho.
+const ouvintes = new Set<() => void>();
+
+function avisarQueMudou() {
+  for (const ouvinte of Array.from(ouvintes)) ouvinte();
 }
 
-export function apagarParte(meetingId: string, seq: number): Promise<unknown> {
-  return comTabela("readwrite", tabela => tabela.delete([meetingId, seq]));
+/** Chama `ouvinte` a cada parte guardada ou apagada nesta aba. Devolve a função que para de ouvir. */
+export function aoMudarAsPartes(ouvinte: () => void): () => void {
+  ouvintes.add(ouvinte);
+  return () => {
+    ouvintes.delete(ouvinte);
+  };
+}
+
+export async function guardarParte(parte: ParteNoAparelho): Promise<unknown> {
+  const resultado = await comTabela("readwrite", tabela => tabela.put(parte));
+  avisarQueMudou();
+  return resultado;
+}
+
+export async function apagarParte(meetingId: string, seq: number): Promise<unknown> {
+  const resultado = await comTabela("readwrite", tabela => tabela.delete([meetingId, seq]));
+  avisarQueMudou();
+  return resultado;
 }
 
 export async function partesGuardadas(dona: string): Promise<ParteNoAparelho[]> {
   const todas = await comTabela<ParteNoAparelho[]>("readonly", tabela => tabela.getAll() as IDBRequest<ParteNoAparelho[]>);
   return todas.filter(p => p.dona === dona).sort((a, b) => a.meetingId.localeCompare(b.meetingId) || a.seq - b.seq);
+}
+
+/**
+ * A parte ainda está no aparelho? Conta só a chave, sem trazer o áudio para a
+ * memória. É a conferência de quem envia (lib/envio-das-partes.ts), já com a
+ * trava da reunião: a parte que outra aba, ou outra retomada, enviou e apagou
+ * depois da leitura da lista não sobe de novo (G13c).
+ */
+export async function parteNoAparelho(meetingId: string, seq: number): Promise<boolean> {
+  return (await comTabela<number>("readonly", tabela => tabela.count([meetingId, seq]))) > 0;
+}
+
+/**
+ * Quantas partes da conta `dona` estão no aparelho, sem trazer o áudio de todas
+ * para a memória (revisão da G13c). É a conta do áudio por enviar, que a
+ * retomada de toda tela logada (components/RetomadaDasPartes.tsx) refaz a cada
+ * parte guardada ou apagada: com o getAll, cada conta lia todas as partes, e uma
+ * retomada de N partes fazia N leituras de tudo.
+ *
+ * Aqui vão só as chaves ([meetingId, seq]) e UMA parte por reunião, porque a
+ * dona mora no valor, e não na chave: as partes de uma gravação são todas da
+ * conta que a gravou. `pular` tira as reuniões que não contam (a gravação
+ * descartada) sem ler nenhuma parte delas.
+ */
+export async function contarPartesDa(dona: string, pular: (meetingId: string) => boolean = () => false): Promise<number> {
+  const chaves = await comTabela<IDBValidKey[]>("readonly", tabela => tabela.getAllKeys());
+  const porReuniao = new Map<string, number[]>();
+  for (const chave of chaves) {
+    if (!Array.isArray(chave) || typeof chave[0] !== "string" || typeof chave[1] !== "number" || pular(chave[0])) continue;
+    const seqs = porReuniao.get(chave[0]);
+    if (seqs) seqs.push(chave[1]);
+    else porReuniao.set(chave[0], [chave[1]]);
+  }
+  let total = 0;
+  for (const [meetingId, seqs] of Array.from(porReuniao.entries())) {
+    const primeira = await comTabela<ParteNoAparelho | undefined>("readonly", tabela => tabela.get([meetingId, seqs[0]]) as IDBRequest<ParteNoAparelho | undefined>);
+    if (primeira?.dona === dona) total += seqs.length;
+  }
+  return total;
 }
 
 /**
@@ -87,4 +147,5 @@ export async function apagarPartesDaReuniao(meetingId: string): Promise<void> {
 /** Sair da conta ou excluí-la: nenhuma voz fica no aparelho. */
 export async function apagarTodasAsPartes(): Promise<void> {
   await comTabela("readwrite", tabela => tabela.clear());
+  avisarQueMudou();
 }
