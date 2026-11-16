@@ -113,7 +113,8 @@ export function AvisoDeHoraDeGravacao(props: {
       <div className="flex items-start gap-3">
         <Clock3 aria-hidden="true" size={20} className="mt-0.5 shrink-0 text-amber-300"/>
         <div className="min-w-0">
-          <h2 id={idDoPedido} className="font-semibold">{t("meetings.hourCheckTabTitle")}</h2>
+          {/* Tamanho próprio: o h2 global (index.css) é de título de página, e no cartão quebrava em duas linhas. */}
+          <h2 id={idDoPedido} className="text-base font-semibold">{t("meetings.hourCheckTabTitle")}</h2>
           <p id={idDasHoras} className="text-sm font-semibold text-amber-300">{t("meetings.hoursOfRecording", { count: aviso.horas })}</p>
           <p id={idDaDescricao} className="mt-1 text-sm text-white/70">{t("meetings.hourCheckDescription", { minutos })}</p>
         </div>
