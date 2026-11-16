@@ -127,6 +127,13 @@
       "when": 1794754092667,
       "tag": "0017_resumo-guardado",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1794808794946,
+      "tag": "0018_chaves-de-acesso",
+      "breakpoints": true
     }
   ]
 }

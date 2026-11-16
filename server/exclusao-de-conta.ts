@@ -53,7 +53,8 @@ import type { exigirDb } from "./db";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
+  aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
@@ -210,6 +211,11 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: matches, coluna: matches.userId, origem: "id" },
   { tabela: matches, coluna: matches.matchedUserId, origem: "id" },
   { tabela: passwordResetTokens, coluna: passwordResetTokens.userId, origem: "id" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas: a chave pública e
+  // o identificador da conta que o aparelho guarda. O desafio de ENTRADA nasce
+  // sem conta e vence em 5 minutos; sai pelo prazo.
+  { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
+  { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
   { tabela: trustedDevices, coluna: trustedDevices.userId, origem: "id" },
   { tabela: securityEvents, coluna: securityEvents.userId, origem: "id" },
   { tabela: sessions, coluna: sessions.userId, origem: "id" },
