@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Loader2, Mail, PenLine } from "lucide-react";
 import { toast } from "sonner";
@@ -32,6 +32,11 @@ import {
  * O nome de quem recebe não sai do navegador: a IA escreve a marca
  * {DESTINATARIO}, que a tela troca pelo nome digitado. Os rótulos de voz ({F2})
  * viram os nomes que a dona deu, como no resumo (shared/email-de-retorno.ts).
+ *
+ * As escolhas, o rascunho e o pedido à IA ficam na página
+ * (useGuardaDoEmailDeRetorno), e não aqui: a troca de aba desmonta este
+ * componente, e a resposta pode chegar com a aba Resumo fechada ou depois da
+ * volta a ela.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -41,8 +46,71 @@ export type EstadoDoEmailDeRetorno = {
   relacao: RelacaoDoEmail;
   tom: TomDoEmail;
   idioma: IdiomaDaReuniao;
-  rascunho: { assunto: string; corpo: string; semNome: number[] } | null;
+  /** semNome: as vozes citadas sem nome, como saem no texto ("Falante 2"; "Speaker 2" no e-mail em inglês). */
+  rascunho: { assunto: string; corpo: string; semNome: string[] } | null;
 };
+
+/**
+ * As escolhas e o rascunho, num registro que a página guarda e que só o
+ * EmailDeRetorno assina (useSyncExternalStore, como em lib/sessao-ocupada.ts):
+ * a página não se redesenha a cada tecla, o que refaria o destaque da
+ * transcrição inteira. Fica null até a dona mexer em algo.
+ */
+export type RegistroDoEmailDeRetorno = {
+  ler: () => EstadoDoEmailDeRetorno | null;
+  assinar: (aviso: () => void) => () => void;
+  mudar: (proximo: (anterior: EstadoDoEmailDeRetorno | null) => EstadoDoEmailDeRetorno) => void;
+};
+
+function criarRegistro(): RegistroDoEmailDeRetorno {
+  let atual: EstadoDoEmailDeRetorno | null = null;
+  const avisos = new Set<() => void>();
+  return {
+    ler: () => atual,
+    assinar: aviso => {
+      avisos.add(aviso);
+      return () => { avisos.delete(aviso); };
+    },
+    mudar: proximo => {
+      atual = proximo(atual);
+      avisos.forEach(aviso => aviso());
+    },
+  };
+}
+
+/**
+ * O que o e-mail de retorno guarda na página (MeetingDetail), que não desmonta
+ * na troca de aba: o registro e o pedido à IA. Com o pedido aqui, a dona que vai
+ * à Transcrição e volta antes da resposta (de 5 a 45 s) ainda vê o
+ * "escrevendo", com o botão desligado, e a resposta (ou o erro) chega à tela.
+ * Com o pedido no componente, a volta montava um pedido zerado: o botão ligava
+ * de novo e o rascunho pago se perdia.
+ */
+export function useGuardaDoEmailDeRetorno() {
+  const [registro] = useState(criarRegistro);
+  const rascunhar = trpc.meetings.rascunharEmailDeRetorno.useMutation();
+  return { registro, rascunhar };
+}
+export type GuardaDoEmailDeRetorno = ReturnType<typeof useGuardaDoEmailDeRetorno>;
+
+/**
+ * O texto da IA como a dona o vê: a marca vira o nome digitado, e cada rótulo
+ * de voz, o nome que ela deu. A voz sem nome sai como "Falante n" no idioma do
+ * E-MAIL, e não no da tela: o e-mail em inglês não leva palavra em português.
+ */
+function rascunhoNaTela(
+  dados: { assunto: string; corpo: string },
+  destinatario: string,
+  nomes: Readonly<Record<string, string>>,
+  tDoEmail: TranslateFn,
+): NonNullable<EstadoDoEmailDeRetorno["rascunho"]> {
+  const rotulo = (n: number) => tDoEmail("meetings.speakerLabel", { n });
+  return {
+    assunto: preencherRascunho(dados.assunto, destinatario, nomes, rotulo),
+    corpo: preencherRascunho(dados.corpo, destinatario, nomes, rotulo),
+    semNome: vozesSemNome(`${dados.assunto}\n${dados.corpo}`, nomes).map(rotulo),
+  };
+}
 
 /**
  * Acima disto o link mailto: corre o risco de chegar cortado ao app de e-mail
@@ -96,7 +164,7 @@ const LISTA = "rounded-lg border border-white/15 bg-[#211e1b] px-3 py-2 text-sm 
 const OPCAO = "bg-white text-[#322C26]";
 const ROTULO = "flex flex-col gap-1 text-sm text-white/75";
 
-export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, registro }: {
+export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, guarda }: {
   meetingId: string;
   /** Quantos itens do resumo a dona confirmou: sem nenhum, não há o que escrever. */
   confirmados: number;
@@ -104,52 +172,45 @@ export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, 
   idiomaDoResumo: string | null;
   /** Os nomes que a dona deu às vozes (nomesDosFalantes(meeting.speakerNames)). */
   nomes: Readonly<Record<string, string>>;
-  /** Guardado pela página: trocar de aba e voltar não perde o rascunho. */
-  registro?: { current: EstadoDoEmailDeRetorno | null };
+  /** Da página (useGuardaDoEmailDeRetorno): trocar de aba e voltar não perde o rascunho nem o pedido em curso. */
+  guarda: GuardaDoEmailDeRetorno;
 }) {
   const { t, i18n } = useTranslation();
-  const [estado, setEstado] = useState<EstadoDoEmailDeRetorno>(() => registro?.current ?? {
+  const { registro, rascunhar } = guarda;
+  const guardado = useSyncExternalStore(registro.assinar, registro.ler);
+  // Antes de a dona mexer em algo, o padrão: o e-mail no idioma do resumo (ou no da tela).
+  const estado: EstadoDoEmailDeRetorno = guardado ?? {
     destinatario: "",
     relacao: "external",
     tom: "professional",
     idioma: idiomaDaReuniao(idiomaDoResumo) ?? idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO,
     rascunho: null,
-  });
-  useEffect(() => {
-    if (registro) registro.current = estado;
-  }, [estado]);
-  const mudar = (parcial: Partial<EstadoDoEmailDeRetorno>) => setEstado(anterior => ({ ...anterior, ...parcial }));
+  };
+  const mudar = (parcial: Partial<EstadoDoEmailDeRetorno>) => registro.mudar(anterior => ({ ...(anterior ?? estado), ...parcial }));
 
-  // O nome digitado quando o pedido saiu: a resposta o põe no lugar da marca.
-  const nomeDoPedido = useRef("");
   const campoDoTexto = useRef<HTMLTextAreaElement>(null);
-  const rascunhar = trpc.meetings.rascunharEmailDeRetorno.useMutation({
-    onSuccess: dados => {
-      const rotulo = (n: number) => t("meetings.speakerLabel", { n });
-      const rascunho = {
-        assunto: preencherRascunho(dados.assunto, nomeDoPedido.current, nomes, rotulo),
-        corpo: preencherRascunho(dados.corpo, nomeDoPedido.current, nomes, rotulo),
-        semNome: vozesSemNome(`${dados.assunto}\n${dados.corpo}`, nomes),
-      };
-      // Também na página: a resposta que chega com a aba Resumo fechada fica para a volta.
-      if (registro?.current) registro.current = { ...registro.current, rascunho };
-      setEstado(anterior => ({ ...anterior, rascunho }));
-    },
-  });
-
   const nome = estado.destinatario.trim();
   const podeEscrever = confirmados > 0 && !!nome && !rascunhar.isPending;
   function escrever(evento: FormEvent) {
     evento.preventDefault();
     if (!podeEscrever) return;
-    nomeDoPedido.current = nome;
+    const noPedido = estado;
     const voz = vozDoDestinatario(nome, nomes);
-    rascunhar.mutate({ meetingId, relacao: estado.relacao, tom: estado.tom, idioma: estado.idioma, ...(voz ? { vozDoDestinatario: voz } : {}) });
+    rascunhar.mutate({ meetingId, relacao: estado.relacao, tom: estado.tom, idioma: estado.idioma, ...(voz ? { vozDoDestinatario: voz } : {}) }, {
+      // No mutate, e não no hook: o React Query só o chama para o último
+      // pedido. O nome digitado (que não vai ao servidor), os nomes das vozes e
+      // o idioma são os do pedido, e o rascunho vai ao registro da página, que a
+      // aba Resumo mostra mesmo que tenha sido fechada e aberta no meio.
+      onSuccess: dados => {
+        const rascunho = rascunhoNaTela(dados, nome, nomes, i18n.getFixedT(noPedido.idioma));
+        registro.mudar(anterior => ({ ...(anterior ?? noPedido), rascunho }));
+      },
+    });
   }
 
   const rascunho = estado.rascunho;
   const mudarRascunho = (parcial: { assunto?: string; corpo?: string }) =>
-    setEstado(anterior => (anterior.rascunho ? { ...anterior, rascunho: { ...anterior.rascunho, ...parcial } } : anterior));
+    registro.mudar(anterior => (anterior?.rascunho ? { ...anterior, rascunho: { ...anterior.rascunho, ...parcial } } : anterior ?? estado));
   const link = rascunho ? linkDoRascunho(rascunho.assunto, rascunho.corpo) : null;
 
   async function copiar(paraOEmail: boolean) {
@@ -218,8 +279,9 @@ export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, 
         <textarea ref={campoDoTexto} value={rascunho.corpo} onChange={evento => mudarRascunho({ corpo: evento.target.value })} rows={12} dir="auto"
           className={`${CAMPO} leading-6`}/>
       </label>
+      {/* Os rótulos como estão no texto: no idioma do e-mail, que pode não ser o da tela. */}
       {rascunho.semNome.length > 0 && <p className="text-xs text-amber-100/80">
-        {t("meetings.followUp.unnamedVoices", { vozes: rascunho.semNome.map(n => t("meetings.speakerLabel", { n })).join(", ") })}
+        {t("meetings.followUp.unnamedVoices", { vozes: rascunho.semNome.join(", ") })}
       </p>}
       {!link.completo && <p className="text-xs text-white/55">{t("meetings.followUp.tooLongForLink")}</p>}
       <div className="flex flex-wrap gap-2">

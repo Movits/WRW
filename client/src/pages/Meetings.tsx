@@ -11,7 +11,7 @@ import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
-import { EmailDeRetorno, type EstadoDoEmailDeRetorno } from "@/components/EmailDeRetorno";
+import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
@@ -577,9 +577,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // O item até o qual a aba Resumo já rolou: trocar de aba e voltar não rola de
   // novo até ele (como o ?t, que pula uma vez por link).
   const itemJaDestacado = useRef<string | null>(null);
-  // O rascunho do e-mail de retorno (H20) e as escolhas dele: trocar de aba e
-  // voltar não os perde. Não vai ao servidor; sair da reunião os descarta.
-  const rascunhoDoEmail = useRef<EstadoDoEmailDeRetorno | null>(null);
+  // O e-mail de retorno (H20): as escolhas, o rascunho e o pedido à IA ficam
+  // aqui, e não na aba Resumo, que desmonta na troca de aba. Quem volta antes
+  // da resposta ainda vê o "escrevendo", e a resposta acha a tela. O rascunho
+  // não vai ao servidor; sair da reunião o descarta.
+  const emailDeRetorno = useGuardaDoEmailDeRetorno();
   const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
   const [tab, setTab] = useState<"summary" | "transcript" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
@@ -785,7 +787,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}
-        nomes={nomesDosFalantes(meeting.speakerNames)} registro={rascunhoDoEmail}/>}
+        nomes={nomesDosFalantes(meeting.speakerNames)} guarda={emailDeRetorno}/>}
       <PergunteAReuniao meetingId={meetingId}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>

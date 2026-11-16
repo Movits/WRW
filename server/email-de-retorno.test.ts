@@ -176,9 +176,13 @@ describe("rascunharEmailDeRetorno — o que volta da IA é conferido", () => {
     expect(cortado).toBe("a".repeat(ASSUNTO_DO_EMAIL_MAX - 2));
   });
 
-  it("um rótulo de voz que não está nos itens (um nome inventado) derruba o rascunho: SERVICE_UNAVAILABLE, e o log não leva o texto", async () => {
+  // No assunto também: ele chega à dona com o "Falante 7" de uma pessoa que não está nos itens.
+  it.each([
+    ["no texto", { ...BOA, corpo: "Olá, {DESTINATARIO}. {F7} vai cuidar disso." }],
+    ["no assunto", { ...BOA, assunto: "Retorno: {F7} vai cuidar disso" }],
+  ])("um rótulo de voz que não está nos itens (um nome inventado) %s derruba o rascunho: SERVICE_UNAVAILABLE, e o log não leva o texto", async (_onde, resposta) => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    invokeLLM.mockResolvedValue(respostaDaIA({ ...BOA, corpo: "Olá, {DESTINATARIO}. {F7} vai cuidar disso." }));
+    invokeLLM.mockResolvedValue(respostaDaIA(resposta));
     await expect(rascunharEmailDeRetorno("dona-1", ID, PEDIDO)).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_IA_INDISPONIVEL });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("citou uma voz que não está nos itens"));
     expect(JSON.stringify(log.mock.calls)).not.toContain("cuidar disso");

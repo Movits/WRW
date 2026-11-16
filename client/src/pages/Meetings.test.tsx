@@ -1008,7 +1008,26 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     fireEvent.click(within(secao).getByRole("button", { name: /Escrever rascunho/ }));
     expect(duble.mutacoes.rascunharEmailDeRetorno.mutate).toHaveBeenCalledWith({
       meetingId: REUNIAO.id, relacao: "external", tom: "professional", idioma: "pt-BR", vozDoDestinatario: "F1",
-    });
+    }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+  });
+
+  it("o e-mail de retorno é guardado pela página: a dona vai à Transcrição, volta antes da resposta, e a resposta aparece no Resumo", () => {
+    duble.resumoGuardado.mockReturnValue(resumoPronto());
+    abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: TRANSCRICAO });
+    const secao = () => screen.getByRole("region", { name: "E-mail de retorno" });
+    fireEvent.change(within(secao()).getByRole("combobox", { name: "Para quem?" }), { target: { value: "Carla" } });
+    fireEvent.click(within(secao()).getByRole("button", { name: /Escrever rascunho/ }));
+    const [, opcoes] = duble.mutacoes.rascunharEmailDeRetorno.mutate.mock.calls[0];
+
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.queryByRole("region", { name: "E-mail de retorno" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Resumo$/ }));
+    // A resposta chega depois da volta: o React Query chama o onSuccess do pedido.
+    act(() => opcoes.onSuccess({ assunto: "Retorno para {DESTINATARIO}", corpo: "Olá, {DESTINATARIO}. {F1} manda a minuta." }));
+
+    expect(within(secao()).getByRole("textbox", { name: "Assunto" })).toHaveValue("Retorno para Carla");
+    expect(within(secao()).getByRole("textbox", { name: "Texto do e-mail" })).toHaveValue("Olá, Carla. Ana manda a minuta.");
+    expect(within(secao()).getByRole("combobox", { name: "Para quem?" })).toHaveValue("Carla");
   });
 
   it("sem item confirmado, o e-mail de retorno pede para confirmar antes", () => {
