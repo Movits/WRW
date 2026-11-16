@@ -40,14 +40,15 @@ afterEach(async () => {
 });
 
 describe("AppHeader — o menu global fala o idioma da usuária", () => {
-  it("getMenuItems em inglês: 8 itens, nenhum rótulo ou descrição em português", () => {
+  it("getMenuItems em inglês: 9 itens, nenhum rótulo ou descrição em português", () => {
     const itens = getMenuItems(i18n.getFixedT("en"));
     // Reuniões em primeiro: o gravador é a primeira tela do app (30/10/2026).
+    // A agenda (H16a) logo depois: é dela que sai o "Gravar agora".
     expect(itens.map(i => i.href)).toEqual([
-      "/meetings", "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/memory", "/intelligent-matches",
+      "/meetings", "/agenda", "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/memory", "/intelligent-matches",
     ]);
     expect(itens.map(i => i.label)).toEqual([
-      "Meetings", "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "AI Memory", "Smart Connections",
+      "Meetings", "Schedule", "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "AI Memory", "Smart Connections",
     ]);
     for (const item of itens) {
       for (const pt of PORTUGUES) {
