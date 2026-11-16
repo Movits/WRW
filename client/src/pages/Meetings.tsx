@@ -751,7 +751,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
-    {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}/>}
+    {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
+      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que um
@@ -814,7 +815,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             ? <>
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
               <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
-                nomes={nomesDosFalantes(meeting.speakerNames)} aoNomear={async (falante, nome) => {
+                nomes={nomesDosFalantes(meeting.speakerNames)} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
                     await utils.meetings.get.invalidate({ meetingId });

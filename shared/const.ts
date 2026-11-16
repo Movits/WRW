@@ -79,6 +79,15 @@ export const NOME_DO_FALANTE_MAX = 60;
 /** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */
 export const FORMATO_DO_FALANTE = /^F[1-9][0-9]?$/;
 
+/**
+ * A versão da confirmação que a dona marca ao ligar o link aberto da reunião
+ * (H3b, decisão do Roberto de 16/11/2026). A 2 é a caixa que fala dos nomes que
+ * ela der às vozes: só o link ligado com ela mostra esses nomes. A 1 é a caixa
+ * de 12/11, que não falava deles, e vale também para a aba aberta antes do
+ * deploy, que não manda versão nenhuma (server/link-aberto-da-reuniao.ts).
+ */
+export const VERSAO_DA_AUTORIZACAO_COM_NOMES = 2;
+
 /** Os nomes guardados, só os pares válidos (a coluna é JSON livre). */
 export function nomesDosFalantes(bruto: unknown): Record<string, string> {
   if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};

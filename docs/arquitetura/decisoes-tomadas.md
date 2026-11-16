@@ -290,6 +290,8 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   aceita token nos rótulos.
 - **Em aberto:** mostrar os nomes no link é decisão de produto, a confirmar com a Glenda
   (#204).
+- **Revista em 16/11:** o Roberto decidiu que o link mostra os nomes, com a confirmação
+  nova da dona (ver 16/11, abaixo).
 - **Onde:** a coluna `meetings.speaker_names` (migração 0016) e `nomearFalante` em
   `server/meeting-service.ts`. A troca do token na tela vem com `shared/vozes-no-texto.ts`,
   na #208 (aberta).
@@ -449,6 +451,51 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   - no modo Teste, o token vence em 7 dias. Para sair dele, a Google exige uma Política de
     Privacidade real (Cris) e um vídeo.
 - **Onde:** ainda não está no código.
+
+## 16/11/2026 — os nomes das vozes aparecem no link aberto (H3b)
+
+- **Quem:** Roberto, 16/11, no chat: "se alguém atribuiu as vozes numa reunião e
+  compartilhar com alguém o link, como tem no HiNoter, deveria sim estar o nome das vozes
+  que foram atribuídas". O jeito de fazer (a versão da confirmação, o link antigo seguir
+  com "Falante n" e o texto novo da caixa) foi proposto no desenho da H3b e vale enquanto
+  o Roberto não o vetar.
+- **O quê:** quem recebe o link vê os nomes que a dona deu às vozes: no resumo, na
+  transcrição (as falas e o tempo de fala) e na resposta do "Pergunte à reunião". A voz
+  sem nome segue "Falante n". `reuniaoAberta.ver` ganha um campo só, `vozes`
+  (`{F1: "Ana"}`), lido de `meetings.speaker_names` por `nomesDosFalantes`: só as chaves
+  F1 a F99, cada nome aparado e cortado em 60 caracteres. Nada mais da dona sai pelo
+  link: nem o nome, nem o e-mail, nem a conta.
+- **A confirmação nova:** a caixa que a dona marca ao ligar o link passa a falar dos
+  nomes: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram que quem
+  receber o link ouça a gravação e leia a transcrição, com os nomes que eu der às vozes."
+  O "que eu der" cobre o nome dado depois de ligar o link, e o campo do nome da voz avisa
+  que ele aparece também para quem tem o link. A tela manda a versão 2, que vai para os
+  `details` da linha `MEETING_OPEN_LINK_ON`, na mesma transação que liga o link, junto da
+  frase, do idioma e do hash. A aba aberta antes do deploy não manda versão e grava 1. O
+  link mostra os nomes só quando a última linha `MEETING_OPEN_LINK_ON` da reunião tem a
+  versão 2.
+- **Link ligado antes:** segue com "Falante n" até a dona desligar e ligar de novo,
+  porque a confirmação daquele dia não falava dos nomes. O painel de compartilhar avisa a
+  dona quando há nomes e o link é da confirmação antiga (`meetings.get` devolve
+  `linkMostraNomes`). O campo do nome da voz também avisa: quem tem esse link não vê o
+  nome, e para mostrá-lo a dona desliga o link e compartilha de novo.
+- **Os nomes não vão à IA:** a pergunta e o resumo seguem com o rótulo `{Fn}`, e a página
+  do link troca o rótulo pelo nome. Perguntar pelo nome ("o que a Ana decidiu?") ainda
+  não funciona: a IA não sabe quem é a Ana. Fica para a H6b.
+- **Antes:** 14/11, "os nomes das vozes ficam fora do link aberto" (#204), com a pergunta
+  em aberto para a Glenda.
+- **Exceção a uma regra:** o nome dado à voz é a única coluna pessoal que sai pelo link,
+  sem conta, coberta pela confirmação nova da dona. O nome da dona continua fora; se ela
+  der à própria voz o próprio nome, ele sai como nome de voz, por escolha dela.
+- **Com a Cris:** o texto novo da caixa (e a tradução dele nos outros 9 idiomas) e o ponto
+  4 do rascunho do aviso de gravação, que passa a dizer que os nomes dados às vozes
+  aparecem também pelo link. O aviso muda na versão nova, com a H6b.
+- **Onde:** `linkMostraOsNomes` em `server/autorizacao-do-link-aberto.ts`;
+  `ligarLinkAberto` e `verReuniaoPeloLink` em `server/link-aberto-da-reuniao.ts`;
+  `meetings.ligarLinkAberto` em `server/routers/meetings.ts`; `getPrivateMeeting` em
+  `server/meeting-service.ts`; `VERSAO_DA_AUTORIZACAO_COM_NOMES` em `shared/const.ts`; na
+  tela, `CompartilharReuniao.tsx`, `TranscricaoPorFalante.tsx` e `ReuniaoAberta.tsx`. Sem
+  migração.
 
 ---
 

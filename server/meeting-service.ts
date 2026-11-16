@@ -14,6 +14,7 @@ import {
 import { CODIGO_ERRO_INTERROMPIDO, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
@@ -1199,7 +1200,9 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
   audioPipeline: meetings.audioPipeline,
   expectedSlices: meetings.expectedSlices,
-  // Os nomes das vozes (H3): só a dona lê esta lista e este detalhe.
+  // Os nomes das vozes (H3). Esta lista e este detalhe são só da dona; o link
+  // aberto lê os nomes por outra consulta, e só quando foi ligado com a
+  // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
   speakerNames: meetings.speakerNames,
 };
 
@@ -1423,8 +1426,13 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const emPartes = meeting.audioPipeline === "slices";
   const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt, emPartes);
   const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
+  // Se quem tem o link vê os nomes das vozes (H3b): só com o link ligado com a
+  // confirmação que fala deles. O painel de compartilhar avisa a dona quando há
+  // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
+  // sai também pelo link. Sem link, falso, sem consultar a auditoria.
+  const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError) },
+    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
     transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, andamento,
   };
 }

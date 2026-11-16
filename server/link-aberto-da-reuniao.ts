@@ -1,8 +1,10 @@
 import crypto from "crypto";
 import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
+import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { gravacaoParaOuvir } from "./meeting-service";
@@ -19,7 +21,9 @@ import { storageGetSignedUrl } from "./storage";
  * O que o link NÃO abre: o que é da rede particular da dona (sugestões de
  * contato, entidades, pendências do Meu Network Inteligente), o nome dela e
  * qualquer mudança (excluir, reprocessar, decidir). As consultas daqui escolhem
- * as colunas uma a uma: privacidade é regra de consulta, não de tela.
+ * as colunas uma a uma: privacidade é regra de consulta, não de tela. Os nomes
+ * que a dona deu às vozes saem por decisão do Roberto de 16/11/2026 (H3b), e só
+ * quando ela ligou o link com a confirmação que fala deles (verReuniaoPeloLink).
  *
  * O token é o segredo: 24 bytes aleatórios (192 bits) em base64url. Fica em
  * texto no banco, e não em hash, porque a dona copia o link de novo depois; quem
@@ -55,8 +59,9 @@ export function enderecoDoAudioDoLink(token: string): string {
   return `${ROTA_DO_AUDIO_DO_LINK}/${token}/audio`;
 }
 
-/** Ação gravada em `audit_logs` a cada vez que a dona liga o link, com a confirmação dela. */
-export const ACAO_LINK_LIGADO = "MEETING_OPEN_LINK_ON";
+// A ação mora em autorizacao-do-link-aberto.ts, que também lê a confirmação;
+// sai daqui também, para quem já a importava deste módulo.
+export { ACAO_LINK_LIGADO };
 
 /**
  * Liga o link da reunião e devolve o token, ou devolve o que já está ligado.
@@ -72,11 +77,19 @@ export const ACAO_LINK_LIGADO = "MEETING_OPEN_LINK_ON";
  * aceite do NDA da Deal Room, a linha guarda também o texto que a dona viu e o
  * idioma dele, com o hash: a frase da caixa vai mudar (a Cris revisa), e a
  * prova de um link antigo tem de dizer o que foi confirmado naquele dia.
+ *
+ * A linha guarda ainda a versão da confirmação (H3b): 2 quando a tela manda a
+ * caixa que fala dos nomes das vozes, e 1 quando não manda nada, que é a aba
+ * aberta antes do deploy, com a frase antiga. Só a versão 2 deixa o link
+ * mostrar os nomes (linkMostraOsNomes, em autorizacao-do-link-aberto.ts).
  */
 export async function ligarLinkAberto(
   ownerId: string,
   meetingId: string,
-  prova: { userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string },
+  prova: {
+    userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string;
+    versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES;
+  },
 ): Promise<string> {
   const db = await exigirDb();
   return db.transaction(async tx => {
@@ -96,6 +109,8 @@ export async function ligarLinkAberto(
       resourceId: meetingId,
       details: {
         autorizacaoDasPessoas: true,
+        // Ausente vale 1: a aba velha, com a frase antiga, nunca grava "2".
+        versaoDaAutorizacao: prova.versaoDaAutorizacao === VERSAO_DA_AUTORIZACAO_COM_NOMES ? VERSAO_DA_AUTORIZACAO_COM_NOMES : 1,
         idioma: prova.idioma,
         textoExibido: prova.textoExibido,
         textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
@@ -169,22 +184,40 @@ export async function exigirReuniaoDoLink(token: string) {
 }
 
 /**
- * O que a página do link mostra: título, data, transcrição e gravação. O
- * endereço do áudio é o da rota do link, nunca o do proxy da dona
- * (/manus-storage/, que pede a sessão dela), e nada aqui traz o id da dona, o
- * da reunião ou a chave do bucket (a rota do áudio, abaixo, revela o caminho
- * no destino do 307).
+ * Os nomes que a dona deu às vozes, para a página do link (H3b, decisão do
+ * Roberto de 16/11/2026): só se o link foi ligado com a confirmação que fala
+ * deles; senão, nenhum, e a página mostra "Falante n". Saem por
+ * nomesDosFalantes, como na tela da dona: só as chaves F1 a F99, cada nome
+ * aparado e cortado em 60 caracteres, e o par inválido da coluna (JSON livre)
+ * cai. Nada além do mapa: nem o nome da dona, nem conta, nem id.
+ */
+async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { id: string; ownerId: string }): Promise<Record<string, string>> {
+  if (!(await linkMostraOsNomes(db, reuniao.id))) return {};
+  const [linha] = await db.select({ speakerNames: meetings.speakerNames }).from(meetings)
+    .where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId)))
+    .limit(1);
+  return nomesDosFalantes(linha?.speakerNames);
+}
+
+/**
+ * O que a página do link mostra: título, data, transcrição, gravação e os
+ * nomes das vozes. O endereço do áudio é o da rota do link, nunca o do proxy
+ * da dona (/manus-storage/, que pede a sessão dela), e nada aqui traz o id da
+ * dona, o da reunião ou a chave do bucket (a rota do áudio, abaixo, revela o
+ * caminho no destino do 307).
  */
 export async function verReuniaoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
   // As falas por falante (D1) vão junto: são o mesmo texto da transcrição,
-  // separado por voz e tempo, sem nome de ninguém (o rótulo é "Falante n").
+  // separado por voz e tempo, com o rótulo F1, F2... A página troca o rótulo
+  // pelo nome do `vozes`, ou por "Falante n".
   const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
   const { recording, recordingExpired } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, reuniao.createdAt, reuniao.emPartes);
+  const vozes = await vozesDoLink(db, reuniao);
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
@@ -202,6 +235,9 @@ export async function verReuniaoPeloLink(token: string) {
         }
       : null,
     gravacaoExpirada: recordingExpired,
+    // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
+    // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
+    vozes,
   };
 }
 

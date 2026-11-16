@@ -1,4 +1,6 @@
+import { DrizzleQueryError } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
+import { auditLogs, meetings } from "../drizzle/schema";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
@@ -118,9 +120,90 @@ describe("ligar: sem a linha de auditoria, o link não liga", () => {
     }
     expect(passos).toEqual(["begin", "update", "select", "insert", "commit"]);
     const { createHash } = await import("node:crypto");
+    // Sem a versão (a aba aberta antes da H3b, com a frase antiga), a linha leva a 1.
     expect(inserido.valores?.details).toEqual({
-      autorizacaoDasPessoas: true, idioma: "pt-BR", textoExibido: "Confirmo.",
+      autorizacaoDasPessoas: true, versaoDaAutorizacao: 1, idioma: "pt-BR", textoExibido: "Confirmo.",
       textoHash: createHash("sha256").update("Confirmo.").digest("hex"),
     });
+  });
+
+  it("a caixa que fala dos nomes das vozes manda a versão 2, e a linha a guarda junto da frase (H3b)", async () => {
+    const { banco, inserido } = transacaoDublada(async () => undefined);
+    consultasAoBanco.banco = banco;
+    try {
+      await expect(ligarLinkAberto("dona", "reuniao", { ...PROVA, versaoDaAutorizacao: 2 })).resolves.toBe("A".repeat(32));
+    } finally {
+      consultasAoBanco.banco = null;
+    }
+    expect(inserido.valores?.details).toMatchObject({ autorizacaoDasPessoas: true, versaoDaAutorizacao: 2, textoExibido: "Confirmo." });
+  });
+
+  it("versão fora da lista não vira 2: só a caixa nova grava a versão que mostra os nomes", async () => {
+    const { banco, inserido } = transacaoDublada(async () => undefined);
+    consultasAoBanco.banco = banco;
+    try {
+      await ligarLinkAberto("dona", "reuniao", { ...PROVA, versaoDaAutorizacao: 3 as never });
+    } finally {
+      consultasAoBanco.banco = null;
+    }
+    expect(inserido.valores?.details).toMatchObject({ versaoDaAutorizacao: 1 });
+  });
+});
+
+/**
+ * A leitura da confirmação da dona (H3b) é a consulta mais pesada da página do
+ * link (ORDER BY id DESC em audit_logs). Se o banco cai nela, e só nela, ver
+ * sobe o erro: um `vozes: {}` no lugar mostraria "Falante n" a quem tem o link,
+ * e ninguém veria a queda. Aqui cada tabela responde o que o teste combina, e
+ * as outras não têm linha; o caminho feliz contra o MariaDB está em
+ * link-aberto-da-reuniao.integracao.test.ts.
+ */
+describe("ver pelo link: a leitura da confirmação da dona cai (H3b)", () => {
+  const TOKEN = "A".repeat(32);
+  const REUNIAO_DO_LINK = {
+    id: "reuniao", ownerId: "dona", title: "Reunião", status: "ready", createdAt: Date.now(), shareToken: TOKEN,
+    audioPipeline: "single", contaAtiva: true, speakerNames: { F1: "Ana" },
+  };
+
+  /** A cadeia do drizzle (join, where, orderBy, limit ou o await direto) termina na resposta da tabela. */
+  function bancoPorTabela(respostas: Map<unknown, () => Promise<unknown[]>>) {
+    const consulta = (tabela: unknown) => {
+      const responder = () => (respostas.get(tabela) ?? (async () => []))();
+      const elo: Record<string, unknown> = {};
+      Object.assign(elo, {
+        innerJoin: () => elo,
+        where: () => elo,
+        orderBy: () => elo,
+        limit: () => responder(),
+        then: (resolver: (linhas: unknown[]) => unknown, rejeitar: (motivo: unknown) => unknown) => responder().then(resolver, rejeitar),
+      });
+      return elo;
+    };
+    return { select: () => ({ from: (tabela: unknown) => consulta(tabela) }) };
+  }
+
+  async function verCom(auditoria: () => Promise<unknown[]>) {
+    consultasAoBanco.banco = bancoPorTabela(new Map<unknown, () => Promise<unknown[]>>([
+      [meetings, async () => [REUNIAO_DO_LINK]],
+      [auditLogs, auditoria],
+    ]));
+    try {
+      return await verReuniaoPeloLink(TOKEN);
+    } finally {
+      consultasAoBanco.banco = null;
+    }
+  }
+
+  it("com a confirmação que fala dos nomes, o mesmo banco dublado traz os nomes: a leitura chega à auditoria", async () => {
+    await expect(verCom(async () => [{ details: { autorizacaoDasPessoas: true, versaoDaAutorizacao: 2 } }])).resolves.toMatchObject({ vozes: { F1: "Ana" } });
+  });
+
+  it("o banco cai na leitura da auditoria: ver sobe o erro do driver, e não devolve a reunião com vozes vazio", async () => {
+    const queda = new DrizzleQueryError(
+      "select `details` from `audit_logs` where (`audit_logs`.`action` = ? and `audit_logs`.`resourceId` = ?) order by `audit_logs`.`id` desc limit ?",
+      ["MEETING_OPEN_LINK_ON", "reuniao", 1],
+      Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:3306"), { code: "ECONNREFUSED" }),
+    );
+    await expect(verCom(async () => { throw queda; })).rejects.toBe(queda);
   });
 });

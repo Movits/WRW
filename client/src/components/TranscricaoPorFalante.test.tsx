@@ -88,4 +88,25 @@ describe("TranscricaoPorFalante — nomes das vozes (H3)", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
     expect(screen.getByRole("textbox", { name: "Nome do falante 1" })).toHaveValue("Ana");
   });
+
+  it("com o link que mostra os nomes ligado, o campo do nome avisa que o nome aparece também para quem tem o link (H3b)", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} aoNomear={vi.fn(async () => undefined)} nomeNoLink="aparece" />);
+    fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[0]);
+    expect(screen.getByRole("textbox", { name: "Nome do falante 1" })).toHaveAccessibleDescription("Este nome aparece também para quem tem o link da reunião.");
+  });
+
+  it("com o link da confirmação antiga, o campo do nome diz que quem tem o link não vê o nome, e como mostrá-lo (H3b)", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} aoNomear={vi.fn(async () => undefined)} nomeNoLink="naoAparece" />);
+    fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[0]);
+    expect(screen.getByRole("textbox", { name: "Nome do falante 1" }))
+      .toHaveAccessibleDescription("Quem tem o link da reunião não vê este nome. Para mostrá-lo, desligue o link e compartilhe de novo.");
+    expect(screen.queryByText(/aparece também para quem tem o link/)).not.toBeInTheDocument();
+  });
+
+  it("sem o link, o campo não tem dica nenhuma", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} aoNomear={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[0]);
+    expect(screen.getByRole("textbox", { name: "Nome do falante 1" })).not.toHaveAccessibleDescription();
+    expect(screen.queryByText(/quem tem o link/)).not.toBeInTheDocument();
+  });
 });

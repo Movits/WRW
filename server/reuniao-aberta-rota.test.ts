@@ -113,8 +113,8 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("reuniaoAberta — público, sem sessão", () => {
-  it("ver devolve o que o serviço monta para o link", async () => {
-    const vista = { titulo: "Reunião de teste", criadaEm: 1, transcricao: null, gravacao: null, gravacaoExpirada: false };
+  it("ver devolve o que o serviço monta para o link, com os nomes das vozes (H3b)", async () => {
+    const vista = { titulo: "Reunião de teste", criadaEm: 1, transcricao: null, gravacao: null, gravacaoExpirada: false, vozes: { F1: "Ana" } };
     verReuniaoPeloLink.mockResolvedValue(vista);
     await expect(semSessao().reuniaoAberta.ver({ token: TOKEN })).resolves.toEqual(vista);
     expect(verReuniaoPeloLink).toHaveBeenCalledWith(TOKEN);
@@ -280,8 +280,23 @@ describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com audi
     expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, {
       userId: 7, ipAddress: "198.51.100.7", userAgent: "Navegador de teste", idioma: "de", textoExibido: LIGAR.textoExibido,
     });
+    // A aba de antes da H3b não manda a versão: o serviço grava 1.
+    expect(ligarLinkAberto.mock.calls[0][2].versaoDaAutorizacao).toBeUndefined();
     // Não há um segundo registro, que pudesse sumir em silêncio depois de o link ligar.
     expect(createAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("a caixa que fala dos nomes das vozes manda a versão 2, e ela vai ao serviço com a prova (H3b)", async () => {
+    ligarLinkAberto.mockResolvedValue(TOKEN);
+    await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, versaoDaAutorizacao: 2 })).resolves.toEqual({ token: TOKEN });
+    expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, expect.objectContaining({ versaoDaAutorizacao: 2, textoExibido: LIGAR.textoExibido }));
+  });
+
+  it("versão que não é a 2 é BAD_REQUEST: a tela não inventa versão, e a aba velha não manda nenhuma", async () => {
+    for (const versaoDaAutorizacao of [1, 3, "2", null]) {
+      await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, versaoDaAutorizacao } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect(ligarLinkAberto).not.toHaveBeenCalled();
   });
 
   it("recusado pelo serviço, sai com o código que a tela traduz", async () => {

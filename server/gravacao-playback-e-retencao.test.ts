@@ -1,4 +1,4 @@
-import { getTableColumns } from "drizzle-orm";
+import { DrizzleQueryError, getTableColumns } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +73,24 @@ const consulta = (linhas: Record<string, unknown>[]) => ({
 });
 
 /**
+ * A leitura de uma tabela em que o banco cai: aguardar direto, o limit e o
+ * orderBy encadeado rejeitam com o erro, como o driver faria. Cada teste diz a
+ * tabela em `falhasNaLeitura`; as outras seguem respondendo.
+ */
+const falhasNaLeitura = new Map<unknown, unknown>();
+const consultaQueFalha = (erro: unknown): Record<string, unknown> => ({
+  limit: async () => { throw erro; },
+  orderBy: () => consultaQueFalha(erro),
+  then: (resolver: (valor: never) => unknown, rejeitar: (motivo: unknown) => unknown) => Promise.reject(erro).then(resolver, rejeitar),
+});
+/** O erro do driver como ele chega de verdade: DrizzleQueryError com a causa ECONNREFUSED. */
+const quedaDoBanco = () => new DrizzleQueryError(
+  "select `details` from `audit_logs` where (`audit_logs`.`action` = ? and `audit_logs`.`resourceId` = ?) order by `audit_logs`.`id` desc limit ?",
+  ["MEETING_OPEN_LINK_ON", "reuniao-1", 1],
+  Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:3306"), { code: "ECONNREFUSED" }),
+);
+
+/**
  * select(projeção) devolve só as colunas pedidas, com o nome dado na projeção,
  * como o banco faria; select() devolve a linha inteira. Assim o que a lista e o
  * detalhe escolhem se prova pelo que chega à tela, e não pela forma da chamada.
@@ -92,6 +110,7 @@ const fakeDb = {
     from: (tabela: unknown) => ({
       where: (condicao?: SQL) => {
         leituras.push({ tabela, ...renderizar(condicao) });
+        if (falhasNaLeitura.has(tabela)) return consultaQueFalha(falhasNaLeitura.get(tabela));
         return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
       },
     }),
@@ -132,6 +151,7 @@ const gravacaoCom = (expiresAt: number) => ({
 
 beforeEach(() => {
   tabelas.clear();
+  falhasNaLeitura.clear();
   delecoes.length = 0;
   leituras.length = 0;
   ordenacoes.length = 0;
@@ -237,7 +257,7 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "consentAt", "language", "processingError", "createdAt", "updatedAt",
     // Como o áudio chegou e quantas partes a gravação teve (D1): o andamento na tela.
     "audioPipeline", "expectedSlices",
-    // Os nomes das vozes (H3): só a dona lê a lista e o detalhe.
+    // Os nomes das vozes (H3): a lista e o detalhe são só da dona.
     "speakerNames",
   ];
   const linhaCompleta = () => ({
@@ -263,13 +283,46 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
-  it("o detalhe também, mais o token do link aberto, que só a dona recebe", async () => {
+  it("o detalhe também, mais o token do link aberto, que só a dona recebe, e se o link mostra os nomes das vozes (H3b)", async () => {
     tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken"].sort());
-    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto" });
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes"].sort());
+    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false });
+  });
+
+  it("com o link ligado, linkMostraNomes vem da última confirmação da dona na auditoria: só a versão 2 mostra os nomes (H3b)", async () => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, shareToken: "token-do-link-aberto" }]);
+    tabelas.set(schema.auditLogs, [{ details: { autorizacaoDasPessoas: true, versaoDaAutorizacao: 2 } }]);
+    expect((await servico.getPrivateMeeting("dona-1", "reuniao-1"))?.meeting.linkMostraNomes).toBe(true);
+    // A leitura é a da ação de ligar o link daquela reunião, depois de a reunião ser da dona.
+    const lidasNaAuditoria = leituras.filter(operacao => operacao.tabela === schema.auditLogs).map(predicadoDe);
+    expect(lidasNaAuditoria).toEqual([{ sql: "(`audit_logs`.`action` = ? and `audit_logs`.`resourceId` = ?)", params: ["MEETING_OPEN_LINK_ON", "reuniao-1"] }]);
+
+    // A linha de antes da H3b, sem a versão, vale 1.
+    tabelas.set(schema.auditLogs, [{ details: { autorizacaoDasPessoas: true } }]);
+    expect((await servico.getPrivateMeeting("dona-1", "reuniao-1"))?.meeting.linkMostraNomes).toBe(false);
+  });
+
+  // Ao contrário do storage, que não derruba a leitura da reunião (abaixo, na
+  // retenção), a auditoria fora do ar derruba: um linkMostraNomes falso no lugar
+  // do erro faria o painel mandar a dona desligar o link e compartilhar de novo,
+  // trocando sem motivo o endereço que ela já mandou.
+  it("o banco cai na leitura da auditoria: o detalhe sobe o erro, e não diz à dona que o link não mostra os nomes (H3b)", async () => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, shareToken: "token-do-link-aberto" }]);
+    tabelas.set(schema.auditLogs, [{ details: { autorizacaoDasPessoas: true, versaoDaAutorizacao: 2 } }]);
+    const queda = quedaDoBanco();
+    falhasNaLeitura.set(schema.auditLogs, queda);
+    await expect(servico.getPrivateMeeting("dona-1", "reuniao-1")).rejects.toBe(queda);
+    expect(leituras.some(operacao => operacao.tabela === schema.auditLogs)).toBe(true);
+  });
+
+  it("sem link, linkMostraNomes é falso e a auditoria nem é lida", async () => {
+    tabelas.set(schema.auditLogs, [{ details: { versaoDaAutorizacao: 2 } }]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.meeting.linkMostraNomes).toBe(false);
+    expect(leituras.some(operacao => operacao.tabela === schema.auditLogs)).toBe(false);
   });
 
   it("a lista não leva o token do link aberto", async () => {

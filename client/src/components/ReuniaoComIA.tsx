@@ -17,8 +17,9 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  *
  * Serve também à página do link aberto (pages/ReuniaoAberta.tsx): a dona pede
  * pelo id da reunião, e quem abriu o link, pelo token dele. As vozes chegam
- * como rótulo ({F2}): para a dona viram o nome que ela deu (ou "Falante 2"),
- * e no link são sempre "Falante 2", porque o link não leva os nomes. O trecho,
+ * como rótulo ({F2}) e viram o nome que a dona deu (ou "Falante 2"), também no
+ * link, que recebe os nomes só quando foi ligado com a confirmação que fala
+ * deles (H3b). Os nomes só trocam o rótulo na tela: nunca vão à IA. O trecho,
  * o tempo, o aviso de conferir e as frases de erro da IA servem também ao
  * resumo guardado (components/ResumoGuardado.tsx).
  */
@@ -33,8 +34,13 @@ type FonteDaReuniao =
       nomes?: Readonly<Record<string, string>>;
       aoIrPara?: (segundo: number) => void;
     }
-  // O link não recebe os nomes das vozes: não há como passá-los aqui.
-  | { token: string; meetingId?: undefined; aoIrPara?: (segundo: number) => void };
+  | {
+      token: string;
+      meetingId?: undefined;
+      /** Os nomes das vozes que o link recebeu (o `vozes` de reuniaoAberta.ver, H3b). */
+      nomes?: Readonly<Record<string, string>>;
+      aoIrPara?: (segundo: number) => void;
+    };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
 function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
@@ -114,8 +120,8 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
   const resposta = perguntar.isPending ? undefined : perguntar.data;
   const citacoes = resposta?.respondida ? citacoesDaResposta(resposta) : [];
   const podePerguntar = pergunta.trim().length >= 2 && !perguntar.isPending;
-  // O link nunca mostra nomes: as vozes são sempre "Falante n".
-  const nomes = fonte.token === undefined ? fonte.nomes ?? {} : {};
+  // Para a dona, os nomes que ela deu; pelo link, os que o servidor mandou.
+  const nomes = fonte.nomes ?? {};
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
   const idDasCitacoes = useId();
 

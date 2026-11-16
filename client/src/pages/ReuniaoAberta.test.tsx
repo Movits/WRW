@@ -12,8 +12,9 @@ import ReuniaoAberta from "./ReuniaoAberta";
  * guardado e o "Pergunte à reunião" viram marcadores que mostram o que
  * receberam (o comportamento deles está em components/ResumoGuardado.test.tsx e
  * components/ReuniaoComIA.test.tsx). Um teste monta o "Pergunte à reunião" de
- * verdade, para provar o elo da página com ele: as vozes como "Falante n" e o
- * "▶" que leva o player da barra ao ponto.
+ * verdade, para provar o elo da página com ele: as vozes com os nomes que o
+ * link recebeu (H3b), "Falante n" na voz sem nome, e o "▶" que leva o player
+ * da barra ao ponto.
  */
 
 type OpcoesDaConsulta = {
@@ -32,8 +33,9 @@ const duble = vi.hoisted(() => ({
   resumoGuardado: vi.fn(),
   opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
-  // As props que o "Pergunte à reunião" recebeu da página, na última vez.
+  // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
   propsDaPergunta: null as Record<string, unknown> | null,
+  propsDoResumo: null as Record<string, unknown> | null,
   // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
   // resposta da pergunta pelo link daqui (o `data` da mutação).
   perguntaDeVerdade: false,
@@ -78,9 +80,11 @@ vi.mock("@/components/ReuniaoComIA", async importOriginal => {
 // O marcador do resumo mostra o token e o estado que recebeu, e o "▶" dele
 // chama o aoIrPara da página com 610 s (10:10).
 vi.mock("@/components/ResumoGuardado", () => ({
-  ResumoGuardado: ({ token, consulta, aoIrPara }: { token: string; consulta: { data?: { estado: string } }; aoIrPara?: (segundo: number) => void }) => (
-    <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>
-  ),
+  ResumoGuardado: (props: { token: string; consulta: { data?: { estado: string } }; nomes?: Record<string, string>; aoIrPara?: (segundo: number) => void }) => {
+    duble.propsDoResumo = props;
+    const { token, consulta, aoIrPara } = props;
+    return <div data-testid="resumo">{token} {consulta.data?.estado}{aoIrPara && <button type="button" onClick={() => aoIrPara(610)}>▶ do resumo</button>}</div>;
+  },
 }));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
@@ -116,6 +120,7 @@ beforeEach(() => {
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
   duble.propsDaPergunta = null;
+  duble.propsDoResumo = null;
   duble.perguntaDeVerdade = false;
   duble.respostaDaPergunta = undefined;
 });
@@ -457,7 +462,7 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     expect(document.querySelectorAll("audio")).toHaveLength(1);
   });
 
-  it("com o 'Pergunte à reunião' de verdade: as vozes da resposta são 'Falante n', e o '▶' da citação leva o player da barra à parte certa (H6)", () => {
+  it("com o 'Pergunte à reunião' de verdade: a resposta leva os nomes que o link recebeu, a voz sem nome é 'Falante n', e o '▶' da citação leva o player da barra à parte certa (H6, H3b)", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     duble.perguntaDeVerdade = true;
     duble.respostaDaPergunta = {
@@ -468,24 +473,77 @@ describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
     };
     duble.ver.mockReturnValue(pronta({
       ...VISTA,
+      vozes: { F1: "Ana" },
       gravacao: { ...VISTA.gravacao, partes: [
         { seq: 0, url: `/reuniao-aberta/${TOKEN}/audio?parte=0`, mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 },
         { seq: 1, url: `/reuniao-aberta/${TOKEN}/audio?parte=1`, mimeType: "audio/mp4", inicioSegundos: 600, duracaoSegundos: 60 },
       ] },
     }));
     abrir();
-    expect(screen.getByText("Falante 1 propôs a entrega na sexta, e Falante 2 concordou.")).toBeInTheDocument();
+    expect(screen.getByText("Ana propôs a entrega na sexta, e Falante 2 concordou.")).toBeInTheDocument();
     expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 10:15" }));
     expect(document.querySelector("audio")!.getAttribute("src")).toBe(`/reuniao-aberta/${TOKEN}/audio?parte=1`);
   });
 
-  it("sem gravação, a pergunta não ganha o '▶'; e o link nunca passa os nomes das vozes à pergunta", () => {
+  it("sem gravação, a pergunta não ganha o '▶', e segue pedindo pelo token, nunca pela reunião da dona", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: true }));
     abrir();
     expect(screen.getByTestId("pergunte")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "▶ da pergunta" })).not.toBeInTheDocument();
-    expect(duble.propsDaPergunta).not.toHaveProperty("nomes");
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN });
     expect(duble.propsDaPergunta).not.toHaveProperty("meetingId");
+  });
+});
+
+describe("Reunião aberta pelo link — os nomes das vozes (H3b)", () => {
+  const COM_FALAS = {
+    ...VISTA,
+    transcricao: { texto: "Oi. Tchau.", idioma: "pt-BR", segmentos: [
+      { inicio: 1, fim: 2, falante: "F1", texto: "Oi." },
+      { inicio: 3, fim: 5, falante: "F2", texto: "Tchau." },
+    ] },
+  };
+
+  // Os nomes se conferem com toEqual, nunca com toMatchObject: no toMatchObject,
+  // `nomes: {}` casa com qualquer mapa, até com { F1: "Ana" }, e com undefined.
+  it("os nomes que o link recebeu chegam ao resumo, à pergunta e à transcrição; a voz sem nome segue 'Falante n'", () => {
+    duble.ver.mockReturnValue(pronta({ ...COM_FALAS, vozes: { F1: "Ana" } }));
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ token: TOKEN });
+    expect(duble.propsDoResumo?.nomes).toEqual({ F1: "Ana" });
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN });
+    expect(duble.propsDaPergunta?.nomes).toEqual({ F1: "Ana" });
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Ana")).toBeInTheDocument();
+    expect(within(falas).getByText("Falante 2")).toBeInTheDocument();
+    expect(within(falas).queryByText("Falante 1")).not.toBeInTheDocument();
+    // O tempo de fala também leva o nome; e quem tem o link não renomeia nada.
+    const tempoDeFala = screen.getByText("Tempo de fala").parentElement!;
+    expect(tempoDeFala).toHaveTextContent("Ana");
+    expect(tempoDeFala).toHaveTextContent("Falante 2");
+    expect(screen.queryByTitle("Dar nome a esta voz")).not.toBeInTheDocument();
+  });
+
+  it("link ligado com a confirmação antiga: o servidor manda vozes vazio, e toda voz é 'Falante n'", () => {
+    duble.ver.mockReturnValue(pronta({ ...COM_FALAS, vozes: {} }));
+    abrir();
+    expect(duble.propsDoResumo?.nomes).toEqual({});
+    expect(duble.propsDaPergunta?.nomes).toEqual({});
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Falante 1")).toBeInTheDocument();
+    expect(within(falas).getByText("Falante 2")).toBeInTheDocument();
+  });
+
+  it("a resposta de um servidor de antes da H3b, sem o campo, também mostra 'Falante n', sem quebrar a página", () => {
+    duble.ver.mockReturnValue(pronta(COM_FALAS));
+    abrir();
+    // O mapa vazio, e não undefined: a página põe o `?? {}` antes de passar adiante.
+    expect(duble.propsDoResumo?.nomes).toEqual({});
+    expect(duble.propsDaPergunta?.nomes).toEqual({});
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
   });
 });

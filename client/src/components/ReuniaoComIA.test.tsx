@@ -171,15 +171,24 @@ describe("As citações com o '▶' e as vozes (H6)", () => {
     expect(within(citacoes[0]).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("link: as vozes são sempre 'Falante n', mesmo que alguém passe os nomes; o '▶' leva o player ao ponto", () => {
+  it("link: as vozes levam os nomes que o link recebeu, e a voz sem nome é 'Falante n'; os nomes não vão na pergunta; o '▶' leva o player ao ponto (H3b)", () => {
     duble.respostas.perguntarPeloLink = RESPOSTA;
     const aoIrPara = vi.fn();
-    render(<PergunteAReuniao token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" aoIrPara={aoIrPara} {...({ nomes: { F1: "Ana" } } as never)} />);
+    render(<PergunteAReuniao token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" aoIrPara={aoIrPara} nomes={{ F1: "Ana" }} />);
     perguntarAgora();
-    expect(screen.getByText("Falante 1 disse que o contêiner sai dia 12, e Falante 2 confirmou.")).toBeInTheDocument();
-    expect(screen.queryByText(/Ana/)).not.toBeInTheDocument();
+    expect(screen.getByText("Ana disse que o contêiner sai dia 12, e Falante 2 confirmou.")).toBeInTheDocument();
+    expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    // O nome só troca o rótulo na tela: o pedido leva o token, o idioma e a pergunta, e mais nada.
+    expect(duble.chamadas.perguntarPeloLink).toEqual([{ token: "AbCdEfGhIjKlMnOpQrStUvWxYz012345", idioma: "pt-BR", pergunta: "Qual o prazo?" }]);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 01:15" }));
     expect(aoIrPara).toHaveBeenCalledWith(75);
+  });
+
+  it("link sem os nomes (ligado antes da confirmação que fala deles): toda voz é 'Falante n'", () => {
+    duble.respostas.perguntarPeloLink = RESPOSTA;
+    render(<PergunteAReuniao token="AbCdEfGhIjKlMnOpQrStUvWxYz012345" />);
+    perguntarAgora();
+    expect(screen.getByText("Falante 1 disse que o contêiner sai dia 12, e Falante 2 confirmou.")).toBeInTheDocument();
   });
 });
 
