@@ -119,6 +119,7 @@ vi.mock("./lembretes", () => lembretes);
 
 const servico = await import("./proximas-acoes");
 const { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } = await import("@shared/proximas-acoes");
+const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 
 const DONA = "dona-1";
 const de = (tipo: Operacao["tipo"], tabela?: unknown) => estado.operacoes.filter(o => o.tipo === tipo && (tabela === undefined || o.tabela === tabela));
@@ -493,14 +494,20 @@ describe("o que a dona faz na lista", () => {
     await expect(servico.marcarProximaAcaoFeita(DONA, "acao-1", true)).rejects.toEqual(erro(MENSAGEM_ACAO_NAO_ENCONTRADA));
   });
 
-  it("apagar a ação presa ao item trava a reunião e o item, devolve o item a 'para conferir' e apaga a ação, numa transação", async () => {
+  it("apagar a ação presa ao item trava a reunião, o resumo e o item, devolve o item a 'para conferir' e apaga a ação, numa transação", async () => {
     estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: "item-1", meetingId: "reuniao-1" }]);
-    estado.tabelas.set(schema.meetingSummaryItems, [{ status: "confirmed", origin: "ai", editedAt: null, done: true, doneAt: 5 }]);
+    estado.tabelas.set(schema.meetingSummaryItems, [{ summaryId: "resumo-1", status: "confirmed", origin: "ai", editedAt: null, done: true, doneAt: 5 }]);
+    estado.tabelas.set(schema.meetingSummaries, [{ status: "ready" }]);
     await servico.apagarProximaAcao(DONA, "acao-1");
     expect(estado.transacoes).toBe(1);
-    expect(de("select", schema.meetings)[0]).toMatchObject({ travada: true, params: ["reuniao-1", DONA] });
-    // O item lido travado, depois da reunião: o estado dele decide para onde ele vai.
-    expect(de("select", schema.meetingSummaryItems)[0]).toMatchObject({ travada: true, params: ["item-1", DONA] });
+    // As travas na ordem de quem decide no resumo (itemParaDecidir) e da
+    // gravação do resumo: a reunião, o resumo e, por último, o item, cujo
+    // estado decide para onde ele vai.
+    expect(estado.operacoes.filter(o => o.travada).map(o => [o.tabela, o.params])).toEqual([
+      [schema.meetings, ["reuniao-1", DONA]],
+      [schema.meetingSummaries, ["resumo-1", DONA]],
+      [schema.meetingSummaryItems, ["item-1", DONA]],
+    ]);
     const [item] = de("update", schema.meetingSummaryItems);
     expect(item.valores).toMatchObject({ status: "pending", decidedAt: null, done: false, doneAt: null });
     expect(item.sql).toBe("(`meeting_summary_items`.`id` = ? and `meeting_summary_items`.`owner_id` = ?)");
@@ -520,6 +527,26 @@ describe("o que a dona faz na lista", () => {
     expect(de("update", schema.meetingSummaryItems)[0].valores).toMatchObject({
       status: "ignored", done: false, doneAt: null, statusBeforeIgnore: "confirmed", doneAtBeforeIgnore: 5,
     });
+    expect(de("delete", schema.proximasAcoes)).toHaveLength(1);
+  });
+
+  // "Refazer como…" (H4d) em curso: a fila já mandou à IA os itens que ficam,
+  // com a ordem de não repeti-los, e o item devolvido a "para conferir" sairia
+  // na gravação da versão nova, sem voltar nela.
+  it("apagar a ação do item com o resumo na fila é conflito e não mexe em nada; no refazer que falhou, apaga", async () => {
+    estado.tabelas.set(schema.proximasAcoes, [{ id: "acao-1", itemId: "item-1", meetingId: "reuniao-1" }]);
+    estado.tabelas.set(schema.meetingSummaryItems, [{ summaryId: "resumo-1", status: "confirmed", origin: "ai", editedAt: null, done: false, doneAt: null }]);
+    estado.tabelas.set(schema.meetingSummaries, [{ status: "pending" }]);
+    await expect(servico.apagarProximaAcao(DONA, "acao-1")).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    expect(de("update")).toEqual([]);
+    expect(de("delete")).toEqual([]);
+    expect(lembretes.esquecerLembrete).not.toHaveBeenCalled();
+
+    // O refazer que falhou: nada está sendo gerado, e a dona decide sobre a versão anterior.
+    estado.operacoes = [];
+    estado.tabelas.set(schema.meetingSummaries, [{ status: "failed" }]);
+    await servico.apagarProximaAcao(DONA, "acao-1");
+    expect(de("update", schema.meetingSummaryItems)[0].valores).toMatchObject({ status: "pending", decidedAt: null });
     expect(de("delete", schema.proximasAcoes)).toHaveLength(1);
   });
 

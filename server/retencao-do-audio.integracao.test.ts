@@ -36,13 +36,17 @@ vi.mock("./storage", async original => ({
 }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } = await import("../drizzle/schema");
+const {
+  agendaReunioes, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, platformNotifications, users,
+} = await import("../drizzle/schema");
 const {
   deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas,
   MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, ReprocessamentoRecusado,
 } = await import("./meeting-service");
 const { iniciarReuniaoEmPartes, receberParte } = await import("./fatias-de-reuniao");
 const { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } = await import("./storage");
+const { avisarReuniaoPronta } = await import("./lembretes");
+const { criarNaAgenda, ligarGravacaoNaAgenda } = await import("./agenda-de-reunioes");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-retencao-${crypto.randomUUID()}`;
@@ -109,8 +113,21 @@ const partesDe = async (meetingId: string) => (await db()).select().from(meeting
 const varrer = (opcoes: { lote?: number; maximoDeLotes?: number } = {}) => limparGravacoesVencidas({ ownerId: DONA, ...opcoes });
 const chavesExpurgadas = () => storageApagarTodasAsVersoes.mock.calls.map(chamada => chamada[0] as string);
 
+/** Os avisos no sino (H15) da conta da dona que levam à reunião. */
+async function avisosDaReuniao(meetingId: string) {
+  const banco = await db();
+  const [conta] = await banco.select({ id: users.id }).from(users).where(eq(users.openId, DONA));
+  return banco.select().from(platformNotifications)
+    .where(and(eq(platformNotifications.userId, conta.id), eq(platformNotifications.actionUrl, `/meetings/${meetingId}`)));
+}
+
 async function limparDaDona() {
   const banco = await db();
+  // O teste da exclusão cortada no meio do expurgo marca uma reunião na agenda
+  // (H16a) e dá o aviso de pronta no sino (H15).
+  await banco.delete(agendaReunioes).where(eq(agendaReunioes.ownerId, DONA));
+  const contas = await banco.select({ id: users.id }).from(users).where(eq(users.openId, DONA));
+  for (const conta of contas) await banco.delete(platformNotifications).where(eq(platformNotifications.userId, conta.id));
   await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
   await banco.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
   await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
@@ -340,6 +357,43 @@ describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integraç
       const audio = await gravacao(id, agora() + 10 * DIA);
       expect(await deletePrivateMeeting(DONA, id)).toBe(true);
       expect(chavesExpurgadas()).toEqual([audio.chave]);
+      expect(await gravacoesDe(id)).toEqual([]);
+    });
+
+    it("cortada no meio do expurgo (o SIGTERM do deploy), a exclusão já tirou o aviso de pronta do sino (H15) e soltou a agenda (H16a)", async () => {
+      const banco = await db();
+      const id = await reuniao("ready");
+      await gravacao(id, agora() + 10 * DIA);
+      await transcricao(id);
+      expect(await avisarReuniaoPronta(banco, DONA, id, "pronto")).toBe(true);
+      const { id: naAgenda } = await criarNaAgenda(DONA, {
+        titulo: "Conversa com a Bia", inicioEm: agora() + DIA, duracaoMinutos: 60, fuso: "America/Sao_Paulo",
+        local: null, participantes: [], lembreteMinutos: null, googleConvites: false,
+      });
+      await ligarGravacaoNaAgenda(DONA, naAgenda, id);
+      expect(await avisosDaReuniao(id)).toHaveLength(1);
+
+      // O bucket segura o expurgo, a parte longa da exclusão: é ali que o
+      // deploy a corta (o processo sai em até 10 s), e o que vale é o que já
+      // está no banco nesse momento.
+      let soltarOBucket: () => void = () => {};
+      storageApagarTodasAsVersoes.mockImplementationOnce(() => new Promise<void>(resolver => { soltarOBucket = () => resolver(); }));
+      const exclusao = deletePrivateMeeting(DONA, id);
+      exclusao.catch(() => {});
+      try {
+        await vi.waitFor(() => expect(storageApagarTodasAsVersoes).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+        // A reunião já é 'deleted' (some da lista, e a dona não a exclui de
+        // novo) e a transcrição já saiu. Nada retomaria o aviso, que levaria a
+        // "Reunião não encontrada": ele já saiu, e o ponteiro da agenda também.
+        expect(await banco.select({ status: meetings.status }).from(meetings).where(eq(meetings.id, id))).toEqual([{ status: "deleted" }]);
+        expect(await banco.select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id))).toEqual([]);
+        expect(await avisosDaReuniao(id)).toEqual([]);
+        const [marcada] = await banco.select({ meetingId: agendaReunioes.meetingId }).from(agendaReunioes).where(eq(agendaReunioes.id, naAgenda));
+        expect(marcada.meetingId).toBeNull();
+      } finally {
+        soltarOBucket();
+      }
+      expect(await exclusao).toBe(true);
       expect(await gravacoesDe(id)).toEqual([]);
     });
   });

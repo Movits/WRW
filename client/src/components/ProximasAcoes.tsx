@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { AcaoNaAgenda, ErroDoEstadoDaGoogle, pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { MENSAGEM_RESUMO_SENDO_GERADO } from "@shared/const";
 import { rotaDaReuniao } from "@shared/rotas";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
@@ -49,10 +50,16 @@ type AcaoDoPainel = Saidas["proximasAcoes"]["doPainel"]["acoes"][number];
 type AcaoDaLista = Saidas["proximasAcoes"]["listar"]["acoes"][number];
 export type ProximaAcao = AcaoDoPainel & { contatoSugerido?: AcaoDaLista["contatoSugerido"] };
 
-/** A recusa do servidor, no idioma da tela. */
+/**
+ * A recusa do servidor, no idioma da tela. Apagar a ação de um item cujo resumo
+ * está sendo refeito ("Refazer como…", H4d) é recusado como decidir no resumo,
+ * com a mesma frase.
+ */
 export function mensagemDoErroDaAcao(t: TranslateFn, erro: unknown): string {
   const mensagem = (erro as { message?: unknown } | null)?.message;
-  if (mensagem === MENSAGEM_ACAO_NAO_ENCONTRADA || mensagem === MENSAGEM_CONTATO_FORA_DA_REDE) return traduzirMensagemDoServidor(mensagem, t);
+  if (mensagem === MENSAGEM_ACAO_NAO_ENCONTRADA || mensagem === MENSAGEM_CONTATO_FORA_DA_REDE || mensagem === MENSAGEM_RESUMO_SENDO_GERADO) {
+    return traduzirMensagemDoServidor(mensagem, t);
+  }
   const codigo = (erro as { data?: { code?: string } } | null)?.data?.code;
   if (codigo === "INTERNAL_SERVER_ERROR" || codigo === "TOO_MANY_REQUESTS") return mensagemDeErroParaTela(erro, t);
   return t("proximasAcoes.saveError");

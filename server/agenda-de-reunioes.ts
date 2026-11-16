@@ -272,8 +272,9 @@ export async function ligarGravacaoNaAgenda(ownerId: string, id: string, meeting
 
 /**
  * A gravação excluída deixa a agenda: o ponteiro volta a nulo, e a reunião
- * marcada continua na agenda, pronta para outro "Gravar agora". Chamada por
- * deletePrivateMeeting (server/meeting-service.ts), com a dona no WHERE.
+ * marcada continua na agenda, pronta para outro "Gravar agora". Chamada pela
+ * exclusão da reunião (apagarDerivadosDaReuniao, em server/meeting-service.ts),
+ * antes do expurgo do bucket, com a dona no WHERE.
  */
 export async function soltarGravacaoDaAgenda(db: Banco, ownerId: string, meetingId: string): Promise<void> {
   await db.update(agendaReunioes).set({ meetingId: null, updatedAt: Date.now() })

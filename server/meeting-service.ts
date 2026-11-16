@@ -1894,7 +1894,8 @@ export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio
 
 /**
  * Tudo que uma reunião gera fora da própria linha: sugestões, entidades,
- * transcrição, traduções e gravações (linha E objeto no bucket). Serve à
+ * transcrição, traduções e gravações (linha E objeto no bucket), e também os
+ * avisos dela no sino (H15) e o ponteiro da agenda (H16a). Serve à
  * exclusão pela dona e à COMPENSAÇÃO de processMeetingRecording, que usa a
  * mesma lista quando descobre que a reunião foi excluída no meio — duas
  * listas divergiriam na primeira tabela nova.
@@ -1929,6 +1930,17 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
+  // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
+  // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião
+  // não encontrada", e nada retoma essa limpeza (a varredura só retoma o
+  // áudio). Logo depois de apagarDerivadosSemGravacao, e não antes: o DELETE do
+  // resumo, lá dentro, espera o registrarFalha em curso (server/fila-do-resumo.ts),
+  // e o aviso de falha que ele gravar sai aqui.
+  await apagarAvisosDaReuniao(db, ownerId, meetingId);
+  // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
+  // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
+  await soltarGravacaoDaAgenda(db, ownerId, meetingId);
 
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
@@ -2013,12 +2025,9 @@ export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   if (!linhasAfetadas(marcada)) return false;
+  // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
+  // dentro, antes do expurgo do bucket.
   await apagarDerivadosDaReuniao(db, ownerId, meetingId);
-  // Os avisos da reunião no sino (H15: o de pronta, com o título) saem com ela.
-  await apagarAvisosDaReuniao(db, ownerId, meetingId);
-  // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
-  // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
-  await soltarGravacaoDaAgenda(db, ownerId, meetingId);
   await db.delete(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   return true;
 }

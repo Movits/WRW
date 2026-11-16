@@ -5,7 +5,7 @@ import { meetings, meetingSummaries, meetingSummaryItems, privateContacts, proxi
 import { exigirDb } from "./db";
 import { agendarLembreteDaAcao, esquecerLembrete } from "./lembretes";
 import { destinoDaAcaoNaAgenda, estadoDaAcaoAoEscrever, type DestinoDaAcaoNaAgenda } from "@shared/acoes-na-agenda";
-import { nomesDosFalantes } from "@shared/const";
+import { MENSAGEM_RESUMO_SENDO_GERADO, nomesDosFalantes } from "@shared/const";
 import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import {
@@ -649,6 +649,14 @@ export async function marcarProximaAcaoFeita(ownerId: string, acaoId: string, fe
  * dela): vai para os ignorados, com o estado de antes guardado, e o Desfazer do
  * resumo o devolve confirmado, como o Ignorar do resumo. A tela pede a
  * confirmação antes, com o texto de cada caso.
+ *
+ * Com o resumo do item na fila ("Refazer como…", H4d), é conflito, como decidir
+ * e confirmar no resumo: a geração já levou à IA os itens que ficam, com a
+ * ordem de não repeti-los, e o item da IA devolvido a "para conferir" seria
+ * apagado na gravação da versão nova, sem voltar nela. No refazer que falhou
+ * nada está sendo gerado, e apagar segue valendo. Trava a reunião, o resumo e
+ * o item, nesta ordem (a de quem decide no resumo, itemParaDecidir, em
+ * server/resumo-guardado.ts, e a da gravação do resumo).
  */
 export async function apagarProximaAcao(ownerId: string, acaoId: string): Promise<AcaoAntesDeMudar> {
   const db = await exigirDb();
@@ -657,6 +665,15 @@ export async function apagarProximaAcao(ownerId: string, acaoId: string): Promis
     const agora = Date.now();
     if (acao.itemId) {
       const doItem = and(eq(meetingSummaryItems.id, acao.itemId), eq(meetingSummaryItems.ownerId, ownerId));
+      const [onde] = await tx.select({ summaryId: meetingSummaryItems.summaryId }).from(meetingSummaryItems).where(doItem).limit(1);
+      if (onde) {
+        const [resumo] = await tx.select({ status: meetingSummaries.status }).from(meetingSummaries)
+          .where(and(eq(meetingSummaries.id, onde.summaryId), eq(meetingSummaries.ownerId, ownerId))).limit(1).for("update");
+        // Fora da fila é o pronto e o refazer que falhou (foraDaFila, em server/resumo-guardado.ts).
+        if (resumo && resumo.status !== "ready" && resumo.status !== "failed") {
+          throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+        }
+      }
       const [item] = await tx.select({
         status: meetingSummaryItems.status, origin: meetingSummaryItems.origin, editedAt: meetingSummaryItems.editedAt,
         done: meetingSummaryItems.done, doneAt: meetingSummaryItems.doneAt,

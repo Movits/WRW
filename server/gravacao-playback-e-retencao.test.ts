@@ -613,6 +613,34 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 
+  it("os avisos (H15) e o ponteiro da agenda (H16a) saem antes do expurgo do bucket: a exclusão que para no meio dele não deixa no sino o aviso da reunião excluída", async () => {
+    // O expurgo é a parte longa (4 a 5 chamadas ao B2 por áudio): um deploy
+    // (SIGTERM) ou o banco que cai no meio dele corta a exclusão. Aqui o banco
+    // cai na primeira escrita depois do bucket, a da linha do áudio que saiu.
+    tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
+    const queda = quedaDoBanco();
+    deleteQueFalha = ordem => (delecoes[ordem].tabela === schema.meetingRecordings ? queda : null);
+
+    await expect(servico.deletePrivateMeeting("dona-1", "reuniao-1")).rejects.toBe(queda);
+
+    // A reunião ficou 'deleted', fora da lista: a dona não a exclui de novo, e
+    // nada retoma o aviso (a varredura só retoma o áudio). Ele já tinha saído,
+    // e o ponteiro da agenda também.
+    expect(tabelasApagadas()).not.toContain(schema.meetings);
+    expect(delecoes.filter(operacao => operacao.tabela === schema.platformNotifications)).toHaveLength(1);
+    expect(atualizacoes.filter(operacao => operacao.tabela === schema.agendaReunioes)).toHaveLength(1);
+    // A k-ésima escrita de um tipo em `sequencia` é a k-ésima da lista dele.
+    const posicao = (efeito: "delete" | "update", operacoes: Operacao[], tabela: unknown) =>
+      sequencia.flatMap((feito, indice) => (feito === efeito ? [indice] : []))[operacoes.findIndex(operacao => operacao.tabela === tabela)];
+    const bucket = sequencia.indexOf("bucket");
+    expect(posicao("delete", delecoes, schema.platformNotifications)).toBeLessThan(bucket);
+    expect(posicao("update", atualizacoes, schema.agendaReunioes)).toBeLessThan(bucket);
+    // E depois do DELETE do resumo, não antes: ele espera o registrarFalha em
+    // curso (server/fila-do-resumo.ts), e o aviso que esse gravar sai junto.
+    expect(posicao("delete", delecoes, schema.platformNotifications)).toBeGreaterThan(posicao("delete", delecoes, schema.meetingSummaries));
+  });
+
   it("reunião de outra dona não apaga aviso nenhum", async () => {
     tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
     tabelas.set(schema.meetings, []);

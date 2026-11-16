@@ -26,6 +26,7 @@ const servico = await import("./resumo-guardado");
 const acoes = await import("./proximas-acoes");
 const { FalhaDaIA } = await import("./ia-em-json");
 const { deletePrivateMeeting, gravarResultadoDaReuniao } = await import("./meeting-service");
+const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-resumo-${crypto.randomUUID()}`;
@@ -328,6 +329,36 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{
       id: proxima.id, itemId: acao.id, meetingId: id, prazo: "2026-11-20", texto: "Avisar a transportadora", responsavel: "{F2}",
     }]);
+  });
+
+  it("apagar na lista a ação de um item confirmado enquanto o resumo é refeito (H4d) é conflito, e o item fica na versão nova com a ação", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
+    const [proxima] = await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    // "Refazer como Vendas": o resumo volta à fila com os itens ainda lá.
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    // A dona apaga a ação na lista enquanto a IA escreve a versão nova. A fila
+    // já mandou o item como um dos que ficam, e a IA não o repete: devolvido a
+    // "para conferir", ele sairia na gravação sem voltar no resumo novo.
+    let apagar: unknown;
+    gerarResumoDaReuniao.mockImplementationOnce(async () => {
+      apagar = await acoes.apagarProximaAcao(DONA, proxima.id).catch((erro: unknown) => erro);
+      return { emoji: "💼", modelo: "gemini-teste-2", itens: [ITENS[1]], recebidos: 1 };
+    });
+    await rodar();
+    expect(gerarResumoDaReuniao).toHaveBeenLastCalledWith(expect.objectContaining({
+      modelo: "sales", itensQueFicam: [{ section: "action", subject: null, text: "Avisar a transportadora" }],
+    }));
+    expect(apagar).toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "sales", version: 2 });
+    expect((await itensDe(id)).find(item => item.id === acao.id)).toMatchObject({ status: "confirmed" });
+    expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{ id: proxima.id, itemId: acao.id }]);
+    // Com a versão nova gravada, apagar volta a valer: o item fica para conferir.
+    await acoes.apagarProximaAcao(DONA, proxima.id);
+    expect((await itensDe(id)).find(item => item.id === acao.id)).toMatchObject({ status: "pending" });
   });
 
   it("o resumo refeito solta só a ação presa a um item que sai: o nome da voz vai para o texto, e a reunião e o trecho ficam (H5a)", async () => {

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_RESUMO_SENDO_GERADO } from "@shared/const";
 import { hojeNoRelogio, MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { CartaoDeProximasAcoes, mensagemDoErroDaAcao, ProximasAcoes, type ProximaAcao } from "./ProximasAcoes";
 
@@ -297,6 +297,9 @@ describe("as recusas do servidor, no idioma da tela", () => {
     const t = i18n.t.bind(i18n) as (chave: string) => string;
     expect(mensagemDoErroDaAcao(t, { message: MENSAGEM_ACAO_NAO_ENCONTRADA, data: { code: "NOT_FOUND" } })).toBe("This next action no longer exists. Refresh the page.");
     expect(mensagemDoErroDaAcao(t, { message: MENSAGEM_CONTATO_FORA_DA_REDE, data: { code: "NOT_FOUND" } })).toBe("This contact isn't in your network.");
+    // Apagar a ação do item com o resumo sendo refeito (H4d): a recusa do resumo, não "não salvou".
+    expect(mensagemDoErroDaAcao(t, { message: MENSAGEM_RESUMO_SENDO_GERADO, data: { code: "CONFLICT" } }))
+      .toBe("This meeting's summary is being regenerated. Wait for it to finish before deciding.");
     expect(mensagemDoErroDaAcao(t, { message: MENSAGEM_BANCO_INDISPONIVEL, data: { code: "INTERNAL_SERVER_ERROR" } })).toBe("Database unavailable; please try again in a moment");
     expect(mensagemDoErroDaAcao(t, { message: "Prazo inválido.", data: { code: "BAD_REQUEST" } })).toBe("Couldn't save. Please try again.");
   });
