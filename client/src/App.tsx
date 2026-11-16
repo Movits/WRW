@@ -36,6 +36,8 @@ const IntelligentMatches = lazy(() => import("./pages/IntelligentMatches"));
 const MeuNetworkInteligente = lazy(() => import("./pages/MeuNetworkInteligente"));
 const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork"));
 const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
+const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
+const Agenda = lazy(() => import("./pages/Agenda"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -249,9 +251,27 @@ function Router() {
           </TelaAutenticada>
         </Route>
 
+        {/* A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora",
+            que abre o /gravar com a reunião marcada. O caminho é
+            ROTA_DA_AGENDA, de shared/rotas.ts. */}
+        <Route path="/agenda">
+          <TelaAutenticada>
+            <Agenda />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/memory">
           <TelaAutenticada cabecalhoProprio>
             <Memory />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Próximas ações (H5a): o que a dona confirmou nos resumos das reuniões
+            e o que anotou à mão. O caminho é ROTA_DAS_PROXIMAS_ACOES, de
+            shared/proximas-acoes.ts. */}
+        <Route path="/proximas-acoes">
+          <TelaAutenticada>
+            <ProximasAcoes />
           </TelaAutenticada>
         </Route>
 

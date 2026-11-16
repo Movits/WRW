@@ -35,7 +35,8 @@ import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
-import { ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
@@ -171,6 +172,47 @@ export default function Meetings() {
   const [naGravacao] = useRoute(ROTA_GRAVAR);
   const [, reuniaoAberta] = useRoute<{ id: string }>(`${ROTA_DAS_REUNIOES}/:id`);
   const utils = trpc.useUtils();
+  // O "Gravar agora" da agenda (H16a) abre /gravar?agendada=<id>: o título vem
+  // da reunião marcada (ReuniaoDaAgendaNoGravador), e a gravação que nascer fica
+  // ligada a ela. Id fora do formato é ignorado, sem consulta.
+  const busca = useSearch();
+  const agendada = useMemo(() => {
+    const valor = new URLSearchParams(busca).get(PARAMETRO_DA_AGENDADA);
+    return valor && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valor) ? valor : null;
+  }, [busca]);
+  // A reunião da agenda lida na tela (nula sem ela, ou se não é mais da agenda), e
+  // a que valia quando a gravação começou: durante a gravação a faixa sai da
+  // tela sempre que a URL sai de /gravar (e volta, pelo efeito mais abaixo), ou
+  // se a URL perder o ?agendada, e o envio único só cria a reunião no fim.
+  const agendaNaTela = useRef<string | null>(null);
+  const agendaDaGravacao = useRef<string | null>(null);
+  // O ?agendada da URL quando a gravação começou (nulo sem ele): a reunião que
+  // a faixa ler depois só ganha a gravação se for essa. O lembrete da agenda no
+  // sino (H15) abre /gravar?agendada=<id> nesta mesma página, e tocado com uma
+  // gravação na tela traria a faixa de outra reunião.
+  const agendadaNoInicio = useRef<string | null>(null);
+  // A reunião em partes desta gravação que nasceu no Iniciar sem a reunião da
+  // agenda lida (a faixa ainda carregava): a faixa que carregar depois, se for a
+  // do ?agendada de quando a gravação começou, liga esta gravação (aoCarregar).
+  // Uma vez só: ligada, descartada ou com outra gravação, volta a nula.
+  const emPartesSemAgenda = useRef<string | null>(null);
+  // A reunião da agenda que a faixa leu, se for a do ?agendada dado (a de
+  // quando a gravação ou o envio começou): a faixa de outra reunião (o lembrete
+  // dela tocado no sino no meio) não leva a gravação.
+  const agendaQueCarregou = (agendadaDoInicio: string | null) =>
+    agendaNaTela.current !== null && agendaNaTela.current === agendadaDoInicio ? agendaNaTela.current : null;
+  // O endereço do gravador quando a gravação começou, com a busca (?agendada,
+  // ?emPartes): é para ele que a URL volta se sair de /gravar no meio da
+  // gravação (o efeito mais abaixo). Assim a faixa da reunião da agenda, com o
+  // link da chamada e o convite, continua no gravador.
+  const urlDaGravacao = useRef<string>(ROTA_GRAVAR);
+  // Não trava nada: se ligar falhar, a gravação segue, e a dona é avisada.
+  const ligarAAgenda = useCallback((agendaId: string | null, meetingId: string) => {
+    if (!agendaId) return;
+    void utils.client.agenda.ligarGravacao.mutate({ id: agendaId, meetingId })
+      .then(() => utils.agenda.listar.invalidate())
+      .catch(() => toast.error(t("agenda.errors.linkFailed")));
+  }, [utils, t]);
   // Enquanto alguma reunião processa (o reprocessamento roda em segundo plano),
   // a lista se atualiza sozinha a cada 10 s; sem nada processando, não consulta.
   const { data: meetings, isLoading, isError, error, refetch } = trpc.meetings.list.useQuery(undefined, {
@@ -213,12 +255,17 @@ export default function Meetings() {
   const gravacaoEmPartes = useGravacaoEmPartes({
     ativo: emPartes,
     aoEncerrar: meetingId => {
+      // A gravação acabou: a faixa que carregar agora não a liga mais.
+      emPartesSemAgenda.current = null;
       void utils.meetings.list.invalidate();
       setTitle("");
       setConsent(false);
       if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
     },
-    aoFalhar: () => toast.error(t("meetings.sendRecordingError")),
+    aoFalhar: () => {
+      emPartesSemAgenda.current = null;
+      toast.error(t("meetings.sendRecordingError"));
+    },
     // O trecho que o servidor recusou de vez fica de fora da transcrição (G13b).
     // O servidor manda só o código; a frase sai no idioma da tela. O aviso fica
     // até ser fechado, porque quem grava pode não estar olhando.
@@ -351,19 +398,28 @@ export default function Meetings() {
   // ir de /gravar para /meetings ou /meetings/:id (o item Reuniões do menu, ou o
   // voltar do navegador que cai numa delas) não desmonta o gravador. Com a
   // gravação em curso, a URL volta para /gravar e a tela continua nele: sem
-  // isto, a lista aparecia e o microfone seguia gravando escondido. Qualquer
-  // outro destino (os outros itens do menu, o logo, a seta, o avatar, o sino, o
-  // voltar que sai de Reuniões) desmonta a página sem perguntar: em partes, a
-  // gravação para e é entregue como no Encerrar, com um aviso (G13b,
-  // entregarAoSair); no envio único, é descartada, como antes. A sessão ocupada
-  // (lib/sessao-ocupada.ts) confirma só o Sair da conta e o fechar ou recarregar
-  // da aba.
+  // isto, a lista aparecia e o microfone seguia gravando escondido. A URL volta
+  // com a busca de quando a gravação começou (urlDaGravacao): a gravação que
+  // veio da agenda continua com a faixa dela. Qualquer outro destino (os outros
+  // itens do menu, o logo, a seta, o avatar, o sino, o voltar que sai de
+  // Reuniões) desmonta a página sem perguntar: em partes, a gravação para e é
+  // entregue como no Encerrar, com um aviso (G13b, entregarAoSair); no envio
+  // único, é descartada, como antes. A sessão ocupada (lib/sessao-ocupada.ts)
+  // confirma só o Sair da conta e o fechar ou recarregar da aba. Por isso o
+  // "Gravar agora" da agenda põe a lista no histórico antes do gravador
+  // (pages/Agenda.tsx).
+  // O lembrete de outra reunião da agenda, tocado no sino no meio da gravação,
+  // fica no /gravar e só troca o ?agendada: a URL volta do mesmo jeito, e a
+  // gravação segue com a reunião de quando começou. Sem o ?agendada, a faixa só
+  // sai da tela, e a ligação continua (a decisão 2 da H16a).
   useEffect(() => {
-    if (!recording || naGravacao) return;
-    navigate(ROTA_GRAVAR, { replace: true });
+    if (!recording) return;
+    const outraDaAgenda = agendada !== null && agendada !== agendadaNoInicio.current;
+    if (naGravacao && !outraDaAgenda) return;
+    navigate(urlDaGravacao.current, { replace: true });
     // Um aviso só, com o mesmo id, mesmo com vários toques no menu ou no voltar.
     toast.info(t("meetings.stopRecordingToLeave"), { id: "gravacao-em-curso" });
-  }, [recording, naGravacao]);
+  }, [recording, naGravacao, agendada]);
 
   // A página não remonta entre as três rotas, e criar a reunião não relê a lista:
   // quem chega à lista vinda do gravador ou de um detalhe vê o estado atual,
@@ -397,6 +453,11 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
+    agendaDaGravacao.current = agendaNaTela.current;
+    agendadaNoInicio.current = agendada;
+    emPartesSemAgenda.current = null;
+    // O Iniciar só aparece no gravador: o caminho é o /gravar (com ou sem a barra final).
+    urlDaGravacao.current = `${ROTA_GRAVAR}${window.location.search}`;
     iniciandoAgora.current = true;
     setIniciando(true);
     try {
@@ -433,6 +494,19 @@ export default function Meetings() {
       // tentativa sai, e só ela. Se a exclusão falhar agora, ela fica guardada e
       // a retomada a repete; a dona já viu o aviso do microfone.
       if (reuniao && !comecou) await gravacaoEmPartes.cancelar(reuniao);
+      // Em partes, a reunião nasce no Iniciar: é aqui que ela vai para a agenda,
+      // com a reunião da agenda de quando o Iniciar foi tocado ou a que terminou
+      // de carregar enquanto o servidor criava a reunião. Sem nenhuma, a faixa
+      // que carregar depois liga esta gravação (aoCarregar, abaixo).
+      else if (reuniao) {
+        const agendaId = agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current);
+        if (agendaId) {
+          agendaDaGravacao.current = agendaId;
+          ligarAAgenda(agendaId, reuniao);
+        } else if (agendadaNoInicio.current) {
+          emPartesSemAgenda.current = reuniao;
+        }
+      }
     } finally {
       iniciandoAgora.current = false;
       setIniciando(false);
@@ -446,6 +520,7 @@ export default function Meetings() {
   // de sempre: nada vai para a transcrição. O título fica, para gravar de novo;
   // a autorização volta desmarcada, como no Encerrar: ela vale para uma gravação.
   async function discardRecording() {
+    emPartesSemAgenda.current = null;
     gravador.descartar();
     // Os avisos da parte recusada e da cópia que faltou falavam desta gravação,
     // que deixou de existir.
@@ -476,6 +551,11 @@ export default function Meetings() {
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
     if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
+    // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
+    // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
+    // criar a reunião, abaixo).
+    const agendaNoClique = agendaNaTela.current;
+    const agendadaNoClique = agendada;
     let reuniaoCriada: string | undefined;
     // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
     const liberarEnvio = ocupar("enviando");
@@ -489,8 +569,10 @@ export default function Meetings() {
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
       if (durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) return toast.error(t("meetings.audioTooLong"));
+      const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
+      ligarAAgenda(agendaId, created.id);
       await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado });
     } catch (error) {
       // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
@@ -527,6 +609,11 @@ export default function Meetings() {
         readAsDataUrl(t, capturedAudio.blob),
       ]);
       reuniaoCriada = created.id;
+      // A agenda de quando a gravação começou; ou a que terminou de carregar
+      // depois, se for a do ?agendada de quando ela começou. A faixa de outra
+      // reunião (o lembrete dela tocado no sino depois do Encerrar) não leva a
+      // gravação.
+      ligarAAgenda(agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current), created.id);
       await submitRecording.mutateAsync({
         meetingId: created.id,
         audioBase64,
@@ -574,6 +661,22 @@ export default function Meetings() {
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onDiscardRecording={emPartes ? discardRecording : undefined}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
+      daAgenda={agendada && naGravacao ? (
+        // key: outra reunião da agenda lê e preenche de novo.
+        <ReuniaoDaAgendaNoGravador key={agendada} id={agendada} tituloAtual={title} aoPreencherTitulo={setTitle}
+          aoCarregar={id => {
+            agendaNaTela.current = id;
+            // A gravação em partes que nasceu sem a reunião da agenda (a faixa
+            // ainda carregava no Iniciar) é ligada agora, se a faixa é a do
+            // ?agendada de quando ela começou. Uma vez só.
+            const semAgenda = emPartesSemAgenda.current;
+            if (id && semAgenda && id === agendadaNoInicio.current) {
+              emPartesSemAgenda.current = null;
+              agendaDaGravacao.current = id;
+              ligarAAgenda(id, semAgenda);
+            }
+          }} />
+      ) : null}
     />
   ) : screen === "detail" && reuniaoAberta ? (
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
@@ -604,7 +707,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; daAgenda?: React.ReactNode }) {
   const { t } = useTranslation();
   // Iniciando (G13b), o formulário trava como gravando: a autorização desmarcada
   // ou o título trocado no meio não mudariam a reunião que o servidor já cria.
@@ -626,7 +729,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <p className="text-amber-300 text-xs font-semibold tracking-wide mt-6">{t("meetings.newMeetingEyebrow")}</p>
       <h1 className="text-2xl font-bold mt-1">{t("meetings.recorderTitle")}</h1>
       <div className="mt-7 space-y-5">
-        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/></div>
+        <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/>{props.daAgenda}</div>
         <div><label htmlFor="idioma-da-reuniao" className="text-sm text-white/70">{t("meetings.meetingLanguageLabel")}</label>
           <select id="idioma-da-reuniao" disabled={locked} value={props.idioma} onChange={e => props.setIdioma(idiomaDaReuniao(e.target.value) ?? IDIOMA_DA_REUNIAO_PADRAO)} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300">
             {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}

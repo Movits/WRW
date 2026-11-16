@@ -98,6 +98,9 @@ vi.mock("./varredura-de-gravacoes", () => ({
   iniciarVarreduraDeGravacoes: (...args: unknown[]) => { jarra.ordem.push("iniciarVarredura"); return varredura.iniciarVarreduraDeGravacoes(...args); },
   pararVarreduraDeGravacoes: (...args: unknown[]) => varredura.pararVarreduraDeGravacoes(...(args as [])),
 }));
+// O laço dos lembretes no sino (H15) liga junto; aqui é dublê.
+const lacoDosLembretes = vi.hoisted(() => ({ iniciarLembretes: vi.fn(), pararLembretes: vi.fn(async () => ({ lembretes: 1 })) }));
+vi.mock("./lembretes", () => lacoDosLembretes);
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -106,6 +109,11 @@ vi.mock("./meeting-service", () => ({
   limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...(args as [])),
   marcarReunioesInterrompidas: (...args: unknown[]) => marcarReunioesInterrompidas(...(args as [])),
 }));
+// A ida e a volta da conexão com a Google Agenda (H16b) sobem junto; aqui só se
+// confere que foram montadas no app (o comportamento está em
+// server/rotas-da-google-agenda.test.ts).
+const googleAgenda = vi.hoisted(() => ({ registrarRotasDaGoogleAgenda: vi.fn() }));
+vi.mock("./rotas-da-google-agenda", () => googleAgenda);
 
 const { autenticarCron } = await import("./_core/cron");
 
@@ -120,6 +128,8 @@ vi.spyOn(console, "log").mockImplementation(() => {});
 await import("./_core/index");
 await jarra.noAr;
 const varredurasNoBoot = marcarReunioesInterrompidas.mock.calls.length;
+// Lido antes do restoreAllMocks, que zera o histórico dos dublês.
+const appsDaGoogleAgendaNoBoot = googleAgenda.registrarRotasDaGoogleAgenda.mock.calls.map(chamada => chamada[0]);
 vi.restoreAllMocks();
 afterAll(() => {
   vi.useRealTimers();
@@ -147,10 +157,11 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a fila da reunião em partes no index.ts real (G7)", () => {
-  it("as duas filas e a varredura das gravações ligam no boot com banco, e o SIGTERM para as três ANTES de o processo sair", async () => {
+  it("as duas filas, o laço dos lembretes e a varredura das gravações ligam no boot com banco, e o SIGTERM para os quatro ANTES de o processo sair", async () => {
     expect(fila.iniciarFila).toHaveBeenCalledTimes(1);
     expect(filaDoResumo.iniciarFilaDoResumo).toHaveBeenCalledTimes(1);
     expect(varredura.iniciarVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
+    expect(lacoDosLembretes.iniciarLembretes).toHaveBeenCalledTimes(1);
     const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const ordem: string[] = [];
     fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
@@ -162,6 +173,7 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     varredura.pararVarreduraDeGravacoes.mockImplementationOnce(() => new Promise(resolver => {
       soltarVarredura = () => { ordem.push("pararVarredura"); resolver({ emCurso: true, terminou: false }); };
     }));
+    lacoDosLembretes.pararLembretes.mockImplementationOnce(async () => { ordem.push("pararLembretes"); return { lembretes: 1 }; });
     vi.spyOn(console, "error").mockImplementation(() => {});
     sair.mockImplementation(((codigo?: number) => { ordem.push(`exit ${codigo}`); }) as never);
     const logs = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -171,10 +183,10 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     const esperar = async () => { for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve)); };
     await esperar();
     expect(varredura.pararVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
-    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo"]);
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes"]);
     soltarVarredura();
     await esperar();
-    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararVarredura", "exit 0"]);
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes", "pararVarredura", "exit 0"]);
     expect(JSON.stringify(logs.mock.calls)).toContain("a passada em curso fica para a próxima instância");
     // O SIGINT do dev também está ligado (process.once: um por sinal).
     expect(process.listenerCount("SIGINT")).toBeGreaterThanOrEqual(1);
@@ -184,6 +196,12 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     expect(jarra.ordem.filter(item => item === "iniciarVarredura")).toHaveLength(1);
     expect(jarra.ordem.indexOf("listen")).toBeGreaterThanOrEqual(0);
     expect(jarra.ordem.indexOf("iniciarVarredura")).toBeGreaterThan(jarra.ordem.indexOf("listen"));
+  });
+});
+
+describe("as rotas da Google Agenda no index.ts real (H16b)", () => {
+  it("são montadas uma vez, no app do servidor", () => {
+    expect(appsDaGoogleAgendaNoBoot).toEqual([jarra.app]);
   });
 });
 

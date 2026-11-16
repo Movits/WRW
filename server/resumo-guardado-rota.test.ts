@@ -12,15 +12,22 @@ const servico = vi.hoisted(() => ({
   resumoGuardadoDaDona: vi.fn(async () => ({ estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] })),
   pedirResumoDaDona: vi.fn(),
   refazerResumoDaDona: vi.fn(),
-  decidirItemDoResumo: vi.fn(async () => undefined),
+  decidirItemDoResumo: vi.fn(async (..._args: unknown[]) => ({ acaoSaiu: true })),
   confirmarItensDoResumo: vi.fn(async () => 2),
   marcarAcaoFeita: vi.fn(async () => undefined),
-  editarItemDoResumo: vi.fn(async () => undefined),
+  editarItemDoResumo: vi.fn(async (..._args: unknown[]) => ({ acaoQueMudou: null as string | null })),
   acrescentarItemDoResumo: vi.fn(async () => "item-novo"),
   resumoGuardadoPeloLink: vi.fn(async () => ({ estado: "sem_resumo", emoji: null, idioma: null, itens: [] })),
   pedirResumoPeloLink: vi.fn(),
 }));
 vi.mock("./resumo-guardado", () => servico);
+// A Google Agenda da próxima ação do item (H5c) é dublê: o que ela faz está em acoes-na-google.test.ts.
+const PREPARO = { acaoId: "acao-1", estavaNaGoogle: true, acesso: { token: "t" }, ligada: true };
+const naGoogle = vi.hoisted(() => ({
+  prepararAcaoDoItem: vi.fn(async (..._args: unknown[]): Promise<unknown> => null),
+  depoisDeMexerNoItem: vi.fn(async (..._args: unknown[]) => ({ acaoId: null as string | null, naGoogle: null })),
+}));
+vi.mock("./acoes-na-google", () => naGoogle);
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");
@@ -37,7 +44,7 @@ const daDona = (openId = `dona-${Math.random()}`) => meetingsRouter.createCaller
 const doLink = () => reuniaoAbertaRouter.createCaller({ user: null, req: { headers: {}, socket: { remoteAddress: "203.0.113.9" }, ip: "203.0.113.9" }, res: { cookie: () => {} } } as never);
 
 beforeEach(() => {
-  for (const f of Object.values(servico)) f.mockClear();
+  for (const f of [...Object.values(servico), ...Object.values(naGoogle)]) f.mockClear();
   // O serviço real chama o "antes de criar" só quando há trabalho novo.
   servico.pedirResumoDaDona.mockImplementation(async (_dona: string, _id: string, antesDeCriar: () => void) => { antesDeCriar(); return { estado: "pendente" }; });
   servico.refazerResumoDaDona.mockImplementation(async (_dona: string, _id: string, _modelo: string, antesDeCriar: () => void) => { antesDeCriar(); return { estado: "pendente" }; });
@@ -55,6 +62,40 @@ describe("rotas do resumo guardado da dona", () => {
     expect(servico.decidirItemDoResumo).toHaveBeenCalledWith("dona-1", ID, "ignored");
     expect(servico.confirmarItensDoResumo).toHaveBeenCalledWith("dona-1", ID);
     expect(servico.marcarAcaoFeita).toHaveBeenCalledWith("dona-1", ID, true);
+  });
+
+  it("desconfirmar e marcar a ação no resumo passam pela Google Agenda da ação do item (H5c); confirmar, não", async () => {
+    const rota = daDona("dona-1");
+    const CONTA = { id: 7, openId: "dona-1" };
+    naGoogle.prepararAcaoDoItem.mockResolvedValueOnce(PREPARO);
+    naGoogle.depoisDeMexerNoItem.mockResolvedValueOnce({ acaoId: "acao-1", naGoogle: "falhou", motivo: "google" } as never);
+    // O token vem antes da decisão; o evento sai depois, e o id da ação volta para o "Tentar de novo".
+    expect(await rota.decidirItemDoResumo({ itemId: ID, status: "pending" })).toEqual({ ok: true, acaoId: "acao-1", naGoogle: "falhou", motivo: "google" });
+    expect(naGoogle.prepararAcaoDoItem).toHaveBeenCalledWith(CONTA, ID);
+    expect(naGoogle.prepararAcaoDoItem.mock.invocationCallOrder[0]).toBeLessThan(servico.decidirItemDoResumo.mock.invocationCallOrder[0]);
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenCalledWith(CONTA, PREPARO, false);
+    // Confirmar cria a ação sem prazo: nada vai à Google.
+    naGoogle.prepararAcaoDoItem.mockClear();
+    await rota.decidirItemDoResumo({ itemId: ID, status: "confirmed" });
+    expect(naGoogle.prepararAcaoDoItem).not.toHaveBeenCalled();
+    // Reabrir no resumo manda de novo, com o fuso e os rótulos da tela.
+    const rotulos = { voz: "Falante {n}", responsavel: "Responsável: {nome}" };
+    await rota.marcarAcaoFeita({ itemId: ID, feito: false, fuso: "America/Recife", rotulos });
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenLastCalledWith(CONTA, null, true, { fuso: "America/Recife", rotulos });
+    await rota.marcarAcaoFeita({ itemId: ID, feito: true });
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenLastCalledWith(CONTA, null, false, { fuso: undefined, rotulos: undefined });
+    await expect(rota.marcarAcaoFeita({ itemId: ID, feito: true, fuso: "z".repeat(65) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  // Depois da junção com a H4f: o item que a dona escreveu, pedido de volta a
+  // "para conferir", fica confirmado, e a ação dele, com o evento, fica. A rota
+  // segue o que o serviço gravou, e não o pedido.
+  it("o item que fica confirmado com o pedido de 'para conferir' não tira o evento da Google", async () => {
+    const rota = daDona("dona-1");
+    naGoogle.prepararAcaoDoItem.mockResolvedValueOnce(PREPARO);
+    servico.decidirItemDoResumo.mockResolvedValueOnce({ acaoSaiu: false });
+    expect(await rota.decidirItemDoResumo({ itemId: ID, status: "pending" })).toEqual({ ok: true, acaoId: null, naGoogle: null });
+    expect(naGoogle.depoisDeMexerNoItem).not.toHaveBeenCalled();
   });
 
   it("pedir o resumo novo gasta uma vaga do teto de pedidos à IA da dona", async () => {
@@ -114,7 +155,7 @@ describe("rotas da dona que editam e acrescentam itens (H4f)", () => {
   it("a dona é a da sessão; os campos chegam aparados, e o vazio ou ausente vira nulo", async () => {
     const rota = daDona("dona-1");
     expect(await rota.editarItemDoResumo({ itemId: ID, texto: "  {F2} envia a proposta  ", assunto: "   ", responsavel: " {F2} ", prazo: "" }))
-      .toEqual({ ok: true });
+      .toEqual({ ok: true, acaoId: null, naGoogle: null });
     expect(servico.editarItemDoResumo).toHaveBeenCalledWith("dona-1", ID, { texto: "{F2} envia a proposta", assunto: null, responsavel: "{F2}", prazo: null });
     expect(await rota.acrescentarItemDoResumo({ meetingId: ID, secao: "task", texto: "Revisar o contrato", assunto: " Contrato " }))
       .toEqual({ id: "item-novo" });
@@ -137,6 +178,27 @@ describe("rotas da dona que editam e acrescentam itens (H4f)", () => {
     // No limite, passa.
     await rota.editarItemDoResumo({ itemId: ID, texto: "a".repeat(TEXTO_DO_ITEM_DO_RESUMO_MAX), assunto: "s".repeat(CAMPO_DO_ITEM_DO_RESUMO_MAX) });
     expect(servico.editarItemDoResumo).toHaveBeenCalledTimes(1);
+  });
+
+  // A próxima ação do item editado leva o texto novo (H5a), e o evento dela na
+  // Google Agenda também (H5c): o token vem antes da escrita, e a versão nova
+  // vai depois, com o fuso e os rótulos da tela.
+  it("editar o item cuja ação mudou manda a versão nova à Google, com o fuso e os rótulos; sem mudança, nada vai", async () => {
+    const rota = daDona("dona-1");
+    const CONTA = { id: 7, openId: "dona-1" };
+    const rotulos = { voz: "Falante {n}", responsavel: "Responsável: {nome}" };
+    naGoogle.prepararAcaoDoItem.mockResolvedValueOnce(PREPARO);
+    servico.editarItemDoResumo.mockResolvedValueOnce({ acaoQueMudou: "acao-1" });
+    naGoogle.depoisDeMexerNoItem.mockResolvedValueOnce({ acaoId: "acao-1", naGoogle: "ok" } as never);
+    expect(await rota.editarItemDoResumo({ itemId: ID, texto: "Enviar a proposta revisada", fuso: "America/Recife", rotulos }))
+      .toEqual({ ok: true, acaoId: "acao-1", naGoogle: "ok" });
+    expect(naGoogle.prepararAcaoDoItem.mock.invocationCallOrder[0]).toBeLessThan(servico.editarItemDoResumo.mock.invocationCallOrder[0]);
+    expect(naGoogle.depoisDeMexerNoItem).toHaveBeenCalledWith(CONTA, PREPARO, true, { fuso: "America/Recife", rotulos });
+    // O fuso e os rótulos não vão ao serviço do resumo.
+    expect(servico.editarItemDoResumo).toHaveBeenLastCalledWith("dona-1", ID, { texto: "Enviar a proposta revisada", assunto: null, responsavel: null, prazo: null });
+    naGoogle.depoisDeMexerNoItem.mockClear();
+    await rota.editarItemDoResumo({ itemId: ID, texto: "Sem mudança" });
+    expect(naGoogle.depoisDeMexerNoItem).not.toHaveBeenCalled();
   });
 
   it("acrescentar não gasta vaga do teto de pedidos à IA", async () => {

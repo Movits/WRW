@@ -556,9 +556,15 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     expect(tabelasApagadas()).toEqual(expect.arrayContaining([schema.meetingRecordings, schema.meetingTranscripts, schema.meetingContactSuggestions]));
     // Sem 'failed' (não há linha viva para marcar) e sem 'ready'.
     expect(atualizacoes.filter(a => "status" in a).map(a => a.status)).toEqual(["processing"]);
-    // A outra escrita é a das pendências que já são de um contato e não citam
-    // a transcrição: ficam com ele, desligadas da reunião (revisão do pacote P2B).
-    expect(atualizacoes.filter(a => !("status" in a))).toEqual([expect.objectContaining({ meetingId: null, meetingSuggestionId: null })]);
+    // As outras escritas: as pendências que já são de um contato e não citam a
+    // transcrição ficam com ele, desligadas da reunião (revisão do pacote P2B);
+    // e, como a compensação é a lista da exclusão (apagarDerivadosDaReuniao), a
+    // agenda (H16a) solta o ponteiro da reunião excluída, pela dona.
+    expect(atualizacoes.filter(a => !("status" in a))).toEqual([
+      expect.objectContaining({ meetingId: null, meetingSuggestionId: null }),
+      { meetingId: null, updatedAt: expect.any(Number) },
+    ]);
+    expect(escopos).toContainEqual({ sql: "(`agenda_reunioes`.`owner_id` = ? and `agenda_reunioes`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
   });
 
   it("o bucket recusa na compensação: a linha da gravação FICA, vencida, como ponteiro para a varredura", async () => {

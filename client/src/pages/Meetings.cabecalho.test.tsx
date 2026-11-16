@@ -65,6 +65,8 @@ vi.mock("@/lib/trpc", () => ({
       desligarLinkAberto: duble.mutacao(),
     },
     reuniaoAberta: { pedirResumo: duble.mutacao(), perguntar: duble.mutacao(), traduzirResumo: duble.mutacao() },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.mutacao() },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
 }));

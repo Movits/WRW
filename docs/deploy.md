@@ -247,6 +247,80 @@ respondem `CHAVE_INDISPONIVEL` (`server/chaves-de-acesso.ts`).
   `https://www.wrwglobal.org` também dá `true`, e em
   `https://mmm-gud5.onrender.com` dá `false`, como deve.
 
+### Só para a Google Agenda (opcional)
+
+A conexão com a Google Agenda no Perfil (H16b) só existe com as cinco variáveis
+abaixo. Sem qualquer uma, a seção some do Perfil e `/api/google-agenda/conectar` e
+`/api/google-agenda/retorno` dão 404 (`configuracaoDaGoogleAgenda`, em
+`server/google-oauth.ts`). Só os nomes ficam no código; os valores, no painel do
+Render.
+
+| Variável | Para quê | Valor |
+|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | o cliente OAuth "Aplicativo da Web" do Google Cloud | o ID do cliente |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | o segredo do mesmo cliente | o segredo do cliente |
+| `FRONTEND_URL` | vira o URI de retorno, `<FRONTEND_URL>/api/google-agenda/retorno`, que precisa estar cadastrado no cliente exatamente assim | https; http só em `localhost` |
+| `VAULT_ENCRYPTION_KEY` | cifra o refresh token no banco | 32 caracteres ou mais; mais curta, a função some |
+| `GOOGLE_AGENDA_LIBERADA_PARA` | quem vê a função | os ids das contas da WRW, separados por vírgula, enquanto o app do Google Cloud está em modo Teste; `todas` depois que a Google o verificar |
+
+**Por que a lista (escolha de 16/11/2026).** Em modo Teste, a Google só deixa
+autorizar as contas Google da lista de usuários de teste do Google Cloud (até 100). As
+outras param numa página de erro da própria Google ("Acesso bloqueado", Erro 403:
+access_denied), sem voltar à WRW. Então, até a Google verificar o app (o que pede a
+Política de Privacidade e um vídeo), a seção aparece só para as contas da WRW cujas
+contas Google estão naquela lista: ponha nas duas listas as mesmas pessoas (a Glenda e
+quem do time vai validar o pacote). Fora da lista, a seção não aparece e as rotas dão
+404. Sem a variável, ou sem nenhum id válido nela, a
+função some para todas: esquecê-la esconde a função, em vez de pôr diante de todo
+mundo um botão que não funciona. Depois da verificação, o valor vira `todas`.
+
+A conexão só começa pelo host do `FRONTEND_URL`, porque o cookie da ida é do host:
+quem entra pelo endereço do Render vê no Perfil o caminho para o endereço certo. No
+app das lojas (a casca da #180), a seção manda conectar pelo navegador: a WebView não
+consegue terminar a ida e a volta da Google. O que configurar no Google Cloud
+(Calendar API, branding, público em modo Teste, os escopos `openid`, `email` e
+`calendar.events`) está em `docs/arquitetura/decisoes-tomadas.md`, na decisão de
+15/11/2026. No modo Teste, o refresh token vence em 7 dias: na primeira vez que a WRW
+tentar usá-lo depois disso, a conexão fica marcada e a seção pede "Reconectar".
+
+**A Google revoga por conta Google e projeto, não por token.** Revogar qualquer token
+tira a autorização inteira daquela conta Google no projeto do Google Cloud, com os
+tokens de todos os clientes do projeto. Por isso a WRW guarda o `sub` da conta Google
+(`google_agenda_conexoes.google_sub`) e decide por ele: reconectar com a mesma conta
+Google não revoga nada, e desconectar ou excluir uma conta da WRW não revoga a conta
+Google que outra conta da WRW ainda usa. Pela mesma regra, **o cliente OAuth do
+localhost precisa de um projeto próprio do Google Cloud**: no mesmo projeto, desconectar
+no computador de quem desenvolve derrubaria a conexão de produção da mesma conta
+Google.
+
+**Os eventos (H16c) não pedem variável nova.** Com a conexão de pé, marcar, mudar e
+excluir uma reunião na agenda da WRW criam, mudam e tiram o evento na agenda principal
+da conta Google da dona (`server/google-agenda-eventos.ts`): primeiro o banco, depois a
+Google, e o estado fica em `agenda_reunioes.google`. Sem a Calendar API ligada no
+projeto do Google Cloud, a Google recusa toda chamada de evento (403), e as reuniões
+ficam "Ainda não está na sua Google Agenda", com "Tentar de novo". Desconectar e excluir
+a conta da WRW não apagam os eventos que já estão na agenda da dona. O estado é da conta
+Google conectada: desconectar, ou conectar outra conta Google, o zera, e as reuniões que
+vão acontecer voltam a oferecer "Pôr na Google Agenda". A reunião que já acabou nunca é
+criada lá: mudá-la só muda o evento que já existe, sem aviso aos convidados, e excluí-la
+deixa o evento na Google como histórico.
+
+**As próximas ações (H5c) também não pedem variável nova.** Com a mesma conexão, a ação
+aberta com prazo vira um evento às 9h do dia do prazo, no fuso do aparelho de quem mexe
+nela, de 30 minutos, livre na agenda e com aviso na hora
+(`server/acoes-na-google.ts`), e o estado fica em `proximas_acoes.google`. Marcar feita,
+tirar o prazo, apagar a ação e desconfirmar o item no resumo tiram o evento; reabrir e
+mudar o texto ou o prazo o mudam. O id do evento é `acao` mais o id da ação, sem
+coluna própria. Desconectar e excluir a conta da WRW não apagam os eventos que já estão
+na agenda da dona, e a desconexão zera também este estado. Sem a Google Agenda
+conectada, a lista oferece o link de criar evento e o `.ics`, feitos no navegador,
+também livres na agenda. Dar nome a uma voz da reunião muda o texto das ações que a
+citam: o evento delas na Google fica "falhou", com "Tentar de novo" na lista, e o
+`.ics` baixado de novo sai com revisão maior. A nota de privacidade do Perfil diz que a
+WRW só mexe nos eventos das reuniões da agenda e das próximas ações com prazo; a
+Política de Privacidade (Cris) e a descrição do uso da agenda na verificação da Google
+precisam dizer o mesmo.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

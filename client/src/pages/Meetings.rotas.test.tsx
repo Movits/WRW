@@ -103,6 +103,8 @@ vi.mock("@/lib/trpc", () => ({
       perguntar: duble.registrar("perguntarPeloLink"),
       traduzirResumo: duble.registrar("traduzirResumoPeloLink"),
     },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
     },
@@ -451,7 +453,9 @@ describe("Reuniões — gravação em curso", () => {
     // A tela ficou no gravador o tempo todo: a lista nem montou (montar relê a lista).
     expect(duble.utils.meetings.list.invalidate.mock.calls.length).toBe(releiturasAntes);
     // A volta troca a entrada do histórico, e o voltar do navegador não cai na lista.
-    expect(trocar.mock.calls.some(chamada => chamada[2] === "/gravar")).toBe(true);
+    // Ela leva a busca de quando a gravação começou (urlDaGravacao, H16a): o
+    // ?envioUnico=1 fica, e recarregar não troca o modo do gravador.
+    expect(trocar.mock.calls.some(chamada => chamada[2] === gravar)).toBe(true);
     expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Nova reunião/ })).not.toBeInTheDocument();
     expect(toast.info).toHaveBeenCalledWith("Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" });

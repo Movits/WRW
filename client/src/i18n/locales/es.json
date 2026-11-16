@@ -1506,7 +1506,7 @@
     "processingInterrupted": "El procesamiento se interrumpió antes de terminar (el servidor se reinició a mitad).",
     "deleteConfirmProcessing": "Esta reunión todavía se está procesando: el procesamiento en curso se descartará.",
     "deleteConfirmTitle": "¿Eliminar esta reunión?",
-    "deleteConfirmText": "El audio, la transcripción, las traducciones y las sugerencias de contacto se borrarán de forma definitiva.",
+    "deleteConfirmText": "El audio, la transcripción, las traducciones y las sugerencias de contacto se borrarán de forma definitiva. Las próximas acciones que confirmaste se quedan en tu lista, sin el fragmento de la reunión.",
     "deleteConfirmCancel": "Cancelar",
     "deleteConfirmButton": "Eliminar reunión",
     "summaryTab": "Resumen",
@@ -1993,6 +1993,74 @@
     "versaoNovaDepoisDoEnvio": "Hay una versión nueva de WRW. Esta página se actualizará sola cuando se haya enviado el audio.",
     "sairFalhou": "El servidor no confirmó el cierre de la sesión. Si tu cuenta sigue apareciendo abierta, vuelve a cerrar sesión cuando vuelva la conexión."
   },
+  "proximasAcoes": {
+    "title": "Próximas acciones",
+    "intro": "Las acciones y tareas que confirmaste en los resúmenes de las reuniones y las que anotaste aquí. Las abiertas van primero, por plazo.",
+    "filterOpen": "Abiertas",
+    "filterAll": "Todas",
+    "openCount": "Abiertas: {{n}}",
+    "limitNotice": "Mostrando las primeras {{n}}.",
+    "loading": "Cargando las próximas acciones…",
+    "emptyOpen": "No hay acciones abiertas. Cuando confirmes una acción o tarea en el resumen de una reunión, aparecerá aquí.",
+    "emptyAll": "Todavía no hay próximas acciones.",
+    "add": "Nueva acción",
+    "fieldText": "Qué hacer",
+    "fieldDetail": "Detalle (opcional)",
+    "fieldOwner": "Responsable (opcional)",
+    "fieldDueDate": "Plazo (opcional)",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "edit": "Editar",
+    "delete": "Borrar",
+    "deleteQuestion": "¿Borrar esta acción?",
+    "deleteQuestionMeeting": "¿Borrar esta acción? El elemento vuelve a quedar por revisar en el resumen de la reunión.",
+    "deleteQuestionOwnerItem": "¿Borrar esta acción? El elemento que escribiste pasa a Ignorados en el resumen de la reunión, y Deshacer allí lo recupera.",
+    "deleteConfirm": "Sí, borrar",
+    "owner": "Responsable: {{nome}}",
+    "dueDate": "Plazo: {{data}}",
+    "overdue": "Atrasada",
+    "dueToday": "Vence hoy",
+    "spokenDue": "Plazo dicho en la reunión: {{prazo}}",
+    "fromMeeting": "De la reunión: {{titulo}}",
+    "meetingDeleted": "La reunión de esta acción fue eliminada.",
+    "manual": "Anotada por ti",
+    "excerpt": "Fragmento de la reunión",
+    "contact": "Contacto: {{nome}}",
+    "linkContact": "Vincular a un contacto",
+    "unlinkContact": "Quitar el vínculo",
+    "suggestedContact": "¿Es {{nome}}, de tu red?",
+    "linkSuggested": "Vincular",
+    "searchContact": "Buscar contacto por nombre",
+    "noContactFound": "No se encontró ningún contacto.",
+    "searching": "Buscando…",
+    "saveError": "No se pudo guardar. Inténtalo de nuevo.",
+    "errorGone": "Esta próxima acción ya no existe. Actualiza la página.",
+    "errorContactOutside": "Este contacto no está en tu red.",
+    "seeAll": "Ver todas",
+    "cardEmpty": "No hay acciones abiertas. Confirma las acciones y tareas en el resumen de una reunión, o anota una en Próximas acciones.",
+    "undoConfirm": "Deshacer la confirmación",
+    "undoConfirmQuestion": "Deshacer la confirmación también borra la próxima acción creada a partir de este elemento. ¿Deshacer de todos modos?",
+    "undoConfirmYes": "Sí, deshacer",
+    "ignoreConfirmQuestion": "Ignorar este elemento también borra la próxima acción creada a partir de él. ¿Ignorar de todos modos?",
+    "ignoreConfirmYes": "Sí, ignorar",
+    "inNextActions": "En Próximas acciones",
+    "agenda": {
+      "group": "En la agenda",
+      "pageHint": "Con plazo, la acción puede ir a tu agenda: el evento queda a las 9:00 del día del plazo, con aviso a esa hora.",
+      "pageHintGoogle": "Con Google Calendar conectado en tu Perfil, la acción va sola.",
+      "downloadIcs": "Agenda del móvil (.ics)",
+      "toast": {
+        "sent": "La acción está en tu Google Calendar.",
+        "notSent": "La acción está guardada en WRW, pero no llegó a tu Google Calendar.",
+        "pastNotSent": "El plazo de esta acción ya pasó, así que se queda solo en WRW.",
+        "removed": "El evento de la acción se quitó de tu Google Calendar.",
+        "notRemoved": "El evento de esta acción sigue en tu Google Calendar."
+      },
+      "errors": {
+        "stillOpen": "Esta acción sigue abierta y con plazo, y su evento se queda en tu Google Calendar. Actualiza la página."
+      }
+    }
+  },
   "errorBoundary": {
     "title": "Ocurrió algo inesperado",
     "description": "Encontramos un problema técnico al cargar esta página. Nuestro equipo fue notificado automáticamente.",
@@ -2001,6 +2069,163 @@
     "backHome": "← Volver al inicio",
     "tip": "Si el problema persiste, intenta borrar la caché del navegador (Ctrl+Shift+R).",
     "serverUnavailable": "El servidor no respondió. Inténtalo de nuevo en unos instantes."
+  },
+  "agenda": {
+    "eyebrow": "Antes de la reunión",
+    "title": "Agenda de reuniones",
+    "subtitle": "Programa la reunión, invita a las personas por WhatsApp o por correo y, cuando empiece, graba con un toque.",
+    "newButton": "Programar reunión",
+    "loading": "Cargando la agenda…",
+    "emptyTitle": "No hay reuniones programadas",
+    "emptySubtitle": "Programa la próxima y, cuando empiece, toca Grabar ahora.",
+    "upcomingHeading": "Próximas",
+    "pastHeading": "Ya ocurrieron",
+    "noUpcoming": "No hay reuniones por delante.",
+    "timeZoneNote": "Zona horaria: {{zone}}",
+    "form": {
+      "newTitle": "Nueva reunión en la agenda",
+      "editTitle": "Editar reunión",
+      "titleLabel": "Título",
+      "titlePlaceholder": "Ej.: Conversación con inversor",
+      "dateLabel": "Fecha",
+      "timeLabel": "Hora",
+      "durationLabel": "Duración",
+      "placeLabel": "Lugar o enlace de la llamada",
+      "placePlaceholder": "Dirección, o el enlace de Meet, Zoom o Teams",
+      "participantsLabel": "Participantes",
+      "participantsHint": "Nombre, correo o ambos. El correo entra en la invitación por correo y en Google Calendar.",
+      "participantName": "Nombre",
+      "participantEmail": "Correo",
+      "addParticipant": "Añadir participante",
+      "removeParticipant": "Quitar participante",
+      "reminderLabel": "Recordatorio",
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "titleRequired": "Ponle un título a la reunión.",
+      "titleLength": "El título debe tener entre {{min}} y {{max}} caracteres.",
+      "whenRequired": "Elige la fecha y la hora.",
+      "emailInvalid": "Revisa el correo del participante {{position}}.",
+      "tooManyParticipants": "Como máximo {{max}} participantes."
+    },
+    "reminder": {
+      "none": "Sin recordatorio",
+      "atStart": "A la hora de inicio",
+      "m5": "5 minutos antes",
+      "m10": "10 minutos antes",
+      "m15": "15 minutos antes",
+      "m30": "30 minutos antes",
+      "h1": "1 hora antes",
+      "h2": "2 horas antes",
+      "d1": "1 día antes"
+    },
+    "card": {
+      "now": "En curso",
+      "participants": "Con",
+      "reminder": "Recordatorio",
+      "recording": "Grabación",
+      "recordNow": "Grabar ahora",
+      "openRecording": "Abrir la grabación",
+      "recordAgain": "Grabar de nuevo",
+      "inviteGroup": "Invitación y calendario",
+      "inviteWhatsapp": "WhatsApp",
+      "inviteEmail": "Correo",
+      "googleCalendar": "Google Calendar",
+      "downloadIcs": "Archivo .ics",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "deleteConfirm": "¿Quitar «{{title}}» de la agenda? La grabación, si la hay, sigue en Reuniones.",
+      "deleteYes": "Eliminar",
+      "deleteNo": "Mantener"
+    },
+    "invite": {
+      "heading": "Invitación a la reunión «{{title}}»",
+      "when": "Cuándo",
+      "where": "Dónde",
+      "addToGoogle": "Añádela a tu Google Calendar",
+      "emailSubject": "Invitación: {{title}}"
+    },
+    "toast": {
+      "created": "Reunión programada.",
+      "updated": "Reunión actualizada.",
+      "deleted": "Reunión quitada de la agenda."
+    },
+    "errors": {
+      "notFound": "Esta reunión ya no está en tu agenda. Actualiza la página.",
+      "invalid": "Revisa los campos e inténtalo de nuevo.",
+      "full": "Tu agenda llegó al límite de reuniones. Elimina las antiguas para programar nuevas.",
+      "conflict": "Esta grabación ya está vinculada a otra reunión de la agenda.",
+      "linkFailed": "La grabación sigue, pero no quedó vinculada a la reunión de la agenda."
+    },
+    "recorder": {
+      "fromAgenda": "De tu agenda: {{when}}",
+      "notFound": "Esta reunión ya no está en tu agenda. La grabación sigue sin vínculo.",
+      "loadError": "No se pudo leer la reunión de la agenda. La grabación sigue sin vínculo.",
+      "sendInvite": "Enviar la invitación"
+    },
+    "google": {
+      "formNote": "La reunión también va a tu Google Calendar.",
+      "invitesLabel": "Google envía la invitación desde tu cuenta",
+      "invitesHint": "Sin marcar, el evento queda solo en tu agenda, sin los invitados. Marcado, los invitados quedan en el evento, y Google envía la invitación, y después los avisos de cambio y de cancelación, desde tu cuenta a quienes tienen correo en la lista.",
+      "onCalendar": "En tu Google Calendar",
+      "notOnCalendar": "Todavía no está en tu Google Calendar",
+      "send": "Añadir a Google Calendar",
+      "retry": "Intentar de nuevo",
+      "sending": "Enviando…",
+      "broken": "La conexión con Google Calendar dejó de funcionar, y las reuniones no están llegando allí. Vuelve a conectarla en tu Perfil.",
+      "openProfile": "Abrir el Perfil",
+      "statusError": "No se pudo comprobar si tu Google Calendar está conectado.",
+      "toast": {
+        "sent": "La reunión está en tu Google Calendar.",
+        "notSent": "La reunión está guardada en WRW, pero no llegó a tu Google Calendar.",
+        "removed": "La reunión se quitó de tu Google Calendar.",
+        "notRemoved": "La reunión se quitó de la agenda de WRW, pero sigue en tu Google Calendar.",
+        "removeThere": "Si quieres, borra el evento allí.",
+        "pastNotSent": "Esta reunión ya ocurrió, así que se queda solo en la agenda de WRW."
+      },
+      "reason": {
+        "notConnected": "Conecta Google Calendar en tu Perfil.",
+        "revoked": "Vuelve a conectar Google Calendar en tu Perfil.",
+        "google": "Google no respondió. Inténtalo de nuevo en unos instantes."
+      },
+      "errors": {
+        "stillInAgenda": "Esta reunión sigue en tu agenda. Actualiza la página."
+      }
+    }
+  },
+  "googleAgenda": {
+    "title": "Google Calendar",
+    "subtitle": "Conecta tu cuenta de Google para que WRW añada a tu Google Calendar las reuniones que programes y tus próximas acciones con plazo.",
+    "notConnected": "No hay ninguna cuenta de Google conectada.",
+    "connect": "Conectar Google Calendar",
+    "connected": "Conectado a una cuenta de Google.",
+    "connectedAs": "Conectado a la cuenta de Google {{email}}.",
+    "broken": "Esta conexión dejó de funcionar. Vuelve a conectar para que WRW pueda usar de nuevo tu Google Calendar.",
+    "reconnect": "Volver a conectar",
+    "privacyNote": "WRW solo modifica los eventos de las reuniones que programes en la agenda de reuniones de WRW y de tus próximas acciones con plazo. Puedes desconectarlo cuando quieras.",
+    "wrongAddress": "Para conectar Google Calendar, entra en WRW desde la dirección {{address}}.",
+    "openAddress": "Abrir {{address}}",
+    "inApp": "Desde la app no se puede conectar Google Calendar. Abre {{address}} en el navegador, inicia sesión y conéctalo desde tu Perfil.",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando…",
+    "disconnectConfirm": "¿Desconectar Google Calendar? Los eventos que ya están en tu Google Calendar seguirán allí.",
+    "disconnectYes": "Desconectar",
+    "disconnectNo": "Mantener",
+    "result": {
+      "connected": "Google Calendar conectado.",
+      "denied": "No se autorizó la conexión con Google Calendar.",
+      "missingPermission": "Faltó el permiso del calendario. Vuelve a conectar y deja marcada la opción de Google Calendar.",
+      "expired": "La conexión tardó demasiado. Inténtalo de nuevo.",
+      "wrongAddress": "La conexión con Google Calendar solo funciona desde la dirección oficial de WRW.",
+      "error": "No se pudo conectar Google Calendar. Inténtalo de nuevo en unos instantes.",
+      "errorAccessLeft": "No se pudo conectar Google Calendar, y Google no confirmó que deshizo la autorización que acabas de dar. Si quieres, quita el acceso de WRW en la configuración de tu cuenta de Google."
+    },
+    "toast": {
+      "disconnected": "Google Calendar desconectado.",
+      "disconnectedPending": "WRW borró la conexión, pero Google no lo confirmó. Si quieres, quita el acceso de WRW en la configuración de tu cuenta de Google."
+    },
+    "errors": {
+      "unavailable": "La conexión con Google Calendar no está disponible en este momento."
+    }
   },
   "appHeader": {
     "menuButton": "Menú",
@@ -2019,6 +2244,8 @@
       "contextsDesc": "Dónde y cómo conociste a cada persona",
       "meetings": "Reuniones",
       "meetingsDesc": "Grabaciones y transcripciones",
+      "agenda": "Agenda",
+      "agendaDesc": "Reuniones programadas e invitaciones",
       "memory": "Memoria IA",
       "memoryDesc": "Pregunta a tu historial",
       "intelligentMatches": "Conexiones Inteligentes",
@@ -2048,7 +2275,8 @@
       "confirmar": "Eliminar definitivamente",
       "excluindo": "Eliminando...",
       "sucesso": "Tu cuenta y tus datos fueron eliminados.",
-      "sucessoComPendencias": "Tu cuenta y tus datos fueron eliminados. {{quantidade}} archivo(s) todavía no salieron del almacenamiento y pueden tardar más; su eliminación quedó registrada."
+      "sucessoComPendencias": "Tu cuenta y tus datos fueron eliminados. {{quantidade}} archivo(s) todavía no salieron del almacenamiento y pueden tardar más; su eliminación quedó registrada.",
+      "googleNaoConfirmou": "La conexión con Google Calendar se eliminó junto con tu cuenta, pero Google no confirmó que quitó el acceso de WRW. Si quieres, quita ese acceso en la configuración de tu cuenta de Google."
     }
   },
   "termoGeral": {
@@ -2197,7 +2425,9 @@
       "topics": "Temas: {{lista}}",
       "connectionsTitle": "Conexiones e intermediaciones",
       "connectionsNoConsent": "Activa las Conexiones Inteligentes para ver las conexiones de este contacto.",
-      "searchGlobal": "Buscar conexiones de este contacto en la red global"
+      "searchGlobal": "Buscar conexiones de este contacto en la red global",
+      "actionsEmpty": "Ninguna próxima acción vinculada a este contacto. Anota una aquí, o vincula una acción a este contacto en Próximas acciones.",
+      "actionsAll": "Ver todas tus próximas acciones"
     },
     "availability": {
       "title": "Poner este contacto a disposición de las oportunidades de la red",
@@ -2256,7 +2486,9 @@
       "availableYes": "Puesto a disposición de las oportunidades de la red",
       "availableNo": "Autorización para la red retirada",
       "connection": "Conexión registrada por la plataforma",
-      "stage": "Etapa de la conexión: {{etapa}}"
+      "stage": "Etapa de la conexión: {{etapa}}",
+      "nextAction": "Próxima acción: {{texto}}",
+      "nextActionDone": "Próxima acción completada: {{texto}}"
     },
     "connections": {
       "title": "Conexiones registradas",
@@ -2691,7 +2923,15 @@
     "timeNow": "ahora",
     "timeMinutes": "hace {{count}}min",
     "timeHours": "hace {{count}}h",
-    "timeDays": "hace {{count}}d"
+    "timeDays": "hace {{count}}d",
+    "reminder": {
+      "actionTitle": "Recordatorio: próxima acción para el {{data}}",
+      "meetingTitle": "Recordatorio de reunión: {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Tu reunión está lista: transcripción y resumen",
+      "titleNoSummary": "Tu reunión está lista, sin el resumen: ábrela para intentarlo de nuevo"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Verificando acceso...",

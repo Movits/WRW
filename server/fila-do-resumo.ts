@@ -7,7 +7,9 @@ import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { FalhaDaIA } from "./ia-em-json";
+import { avisarReuniaoPronta } from "./lembretes";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
+import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarMapaMental } from "./mapa-mental";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
 import { numeracaoDoResumoRefeito } from "./resumo-refeito";
@@ -79,7 +81,8 @@ const semReservaViva = (agora: number) => or(isNull(meetingSummaries.lockedUntil
  * Resumo pendente vencido o prazo das tentativas, sem reserva viva (o processo
  * caiu em todas, sem o SIGTERM): ninguém mais o reservaria. Vira falha, e a
  * tela oferece tentar de novo. O mapa esgotado falha sozinho: o resumo
- * continua pronto.
+ * continua pronto. Aqui não sai o aviso de reunião pronta no sino (H15), que
+ * registrarFalha dá: é o caso raro, e a varredura é em lote.
  */
 async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   const esgotado = (fase: Fase) => and(
@@ -155,19 +158,34 @@ async function devolverReserva(db: Banco, id: string, token: string) {
 /**
  * Falha com a reserva ainda viva: espera curta e crescente, ou falha de vez.
  * Na fase do mapa, quem falha é só o mapa: o resumo continua pronto.
+ *
+ * A falha de vez do primeiro resumo avisa no sino que a reunião ficou pronta
+ * sem o resumo (H15): a transcrição está lá, e a tela oferece tentar de novo.
+ * A marca e o aviso vão juntos, numa transação. A falha do mapa e a do
+ * resumo refeito (H4d, "Refazer como…": a versão anterior segue na tela) não
+ * avisam nada, e o aviso de pronta que já está no sino fica, porque o resumo
+ * continua lá.
  */
-async function registrarFalha(db: Banco, alvo: { id: string }, token: string, codigo: string, definitiva: boolean, fase: Fase = "resumo") {
-  const [linha] = await db.select({ attempts: meetingSummaries.attempts }).from(meetingSummaries)
+async function registrarFalha(
+  db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string, codigo: string, definitiva: boolean, fase: Fase = "resumo",
+) {
+  const [linha] = await db.select({ attempts: meetingSummaries.attempts, version: meetingSummaries.version }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).limit(1);
   if (!linha) return;
   const deVez = definitiva || linha.attempts >= TENTATIVAS_DO_RESUMO;
   const desfecho = fase === "resumo"
     ? { status: deVez ? "failed" as const : "pending" as const, lastError: codigo }
     : { mindMapStatus: deVez ? "failed" as const : "pending" as const, mindMapError: codigo };
-  await db.update(meetingSummaries).set({
-    ...desfecho, lockToken: null,
-    lockedUntil: deVez ? null : Date.now() + linha.attempts * 60_000, updatedAt: Date.now(),
-  }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
+  // Sem versão anterior (version 0), a reunião ficou sem resumo nenhum: é o
+  // que o aviso diz. O refazer que falha tem uma versão gravada, que vale.
+  const avisar = deVez && fase === "resumo" && Number(linha.version) === 0;
+  await db.transaction(async tx => {
+    const r = await tx.update(meetingSummaries).set({
+      ...desfecho, lockToken: null,
+      lockedUntil: deVez ? null : Date.now() + linha.attempts * 60_000, updatedAt: Date.now(),
+    }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
+    if (avisar && linhas(r)) await avisarReuniaoPronta(tx, alvo.ownerId, alvo.meetingId, "falhou");
+  });
 }
 
 /**
@@ -291,6 +309,13 @@ async function gravarResumo(
     const queFicam = itensAtuais.filter(itemQueFica);
     const queSaem = itensAtuais.filter(item => !itemQueFica(item)).map(item => item.id);
     if (queSaem.length) {
+      // A próxima ação presa a um item que sai se solta antes (H5a), como no
+      // reprocesso: o nome das vozes vai para o texto, e a reunião e o trecho
+      // ficam. Só a dos itens que saem: a do item que fica (confirmado, feito,
+      // escrito pela dona) continua presa a ele, com o prazo, o contato e o
+      // evento; solta, a leitura seguinte criaria outra ação para o mesmo item.
+      // Item que sai não tem ação (desconfirmar a apaga): isto é a defesa.
+      await soltarAcoesDaReuniao(tx, alvo.ownerId, alvo.meetingId, false, agora, queSaem);
       await tx.delete(meetingSummaryItems).where(and(
         inArray(meetingSummaryItems.id, queSaem), eq(meetingSummaryItems.ownerId, alvo.ownerId),
         ne(meetingSummaryItems.status, "confirmed"), eq(meetingSummaryItems.done, false),
@@ -327,7 +352,11 @@ async function gravarResumo(
       attempts: 0,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token)));
-    return linhas(r) > 0 ? "gravou" : "sem_reserva";
+    if (!linhas(r)) return "sem_reserva";
+    // O aviso "a reunião ficou pronta" no sino (H15), na mesma transação: o
+    // resumo pronto e o aviso saem juntos, e a reunião segue travada.
+    await avisarReuniaoPronta(tx, alvo.ownerId, alvo.meetingId, "pronto");
+    return "gravou";
   });
 }
 

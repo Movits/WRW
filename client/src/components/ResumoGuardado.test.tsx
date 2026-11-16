@@ -15,7 +15,7 @@ import { ResumoGuardado } from "./ResumoGuardado";
  * O que o servidor faz está em server/resumo-guardado.ts e nos testes dele.
  */
 
-type Opcoes = { onError?: (erro: unknown) => void; onSettled?: () => unknown };
+type Opcoes = { onError?: (erro: unknown) => void; onSettled?: () => unknown; onSuccess?: (resultado: unknown, variaveis: unknown) => void };
 const duble = vi.hoisted(() => {
   const mutacoes: Record<string, { mutate: ReturnType<typeof vi.fn>; opcoes: Opcoes; isPending: boolean; isError: boolean; error: unknown }> = {};
   const registrar = (nome: string) => ({
@@ -31,11 +31,12 @@ const duble = vi.hoisted(() => {
     utils: {
       meetings: { resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
+      googleAgenda: { estado: { invalidate: vi.fn() } },
     },
   };
 });
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
@@ -50,10 +51,14 @@ vi.mock("@/lib/trpc", () => ({
       acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink") },
+    // O "Tentar de novo" do evento que ficou na Google Agenda (H5c, useAvisosDaAgenda).
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
   },
 }));
 
 const REUNIAO = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+/** O fuso do aparelho e os rótulos da tela, em pt-BR (H5c). */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
 
 // Os itens como a dona os recebe (server/resumo-guardado.ts), fora da ordem do
@@ -124,11 +129,12 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
   it("a caixa da ação marca e desmarca pelo marcarAcaoFeita, com o id do item", () => {
     daDona(pronto(), { nomes: { F2: "Carla" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
-    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao", feito: true });
+    // Com o fuso e os rótulos da tela: reabrir a ação com prazo a manda de novo à Google Agenda (H5c).
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao", feito: true, ...PEDIDO });
     const feita = screen.getByRole("checkbox", { name: "Reservar a sala de reunião" });
     expect(feita).toBeChecked();
     fireEvent.click(feita);
-    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", feito: false });
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", feito: false, ...PEDIDO });
     // Só as ações têm caixa.
     expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   });
@@ -183,6 +189,32 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(recolhidos).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(within(itemDoTexto("Abrir um escritório em Berlim.")).getByRole("button", { name: "Desfazer" }));
     expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-ignorado", status: "pending" });
+  });
+
+  it("desfazer a confirmação de uma ação pede confirmação antes (ela apaga a próxima ação), e então volta o item a pendente", () => {
+    daDona(pronto());
+    const acao = itemDoTexto("Reservar a sala de reunião");
+    // A ação confirmada está em Próximas ações (H5a).
+    expect(within(acao).getByRole("link", { name: "Em Próximas ações" })).toHaveAttribute("href", "/proximas-acoes");
+    fireEvent.click(within(acao).getByRole("button", { name: "Desfazer a confirmação", description: "Reservar a sala de reunião" }));
+    expect(within(acao).getByText(/também apaga a próxima ação criada a partir deste item/)).toBeInTheDocument();
+    expect(mutacao("decidirItemDoResumo").mutate).not.toHaveBeenCalled();
+    fireEvent.click(within(acao).getByRole("button", { name: "Cancelar" }));
+    expect(within(acao).queryByText(/também apaga a próxima ação/)).not.toBeInTheDocument();
+    fireEvent.click(within(acao).getByRole("button", { name: "Desfazer a confirmação" }));
+    fireEvent.click(within(acao).getByRole("button", { name: "Sim, desfazer" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", status: "pending" });
+  });
+
+  it("o item confirmado que não vira ação (foco, bloqueio) desfaz direto, sem pergunta e sem link de Próximas ações", () => {
+    daDona(pronto());
+    const foco = itemDoTexto("A reunião tratou da exportação de café para a Alemanha.");
+    expect(within(foco).queryByRole("link", { name: "Em Próximas ações" })).not.toBeInTheDocument();
+    fireEvent.click(within(foco).getByRole("button", { name: "Desfazer a confirmação" }));
+    expect(screen.queryByText(/também apaga a próxima ação/)).not.toBeInTheDocument();
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-foco", status: "pending" });
+    // O pendente ainda não tem o que desfazer.
+    expect(within(itemDoTexto("Não renovar com a transportadora antiga.")).queryByRole("button", { name: "Desfazer a confirmação" })).not.toBeInTheDocument();
   });
 
   it("o '▶ mm:ss' leva o player ao segundo do trecho; sem tempo não há botão", () => {
@@ -333,7 +365,7 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     fireEvent.change(screen.getByLabelText("Texto"), { target: { value: "Carla envia a proposta final" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     expect(mutacao("editarItemDoResumo").mutate).toHaveBeenCalledWith({
-      itemId: "i-acao", texto: "{F2} envia a proposta final", assunto: null, responsavel: "{F2}", prazo: "até sexta-feira",
+      itemId: "i-acao", texto: "{F2} envia a proposta final", assunto: null, responsavel: "{F2}", prazo: "até sexta-feira", ...PEDIDO,
     });
     fireEvent.click(within(screen.getByRole("form", { name: "Editar" })).getByRole("button", { name: "Ignorar" }));
     expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao", status: "ignored" });
@@ -592,6 +624,90 @@ describe("Resumo guardado — o item pedido pelo link (?item)", () => {
   it("enquanto o resumo é gerado, não há aviso de item sumido: ele ainda vai chegar", () => {
     daDona(comEstado("gerando"), { itemDestacado: "i-decisao" });
     expect(screen.queryByText("O item deste link não está mais no resumo.")).not.toBeInTheDocument();
+  });
+});
+
+describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)", () => {
+  beforeEach(() => {
+    vi.mocked(toast.warning).mockClear();
+    duble.utils.googleAgenda.estado.invalidate.mockClear();
+    mutacao("tirarDaGoogle")?.mutate.mockClear();
+  });
+
+  it("desconfirmar o item cuja ação ficou na Google porque ela falhou: o aviso traz 'Tentar de novo', que tira o evento pela ação", () => {
+    daDona(pronto());
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", status: "pending" }));
+    const [texto, opcoes] = vi.mocked(toast.warning).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => void } }];
+    expect(texto).toBe("O evento desta ação continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
+    expect(opcoes.action.label).toBe("Tentar de novo");
+    // A ação já saiu do banco (ou está feita): nenhuma lista oferece a retirada, só este aviso.
+    act(() => opcoes.action.onClick());
+    expect(mutacao("tirarDaGoogle").mutate).toHaveBeenCalledWith({ id: "acao-9" });
+  });
+
+  it("quando só reconectar resolve, o aviso manda apagar por lá e o estado da conexão é relido; reabrir que não chega à Google diz o porquê", () => {
+    daDona(pronto());
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "revogada" }, { itemId: "i-acao", feito: true }));
+    expect(toast.warning).toHaveBeenLastCalledWith("O evento desta ação continua na sua Google Agenda. Se quiser, apague o evento por lá.", { duration: 15_000 });
+    expect(duble.utils.googleAgenda.estado.invalidate).toHaveBeenCalled();
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", feito: false }));
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      "A ação está salva na WRW, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+  });
+
+  // A junção com a H4f: o item que a dona escreveu não volta a "para
+  // conferir" (o servidor o deixa confirmado), e a tela não oferece isso.
+  it("o item confirmado que a dona escreveu não tem 'Desfazer a confirmação', mas tem o caminho até Próximas ações", () => {
+    const daDonaConfirmados = [
+      { ...ITENS[1], id: "i-da-dona", status: "confirmed", origin: "owner", editedAt: null, text: "Ligar para o importador", excerpt: "" },
+      { ...ITENS[1], id: "i-editado", status: "confirmed", origin: "ai", editedAt: 500, text: "Mandar o catálogo" },
+      { ...ITENS[1], id: "i-da-ia", status: "confirmed", origin: "ai", editedAt: null, text: "Reservar o voo" },
+    ];
+    daDona(pronto(daDonaConfirmados));
+    for (const texto of ["Ligar para o importador", "Mandar o catálogo"]) {
+      const item = itemDoTexto(texto);
+      expect(within(item).queryByRole("button", { name: "Desfazer a confirmação" })).not.toBeInTheDocument();
+      expect(within(item).getByRole("link", { name: "Em Próximas ações" })).toHaveAttribute("href", "/proximas-acoes");
+    }
+    expect(within(itemDoTexto("Reservar o voo")).getByRole("button", { name: "Desfazer a confirmação" })).toBeInTheDocument();
+  });
+
+  it("enquanto o resumo é refeito (H4d), o confirmado não tem 'Desfazer a confirmação'; no refazer que falhou, tem", () => {
+    const anterior = (estado: string) => consulta({ estado, emoji: "☕", idioma: "pt-BR", erro: null, modelo: "sales", versaoAnterior: true, itens: ITENS });
+    const { unmount } = daDona(anterior("pendente"));
+    expect(within(itemDoTexto("Reservar a sala de reunião")).queryByRole("button", { name: "Desfazer a confirmação" })).not.toBeInTheDocument();
+    unmount();
+    daDona(anterior("falhou"));
+    expect(within(itemDoTexto("Reservar a sala de reunião")).getByRole("button", { name: "Desfazer a confirmação" })).toBeInTheDocument();
+  });
+
+  it("Ignorar no formulário a ação confirmada pergunta antes; o item pendente, não", () => {
+    daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Reservar a sala de reunião" }));
+    fireEvent.click(within(screen.getByRole("form", { name: "Editar" })).getByRole("button", { name: "Ignorar" }));
+    expect(mutacao("decidirItemDoResumo").mutate).not.toHaveBeenCalledWith({ itemId: "i-acao-feita", status: "ignored" });
+    fireEvent.click(screen.getByRole("button", { name: "Sim, ignorar" }));
+    expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-acao-feita", status: "ignored" });
+  });
+
+  it("editar o item cuja ação não chegou à Google avisa como a lista; o evento que foi, não", () => {
+    daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Editar", description: "Reservar a sala de reunião" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, {}));
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      "A ação está salva na WRW, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+    vi.mocked(toast.warning).mockClear();
+    act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "ok" }, {}));
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("deu certo, ou o item não tinha ação com evento: nenhum aviso", () => {
+    daDona(pronto());
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "ok" }, { itemId: "i-acao-feita", status: "pending" }));
+    act(() => mutacao("decidirItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: null, naGoogle: null }, { itemId: "i-decisao", status: "confirmed" }));
+    act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: null, naGoogle: null }, { itemId: "i-acao", feito: false }));
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });
 

@@ -11,7 +11,7 @@ import { FormularioDoItemDoResumo, type ItemEditavel } from "./FormularioDoItemD
  * as opções; o que o servidor faz está em server/resumo-guardado-edicao.test.ts.
  */
 
-type Opcoes = { onError?: (erro: unknown) => void; onSettled?: (dados: unknown, erro: unknown) => unknown };
+type Opcoes = { onSuccess?: (dados: unknown) => void; onError?: (erro: unknown) => void; onSettled?: (dados: unknown, erro: unknown) => unknown };
 const duble = vi.hoisted(() => {
   const mutacoes: Record<string, { mutate: ReturnType<typeof vi.fn>; opcoes: Opcoes; isPending: boolean }> = {};
   const registrar = (nome: string) => ({
@@ -49,6 +49,8 @@ function abrir(props: Partial<Parameters<typeof FormularioDoItemDoResumo>[0]> = 
   return chamadas;
 }
 const mutacao = (nome: string) => duble.mutacoes[nome];
+/** O fuso do aparelho e os rótulos da tela, em pt-BR: o evento da próxima ação do item na Google Agenda (H5c). */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 const preparar = (nome: string, isPending: boolean) => {
   duble.mutacoes[nome] ??= { mutate: vi.fn(), opcoes: {}, isPending: false };
   duble.mutacoes[nome].isPending = isPending;
@@ -70,7 +72,7 @@ describe("Formulário do item do resumo — editar", () => {
     fireEvent.change(screen.getByLabelText("Prazo"), { target: { value: "  até segunda  " } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     expect(mutacao("editarItemDoResumo").mutate).toHaveBeenCalledWith({
-      itemId: "i-acao", texto: "{F2} envia a proposta revisada para {F3}", assunto: null, responsavel: "{F2}", prazo: "até segunda",
+      itemId: "i-acao", texto: "{F2} envia a proposta revisada para {F3}", assunto: null, responsavel: "{F2}", prazo: "até segunda", ...PEDIDO,
     });
   });
 
@@ -80,7 +82,7 @@ describe("Formulário do item do resumo — editar", () => {
     fireEvent.change(screen.getByLabelText("Assunto"), { target: { value: "Contrato com Carla e o importador" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     expect(mutacao("editarItemDoResumo").mutate).toHaveBeenLastCalledWith({
-      itemId: "i-tarefa", texto: "{F2} fecha o contrato.", assunto: "Contrato com {F2} e o importador", responsavel: null, prazo: null,
+      itemId: "i-tarefa", texto: "{F2} fecha o contrato.", assunto: "Contrato com {F2} e o importador", responsavel: null, prazo: null, ...PEDIDO,
     });
   });
 
@@ -89,7 +91,7 @@ describe("Formulário do item do resumo — editar", () => {
     expect(screen.queryByLabelText("Responsável")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Prazo")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-    expect(mutacao("editarItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-decisao", texto: "Não renovar.", assunto: null, responsavel: null, prazo: null });
+    expect(mutacao("editarItemDoResumo").mutate).toHaveBeenLastCalledWith({ itemId: "i-decisao", texto: "Não renovar.", assunto: null, responsavel: null, prazo: null, ...PEDIDO });
   });
 
   it("Ignorar só existe na edição, e espera a decisão que está no ar", () => {
@@ -101,6 +103,32 @@ describe("Formulário do item do resumo — editar", () => {
     abrir({ item: ACAO, aoIgnorar });
     fireEvent.click(screen.getByRole("button", { name: "Ignorar" }));
     expect(aoIgnorar).toHaveBeenCalledTimes(1);
+  });
+
+  // A ação ou tarefa confirmada virou próxima ação (H5a): ignorá-la apaga a
+  // ação, com o prazo, o contato e o evento. Como o "Desfazer a confirmação",
+  // o formulário pergunta antes.
+  it("Ignorar a ação confirmada pergunta antes, porque apaga a próxima ação; Cancelar não ignora", () => {
+    const aoIgnorar = vi.fn();
+    abrir({ item: ACAO, aoIgnorar, ignorarApagaAcao: true });
+    fireEvent.click(screen.getByRole("button", { name: "Ignorar" }));
+    expect(aoIgnorar).not.toHaveBeenCalled();
+    expect(screen.getByText("Ignorar este item também apaga a próxima ação criada a partir dele. Ignorar mesmo?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/Ignorar mesmo\?/)).not.toBeInTheDocument();
+    expect(aoIgnorar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Ignorar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sim, ignorar" }));
+    expect(aoIgnorar).toHaveBeenCalledTimes(1);
+  });
+
+  it("salvar a edição devolve a quem chama o que a Google Agenda fez com o evento da ação (H5c)", () => {
+    const aoSalvarEdicao = vi.fn();
+    abrir({ item: ACAO, aoSalvarEdicao });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    const resultado = { ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" };
+    act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!(resultado));
+    expect(aoSalvarEdicao).toHaveBeenCalledWith(resultado);
   });
 });
 

@@ -288,6 +288,9 @@ sem ele).
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
   `server/security.ts` e `server/matching.ts` derivam a chave do cofre do `JWT_SECRET`.
+  A exceção é a Google Agenda (H16b, `server/google-oauth.ts`): sem ela, com 32
+  caracteres ou mais, a conexão some, porque o refresh token não pode ficar preso ao
+  `JWT_SECRET`.
 
 ## Reunião que falha na IA se reprocessa pelo áudio guardado
 

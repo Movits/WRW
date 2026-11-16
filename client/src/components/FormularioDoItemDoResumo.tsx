@@ -2,6 +2,8 @@ import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Loader2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { pedidoDaTela } from "@/components/AcaoNaAgenda";
+import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import {
   CAMPO_DO_ITEM_DO_RESUMO_MAX,
   SECOES_DO_RESUMO,
@@ -24,6 +26,12 @@ import { responsavelDeVolta, textoDeVolta, textoExibido, type ExibirVoz } from "
  * (shared/vozes-na-edicao.ts). No responsável, a lista sugere as vozes da
  * reunião. As mutações moram aqui, e não no ResumoGuardado: o formulário só
  * monta quando a dona o abre, e a falha deixa o que ela escreveu nos campos.
+ *
+ * A próxima ação do item (H5a) leva o texto editado, e o evento dela na Google
+ * Agenda também (H5c): a edição manda o fuso do aparelho e os rótulos da tela,
+ * como a caixa de feito do resumo, e o resultado da Google volta a quem chama
+ * (`aoSalvarEdicao`). Ignorar a ação ou tarefa confirmada apaga a próxima ação:
+ * antes, o formulário pede a confirmação (`ignorarApagaAcao`).
  */
 
 export type ItemEditavel = {
@@ -53,6 +61,10 @@ type Props = {
   aoFechar: () => void;
   /** Só na edição: tira o item do resumo (vai para os ignorados, com Desfazer). */
   aoIgnorar?: () => void;
+  /** O Ignorar apaga a próxima ação do item (a ação ou tarefa confirmada): pergunta antes. */
+  ignorarApagaAcao?: boolean;
+  /** Só na edição: o que a Google Agenda fez com o evento da próxima ação do item (H5c). */
+  aoSalvarEdicao?: (resultado: (ResultadoNaGoogle & { acaoId: string | null }) | undefined) => void;
   /** Outra decisão do resumo no ar: o Ignorar espera por ela. */
   decidindo?: boolean;
   /**
@@ -68,7 +80,9 @@ const CAMPO = "mt-1 w-full rounded-lg border border-white/15 px-3 py-2 text-base
 const CAMPO_DE_TEXTO = `${CAMPO} bg-white/5`;
 const ROTULO = "block text-xs font-semibold text-white/60";
 
-export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, tituloDaSecao, reler, aoFalhar, aoFechar, aoIgnorar, decidindo = false, comLinkAberto = false }: Props) {
+export function FormularioDoItemDoResumo({
+  meetingId, item, vozes, exibir, tituloDaSecao, reler, aoFalhar, aoFechar, aoIgnorar, ignorarApagaAcao = false, aoSalvarEdicao, decidindo = false, comLinkAberto = false,
+}: Props) {
   const { t } = useTranslation();
   const idDasVozes = useId();
   const idDoAvisoDoLink = useId();
@@ -77,11 +91,12 @@ export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, titul
   const [assunto, setAssunto] = useState(() => item?.subject ? textoExibido(item.subject, exibir) : "");
   const [responsavel, setResponsavel] = useState(() => item?.assignee ? textoExibido(item.assignee, exibir) : "");
   const [prazo, setPrazo] = useState(item?.due ?? "");
+  const [perguntandoIgnorar, setPerguntandoIgnorar] = useState(false);
 
   // Salvou: relê e só então fecha, para o item não piscar com o texto velho.
   // A falha deixa o formulário aberto, com o que a dona escreveu.
   const aoTerminar = (_dados: unknown, erro: unknown) => Promise.resolve(reler()).then(() => { if (!erro) aoFechar(); });
-  const editar = trpc.meetings.editarItemDoResumo.useMutation({ onError: aoFalhar, onSettled: aoTerminar });
+  const editar = trpc.meetings.editarItemDoResumo.useMutation({ onSuccess: resultado => aoSalvarEdicao?.(resultado), onError: aoFalhar, onSettled: aoTerminar });
   const acrescentar = trpc.meetings.acrescentarItemDoResumo.useMutation({ onError: aoFalhar, onSettled: aoTerminar });
   const salvando = editar.isPending || acrescentar.isPending;
   const comAssunto = secaoTemAssunto(secao);
@@ -98,7 +113,7 @@ export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, titul
       responsavel: comResponsavel ? responsavelDeVolta(responsavel, item?.assignee, vozes, exibir) : null,
       prazo: comResponsavel ? prazo.trim() || null : null,
     };
-    if (item) editar.mutate({ itemId: item.id, ...campos });
+    if (item) editar.mutate({ itemId: item.id, ...campos, ...pedidoDaTela(t) });
     else acrescentar.mutate({ meetingId, secao, ...campos });
   }
 
@@ -132,7 +147,18 @@ export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, titul
       </label>
       {sugestoes.length > 0 && <datalist id={idDasVozes}>{sugestoes.map(nome => <option key={nome} value={nome}/>)}</datalist>}
     </div>}
-    <div className="flex flex-wrap items-center gap-2">
+    {/* Ignorar a ação ou tarefa confirmada apaga a próxima ação dela (H5a), com o
+        prazo, o contato e o evento: a pergunta toma o lugar dos botões, e o
+        Cancelar dela volta ao formulário. */}
+    {aoIgnorar && perguntandoIgnorar ? <div role="group" aria-label={t("meetings.summary.ignore")} className="rounded-lg border border-amber-300/30 bg-amber-300/[0.06] p-3 text-xs text-amber-100">
+      <p>{t("proximasAcoes.ignoreConfirmQuestion")}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" disabled={salvando || decidindo} onClick={() => { setPerguntandoIgnorar(false); aoIgnorar(); }}
+          className="rounded-lg bg-amber-400 px-3 py-1.5 font-bold text-[#1a120c] disabled:opacity-50">{t("proximasAcoes.ignoreConfirmYes")}</button>
+        <button type="button" onClick={() => setPerguntandoIgnorar(false)}
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-white/70">{t("proximasAcoes.cancel")}</button>
+      </div>
+    </div> : <div className="flex flex-wrap items-center gap-2">
       <button type="submit" disabled={salvando || !texto.trim()}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50">
         {salvando ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>} {t("meetings.summary.save")}
@@ -141,10 +167,10 @@ export function FormularioDoItemDoResumo({ meetingId, item, vozes, exibir, titul
         className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/65 disabled:opacity-50">
         {t("meetings.summary.cancel")}
       </button>
-      {aoIgnorar && <button type="button" onClick={aoIgnorar} disabled={salvando || decidindo}
+      {aoIgnorar && <button type="button" onClick={() => (ignorarApagaAcao ? setPerguntandoIgnorar(true) : aoIgnorar())} disabled={salvando || decidindo}
         className="ms-auto inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs text-white/55 hover:text-white disabled:opacity-50">
         <X size={14}/> {t("meetings.summary.ignore")}
       </button>}
-    </div>
+    </div>}
   </form>;
 }

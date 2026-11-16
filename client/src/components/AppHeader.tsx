@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft, Briefcase, Brain, ChevronDown, Crown, LogOut,
+  ArrowLeft, Briefcase, Brain, CalendarDays, ChevronDown, Crown, LogOut,
   MapPin, Menu as MenuIcon, Mic, Network, ShieldCheck, Sparkles, Users,
 } from "lucide-react";
 import {
@@ -10,7 +10,7 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NotificationBell } from "@/components/NotificationBell";
-import { ROTA_DAS_REUNIOES } from "@shared/rotas";
+import { ROTA_DA_AGENDA, ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
@@ -31,10 +31,12 @@ type Traduzir = (key: string) => string;
 // array fixo em português era o motivo de a navegação primária do app inteiro
 // sair em pt-BR para as outras 9 línguas, ao lado de um título já traduzido.
 // Reuniões vem em primeiro: o gravador é a primeira coisa que a cliente quer
-// ver depois do login (pedido de 20/10/2026; ver shared/rotas.ts).
+// ver depois do login (pedido de 20/10/2026; ver shared/rotas.ts). A agenda
+// (H16a) vem logo depois: é dela que sai o "Gravar agora".
 export function getMenuItems(t: Traduzir) {
   return [
     { href: ROTA_DAS_REUNIOES, icon: Mic, label: t("appHeader.menu.meetings"), desc: t("appHeader.menu.meetingsDesc") },
+    { href: ROTA_DA_AGENDA, icon: CalendarDays, label: t("appHeader.menu.agenda"), desc: t("appHeader.menu.agendaDesc") },
     { href: "/meu-network-inteligente", icon: Network, label: t("appHeader.menu.smartNetwork"), desc: t("appHeader.menu.smartNetworkDesc") },
     { href: "/opportunities", icon: Briefcase, label: t("appHeader.menu.opportunities"), desc: t("appHeader.menu.opportunitiesDesc") },
     { href: "/verification", icon: ShieldCheck, label: t("appHeader.menu.verification"), desc: t("appHeader.menu.verificationDesc") },

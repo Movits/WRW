@@ -101,6 +101,8 @@ vi.mock("@/lib/trpc", () => ({
       perguntar: duble.registrar("perguntarPeloLink"),
       traduzirResumo: duble.registrar("traduzirResumoPeloLink"),
     },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
@@ -219,8 +221,9 @@ describe("Detalhe da reunião — excluir pede confirmação", () => {
     fireEvent.click(botaoExcluir());
 
     expect(tituloDoModal()).toBeInTheDocument();
-    // o texto nomeia tudo que some
+    // o texto nomeia tudo que some, e o que fica: as próximas ações confirmadas (H5a), soltas da reunião
     expect(screen.getByText(/áudio, a transcrição, as traduções e as sugestões de contato/)).toBeInTheDocument();
+    expect(screen.getByText(/As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião\./)).toBeInTheDocument();
     expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
   });
 

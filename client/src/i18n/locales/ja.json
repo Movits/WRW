@@ -1506,7 +1506,7 @@
     "processingInterrupted": "処理が完了する前に中断されました（サーバーが途中で再起動しました）。",
     "deleteConfirmProcessing": "このミーティングはまだ処理中です。進行中の処理は破棄されます。",
     "deleteConfirmTitle": "このミーティングを削除しますか？",
-    "deleteConfirmText": "音声、文字起こし、翻訳、連絡先の提案が完全に削除されます。",
+    "deleteConfirmText": "音声、文字起こし、翻訳、連絡先の提案が完全に削除されます。確定した次のアクションはリストに残りますが、ミーティングの該当箇所は含まれません。",
     "deleteConfirmCancel": "キャンセル",
     "deleteConfirmButton": "ミーティングを削除",
     "summaryTab": "要約",
@@ -1993,6 +1993,74 @@
     "versaoNovaDepoisDoEnvio": "WRW の新しいバージョンがあります。音声の送信が終わると、このページは自動で更新されます。",
     "sairFalhou": "サーバーでセッションの終了を確認できませんでした。アカウントがまだサインイン中と表示される場合は、接続が戻ってからもう一度サインアウトしてください。"
   },
+  "proximasAcoes": {
+    "title": "次のアクション",
+    "intro": "ミーティングの要約で確定したアクションとタスク、そしてここにメモしたもの。未完了のものを期限順に先に表示します。",
+    "filterOpen": "未完了",
+    "filterAll": "すべて",
+    "openCount": "未完了：{{n}}",
+    "limitNotice": "最初の{{n}}件を表示しています。",
+    "loading": "次のアクションを読み込み中…",
+    "emptyOpen": "未完了のアクションはありません。ミーティングの要約でアクションやタスクを確定すると、ここに表示されます。",
+    "emptyAll": "次のアクションはまだありません。",
+    "add": "新しいアクション",
+    "fieldText": "やること",
+    "fieldDetail": "詳細（任意）",
+    "fieldOwner": "担当（任意）",
+    "fieldDueDate": "期限（任意）",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "edit": "編集",
+    "delete": "削除",
+    "deleteQuestion": "このアクションを削除しますか？",
+    "deleteQuestionMeeting": "このアクションを削除しますか？この項目はミーティングの要約で再び「要確認」に戻ります。",
+    "deleteQuestionOwnerItem": "このアクションを削除しますか？あなたが書いた項目はミーティングの要約の「無視した項目」に移り、そこで「元に戻す」を押すと戻せます。",
+    "deleteConfirm": "削除する",
+    "owner": "担当：{{nome}}",
+    "dueDate": "期限：{{data}}",
+    "overdue": "期限切れ",
+    "dueToday": "今日が期限",
+    "spokenDue": "ミーティングで言及された期限：{{prazo}}",
+    "fromMeeting": "ミーティング：{{titulo}}",
+    "meetingDeleted": "このアクションのミーティングは削除されました。",
+    "manual": "あなたのメモ",
+    "excerpt": "ミーティングの該当箇所",
+    "contact": "連絡先：{{nome}}",
+    "linkContact": "連絡先と紐づける",
+    "unlinkContact": "紐づけを解除",
+    "suggestedContact": "あなたのネットワークの{{nome}}さんですか？",
+    "linkSuggested": "紐づける",
+    "searchContact": "名前で連絡先を検索",
+    "noContactFound": "連絡先が見つかりません。",
+    "searching": "検索中…",
+    "saveError": "保存できませんでした。もう一度お試しください。",
+    "errorGone": "この次のアクションはもう存在しません。ページを更新してください。",
+    "errorContactOutside": "この連絡先はあなたのネットワークにありません。",
+    "seeAll": "すべて表示",
+    "cardEmpty": "未完了のアクションはありません。ミーティングの要約でアクションとタスクを確定するか、「次のアクション」にメモしてください。",
+    "undoConfirm": "確定を取り消す",
+    "undoConfirmQuestion": "確定を取り消すと、この項目から作成された次のアクションも削除されます。取り消しますか？",
+    "undoConfirmYes": "取り消す",
+    "ignoreConfirmQuestion": "この項目を無視すると、この項目から作成された次のアクションも削除されます。無視しますか？",
+    "ignoreConfirmYes": "無視する",
+    "inNextActions": "「次のアクション」にあります",
+    "agenda": {
+      "group": "カレンダー",
+      "pageHint": "期限のあるアクションはカレンダーに追加できます。予定は期限日の午前 9 時で、その時刻に通知します。",
+      "pageHintGoogle": "プロフィールで Google カレンダーを接続していれば、アクションは自動で追加されます。",
+      "downloadIcs": "スマホのカレンダー（.ics）",
+      "toast": {
+        "sent": "アクションは Google カレンダーに追加されました。",
+        "notSent": "アクションは WRW に保存されましたが、Google カレンダーには追加されませんでした。",
+        "pastNotSent": "このアクションの期限は過ぎているため、WRW にだけ残ります。",
+        "removed": "アクションの予定を Google カレンダーから削除しました。",
+        "notRemoved": "このアクションの予定は Google カレンダーに残っています。"
+      },
+      "errors": {
+        "stillOpen": "このアクションはまだ完了しておらず期限があるため、予定は Google カレンダーに残ります。ページを更新してください。"
+      }
+    }
+  },
   "errorBoundary": {
     "title": "予期しないエラーが発生しました",
     "description": "このページの読み込み中に技術的な問題が発生しました。運営チームには自動的に通知されました。",
@@ -2001,6 +2069,163 @@
     "backHome": "← ホームに戻る",
     "tip": "問題が解決しない場合は、ブラウザのキャッシュを削除してみてください（Ctrl+Shift+R）。",
     "serverUnavailable": "サーバーが応答しませんでした。しばらくしてからもう一度お試しください。"
+  },
+  "agenda": {
+    "eyebrow": "ミーティングの前に",
+    "title": "ミーティングの予定",
+    "subtitle": "ミーティングを予定に入れ、WhatsApp かメールで参加者を招待し、始まったらワンタップで録音できます。",
+    "newButton": "ミーティングを予定",
+    "loading": "予定を読み込んでいます…",
+    "emptyTitle": "予定されたミーティングはありません",
+    "emptySubtitle": "次のミーティングを予定に入れ、始まったら「今すぐ録音」をタップしてください。",
+    "upcomingHeading": "今後の予定",
+    "pastHeading": "終了したもの",
+    "noUpcoming": "今後のミーティングはありません。",
+    "timeZoneNote": "タイムゾーン：{{zone}}",
+    "form": {
+      "newTitle": "新しいミーティングの予定",
+      "editTitle": "ミーティングを編集",
+      "titleLabel": "タイトル",
+      "titlePlaceholder": "例：投資家との会話",
+      "dateLabel": "日付",
+      "timeLabel": "時刻",
+      "durationLabel": "所要時間",
+      "placeLabel": "場所または通話リンク",
+      "placePlaceholder": "住所、または Meet・Zoom・Teams のリンク",
+      "participantsLabel": "参加者",
+      "participantsHint": "名前、メール、またはその両方。メールはメールでの招待と Google カレンダーに使われます。",
+      "participantName": "名前",
+      "participantEmail": "メール",
+      "addParticipant": "参加者を追加",
+      "removeParticipant": "参加者を削除",
+      "reminderLabel": "リマインダー",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "titleRequired": "ミーティングにタイトルを付けてください。",
+      "titleLength": "タイトルは{{min}}～{{max}}文字にしてください。",
+      "whenRequired": "日付と時刻を選んでください。",
+      "emailInvalid": "{{position}} 人目の参加者のメールを確認してください。",
+      "tooManyParticipants": "参加者は最大 {{max}} 人です。"
+    },
+    "reminder": {
+      "none": "リマインダーなし",
+      "atStart": "開始時刻",
+      "m5": "5 分前",
+      "m10": "10 分前",
+      "m15": "15 分前",
+      "m30": "30 分前",
+      "h1": "1 時間前",
+      "h2": "2 時間前",
+      "d1": "1 日前"
+    },
+    "card": {
+      "now": "進行中",
+      "participants": "参加者",
+      "reminder": "リマインダー",
+      "recording": "録音",
+      "recordNow": "今すぐ録音",
+      "openRecording": "録音を開く",
+      "recordAgain": "もう一度録音",
+      "inviteGroup": "招待とカレンダー",
+      "inviteWhatsapp": "WhatsApp",
+      "inviteEmail": "メール",
+      "googleCalendar": "Google カレンダー",
+      "downloadIcs": ".ics ファイル",
+      "edit": "編集",
+      "delete": "削除",
+      "deleteConfirm": "「{{title}}」を予定から削除しますか？録音がある場合は「ミーティング」に残ります。",
+      "deleteYes": "削除",
+      "deleteNo": "残す"
+    },
+    "invite": {
+      "heading": "ミーティング「{{title}}」へのご招待",
+      "when": "日時",
+      "where": "場所",
+      "addToGoogle": "Google カレンダーに追加",
+      "emailSubject": "ご招待：{{title}}"
+    },
+    "toast": {
+      "created": "ミーティングを予定に入れました。",
+      "updated": "ミーティングを更新しました。",
+      "deleted": "ミーティングを予定から削除しました。"
+    },
+    "errors": {
+      "notFound": "このミーティングは予定にありません。ページを更新してください。",
+      "invalid": "入力内容を確認して、もう一度お試しください。",
+      "full": "予定できるミーティングの上限に達しました。古いものを削除してから新しく予定してください。",
+      "conflict": "この録音はすでに別の予定のミーティングに関連付けられています。",
+      "linkFailed": "録音は続いていますが、予定のミーティングには関連付けられませんでした。"
+    },
+    "recorder": {
+      "fromAgenda": "予定から：{{when}}",
+      "notFound": "このミーティングは予定にありません。録音は関連付けなしで続きます。",
+      "loadError": "予定のミーティングを読み込めませんでした。録音は関連付けなしで続きます。",
+      "sendInvite": "招待を送る"
+    },
+    "google": {
+      "formNote": "このミーティングは Google カレンダーにも追加されます。",
+      "invitesLabel": "Google があなたのアカウントから招待を送る",
+      "invitesHint": "オフの場合、イベントはあなたのカレンダーだけに入り、ゲストは追加されません。オンの場合、ゲストがイベントに追加され、Google があなたのアカウントから、リストでメールのある全員に招待を送り、その後も変更やキャンセルの通知を送ります。",
+      "onCalendar": "Google カレンダーに追加済み",
+      "notOnCalendar": "まだ Google カレンダーにありません",
+      "send": "Google カレンダーに追加",
+      "retry": "もう一度試す",
+      "sending": "送信中…",
+      "broken": "Google カレンダーとの連携が機能しなくなったため、ミーティングが追加されていません。プロフィールで再連携してください。",
+      "openProfile": "プロフィールを開く",
+      "statusError": "Google カレンダーが連携されているか確認できませんでした。",
+      "toast": {
+        "sent": "ミーティングは Google カレンダーにあります。",
+        "notSent": "ミーティングは WRW に保存されましたが、Google カレンダーには追加されませんでした。",
+        "removed": "ミーティングを Google カレンダーから削除しました。",
+        "notRemoved": "ミーティングは WRW の予定から削除されましたが、Google カレンダーには残っています。",
+        "removeThere": "必要であれば、そちらでイベントを削除してください。",
+        "pastNotSent": "このミーティングはすでに終わっているため、WRW の予定にだけ残ります。"
+      },
+      "reason": {
+        "notConnected": "プロフィールで Google カレンダーを連携してください。",
+        "revoked": "プロフィールで Google カレンダーを再連携してください。",
+        "google": "Google から応答がありませんでした。しばらくしてからもう一度お試しください。"
+      },
+      "errors": {
+        "stillInAgenda": "このミーティングはまだ予定にあります。ページを更新してください。"
+      }
+    }
+  },
+  "googleAgenda": {
+    "title": "Google カレンダー",
+    "subtitle": "Google アカウントを連携すると、予定に入れたミーティングと期限のある次のアクションを WRW が Google カレンダーに追加できます。",
+    "notConnected": "Google アカウントは連携されていません。",
+    "connect": "Google カレンダーを連携",
+    "connected": "Google アカウントと連携しています。",
+    "connectedAs": "Google アカウント {{email}} と連携しています。",
+    "broken": "この連携は機能しなくなりました。WRW が再び Google カレンダーを使えるよう、もう一度連携してください。",
+    "reconnect": "再連携",
+    "privacyNote": "WRW が変更するのは、WRW で予定に入れたミーティングと、期限のある次のアクションのイベントだけです。連携はいつでも解除できます。",
+    "wrongAddress": "Google カレンダーを連携するには、{{address}} から WRW を開いてください。",
+    "openAddress": "{{address}} を開く",
+    "inApp": "アプリからは Google カレンダーを連携できません。ブラウザで {{address}} を開いてログインし、プロフィールから連携してください。",
+    "disconnect": "連携を解除",
+    "disconnecting": "連携を解除しています…",
+    "disconnectConfirm": "Google カレンダーとの連携を解除しますか？すでに Google カレンダーにあるイベントはそのまま残ります。",
+    "disconnectYes": "解除する",
+    "disconnectNo": "そのままにする",
+    "result": {
+      "connected": "Google カレンダーを連携しました。",
+      "denied": "Google カレンダーとの連携は許可されませんでした。",
+      "missingPermission": "カレンダーへのアクセス許可が不足しています。もう一度連携し、Google カレンダーの項目にチェックを入れたままにしてください。",
+      "expired": "連携に時間がかかりすぎました。もう一度お試しください。",
+      "wrongAddress": "Google カレンダーとの連携は WRW の公式アドレスからのみ行えます。",
+      "error": "Google カレンダーを連携できませんでした。しばらくしてからもう一度お試しください。",
+      "errorAccessLeft": "Google カレンダーを連携できませんでした。また、たった今許可したアクセス権の取り消しを Google から確認できませんでした。必要に応じて、Google アカウントの設定で WRW のアクセス権を削除してください。"
+    },
+    "toast": {
+      "disconnected": "Google カレンダーとの連携を解除しました。",
+      "disconnectedPending": "WRW は連携を削除しましたが、Google からの確認はありませんでした。必要に応じて、Google アカウントの設定で WRW のアクセス権を削除してください。"
+    },
+    "errors": {
+      "unavailable": "現在、Google カレンダーとの連携は利用できません。"
+    }
   },
   "appHeader": {
     "menuButton": "メニュー",
@@ -2019,6 +2244,8 @@
       "contextsDesc": "それぞれの人といつどこで出会ったか",
       "meetings": "ミーティング",
       "meetingsDesc": "録音と文字起こし",
+      "agenda": "予定",
+      "agendaDesc": "予定したミーティングと招待",
       "memory": "AI メモリー",
       "memoryDesc": "あなたの履歴に質問する",
       "intelligentMatches": "スマートなつながり",
@@ -2048,7 +2275,8 @@
       "confirmar": "完全に削除",
       "excluindo": "削除中...",
       "sucesso": "アカウントとデータを削除しました。",
-      "sucessoComPendencias": "アカウントとデータを削除しました。{{quantidade}} 件のファイルはまだストレージから削除されておらず、時間がかかる場合があります。削除は記録済みです。"
+      "sucessoComPendencias": "アカウントとデータを削除しました。{{quantidade}} 件のファイルはまだストレージから削除されておらず、時間がかかる場合があります。削除は記録済みです。",
+      "googleNaoConfirmou": "Google カレンダーとの連携はアカウントと一緒に削除されましたが、WRW のアクセス権の削除を Google から確認できませんでした。必要に応じて、Google アカウントの設定でこのアクセス権を削除してください。"
     }
   },
   "termoGeral": {
@@ -2197,7 +2425,9 @@
       "topics": "話題：{{lista}}",
       "connectionsTitle": "コネクションと仲介",
       "connectionsNoConsent": "この連絡先のコネクションを見るには、スマートコネクションを有効にしてください。",
-      "searchGlobal": "この連絡先のコネクションをグローバルネットワークで探す"
+      "searchGlobal": "この連絡先のコネクションをグローバルネットワークで探す",
+      "actionsEmpty": "この連絡先に紐づく次のアクションはありません。ここでメモするか、「次のアクション」でアクションをこの連絡先に紐づけてください。",
+      "actionsAll": "次のアクションをすべて表示"
     },
     "availability": {
       "title": "この連絡先をネットワークの機会に公開する",
@@ -2256,7 +2486,9 @@
       "availableYes": "ネットワークの機会に公開",
       "availableNo": "ネットワークへの許可を取り消し",
       "connection": "プラットフォームがコネクションを記録",
-      "stage": "コネクションの段階：{{etapa}}"
+      "stage": "コネクションの段階：{{etapa}}",
+      "nextAction": "次のアクション：{{texto}}",
+      "nextActionDone": "次のアクション完了：{{texto}}"
     },
     "connections": {
       "title": "記録されたコネクション",
@@ -2691,7 +2923,15 @@
     "timeNow": "たった今",
     "timeMinutes": "{{count}}分前",
     "timeHours": "{{count}}時間前",
-    "timeDays": "{{count}}日前"
+    "timeDays": "{{count}}日前",
+    "reminder": {
+      "actionTitle": "リマインダー：次のアクションの期限は{{data}}です",
+      "meetingTitle": "ミーティングのリマインダー：{{quando}}"
+    },
+    "meetingReady": {
+      "title": "ミーティングの準備ができました：文字起こしと要約",
+      "titleNoSummary": "ミーティングの準備ができましたが、要約はありません。開いてもう一度お試しください"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "アクセスを確認しています...",

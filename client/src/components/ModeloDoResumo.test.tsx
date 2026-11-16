@@ -28,6 +28,7 @@ const duble = vi.hoisted(() => {
     utils: {
       meetings: { resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
+      googleAgenda: { estado: { invalidate: vi.fn() } },
     },
   };
 });
@@ -44,6 +45,8 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink") },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.registrar("tirarDaGoogle") },
   },
 }));
 
@@ -201,7 +204,8 @@ describe("Modelos do resumo — a versão anterior enquanto a nova é escrita", 
     const feita = screen.getByRole("checkbox", { name: "Reservar a sala de reunião" });
     expect(feita).toBeEnabled();
     fireEvent.click(feita);
-    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao-feita", feito: false });
+    // Com o fuso do aparelho e os rótulos da tela: a próxima ação reaberta volta à Google Agenda (H5c).
+    expect(mutacao("marcarAcaoFeita").mutate).toHaveBeenCalledWith({ itemId: "i-acao-feita", feito: false, fuso: expect.any(String), rotulos: expect.any(Object) });
     fireEvent.click(screen.getByRole("button", { name: "Ignorados (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
     expect(mutacao("decidirItemDoResumo").mutate).toHaveBeenCalledWith({ itemId: "i-ignorado", status: "pending" });

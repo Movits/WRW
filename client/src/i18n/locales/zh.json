@@ -1506,7 +1506,7 @@
     "processingInterrupted": "处理在完成前被中断（服务器中途重启）。",
     "deleteConfirmProcessing": "此会议仍在处理中：正在进行的处理将被丢弃。",
     "deleteConfirmTitle": "删除此会议？",
-    "deleteConfirmText": "音频、转录内容、翻译和联系人建议将被永久删除。",
+    "deleteConfirmText": "音频、转录内容、翻译和联系人建议将被永久删除。您确认过的后续行动会保留在您的列表中，但不含会议原文片段。",
     "deleteConfirmCancel": "取消",
     "deleteConfirmButton": "删除会议",
     "summaryTab": "摘要",
@@ -1993,6 +1993,74 @@
     "versaoNovaDepoisDoEnvio": "WRW 有新版本。音频发送完成后，此页面会自动刷新。",
     "sairFalhou": "服务器未确认会话已结束。如果你的账户仍显示为已登录，请在连接恢复后再次退出登录。"
   },
+  "proximasAcoes": {
+    "title": "后续行动",
+    "intro": "您在会议摘要中确认的行动项和任务，以及您在这里记下的事项。未完成的排在前面，按截止日期排序。",
+    "filterOpen": "未完成",
+    "filterAll": "全部",
+    "openCount": "未完成：{{n}}",
+    "limitNotice": "显示前 {{n}} 项。",
+    "loading": "正在加载后续行动…",
+    "emptyOpen": "没有未完成的行动。在会议摘要中确认行动项或任务后，它会显示在这里。",
+    "emptyAll": "还没有后续行动。",
+    "add": "新建行动",
+    "fieldText": "要做什么",
+    "fieldDetail": "详情（选填）",
+    "fieldOwner": "负责人（选填）",
+    "fieldDueDate": "截止日期（选填）",
+    "save": "保存",
+    "cancel": "取消",
+    "edit": "编辑",
+    "delete": "删除",
+    "deleteQuestion": "删除此行动？",
+    "deleteQuestionMeeting": "删除此行动？该条目会在会议摘要中重新变为“待核对”。",
+    "deleteQuestionOwnerItem": "删除此行动？您写的这个条目会移到会议摘要的“已忽略”中，在那里点“撤销”即可恢复。",
+    "deleteConfirm": "是，删除",
+    "owner": "负责人：{{nome}}",
+    "dueDate": "截止：{{data}}",
+    "overdue": "已逾期",
+    "dueToday": "今天到期",
+    "spokenDue": "会议中提到的期限：{{prazo}}",
+    "fromMeeting": "来自会议：{{titulo}}",
+    "meetingDeleted": "此行动所属的会议已被删除。",
+    "manual": "由您记下",
+    "excerpt": "会议原文片段",
+    "contact": "联系人：{{nome}}",
+    "linkContact": "关联联系人",
+    "unlinkContact": "取消关联",
+    "suggestedContact": "是您人脉网络中的 {{nome}} 吗？",
+    "linkSuggested": "关联",
+    "searchContact": "按姓名搜索联系人",
+    "noContactFound": "未找到联系人。",
+    "searching": "正在搜索…",
+    "saveError": "无法保存，请重试。",
+    "errorGone": "此后续行动已不存在。请刷新页面。",
+    "errorContactOutside": "此联系人不在您的人脉网络中。",
+    "seeAll": "查看全部",
+    "cardEmpty": "没有未完成的行动。请在会议摘要中确认行动项和任务，或在“后续行动”中记下一项。",
+    "undoConfirm": "撤销确认",
+    "undoConfirmQuestion": "撤销确认也会删除由此条目创建的后续行动。仍要撤销吗？",
+    "undoConfirmYes": "是，撤销",
+    "ignoreConfirmQuestion": "忽略此条目也会删除由它创建的后续行动。仍要忽略吗？",
+    "ignoreConfirmYes": "是，忽略",
+    "inNextActions": "已在后续行动中",
+    "agenda": {
+      "group": "日历",
+      "pageHint": "有截止日期的行动可以加入您的日历：活动安排在截止日期当天上午 9 点，并在那时提醒。",
+      "pageHintGoogle": "如果您在个人资料中连接了 Google 日历，行动会自动加入。",
+      "downloadIcs": "手机日历（.ics）",
+      "toast": {
+        "sent": "该行动已在您的 Google 日历中。",
+        "notSent": "行动已保存在 WRW，但没有添加到您的 Google 日历。",
+        "pastNotSent": "该行动的截止日期已过，因此只保留在 WRW 中。",
+        "removed": "该行动的活动已从您的 Google 日历中移除。",
+        "notRemoved": "该行动的活动仍在您的 Google 日历中。"
+      },
+      "errors": {
+        "stillOpen": "该行动仍未完成且有截止日期，因此其活动保留在您的 Google 日历中。请刷新页面。"
+      }
+    }
+  },
   "errorBoundary": {
     "title": "发生了意外情况",
     "description": "加载此页面时遇到了技术问题。我们的团队已自动收到通知。",
@@ -2001,6 +2069,163 @@
     "backHome": "← 返回首页",
     "tip": "如果问题仍然存在，请尝试清除浏览器缓存（Ctrl+Shift+R）。",
     "serverUnavailable": "服务器没有响应。请稍后再试。"
+  },
+  "agenda": {
+    "eyebrow": "会议之前",
+    "title": "会议日程",
+    "subtitle": "安排会议，通过 WhatsApp 或电子邮件邀请参会人，会议开始时一键录制。",
+    "newButton": "安排会议",
+    "loading": "正在加载日程…",
+    "emptyTitle": "还没有安排会议",
+    "emptySubtitle": "安排下一场会议，开始时点按“立即录制”。",
+    "upcomingHeading": "即将进行",
+    "pastHeading": "已结束",
+    "noUpcoming": "接下来没有会议。",
+    "timeZoneNote": "时区：{{zone}}",
+    "form": {
+      "newTitle": "日程中的新会议",
+      "editTitle": "编辑会议",
+      "titleLabel": "标题",
+      "titlePlaceholder": "例如：与投资人的对话",
+      "dateLabel": "日期",
+      "timeLabel": "时间",
+      "durationLabel": "时长",
+      "placeLabel": "地点或通话链接",
+      "placePlaceholder": "地址，或 Meet、Zoom、Teams 链接",
+      "participantsLabel": "参会人",
+      "participantsHint": "填写姓名、电子邮件或两者。电子邮件会用于邮件邀请和 Google 日历。",
+      "participantName": "姓名",
+      "participantEmail": "电子邮件",
+      "addParticipant": "添加参会人",
+      "removeParticipant": "移除参会人",
+      "reminderLabel": "提醒",
+      "save": "保存",
+      "cancel": "取消",
+      "titleRequired": "请为会议填写标题。",
+      "titleLength": "标题需为 {{min}} 到 {{max}} 个字符。",
+      "whenRequired": "请选择日期和时间。",
+      "emailInvalid": "请检查第 {{position}} 位参会人的电子邮件。",
+      "tooManyParticipants": "最多 {{max}} 位参会人。"
+    },
+    "reminder": {
+      "none": "不提醒",
+      "atStart": "开始时",
+      "m5": "提前 5 分钟",
+      "m10": "提前 10 分钟",
+      "m15": "提前 15 分钟",
+      "m30": "提前 30 分钟",
+      "h1": "提前 1 小时",
+      "h2": "提前 2 小时",
+      "d1": "提前 1 天"
+    },
+    "card": {
+      "now": "正在进行",
+      "participants": "参会人",
+      "reminder": "提醒",
+      "recording": "录音",
+      "recordNow": "立即录制",
+      "openRecording": "打开录音",
+      "recordAgain": "重新录制",
+      "inviteGroup": "邀请与日历",
+      "inviteWhatsapp": "WhatsApp",
+      "inviteEmail": "电子邮件",
+      "googleCalendar": "Google 日历",
+      "downloadIcs": ".ics 文件",
+      "edit": "编辑",
+      "delete": "删除",
+      "deleteConfirm": "要从日程中移除“{{title}}”吗？如有录音，仍会保留在“会议”中。",
+      "deleteYes": "删除",
+      "deleteNo": "保留"
+    },
+    "invite": {
+      "heading": "会议“{{title}}”的邀请",
+      "when": "时间",
+      "where": "地点",
+      "addToGoogle": "添加到您的 Google 日历",
+      "emailSubject": "邀请：{{title}}"
+    },
+    "toast": {
+      "created": "会议已安排。",
+      "updated": "会议已更新。",
+      "deleted": "会议已从日程中移除。"
+    },
+    "errors": {
+      "notFound": "这场会议已不在您的日程中。请刷新页面。",
+      "invalid": "请检查各项内容后重试。",
+      "full": "您的日程已达到会议数量上限。请删除旧会议后再安排新会议。",
+      "conflict": "这段录音已关联到日程中的另一场会议。",
+      "linkFailed": "录音仍在继续，但未能关联到日程中的会议。"
+    },
+    "recorder": {
+      "fromAgenda": "来自您的日程：{{when}}",
+      "notFound": "这场会议已不在您的日程中。录音将继续，但不会关联。",
+      "loadError": "无法读取日程中的会议。录音将继续，但不会关联。",
+      "sendInvite": "发送邀请"
+    },
+    "google": {
+      "formNote": "这场会议也会添加到您的 Google 日历。",
+      "invitesLabel": "由 Google 从您的账号发送邀请",
+      "invitesHint": "不勾选时，活动只在您的日历中，不包含受邀者。勾选后，受邀者会出现在活动中，Google 会从您的账号向名单中有电子邮件的每个人发送邀请，之后还会发送变更和取消通知。",
+      "onCalendar": "已在您的 Google 日历中",
+      "notOnCalendar": "尚未添加到您的 Google 日历",
+      "send": "添加到 Google 日历",
+      "retry": "重试",
+      "sending": "正在发送…",
+      "broken": "与 Google 日历的关联已失效，会议没有添加到那里。请在个人资料中重新关联。",
+      "openProfile": "打开个人资料",
+      "statusError": "无法确认您的 Google 日历是否已关联。",
+      "toast": {
+        "sent": "会议已在您的 Google 日历中。",
+        "notSent": "会议已保存在 WRW，但没有添加到您的 Google 日历。",
+        "removed": "会议已从您的 Google 日历中移除。",
+        "notRemoved": "会议已从 WRW 日程中移除，但仍在您的 Google 日历中。",
+        "removeThere": "如有需要，请在那里删除该活动。",
+        "pastNotSent": "这场会议已经结束，因此只保留在 WRW 日程中。"
+      },
+      "reason": {
+        "notConnected": "请在个人资料中关联 Google 日历。",
+        "revoked": "请在个人资料中重新关联 Google 日历。",
+        "google": "Google 没有响应。请稍后重试。"
+      },
+      "errors": {
+        "stillInAgenda": "这场会议仍在您的日程中。请刷新页面。"
+      }
+    }
+  },
+  "googleAgenda": {
+    "title": "Google 日历",
+    "subtitle": "关联您的 Google 账号，WRW 就能把您安排的会议和有截止日期的后续行动添加到您的 Google 日历。",
+    "notConnected": "尚未关联 Google 账号。",
+    "connect": "关联 Google 日历",
+    "connected": "已关联 Google 账号。",
+    "connectedAs": "已关联 Google 账号 {{email}}。",
+    "broken": "此关联已失效。请重新关联，以便 WRW 再次使用您的 Google 日历。",
+    "reconnect": "重新关联",
+    "privacyNote": "WRW 只会修改您在 WRW 会议日程中安排的会议，以及您有截止日期的后续行动所对应的活动。您可以随时取消关联。",
+    "wrongAddress": "要关联 Google 日历，请通过 {{address}} 打开 WRW。",
+    "openAddress": "打开 {{address}}",
+    "inApp": "无法在应用内关联 Google 日历。请在浏览器中打开 {{address}}，登录您的账号，然后在个人资料中关联。",
+    "disconnect": "取消关联",
+    "disconnecting": "正在取消关联…",
+    "disconnectConfirm": "要取消关联 Google 日历吗？已在您 Google 日历中的活动会保留。",
+    "disconnectYes": "取消关联",
+    "disconnectNo": "保留",
+    "result": {
+      "connected": "Google 日历已关联。",
+      "denied": "未授权关联 Google 日历。",
+      "missingPermission": "缺少日历权限。请重新关联，并保持勾选 Google 日历选项。",
+      "expired": "关联耗时过长，请重试。",
+      "wrongAddress": "Google 日历关联只能通过 WRW 的官方网址进行。",
+      "error": "无法关联 Google 日历，请稍后重试。",
+      "errorAccessLeft": "无法关联 Google 日历，且 Google 尚未确认已撤销您刚才授予的权限。如有需要，请在您的 Google 账号设置中移除 WRW 的访问权限。"
+    },
+    "toast": {
+      "disconnected": "Google 日历已取消关联。",
+      "disconnectedPending": "WRW 已删除该关联，但 Google 尚未确认。如有需要，请在您的 Google 账号设置中移除 WRW 的访问权限。"
+    },
+    "errors": {
+      "unavailable": "Google 日历关联目前不可用。"
+    }
   },
   "appHeader": {
     "menuButton": "菜单",
@@ -2019,6 +2244,8 @@
       "contextsDesc": "您在何时何地结识每个人",
       "meetings": "会议",
       "meetingsDesc": "录音与转录",
+      "agenda": "日程",
+      "agendaDesc": "已安排的会议和邀请",
       "memory": "AI 记忆",
       "memoryDesc": "向您的历史记录提问",
       "intelligentMatches": "智能连接",
@@ -2048,7 +2275,8 @@
       "confirmar": "永久删除",
       "excluindo": "正在删除...",
       "sucesso": "你的账户和数据已删除。",
-      "sucessoComPendencias": "你的账户和数据已删除。还有 {{quantidade}} 个文件尚未从存储中删除，可能需要更长时间；其删除已记录。"
+      "sucessoComPendencias": "你的账户和数据已删除。还有 {{quantidade}} 个文件尚未从存储中删除，可能需要更长时间；其删除已记录。",
+      "googleNaoConfirmou": "Google 日历关联已随你的账户一并删除，但 Google 尚未确认已移除 WRW 的访问权限。如有需要，请在你的 Google 账号设置中移除该访问权限。"
     }
   },
   "termoGeral": {
@@ -2197,7 +2425,9 @@
       "topics": "话题：{{lista}}",
       "connectionsTitle": "连接与撮合",
       "connectionsNoConsent": "开启智能连接后即可查看此联系人的连接。",
-      "searchGlobal": "在全球网络中查找此联系人的连接"
+      "searchGlobal": "在全球网络中查找此联系人的连接",
+      "actionsEmpty": "没有与此联系人关联的后续行动。可以在这里记下一项，或在“后续行动”中将行动关联到此联系人。",
+      "actionsAll": "查看您的全部后续行动"
     },
     "availability": {
       "title": "将此联系人开放给网络中的机会",
@@ -2256,7 +2486,9 @@
       "availableYes": "已开放给网络中的机会",
       "availableNo": "已撤回对网络的授权",
       "connection": "平台已记录连接",
-      "stage": "连接阶段：{{etapa}}"
+      "stage": "连接阶段：{{etapa}}",
+      "nextAction": "后续行动：{{texto}}",
+      "nextActionDone": "后续行动已完成：{{texto}}"
     },
     "connections": {
       "title": "已记录的连接",
@@ -2691,7 +2923,15 @@
     "timeNow": "刚刚",
     "timeMinutes": "{{count}} 分钟前",
     "timeHours": "{{count}} 小时前",
-    "timeDays": "{{count}} 天前"
+    "timeDays": "{{count}} 天前",
+    "reminder": {
+      "actionTitle": "提醒：后续行动截止于 {{data}}",
+      "meetingTitle": "会议提醒：{{quando}}"
+    },
+    "meetingReady": {
+      "title": "您的会议已就绪：转录内容和摘要",
+      "titleNoSummary": "您的会议已就绪，但没有摘要：打开会议即可重试"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "正在验证访问权限...",

@@ -103,6 +103,7 @@ const RELATORIO = {
   arquivosApagados: 2,
   arquivosComFalha: [] as string[],
   linhasApagadas: 31,
+  googleAgenda: "sem-conexao",
 };
 
 beforeEach(() => {
@@ -196,7 +197,7 @@ describe("o caminho feliz", () => {
     const resposta = await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "DONA@exemplo.com" });
     expect(excluirContaFalso).toHaveBeenCalledTimes(1);
     expect(excluirContaFalso.mock.calls[0][1]).toEqual({ id: 7, openId: "open-7", email: "Dona@Exemplo.com" });
-    expect(resposta).toEqual({ sucesso: true, linhasApagadas: 31, arquivosApagados: 2, arquivosComFalha: 0 });
+    expect(resposta).toEqual({ sucesso: true, linhasApagadas: 31, arquivosApagados: 2, arquivosComFalha: 0, googleNaoConfirmou: false });
     expect(cookiesLimpos).toEqual([COOKIE_NAME]);
   });
 
@@ -218,6 +219,31 @@ describe("o caminho feliz", () => {
     const resposta = await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "dona@exemplo.com" });
     expect(resposta.arquivosComFalha).toBe(1);
     expect(auditoria.find(linha => linha.action === ACAO_EXCLUSAO)).toMatchObject({ status: "failure" });
+  });
+
+  it("o token da Google Agenda que a Google não revogou também vira failure, e o registro diz isso (H16b)", async () => {
+    excluirContaFalso.mockResolvedValue({ ...RELATORIO, googleAgenda: "falhou" });
+    const { caller } = contexto();
+    const resposta = await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "dona@exemplo.com" });
+    expect(resposta.sucesso).toBe(true);
+    // A tela precisa saber, para dizer à dona como tirar o acesso pela conta Google.
+    expect(resposta.googleNaoConfirmou).toBe(true);
+    const registro = auditoria.find(linha => linha.action === ACAO_EXCLUSAO);
+    expect(registro).toMatchObject({ status: "failure" });
+    expect((registro!.details as Record<string, unknown>).googleAgenda).toBe("falhou");
+  });
+
+  it("a conexão revogada, nenhuma, ou mantida para outra conta não muda o sucesso do registro nem avisa a tela", async () => {
+    for (const googleAgenda of ["revogada", "sem-conexao", "mantida-para-outra-conta"]) {
+      auditoria.length = 0;
+      excluirContaFalso.mockResolvedValue({ ...RELATORIO, googleAgenda });
+      const { caller } = contexto();
+      const resposta = await caller.conta.excluirMinhaConta({ senha: "certa", confirmacao: "dona@exemplo.com" });
+      expect(resposta.googleNaoConfirmou).toBe(false);
+      const registro = auditoria.find(linha => linha.action === ACAO_EXCLUSAO);
+      expect(registro).toMatchObject({ status: "success" });
+      expect((registro!.details as Record<string, unknown>).googleAgenda).toBe(googleAgenda);
+    }
   });
 });
 

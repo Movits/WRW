@@ -34,7 +34,10 @@ import {
   REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type ItemProposto,
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
+import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
+import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
+import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
@@ -1055,7 +1058,7 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   }
   if (viva.status !== "processing" || Number(viva.updatedAt) !== ficha) throw new ReuniaoTomadaPorOutraExecucao();
 
-  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId);
+  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId, false);
 
   const completedAt = now();
   // O resumo guardado (mais abaixo) nasce apontando para esta transcrição.
@@ -1405,7 +1408,9 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
  * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
  * Só a dona: a reunião de outra conta é "não encontrada". Devolve os nomes
  * como ficaram, ou null sem a reunião. A leitura e a gravação vão na mesma
- * transação com a linha travada: dois nomes salvos juntos não se apagam.
+ * transação com a linha travada: dois nomes salvos juntos não se apagam. O nome
+ * que muda de fato muda também o texto das próximas ações que citam a voz, e o
+ * evento delas na agenda fica para trás (acoesComAVozRenomeada, H5c).
  */
 export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
   if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
@@ -1416,9 +1421,12 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
     const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
     const nomes = nomesDosFalantes(reuniao.speakerNames);
+    const antes = nomes[falante] ?? "";
     if (limpo) nomes[falante] = limpo;
     else delete nomes[falante];
-    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: Date.now() }).where(daDona);
+    const agora = Date.now();
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: agora }).where(daDona);
+    if (antes !== limpo) await acoesComAVozRenomeada(tx, ownerId, meetingId, falante, agora);
     return nomes;
   });
 }
@@ -1886,7 +1894,8 @@ export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio
 
 /**
  * Tudo que uma reunião gera fora da própria linha: sugestões, entidades,
- * transcrição, traduções e gravações (linha E objeto no bucket). Serve à
+ * transcrição, traduções e gravações (linha E objeto no bucket), e também os
+ * avisos dela no sino (H15) e o ponteiro da agenda (H16a). Serve à
  * exclusão pela dona e à COMPENSAÇÃO de processMeetingRecording, que usa a
  * mesma lista quando descobre que a reunião foi excluída no meio — duas
  * listas divergiriam na primeira tabela nova.
@@ -1920,7 +1929,18 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .from(meetingAudioSlices)
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 
-  await apagarDerivadosSemGravacao(db, ownerId, meetingId);
+  await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
+  // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
+  // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião
+  // não encontrada", e nada retoma essa limpeza (a varredura só retoma o
+  // áudio). Logo depois de apagarDerivadosSemGravacao, e não antes: o DELETE do
+  // resumo, lá dentro, espera o registrarFalha em curso (server/fila-do-resumo.ts),
+  // e o aviso de falha que ele gravar sai aqui.
+  await apagarAvisosDaReuniao(db, ownerId, meetingId);
+  // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
+  // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
+  await soltarGravacaoDaAgenda(db, ownerId, meetingId);
 
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
@@ -1970,8 +1990,13 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
  * traduções e resumo guardado —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
  * fica, porque é dele que sai o resultado novo. Mora dentro da lista única de
  * apagarDerivadosDaReuniao para as duas nunca divergirem.
+ *
+ * As próximas ações (H5a) não saem: são da dona. Elas se soltam primeiro,
+ * enquanto a reunião e os nomes das vozes ainda existem (`reuniaoSai` é a
+ * exclusão; sem ele, o reprocesso, que zera os nomes e refaz os itens).
  */
-async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string) {
+async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string, reuniaoSai: boolean) {
+  await soltarAcoesDaReuniao(db, ownerId, meetingId, reuniaoSai);
   await db.delete(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId)));
   // As pendências de Quem Sou / Tenho / Preciso tiradas desta reunião carregam
   // trechos literais da transcrição: saem com ela.
@@ -2000,6 +2025,8 @@ export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   if (!linhasAfetadas(marcada)) return false;
+  // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
+  // dentro, antes do expurgo do bucket.
   await apagarDerivadosDaReuniao(db, ownerId, meetingId);
   await db.delete(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   return true;

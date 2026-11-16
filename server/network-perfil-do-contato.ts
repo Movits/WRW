@@ -8,12 +8,15 @@ import { exigirDb } from "./db";
 import { garantirCodigosAnonimos } from "./network-codigo-anonimo";
 import { listarPendencias } from "./network-extracao";
 import { listarConexoesDaSolicitante, type ConexaoVisivel, type Solicitante } from "./network-registro";
+import { ACOES_NO_PERFIL_DO_CONTATO, proximasAcoesDoContato } from "./proximas-acoes";
 
 /**
  * O perfil de um contato no Meu Network Inteligente — spec da Glenda de 14/09,
  * itens 20 e 22: QUEM SOU, O QUE TENHO, O QUE PRECISO, ID anônimo, reuniões
  * vinculadas, informações faltantes, conexões e intermediações, status de
- * disponibilização e a MEMÓRIA DE RELACIONAMENTO (linha do tempo privada).
+ * disponibilização e a MEMÓRIA DE RELACIONAMENTO (linha do tempo privada). E,
+ * desde a H5b do desenho do gravador, as próximas ações que a dona ligou ao
+ * contato (server/proximas-acoes.ts).
  *
  * É a agenda da própria dona: toda consulta leva o openId dela no WHERE, e
  * contato de outra dona sai como "não encontrado" antes de qualquer outra
@@ -22,9 +25,10 @@ import { listarConexoesDaSolicitante, type ConexaoVisivel, type Solicitante } fr
  * A linha do tempo é MONTADA a partir do que já existe — reuniões, contextos
  * (onde se conheceram), itens de tenho/preciso com a data em que entraram,
  * confirmações de Quem Sou vindas da IA (e, à parte, as de cargo e empresa,
- * que não são Quem Sou), a disponibilização e as conexões
- * registradas com suas etapas. Sem tabela nova de eventos: o que não deixou
- * rastro (remoção de um item, por exemplo) não aparece, e o relatório diz isso.
+ * que não são Quem Sou), a disponibilização, as conexões registradas com suas
+ * etapas e as próximas ações (a anotada e a feita). Sem tabela nova de
+ * eventos: o que não deixou rastro (remoção de um item, a ação desmarcada ou
+ * desligada do contato, por exemplo) não aparece, e o relatório diz isso.
  */
 
 export type EventoDaLinhaDoTempo =
@@ -36,7 +40,11 @@ export type EventoDaLinhaDoTempo =
   | { tipo: "apoio_confirmado"; em: number; campo: "cargo" | "empresa"; valor: string; origem: string }
   | { tipo: "disponibilidade"; em: number; disponivel: boolean }
   | { tipo: "conexao_registrada"; em: number; conexaoId: string; origem: string }
-  | { tipo: "conexao_etapa"; em: number; conexaoId: string; etapa: "apresentacao" | "negociacao" | "fechada" | "descartada" };
+  | { tipo: "conexao_etapa"; em: number; conexaoId: string; etapa: "apresentacao" | "negociacao" | "fechada" | "descartada" }
+  // O texto da ação vai com os rótulos de voz ({F2}) e o mapa dos nomes, como
+  // na lista das próximas ações: quem troca o rótulo pelo nome é a tela
+  // (shared/vozes-no-texto.ts).
+  | { tipo: "proxima_acao" | "proxima_acao_feita"; em: number; acaoId: string; texto: string; vozes: Record<string, string> };
 
 /** Função pura: junta, ordena (mais recente primeiro) e limita. É o que os testes exercitam. */
 export function montarLinhaDoTempo(dados: {
@@ -47,6 +55,7 @@ export function montarLinhaDoTempo(dados: {
   preciso: Array<{ label: string; createdAt: number }>;
   confirmacoes: Array<{ campo: string; valor: string; origem: string; decididaEm: number | null }>;
   conexoes: ConexaoVisivel[];
+  acoes: Array<{ id: string; texto: string; vozes: Record<string, string>; createdAt: number; feita: boolean; feitaEm: number | null }>;
 }, limite = 100): EventoDaLinhaDoTempo[] {
   const eventos: EventoDaLinhaDoTempo[] = [{ tipo: "contato_criado", em: Number(dados.contato.createdAt) }];
   for (const r of dados.reunioes) eventos.push({ tipo: "reuniao", em: Number(r.createdAt), meetingId: r.id, titulo: r.title, assuntos: r.assuntos });
@@ -74,6 +83,17 @@ export function montarLinhaDoTempo(dados: {
     ] as const;
     for (const [etapa, em] of etapas) if (em !== null) eventos.push({ tipo: "conexao_etapa", em, conexaoId: conexao.id, etapa });
   }
+  for (const acao of dados.acoes) {
+    const base = { acaoId: acao.id, texto: acao.texto, vozes: acao.vozes };
+    const feitaEm = acao.feita && acao.feitaEm !== null ? Number(acao.feitaEm) : null;
+    // A feita entra antes: no empate, a ordem (estável) a deixa acima da anotada.
+    if (feitaEm !== null) eventos.push({ tipo: "proxima_acao_feita", em: feitaEm, ...base });
+    // A ação que nasceu já feita (o item marcado no resumo antes de virar ação)
+    // guarda a hora real da caixa, anterior à criação: a anotada não fica
+    // depois da feita.
+    const anotadaEm = Number(acao.createdAt);
+    eventos.push({ tipo: "proxima_acao", em: feitaEm !== null ? Math.min(anotadaEm, feitaEm) : anotadaEm, ...base });
+  }
   return eventos.sort((x, y) => y.em - x.em).slice(0, limite);
 }
 
@@ -99,7 +119,7 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
   }).from(privateContacts).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, quem.openId))).limit(1);
   if (!contato) return null;
 
-  const [tenho, preciso, sugestoesDaReuniao, vinculos, confirmacoes, pendencias] = await Promise.all([
+  const [tenho, preciso, sugestoesDaReuniao, vinculos, confirmacoes, pendencias, acoes] = await Promise.all([
     db.select({ id: contactAssets.id, label: contactAssets.tagLabel, category: contactAssets.category, createdAt: contactAssets.createdAt })
       .from(contactAssets).where(and(eq(contactAssets.ownerId, quem.openId), eq(contactAssets.contactId, contactId))),
     db.select({ id: contactNeeds.id, label: contactNeeds.tagLabel, category: contactNeeds.category, createdAt: contactNeeds.createdAt })
@@ -112,6 +132,7 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
       .from(networkSugestoes)
       .where(and(eq(networkSugestoes.ownerId, quem.openId), eq(networkSugestoes.contactId, contactId), eq(networkSugestoes.status, "confirmada"))),
     listarPendencias(quem.openId, { contactId }),
+    proximasAcoesDoContato(quem.openId, contactId),
   ]);
 
   // Reuniões vinculadas: a que foi gravada já apontando o contato, e as que
@@ -166,6 +187,7 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
     }),
     pendencias,
     reunioes: reunioes.map(r => ({ id: r.id, titulo: r.title, status: r.status, em: r.createdAt, assuntos: assuntosDa(r.id) })),
+    proximasAcoes: { lista: acoes, limite: ACOES_NO_PERFIL_DO_CONTATO },
     conexoes: opcoes.termoSmartMatch ? { termoAceito: true as const, lista: conexoes } : { termoAceito: false as const },
     linhaDoTempo: montarLinhaDoTempo({
       contato: {
@@ -179,6 +201,7 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
       preciso: preciso.map(p => ({ label: p.label, createdAt: p.createdAt })),
       confirmacoes: confirmacoes.map(c => ({ ...c, decididaEm: c.decididaEm ?? null })),
       conexoes,
+      acoes: acoes.map(a => ({ id: a.id, texto: a.texto, vozes: a.vozes, createdAt: a.createdAt, feita: a.feita, feitaEm: a.feitaEm })),
     }),
   };
 }

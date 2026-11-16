@@ -9,6 +9,7 @@ import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@s
 import { ITENS_DO_RESUMO_MAX, secaoTemAssunto, secaoTemResponsavel, type SecaoDoItem } from "@shared/item-do-resumo";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
+import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -67,17 +68,23 @@ function temVersaoAnterior(linha: { status: string; version: number } | undefine
  */
 const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
-/** A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental (server/mapa-mental-guardado.ts) usa a mesma. */
-export async function reuniaoDaDona(db: Banco, ownerId: string, meetingId: string) {
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+/**
+ * A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental
+ * (server/mapa-mental-guardado.ts) usa a mesma. `travar`: numa transação, a
+ * linha fica presa até o fim dela, e o estado lido é o mais novo.
+ */
+export async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
+  const consulta = db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+  const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   return reuniao;
 }
 
-async function linhaDoResumo(db: Banco, ownerId: string, meetingId: string) {
-  const [linha] = await db.select(COLUNAS_DO_RESUMO).from(meetingSummaries)
+async function linhaDoResumo(db: Executor, ownerId: string, meetingId: string, travar = false) {
+  const consulta = db.select(COLUNAS_DO_RESUMO).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1);
+  const [linha] = await (travar ? consulta.for("update") : consulta);
   return linha;
 }
 
@@ -217,8 +224,24 @@ export async function refazerResumoDaDona(ownerId: string, meetingId: string, mo
  * O item da dona e o estado do resumo dele. Só se decide sobre o resumo fora
  * da fila (pronto, ou o refazer que falhou) de reunião pronta: enquanto o
  * resumo é refeito, os itens vão ser trocados.
+ *
+ * Roda na transação da decisão e trava a reunião, o resumo e o item até o fim
+ * dela, nesta ordem (a da fila do resumo, server/fila-do-resumo.ts). A
+ * exclusão, que marca a reunião 'deleted' antes de apagar, espera a decisão, e
+ * a próxima ação que a decisão criar (H5a) se solta com os outros derivados.
+ * Os estados vêm das leituras travadas, que leem a versão mais nova da linha:
+ * o do item decide o que o Desfazer devolve (estadoDaDecisao).
  */
-async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
+async function itemParaDecidir(db: Executor, ownerId: string, itemId: string) {
+  const [onde] = await db.select({ summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
+    .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
+  if (!onde) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+    .where(and(eq(meetings.id, onde.meetingId), eq(meetings.ownerId, ownerId))).for("update");
+  const [resumo] = await db.select({ status: meetingSummaries.status }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.id, onde.summaryId), eq(meetingSummaries.ownerId, ownerId))).for("update");
+  if (!reuniao || !resumo || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  if (!foraDaFila(resumo.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   const [item] = await db.select({
     id: meetingSummaryItems.id,
     section: meetingSummaryItems.section,
@@ -230,14 +253,9 @@ async function itemParaDecidir(db: Banco, ownerId: string, itemId: string) {
     doneAt: meetingSummaryItems.doneAt,
     statusBeforeIgnore: meetingSummaryItems.statusBeforeIgnore,
     doneAtBeforeIgnore: meetingSummaryItems.doneAtBeforeIgnore,
-    statusDoResumo: meetingSummaries.status,
-    statusDaReuniao: meetings.status,
   }).from(meetingSummaryItems)
-    .innerJoin(meetingSummaries, and(eq(meetingSummaries.id, meetingSummaryItems.summaryId), eq(meetingSummaries.ownerId, meetingSummaryItems.ownerId)))
-    .innerJoin(meetings, and(eq(meetings.id, meetingSummaryItems.meetingId), eq(meetings.ownerId, meetingSummaryItems.ownerId)))
-    .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
-  if (!item || item.statusDaReuniao === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  if (!foraDaFila(item.statusDoResumo) || item.statusDaReuniao !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1).for("update");
+  if (!item) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   return item;
 }
 
@@ -295,44 +313,73 @@ function estadoDaDecisao(item: Awaited<ReturnType<typeof itemParaDecidir>>, pedi
 /**
  * Confirma, ignora ou volta a pendente um item do resumo (o estado gravado
  * está em estadoDaDecisao).
+ *
+ * A próxima ação (H5a) acompanha o estado que fica gravado, e não o pedido,
+ * na mesma transação: o item que fica confirmado tem a ação (o confirmado
+ * agora a ganha; o escrito pela dona, que o pedido de "para conferir" deixa
+ * confirmado, fica com a dele, com o prazo, o contato e o evento; o Desfazer
+ * que devolve um ignorado confirmado a cria de novo); o que deixa de estar
+ * confirmado a perde (a tela pede confirmação antes). Devolve se a ação saiu,
+ * para quem chama tirar o evento dela da Google Agenda (H5c) só nesse caso.
  */
-export async function decidirItemDoResumo(ownerId: string, itemId: string, pedido: DecisaoDoItem) {
+export async function decidirItemDoResumo(ownerId: string, itemId: string, pedido: DecisaoDoItem): Promise<{ acaoSaiu: boolean }> {
   const db = await exigirDb();
-  const item = await itemParaDecidir(db, ownerId, itemId);
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({ ...estadoDaDecisao(item, pedido, agora), updatedAt: agora })
-    .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
-  if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  return db.transaction(async tx => {
+    const item = await itemParaDecidir(tx, ownerId, itemId);
+    const agora = Date.now();
+    const estado = estadoDaDecisao(item, pedido, agora);
+    const r = await tx.update(meetingSummaryItems).set({ ...estado, updatedAt: agora })
+      .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+    if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    if (estado.status === "confirmed") {
+      await criarDoItem(tx, ownerId, itemId, agora);
+      return { acaoSaiu: false };
+    }
+    return { acaoSaiu: (await apagarAcaoDoItem(tx, ownerId, itemId)) > 0 };
+  });
 }
 
-/** Confirma de uma vez os itens ainda pendentes do resumo da reunião, fora da fila (pronto, ou o refazer que falhou). */
+/**
+ * Confirma de uma vez os itens ainda pendentes do resumo da reunião, fora da
+ * fila (pronto, ou o refazer que falhou). As ações e tarefas confirmadas ganham
+ * a próxima ação na mesma transação, e as confirmadas antes da H5a também.
+ */
 export async function confirmarItensDoResumo(ownerId: string, meetingId: string): Promise<number> {
   const db = await exigirDb();
-  const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
-  const linha = await linhaDoResumo(db, ownerId, meetingId);
-  if (!linha || !foraDaFila(linha.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({ status: "confirmed", decidedAt: agora, updatedAt: agora })
-    .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "pending")));
-  return linhasAfetadas(r);
+  return db.transaction(async tx => {
+    // A reunião e o resumo travados até o fim, nesta ordem, como em itemParaDecidir.
+    const reuniao = await reuniaoDaDona(tx, ownerId, meetingId, true);
+    const linha = await linhaDoResumo(tx, ownerId, meetingId, true);
+    if (!linha || !foraDaFila(linha.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    const agora = Date.now();
+    const r = await tx.update(meetingSummaryItems).set({ status: "confirmed", decidedAt: agora, updatedAt: agora })
+      .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "pending")));
+    await garantirAcoesDosItensConfirmados(tx, ownerId, meetingId, agora);
+    return linhasAfetadas(r);
+  });
 }
 
 /**
  * Marca ou desmarca a caixa de uma ação do resumo. Marcar como feita também a
- * confirma: quem marca que fez está dizendo que a ação existiu.
+ * confirma: quem marca que fez está dizendo que a ação existiu. A próxima ação
+ * dela nasce, se ainda não existia, e a marca de feita vai para as duas pela
+ * mesma escrita (escreverFeita), na mesma transação.
  */
 export async function marcarAcaoFeita(ownerId: string, itemId: string, feito: boolean) {
   const db = await exigirDb();
-  const item = await itemParaDecidir(db, ownerId, itemId);
-  if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_SO_ACAO_TEM_CAIXA });
-  const agora = Date.now();
-  const r = await db.update(meetingSummaryItems).set({
-    done: feito,
-    doneAt: feito ? agora : null,
-    ...(feito ? { status: "confirmed" as const, decidedAt: sql`coalesce(${meetingSummaryItems.decidedAt}, ${agora})` } : {}),
-    updatedAt: agora,
-  }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
-  if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  await db.transaction(async tx => {
+    const item = await itemParaDecidir(tx, ownerId, itemId);
+    if (item.section !== "action") throw new TRPCError({ code: "BAD_REQUEST", message: MENSAGEM_SO_ACAO_TEM_CAIXA });
+    const agora = Date.now();
+    if (feito) {
+      const r = await tx.update(meetingSummaryItems).set({
+        status: "confirmed" as const, decidedAt: sql`coalesce(${meetingSummaryItems.decidedAt}, ${agora})`, updatedAt: agora,
+      }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
+      if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+      await criarDoItem(tx, ownerId, itemId, agora);
+    }
+    await escreverFeita(tx, ownerId, { itemId }, feito, agora);
+  });
 }
 
 /**
@@ -390,26 +437,36 @@ async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: str
  * acha o item editado pela impressão digital do texto e o acrescentado pelo id
  * novo, e manda à IA só ele. Subir a versão aqui jogava fora a tradução
  * guardada inteira, e cada correção custava a tradução do resumo e do mapa.
+ *
+ * A próxima ação do item (H5a) anda com ele, na mesma transação: a ação ou
+ * tarefa que fica confirmada a ganha, se faltava, e a que já existia leva o
+ * texto novo onde ainda tem a cópia do item (levarEdicaoDoItemAAcao). Devolve
+ * o id da ação que mudou, para quem chama mandar a versão nova à Google Agenda
+ * (H5c); nulo, se nenhuma mudou.
  */
-export async function editarItemDoResumo(ownerId: string, itemId: string, campos: CamposDoItem) {
+export async function editarItemDoResumo(ownerId: string, itemId: string, campos: CamposDoItem): Promise<{ acaoQueMudou: string | null }> {
   const db = await exigirDb();
-  await db.transaction(async tx => {
+  return db.transaction(async tx => {
+    const [onde] = await tx.select({ summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
+      .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
+    if (!onde) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    const resumo = await travarResumoPronto(tx, ownerId, onde.meetingId, MENSAGEM_ITEM_NAO_ENCONTRADO);
+    // O item é de outro resumo da mesma reunião (o resumo foi refeito entre a
+    // leitura e a trava): não existe mais.
+    if (resumo.id !== onde.summaryId) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    // O item lido travado, depois da reunião e do resumo: a versão mais nova,
+    // que é a que a próxima ação copiou.
     const [item] = await tx.select({
-      summaryId: meetingSummaryItems.summaryId,
-      meetingId: meetingSummaryItems.meetingId,
       section: meetingSummaryItems.section,
       status: meetingSummaryItems.status,
       subject: meetingSummaryItems.subject,
       text: meetingSummaryItems.text,
       assignee: meetingSummaryItems.assignee,
       due: meetingSummaryItems.due,
+      excerpt: meetingSummaryItems.excerpt,
     }).from(meetingSummaryItems)
-      .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
+      .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1).for("update");
     if (!item) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-    const resumo = await travarResumoPronto(tx, ownerId, item.meetingId, MENSAGEM_ITEM_NAO_ENCONTRADO);
-    // O item é de outro resumo da mesma reunião (o resumo foi refeito entre a
-    // leitura e a trava): não existe mais.
-    if (resumo.id !== item.summaryId) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
     const novos = camposDaSecao(item.section, campos);
     const mudou = novos.text !== item.text || novos.subject !== item.subject || novos.assignee !== item.assignee || novos.due !== item.due;
     const agora = Date.now();
@@ -421,13 +478,17 @@ export async function editarItemDoResumo(ownerId: string, itemId: string, campos
       updatedAt: agora,
     }).where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId)));
     if (!linhasAfetadas(r)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+    const acaoQueMudou = mudou ? await levarEdicaoDoItemAAcao(tx, ownerId, itemId, item, { ...item, ...novos }, agora) : null;
+    await criarDoItem(tx, ownerId, itemId, agora);
+    return { acaoQueMudou };
   });
 }
 
 /**
  * A dona acrescenta um item à mão ao resumo pronto (H4f): no fim da seção,
  * confirmado, com a origem 'owner', sem trecho, sem tempo e sem confiança. O
- * resumo guarda até ITENS_DO_RESUMO_MAX itens. Devolve o id do item novo.
+ * resumo guarda até ITENS_DO_RESUMO_MAX itens. A ação ou tarefa acrescentada
+ * já é próxima ação (H5a). Devolve o id do item novo.
  */
 export async function acrescentarItemDoResumo(ownerId: string, meetingId: string, secao: SecaoDoItem, campos: CamposDoItem): Promise<string> {
   const db = await exigirDb();
@@ -445,6 +506,8 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
       ...camposDaSecao(secao, campos), excerpt: "", startSeconds: null,
       origin: "owner", status: "confirmed", done: false, decidedAt: agora, createdAt: agora, updatedAt: agora,
     });
+    // Confirmada ao nascer: a ação ou tarefa ganha a próxima ação (H5a) na mesma transação.
+    await criarDoItem(tx, ownerId, id, agora);
   });
   return id;
 }

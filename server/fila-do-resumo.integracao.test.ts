@@ -20,11 +20,13 @@ vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("
 const MAPA = { ramos: [{ rotulo: "Exportação de café", folhas: [] }, { rotulo: "Transportadora", folhas: [] }] };
 
 const { getDb } = await import("./db");
-const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, platformNotifications, proximasAcoes, users } = await import("../drizzle/schema");
 const fila = await import("./fila-do-resumo");
 const servico = await import("./resumo-guardado");
+const acoes = await import("./proximas-acoes");
 const { FalhaDaIA } = await import("./ia-em-json");
 const { deletePrivateMeeting, gravarResultadoDaReuniao } = await import("./meeting-service");
+const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-resumo-${crypto.randomUUID()}`;
@@ -65,9 +67,22 @@ const itensDe = async (meetingId: string) => (await db()).select().from(meetingS
 const vaga = vi.fn();
 const pedir = (meetingId: string) => servico.pedirResumoDaDona(DONA, meetingId, vaga);
 
+/** Os avisos de reunião pronta (H15) da conta da dona. */
+async function avisosDaDona(meetingId?: string) {
+  const banco = await db();
+  const [conta] = await banco.select({ id: users.id }).from(users).where(eq(users.openId, DONA));
+  const avisos = await banco.select().from(platformNotifications).where(eq(platformNotifications.userId, conta.id));
+  return avisos.filter(aviso => !meetingId || aviso.actionUrl === `/meetings/${meetingId}`);
+}
+
 async function limpar() {
   const banco = await db();
+  // A fila avisa no sino quando o resumo fica pronto ou falha de vez (H15).
+  const contas = await banco.select({ id: users.id }).from(users).where(inArray(users.openId, [DONA, OUTRA]));
+  if (contas.length) await banco.delete(platformNotifications).where(inArray(platformNotifications.userId, contas.map(conta => conta.id)));
   for (const dona of [DONA, OUTRA]) {
+    // Confirmar uma ação no resumo cria a próxima ação dela (H5a).
+    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
     await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
     await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
     await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
@@ -115,6 +130,22 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, model: "gemini-teste-1" });
     // O mapa mental (H10) veio na mesma rodada, sem mexer no resumo.
     expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMapError: null });
+    // O aviso no sino (H15), na mesma transação: o tipo, o link da reunião e
+    // os parâmetros que a tela traduz.
+    const avisos = await avisosDaDona(id);
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toMatchObject({ type: "reuniao_pronta", title: "Reunião do resumo", body: null, isRead: false, parametros: { titulo: "Reunião do resumo", resumo: "pronto" } });
+  });
+
+  it("o resumo refeito troca o aviso de pronta: um por reunião; excluir a reunião o apaga (H15)", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    await (await db()).update(meetingSummaries).set({ status: "pending", attempts: 0 }).where(eq(meetingSummaries.meetingId, id));
+    await rodar();
+    expect(await avisosDaDona(id)).toHaveLength(1);
+    await deletePrivateMeeting(DONA, id);
+    expect(await avisosDaDona(id)).toEqual([]);
   });
 
   it("pedir de novo o que já está na fila, ou pronto, não gasta vaga nem duplica", async () => {
@@ -157,6 +188,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     linha = await linhaDoResumo(id);
     expect(linha).toMatchObject({ status: "failed", attempts: 3, lastError: "IA_INDISPONIVEL" });
     expect((await servico.resumoGuardadoDaDona(DONA, id)).estado).toBe("falhou");
+    // Só a falha de vez avisa (H15): pronta, sem o resumo. As passageiras, não.
+    expect((await avisosDaDona(id)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "falhou" }]);
 
     await pedir(id);
     expect(vaga).toHaveBeenCalledTimes(2);
@@ -190,6 +223,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await rodar();
     expect(await itensDe(id)).toEqual([]);
     expect(await linhaDoResumo(id)).toBeUndefined();
+    // Nem o aviso de pronta (H15).
+    expect(await avisosDaDona(id)).toEqual([]);
   });
 
   it("transcrição trocada durante a geração (reprocesso): o resumo da antiga não é gravado, e a reserva volta sem gastar tentativa", async () => {
@@ -277,6 +312,97 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await expect(servico.marcarAcaoFeita(DONA, acao.id, true)).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("o resumo refeito (H4d) guarda o item confirmado com a próxima ação presa a ele, com o prazo; a leitura seguinte não cria outra (H5a)", async () => {
+    const id = await reuniaoPronta({ speakerNames: { F2: "Carla" } });
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
+    const [proxima] = await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    await (await db()).update(proximasAcoes).set({ prazo: "2026-11-20" }).where(eq(proximasAcoes.id, proxima.id));
+    // "Refazer como…": o resumo volta à fila com os itens ainda lá, e a rodada grava os novos.
+    await (await db()).update(meetingSummaries).set({ status: "pending" }).where(eq(meetingSummaries.meetingId, id));
+    await rodar();
+    expect((await itensDe(id)).map(item => item.id)).toContain(acao.id);
+    // A lista e o Dashboard completam as ações que faltam antes de ler: nenhuma falta.
+    await acoes.listarProximasAcoes(DONA, "todas");
+    expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{
+      id: proxima.id, itemId: acao.id, meetingId: id, prazo: "2026-11-20", texto: "Avisar a transportadora", responsavel: "{F2}",
+    }]);
+  });
+
+  it("apagar na lista a ação de um item confirmado enquanto o resumo é refeito (H4d) é conflito, e o item fica na versão nova com a ação", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
+    const [proxima] = await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    // "Refazer como Vendas": o resumo volta à fila com os itens ainda lá.
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    // A dona apaga a ação na lista enquanto a IA escreve a versão nova. A fila
+    // já mandou o item como um dos que ficam, e a IA não o repete: devolvido a
+    // "para conferir", ele sairia na gravação sem voltar no resumo novo.
+    let apagar: unknown;
+    gerarResumoDaReuniao.mockImplementationOnce(async () => {
+      apagar = await acoes.apagarProximaAcao(DONA, proxima.id).catch((erro: unknown) => erro);
+      return { emoji: "💼", modelo: "gemini-teste-2", itens: [ITENS[1]], recebidos: 1 };
+    });
+    await rodar();
+    expect(gerarResumoDaReuniao).toHaveBeenLastCalledWith(expect.objectContaining({
+      modelo: "sales", itensQueFicam: [{ section: "action", subject: null, text: "Avisar a transportadora" }],
+    }));
+    expect(apagar).toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "sales", version: 2 });
+    expect((await itensDe(id)).find(item => item.id === acao.id)).toMatchObject({ status: "confirmed" });
+    expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{ id: proxima.id, itemId: acao.id }]);
+    // Com a versão nova gravada, apagar volta a valer: o item fica para conferir.
+    await acoes.apagarProximaAcao(DONA, proxima.id);
+    expect((await itensDe(id)).find(item => item.id === acao.id)).toMatchObject({ status: "pending" });
+  });
+
+  it("o resumo refeito solta só a ação presa a um item que sai: o nome da voz vai para o texto, e a reunião e o trecho ficam (H5a)", async () => {
+    const id = await reuniaoPronta({ speakerNames: { F2: "Carla" } });
+    await pedir(id);
+    await rodar();
+    const [acao] = await itensDe(id);
+    // A ação de um item que não está confirmado (a regra não deixa nascer; um
+    // dado antigo, por exemplo): o item sai, e ela se solta dele.
+    await (await db()).insert(proximasAcoes).values({
+      id: crypto.randomUUID(), ownerId: DONA, origem: "reuniao", meetingId: id, itemId: acao.id, texto: acao.text, responsavel: acao.assignee,
+      trecho: acao.excerpt, feita: false, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    await (await db()).update(meetingSummaries).set({ status: "pending" }).where(eq(meetingSummaries.meetingId, id));
+    await rodar();
+    expect((await itensDe(id)).map(item => item.id)).not.toContain(acao.id);
+    expect(await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA))).toMatchObject([{
+      texto: "Avisar a transportadora", responsavel: "Carla", itemId: null, meetingId: id,
+      trecho: "Decidimos não renovar o contrato com a transportadora",
+    }]);
+  });
+
+  it("a falha de vez do mapa (H10) e a do resumo refeito (H4d) não trocam o aviso de pronta; a do primeiro resumo, sim (H15)", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    gerarMapaMental.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", mindMapStatus: "failed", mindMapError: "RESPOSTA_CORTADA" });
+    expect((await avisosDaDona(id)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "pronto" }]);
+
+    // O refazer que falha de vez: a versão anterior segue na tela, e o sino segue dizendo que a reunião está pronta.
+    await (await db()).update(meetingSummaries).set({ status: "pending", attempts: 0 }).where(eq(meetingSummaries.meetingId, id));
+    gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
+    await rodar();
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", version: 1, lastError: "RESPOSTA_CORTADA" });
+    expect((await avisosDaDona(id)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "pronto" }]);
+
+    // O primeiro resumo de outra reunião que falha de vez avisa que ela ficou sem o resumo.
+    const outra = await reuniaoPronta();
+    await pedir(outra);
+    await rodar();
+    expect((await avisosDaDona(outra)).map(aviso => aviso.parametros)).toEqual([{ titulo: "Reunião do resumo", resumo: "falhou" }]);
+  });
+
   it("o desligamento devolve a reserva sem gastar a tentativa, e a geração em curso não grava", async () => {
     const id = await reuniaoPronta();
     await pedir(id);
@@ -303,11 +429,15 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(d.status).toBe("ignored");
     expect(a).toMatchObject({ status: "confirmed", done: true });
     expect(Number(a.decidedAt)).toBeGreaterThan(0);
+    // A ação marcada como feita vira próxima ação já feita (H5a).
+    const acoesDaDona = async () => (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
+    expect(await acoesDaDona()).toMatchObject([{ itemId: acao.id, feita: true }]);
 
-    // Voltar a pendente tira a marca de feito.
+    // Voltar a pendente tira a marca de feito, e a próxima ação sai.
     await servico.decidirItemDoResumo(DONA, acao.id, "pending");
     [a] = await itensDe(id);
     expect(a).toMatchObject({ status: "pending", done: false, doneAt: null, decidedAt: null });
+    expect(await acoesDaDona()).toEqual([]);
 
     await expect(servico.marcarAcaoFeita(DONA, decisao.id, true)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(await servico.confirmarItensDoResumo(DONA, id)).toBe(1);

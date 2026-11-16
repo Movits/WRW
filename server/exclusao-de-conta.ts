@@ -50,21 +50,26 @@
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
 import type { exigirDb } from "./db";
+import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
+// Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
+import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
-  meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
   strategicGroups, trustedDevices, userProfiles, users,
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
+  proximasAcoes,
+  googleAgendaConexoes,
 } from "../drizzle/schema";
 
 /**
@@ -160,6 +165,11 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },
   { tabela: meetingTranscriptTranslations, coluna: meetingTranscriptTranslations.ownerId, origem: "openId" },
   { tabela: meetingTranscripts, coluna: meetingTranscripts.ownerId, origem: "openId" },
+  // As próximas ações (H5a): o que a dona confirmou nos resumos (com o trecho) e o que anotou.
+  { tabela: proximasAcoes, coluna: proximasAcoes.ownerId, origem: "openId" },
+  // Os lembretes no sino (H15): a hora de cada aviso da próxima ação e da agenda.
+  // Os avisos que já saíram estão em platform_notifications, que sai pelo id.
+  { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
   // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens, que carregam trechos da transcrição.
   { tabela: meetingSummaryTranslations, coluna: meetingSummaryTranslations.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
@@ -178,6 +188,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a gravação cujo áudio não saiu do bucket fica como o único ponteiro para o objeto",
   },
+  // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
+  // (nome e e-mail de terceiros) que a dona marcou.
+  { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
@@ -198,6 +211,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
 
   // ── módulo institucional: chave id ────────────────────────────────────────
   { tabela: consents, coluna: consents.userId, origem: "id" },
+  {
+    tabela: googleAgendaConexoes, coluna: googleAgendaConexoes.userId, origem: "id",
+    motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
+  },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
@@ -281,6 +298,13 @@ export type RelatorioDeExclusao = {
   arquivosApagados: number;
   arquivosComFalha: string[];
   linhasApagadas: number;
+  /**
+   * A conexão com a Google Agenda (H16b): o token revogado na Google, nenhuma
+   * conexão, a autorização mantida porque outra conta da WRW usa a mesma conta
+   * Google, ou a revogação falhou (a linha sai do banco assim mesmo, e a falha
+   * vai ao log, à auditoria da exclusão e ao aviso da tela).
+   */
+  googleAgenda: RevogacaoNaExclusao | "falhou";
 };
 
 /** Descobre os ids que o plano precisa antes de apagar qualquer coisa. */
@@ -470,11 +494,19 @@ async function deixarSoOPonteiroDasGravacoes(db: Db, chaves: ChavesDaConta, grav
  * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é áudio de
  * reunião (parte ou gravação inteira), a linha dele fica como ponteiro, e a
  * varredura das gravações tenta de novo (regra 6 no topo).
+ *
+ * `revogarGoogle` é injetável pelo mesmo motivo: revoga na Google o token da
+ * Google Agenda da conta (H16b) antes de a linha dele sair no plano. Falha da
+ * Google também não aborta: vai ao log e ao relatório (`googleAgenda`). Banco
+ * fora do ar aborta, antes de apagar qualquer linha.
  */
 export async function excluirConta(
   db: Db,
   conta: { id: number; openId: string; email: string | null },
-  opcoes: { apagarArquivo?: (chave: string) => Promise<void> } = {},
+  opcoes: {
+    apagarArquivo?: (chave: string) => Promise<void>;
+    revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
+  } = {},
 ): Promise<RelatorioDeExclusao> {
   // O apagador do bucket só é montado quando o teste não injeta o próprio, e
   // UMA vez, antes do laço que roda vários arquivos ao mesmo tempo (imports
@@ -486,6 +518,10 @@ export async function excluirConta(
     const bucket = await import("./storage");
     return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
   })();
+  // Import tardio, como o do bucket: o módulo da Google Agenda só entra quando
+  // a exclusão roda de verdade, e o teste injeta o próprio revogador.
+  const revogarGoogle = opcoes.revogarGoogle
+    ?? (async (userId: number) => (await import("./google-agenda")).revogarGoogleDaConta(db, userId));
   const chaves = await lerChavesDaConta(db, conta);
 
   // As reuniões da conta viram 'deleted' ANTES de ler as chaves, como na
@@ -554,6 +590,26 @@ export async function excluirConta(
     if (linhas > 0) passos.push({ nome: "meeting_recordings (ponteiro, UPDATE)", linhas });
   }
 
+  // A Google Agenda (H16b) antes do laço, enquanto a linha ainda guarda o
+  // token: depois do passo dela, não há mais o que revogar. Se a Google não
+  // confirmar, a exclusão segue (como no bucket), e a linha sai assim mesmo:
+  // a WRW esquece o token, e a dona ainda pode tirar o acesso pela conta Google.
+  let googleAgenda: RelatorioDeExclusao["googleAgenda"];
+  try {
+    googleAgenda = await revogarGoogle(conta.id);
+  } catch (erro) {
+    // Banco fora do ar não é "a Google não confirmou": a leitura da conexão
+    // falhou antes de falar com a Google, e seguir apagaria a única cópia de um
+    // token que continua valendo lá. A exclusão para aqui, antes de apagar
+    // qualquer linha, como pararia no primeiro DELETE com o banco fora.
+    if (ehErroDeBancoIndisponivel(erro)) throw erro;
+    googleAgenda = "falhou";
+    console.error(
+      `[ExclusãoDeConta] o token da Google Agenda não foi revogado na Google (userId ${conta.id}); a conexão sai do banco assim mesmo:`,
+      erro instanceof Error ? erro.message : erro,
+    );
+  }
+
   for (const passo of PLANO_DE_EXCLUSAO) {
     const valores = valoresDaOrigem(chaves, passo.origem);
     if (!valores.length) continue;
@@ -600,5 +656,5 @@ export async function excluirConta(
   passos.push({ nome: "users.id + users.openId", linhas: linhasDaConta });
   linhasApagadas += linhasDaConta;
 
-  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas };
+  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas, googleAgenda };
 }

@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
+import { textoDoAviso } from "@/lib/aviso-do-sino";
+import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { Link } from "wouter";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -10,6 +14,9 @@ type Notification = {
   title: string;
   body: string | null;
   actionUrl: string | null;
+  // Os avisos do gravador (H15) guardam aqui o que a tela escreve no idioma de
+  // quem lê (lib/aviso-do-sino.ts); nos outros, é nulo.
+  parametros?: unknown;
   isRead: boolean | null;
   createdAt: Date;
 };
@@ -26,6 +33,8 @@ function NotifIcon({ type }: { type: string }) {
     compliance_update: "🛡️",
     system: "📎",
     new_message: "✉️",
+    lembrete: "⏰",
+    reuniao_pronta: "🎙️",
   };
   return <span className="text-base">{icons[type] ?? "🔔"}</span>;
 }
@@ -58,8 +67,19 @@ export function NotificationBell() {
     refetchInterval: 30_000, // poll a cada 30s
     staleTime: 15_000,
   });
+  // Marcar como lido que falha (o banco fora do ar, a rede caindo) é dito na
+  // tela, no idioma dela: sem isso, o aviso voltava como novo na consulta
+  // seguinte, sem explicação.
+  const aoFalharAoMarcar = (erro: unknown) => toast.error(mensagemDeErroParaTela(erro, t));
   const markAllReadMutation = trpc.notifications.markAllRead.useMutation({
     onSuccess: () => notificationsQuery.refetch(),
+    onError: aoFalharAoMarcar,
+  });
+  // Aviso por aviso (H15): tocar um aviso novo o marca lido, e os outros
+  // continuam novos.
+  const markReadMutation = trpc.notifications.markRead.useMutation({
+    onSuccess: () => notificationsQuery.refetch(),
+    onError: aoFalharAoMarcar,
   });
 
   const notifications: Notification[] = (notificationsQuery.data || []) as Notification[];
@@ -95,7 +115,11 @@ export function NotificationBell() {
   };
 
   return (
-    <div ref={dropdownRef} className="relative">
+    // O embrulho só é a referência do painel do sm para cima. No celular, a
+    // referência é a barra do topo (sticky, em AppHeader e no Dashboard), e o
+    // painel se ancora no fim dela: ancorado no sino, que não fica na borda (o
+    // idioma e o avatar vêm depois), ele cortava uns 60 px a 375 px.
+    <div ref={dropdownRef} className="sm:relative">
       {/* Botão sino */}
       <button
         onClick={handleOpen}
@@ -136,8 +160,12 @@ export function NotificationBell() {
           {/* Overlay para fechar */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
 
+          {/* Lado lógico (end), que espelha em árabe: com o lado físico, o
+              painel saía quase todo da tela em RTL. No celular, 0,5rem antes
+              do fim da barra do topo; do sm para cima, no fim do sino, como
+              antes. A largura nunca passa da tela menos 1rem. */}
           <div
-            className="absolute right-0 top-full mt-2 z-50 w-80 rounded-2xl overflow-hidden shadow-2xl shadow-black/50"
+            className="absolute end-2 sm:end-0 top-full mt-2 z-50 w-80 max-w-[calc(100vw-1rem)] rounded-2xl overflow-hidden shadow-2xl shadow-black/50"
             style={{
               background: "linear-gradient(180deg, #211e1b 0%, #211e1b 100%)",
               border: "1px solid rgba(255,255,255,0.1)",
@@ -167,7 +195,12 @@ export function NotificationBell() {
 
             {/* Lista de notificações */}
             <div className="max-h-96 overflow-y-auto">
-              {notifications.length === 0 ? (
+              {/* Erro de consulta é erro, nunca "nenhuma notificação" (server/CLAUDE.md). */}
+              {notificationsQuery.isError && !notificationsQuery.data ? (
+                <div className="p-3">
+                  <ErroDeConsulta erro={notificationsQuery.error} aoTentarDeNovo={() => void notificationsQuery.refetch()} />
+                </div>
+              ) : notifications.length === 0 ? (
                 <div className="py-10 text-center">
                   <div className="text-3xl mb-2">🔔</div>
                   <p className="text-white/30 text-xs">{t("notifications.empty")}</p>
@@ -179,6 +212,7 @@ export function NotificationBell() {
                     notif={notif}
                     index={i}
                     onClose={() => setOpen(false)}
+                    onRead={(id) => markReadMutation.mutate({ id })}
                   />
                 ))
               )}
@@ -228,9 +262,15 @@ export function NotificationBell() {
 }
 
 // ─── Item de notificação ──────────────────────────────────────────────────────
-function NotifItem({ notif, index, onClose }: { notif: Notification; index: number; onClose: () => void }) {
-  const { t } = useTranslation();
+function NotifItem({ notif, index, onClose, onRead }: { notif: Notification; index: number; onClose: () => void; onRead: (id: number) => void }) {
+  const { t, i18n } = useTranslation();
   const isUnread = !notif.isRead;
+  // Os avisos do gravador saem no idioma de quem lê; os outros, como foram gravados.
+  const { titulo, corpo } = textoDoAviso(notif, t, i18n.language);
+  const aoTocar = () => {
+    if (isUnread) onRead(notif.id);
+    onClose();
+  };
 
   const content = (
     <div
@@ -251,16 +291,16 @@ function NotifItem({ notif, index, onClose }: { notif: Notification; index: numb
       {/* Conteúdo */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className={`text-xs font-semibold leading-tight ${isUnread ? "text-white" : "text-white/60"}`}>
-            {notif.title}
+          <p dir="auto" className={`text-xs font-semibold leading-tight ${isUnread ? "text-white" : "text-white/60"}`}>
+            {titulo}
           </p>
           {isUnread && (
             <div className="w-1.5 h-1.5 rounded-full bg-[#c98f70] flex-shrink-0 mt-1" />
           )}
         </div>
-        {notif.body && (
-          <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed line-clamp-2">
-            {notif.body}
+        {corpo && (
+          <p dir="auto" className="text-[11px] text-white/40 mt-0.5 leading-relaxed line-clamp-2">
+            {corpo}
           </p>
         )}
         <p className="text-[10px] text-white/25 mt-1">
@@ -272,10 +312,14 @@ function NotifItem({ notif, index, onClose }: { notif: Notification; index: numb
 
   if (notif.actionUrl) {
     return (
-      <Link href={notif.actionUrl} onClick={onClose}>
+      <Link href={notif.actionUrl} onClick={aoTocar}>
         {content}
       </Link>
     );
   }
-  return content;
+  // Sem link, tocar só marca o aviso lido; a lista fica aberta.
+  return isUnread
+    ? <div role="button" tabIndex={0} onClick={() => onRead(notif.id)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRead(notif.id); } }}>{content}</div>
+    : content;
 }

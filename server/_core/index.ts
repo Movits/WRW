@@ -8,6 +8,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -242,6 +243,10 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
+  // Vite e do estático, que responderiam a página no lugar delas. Sem as
+  // variáveis, 404 (server/rotas-da-google-agenda.ts).
+  registrarRotasDaGoogleAgenda(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
@@ -391,23 +396,25 @@ async function startServer() {
   });
 
   // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
-  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas.
-  // As duas rodam no próprio processo, a cada poucos segundos, cada uma com o
-  // seu laço. O terceiro laço é a varredura das gravações vencidas
-  // (server/varredura-de-gravacoes.ts): tira do bucket, com todas as versões, o
-  // áudio de reunião que passou dos 30 dias, já no boot (sem atrasar o listen,
-  // que já foi chamado aqui) e de 5 em 5 min. Sem banco (dev sem DATABASE_URL),
-  // nenhum liga.
+  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas;
+  // o laço dos lembretes (H15) põe no sino os da próxima ação e os da agenda.
+  // Os três rodam no próprio processo, cada um com o seu laço. O quarto laço é
+  // a varredura das gravações vencidas (server/varredura-de-gravacoes.ts): tira
+  // do bucket, com todas as versões, o áudio de reunião que passou dos 30 dias,
+  // já no boot (sem atrasar o listen, que já foi chamado aqui) e de 5 em 5 min.
+  // Sem banco (dev sem DATABASE_URL), nenhum liga.
   if (process.env.DATABASE_URL) {
     const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
     const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
     const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
+    const { iniciarLembretes, pararLembretes } = await import("../lembretes");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
     iniciarVarreduraDeGravacoes();
+    iniciarLembretes();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
-    // SIGINT. As duas filas param de reservar e devolvem as reservas desta
+    // SIGINT. Os três laços param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
     // depois de a reserva vencer), e a varredura das gravações não começa outro
     // áudio; a falha de um laço não segura os outros. Depois, o servidor fecha e
@@ -427,6 +434,9 @@ async function startServer() {
         pararVarreduraDeGravacoes()
           .then(r => console.log(`[Gravações] varredura parada${r.emCurso ? (r.terminou ? "; a passada em curso terminou." : "; a passada em curso fica para a próxima instância.") : "."}`))
           .catch(erro => console.error("[Gravações] não foi possível parar a varredura:", descreverErroDeBanco(erro))),
+        pararLembretes()
+          .then(r => console.log(`[Lembretes] devolvidos: ${r.lembretes} lembrete(s).`))
+          .catch(erro => console.error("[Lembretes] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
       ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.

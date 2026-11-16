@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
+import { pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
+import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/ModeloDoResumo";
 import { FormularioDoItemDoResumo } from "@/components/FormularioDoItemDoResumo";
@@ -16,6 +19,7 @@ import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { ROTA_DAS_PROXIMAS_ACOES, viraProximaAcao } from "@shared/proximas-acoes";
 import { vozesCitadas } from "@shared/vozes-na-edicao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
@@ -32,7 +36,12 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * ignorados ficam recolhidos, com Desfazer. O "▶ mm:ss" leva o player da barra
  * do rodapé ao ponto do trecho. A dona também edita um item e acrescenta item
  * à mão (H4f, components/FormularioDoItemDoResumo.tsx): o que ela escreve vale
- * como confirmado, e a tela marca o que é dela.
+ * como confirmado, e a tela marca o que é dela. A ação ou tarefa confirmada
+ * vira próxima ação (H5a, server/proximas-acoes.ts): o confirmado da IA tem
+ * "Desfazer a confirmação", que nela pede confirmação antes, porque apaga a
+ * próxima ação; o item que a dona escreveu não volta a "para conferir" e não
+ * o tem. O Ignorar do formulário, na ação ou tarefa confirmada, também pede
+ * confirmação antes, pelo mesmo motivo.
  *
  * Serve às duas telas: o detalhe da dona (pages/Meetings.tsx), que decide, e o
  * link aberto (pages/ReuniaoAberta.tsx), só de leitura: sem os botões de
@@ -234,11 +243,26 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     ? utils.reuniaoAberta.resumoGuardado.invalidate({ token })
     : utils.meetings.resumoGuardado.invalidate({ meetingId });
   const aoFalharDecisao = (erro: unknown) => toast.error(mensagemDaDecisao(t, erro));
+  // A próxima ação do item, com prazo, anda com a Google Agenda (H5c):
+  // desconfirmar o item ou marcá-la feita tira o evento, e reabri-la o manda de
+  // novo. A decisão fica; quando a Google falha, um aviso à parte, o mesmo da
+  // lista (useAvisosDaAgenda). O evento que ficou lá porque a Google falhou
+  // traz "Tentar de novo", pelo id da ação que a rota devolve: a ação apagada
+  // (ou feita) não está mais em lista nenhuma para oferecê-lo.
+  const avisos = useAvisosDaAgenda();
+  const avisarDaAgenda = (resultado: (ResultadoNaGoogle & { acaoId: string | null }) | undefined, saiu: boolean) => {
+    if (!saiu) avisos.depoisDeMandar(resultado);
+    else if (resultado?.acaoId) avisos.depoisDeTirar(resultado.acaoId, resultado);
+  };
   const pedirDaDona = trpc.meetings.pedirResumo.useMutation({ onSettled: reler });
   const pedirPeloLink = trpc.reuniaoAberta.pedirResumo.useMutation({ onSettled: reler });
-  const decidir = trpc.meetings.decidirItemDoResumo.useMutation({ onError: aoFalharDecisao, onSettled: reler });
+  const decidir = trpc.meetings.decidirItemDoResumo.useMutation({
+    onSuccess: resultado => avisarDaAgenda(resultado, true), onError: aoFalharDecisao, onSettled: reler,
+  });
   const confirmarTodos = trpc.meetings.confirmarItensDoResumo.useMutation({ onError: aoFalharDecisao, onSettled: reler });
-  const marcar = trpc.meetings.marcarAcaoFeita.useMutation({ onError: aoFalharDecisao, onSettled: reler });
+  const marcar = trpc.meetings.marcarAcaoFeita.useMutation({
+    onSuccess: (resultado, variaveis) => avisarDaAgenda(resultado, variaveis.feito), onError: aoFalharDecisao, onSettled: reler,
+  });
   const pedir = peloLink ? pedirPeloLink : pedirDaDona;
   // Sem modelo, o resumo que falhou reabre no modelo em que estava.
   const pedirResumo = (modelo?: ModeloDeResumo) => {
@@ -322,6 +346,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     ? <FormularioDoItemDoResumo meetingId={meetingId} vozes={vozes} exibir={exibir} tituloDaSecao={secao => tituloDaSecao(t, secao)}
         item={{ id: item.id, section: item.section, subject: noOriginal(item).subject, text: noOriginal(item).text, assignee: noOriginal(item).assignee, due: noOriginal(item).due }}
         reler={reler} aoFalhar={aoFalharDecisao} aoFechar={fechar} decidindo={decidindo} comLinkAberto={comLinkAberto}
+        aoSalvarEdicao={resultado => avisarDaAgenda(resultado, false)}
+        ignorarApagaAcao={item.status === "confirmed" && viraProximaAcao(item.section)}
         aoIgnorar={() => { if (item.id) decidir.mutate({ itemId: item.id, status: "ignored" }); }}/>
     : null;
   const [acrescentando, setAcrescentando] = useState(false);
@@ -411,7 +437,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
               aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
-              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito }); }}
+              aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito, ...pedidoDaTela(t) }); }}
               formularioDeEdicao={!peloLink && !somenteLeitura && item.id ? fechar => formularioDoItem(item, fechar) : undefined}/>)}
           </ul>
         </section>;
@@ -497,7 +523,7 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
   decidindo: boolean;
   /** A versão anterior do resumo que está sendo refeito (H4d): a caixa fica, travada, e não há botões de decidir. */
   somenteLeitura: boolean;
-  aoDecidir: (status: "confirmed" | "ignored") => void;
+  aoDecidir: (status: "confirmed" | "ignored" | "pending") => void;
   aoMarcar: (feito: boolean) => void;
   /** Só para a dona (H4f): o formulário que edita o item, no lugar dele. */
   formularioDeEdicao?: (fechar: () => void) => ReactNode;
@@ -509,6 +535,8 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
   // O item da IA que a dona editou (H4f); pelo link, o escrito por ela que tem
   // trecho (o acrescentado não tem).
   const editadoPelaDona = peloLink ? !!item.escritoPelaDona && !!item.excerpt : item.origin !== "owner" && item.editedAt != null;
+  // O item que a dona escreveu, acrescentado ou editado (H4f): não volta a "para conferir".
+  const escritoPelaDona = !peloLink && (item.origin === "owner" || item.editedAt != null);
   // Confirmar, Ignorar e Editar se repetem em todo item: o texto do item os descreve.
   const idDoTexto = useId();
   const [editando, setEditando] = useState(false);
@@ -571,6 +599,11 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
           <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>) : null}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
+    {/* O confirmado: o caminho até a próxima ação (H5a) e o "Desfazer a
+        confirmação", que some enquanto o resumo é refeito (H4d) e no item
+        que a dona escreveu (H4f), que não volta a "para conferir". */}
+    {item.status === "confirmed" && !peloLink && <DesfazerConfirmacao viraAcao={viraProximaAcao(item.section)} desabilitado={decidindo}
+      podeDesfazer={!somenteLeitura && !escritoPelaDona} descritoPor={idDoTexto} aoDesfazer={() => aoDecidir("pending")}/>}
     {pendente && !peloLink && !somenteLeitura && <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" aria-describedby={idDoTexto} disabled={decidindo} onClick={() => aoDecidir("confirmed")}
         className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-[#1a120c] disabled:opacity-50"><Check size={14}/> {t("meetings.summary.confirm")}</button>
@@ -579,4 +612,41 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
       {editar}
     </div>}
   </li>;
+}
+
+/**
+ * O item confirmado volta a "para conferir" (H5a). A ação ou tarefa confirmada
+ * virou próxima ação, e desconfirmar a apaga no servidor: antes, a tela pede a
+ * confirmação. Os outros itens voltam direto. Sem `podeDesfazer` (o resumo
+ * sendo refeito, H4d, ou o item que a dona escreveu, H4f), fica só o caminho
+ * até a próxima ação.
+ */
+function DesfazerConfirmacao({ viraAcao, desabilitado, podeDesfazer, descritoPor, aoDesfazer }: {
+  viraAcao: boolean;
+  desabilitado: boolean;
+  podeDesfazer: boolean;
+  descritoPor: string;
+  aoDesfazer: () => void;
+}) {
+  const { t } = useTranslation();
+  const [perguntando, setPerguntando] = useState(false);
+  if (!viraAcao && !podeDesfazer) return null;
+  if (perguntando && podeDesfazer) {
+    return <div className="mt-3 rounded-lg border border-amber-300/30 bg-amber-300/[0.06] p-3 text-xs text-amber-100">
+      <p>{t("proximasAcoes.undoConfirmQuestion")}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" aria-describedby={descritoPor} disabled={desabilitado} onClick={() => { setPerguntando(false); aoDesfazer(); }}
+          className="rounded-lg bg-amber-400 px-3 py-1.5 font-bold text-[#1a120c] disabled:opacity-50">{t("proximasAcoes.undoConfirmYes")}</button>
+        <button type="button" onClick={() => setPerguntando(false)}
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-white/70">{t("proximasAcoes.cancel")}</button>
+      </div>
+    </div>;
+  }
+  return <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+    {viraAcao && <Link href={ROTA_DAS_PROXIMAS_ACOES} className="font-semibold text-amber-200 hover:text-amber-100">{t("proximasAcoes.inNextActions")}</Link>}
+    {podeDesfazer && <button type="button" aria-describedby={descritoPor} disabled={desabilitado} onClick={() => (viraAcao ? setPerguntando(true) : aoDesfazer())}
+      className="inline-flex items-center gap-1 text-white/45 hover:text-white/75 disabled:opacity-50">
+      <RotateCcw size={12} aria-hidden/> {t("proximasAcoes.undoConfirm")}
+    </button>}
+  </div>;
 }

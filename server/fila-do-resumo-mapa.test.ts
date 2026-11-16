@@ -51,7 +51,8 @@ vi.mock("./db", async () => {
       if (chaves.includes("texto")) return banco.transcricao ? [banco.transcricao] : [];
       return [{ id: banco.transcricaoAtual }];
     }
-    if (tabela === schema.meetings) return [banco.reuniao];
+    // O aviso de reunião pronta no sino (H15), na transação da gravação do resumo: o título e a conta.
+    if (tabela === schema.meetings) return chaves.includes("titulo") ? [{ titulo: "Reunião do mapa", contaId: 7 }] : [banco.reuniao];
     return [];
   };
   const db = {

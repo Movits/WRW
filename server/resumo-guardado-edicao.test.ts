@@ -143,6 +143,17 @@ vi.mock("./db", async () => {
   };
 });
 
+// As próximas ações (H5a) andam com o item: aqui, só o que a edição pede a
+// elas. O que elas gravam no banco está em proximas-acoes.integracao.test.ts.
+const acoes = vi.hoisted(() => ({
+  criarDoItem: vi.fn(async () => true),
+  apagarAcaoDoItem: vi.fn(async () => 0),
+  escreverFeita: vi.fn(async () => 1),
+  garantirAcoesDosItensConfirmados: vi.fn(async () => 0),
+  levarEdicaoDoItemAAcao: vi.fn(async (): Promise<string | null> => null),
+}));
+vi.mock("./proximas-acoes", () => acoes);
+
 const servico = await import("./resumo-guardado");
 const schema = await import("../drizzle/schema");
 const { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
@@ -183,6 +194,7 @@ const CAMPOS = { texto: "{F2} envia a proposta revisada", assunto: null, respons
 
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(AGORA);
+  for (const dublê of Object.values(acoes)) dublê.mockClear();
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -273,12 +285,35 @@ describe("editarItemDoResumo (H4f)", () => {
     await expect(servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS)).rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   });
 
-  it("trava a reunião e depois o resumo, a ordem da fila do resumo, antes de escrever; a linha do resumo não muda", async () => {
+  it("trava a reunião, o resumo e o item, a ordem da fila do resumo, antes de escrever; a linha do resumo não muda", async () => {
     const acao = item();
     montar({ itens: [acao] });
     await servico.editarItemDoResumo(DONA, acao.id as string, { ...CAMPOS, texto: "outro" });
-    expect(banco.travas).toEqual(["meetings", "meeting_summaries"]);
+    // O item lido travado depois dos dois: a versão mais nova, que a próxima ação copiou.
+    expect(banco.travas).toEqual(["meetings", "meeting_summaries", "meeting_summary_items"]);
     expect(banco.escritas).toEqual(["update meeting_summary_items"]);
+  });
+
+  // A próxima ação (H5a) anda com o item, na mesma transação: a do item que
+  // mudou leva o texto novo, e a ação ou tarefa confirmada ganha a dela.
+  it("a próxima ação acompanha a edição: recebe o antes e o depois do item, e a que faltar nasce", async () => {
+    const acao = item({ status: "confirmed", decidedAt: ANTES });
+    montar({ itens: [acao] });
+    acoes.levarEdicaoDoItemAAcao.mockResolvedValueOnce("acao-9");
+    await expect(servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS)).resolves.toEqual({ acaoQueMudou: "acao-9" });
+    const [, dona, itemId, antes, depois, quando] = acoes.levarEdicaoDoItemAAcao.mock.calls[0] as unknown as [unknown, string, string, Linha, Linha, number];
+    expect([dona, itemId, quando]).toEqual([DONA, acao.id, AGORA]);
+    expect(antes).toMatchObject({ text: "{F2} envia a proposta", assignee: "{F2}", due: "até sexta-feira", excerpt: "eu mando a proposta até sexta-feira" });
+    expect(depois).toMatchObject({ text: "{F2} envia a proposta revisada", assignee: "{F2}", due: "até sexta-feira", excerpt: "eu mando a proposta até sexta-feira" });
+    expect(acoes.criarDoItem).toHaveBeenCalledWith(expect.anything(), DONA, acao.id, AGORA);
+  });
+
+  it("salvar sem mudar nada não leva nada à ação (só confirma, e a ação que faltar nasce)", async () => {
+    const acao = item({ text: CAMPOS.texto });
+    montar({ itens: [acao] });
+    await expect(servico.editarItemDoResumo(DONA, acao.id as string, CAMPOS)).resolves.toEqual({ acaoQueMudou: null });
+    expect(acoes.levarEdicaoDoItemAAcao).not.toHaveBeenCalled();
+    expect(acoes.criarDoItem).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -352,6 +387,12 @@ describe("acrescentarItemDoResumo (H4f)", () => {
     await expect(servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Novo", assunto: null, responsavel: null, prazo: null }))
       .rejects.toMatchObject({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
     expect(itens()).toEqual([]);
+  });
+
+  it("a ação ou tarefa acrescentada já é próxima ação (H5a): criarDoItem com o id novo, na mesma transação", async () => {
+    montar({ itens: [] });
+    const id = await servico.acrescentarItemDoResumo(DONA, REUNIAO, "action", { texto: "Reservar a sala", assunto: null, responsavel: null, prazo: null });
+    expect(acoes.criarDoItem).toHaveBeenCalledWith(expect.anything(), DONA, id, AGORA);
   });
 
   it("trava a reunião e depois o resumo antes de contar e gravar; a linha do resumo não muda", async () => {

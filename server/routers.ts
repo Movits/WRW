@@ -27,6 +27,9 @@ import { intelligentMatchesRouter } from "./routers/matches";
 import { distribuicaoRouter } from "./routers/distribuicao";
 import { networkInteligenteRouter } from "./routers/networkInteligente";
 import { assistenteTextoRouter } from "./routers/assistenteTexto";
+import { proximasAcoesRouter } from "./routers/proximasAcoes";
+import { agendaRouter } from "./routers/agenda";
+import { googleAgendaRouter } from "./routers/googleAgenda";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -63,6 +66,13 @@ export const appRouter = router({
   networkInteligente: networkInteligenteRouter,
   // "Gravar áudio" e "Revisar texto" dos campos livres (cadastro, Perfil, oportunidade).
   assistenteTexto: assistenteTextoRouter,
+  // As próximas ações da dona (H5a): o que ela confirmou nos resumos e o que anotou.
+  proximasAcoes: proximasAcoesRouter,
+  // A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora".
+  agenda: agendaRouter,
+  // A conexão com a Google Agenda (H16b): o estado e o desconectar. Conectar
+  // é navegação (server/rotas-da-google-agenda.ts).
+  googleAgenda: googleAgendaRouter,
 });
 
 export type AppRouter = typeof appRouter;

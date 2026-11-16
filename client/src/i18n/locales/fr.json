@@ -1506,7 +1506,7 @@
     "processingInterrupted": "Le traitement a été interrompu avant la fin (le serveur a redémarré en cours de route).",
     "deleteConfirmProcessing": "Cette réunion est encore en cours de traitement : le traitement en cours sera abandonné.",
     "deleteConfirmTitle": "Supprimer cette réunion ?",
-    "deleteConfirmText": "L'audio, la transcription, les traductions et les suggestions de contacts seront supprimés définitivement.",
+    "deleteConfirmText": "L'audio, la transcription, les traductions et les suggestions de contacts seront supprimés définitivement. Les prochaines actions que vous avez confirmées restent dans votre liste, sans l'extrait de la réunion.",
     "deleteConfirmCancel": "Annuler",
     "deleteConfirmButton": "Supprimer la réunion",
     "summaryTab": "Résumé",
@@ -1993,6 +1993,74 @@
     "versaoNovaDepoisDoEnvio": "Une nouvelle version de WRW est disponible. Cette page s'actualisera d'elle-même une fois l'audio envoyé.",
     "sairFalhou": "Le serveur n'a pas confirmé la fin de la session. Si votre compte apparaît encore connecté, déconnectez-vous à nouveau quand la connexion sera rétablie."
   },
+  "proximasAcoes": {
+    "title": "Prochaines actions",
+    "intro": "Les actions et tâches que vous avez confirmées dans les résumés de réunion, et celles que vous avez notées ici. Les ouvertes d'abord, par échéance.",
+    "filterOpen": "Ouvertes",
+    "filterAll": "Toutes",
+    "openCount": "Ouvertes : {{n}}",
+    "limitNotice": "Affichage des {{n}} premières.",
+    "loading": "Chargement des prochaines actions…",
+    "emptyOpen": "Aucune action ouverte. Quand vous confirmez une action ou une tâche dans le résumé d'une réunion, elle apparaît ici.",
+    "emptyAll": "Aucune prochaine action pour l'instant.",
+    "add": "Nouvelle action",
+    "fieldText": "À faire",
+    "fieldDetail": "Détail (facultatif)",
+    "fieldOwner": "Responsable (facultatif)",
+    "fieldDueDate": "Échéance (facultative)",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "deleteQuestion": "Supprimer cette action ?",
+    "deleteQuestionMeeting": "Supprimer cette action ? L'élément redevient « À vérifier » dans le résumé de la réunion.",
+    "deleteQuestionOwnerItem": "Supprimer cette action ? L'élément que vous avez écrit passe dans les éléments ignorés du résumé de la réunion, et « Rétablir » le fait revenir.",
+    "deleteConfirm": "Oui, supprimer",
+    "owner": "Responsable : {{nome}}",
+    "dueDate": "Échéance : {{data}}",
+    "overdue": "En retard",
+    "dueToday": "Échéance aujourd'hui",
+    "spokenDue": "Échéance dite en réunion : {{prazo}}",
+    "fromMeeting": "De la réunion : {{titulo}}",
+    "meetingDeleted": "La réunion de cette action a été supprimée.",
+    "manual": "Notée par vous",
+    "excerpt": "Extrait de la réunion",
+    "contact": "Contact : {{nome}}",
+    "linkContact": "Associer à un contact",
+    "unlinkContact": "Retirer l'association",
+    "suggestedContact": "Est-ce {{nome}}, de votre réseau ?",
+    "linkSuggested": "Associer",
+    "searchContact": "Rechercher un contact par nom",
+    "noContactFound": "Aucun contact trouvé.",
+    "searching": "Recherche…",
+    "saveError": "Impossible d'enregistrer. Réessayez.",
+    "errorGone": "Cette prochaine action n'existe plus. Actualisez la page.",
+    "errorContactOutside": "Ce contact ne fait pas partie de votre réseau.",
+    "seeAll": "Tout voir",
+    "cardEmpty": "Aucune action ouverte. Confirmez les actions et les tâches dans le résumé d'une réunion, ou notez-en une dans Prochaines actions.",
+    "undoConfirm": "Annuler la confirmation",
+    "undoConfirmQuestion": "Annuler la confirmation supprime aussi la prochaine action créée à partir de cet élément. Annuler quand même ?",
+    "undoConfirmYes": "Oui, annuler",
+    "ignoreConfirmQuestion": "Ignorer cet élément supprime aussi la prochaine action créée à partir de lui. Ignorer quand même ?",
+    "ignoreConfirmYes": "Oui, ignorer",
+    "inNextActions": "Dans Prochaines actions",
+    "agenda": {
+      "group": "Dans l’agenda",
+      "pageHint": "Avec une échéance, l’action peut aller dans votre agenda : l’événement est à 9 h le jour de l’échéance, avec un rappel à cette heure-là.",
+      "pageHintGoogle": "Si Google Agenda est connecté dans votre Profil, l’action y va automatiquement.",
+      "downloadIcs": "Agenda du téléphone (.ics)",
+      "toast": {
+        "sent": "L’action est dans votre Google Agenda.",
+        "notSent": "L’action est enregistrée dans WRW, mais elle n’a pas été ajoutée à votre Google Agenda.",
+        "pastNotSent": "L’échéance de cette action est passée : elle reste uniquement dans WRW.",
+        "removed": "L’événement de l’action a été retiré de votre Google Agenda.",
+        "notRemoved": "L’événement de cette action est toujours dans votre Google Agenda."
+      },
+      "errors": {
+        "stillOpen": "Cette action est toujours ouverte et a une échéance : son événement reste dans votre Google Agenda. Actualisez la page."
+      }
+    }
+  },
   "errorBoundary": {
     "title": "Un problème inattendu est survenu",
     "description": "Nous avons rencontré un problème technique lors du chargement de cette page. Notre équipe a été automatiquement notifiée.",
@@ -2001,6 +2069,163 @@
     "backHome": "← Retour à l'accueil",
     "tip": "Si le problème persiste, essayez de vider le cache de votre navigateur (Ctrl+Shift+R).",
     "serverUnavailable": "Le serveur n’a pas répondu. Réessayez dans quelques instants."
+  },
+  "agenda": {
+    "eyebrow": "Avant la réunion",
+    "title": "Agenda des réunions",
+    "subtitle": "Planifiez la réunion, invitez les participants par WhatsApp ou par e-mail et, le moment venu, lancez l’enregistrement d’un seul geste.",
+    "newButton": "Planifier une réunion",
+    "loading": "Chargement de l’agenda…",
+    "emptyTitle": "Aucune réunion planifiée",
+    "emptySubtitle": "Planifiez la prochaine et, quand elle commence, touchez Lancer l’enregistrement.",
+    "upcomingHeading": "À venir",
+    "pastHeading": "Déjà passées",
+    "noUpcoming": "Aucune réunion à venir.",
+    "timeZoneNote": "Fuseau horaire : {{zone}}",
+    "form": {
+      "newTitle": "Nouvelle réunion à l’agenda",
+      "editTitle": "Modifier la réunion",
+      "titleLabel": "Titre",
+      "titlePlaceholder": "Ex. : Conversation avec un investisseur",
+      "dateLabel": "Date",
+      "timeLabel": "Heure",
+      "durationLabel": "Durée",
+      "placeLabel": "Lieu ou lien de l’appel",
+      "placePlaceholder": "Adresse, ou le lien Meet, Zoom ou Teams",
+      "participantsLabel": "Participants",
+      "participantsHint": "Nom, e-mail ou les deux. L’e-mail sert à l’invitation par e-mail et à Google Agenda.",
+      "participantName": "Nom",
+      "participantEmail": "E-mail",
+      "addParticipant": "Ajouter un participant",
+      "removeParticipant": "Retirer le participant",
+      "reminderLabel": "Rappel",
+      "save": "Enregistrer",
+      "cancel": "Annuler",
+      "titleRequired": "Donnez un titre à la réunion.",
+      "titleLength": "Le titre doit comporter entre {{min}} et {{max}} caractères.",
+      "whenRequired": "Choisissez la date et l’heure.",
+      "emailInvalid": "Vérifiez l’e-mail du participant {{position}}.",
+      "tooManyParticipants": "{{max}} participants au maximum."
+    },
+    "reminder": {
+      "none": "Sans rappel",
+      "atStart": "À l’heure du début",
+      "m5": "5 minutes avant",
+      "m10": "10 minutes avant",
+      "m15": "15 minutes avant",
+      "m30": "30 minutes avant",
+      "h1": "1 heure avant",
+      "h2": "2 heures avant",
+      "d1": "1 jour avant"
+    },
+    "card": {
+      "now": "En cours",
+      "participants": "Avec",
+      "reminder": "Rappel",
+      "recording": "Enregistrement",
+      "recordNow": "Lancer l’enregistrement",
+      "openRecording": "Ouvrir l’enregistrement",
+      "recordAgain": "Enregistrer de nouveau",
+      "inviteGroup": "Invitation et calendrier",
+      "inviteWhatsapp": "WhatsApp",
+      "inviteEmail": "E-mail",
+      "googleCalendar": "Google Agenda",
+      "downloadIcs": "Fichier .ics",
+      "edit": "Modifier",
+      "delete": "Supprimer",
+      "deleteConfirm": "Retirer « {{title}} » de l’agenda ? L’enregistrement, s’il existe, reste dans Réunions.",
+      "deleteYes": "Supprimer",
+      "deleteNo": "Garder"
+    },
+    "invite": {
+      "heading": "Invitation à la réunion « {{title}} »",
+      "when": "Quand",
+      "where": "Où",
+      "addToGoogle": "Ajoutez-la à votre Google Agenda",
+      "emailSubject": "Invitation : {{title}}"
+    },
+    "toast": {
+      "created": "Réunion planifiée.",
+      "updated": "Réunion mise à jour.",
+      "deleted": "Réunion retirée de l’agenda."
+    },
+    "errors": {
+      "notFound": "Cette réunion n’est plus dans votre agenda. Actualisez la page.",
+      "invalid": "Vérifiez les champs et réessayez.",
+      "full": "Votre agenda a atteint la limite de réunions. Supprimez les anciennes pour en planifier de nouvelles.",
+      "conflict": "Cet enregistrement est déjà lié à une autre réunion de l’agenda.",
+      "linkFailed": "L’enregistrement continue, mais il n’a pas été lié à la réunion de l’agenda."
+    },
+    "recorder": {
+      "fromAgenda": "De votre agenda : {{when}}",
+      "notFound": "Cette réunion n’est plus dans votre agenda. L’enregistrement continue sans lien.",
+      "loadError": "Impossible de lire la réunion de l’agenda. L’enregistrement continue sans lien.",
+      "sendInvite": "Envoyer l’invitation"
+    },
+    "google": {
+      "formNote": "La réunion est aussi ajoutée à votre Google Agenda.",
+      "invitesLabel": "Google envoie l’invitation depuis votre compte",
+      "invitesHint": "Décoché, l’événement reste seulement dans votre agenda, sans les invités. Coché, les invités figurent dans l’événement, et Google envoie l’invitation, puis les avis de modification et d’annulation, depuis votre compte, à chaque personne qui a un e-mail dans la liste.",
+      "onCalendar": "Dans votre Google Agenda",
+      "notOnCalendar": "Pas encore dans votre Google Agenda",
+      "send": "Ajouter à Google Agenda",
+      "retry": "Réessayer",
+      "sending": "Envoi…",
+      "broken": "La connexion à Google Agenda ne fonctionne plus, et les réunions n’y arrivent pas. Reconnectez-la depuis votre Profil.",
+      "openProfile": "Ouvrir le Profil",
+      "statusError": "Impossible de vérifier si votre Google Agenda est connecté.",
+      "toast": {
+        "sent": "La réunion est dans votre Google Agenda.",
+        "notSent": "La réunion est enregistrée dans WRW, mais elle n’a pas été ajoutée à votre Google Agenda.",
+        "removed": "La réunion a été retirée de votre Google Agenda.",
+        "notRemoved": "La réunion a été retirée de l’agenda de WRW, mais elle est toujours dans votre Google Agenda.",
+        "removeThere": "Si vous le souhaitez, supprimez l’événement là-bas.",
+        "pastNotSent": "Cette réunion a déjà eu lieu : elle reste uniquement dans l’agenda de WRW."
+      },
+      "reason": {
+        "notConnected": "Connectez Google Agenda depuis votre Profil.",
+        "revoked": "Reconnectez Google Agenda depuis votre Profil.",
+        "google": "Google n’a pas répondu. Réessayez dans quelques instants."
+      },
+      "errors": {
+        "stillInAgenda": "Cette réunion est toujours dans votre agenda. Actualisez la page."
+      }
+    }
+  },
+  "googleAgenda": {
+    "title": "Google Agenda",
+    "subtitle": "Connectez votre compte Google pour que WRW ajoute à votre Google Agenda les réunions que vous planifiez et vos prochaines actions avec échéance.",
+    "notConnected": "Aucun compte Google connecté.",
+    "connect": "Connecter Google Agenda",
+    "connected": "Connecté à un compte Google.",
+    "connectedAs": "Connecté au compte Google {{email}}.",
+    "broken": "Cette connexion ne fonctionne plus. Reconnectez-vous pour que WRW puisse de nouveau utiliser votre Google Agenda.",
+    "reconnect": "Reconnecter",
+    "privacyNote": "WRW ne modifie que les événements des réunions que vous planifiez dans l’agenda des réunions de WRW et de vos prochaines actions avec échéance. Vous pouvez vous déconnecter à tout moment.",
+    "wrongAddress": "Pour connecter Google Agenda, ouvrez WRW à l’adresse {{address}}.",
+    "openAddress": "Ouvrir {{address}}",
+    "inApp": "Impossible de connecter Google Agenda depuis l’application. Ouvrez {{address}} dans votre navigateur, identifiez-vous, puis connectez-le depuis votre Profil.",
+    "disconnect": "Déconnecter",
+    "disconnecting": "Déconnexion…",
+    "disconnectConfirm": "Déconnecter Google Agenda ? Les événements déjà présents dans votre Google Agenda y resteront.",
+    "disconnectYes": "Déconnecter",
+    "disconnectNo": "Conserver",
+    "result": {
+      "connected": "Google Agenda connecté.",
+      "denied": "La connexion à Google Agenda n’a pas été autorisée.",
+      "missingPermission": "L’autorisation d’accès à l’agenda manquait. Reconnectez-vous et laissez cochée l’option Google Agenda.",
+      "expired": "La connexion a pris trop de temps. Réessayez.",
+      "wrongAddress": "La connexion à Google Agenda ne fonctionne que depuis l’adresse officielle de WRW.",
+      "error": "Impossible de connecter Google Agenda. Réessayez dans un instant.",
+      "errorAccessLeft": "Impossible de connecter Google Agenda, et Google n’a pas confirmé l’annulation de l’autorisation que vous venez de donner. Si vous le souhaitez, retirez l’accès de WRW dans les paramètres de votre compte Google."
+    },
+    "toast": {
+      "disconnected": "Google Agenda déconnecté.",
+      "disconnectedPending": "WRW a supprimé la connexion, mais Google ne l’a pas confirmé. Si vous le souhaitez, retirez l’accès de WRW dans les paramètres de votre compte Google."
+    },
+    "errors": {
+      "unavailable": "La connexion à Google Agenda n’est pas disponible pour le moment."
+    }
   },
   "appHeader": {
     "menuButton": "Menu",
@@ -2019,6 +2244,8 @@
       "contextsDesc": "Où et comment vous avez rencontré chaque personne",
       "meetings": "Réunions",
       "meetingsDesc": "Enregistrements et transcriptions",
+      "agenda": "Agenda",
+      "agendaDesc": "Réunions planifiées et invitations",
       "memory": "Mémoire IA",
       "memoryDesc": "Interrogez votre historique",
       "intelligentMatches": "Connexions intelligentes",
@@ -2048,7 +2275,8 @@
       "confirmar": "Supprimer définitivement",
       "excluindo": "Suppression...",
       "sucesso": "Votre compte et vos données ont été supprimés.",
-      "sucessoComPendencias": "Votre compte et vos données ont été supprimés. {{quantidade}} fichier(s) n'ont pas encore quitté le stockage et peuvent prendre plus de temps ; leur suppression a été enregistrée."
+      "sucessoComPendencias": "Votre compte et vos données ont été supprimés. {{quantidade}} fichier(s) n'ont pas encore quitté le stockage et peuvent prendre plus de temps ; leur suppression a été enregistrée.",
+      "googleNaoConfirmou": "La connexion à Google Agenda a été supprimée avec votre compte, mais Google n'a pas confirmé le retrait de l'accès de WRW. Si vous le souhaitez, retirez cet accès dans les paramètres de votre compte Google."
     }
   },
   "termoGeral": {
@@ -2197,7 +2425,9 @@
       "topics": "Sujets : {{lista}}",
       "connectionsTitle": "Connexions et intermédiations",
       "connectionsNoConsent": "Activez les Connexions Intelligentes pour voir les connexions de ce contact.",
-      "searchGlobal": "Rechercher des connexions de ce contact dans le réseau mondial"
+      "searchGlobal": "Rechercher des connexions de ce contact dans le réseau mondial",
+      "actionsEmpty": "Aucune prochaine action associée à ce contact. Notez-en une ici, ou associez une action à ce contact dans Prochaines actions.",
+      "actionsAll": "Voir toutes vos prochaines actions"
     },
     "availability": {
       "title": "Rendre ce contact disponible pour les opportunités du réseau",
@@ -2256,7 +2486,9 @@
       "availableYes": "Rendu disponible pour les opportunités du réseau",
       "availableNo": "Autorisation pour le réseau retirée",
       "connection": "Connexion enregistrée par la plateforme",
-      "stage": "Étape de la connexion : {{etapa}}"
+      "stage": "Étape de la connexion : {{etapa}}",
+      "nextAction": "Prochaine action : {{texto}}",
+      "nextActionDone": "Prochaine action terminée : {{texto}}"
     },
     "connections": {
       "title": "Connexions enregistrées",
@@ -2691,7 +2923,15 @@
     "timeNow": "à l'instant",
     "timeMinutes": "il y a {{count}} min",
     "timeHours": "il y a {{count}} h",
-    "timeDays": "il y a {{count}} j"
+    "timeDays": "il y a {{count}} j",
+    "reminder": {
+      "actionTitle": "Rappel : prochaine action pour le {{data}}",
+      "meetingTitle": "Rappel de réunion : {{quando}}"
+    },
+    "meetingReady": {
+      "title": "Votre réunion est prête : transcription et résumé",
+      "titleNoSummary": "Votre réunion est prête, sans le résumé : ouvrez-la pour réessayer"
+    }
   },
   "protectedRoute": {
     "checkingAccess": "Vérification de l'accès...",
