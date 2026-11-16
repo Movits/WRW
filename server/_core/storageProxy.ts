@@ -10,7 +10,8 @@
 // A ordem das checagens importa:
 //   1. sessão válida (senão 401) — anônimo não descobre nem se a chave existe
 //   2. posse da chave (senão 403) — regra por prefixo, DENY por padrão
-//   3. só então a URL assinada de 5 minutos, com 307
+//   3. só então a URL assinada (vale 1 hora: SEGUNDOS_DA_URL_ASSINADA, em
+//      server/storage.ts), com 307
 //
 // As regras por prefixo espelham as políticas dos routers que criam cada tipo
 // de arquivo — o proxy não inventa política, repete a que já existe no tRPC.
@@ -21,7 +22,7 @@ import { sdk } from "./sdk";
 import { exigirDb } from "../db";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "../banco-indisponivel";
 import { dealRooms } from "../../drizzle/schema";
-import { storageGetSignedUrl } from "../storage";
+import { storageGetSignedUrl, SEGUNDOS_DA_URL_ASSINADA } from "../storage";
 
 type Usuaria = { id: number; openId: string; role: string | null };
 type Sala = { ownerId: number; interestedId: number } | null;
@@ -88,6 +89,134 @@ export async function podeBaixarChave(
   return false;
 }
 
+// ─── Cache: a mesma URL assinada, e um cache curto no navegador ──────────────
+//
+// O problema que isto resolve é de DINHEIRO, e não de velocidade. Toda abertura
+// de tela pedia ao proxy uma URL assinada NOVA — assinatura e data diferentes,
+// logo URL diferente — e para o navegador URL diferente é arquivo diferente:
+// ele baixava os mesmos bytes do bucket de novo. Com o Backblaze na conta
+// gratuita (1 GB de download por dia), reabrir Minha Rede algumas vezes já
+// consome a cota do dia.
+//
+// Duas medidas, nesta ordem de importância:
+//
+//   1. A MESMA URL por até 50 minutos (a assinatura vale 60), guardada em
+//      memória por chave. Assim o cache do navegador reconhece o arquivo e não
+//      o baixa de novo. Sem isto, a medida 2 não serve para nada.
+//   2. Cache-Control: private, max-age=300 no 307, para a segunda abertura da
+//      tela não precisar nem chegar ao proxy.
+//
+// O que NÃO muda: sessão e posse são conferidas em TODA requisição, antes de
+// qualquer consulta ao cache. O cache guarda URL por chave, nunca por usuária,
+// e nunca entrega uma URL a quem não passou pelas duas perguntas.
+//
+// O preço do `max-age=300`: por até 5 minutos o navegador pode repetir o
+// redirecionamento sem voltar ao proxy, então uma perda de acesso nesse
+// intervalo não é sentida naquele navegador. É `private` (nenhum cache
+// compartilhado guarda) e vale só para os prefixos de baixo — arquivo sob NDA
+// da Deal Room, documento do SIVC e áudio de reunião seguem com `no-store`.
+//
+// Por que só estes três prefixos: são as imagens que a tela pede em lista, de
+// novo a cada abertura, e é onde a fatura dói. O áudio de reunião fica de fora
+// por um segundo motivo — ele dura até 10 minutos, e reaproveitar uma URL com
+// 11 minutos de vida restante poderia cortar a escuta no meio.
+//
+// E só IMAGEM (jpg, png, webp), pela extensão da chave: contexts/ também guarda
+// o PDF anexado à Linha do Tempo (uma proposta, um contrato), e ele não aparece
+// em lista — a grade mostra um ícone e o arquivo só abre pelo link. Cachear o
+// PDF não economizaria nada e ainda pagaria o preço do `max-age` acima.
+const PREFIXOS_COM_CACHE_NO_NAVEGADOR = new Set(["contacts", "contexts", "generated"]);
+const EXTENSAO_DE_IMAGEM = /\.(jpe?g|png|webp)$/i;
+
+export const SEGUNDOS_DE_CACHE_NO_NAVEGADOR = 300;
+/** Margem para o download terminar antes de a assinatura vencer. */
+export const MS_DE_FOLGA_ANTES_DE_VENCER = 5 * 60 * 1000;
+/**
+ * Por quanto tempo o cofre repete a mesma URL. Sai do prazo da assinatura, e
+ * não de um número escrito à mão: se alguém encurtar SEGUNDOS_DA_URL_ASSINADA,
+ * a janela encurta junto, em vez de entregar URL vencida (403 do bucket em toda
+ * foto, cartão e mídia de contexto). A conta: a URL sai do cofre no máximo ao
+ * fim da janela, o navegador pode repetir o 307 por mais
+ * SEGUNDOS_DE_CACHE_NO_NAVEGADOR, e ainda sobra a folga. Com a assinatura de
+ * 1 hora, são 50 minutos.
+ */
+export const MS_DE_REUSO_DA_URL =
+  SEGUNDOS_DA_URL_ASSINADA * 1000 - SEGUNDOS_DE_CACHE_NO_NAVEGADOR * 1000 - MS_DE_FOLGA_ANTES_DE_VENCER;
+/**
+ * Teto de chaves guardadas, para TODAS as usuárias juntas. Cada entrada é uma
+ * URL assinada (~1 KB): 5.000 dão ~5 MB. Com 500, um dia de evento (30 usuárias
+ * abrindo 20 fotos cada) já expulsava URLs ainda em uso, e cada expulsa voltava
+ * como URL nova: download novo.
+ */
+export const TETO_DE_URLS_GUARDADAS = 5000;
+
+export type PoliticaDeCache = { reaproveitarUrl: boolean; cacheControl: string };
+
+export function politicaDeCacheDaChave(chave: string): PoliticaDeCache {
+  const prefixo = chave.split("/")[0];
+  if (PREFIXOS_COM_CACHE_NO_NAVEGADOR.has(prefixo) && EXTENSAO_DE_IMAGEM.test(chave)) {
+    return {
+      reaproveitarUrl: true,
+      cacheControl: `private, max-age=${SEGUNDOS_DE_CACHE_NO_NAVEGADOR}`,
+    };
+  }
+  return { reaproveitarUrl: false, cacheControl: "no-store" };
+}
+
+export type CofreDeUrls = {
+  obter(chave: string, politica: PoliticaDeCache): Promise<string>;
+  limpar(): void;
+  tamanho(): number;
+};
+
+/**
+ * O cofre é criado por função (e não escrito solto no módulo) para o teste
+ * poder trocar o assinador e o relógio. Em produção existe uma instância só.
+ */
+export function criarCofreDeUrls(
+  assinar: (chave: string) => Promise<string>,
+  relogio: () => number = Date.now,
+  msDeReuso: number = MS_DE_REUSO_DA_URL,
+  teto: number = TETO_DE_URLS_GUARDADAS,
+): CofreDeUrls {
+  const guardadas = new Map<string, { url: string; validaAte: number }>();
+  return {
+    async obter(chave, politica) {
+      if (!politica.reaproveitarUrl) return assinar(chave);
+      const agora = relogio();
+      const guardada = guardadas.get(chave);
+      if (guardada && guardada.validaAte > agora) {
+        // Acerto: a chave vai para o fim da ordem do Map. Assim quem sai pelo
+        // teto é a MENOS USADA, e não a primeira que chegou — a foto aberta a
+        // toda hora não perde a URL para uma que ninguém mais pediu.
+        guardadas.delete(chave);
+        guardadas.set(chave, guardada);
+        return guardada.url;
+      }
+      const url = await assinar(chave);
+      // Reinserir move a chave para o fim da ordem do Map, que é a ordem de
+      // inserção renovada a cada acerto: a primeira chave é sempre a menos
+      // usada, e é ela que sai.
+      guardadas.delete(chave);
+      while (guardadas.size >= teto) {
+        const maisAntiga = guardadas.keys().next().value;
+        if (maisAntiga === undefined) break;
+        guardadas.delete(maisAntiga);
+      }
+      guardadas.set(chave, { url, validaAte: agora + msDeReuso });
+      return url;
+    },
+    limpar() {
+      guardadas.clear();
+    },
+    tamanho() {
+      return guardadas.size;
+    },
+  };
+}
+
+const cofreDoProcesso = criarCofreDeUrls(storageGetSignedUrl);
+
 async function buscarSalaNoBanco(roomId: number): Promise<Sala> {
   const db = await exigirDb();
   const [sala] = await db
@@ -98,7 +227,7 @@ async function buscarSalaNoBanco(roomId: number): Promise<Sala> {
   return sala ?? null;
 }
 
-export function registerStorageProxy(app: Express) {
+export function registerStorageProxy(app: Express, cofre: CofreDeUrls = cofreDoProcesso) {
   app.get("/manus-storage/*", async (req, res) => {
     const key = (req.params as Record<string, string>)[0];
     if (!key) {
@@ -141,10 +270,11 @@ export function registerStorageProxy(app: Express) {
       return;
     }
 
-    // 3. Só agora a URL assinada.
+    // 3. Só agora a URL assinada — reaproveitada, quando o prefixo permite.
     try {
-      const url = await storageGetSignedUrl(key);
-      res.set("Cache-Control", "no-store");
+      const politica = politicaDeCacheDaChave(key);
+      const url = await cofre.obter(key, politica);
+      res.set("Cache-Control", politica.cacheControl);
       res.redirect(307, url);
     } catch (err) {
       console.error("[StorageProxy] falhou:", err);

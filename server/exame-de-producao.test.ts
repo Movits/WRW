@@ -904,3 +904,82 @@ describe("Termo Geral de Uso vigente: o exame reprova sem exatamente uma versão
     );
   });
 });
+
+// ═══════════════════════════ 11. O 307 do proxy para imagem da dona ═════════
+// Desde a #149 o proxy responde `private, max-age=300` e repete a URL assinada
+// para imagem de contexts/ (a do exame). A checagem antiga exigia `no-store` e
+// reprovaria o primeiro exame depois do merge, sem nenhum teste ver: nada aqui
+// rodava aquela linha. A igualdade com o valor do PROXY está em
+// server/storage-proxy-cache.test.ts, que já carrega o storageProxy com os
+// dublês de sessão e banco.
+describe("avaliarRedirecionamentoComCache: 307 com o cache curto e a MESMA URL na segunda abertura", () => {
+  const { avaliarRedirecionamentoComCache, CACHE_DO_307_DE_IMAGEM_DA_DONA } = relatorioMod as any;
+  const URL_ASSINADA = "https://bucket.exemplo/contexts/qa/ctx/exame_ab12cd34.png?X-Amz-Signature=segredo";
+  const primeira = (extra: Record<string, unknown> = {}) => ({
+    status: 307, cacheControl: CACHE_DO_307_DE_IMAGEM_DA_DONA, location: URL_ASSINADA, ...extra,
+  });
+  const segunda = (extra: Record<string, unknown> = {}) => ({ status: 307, location: URL_ASSINADA, ...extra });
+
+  it("o cabeçalho esperado é exatamente o cache curto e privado", () => {
+    expect(CACHE_DO_307_DE_IMAGEM_DA_DONA).toBe("private, max-age=300");
+  });
+
+  it("307, cabeçalho exato e o mesmo Location duas vezes: passa", () => {
+    expect(avaliarRedirecionamentoComCache(primeira(), segunda())).toEqual({
+      ok: true,
+      detalhe: "307 e a mesma URL assinada nas duas aberturas",
+    });
+  });
+
+  it("no-store (o proxy de antes da #149, ou uma regressão) reprova", () => {
+    const r = avaliarRedirecionamentoComCache(primeira({ cacheControl: "no-store" }), segunda());
+    expect(r.ok).toBe(false);
+    expect(r.detalhe).toContain('Cache-Control "no-store"');
+  });
+
+  it("CDN ou borda que reescreva o cabeçalho reprova: public, outro max-age, ausente", () => {
+    for (const cacheControl of ["public, max-age=300", "private, max-age=14400", "private, max-age=300, public", null]) {
+      expect(avaliarRedirecionamentoComCache(primeira({ cacheControl }), segunda()).ok, String(cacheControl)).toBe(false);
+    }
+  });
+
+  it("URL nova na segunda abertura reprova: o reaproveitamento é o que poupa o download", () => {
+    const r = avaliarRedirecionamentoComCache(primeira(), segunda({ location: URL_ASSINADA.replace("segredo", "outra") }));
+    expect(r.ok).toBe(false);
+    expect(r.detalhe).toContain("outra URL assinada");
+  });
+
+  it("status diferente de 307 em qualquer abertura, ou sem Location, reprova", () => {
+    expect(avaliarRedirecionamentoComCache(primeira({ status: 403 }), segunda()).detalhe).toContain("status 403");
+    expect(avaliarRedirecionamentoComCache(primeira(), segunda({ status: 503 })).detalhe).toContain("segunda abertura: status 503");
+    expect(avaliarRedirecionamentoComCache(primeira({ location: "" }), segunda()).detalhe).toContain("sem Location");
+  });
+
+  it("o detalhe nunca carrega a URL assinada (a saída vai para PR pública) e corta o cabeçalho em 40 caracteres", () => {
+    const casos = [
+      avaliarRedirecionamentoComCache(primeira({ cacheControl: "x".repeat(60) }), segunda({ location: "https://outra" })),
+      avaliarRedirecionamentoComCache(primeira(), segunda()),
+    ];
+    for (const r of casos) {
+      expect(r.detalhe).not.toContain("X-Amz-Signature");
+      expect(r.detalhe).not.toContain("https://");
+    }
+    expect(casos[0].detalhe).toContain("x".repeat(40));
+    expect(casos[0].detalhe).not.toContain("x".repeat(41));
+  });
+
+  it("dentro do relatório, a reprovação é FALHA com código 1", () => {
+    const r = new Relatorio();
+    const v = avaliarRedirecionamentoComCache(primeira({ cacheControl: "no-store" }), segunda());
+    r.ok("proxy", v.ok, v.detalhe);
+    expect(r.codigoDeSaida()).toBe(1);
+  });
+
+  it("checar-producao.mjs abre a imagem duas vezes e julga pelo avaliador, sem exigir no-store", () => {
+    const fonte = readFileSync(path.resolve(RAIZ, "scripts", "checar-producao.mjs"), "utf8");
+    expect(fonte).toMatch(/import \{[^}]*\bavaliarRedirecionamentoComCache\b[^}]*\} from "\.\/exame\/relatorio\.mjs"/);
+    expect(fonte).toMatch(/const proxy = await abrirComoDona\(\);[\s\S]{0,400}const proxyDeNovo = await abrirComoDona\(\);/);
+    expect(fonte).toMatch(/rel\.ok\("proxy autenticado redireciona a dona \(307 \+ private, max-age=300\) e repete a URL assinada", redirecionamento\.ok, redirecionamento\.detalhe\)/);
+    expect(fonte).not.toMatch(/\/no-store\/\.test\(/);
+  });
+});

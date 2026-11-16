@@ -63,6 +63,7 @@ vi.mock("./storage", async (importOriginal) => {
 
 const { networkRouter } = await import("./routers/network");
 const { podeBaixarChave } = await import("./_core/storageProxy");
+const { CACHE_DE_ARQUIVO_PRIVADO } = await import("./storage");
 
 const ctx = {
   user: { id: 1, openId: "dona-1", email: "t@local", role: "silver" },
@@ -126,15 +127,19 @@ describe("Etapa 1 — upload real (uploadPhoto / uploadCard)", () => {
   it("uploadPhoto grava sob contacts/{openId}/foto.* e devolve a URL do proxy", async () => {
     const res = await rede.uploadPhoto({ fileName: "eu.png", mimeType: "image/png", dataBase64: `data:image/png;base64,${pngMinimo}` });
     expect(storagePut).toHaveBeenCalledTimes(1);
-    const [chave] = storagePut.mock.calls[0];
+    const [chave, , , opcoes] = storagePut.mock.calls[0] as unknown as [string, Buffer, string, unknown];
     expect(chave).toBe("contacts/dona-1/foto.png");
     expect(res.url).toContain("/manus-storage/contacts/dona-1/foto.png");
+    // O cache vai gravado no objeto (#149): sem ele o navegador revalida a foto
+    // no bucket a cada abertura de Minha Rede.
+    expect(opcoes).toEqual({ cacheControl: CACHE_DE_ARQUIVO_PRIVADO });
   });
 
   it("uploadCard grava sob contacts/{openId}/cartao.* — chave diferente da foto", async () => {
     await rede.uploadCard({ fileName: "cartao.png", mimeType: "image/png", dataBase64: `data:image/png;base64,${pngMinimo}` });
-    const [chave] = storagePut.mock.calls[0];
+    const [chave, , , opcoes] = storagePut.mock.calls[0] as unknown as [string, Buffer, string, unknown];
     expect(chave).toBe("contacts/dona-1/cartao.png");
+    expect(opcoes).toEqual({ cacheControl: CACHE_DE_ARQUIVO_PRIVADO });
   });
 
   it("rejeita PDF — o requisito pede imagem, diferente da mídia de contexto que aceita documento", async () => {
