@@ -83,8 +83,10 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 64: as partes do áudio da gravação longa somaram meeting_audio_slices.owner_id.
     // 66: o resumo guardado da reunião (H4) somou meeting_summaries.owner_id e
     // meeting_summary_items.owner_id.
-    // 67: as próximas ações (H5a) somaram proximas_acoes.owner_id.
-    expect(PARES).toHaveLength(67);
+    // 68: as chaves de acesso (A6) somaram chaves_de_acesso.userId e
+    // desafios_de_chave_de_acesso.userId.
+    // 69: as próximas ações (H5a) somaram proximas_acoes.owner_id.
+    expect(PARES).toHaveLength(69);
     expect(PARES).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
     expect(PARES).toContainEqual({ tabela: "gold_access_grants", coluna: "revokedBy" });

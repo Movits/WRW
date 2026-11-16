@@ -1,6 +1,7 @@
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 import { authRouter } from "./routers/auth";
+import { chavesDeAcessoRouter } from "./routers/chavesDeAcesso";
 import { contaRouter } from "./routers/conta";
 import { profileRouter } from "./routers/profile";
 import { opportunitiesRouter } from "./routers/opportunities";
@@ -36,6 +37,8 @@ export const appRouter = router({
   dealRoom: dealRoomRouter,
   sivc: sivcRouter,
   auth: authRouter,
+  // Entrar com Face ID ou digital (chaves de acesso, A6): server/chaves-de-acesso.ts.
+  chavesDeAcesso: chavesDeAcessoRouter,
   conta: contaRouter,
   profile: profileRouter,
   opportunities: opportunitiesRouter,

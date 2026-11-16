@@ -422,6 +422,62 @@ export const trustedDevices = mysqlTable("trusted_devices", {
 }));
 
 // ============================================================
+// CHAVES DE ACESSO (passkeys, WebAuthn) — A6 do desenho do gravador
+// Entrar com Face ID, digital ou o bloqueio de tela do aparelho
+// (server/chaves-de-acesso.ts). O aparelho confere a pessoa e manda só uma
+// assinatura: a WRW guarda a chave PÚBLICA e dados técnicos da chave, nunca
+// biometria. Varchar com o enum só no TypeScript, como em network_sugestoes.
+// ============================================================
+export const chavesDeAcesso = mysqlTable("chaves_de_acesso", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull(),
+  // O id da credencial, em base64url, como o aparelho o manda na entrada.
+  credencialId: varchar("credencial_id", { length: 512 }).notNull(),
+  // A chave pública no formato COSE, em base64url.
+  chavePublica: text("chave_publica").notNull(),
+  // O contador de usos que o aparelho assina; o que volta é recusado.
+  contador: bigint("contador", { mode: "number" }).default(0).notNull(),
+  // As formas de conexão da chave (internal, hybrid, usb...), para a entrada.
+  transportes: jsonCompat("transportes").$type<string[]>(),
+  // singleDevice: presa a um aparelho; multiDevice: pode ser sincronizada.
+  tipoDoAparelho: varchar("tipo_do_aparelho", { length: 16, enum: ["singleDevice", "multiDevice"] }).notNull(),
+  // A chave está numa cópia sincronizada (iCloud, Google, gerenciador de senhas).
+  sincronizada: boolean("sincronizada").default(false).notNull(),
+  // O identificador da conta que o aparelho guarda com a chave (user handle):
+  // aleatório, o mesmo em todas as chaves da conta, nunca o id nem o e-mail.
+  identificadorDaUsuaria: varchar("identificador_da_usuaria", { length: 64 }).notNull(),
+  // O modelo do autenticador (AAGUID); zeros quando o aparelho não diz.
+  aaguid: varchar("aaguid", { length: 36 }),
+  apelido: varchar("apelido", { length: 60 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  ultimoUsoEm: bigint("ultimo_uso_em", { mode: "number" }),
+}, (table) => ({
+  credencialUnique: uniqueIndex("chaves_de_acesso_credencial_unique").on(table.credencialId),
+  userIdx: index("chaves_de_acesso_user_idx").on(table.userId),
+}));
+
+// O desafio de uso único de cada cadastro ou entrada com chave de acesso.
+// Fica fora do audit_logs de propósito: o insert de lá engole o erro, e um
+// desafio que falhasse em ser gasto continuaria valendo. É gasto por UPDATE
+// condicional (consumido_em ainda nulo e prazo vivo) e vence em 5 minutos.
+// `userId` é nulo na entrada, que começa sem saber quem é a pessoa.
+export const desafiosDeChaveDeAcesso = mysqlTable("desafios_de_chave_de_acesso", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  desafio: varchar("desafio", { length: 128 }).notNull(),
+  finalidade: varchar("finalidade", { length: 12, enum: ["cadastro", "entrada"] }).notNull(),
+  userId: int("userId"),
+  // No cadastro, o identificador que foi para o aparelho e que a chave vai guardar.
+  identificadorDaUsuaria: varchar("identificador_da_usuaria", { length: 64 }),
+  expiraEm: bigint("expira_em", { mode: "number" }).notNull(),
+  consumidoEm: bigint("consumido_em", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  desafioUnique: uniqueIndex("desafios_de_chave_de_acesso_desafio_unique").on(table.desafio),
+  expiraIdx: index("desafios_de_chave_de_acesso_expira_idx").on(table.expiraEm),
+  userIdx: index("desafios_de_chave_de_acesso_user_idx").on(table.userId),
+}));
+
+// ============================================================
 // MATCHES ENTRE PERFIS DE USUÁRIOS (sistema original MMM)
 // ============================================================
 export const matches = mysqlTable("matches", {

@@ -39,6 +39,13 @@ vi.mock("./db", async importOriginal => {
         },
       }),
     }),
+    // As chaves de acesso e os desafios que o reset apaga (A6) também contam.
+    delete: (tabela: Table) => ({
+      where: async (filtro: unknown) => {
+        banco.gravacoes.push({ tabela: getTableName(tabela), valores: {}, filtro });
+        return [{ affectedRows: 0 }];
+      },
+    }),
     // A auditoria do reset também conta como gravação.
     insert: (tabela: Table) => ({
       values: async (valores: Record<string, unknown>) => {
