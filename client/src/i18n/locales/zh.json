@@ -1718,6 +1718,25 @@
       "reviewNotice": "AI 给出的建议，请对照转录片段核实。以上内容均未保存。",
       "translateSubtext": "选择您想用来阅读转录内容的语言。"
     },
+    "export": {
+      "button": "下载 PDF",
+      "title": "将会议下载为 PDF",
+      "notice": "PDF 包含本次会议的转录内容（附有您为各个声音设置的名字），摘要部分只包含您已确认的条目。下载后，文件就在 WRW 之外了：请妥善保管，只与参加了会议或已同意的人分享。",
+      "confirmedItems": "PDF 中包含的已确认摘要条目：{{n}} 条。",
+      "noConfirmedItems": "摘要中还没有已确认的条目：PDF 只包含转录内容。",
+      "confirm": "下载 PDF",
+      "cancel": "取消",
+      "preparing": "正在准备 PDF…",
+      "ready": "在打印界面中，选择“另存为 PDF”。在 iPhone 和 iPad 上，轻点“共享”，然后轻点“存储到‘文件’”。",
+      "installedAppHint": "在已安装的应用中，如果打印界面没有打开，请在浏览器中打开此会议，并从浏览器下载 PDF。",
+      "printAgain": "再次打开打印界面",
+      "close": "关闭",
+      "error": "无法准备 PDF，请重试。",
+      "onlyReady": "只能下载已就绪会议的 PDF。",
+      "tooMany": "连续下载的 PDF 过多。请等待几分钟后重试。",
+      "doneTag": "（已完成）",
+      "footer": "于 {{data}} 从 WRW 导出。"
+    },
     "followUp": {
       "title": "跟进邮件",
       "intro": "AI 会根据您在摘要中确认的条目撰写一份草稿。WRW 不会发送任何内容：由您审阅、在自己的邮件应用中打开或复制。",

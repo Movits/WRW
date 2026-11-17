@@ -1718,6 +1718,25 @@
       "reviewNotice": "Suggestions de l'IA à vérifier avec les extraits de la transcription. Rien de tout cela n'a été enregistré.",
       "translateSubtext": "Choisissez la langue dans laquelle vous voulez lire la transcription."
     },
+    "export": {
+      "button": "Télécharger le PDF",
+      "title": "Télécharger la réunion en PDF",
+      "notice": "Le PDF contient la transcription de cette réunion, avec les noms que vous avez donnés aux voix, et uniquement les éléments du résumé que vous avez confirmés. Une fois téléchargé, le fichier est hors de WRW : conservez-le avec soin et ne le partagez qu'avec les personnes qui ont participé à la réunion ou qui l'ont autorisé.",
+      "confirmedItems": "Éléments du résumé confirmés inclus dans le PDF : {{n}}.",
+      "noConfirmedItems": "Aucun élément du résumé n'a encore été confirmé : le PDF contient uniquement la transcription.",
+      "confirm": "Télécharger le PDF",
+      "cancel": "Annuler",
+      "preparing": "Préparation du PDF…",
+      "ready": "Dans l'écran d'impression, choisissez « Enregistrer au format PDF ». Sur iPhone et iPad, touchez Partager, puis « Enregistrer dans Fichiers ».",
+      "installedAppHint": "Dans l'application installée, si l'écran d'impression ne s'ouvre pas, ouvrez cette réunion dans le navigateur et téléchargez le PDF depuis celui-ci.",
+      "printAgain": "Rouvrir l'impression",
+      "close": "Fermer",
+      "error": "Impossible de préparer le PDF. Réessayez.",
+      "onlyReady": "Seul le PDF d'une réunion prête peut être téléchargé.",
+      "tooMany": "Trop de PDF téléchargés à la suite. Patientez quelques minutes et réessayez.",
+      "doneTag": "(faite)",
+      "footer": "Exporté de WRW le {{data}}."
+    },
     "followUp": {
       "title": "E-mail de suivi",
       "intro": "L'IA rédige un brouillon à partir des éléments que vous avez confirmés dans le résumé. WRW n'envoie rien : vous le relisez, l'ouvrez dans votre messagerie ou le copiez.",

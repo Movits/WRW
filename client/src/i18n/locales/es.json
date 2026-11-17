@@ -1718,6 +1718,25 @@
       "reviewNotice": "Sugerencias de la IA para comprobar con los fragmentos de la transcripción. Nada de esto se guardó.",
       "translateSubtext": "Elige el idioma en el que quieres leer la transcripción."
     },
+    "export": {
+      "button": "Descargar PDF",
+      "title": "Descargar la reunión en PDF",
+      "notice": "El PDF incluye la transcripción de esta reunión, con los nombres que diste a las voces, y solo los elementos del resumen que confirmaste. Una vez descargado, el archivo queda fuera de WRW: guárdalo con cuidado y compártelo solo con quienes participaron en la reunión o lo autorizaron.",
+      "confirmedItems": "Elementos del resumen confirmados que van en el PDF: {{n}}.",
+      "noConfirmedItems": "Aún no se ha confirmado ningún elemento del resumen: el PDF incluye solo la transcripción.",
+      "confirm": "Descargar PDF",
+      "cancel": "Cancelar",
+      "preparing": "Preparando el PDF…",
+      "ready": "En la pantalla de impresión, elige «Guardar como PDF». En el iPhone y el iPad, toca Compartir y luego «Guardar en Archivos».",
+      "installedAppHint": "En la app instalada, si la pantalla de impresión no se abre, abre esta reunión en el navegador y descarga el PDF desde allí.",
+      "printAgain": "Abrir la impresión de nuevo",
+      "close": "Cerrar",
+      "error": "No se pudo preparar el PDF. Inténtalo de nuevo.",
+      "onlyReady": "Solo se puede descargar el PDF de una reunión que esté lista.",
+      "tooMany": "Demasiados PDF descargados seguidos. Espera unos minutos e inténtalo de nuevo.",
+      "doneTag": "(hecha)",
+      "footer": "Exportado de WRW el {{data}}."
+    },
     "followUp": {
       "title": "Correo de seguimiento",
       "intro": "La IA redacta un borrador a partir de los elementos que confirmaste en el resumen. WRW no envía nada: tú lo revisas, lo abres en tu app de correo o lo copias.",

@@ -1718,6 +1718,25 @@
       "reviewNotice": "AI suggestions to check against the transcript excerpts. None of this was saved.",
       "translateSubtext": "Choose the language you want to read the transcript in."
     },
+    "export": {
+      "button": "Download PDF",
+      "title": "Download the meeting as a PDF",
+      "notice": "The PDF includes this meeting's transcript, with the names you gave the voices, and only the summary items you confirmed. Once downloaded, the file is outside WRW: keep it safe and share it only with people who took part in the meeting or gave permission.",
+      "confirmedItems": "Confirmed summary items included in the PDF: {{n}}.",
+      "noConfirmedItems": "No summary item has been confirmed yet: the PDF includes only the transcript.",
+      "confirm": "Download PDF",
+      "cancel": "Cancel",
+      "preparing": "Preparing the PDF…",
+      "ready": "In the print screen, choose “Save as PDF”. On iPhone and iPad, tap Share and then “Save to Files”.",
+      "installedAppHint": "In the installed app, if the print screen doesn't open, open this meeting in your browser and download the PDF there.",
+      "printAgain": "Open the print screen again",
+      "close": "Close",
+      "error": "Couldn't prepare the PDF. Please try again.",
+      "onlyReady": "You can only download the PDF of a meeting that is ready.",
+      "tooMany": "Too many PDFs downloaded in a row. Wait a few minutes and try again.",
+      "doneTag": "(done)",
+      "footer": "Exported from WRW on {{data}}."
+    },
     "followUp": {
       "title": "Follow-up email",
       "intro": "The AI drafts an email from the items you confirmed in the summary. WRW sends nothing: you review it, open it in your email app or copy it.",
