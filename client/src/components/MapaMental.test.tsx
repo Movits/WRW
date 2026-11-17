@@ -440,6 +440,19 @@ describe("Mapa mental — as conexões desta reunião (N5)", () => {
     expect(within(arvore()).getByText("Carla Dias")).toBeInTheDocument();
   });
 
+  // Revisão da N5: erro de consulta é erro, nunca "reunião sem conexões".
+  it("a consulta das conexões que falha mostra o erro com tentar de novo, no lugar do ramo, e o resto do mapa fica", () => {
+    const refetch = vi.fn();
+    duble.conexoes.mockReturnValue({ data: undefined, isError: true, error: new Error(MENSAGEM_BANCO_INDISPONIVEL), refetch });
+    daDona(pronto());
+    expect(within(arvore()).queryByText("Conexões desta reunião")).not.toBeInTheDocument();
+    expect(ramo("Exportação de café")).toBeInTheDocument();
+    const alerta = screen.getByRole("alert");
+    expect(within(alerta).getByText("O servidor não respondeu. Tente de novo em instantes.")).toBeInTheDocument();
+    fireEvent.click(within(alerta).getByRole("button", { name: "↻ Tentar novamente" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
   it("sem pessoa com o que mostrar, não há ramo; pelo link, nem a consulta acontece", () => {
     duble.conexoes.mockReturnValue({ data: { totalDeConexoes: 0, pessoas: [CONEXOES.pessoas[2]] } });
     const { unmount } = daDona(pronto());

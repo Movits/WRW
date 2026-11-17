@@ -62,8 +62,11 @@ type Extras = {
 };
 type Props = ({ meetingId: string; token?: undefined } | { token: string; meetingId?: undefined }) & Extras;
 type DoCorpo = Omit<Extras, "emoji"> & { emoji: string | null };
-/** N5: o ramo "Conexões desta reunião", só no mapa da dona (o do link nunca o recebe). */
-type ComRamoExtra = { ramoExtra?: RamoDasConexoes | null };
+/**
+ * N5: o ramo "Conexões desta reunião", só no mapa da dona (o do link nunca o
+ * recebe), e o erro da consulta dele, que aparece no lugar do ramo.
+ */
+type ComRamoExtra = { ramoExtra?: RamoDasConexoes | null; erroDoRamo?: { erro: unknown; tentarDeNovo: () => void } | null };
 
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
 // A reunião que não existe mais e o link desligado (ou cortado) no meio da
@@ -89,7 +92,10 @@ function MapaDaDona({ meetingId, ...extras }: { meetingId: string } & DoCorpo) {
   });
   // N5: as pessoas da reunião, com o que têm e precisam e as conexões que
   // nasceram delas, num ramo à parte, montado aqui (sem IA nem tradução).
-  const ramoExtra = ramoDasConexoes(useConexoesDaReuniao(meetingId).data, t);
+  const conexoes = useConexoesDaReuniao(meetingId);
+  const ramoExtra = ramoDasConexoes(conexoes.data, t);
+  // Erro de consulta é erro, nunca "reunião sem conexões" (revisão da N5): o ramo dá lugar ao aviso.
+  const erroDoRamo = conexoes.isError ? { erro: conexoes.error, tentarDeNovo: () => { void conexoes.refetch(); } } : null;
   // Pedir o mapa pode criar ou reabrir o resumo (sem resumo pronto, o mapa vem
   // com ele): relê os dois, para a aba Resumo e o emoji do título não ficarem
   // velhos. Devolvida ao onSettled, a releitura segura o botão até o estado
@@ -97,7 +103,7 @@ function MapaDaDona({ meetingId, ...extras }: { meetingId: string } & DoCorpo) {
   const pedir = trpc.meetings.pedirMapa.useMutation({
     onSettled: () => Promise.all([utils.meetings.mapaMental.invalidate({ meetingId }), utils.meetings.resumoGuardado.invalidate({ meetingId })]),
   });
-  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} ramoExtra={ramoExtra} {...extras}/>;
+  return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} ramoExtra={ramoExtra} erroDoRamo={erroDoRamo} {...extras}/>;
 }
 
 function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
@@ -114,7 +120,7 @@ function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink {...extras}/>;
 }
 
-function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, traducao, aoMudarRotulos, ramoExtra }: {
+function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, traducao, aoMudarRotulos, ramoExtra, erroDoRamo }: {
   consulta: ConsultaDoMapa;
   pedido: PedidoDoMapa;
   aoPedir: () => void;
@@ -171,6 +177,7 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
       <ArvoreDoMapa raiz={titulo} emoji={emoji} mapa={dados.mapa} idioma={traducao?.estado === "pronta" ? traducao.idioma : dados.idioma}
         traduzir={traducao?.estado === "pronta" ? traducao.traduzirRotulo : undefined} ramoExtra={peloLink ? null : ramoExtra}/>
       {!peloLink && ramoExtra && <p className="text-xs text-white/45">{t("reuniaoNoMatch.mapaAviso")}</p>}
+      {!peloLink && erroDoRamo && <ErroDeConsulta erro={erroDoRamo.erro} aoTentarDeNovo={erroDoRamo.tentarDeNovo}/>}
     </div>;
   }
 

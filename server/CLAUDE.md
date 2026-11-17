@@ -136,7 +136,10 @@ mesmo. No "Sou eu" o destino é o PERFIL dela (`network_sugestoes.alvo = 'perfil
 "tenho" vai a `whatIHave`, o "preciso" vira demanda de "O que preciso", item que nomeia
 alguém da reunião é recusado e o motor de perfis recalcula uma vez por reunião. A origem do
 item é a linha confirmada de `network_sugestoes` (excluir a reunião a apaga; o item fica).
-O portão derruba o "preciso" hipotético ("poderia precisar de", `necessidadeHipotetica`).
+O portão derruba o "preciso" hipotético (`necessidadeHipotetica`): conta o verbo que rege o
+item, com modal ("poderia precisar", "talvez a gente precise", "pode ser que") ou condição
+("se a gente precisar"); a menção sem verbo não sustenta a hipótese, e "eventualmente
+precisamos" é declarada. Forma nova entra com teste negativo e positivo.
 
 ## Acesso a dados: banco fora do ar é erro
 

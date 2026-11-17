@@ -23,8 +23,13 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  *   "Exportar café" × "Exportar café" não nasce (concorrentes).
  * - Vincular na segunda reunião: o que o contato já tem é ignorado.
  * - Exclusões: sem a reunião, o item e a conexão ficam, sem origem; sem o
- *   contato, sai tudo dele.
- * - Privacidade: o link aberto não tem as conexões nem as pendências.
+ *   contato, sai tudo dele; sem o contato, o nome dele segue barrado no perfil.
+ * - Ignorar (revisão da N5): o último item do perfil, ignorado, decide a
+ *   reunião e o motor roda uma vez; a reunião só com ignorados não o roda;
+ *   outra dona leva NOT_FOUND; três confirmações ao mesmo tempo não perdem item.
+ * - Sem o termo do Smart Match, as conexões da reunião não saem (revisão da N5).
+ * - Privacidade: o link aberto não tem as conexões nem as pendências, nem
+ *   nos procedimentos nem no que eles devolvem.
  *
  * Dona com openId aleatório: a limpeza no fim só alcança o que este arquivo criou.
  */
@@ -33,14 +38,22 @@ vi.mock("./matching", async original => {
   const real = await original<typeof import("./matching")>();
   return { ...real, generateMatchesForUser: async (userId: number) => { motor.rodadas.push(userId); return 0; } };
 });
+// O banco de teste não tem termo publicado, e hasValidConsent diz "sim" a todas: o dublê deixa o teste
+// negar o termo do Smart Match só onde ele pede (revisão da N5).
+const termo = vi.hoisted(() => ({ negado: false }));
+vi.mock("./routers/consent", async original => {
+  const real = await original<typeof import("./routers/consent")>();
+  return { ...real, hasValidConsent: async (...args: Parameters<typeof real.hasValidConsent>) => (termo.negado ? false : real.hasValidConsent(...args)) };
+});
 
 const { getDb } = await import("./db");
 const {
-  aiMatchSuggestions, conexoesParticipantes, conexoesRegistradas, consumoDeMinutos, contactAssets, contactNeeds,
+  aiMatchSuggestions, auditLogs, conexoesParticipantes, conexoesRegistradas, consumoDeMinutos, contactAssets, contactNeeds,
   meetingContactSuggestions, meetingEntities, meetingSummaries, meetingTranscripts, meetings, networkSugestoes,
   privateContacts, userProfiles, users,
 } = await import("../drizzle/schema");
 const { gravarResultadoDaReuniao } = await import("./meeting-service");
+const { ligarLinkAberto } = await import("./link-aberto-da-reuniao");
 const { appRouter } = await import("./routers");
 const { necessidadesEscritasDoPerfil } = await import("./portao-da-demanda-expressa");
 const { MENSAGEM_ITEM_DO_PERFIL_COM_IDENTIFICACAO, MENSAGEM_O_QUE_TENHO_CHEIO } = await import("./reuniao-no-match");
@@ -59,6 +72,10 @@ const TRANSCRICAO_2 = [
   "Eu sou a Ana Lima. Eu exporto café para a Europa e também torramos café especial.",
   "Eu sou a Carla Dias. A gente exporta café e tem armazém em Santos.",
 ].join("\n");
+const TRANSCRICAO_3 = [
+  "Eu sou a Ana Lima. Eu vendo cacau fino, faço chocolate artesanal e embalo bombons, e preciso de uma gráfica para os rótulos.",
+  "Eu sou a Elisa Prado. Eu imprimo rótulos.",
+].join("\n");
 
 const item = (texto: string, trecho: string) => ({ texto, trecho, confianca: 0.9 });
 const pessoa = (dados: Record<string, unknown> & { fullName: string }) => ({
@@ -72,7 +89,7 @@ const rota = (openId = DONA) => appRouter.createCaller({
 } as never);
 const banco = async () => (await getDb())!;
 
-async function reuniaoPronta(titulo: string, transcricao: string, contatos: ReturnType<typeof pessoa>[]) {
+async function reuniaoPronta(titulo: string, transcricao: string, contatos: ReturnType<typeof pessoa>[], entidades: unknown[] = []) {
   const id = crypto.randomUUID();
   const db = await banco();
   const ficha = Date.now();
@@ -80,9 +97,21 @@ async function reuniaoPronta(titulo: string, transcricao: string, contatos: Retu
   await gravarResultadoDaReuniao(db, {
     meetingId: id, ownerId: DONA, ficha, limparAntes: false, durationSeconds: 60,
     transcription: { text: transcricao, segments: [], language: "pt-BR" },
-    extraction: { entities: [], contacts: contatos } as never,
+    extraction: { entities: entidades, contacts: contatos } as never,
   });
   return id;
+}
+
+/** Todas as chaves de uma resposta, em qualquer nível. */
+function chavesDe(valor: unknown, saida = new Set<string>()): Set<string> {
+  if (Array.isArray(valor)) for (const item of valor) chavesDe(item, saida);
+  else if (valor && typeof valor === "object") {
+    for (const [chave, dentro] of Object.entries(valor)) {
+      saida.add(chave);
+      chavesDe(dentro, saida);
+    }
+  }
+  return saida;
 }
 
 async function sugestaoDe(meetingId: string, fullName: string) {
@@ -101,6 +130,7 @@ async function perfilDaDona() {
 
 describe.skipIf(!temBanco)("N5 — a reunião vira conexões e refina o perfil (integração)", () => {
   let reuniao = "";
+  let terceira = "";
   const contatos: Record<string, number> = {};
 
   beforeAll(async () => {
@@ -145,6 +175,8 @@ describe.skipIf(!temBanco)("N5 — a reunião vira conexões e refina o perfil (
     await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
     await db.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, DONA));
     await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    // A prova do link ligado (ligarLinkAberto grava a auditoria).
+    await db.delete(auditLogs).where(eq(auditLogs.userId, idDaDona));
     await db.delete(userProfiles).where(eq(userProfiles.userId, idDaDona));
     await db.delete(users).where(eq(users.openId, DONA));
   });
@@ -239,6 +271,18 @@ describe.skipIf(!temBanco)("N5 — a reunião vira conexões e refina o perfil (
     });
     await expect(rota(OUTRA).meetings.conexoes({ meetingId: reuniao })).rejects.toMatchObject({ code: "NOT_FOUND" });
 
+    // Sem o termo do Smart Match (revogado, ou a versão nova não aceita), a reunião mostra as pessoas e os
+    // itens, e nenhuma conexão: nem a contagem do resumo nem o ramo do mapa (revisão da N5).
+    termo.negado = true;
+    try {
+      const semTermo = await rota().meetings.conexoes({ meetingId: reuniao });
+      expect(semTermo.totalDeConexoes).toBe(0);
+      expect(semTermo.pessoas.flatMap(p => p.conexoes)).toEqual([]);
+      expect(semTermo.pessoas.find(p => p.nome === "Carla Dias")).toMatchObject({ tenho: [{ valor: "Exportar café", confirmado: true }] });
+    } finally {
+      termo.negado = false;
+    }
+
     const perfilDaCarla = await rota().networkInteligente.contato({ contactId: contatos["Carla Dias"] });
     expect(perfilDaCarla.tenho).toEqual([expect.objectContaining({ label: "Exportar café", origem: expect.objectContaining({ meetingId: reuniao, titulo: "Rodada do café", trecho: "exporta café" }) })]);
   });
@@ -294,10 +338,64 @@ describe.skipIf(!temBanco)("N5 — a reunião vira conexões e refina o perfil (
     expect(await db.select().from(networkSugestoes).where(and(eq(networkSugestoes.ownerId, DONA), eq(networkSugestoes.contactId, contatos["Bruno Prado"])))).toEqual([]);
   });
 
-  it("privacidade: o link aberto não tem as conexões nem as pendências da reunião", () => {
+  it("ignorar (revisão da N5): o último item do perfil decide a reunião e o motor roda uma vez; só ignorados não o rodam; outra dona leva NOT_FOUND", async () => {
+    // A segunda reunião: o "Exportar café" foi ignorado sozinho (o perfil já tem), e só a "Torrefação" espera.
+    const [torrefacao] = (await rota().networkInteligente.pendenciasDoPerfil()).filter(p => p.valor === "Torrefação de café especial");
+    await expect(rota(OUTRA).networkInteligente.ignorarPendencia({ id: torrefacao.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const rodadasAntes = motor.rodadas.length;
+    // Tudo ignorado, nada confirmado: o perfil não mudou, e o motor não roda.
+    expect(await rota().networkInteligente.ignorarPendencia({ id: torrefacao.id })).toMatchObject({ alvo: "perfil", reuniaoDecidida: false });
+
+    terceira = await reuniaoPronta("Terceira rodada", TRANSCRICAO_3, [
+      pessoa({
+        fullName: "Ana Lima",
+        oQueTenho: [item("Cacau fino", "vendo cacau fino"), item("Chocolate artesanal", "faço chocolate artesanal"), item("Bombons embalados", "embalo bombons")],
+        oQuePreciso: [item("Gráfica para rótulos", "preciso de uma gráfica para os rótulos")],
+      }),
+      pessoa({ fullName: "Elisa Prado", oQueTenho: [item("Impressão de rótulos", "imprimo rótulos")] }),
+    ], [{ type: "person", value: "Elisa Prado", normalizedValue: null, confidence: 0.9 }]);
+    const ana = await sugestaoDe(terceira, "Ana Lima");
+    await rota().meetings.decideContactSuggestion({ suggestionId: ana.id, action: "self" });
+
+    // Excluir o contato criado na reunião apaga a sugestão dele, e o nome segue barrado no perfil (as entidades da reunião ficam).
+    const elisa = await sugestaoDe(terceira, "Elisa Prado");
+    const { contactId: idDaElisa } = await rota().meetings.decideContactSuggestion({ suggestionId: elisa.id, action: "create" });
+    await rota().network.delete({ id: idDaElisa! });
+    expect(await sugestaoDe(terceira, "Elisa Prado")).toBeUndefined();
+    const pendentes = (await pendenciasDe(ana.id)).filter(p => p.status === "pendente");
+    const precisoDaAna = pendentes.find(p => p.campo === "preciso")!;
+    await expect(rota().networkInteligente.confirmarPendencia({ id: precisoDaAna.id, valor: "Gráfica indicada pela Elisa Prado" }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST", message: MENSAGEM_ITEM_DO_PERFIL_COM_IDENTIFICACAO });
+
+    // Três confirmações ao mesmo tempo: o perfil travado na transação (FOR UPDATE) não perde nenhuma.
+    const tenhos = pendentes.filter(p => p.campo === "tenho");
+    expect(tenhos).toHaveLength(3);
+    const respostas = await Promise.all(tenhos.map(p => rota().networkInteligente.confirmarPendencia({ id: p.id })));
+    expect(respostas.map(r => r?.reuniaoDecidida)).toEqual([false, false, false]);
+    expect([...(await perfilDaDona()).whatIHave as string[]].sort()).toEqual(["Bombons embalados", "Cacau fino", "Chocolate artesanal", "Exportar café"]);
+    expect(motor.rodadas).toHaveLength(rodadasAntes);
+
+    // O último item do perfil, ignorado, decide a reunião: o motor de perfis roda uma vez.
+    await expect(rota(OUTRA).networkInteligente.ignorarPendencia({ id: precisoDaAna.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await rota().networkInteligente.ignorarPendencia({ id: precisoDaAna.id })).toMatchObject({ alvo: "perfil", reuniaoDecidida: true });
+    await vi.waitFor(() => expect(motor.rodadas).toEqual([...motor.rodadas.slice(0, rodadasAntes), idDaDona]));
+  });
+
+  it("privacidade: o link aberto não tem as conexões nem as pendências da reunião, nem nos procedimentos nem no que eles devolvem", async () => {
     const doLink = Object.keys((appRouter as unknown as { _def: { procedures: Record<string, unknown> } })._def.procedures)
       .filter(caminho => caminho.startsWith("reuniaoAberta."));
     expect(doLink.length).toBeGreaterThan(0);
     expect(doLink.filter(caminho => /conex|pendenc|candidat/i.test(caminho))).toEqual([]);
+
+    // A reunião com pessoas decididas e itens confirmados, aberta pelo link, para quem não tem conta (revisão da N5).
+    const token = await ligarLinkAberto(DONA, terceira, { userId: idDaDona, ipAddress: "127.0.0.1", userAgent: "teste", idioma: "pt-BR", textoExibido: "As pessoas autorizaram." });
+    const visitante = appRouter.createCaller({ user: null, req: { headers: {}, socket: {} }, res: { cookie: () => {} } } as never);
+    const chaves = new Set([
+      ...chavesDe(await visitante.reuniaoAberta.ver({ token })),
+      ...chavesDe(await visitante.reuniaoAberta.mapaMental({ token })),
+    ]);
+    expect(chaves.size).toBeGreaterThan(0);
+    const proibidas = ["pessoas", "conexoes", "totalDeConexoes", "sugestoes", "suggestions", "existingContactName", "pareceSerADona", "tenho", "preciso", "valor"];
+    expect(proibidas.filter(chave => chaves.has(chave))).toEqual([]);
   });
 });

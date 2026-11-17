@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import {
-  aiMatchSuggestions, meetingContactSuggestions, meetings, networkSugestoes, privateContacts, userProfiles,
+  aiMatchSuggestions, meetingContactSuggestions, meetingEntities, meetings, networkSugestoes, privateContacts, userProfiles,
 } from "../drizzle/schema";
+import { nomesDosFalantes } from "@shared/const";
 import {
   CATEGORIA_DE_SERVICO, LIMITE_DE_DEMANDAS, LIMITE_DE_DEMANDAS_POR_CATEGORIA, lerDemandas, novoIdDeDemanda, problemaDaDemanda,
   type ChaveOQuePreciso, type DemandaDetalhada,
@@ -105,6 +106,13 @@ export function mudancaNoPerfil(perfil: PerfilGravado, campo: "tenho" | "preciso
  * sugeridas (nome, empresa e telefone, em qualquer status), as pendências de
  * nome, empresa e telefone tiradas dela e o nome e a empresa do perfil da
  * própria dona. Posse no WHERE.
+ *
+ * Excluir o contato criado na reunião apaga a sugestão e as pendências dele
+ * (apagarRastroDoContato), e o nome sumia da guarda (revisão da N5). Por isso
+ * entram também o que a exclusão não apaga: as pessoas e os telefones que a
+ * extração tirou da reunião (meeting_entities) e os nomes que a dona deu às
+ * vozes. A empresa só citada na conversa ("vendas na Amazon") não entra: não
+ * identifica ninguém da reunião, e recusaria item legítimo.
  */
 export async function identificacaoDaReuniao(db: BancoOuTransacao, dona: { id: number; openId: string }, meetingId: string | null): Promise<Identificacao> {
   const [perfil] = await db.select({ displayName: userProfiles.displayName, company: userProfiles.company })
@@ -112,7 +120,7 @@ export async function identificacaoDaReuniao(db: BancoOuTransacao, dona: { id: n
   const nomes: unknown[] = [perfil?.displayName, perfil?.company];
   const telefones: unknown[] = [];
   if (meetingId) {
-    const [pessoas, pendencias] = await Promise.all([
+    const [pessoas, pendencias, entidades, [reuniao]] = await Promise.all([
       db.select({ fullName: meetingContactSuggestions.fullName, company: meetingContactSuggestions.company, phone: meetingContactSuggestions.phone })
         .from(meetingContactSuggestions)
         .where(and(eq(meetingContactSuggestions.ownerId, dona.openId), eq(meetingContactSuggestions.meetingId, meetingId))),
@@ -121,12 +129,21 @@ export async function identificacaoDaReuniao(db: BancoOuTransacao, dona: { id: n
           eq(networkSugestoes.ownerId, dona.openId), eq(networkSugestoes.meetingId, meetingId),
           inArray(networkSugestoes.campo, ["nome", "empresa", "telefone"]),
         )),
+      db.select({ tipo: meetingEntities.entityType, valor: meetingEntities.value }).from(meetingEntities)
+        .where(and(
+          eq(meetingEntities.ownerId, dona.openId), eq(meetingEntities.meetingId, meetingId),
+          inArray(meetingEntities.entityType, ["person", "phone"]),
+        )),
+      db.select({ speakerNames: meetings.speakerNames }).from(meetings)
+        .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, dona.openId))).limit(1),
     ]);
     for (const pessoa of pessoas) {
       nomes.push(pessoa.fullName, pessoa.company);
       telefones.push(pessoa.phone);
     }
     for (const pendencia of pendencias) (pendencia.campo === "telefone" ? telefones : nomes).push(pendencia.valor);
+    for (const entidade of entidades) (entidade.tipo === "phone" ? telefones : nomes).push(entidade.valor);
+    nomes.push(...Object.values(nomesDosFalantes(reuniao?.speakerNames)));
   }
   return { nomes, telefones };
 }
