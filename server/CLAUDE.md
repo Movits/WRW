@@ -130,6 +130,14 @@ exigência.
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
 reunião nascem `pending`; o SIVC pondera a fonte em `CONFIDENCE_WEIGHTS`.
 
+**Da reunião ao perfil e às conexões (N5, `server/reuniao-no-match.ts`):** decidida a
+pessoa da reunião (criar, vincular ou "Sou eu"), a dona confirma cada Tenho/Preciso ali
+mesmo. No "Sou eu" o destino é o PERFIL dela (`network_sugestoes.alvo = 'perfil'`): o
+"tenho" vai a `whatIHave`, o "preciso" vira demanda de "O que preciso", item que nomeia
+alguém da reunião é recusado e o motor de perfis recalcula uma vez por reunião. A origem do
+item é a linha confirmada de `network_sugestoes` (excluir a reunião a apaga; o item fica).
+O portão derruba o "preciso" hipotético ("poderia precisar de", `necessidadeHipotetica`).
+
 ## Acesso a dados: banco fora do ar é erro
 
 `server/db.ts` é a camada única (usuárias, oportunidades, Ouro, segurança, matches, rede

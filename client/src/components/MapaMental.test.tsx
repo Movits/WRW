@@ -33,6 +33,7 @@ const duble = vi.hoisted(() => {
     registrar,
     daDona: vi.fn(),
     doLink: vi.fn(),
+    conexoes: vi.fn(() => ({ data: undefined })),
     opcoes: {} as { dona?: OpcoesDaConsulta; link?: OpcoesDaConsulta },
     utils: {
       meetings: { mapaMental: { invalidate: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
@@ -47,6 +48,8 @@ vi.mock("@/lib/trpc", () => ({
     meetings: {
       mapaMental: { useQuery: (entrada: unknown, opcoes: OpcoesDaConsulta) => { duble.opcoes.dona = opcoes; return duble.daDona(entrada); } },
       pedirMapa: duble.registrar("pedirMapa"),
+      // N5: as pessoas e as conexões da reunião, para o ramo "Conexões desta reunião".
+      conexoes: { useQuery: (...args: unknown[]) => duble.conexoes(...args) },
     },
     reuniaoAberta: {
       mapaMental: { useQuery: (entrada: unknown, opcoes: OpcoesDaConsulta) => { duble.opcoes.link = opcoes; return duble.doLink(entrada); } },
@@ -91,6 +94,8 @@ beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); Object.assign(m, { isPending: false, isError: false, error: null }); }
   duble.daDona.mockReset();
   duble.doLink.mockReset();
+  duble.conexoes.mockReset();
+  duble.conexoes.mockReturnValue({ data: undefined });
   for (const area of [duble.utils.meetings, duble.utils.reuniaoAberta]) {
     area.mapaMental.invalidate.mockReset();
     area.resumoGuardado.invalidate.mockReset();
@@ -391,5 +396,58 @@ describe("Mapa mental — a tradução do resumo (H11)", () => {
       expect(ramo("Exportação de café")).toBeInTheDocument();
       unmount();
     }
+  });
+});
+
+// N5: o ramo "Conexões desta reunião", montado na tela com o que a extração
+// tirou das pessoas — só no mapa da dona, sem IA e sem tradução.
+describe("Mapa mental — as conexões desta reunião (N5)", () => {
+  const CONEXOES = {
+    totalDeConexoes: 1,
+    pessoas: [
+      { id: "s1", nome: "Carla Dias", status: "created", citada: false, tenho: [{ valor: "Exportar café", confirmado: true }], preciso: [{ valor: "Contador", confirmado: false }], conexoes: [{ id: "c1", com: "Bruno Prado" }] },
+      { id: "s2", nome: "Sônia Pacheco", status: "ignored", citada: true, tenho: [{ valor: "Embalagem", confirmado: false }], preciso: [], conexoes: [] },
+      { id: "s3", nome: "Diego Reis", status: "pending", citada: false, tenho: [], preciso: [], conexoes: [] },
+    ],
+  };
+
+  it("a dona vê o ramo depois dos ramos da IA: cada pessoa com o que tem, precisa e as conexões que nasceram dela", () => {
+    duble.conexoes.mockReturnValue({ data: CONEXOES });
+    daDona(pronto());
+    expect(duble.conexoes).toHaveBeenCalledWith({ meetingId: REUNIAO }, expect.anything());
+    const doRamo = ramo("Conexões desta reunião");
+    expect(doRamo.closest("li")).toHaveAttribute("data-ramo-extra", "true");
+    const folhas = folhasDe(doRamo);
+    expect(within(folhas).getByText("Carla Dias")).toBeVisible();
+    expect(within(folhas).getByText("Tem: Exportar café")).toBeVisible();
+    expect(within(folhas).getByText("Precisa (a confirmar): Contador")).toBeVisible();
+    expect(within(folhas).getByText("Conexão com Bruno Prado")).toBeVisible();
+    // A ignorada e a pessoa sem nada a mostrar não viram folha.
+    expect(within(folhas).queryByText("Sônia Pacheco")).not.toBeInTheDocument();
+    expect(within(folhas).queryByText("Diego Reis")).not.toBeInTheDocument();
+    expect(screen.getByText(/não aparece no link aberto/)).toBeInTheDocument();
+  });
+
+  it("o ramo não vai à tradução: os rótulos que a página traduz são só os da IA, e o ramo fica como está com a tradução pronta", () => {
+    duble.conexoes.mockReturnValue({ data: CONEXOES });
+    duble.daDona.mockReturnValue(pronto("pt-BR"));
+    const aoMudarRotulos = vi.fn();
+    render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} aoMudarRotulos={aoMudarRotulos}
+      traducao={{ estado: "pronta", idioma: "ar", idiomaOriginal: "pt-BR", erro: null, tentarDeNovo: vi.fn(), traduzirRotulo: rotulo => `«${rotulo}»` }}/>);
+    expect(aoMudarRotulos.mock.calls.flat(2)).not.toContain("Carla Dias");
+    expect(aoMudarRotulos.mock.calls.flat(2)).not.toContain("Tem: Exportar café");
+    expect(ramo("Conexões desta reunião")).toBeInTheDocument();
+    expect(within(arvore()).getByText("Carla Dias")).toBeInTheDocument();
+  });
+
+  it("sem pessoa com o que mostrar, não há ramo; pelo link, nem a consulta acontece", () => {
+    duble.conexoes.mockReturnValue({ data: { totalDeConexoes: 0, pessoas: [CONEXOES.pessoas[2]] } });
+    const { unmount } = daDona(pronto());
+    expect(within(arvore()).queryByText("Conexões desta reunião")).not.toBeInTheDocument();
+    unmount();
+    duble.conexoes.mockClear();
+    doLink(pronto());
+    expect(duble.conexoes).not.toHaveBeenCalled();
+    expect(within(arvore()).queryByText("Conexões desta reunião")).not.toBeInTheDocument();
   });
 });

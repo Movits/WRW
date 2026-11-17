@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, not, or } from "drizzle-orm";
 import { contactAssets, contactNeeds, meetingContactSuggestions, meetingTranscripts, networkSugestoes, privateContacts } from "../drizzle/schema";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
+import { lerDemandas } from "@shared/o-que-preciso";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
 import { invokeLLM } from "./_core/llm";
@@ -356,6 +357,65 @@ export function trechoEstaNaFonte(trecho: string | null | undefined, fonte: stri
 }
 
 /**
+ * Necessidade HIPOTÉTICA não é necessidade declarada (N5, desenho de 16/11;
+ * a regra da demanda expressa: "não fazemos match porque alguém poderia
+ * precisar"). O prompt já pede isso (REGRAS_DAS_TRES_DIMENSOES), mas prompt é
+ * pedido, não garantia: "a gente poderia precisar de contador" passava pelo
+ * portão como o "preciso" "Contador", e a N5 o leva às conexões.
+ *
+ * Hipotética é a necessidade em que, no trecho ou logo antes dele na mesma
+ * oração, o verbo de necessidade ("precisar", "necessitar", "need") vem
+ * depois de um modal de possibilidade ("poderia", "poderíamos", "podemos",
+ * "talvez", "might", "maybe"...), com no meio só o sujeito ou "vir a"
+ * ("talvez a gente precise", "podemos vir a precisar"). A lista é curta e do
+ * lado conservador: "may" fica de fora (o mês de maio, "In May we need"), e o
+ * pedido educado sem verbo de necessidade ("você poderia me apresentar um
+ * investidor?") não é tocado. Só vale para O QUE PRECISO.
+ */
+const VERBO_DE_NECESSIDADE = /^(precis|necessit|necesit|need)/;
+const MODAIS_DE_HIPOTESE = new Set([
+  "poderia", "poderiam", "poderiamos", "podemos", "pode", "possa", "possam", "possamos", "talvez", "eventualmente", "possivelmente",
+  "podria", "podrian", "podriamos", "puede", "pueden", "quizas", "quiza", "posiblemente",
+  "might", "could", "maybe", "perhaps", "possibly",
+]);
+/** O que pode ficar entre o modal e o verbo: o sujeito e "vir a" ("talvez a gente precise", "podemos vir a precisar"). */
+const ENTRE_O_MODAL_E_O_VERBO = new Set([
+  "a", "gente", "nos", "eu", "ela", "ele", "elas", "eles", "voce", "voces", "vir", "ainda", "tambem",
+  "nosotros", "yo", "llegar", "we", "i", "they", "you", "also", "still",
+]);
+const ALCANCE_DA_HIPOTESE = 3;
+
+export function necessidadeHipotetica(trecho: unknown, fonte: string): boolean {
+  if (typeof trecho !== "string") return false;
+  const { daFonte, oracao } = fonteLida(fonte);
+  const pedacos = trecho.split(/\.{3}|…/).map(parte => unidadesPorOracao(parte).lista).filter(pedaco => pedaco.join("").length >= 4);
+  const hipoteticoEm = (k: number) => {
+    for (let j = k - 1; j >= Math.max(0, k - ALCANCE_DA_HIPOTESE) && oracao[j] === oracao[k]; j -= 1) {
+      if (MODAIS_DE_HIPOTESE.has(daFonte[j])) return true;
+      if (!ENTRE_O_MODAL_E_O_VERBO.has(daFonte[j])) return false;
+    }
+    return false;
+  };
+  // O verbo pode estar no trecho ("poderia precisar de contador") ou logo antes dele ("poderia precisar de | contador").
+  const ocorrenciaHipotetica = (inicio: number, fim: number) => {
+    for (let k = Math.max(0, inicio - ALCANCE_DA_HIPOTESE); k < fim; k += 1) {
+      if ((k >= inicio || oracao[k] === oracao[inicio]) && VERBO_DE_NECESSIDADE.test(daFonte[k]) && hipoteticoEm(k)) return true;
+    }
+    return false;
+  };
+  // Hipotética só se TODA ocorrência de um pedaço do trecho é: a fonte que também declara a necessidade a sustenta.
+  return pedacos.some(pedaco => {
+    let achou = false;
+    for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
+      if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
+      if (!ocorrenciaHipotetica(inicio, inicio + pedaco.length)) return false;
+      achou = true;
+    }
+    return achou;
+  });
+}
+
+/**
  * Duas grafias da mesma palavra: "distribuição" × "distribuímos",
  * "fornecedores" × "fornecedor", "venda" × "vendemos". Prefixo comum de 4+
  * letras que cobre a menor delas, a menos das 4 últimas; "investidores" ×
@@ -562,9 +622,11 @@ export function filtrarPelaFonte(proposta: PerfilProposto, fonte: string, identi
     nomes: [...(identificacao.nomes ?? []), quemSou.nome],
     telefones: [...(identificacao.telefones ?? []), quemSou.telefone],
   };
-  const itens = (lista: unknown): ItemProposto[] => (Array.isArray(lista) ? lista : [])
+  const itens = (lista: unknown, campo: "tenho" | "preciso"): ItemProposto[] => (Array.isArray(lista) ? lista : [])
     .filter((item): item is ItemProposto => Boolean(item) && typeof item.texto === "string" && item.texto.trim().length >= 2)
     .filter(item => textoSustentadoPeloTrecho(item.texto, item.trecho, fonte))
+    // "Poderíamos precisar de contador" não é necessidade declarada (N5).
+    .filter(item => campo !== "preciso" || !necessidadeHipotetica(item.trecho, fonte))
     .filter(item => !itemIdentificaOContato(item.texto, quem))
     .map(item => ({
       texto: item.texto.trim().slice(0, LIMITES_DO_CAMPO.tenho),
@@ -580,7 +642,7 @@ export function filtrarPelaFonte(proposta: PerfilProposto, fonte: string, identi
   const email = typeof quemSou.email === "string" && quemSou.email.trim().length <= LIMITES_DO_CAMPO.email && emailEstaNaFonte(quemSou.email, fonte)
     ? quemSou.email.trim().toLowerCase() : null;
   const tipoPessoa = quemSou.tipoPessoa === "fisica" || quemSou.tipoPessoa === "juridica" ? quemSou.tipoPessoa : "nao_informado";
-  return { quemSou: { tipoPessoa, nome, telefone, email }, oQueTenho: itens(proposta.oQueTenho), oQuePreciso: itens(proposta.oQuePreciso) };
+  return { quemSou: { tipoPessoa, nome, telefone, email }, oQueTenho: itens(proposta.oQueTenho, "tenho"), oQuePreciso: itens(proposta.oQuePreciso, "preciso") };
 }
 
 // ─── A IA: interpretar texto ou fala sobre UM contato ─────────────────────────
@@ -841,12 +903,16 @@ export async function identificacaoDoContato(db: Banco, ownerId: string, contato
   };
 }
 
-/** Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro. */
-export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string }) {
+/**
+ * Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro.
+ * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona.
+ */
+export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string; alvo?: "contato" | "perfil" }) {
   const db = await exigirDb();
   const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")];
   if (filtro.contactId !== undefined) condicoes.push(eq(networkSugestoes.contactId, filtro.contactId));
   if (filtro.meetingId !== undefined) condicoes.push(eq(networkSugestoes.meetingId, filtro.meetingId));
+  if (filtro.alvo !== undefined) condicoes.push(eq(networkSugestoes.alvo, filtro.alvo));
   const linhas = await db.select().from(networkSugestoes).where(and(...condicoes)).orderBy(desc(networkSugestoes.createdAt)).limit(100);
   return linhas.map(linha => ({
     id: linha.id,
@@ -854,6 +920,7 @@ export async function listarPendencias(ownerId: string, filtro: { contactId?: nu
     meetingId: linha.meetingId,
     meetingSuggestionId: linha.meetingSuggestionId,
     origem: linha.origem,
+    alvo: linha.alvo,
     campo: linha.campo,
     valor: linha.valor,
     categoria: linha.categoria,
@@ -902,8 +969,13 @@ export const MENSAGEM_ITEM_COM_IDENTIFICACAO =
  */
 export async function confirmarPendencia(ownerId: string, id: string, valorCorrigido?: string) {
   const db = await exigirDb();
+  // Só a pendência do CONTATO: a que vai ao perfil da dona (N5, alvo 'perfil')
+  // é confirmada por server/reuniao-no-match.ts, e nunca vira dado de contato.
   const [pendencia] = await db.select().from(networkSugestoes)
-    .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"))).limit(1);
+    .where(and(
+      eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+      eq(networkSugestoes.alvo, "contato"),
+    )).limit(1);
   if (!pendencia || pendencia.contactId === null) throw new PendenciaNaoEncontrada();
   const contactId = Number(pendencia.contactId);
   const campo = pendencia.campo;
@@ -925,7 +997,10 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
   const inseriu = await db.transaction(async tx => {
     const [tomada] = await tx.update(networkSugestoes)
       .set({ status: "confirmada", valor, decididaEm: agora, updatedAt: agora })
-      .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")));
+      .where(and(
+        eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+        eq(networkSugestoes.alvo, "contato"),
+      ));
     if (!((tomada as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
 
     switch (campo) {
@@ -972,7 +1047,17 @@ export async function ignorarPendencia(ownerId: string, id: string) {
  * - vincular a um contato que já existe: idem, e o QUEM SOU, o cargo e a
  *   empresa da sugestão que diferem do contato viram pendência (nada
  *   sobrescreve o que a dona gravou);
- * - ignorar: tudo que veio daquela pessoa é ignorado.
+ * - ignorar: tudo que veio daquela pessoa é ignorado;
+ * - "Sou eu" (N5, `self`): nenhum contato nasce. O QUE TENHO e O QUE PRECISO
+ *   da pessoa passam a ter o PERFIL da dona como destino (alvo 'perfil'),
+ *   ainda pendentes; o resto (tipo de pessoa) é ignorado, e nome, telefone,
+ *   e-mail, cargo e empresa nem viram pendência. O que o perfil já tem (o
+ *   mesmo slug em "O que tenho", a mesma descrição numa demanda) é ignorado.
+ *
+ * No vincular, o que o contato já tem (o mesmo slug em contact_assets ou
+ * contact_needs) e o que ele já espera de outra fonte (a mesma pendência
+ * aberta) é ignorado (N5): na segunda reunião com a mesma pessoa, a dona não
+ * confirma de novo o que já confirmou.
  *
  * As pendências novas levam a confiança que a extração deu à pessoa
  * (meeting_contact_suggestions.confidence), e não um número fixo que nenhum
@@ -985,13 +1070,15 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
   ownerId: string;
   meetingSuggestionId: string;
   meetingId: string;
-  acao: "create" | "link" | "ignore";
+  acao: "create" | "link" | "ignore" | "self";
   contactId: number | null;
   quemSouDaSugestao?: {
     fullName: string; phone: string | null; email: string | null; jobTitle?: string | null; company?: string | null;
     /** A confiança da sugestão, como a coluna a guarda ("0.900"). */
     confianca: unknown;
   };
+  /** No "Sou eu": o que o perfil da dona já tem, para não pedir de novo. */
+  perfilDaDona?: { whatIHave: unknown; whatINeedDetails: unknown };
 }) {
   const agora = Date.now();
   const daPessoa = and(
@@ -999,11 +1086,37 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
     eq(networkSugestoes.meetingSuggestionId, entrada.meetingSuggestionId),
     eq(networkSugestoes.status, "pendente"),
   );
+  const tenhoOuPreciso = inArray(networkSugestoes.campo, ["tenho", "preciso"]);
+  if (entrada.acao === "self") {
+    await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
+      .where(and(daPessoa, not(tenhoOuPreciso)));
+    await db.update(networkSugestoes).set({ alvo: "perfil", updatedAt: agora }).where(and(daPessoa, tenhoOuPreciso));
+    await ignorarRepetidas(db, entrada.ownerId, entrada.meetingSuggestionId, {
+      tenho: slugsDaLista(entrada.perfilDaDona?.whatIHave),
+      preciso: new Set(lerDemandas(entrada.perfilDaDona?.whatINeedDetails).map(demanda => slugifyMatchTag(demanda.description ?? "")).filter(Boolean)),
+    }, new Set());
+    return;
+  }
   if (entrada.acao === "ignore" || entrada.contactId === null) {
     await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora }).where(daPessoa);
     return;
   }
   await db.update(networkSugestoes).set({ contactId: entrada.contactId, updatedAt: agora }).where(daPessoa);
+  // No vincular, o retrato do contato serve às duas conferências: o que ele já tem não volta a pedir confirmação.
+  const retrato = entrada.acao === "link" ? await retratoDoContato(db, entrada.ownerId, entrada.contactId) : null;
+  if (entrada.acao === "link") {
+    // O que o contato já tem, e o que ele já espera de outra fonte, não volta a pedir confirmação.
+    const outrasAbertas = await db.select({ campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
+      .where(and(
+        eq(networkSugestoes.ownerId, entrada.ownerId), eq(networkSugestoes.contactId, entrada.contactId),
+        eq(networkSugestoes.status, "pendente"), tenhoOuPreciso,
+        or(isNull(networkSugestoes.meetingSuggestionId), ne(networkSugestoes.meetingSuggestionId, entrada.meetingSuggestionId)),
+      ));
+    await ignorarRepetidas(db, entrada.ownerId, entrada.meetingSuggestionId, {
+      tenho: new Set((retrato?.tenho ?? []).map(slugifyMatchTag)),
+      preciso: new Set((retrato?.preciso ?? []).map(slugifyMatchTag)),
+    }, new Set(outrasAbertas.map(aberta => chaveDaPendencia(aberta.campo, aberta.valor))));
+  }
   const sugestao = entrada.quemSouDaSugestao;
   if (!sugestao) return;
   const confianca = confiancaValida(sugestao.confianca);
@@ -1020,11 +1133,41 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
     await gravar(apoio);
     return;
   }
-  const atual = await retratoDoContato(db, entrada.ownerId, entrada.contactId);
+  const atual = retrato ?? await retratoDoContato(db, entrada.ownerId, entrada.contactId);
   if (!atual) return;
   await gravar(semRepeticao([
     ...linha("nome", sugestao.fullName), ...linha("telefone", sugestao.phone), ...linha("email", sugestao.email), ...apoio,
   ], atual));
+}
+
+/** Os slugs de uma lista de texto gravada numa coluna JSON (lida com desconfiança: pode não ser lista). */
+function slugsDaLista(valor: unknown): Set<string> {
+  const lista = Array.isArray(valor) ? valor.filter((item): item is string => typeof item === "string") : [];
+  return new Set(lista.map(slugifyMatchTag).filter(Boolean));
+}
+
+/**
+ * Ignora as pendências de Tenho/Preciso da pessoa da reunião que o destino já
+ * tem (`jaTem`, por slug) ou que já esperam a dona de outra fonte (`abertas`,
+ * pela chave da pendência). Status no WHERE: só a que ainda está pendente.
+ */
+async function ignorarRepetidas(
+  db: BancoOuTransacao, ownerId: string, meetingSuggestionId: string,
+  jaTem: { tenho: ReadonlySet<string>; preciso: ReadonlySet<string> }, abertas: ReadonlySet<string>,
+) {
+  const daPessoa = await db.select({ id: networkSugestoes.id, campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
+    .where(and(
+      eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.meetingSuggestionId, meetingSuggestionId),
+      eq(networkSugestoes.status, "pendente"), inArray(networkSugestoes.campo, ["tenho", "preciso"]),
+    ));
+  const repetidas = daPessoa.filter(linha => {
+    const lista = linha.campo === "tenho" ? jaTem.tenho : jaTem.preciso;
+    return lista.has(slugifyMatchTag(linha.valor)) || abertas.has(chaveDaPendencia(linha.campo, linha.valor));
+  }).map(linha => linha.id);
+  if (!repetidas.length) return;
+  const agora = Date.now();
+  await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
+    .where(and(eq(networkSugestoes.ownerId, ownerId), inArray(networkSugestoes.id, repetidas), eq(networkSugestoes.status, "pendente")));
 }
 
 /**

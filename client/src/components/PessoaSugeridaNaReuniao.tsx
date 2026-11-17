@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { useTranslation } from "react-i18next";
 import { CircleAlert } from "lucide-react";
+import { LinhaDoItemDaReuniao } from "@/components/ItemDaReuniao";
 
 /**
  * A pessoa que a IA encontrou numa reunião, nas três dimensões do Meu Network
@@ -24,6 +25,11 @@ import { CircleAlert } from "lucide-react";
  * `pendencias` undefined = ainda não lidas (carregando, ou a consulta falhou e
  * a tela mostra o erro): Tenho e Preciso ficam neutros. Dizer FALTANDO sem ter
  * lido seria afirmar que a IA não achou nada.
+ *
+ * Decidida a pessoa (N5) — contato criado, vinculado ou "Sou eu" —, o que ela
+ * tem e precisa e ainda espera a dona aparece aqui mesmo, item a item, com ✓,
+ * ✎, ✕ e o trecho (LinhaDoItemDaReuniao). No "Sou eu" o destino é o perfil da
+ * dona, e o aviso diz que o item entra nas conexões.
  */
 
 type Sugestao = {
@@ -32,13 +38,18 @@ type Sugestao = {
 };
 type Pendencia = { id: string; meetingSuggestionId: string | null; campo: string; valor: string; trecho: string | null };
 
-export function PessoaSugeridaNaReuniao({ sugestao, pendencias }: { sugestao: Sugestao; pendencias: Pendencia[] | undefined }) {
+export function PessoaSugeridaNaReuniao({ sugestao, pendencias, aoDecidirItem }: {
+  sugestao: Sugestao; pendencias: Pendencia[] | undefined; aoDecidirItem?: () => void;
+}) {
   const { t } = useTranslation();
   const lidas = pendencias !== undefined;
   const daPessoa = (pendencias ?? []).filter(p => p.meetingSuggestionId === sugestao.id);
   const tenho = daPessoa.filter(p => p.campo === "tenho");
   const preciso = daPessoa.filter(p => p.campo === "preciso");
   const pendente = sugestao.status === "pending";
+  const alvo = sugestao.status === "self" ? "perfil" as const
+    : (sugestao.status === "created" || sugestao.status === "linked") && sugestao.existingContactId !== null ? "contato" as const : null;
+  const itensParaDecidir = alvo ? [...tenho, ...preciso] : [];
   const citada = sugestao.presence === "mentioned";
   const falta = !citada && (!sugestao.phone || !sugestao.email || (pendente && lidas && (!tenho.length || !preciso.length)));
   const faltando = <span className="font-semibold text-amber-300">{t("networkPanel.statusMissing")}</span>;
@@ -62,7 +73,8 @@ export function PessoaSugeridaNaReuniao({ sugestao, pendencias }: { sugestao: Su
 
       {citada ? (
         (sugestao.phone || sugestao.email) && <p className="mt-1 break-all text-xs text-white/60">{[sugestao.phone, sugestao.email].filter(Boolean).join(" · ")}</p>
-      ) : (
+      ) : alvo === "perfil" ? null : (
+        // No "Sou eu" a pessoa é a dona: o Quem Sou dela não é colhido aqui, e FALTANDO não se aplica.
         <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           <div className="sm:col-span-2 text-[11px] font-bold uppercase tracking-wider text-white/45">{t("networkPanel.whoAmI")}</div>
           <div className="flex gap-2"><dt className="text-white/50">{t("networkPanel.fields.nome")}:</dt><dd className="text-emerald-300" aria-label={sugestao.fullName}>✓</dd></div>
@@ -96,6 +108,14 @@ export function PessoaSugeridaNaReuniao({ sugestao, pendencias }: { sugestao: Su
       )}
       {esperaConfirmacao && (
         <p className="mt-2 text-xs text-white/45">{t("networkInteligente.meetingProposal.pendingAfterCreate")}</p>
+      )}
+      {alvo && itensParaDecidir.length > 0 && (
+        <div className="mt-3">
+          {alvo === "perfil" && <p className="mb-2 text-xs leading-relaxed text-amber-100/80">{t("reuniaoNoMatch.avisoPerfil")}</p>}
+          <ul className="space-y-2">
+            {itensParaDecidir.map(item => <LinhaDoItemDaReuniao key={item.id} item={item} alvo={alvo} aoDecidir={() => aoDecidirItem?.()} />)}
+          </ul>
+        </div>
       )}
       {(sugestao.status === "created" || sugestao.status === "linked") && sugestao.existingContactId !== null && (
         <Link href={`/meu-network-inteligente/contatos/${sugestao.existingContactId}`}

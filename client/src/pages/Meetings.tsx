@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, Square, Trash2, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Link2, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, Square, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -9,6 +9,8 @@ import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
+import { VincularAContato } from "@/components/VincularAContato";
+import { ConexoesGeradasPelaReuniao } from "@/components/ConexoesDaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
@@ -915,11 +917,18 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     refetchOnReconnect: consulta => !linkDeReuniaoInvalido(consulta.state.error),
     retry: (tentativas, erro) => !linkDeReuniaoInvalido(erro) && tentativas < 3,
   });
+  // N5: a pessoa cujo "Vincular a um contato" está aberto (uma por vez).
+  const [vinculando, setVinculando] = useState<string | null>(null);
   // Recusada (CONFLICT: já decidida em outra aba), a tela relê o estado real da sugestão.
   const decideContact = trpc.meetings.decideContactSuggestion.useMutation({
     onError: erro => toast.error(erro.message),
-    onSettled: () => { void utils.meetings.get.invalidate({ meetingId }); void pendenciasDaReuniao.refetch(); },
+    onSettled: () => { setVinculando(null); void utils.meetings.get.invalidate({ meetingId }); void pendenciasDaReuniao.refetch(); },
   });
+  // Um item decidido muda o que espera a dona e, confirmado, as conexões desta reunião.
+  const depoisDeDecidirItem = () => {
+    void pendenciasDaReuniao.refetch();
+    void utils.meetings.conexoes.invalidate({ meetingId });
+  };
   // A resposta da tradução é aplicada no callback do próprio mutate (lá embaixo),
   // que só dispara para o ÚLTIMO pedido: a tradução de uma transcrição trocada
   // por um reprocessamento, chegando atrasada, não sobrescreve a da nova.
@@ -1040,7 +1049,32 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // (anterior a ela) fica com as participantes, como sempre ficou.
   const citadas = suggestions.filter(suggestion => suggestion.presence === "mentioned");
   const participantes = suggestions.filter(suggestion => suggestion.presence !== "mentioned");
-  const cartaoDaSugestao = (suggestion: (typeof suggestions)[number]) => <section key={suggestion.id} className={suggestion.presence === "mentioned" ? "rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-4" : "rounded-2xl border border-white/10 bg-white/[0.035] p-5"}><div className="flex flex-col md:flex-row gap-4 justify-between"><PessoaSugeridaNaReuniao sugestao={suggestion} pendencias={pendenciasDaReuniao.data} />{suggestion.status === "pending" && emProcessamento ? <span className="text-sm text-amber-200/70">{t("meetings.decisionsPaused")}</span> : suggestion.status === "pending" ? <div className="flex flex-wrap gap-2"><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "create" })} className="rounded-lg bg-amber-400 text-[#1a120c] px-3 py-2 text-sm font-bold disabled:opacity-50"><Check size={15} className="inline mr-1"/>{t("meetings.createContactButton")}</button><button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "ignore" })} className="rounded-lg border border-white/15 px-3 py-2 text-sm text-white/65 disabled:opacity-50"><X size={15} className="inline mr-1"/>{t("meetings.ignoreButton")}</button></div> : <span className="text-sm text-white/45">{suggestion.status === "created" ? t("meetings.contactCreatedStatus") : t("meetings.ignoredStatus")}</span>}</div></section>;
+  // Os itens (Tenho/Preciso) de todas as pessoas que ainda esperam a dona.
+  const itensEsperando = (pendenciasDaReuniao.data ?? []).filter(item => item.campo === "tenho" || item.campo === "preciso").length;
+  // O que já foi decidido sobre a pessoa, em palavras (N5: "É você" e "Vinculada a…").
+  const statusDaPessoa = (suggestion: (typeof suggestions)[number]) => {
+    switch (suggestion.status) {
+      case "created": return t("meetings.contactCreatedStatus");
+      case "linked": return suggestion.existingContactName ? t("reuniaoNoMatch.statusVinculada", { nome: suggestion.existingContactName }) : t("reuniaoNoMatch.statusVinculadaSemNome");
+      case "self": return t("reuniaoNoMatch.statusEVoce");
+      default: return t("meetings.ignoredStatus");
+    }
+  };
+  // As quatro saídas da pessoa da reunião (N5): Criar contato, Vincular a um
+  // contato, Sou eu e Ignorar. "É você?" aparece quando o nome ou o e-mail
+  // batem com os da conta; quem decide é a dona.
+  const botoesDaPessoa = (suggestion: (typeof suggestions)[number]) => <div className="flex flex-wrap items-center gap-2">
+    <button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "create" })} className="rounded-lg bg-amber-400 text-[#1a120c] px-3 py-2 text-sm font-bold disabled:opacity-50"><Check size={15} className="inline mr-1"/>{t("meetings.createContactButton")}</button>
+    <button type="button" aria-expanded={vinculando === suggestion.id} disabled={decideContact.isPending} onClick={() => setVinculando(atual => atual === suggestion.id ? null : suggestion.id)} className="rounded-lg border border-[#c98f70]/40 px-3 py-2 text-sm text-[#efcba8] disabled:opacity-50"><Link2 size={15} className="inline mr-1"/>{t("reuniaoNoMatch.vincular")}</button>
+    {suggestion.pareceSerADona && <span className="text-xs font-semibold text-amber-200">{t("reuniaoNoMatch.eVoce")}</span>}
+    <button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "self" })} className={`rounded-lg px-3 py-2 text-sm disabled:opacity-50 ${suggestion.pareceSerADona ? "border border-amber-300/60 bg-amber-300/10 font-semibold text-amber-100" : "border border-white/15 text-white/70"}`}><UserRound size={15} className="inline mr-1"/>{t("reuniaoNoMatch.souEu")}</button>
+    <button disabled={decideContact.isPending} onClick={() => decideContact.mutate({ suggestionId: suggestion.id, action: "ignore" })} className="rounded-lg border border-white/15 px-3 py-2 text-sm text-white/65 disabled:opacity-50"><X size={15} className="inline mr-1"/>{t("meetings.ignoreButton")}</button>
+  </div>;
+  const cartaoDaSugestao = (suggestion: (typeof suggestions)[number]) => <section key={suggestion.id} className={suggestion.presence === "mentioned" ? "rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-4" : "rounded-2xl border border-white/10 bg-white/[0.035] p-5"}>
+    <div className="flex flex-col md:flex-row gap-4 justify-between"><PessoaSugeridaNaReuniao sugestao={suggestion} pendencias={pendenciasDaReuniao.data} aoDecidirItem={depoisDeDecidirItem} />{suggestion.status === "pending" && emProcessamento ? <span className="text-sm text-amber-200/70">{t("meetings.decisionsPaused")}</span> : suggestion.status === "pending" ? botoesDaPessoa(suggestion) : <span className="text-sm text-white/45">{statusDaPessoa(suggestion)}</span>}</div>
+    {suggestion.status === "pending" && !emProcessamento && vinculando === suggestion.id && <VincularAContato suggestionId={suggestion.id} ocupado={decideContact.isPending}
+      aoEscolher={contactId => decideContact.mutate({ suggestionId: suggestion.id, action: "link", contactId })} aoCancelar={() => setVinculando(null)}/>}
+  </section>;
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span><button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
@@ -1072,6 +1106,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
+      {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
+      <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken}/>
@@ -1142,6 +1178,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
       : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>)}
     {tab === "contacts" && <div className="space-y-3">
+      {itensEsperando > 0 && <p role="status" className="text-sm font-semibold text-amber-200">{t("reuniaoNoMatch.itensEsperando", { quantidade: itensEsperando })}</p>}
       {/* Pendências ainda não lidas: carregando, ou erro com tentar de novo —
           nunca "FALTANDO" nos cartões, que afirmaria que a IA não achou nada. */}
       {suggestions.length > 0 && !pendenciasDaReuniao.data && (pendenciasDaReuniao.isError
