@@ -95,12 +95,15 @@ let contextos: ContextoFalso[] = [];
 
 /**
  * O navegador com Web Audio. `estadoInicial` "suspended" é o iPhone, que só
- * deixa o contexto rodar a partir de um toque: o resume() nunca responde.
+ * deixa o contexto rodar a partir de um toque: o resume() nunca responde. Com
+ * `rodaDepoisDeMs`, o contexto que nasce suspenso roda sozinho esse tanto
+ * depois de criado: é o Firefox, que segue a especificação do Web Audio e só
+ * o roda numa tarefa seguinte (o Chrome já o cria rodando).
  */
-function navegadorQueOuve({ estadoInicial = "running", recusar = false } = {}) {
+function navegadorQueOuve({ estadoInicial = "running", recusar = false, rodaDepoisDeMs = Infinity } = {}) {
   vi.stubGlobal("AudioContext", class {
     sampleRate = 48_000;
-    state = estadoInicial;
+    estado = estadoInicial;
     criadoEm = Date.now();
     fechado = false;
     resume = vi.fn(() => new Promise<void>(() => {}));
@@ -109,9 +112,15 @@ function navegadorQueOuve({ estadoInicial = "running", recusar = false } = {}) {
       if (recusar) throw new DOMException("recusado", "NotSupportedError");
       contextos.push(this);
     }
-    get currentTime() { return this.state === "running" ? (Date.now() - this.criadoEm) / 1000 : 0; }
+    /** Quando o contexto começou a rodar: o relógio dele (currentTime) conta daí. */
+    get rodandoDesde() { return estadoInicial === "running" ? this.criadoEm : this.criadoEm + rodaDepoisDeMs; }
+    get state() {
+      if (this.estado === "suspended" && Date.now() >= this.rodandoDesde) this.estado = "running";
+      return this.estado;
+    }
+    get currentTime() { return this.state === "running" ? (Date.now() - this.rodandoDesde) / 1000 : 0; }
     close() {
-      this.state = "closed";
+      this.estado = "closed";
       this.fechado = true;
       return Promise.resolve();
     }
@@ -1105,6 +1114,87 @@ describe("useGravadorDeAudio — a emenda das partes, sem corte", () => {
       expect(gravadores).toHaveLength(2);
       expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: HORA_DA_TROCA + 5_000 + 2_300 });
       expect(contextos[1].fechado).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o contexto que nasce suspenso e só roda depois (o Firefox), reaberto na volta de uma pausa depois da hora: a troca espera a pausa da fala, e não sai no meio dela", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended", rodaDepoisDeMs: 5 });
+      const { result, aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      // Aberto aos 598 s, o contexto teve tempo de rodar: com fala, a troca espera.
+      andarAte(comecouEm, HORA_DA_TROCA + 5_000);
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      act(() => result.current.pausar());
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => result.current.continuar());
+      const voltouEm = Date.now();
+      somDesde(voltouEm + 3_000, SILENCIO);
+      // O primeiro tique da volta reabre o detector ainda suspenso, no meio da fala: não troca.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(2);
+      expect(gravadores).toHaveLength(1);
+      act(() => { vi.advanceTimersByTime(2_700); });
+      expect(gravadores).toHaveLength(1);
+      // 300 ms calmos: troca.
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: HORA_DA_TROCA + 5_000 + 3_300 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o primeiro tique depois dos 598 s que já cai depois da hora (a página travada por 3 s), com o contexto que nasce suspenso e só roda depois: a troca espera a pausa da fala", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended", rodaDepoisDeMs: 5 });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      somDesde(comecouEm + HORA_DA_TROCA + 4_000, SILENCIO);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS - 500);
+      expect(contextos).toHaveLength(0);
+      // A trava é menor que a da aba em segundo plano (ATRASO_MAXIMO_MS): o tique seguinte, aos 601 s, abre o detector e espera.
+      vi.setSystemTime(Date.now() + 3_000);
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 4_200);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 4_300);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA + 4_300);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o contexto que nunca roda (o iPhone sem o toque da dona), aberto já depois da hora: a troca não espera a pausa da fala, só o tempo de o contexto começar (PREPARO_DO_DETECTOR_MS)", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended" });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS - 500);
+      vi.setSystemTime(Date.now() + 3_000);
+      // Aberto aos 601 s, ainda pode começar a rodar: espera.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS - 100);
+      expect(gravadores).toHaveLength(1);
+      // Não rodou no prazo: troca no tempo, com fala, e fecha o contexto.
+      andarAte(comecouEm, HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS);
+      expect(contextos[0].fechado).toBe(true);
     } finally {
       vi.useRealTimers();
     }

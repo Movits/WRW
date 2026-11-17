@@ -7,9 +7,12 @@
  *
  * Só ouve: não liga nada à saída de som, não grava e não mexe no fluxo. Sem
  * AudioContext (o navegador sem Web Audio), ou se ele recusar, abrir devolve
- * null; com o contexto suspenso (o iPhone, que só deixa o áudio rodar a partir
- * de um toque da dona), `ouvindo` diz false. Nos dois casos quem chama troca no
- * tempo, como antes.
+ * null; com o contexto suspenso, `ouvindo` diz false. O suspenso pode ser só o
+ * começo (o Firefox cria o contexto suspenso e só o roda numa tarefa seguinte,
+ * como pede a especificação) ou para sempre (o iPhone, que só deixa o áudio
+ * rodar a partir de um toque da dona). Sem detector, quem chama troca no tempo,
+ * como antes; com o contexto que não roda, também, depois de dar a ele o prazo
+ * para começar (PREPARO_DO_DETECTOR_MS, em hooks/useGravadorDeAudio.ts).
  */
 
 /** O trecho calmo que a troca espera: uns 300 ms sem fala. */
@@ -105,7 +108,8 @@ export function abrirDetectorDePausa(fluxo: MediaStream): DetectorDePausa | null
     fonte.connect(analisador);
     const amostras = new Float32Array(analisador.fftSize);
     // Criado fora do toque da dona, o contexto pode nascer suspenso: pede para
-    // rodar. O Chrome e o Firefox rodam; o iPhone, sem o toque, segue suspenso.
+    // rodar. O Chrome já o cria rodando; o Firefox o roda numa tarefa seguinte;
+    // o iPhone, sem o toque, segue suspenso.
     if (ctx.state === "suspended") semFalha(() => ctx.resume());
     let fechado = false;
     let quebrado = false;

@@ -48,8 +48,9 @@ export type OpcoesDoGravador = {
    * troca espera uma pausa da fala, de uns 300 ms (lib/detector-de-pausa.ts),
    * por até ESPERA_PELA_PAUSA_MS depois de `fatiaSegundos`, para a palavra não
    * sair cortada entre dois arquivos; sem pausa, troca no fim dessa espera. Sem
-   * como ouvir (sem AudioContext, ou o contexto suspenso do iPhone), troca no
-   * tempo. As partes saem sempre na ordem da gravação.
+   * como ouvir (sem AudioContext, ou o contexto que não começa a rodar, como o
+   * suspenso do iPhone), troca no tempo. As partes saem sempre na ordem da
+   * gravação.
    */
   fatiaSegundos?: number;
   aoFecharParte?: (parte: AudioGravado & { seq: number; ultima: boolean }) => void;
@@ -95,7 +96,15 @@ export const PAUSA_MAXIMA_MS = 60 * 60 * 1000;
  * aba em segundo plano.
  */
 export const ESPERA_PELA_PAUSA_MS = 20_000;
-/** O detector de pausa abre um pouco antes da hora da troca, para o contexto de áudio já estar rodando quando ela chegar. */
+/**
+ * O detector de pausa abre um pouco antes da hora da troca, para o contexto de
+ * áudio já estar rodando quando ela chegar. É também o prazo que o contexto
+ * tem, desde a abertura, para começar a rodar: o Firefox o cria suspenso e só
+ * o roda numa tarefa seguinte, como pede a especificação do Web Audio, e o
+ * iPhone, sem um toque da dona, nunca. Dentro do prazo, o contexto que ainda
+ * não roda não faz a troca sair no tempo: aberto já na hora ou depois dela (na
+ * volta de uma pausa, no tique atrasado), ele cortaria a fala.
+ */
 export const PREPARO_DO_DETECTOR_MS = 2_000;
 /** De quanto em quanto tempo o detector é consultado, da abertura à troca. */
 export const ESCUTA_MS = 100;
@@ -192,9 +201,11 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // repetiria a cada 500 ms (G13b).
   const limiteAvisado = useRef(false);
   // O detector de pausa da troca de parte: undefined enquanto não abriu nesta
-  // parte, null sem como ouvir. A escuta é o relógio que o consulta, e a última
+  // parte, null sem como ouvir, e quando abriu (o prazo do contexto para
+  // começar a rodar conta daí). A escuta é o relógio que o consulta, e a última
   // conferência mede o atraso do tique.
   const detector = useRef<DetectorDePausa | null | undefined>(undefined);
+  const detectorAbertoEm = useRef(0);
   const escuta = useRef(0);
   const ultimaConferencia = useRef(0);
 
@@ -301,8 +312,9 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
    * e, com o detector aberto, na escuta (a cada 100 ms). O detector abre
    * PREPARO_DO_DETECTOR_MS antes de `fatiaSegundos` de parte (sem as pausas). A
    * partir daí a troca sai no primeiro trecho calmo; sem um, ao fim de
-   * ESPERA_PELA_PAUSA_MS; sem como ouvir, ou com o tique muito atrasado (a aba
-   * em segundo plano), na hora.
+   * ESPERA_PELA_PAUSA_MS; com o tique muito atrasado (a aba em segundo plano),
+   * na hora; sem como ouvir, na hora também, mas o contexto que ainda não roda
+   * só conta como sem como ouvir PREPARO_DO_DETECTOR_MS depois de aberto.
    */
   function conferirATroca() {
     const agora = Date.now();
@@ -317,11 +329,20 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     if (tempo >= hora && (tempo >= hora + ESPERA_PELA_PAUSA_MS || atraso > ATRASO_MAXIMO_MS)) return trocarDeParte();
     if (detector.current === undefined && fluxoGravado.current) {
       detector.current = abrirDetectorDePausa(fluxoGravado.current);
+      detectorAbertoEm.current = agora;
       if (detector.current) escuta.current = window.setInterval(conferirATroca, ESCUTA_MS);
     }
     if (tempo < hora) return;
     const ouvido = detector.current;
-    if (!ouvido || !ouvido.ouvindo() || ouvido.calmo()) trocarDeParte();
+    if (!ouvido) return trocarDeParte();
+    if (ouvido.ouvindo()) {
+      if (ouvido.calmo()) trocarDeParte();
+      return;
+    }
+    // Não roda: o contexto recém-aberto (a volta de uma pausa, o tique que já
+    // caiu depois da hora) ainda pode começar, e a troca espera; passado o
+    // prazo, troca no tempo, como sem detector.
+    if (agora - detectorAbertoEm.current >= PREPARO_DO_DETECTOR_MS) trocarDeParte();
   }
 
   /** Para sem entregar nada e solta o microfone. */
