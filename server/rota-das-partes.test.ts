@@ -12,7 +12,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * DEPOIS, como no index.ts: o corpo binário tem de chegar inteiro à rota.
  */
 
-const { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } = await import("./_core/rota-das-partes");
+const { PARTES_POR_DONA_EM_10_MIN, registrarRotaDasPartes, tratarCorpoGrandeDasPartes } = await import("./_core/rota-das-partes");
 const { FalhaPassageiraDaParte, RecusaDaParte, TAMANHO_MAXIMO_DA_PARTE } = await import("./fatias-de-reuniao");
 const { BancoIndisponivel } = await import("./banco-indisponivel");
 
@@ -87,10 +87,11 @@ describe("POST /api/reunioes/{id}/partes/{seq}", () => {
     expect(resposta.status).toBe(401);
   });
 
-  it("falha passageira devolve a vaga do teto: 70 reenvios com o bucket fora nunca viram 429", async () => {
+  it("falha passageira devolve a vaga do teto: 130 reenvios com o bucket fora nunca viram 429", async () => {
     receber.mockRejectedValue(new FalhaPassageiraDaParte("bucket"));
-    for (let i = 0; i < 70; i++) expect((await enviar(Buffer.from("x"))).status).toBe(503);
-    expect(receber).toHaveBeenCalledTimes(70);
+    // Mais que o teto (120): sem devolver a vaga, o 121º já seria 429.
+    for (let i = 0; i < 130; i++) expect((await enviar(Buffer.from("x"))).status).toBe(503);
+    expect(receber).toHaveBeenCalledTimes(130);
   });
 
   it("cadastro não concluído e sessão de cron: 403", async () => {
@@ -142,12 +143,14 @@ describe("POST /api/reunioes/{id}/partes/{seq}", () => {
     expect(await resposta.text()).toBe("tratador padrão");
   });
 
-  it("teto de pedidos por dona: o 61º em 10 min é 429 e não recebe", async () => {
+  it("teto de pedidos por dona: o 121º em 10 min é 429 e não recebe", async () => {
+    // 120 (H9a): o MP3 de 12 h a 320 kbps, importado em partes de 14 MB, tem 118 partes.
+    expect(PARTES_POR_DONA_EM_10_MIN).toBe(120);
     receber.mockResolvedValue({ seq: 3, repetida: true });
-    for (let i = 0; i < 60; i++) expect((await enviar(Buffer.from("x"))).status).toBe(200);
+    for (let i = 0; i < 120; i++) expect((await enviar(Buffer.from("x"))).status).toBe(200);
     const excedente = await enviar(Buffer.from("x"));
     expect(excedente.status).toBe(429);
     expect(await excedente.json()).toEqual({ codigo: "MUITOS_PEDIDOS" });
-    expect(receber).toHaveBeenCalledTimes(60);
+    expect(receber).toHaveBeenCalledTimes(120);
   });
 });

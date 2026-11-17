@@ -201,9 +201,11 @@ function abrir(caminho: string) {
   return render(<Meetings />);
 }
 
+// O arquivo do envio único (um M4A): o MP3 vai em partes desde a H9a, e a
+// ligação dele à agenda está em Meetings.importacao.test.tsx.
 function enviarArquivo() {
   fireEvent.click(screen.getByRole("checkbox"));
-  fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+  fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
 }
 
 describe("Gravar agora: o gravador com a reunião da agenda", () => {

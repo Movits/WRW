@@ -534,3 +534,65 @@ describe("useGravacaoEmPartes — a dona desde o Iniciar (revisão da G13c)", ()
     expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1" }]);
   });
 });
+
+describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
+  it("a origem vai ao servidor: 'arquivo' na importação, 'gravacao' por padrão", async () => {
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    expect(d.iniciar).toHaveBeenLastCalledWith({ ...INICIO, consentGranted: true, origem: "arquivo" });
+    await act(async () => { await result.current.iniciar(INICIO); });
+    expect(d.iniciar).toHaveBeenLastCalledWith({ ...INICIO, consentGranted: true, origem: "gravacao" });
+  });
+
+  it("a parte audio/mpeg vai ao aparelho e ao servidor com o tipo dela", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    const blob = new Blob(["quadros"], { type: "audio/mpeg" });
+    act(() => result.current.receberParte({ blob, mimeType: "audio/mpeg", duracaoMs: 599_976, seq: 0, ultima: true }));
+    await waitFor(() => expect(aoEncerrar).toHaveBeenCalledWith("r-1"));
+    expect(d.guardarParte.mock.calls[0][0]).toMatchObject({ meetingId: "r-1", seq: 0, mimeType: "audio/mpeg", duracaoMs: 599_976 });
+    expect(d.enviarParte).toHaveBeenCalledWith("r-1", 0, blob, "audio/mpeg");
+  });
+
+  it("esperarFila resolve só quando a parte que entrou na fila saiu dela", async () => {
+    let soltar: (resultado: unknown) => void = () => {};
+    d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await act(async () => { await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, false)));
+    let vazia = false;
+    void result.current.esperarFila().then(() => { vazia = true; });
+    await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
+    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    expect(vazia).toBe(false);
+    await act(async () => { soltar({ tipo: "recebida" }); });
+    await waitFor(() => expect(vazia).toBe(true));
+    // A falha da parte não rejeita a espera: ela já saiu pelos avisos.
+    d.enviarParte.mockRejectedValueOnce(new Error("rede"));
+    act(() => result.current.receberParte(parte(1, false)));
+    await act(async () => { await expect(result.current.esperarFila()).resolves.toBeUndefined(); });
+  });
+
+  it("cancelada enquanto a ÚLTIMA parte subia: o fim não é declarado, a tela não vai ao detalhe, e a reunião sai", async () => {
+    let soltar: (resultado: unknown) => void = () => {};
+    d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
+    const aoEncerrar = vi.fn();
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    act(() => result.current.receberParte(parte(0, true)));
+    await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
+    let cancelamento: Promise<ResultadoDoDescarte> = Promise.resolve("nada");
+    act(() => { cancelamento = result.current.cancelar(id); });
+    let resultado: ResultadoDoDescarte | undefined;
+    await act(async () => { soltar({ tipo: "recebida" }); resultado = await cancelamento; });
+    expect(resultado).toBe("descartada");
+    expect(d.encerrar).not.toHaveBeenCalled();
+    expect(aoEncerrar).not.toHaveBeenCalled();
+    expect(aoFalhar).not.toHaveBeenCalled();
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+  });
+});
