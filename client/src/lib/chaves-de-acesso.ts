@@ -160,8 +160,11 @@ export function mensagemDoErroDaChave(erro: unknown, t: Traduzir): string {
     if (ehChaveJaCadastrada(erro)) return t("chavesDeAcesso.errors.alreadyRegistered");
     return t("chavesDeAcesso.errors.device");
   }
-  // Erro do tRPC que não é da A6 (banco fora do ar, sessão vencida...).
-  if ((erro as { data?: unknown } | null)?.data) return mensagemDeErroParaTela(erro, t);
+  // Erro do tRPC que não é da A6 (banco fora do ar, sessão vencida...), e
+  // também o pedido que nem chegou ao servidor (sem rede, servidor fora do ar:
+  // TRPCClientError sem `data`), que vira "servidor indisponível", nunca culpa do aparelho.
+  const comoTrpc = erro as { data?: unknown; name?: unknown } | null;
+  if (comoTrpc?.data || comoTrpc?.name === "TRPCClientError") return mensagemDeErroParaTela(erro, t);
   // Erro do próprio navegador ao falar com o aparelho.
   return t("chavesDeAcesso.errors.device");
 }

@@ -134,7 +134,11 @@ export function ChavesDeAcesso() {
     try {
       await entrarDeNovo.mutateAsync({ email: user.email, password: senha });
     } catch (erro) {
-      toast.error(t("chavesDeAcesso.profile.wrongPassword"), { description: mensagemDoErroDaChave(erro, t) });
+      // Senha errada (UNAUTHORIZED) tem a frase própria; o resto (muitas
+      // tentativas, servidor fora do ar) segue a tradução de sempre. A frase do
+      // servidor vem em português e não vai para a tela.
+      const senhaErrada = (erro as { data?: { code?: string } } | null)?.data?.code === "UNAUTHORIZED";
+      toast.error(senhaErrada ? t("chavesDeAcesso.profile.wrongPassword") : mensagemDoErroDaChave(erro, t));
       return;
     }
     setSenha("");

@@ -162,6 +162,15 @@ describe("a sugestão da chave no campo", () => {
     await waitFor(() => expect(duble.pedirAoAparelho).toHaveBeenCalledTimes(2));
   });
 
+  it("conta desativada não refaz a espera: o erro voltaria igual", async () => {
+    duble.pedirAoAparelho.mockResolvedValueOnce(RESPOSTA_DE_ENTRADA).mockImplementation(nuncaResponde);
+    duble.entrar.mockRejectedValue(erroDoServidor(ERRO_DA_CHAVE_DE_ACESSO.contaDesativada));
+    render(<Login />);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("chavesDeAcesso.errors.accountDisabled")));
+    await act(async () => {});
+    expect(duble.pedirAoAparelho).toHaveBeenCalledTimes(1);
+  });
+
   it("fechar o pedido do aparelho não mostra erro", async () => {
     duble.pedirAoAparelho.mockRejectedValue(cancelado());
     render(<Login />);

@@ -228,7 +228,8 @@ describe("ativar neste aparelho", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Ativar neste aparelho/ }));
     fireEvent.change(await screen.findByLabelText("Senha"), { target: { value: "errada" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar e ativar" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível confirmar a senha.", expect.anything()));
+    // A frase do servidor (em português) não vai para a tela.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível confirmar a senha."));
     expect(duble.opcoesDeCadastro).toHaveBeenCalledTimes(1);
   });
 

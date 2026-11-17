@@ -160,7 +160,13 @@ export default function Login() {
       } catch (erro) {
         setEntrandoComChave(false);
         avisarErroDaEntrada(erro, resposta.id);
-        if (ativo && !saindo.current) setEsperaNoCampo(n => n + 1);
+        // Refaz a espera só quando outra chave (ou outra tentativa) pode dar
+        // certo; conta desativada ou muitas tentativas voltariam iguais.
+        const codigo = codigoDoErroDaChave(erro);
+        const vale = codigo === ERRO_DA_CHAVE_DE_ACESSO.desconhecida
+          || codigo === ERRO_DA_CHAVE_DE_ACESSO.desafioInvalido
+          || codigo === ERRO_DA_CHAVE_DE_ACESSO.recusada;
+        if (vale && ativo && !saindo.current) setEsperaNoCampo(n => n + 1);
       }
     })();
     return () => {

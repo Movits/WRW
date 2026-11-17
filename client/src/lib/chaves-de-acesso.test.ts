@@ -163,6 +163,11 @@ describe("o erro na tela", () => {
     expect(mensagemDoErroDaChave(new Error("SecurityError"), t)).toBe("[chavesDeAcesso.errors.device]");
   });
 
+  it("o pedido que nem chegou ao servidor diz que o servidor está indisponível, não culpa o aparelho", () => {
+    const semRede = Object.assign(new Error("Failed to fetch"), { name: "TRPCClientError" });
+    expect(mensagemDoErroDaChave(semRede, t)).toBe("[errorBoundary.serverUnavailable]");
+  });
+
   it("erro do tRPC que não é da A6 segue a tradução de sempre", () => {
     const erro = { message: "Muitas requisições. Tente novamente em alguns minutos.", data: { code: "TOO_MANY_REQUESTS" } };
     expect(mensagemDoErroDaChave(erro, t)).not.toContain("chavesDeAcesso");
