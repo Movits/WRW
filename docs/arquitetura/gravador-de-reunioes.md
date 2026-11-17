@@ -209,7 +209,12 @@ gravação contínua).
 1. **Fatias de 10 minutos, cada uma um arquivo válido.** O gravador reinicia o
    MediaRecorder a cada fatia e pede mp4 antes de webm (o webm já falhou no Gemini; ver a
    PR #158). A troca de parte não pode deixar buraco no áudio. A bancada B, que conferiria
-   a emenda, foi trocada em 15/11 (ver "As duas bancadas de teste").
+   a emenda, foi trocada em 15/11 (ver "As duas bancadas de teste"). Desde 16/11 o
+   MediaRecorder da parte seguinte começa antes de o da atual parar (o trecho em comum fica
+   em milissegundos), e a troca espera uma pausa da fala de uns 300 ms, ouvida por um
+   AnalyserNode no mesmo fluxo: sem pausa, troca aos 620 s; sem AudioContext, ou com o
+   contexto suspenso do iPhone, troca no tempo, aos 600 s
+   (`client/src/hooks/useGravadorDeAudio.ts` e `client/src/lib/detector-de-pausa.ts`).
 2. **Cópia no aparelho.** A fatia fica no IndexedDB até o servidor confirmar. O trecho
    em curso também vai para o aparelho aos poucos, e não só no fim da fatia, para um
    travamento perder no máximo os últimos segundos. Queda de rede, recarregar a página e

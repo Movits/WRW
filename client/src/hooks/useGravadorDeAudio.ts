@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { abrirDetectorDePausa, type DetectorDePausa } from "@/lib/detector-de-pausa";
 import { escolherMimeDeGravacao, tipoParaOServidor, type TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { useOcupacao } from "@/lib/sessao-ocupada";
 
@@ -41,6 +42,14 @@ export type OpcoesDoGravador = {
    * abre a seguinte no MESMO microfone, sem parar a gravação, e cada parte (um
    * arquivo válido por si) sai por `aoFecharParte`, a última com `ultima`. A
    * última também sai por `aoTerminar`, como antes.
+   *
+   * A emenda não perde fala. O gravador da parte seguinte começa ANTES de o da
+   * atual parar, e o trecho que as duas têm em comum fica em milissegundos. E a
+   * troca espera uma pausa da fala, de uns 300 ms (lib/detector-de-pausa.ts),
+   * por até ESPERA_PELA_PAUSA_MS depois de `fatiaSegundos`, para a palavra não
+   * sair cortada entre dois arquivos; sem pausa, troca no fim dessa espera. Sem
+   * como ouvir (sem AudioContext, ou o contexto suspenso do iPhone), troca no
+   * tempo. As partes saem sempre na ordem da gravação.
    */
   fatiaSegundos?: number;
   aoFecharParte?: (parte: AudioGravado & { seq: number; ultima: boolean }) => void;
@@ -78,6 +87,25 @@ const RELOGIO_MS = 500;
  * ocupada (o Sair perguntando, o recarregar depois do deploy adiado) sem fim.
  */
 export const PAUSA_MAXIMA_MS = 60 * 60 * 1000;
+/**
+ * Quanto a troca de parte espera por uma pausa da fala depois de
+ * `fatiaSegundos`: sem pausa, a parte de 10 min fecha aos 620 s. O servidor
+ * aceita parte de até 720 s (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS, em
+ * server/fatias-de-reuniao.ts), e a folga que sobra é a do tique atrasado da
+ * aba em segundo plano.
+ */
+export const ESPERA_PELA_PAUSA_MS = 20_000;
+/** O detector de pausa abre um pouco antes da hora da troca, para o contexto de áudio já estar rodando quando ela chegar. */
+export const PREPARO_DO_DETECTOR_MS = 2_000;
+/** De quanto em quanto tempo o detector é consultado, da abertura à troca. */
+export const ESCUTA_MS = 100;
+/**
+ * O tique que chega mais de 5 s depois do anterior é a aba em segundo plano,
+ * com os timers espaçados pelo navegador (até um por minuto). Na hora da troca
+ * ele troca na hora, como antes: esperar a pausa de tique em tique levaria a
+ * parte para perto dos 720 s que o servidor aceita.
+ */
+export const ATRASO_MAXIMO_MS = 5_000;
 
 /** O navegador pausa o MediaRecorder? (o Safari antigo não). */
 export function pausaSuportada() {
@@ -105,6 +133,27 @@ function pararTrilhas(fluxo: MediaStream | null) {
   fluxo?.getTracks().forEach(trilha => trilha.stop());
 }
 
+/** Uma parte da gravação: o MediaRecorder dela e o tempo que ela conta. Sem partes, a gravação inteira é a parte 0. */
+type Parte = {
+  seq: number;
+  gravador: MediaRecorder;
+  comecouEm: number;
+  /** O tempo pausado DESTA parte: a duração dela o desconta. */
+  pausado: number;
+  /** Quando o hook mandou parar (a troca ou o fim); 0 até lá, e no fim que o navegador deu por conta própria. */
+  paradaEm: number;
+  /** O stop foi a troca para a parte seguinte: esta não é a última. */
+  trocada: boolean;
+  /**
+   * A troca sem o segundo gravador (o navegador recusou o da parte seguinte com
+   * o desta ainda gravando): a seguinte abre quando esta terminar de fechar o
+   * arquivo, como antes da emenda, com o intervalo de antes.
+   */
+  reabrir: boolean;
+  /** O Parar chegou no meio dessa troca: esta é a última, e a seguinte não abre. */
+  encerrar: boolean;
+};
+
 export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   const [estado, setEstado] = useState<EstadoDoGravador>("parado");
   const [segundos, setSegundos] = useState(0);
@@ -116,23 +165,23 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // o segundo clique de um duplo clique abria um segundo MediaRecorder e deixava
   // o primeiro com o microfone aceso.
   const estadoAgora = useRef<EstadoDoGravador>("parado");
-  const gravador = useRef<MediaRecorder | null>(null);
+  // A parte que grava agora (a última aberta). Logo depois de uma troca, a
+  // anterior ainda fecha o arquivo: os gravadores que não entregaram o fim
+  // ficam em `vivos`, para o Descartar calar todos.
+  const parte = useRef<Parte | null>(null);
+  const vivos = useRef(new Set<MediaRecorder>());
+  // Abre a parte seguinte no fluxo da gravação em curso (lança se o navegador
+  // recusar o gravador), e o fluxo, que o detector de pausa ouve.
+  const abrirParte = useRef<((seq: number) => Parte) | null>(null);
+  const fluxoGravado = useRef<MediaStream | null>(null);
   // Só o microfone que o hook abriu: o MediaStream de fora é de quem o entregou.
   const microfone = useRef<MediaStream | null>(null);
   const inicio = useRef(0);
-  // Na gravação em partes: quando a parte atual começou, e se o stop em curso é
-  // a troca de parte (e não o fim da gravação).
-  const inicioDaParte = useRef(0);
-  const trocandoDeParte = useRef(false);
-  // O Parar que chega DURANTE a troca (o gravador da parte já parou e o da
-  // seguinte ainda não abriu): vale como o fim, e a parte seguinte não abre.
-  const pararNaTroca = useRef(false);
-  // A pausa (G10): quando a atual começou (0 sem pausa), o tempo pausado da
-  // gravação inteira e o da parte atual. O áudio pausado não existe no arquivo:
-  // a duração entregue, o relógio e a troca de parte descontam a pausa.
+  // A pausa (G10): quando a atual começou (0 sem pausa) e o tempo pausado da
+  // gravação inteira; o da parte fica na parte. O áudio pausado não existe no
+  // arquivo: a duração entregue, o relógio e a troca de parte descontam a pausa.
   const pausaComecou = useRef(0);
   const pausadoNaGravacao = useRef(0);
-  const pausadoNaParte = useRef(0);
   // Cada pedido de microfone leva um número. Sair da tela ou descartar troca o
   // número, e o microfone que o navegador entregar depois, para um pedido
   // velho, é solto na hora.
@@ -142,6 +191,12 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // inativo), o relógio segue batendo no limite a cada volta, e o aviso se
   // repetiria a cada 500 ms (G13b).
   const limiteAvisado = useRef(false);
+  // O detector de pausa da troca de parte: undefined enquanto não abriu nesta
+  // parte, null sem como ouvir. A escuta é o relógio que o consulta, e a última
+  // conferência mede o atraso do tique.
+  const detector = useRef<DetectorDePausa | null | undefined>(undefined);
+  const escuta = useRef(0);
+  const ultimaConferencia = useRef(0);
 
   function mudarEstado(novo: EstadoDoGravador) {
     estadoAgora.current = novo;
@@ -153,26 +208,26 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // confirmação. O fim do arquivo, descartar, a falha e sair da tela liberam.
   useOcupacao("gravando", estado !== "parado");
 
-  /** Fecha a pausa em curso, somando-a ao tempo pausado. */
+  /** Fecha a pausa em curso, somando-a ao tempo pausado da gravação e da parte. */
   function fecharPausa() {
     if (!pausaComecou.current) return;
     const pausa = Date.now() - pausaComecou.current;
     pausaComecou.current = 0;
     pausadoNaGravacao.current += pausa;
-    pausadoNaParte.current += pausa;
+    if (parte.current) parte.current.pausado += pausa;
   }
 
   /** Pausa a gravação (G10): o microfone segue aberto, nada é gravado. */
   function pausar() {
-    const atual = gravador.current;
-    if (atual?.state !== "recording" || trocandoDeParte.current || typeof atual.pause !== "function") return;
+    const atual = parte.current?.gravador;
+    if (atual?.state !== "recording" || typeof atual.pause !== "function") return;
     atual.pause();
     pausaComecou.current = Date.now();
     mudarEstado("pausado");
   }
 
   function continuar() {
-    const atual = gravador.current;
+    const atual = parte.current?.gravador;
     if (atual?.state !== "paused") return;
     // No iPhone, bloquear a tela durante a pausa encerra a trilha do microfone:
     // retomar gravaria silêncio. Encerra e entrega o que já foi gravado.
@@ -183,29 +238,106 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   }
 
   function parar() {
-    const atual = gravador.current;
-    if (trocandoDeParte.current && atual) {
-      pararNaTroca.current = true;
+    const atual = parte.current;
+    // No meio da troca sem o segundo gravador (ver `reabrir`): a parte já parou,
+    // e o fim do arquivo dela ainda vem. O Parar vale como o fim da gravação, e
+    // a parte seguinte não abre.
+    if (atual?.reabrir && atual.gravador.state === "inactive") {
+      atual.encerrar = true;
       mudarEstado("finalizando");
       return;
     }
-    if (atual?.state !== "recording" && atual?.state !== "paused") return;
+    if (atual?.gravador.state !== "recording" && atual?.gravador.state !== "paused") return;
     fecharPausa();
     mudarEstado("finalizando");
-    atual.stop();
+    // A parte anterior que ainda fecha o arquivo (o Parar logo depois de uma
+    // troca) sai antes desta, que é a última.
+    atual.paradaEm = Date.now();
+    atual.gravador.stop();
+  }
+
+  /** Fecha o detector de pausa e a escuta dele. */
+  function pararDeOuvir() {
+    window.clearInterval(escuta.current);
+    escuta.current = 0;
+    detector.current?.fechar();
+    detector.current = undefined;
+  }
+
+  /**
+   * A troca de parte: abre o gravador da parte seguinte no mesmo fluxo e só
+   * então para o da atual. O trecho que as duas gravam juntas fica em
+   * milissegundos, e nada cai entre elas. A atual entrega o arquivo quando o
+   * navegador termina de fechá-lo, já com a seguinte gravando.
+   */
+  function trocarDeParte() {
+    pararDeOuvir();
+    const velha = parte.current;
+    const abrir = abrirParte.current;
+    if (!velha || !abrir || estadoAgora.current !== "gravando" || velha.gravador.state !== "recording") return;
+    let nova: Parte;
+    try {
+      nova = abrir(velha.seq + 1);
+    } catch {
+      // O navegador recusou o gravador da parte seguinte com o desta ainda
+      // gravando: troca como antes da emenda, abrindo a seguinte quando esta
+      // terminar de fechar o arquivo (com o intervalo de antes), em vez de
+      // encerrar a gravação. Recusado de novo (a trilha do microfone que acabou
+      // de cair, por exemplo), esta é a última parte.
+      velha.reabrir = true;
+      velha.trocada = true;
+      velha.paradaEm = Date.now();
+      velha.gravador.stop();
+      return;
+    }
+    parte.current = nova;
+    velha.trocada = true;
+    velha.paradaEm = Date.now();
+    velha.gravador.stop();
+  }
+
+  /**
+   * Confere se é hora de trocar de parte: no tique do relógio (a cada 500 ms)
+   * e, com o detector aberto, na escuta (a cada 100 ms). O detector abre
+   * PREPARO_DO_DETECTOR_MS antes de `fatiaSegundos` de parte (sem as pausas). A
+   * partir daí a troca sai no primeiro trecho calmo; sem um, ao fim de
+   * ESPERA_PELA_PAUSA_MS; sem como ouvir, ou com o tique muito atrasado (a aba
+   * em segundo plano), na hora.
+   */
+  function conferirATroca() {
+    const agora = Date.now();
+    const atraso = agora - ultimaConferencia.current;
+    ultimaConferencia.current = agora;
+    const fatia = atuais.current.fatiaSegundos;
+    const atual = parte.current;
+    if (!fatia || !atual || estadoAgora.current !== "gravando" || atual.gravador.state !== "recording") return;
+    const hora = fatia * 1000;
+    const tempo = agora - atual.comecouEm - atual.pausado;
+    if (tempo < hora - PREPARO_DO_DETECTOR_MS) return;
+    if (tempo >= hora && (tempo >= hora + ESPERA_PELA_PAUSA_MS || atraso > ATRASO_MAXIMO_MS)) return trocarDeParte();
+    if (detector.current === undefined && fluxoGravado.current) {
+      detector.current = abrirDetectorDePausa(fluxoGravado.current);
+      if (detector.current) escuta.current = window.setInterval(conferirATroca, ESCUTA_MS);
+    }
+    if (tempo < hora) return;
+    const ouvido = detector.current;
+    if (!ouvido || !ouvido.ouvindo() || ouvido.calmo()) trocarDeParte();
   }
 
   /** Para sem entregar nada e solta o microfone. */
   function descartar() {
     pedidoAtual.current++;
+    pararDeOuvir();
     pausaComecou.current = 0;
     pausadoNaGravacao.current = 0;
-    pausadoNaParte.current = 0;
-    trocandoDeParte.current = false;
-    pararNaTroca.current = false;
-    const atual = gravador.current;
-    gravador.current = null;
-    if (atual) {
+    // A parte atual e a anterior que ainda fecha o arquivo (o Descartar logo
+    // depois de uma troca): nenhuma entrega nada.
+    const gravadores = Array.from(vivos.current);
+    vivos.current.clear();
+    parte.current = null;
+    abrirParte.current = null;
+    fluxoGravado.current = null;
+    for (const atual of gravadores) {
       atual.onstop = null;
       if (atual.state !== "inactive") atual.stop();
     }
@@ -233,44 +365,78 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       const mimeType = escolherMimeDeGravacao(tipo => MediaRecorder.isTypeSupported(tipo));
       const audioBitsPerSecond = atuais.current.bitsPorSegundo;
       const comecouEm = Date.now();
+      // As partes que já fecharam e esperam a vez: saem na ordem da gravação,
+      // mesmo que o navegador entregue o fim de uma parte antes do da anterior
+      // (as duas fecham juntas quando o Parar vem logo depois de uma troca).
+      const prontas = new Map<number, { audio: AudioGravado; ultima: boolean }>();
+      let proxima = 0;
+      const entregar = () => {
+        for (let pronta = prontas.get(proxima); pronta; pronta = prontas.get(proxima)) {
+          prontas.delete(proxima);
+          const seq = proxima++;
+          if (!pronta.ultima) {
+            atuais.current.aoFecharParte?.({ ...pronta.audio, seq, ultima: false });
+            continue;
+          }
+          pararDeOuvir();
+          pararTrilhas(aberto);
+          if (microfone.current === aberto) microfone.current = null;
+          if (parte.current?.seq === seq) {
+            parte.current = null;
+            abrirParte.current = null;
+            fluxoGravado.current = null;
+          }
+          mudarEstado("parado");
+          setSegundos(0);
+          atuais.current.aoFecharParte?.({ ...pronta.audio, seq, ultima: true });
+          // Fora do modo em partes, a duração é a da gravação inteira, como antes.
+          atuais.current.aoTerminar(atuais.current.fatiaSegundos ? pronta.audio : { ...pronta.audio, duracaoMs: Date.now() - comecouEm - pausadoNaGravacao.current });
+          return;
+        }
+      };
       // Uma parte: um MediaRecorder novo no mesmo fluxo, com os pedaços SÓ dela
       // (nenhum gravador empurra para a lista de outro). Na gravação de uma
       // parte só (o ditado, a voz), é o gravador de sempre.
-      const abrirParte = (seq: number) => {
+      const abrir = (seq: number): Parte => {
         const novo = mimeType ? new MediaRecorder(fluxo, { mimeType, audioBitsPerSecond }) : new MediaRecorder(fluxo, { audioBitsPerSecond });
         const pedacos: Blob[] = [];
-        const parteComecouEm = Date.now();
+        const nova: Parte = { seq, gravador: novo, comecouEm: Date.now(), pausado: 0, paradaEm: 0, trocada: false, reabrir: false, encerrar: false };
         novo.ondataavailable = evento => { if (evento.data.size) pedacos.push(evento.data); };
         novo.onstop = () => {
+          vivos.current.delete(novo);
+          if (!vigente()) return;
           const blob = new Blob(pedacos, { type: novo.mimeType || "audio/webm" });
-          const audio = { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs: Date.now() - parteComecouEm - pausadoNaParte.current };
-          // Troca de parte: a gravação continua, já na parte seguinte.
-          if (trocandoDeParte.current && gravador.current === novo && !pararNaTroca.current) {
-            trocandoDeParte.current = false;
-            abrirParte(seq + 1);
-            atuais.current.aoFecharParte?.({ ...audio, seq, ultima: false });
-            return;
+          // A parte termina quando o hook mandou parar, e não quando o navegador
+          // acaba de fechar o arquivo: a seguinte já gravava desde a troca.
+          const duracaoMs = (nova.paradaEm || Date.now()) - nova.comecouEm - nova.pausado;
+          // O fim que não veio de uma troca (o Parar, o limite ou o navegador
+          // que parou sozinho) é o da gravação.
+          let ultima = !nova.trocada;
+          // A troca sem o segundo gravador: a seguinte só abre agora. O Parar que
+          // chegou no meio, ou o gravador recusado de novo, fazem desta a última.
+          if (nova.reabrir && !ultima) {
+            if (nova.encerrar) ultima = true;
+            else {
+              try {
+                parte.current = abrir(seq + 1);
+              } catch {
+                ultima = true;
+              }
+            }
           }
-          trocandoDeParte.current = false;
-          pararNaTroca.current = false;
-          pararTrilhas(aberto);
-          if (microfone.current === aberto) microfone.current = null;
-          if (gravador.current === novo) gravador.current = null;
-          mudarEstado("parado");
-          setSegundos(0);
-          atuais.current.aoFecharParte?.({ ...audio, seq, ultima: true });
-          // Fora do modo em partes, a duração é a da gravação inteira, como antes.
-          atuais.current.aoTerminar(atuais.current.fatiaSegundos ? audio : { ...audio, duracaoMs: Date.now() - comecouEm - pausadoNaGravacao.current });
+          prontas.set(seq, { audio: { blob, mimeType: tipoParaOServidor(blob.type), duracaoMs }, ultima });
+          entregar();
         };
         novo.start(FATIA_MS);
-        gravador.current = novo;
-        inicioDaParte.current = parteComecouEm;
-        pausadoNaParte.current = 0;
+        vivos.current.add(novo);
+        return nova;
       };
       pausaComecou.current = 0;
       pausadoNaGravacao.current = 0;
       limiteAvisado.current = false;
-      abrirParte(0);
+      parte.current = abrir(0);
+      abrirParte.current = abrir;
+      fluxoGravado.current = fluxo;
       microfone.current = aberto;
       inicio.current = comecouEm;
       setSegundos(0);
@@ -322,6 +488,8 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       return () => window.clearInterval(vigia);
     }
     if (estado !== "gravando") return;
+    // O atraso do tique conta a partir de agora: a pausa que acabou de terminar não é a aba em segundo plano.
+    ultimaConferencia.current = Date.now();
     const relogio = window.setInterval(() => {
       const limite = atuais.current.limiteSegundos;
       const decorridos = Math.floor((Date.now() - inicio.current - pausadoNaGravacao.current) / 1000);
@@ -336,14 +504,14 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
         }
         return;
       }
-      const fatia = atuais.current.fatiaSegundos;
-      const atual = gravador.current;
-      if (fatia && atual?.state === "recording" && !trocandoDeParte.current && Date.now() - inicioDaParte.current - pausadoNaParte.current >= fatia * 1000) {
-        trocandoDeParte.current = true;
-        atual.stop();
-      }
+      conferirATroca();
     }, RELOGIO_MS);
-    return () => window.clearInterval(relogio);
+    return () => {
+      window.clearInterval(relogio);
+      // Pausada, parando ou fora da tela, o detector solta o fluxo; na volta à
+      // gravação, a hora da troca o abre de novo.
+      pararDeOuvir();
+    };
   }, [estado]);
 
   return { estado, segundos, comecar, parar, descartar, pausar, continuar };
