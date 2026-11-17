@@ -9,7 +9,7 @@ const ambiente = vi.hoisted(() => ({ ENV: { llmApiKey: "chave-de-teste-que-nunca
 vi.mock("./_core/env", () => ambiente);
 
 const { gerarComAudioNoGemini, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, raciocinioBaixo } = await import("./gemini");
-const { contextoParaAProxima, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, transcreverFatia } = await import("./transcricao-de-fatia");
+const { contextoParaAProxima, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, TemposForaDaParteError, transcreverFatia } = await import("./transcricao-de-fatia");
 
 let fetchOriginal: typeof globalThis.fetch;
 let pedidos: Array<{ url: string; corpo: Record<string, any> }> = [];
@@ -177,6 +177,27 @@ describe("normalizarSegmentos", () => {
     expect(() => normalizarSegmentos({ texto: "oi" }, 0, 600)).toThrow("A transcrição da parte veio sem a lista de falas.");
     expect(() => normalizarSegmentos(null, 0, 600)).toThrow();
   });
+
+  it("item fora do formato (sem \"texto\" em texto) não é silêncio: todos assim é erro; só alguns, aviso com a contagem", () => {
+    // A fala numa chave errada, numa parte curta (a última da reunião): sem o
+    // erro, a parte ficava transcrita sem fala, e a montagem não abria lacuna.
+    expect(() => normalizarSegmentos({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", text: "oi" }] }, 0, 20))
+      .toThrow("A transcrição da parte veio com falas fora do formato.");
+    expect(() => normalizarSegmentos({ segmentos: [null, { inicio: 1, fim: 2, falante: "F1", texto: 7 }, "oi"] }, 0, 600))
+      .toThrow("A transcrição da parte veio com falas fora do formato.");
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: "00:01", fim: "00:02", falante: "F1", texto: "fica" },
+      { inicio: "00:03", fim: "00:04", falante: "F1", text: "sai" },
+    ] }, 0, 600);
+    expect(s.map(x => x.texto)).toEqual(["fica"]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("1 de 2 itens vieram fora do formato"));
+  });
+
+  it("texto vazio continua sendo silêncio: sem erro e sem aviso de formato", () => {
+    expect(normalizarSegmentos({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", texto: "" }] }, 0, 20)).toEqual([]);
+    expect(normalizarSegmentos({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", texto: "  " }] }, 0, 20)).toEqual([]);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -250,6 +271,84 @@ describe("tempo da fala em 'MM:SS'", () => {
     ] }, 0, 600);
     expect(s.map(x => [x.inicio, x.fim])).toEqual([[0, 12], [75, 130], [590, 602]]);
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("lidos como segundos"));
+  });
+
+  it("(a) a resposta MMSS antiga com o último fim depois do fim da parte (10:05 escrito 1005) segue em MMSS, e o fim fica preso", () => {
+    // Quem decide são os inícios: um fim 3 s depois do teto, nessa leitura, não
+    // devolve a parte inteira aos segundos (o defeito de 17/11 de volta).
+    const resposta = minutos(i => i * 100);
+    resposta.segmentos[9].fim = 1005;
+    const s = normalizarSegmentos(resposta, 0, 600);
+    expect(s.map(x => x.inicio)).toEqual([0, 60, 120, 180, 240, 300, 360, 420, 480, 540]);
+    expect(s[9]).toMatchObject({ inicio: 540, fim: 602, texto: "Minute 10." });
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("lidos como minutos e segundos juntos"));
+  });
+
+  it("(b) segundos de verdade, com poucas falas e um início 1 s depois do teto, ficam em segundos, e esse início fica preso no fim", () => {
+    // Todos os números têm a forma MMSS (300 seria 3:00), mas um início só,
+    // 1 s depois do teto, não é evidência: lidos como MMSS, 300 e 340 encolhiam.
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: 10, fim: 20, falante: "F1", texto: "a" },
+      { inicio: 300, fim: 340, falante: "F2", texto: "b" },
+      { inicio: 603, fim: 604, falante: "F1", texto: "c" },
+    ] }, 0, 600);
+    expect(s.map(x => [x.inicio, x.fim])).toEqual([[10, 20], [300, 340], [602, 602]]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("lidos como segundos"));
+  });
+
+  it("a evidência para MMSS: dois inícios mais de 30 s depois do fim, ou um mais de 1 min depois do teto; um só, perto do fim, não basta", () => {
+    // 6:31 e 6:45 escritos 631 e 645: o modelo parou antes dos 7 min.
+    const dois = normalizarSegmentos({ segmentos: [
+      { inicio: 0, fim: 10, falante: "F1", texto: "a" },
+      { inicio: 245, fim: 250, falante: "F2", texto: "b" },
+      { inicio: 631, fim: 640, falante: "F1", texto: "c" },
+      { inicio: 645, fim: 659, falante: "F2", texto: "d" },
+    ] }, 0, 600);
+    expect(dois.map(x => [x.inicio, x.fim])).toEqual([[0, 10], [165, 170], [391, 400], [405, 419]]);
+    // 7:05 escrito 705: um início só, mas mais de 1 min depois do teto.
+    const umLonge = normalizarSegmentos({ segmentos: [
+      { inicio: 30, fim: 45, falante: "F1", texto: "a" },
+      { inicio: 705, fim: 712, falante: "F2", texto: "b" },
+    ] }, 0, 600);
+    expect(umLonge.map(x => [x.inicio, x.fim])).toEqual([[30, 45], [425, 432]]);
+    // Um início só, 40 s depois do fim: segundos, preso no fim.
+    const umPerto = normalizarSegmentos({ segmentos: [
+      { inicio: 30, fim: 45, falante: "F1", texto: "a" },
+      { inicio: 640, fim: 650, falante: "F2", texto: "b" },
+    ] }, 0, 600);
+    expect(umPerto.map(x => [x.inicio, x.fim])).toEqual([[30, 45], [602, 602]]);
+  });
+
+  it("parte de 12 min (o máximo aceito): \"11:30\" e \"11:59\" saem em 690 e 719, sem aviso, e o prompt vai até \"12:00\"", () => {
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: "11:30", fim: "11:45", falante: "F1", texto: "quase no fim" },
+      { inicio: "11:59", fim: "12:00", falante: "F2", texto: "no fim" },
+    ] }, 0, 720);
+    expect(s.map(x => [x.inicio, x.fim])).toEqual([[690, 705], [719, 720]]);
+    expect(console.warn).not.toHaveBeenCalled();
+    const prompt = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 720 });
+    expect(prompt).toContain('de "00:00" a "12:00"');
+    expect(prompt).toContain("O trecho tem 12:00 de áudio: transcreva até o fim dele.");
+  });
+
+  it("a última parte, curta (37 s): \"00:36\" sai em 36, e o fim \"00:41\" fica preso em 39 (a duração e a folga), sem aviso", () => {
+    const s = normalizarSegmentos({ segmentos: [{ inicio: "00:36", fim: "00:41", falante: "F1", texto: "Tchau." }] }, 0, 37);
+    expect(s).toEqual([{ inicio: 36, fim: 39, falante: "F1", texto: "Tchau." }]);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("parte curta vazia (20 s) é silêncio, sem aviso", () => {
+    expect(normalizarSegmentos({ segmentos: [] }, 0, 20)).toEqual([]);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("parte com menos de 1 s (o resto da gravação): o prompt diz \"menos de 1 segundo\", e não que o trecho tem 00:00 de áudio", () => {
+    const prompt = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 0.4 });
+    expect(prompt).toContain("O trecho tem menos de 1 segundo de áudio: transcreva até o fim dele.");
+    expect(prompt).toContain('de "00:00" a "00:01"');
+    expect(prompt).not.toContain('a "00:00"');
+    expect(promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 0.7 })).toContain("O trecho tem menos de 1 segundo de áudio");
+    expect(promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 1 })).toContain("O trecho tem 00:01 de áudio");
   });
 
   it("a fala no fim da parte, e a que começa depois dele, ficam presas no fim, com o texto e na ordem", () => {
@@ -411,5 +510,52 @@ describe("transcreverFatia", () => {
     responder({ corpo: { candidates: [{ finishReason: "STOP", content: { parts: [{ text: "não é json" }] } }] } });
     await expect(transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", inicioSegundos: 0, duracaoSegundos: 600 }))
       .rejects.toThrow("A transcrição da parte veio num formato inválido.");
+  });
+
+  it("as falas todas fora do formato são erro como o JSON inválido, também na última tentativa (a fila abre a lacuna)", async () => {
+    responder({ corpo: respostaJson({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", text: "oi" }] }) });
+    await expect(transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", inicioSegundos: 1200, duracaoSegundos: 20, ultimaTentativa: true }))
+      .rejects.toThrow("A transcrição da parte veio com falas fora do formato.");
+  });
+
+  const parteDe10Min = { audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "pt-BR", inicioSegundos: 600, duracaoSegundos: 600 };
+
+  it("todas as falas presas no fim: antes da última tentativa é erro passageiro; na última, a parte entra com as contagens", async () => {
+    responder({ corpo: respostaJson({ segmentos: [
+      { inicio: "12:00", fim: "12:05", falante: "F1", texto: "um" },
+      { inicio: "13:00", fim: "13:05", falante: "F2", texto: "dois" },
+      { inicio: "14:00", fim: "14:05", falante: "F1", texto: "três" },
+    ] }) });
+    const erro = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: false }).catch(e => e);
+    expect(erro).toBeInstanceOf(TemposForaDaParteError);
+    expect(erro.tempos).toEqual({ presasNoFim: 3, semTempo: 0, total: 3 });
+    const r = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: true });
+    expect(r.segmentos.map(s => [s.inicio, s.texto])).toEqual([[1202, "um"], [1202, "dois"], [1202, "três"]]);
+    expect(r.tempos).toEqual({ presasNoFim: 3, semTempo: 0, total: 3 });
+  });
+
+  it("todas as falas sem tempo legível: erro antes da última tentativa; na última, a parte entra com as contagens", async () => {
+    responder({ corpo: respostaJson({ segmentos: [
+      { inicio: "?", fim: "", falante: "F1", texto: "um" },
+      { inicio: "agora", fim: "x", falante: "F2", texto: "dois" },
+    ] }) });
+    await expect(transcreverFatia({ ...parteDe10Min, ultimaTentativa: false })).rejects.toBeInstanceOf(TemposForaDaParteError);
+    const r = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: true });
+    expect(r.segmentos.map(s => [s.inicio, s.texto])).toEqual([[600, "um"], [600, "dois"]]);
+    expect(r.tempos).toEqual({ presasNoFim: 0, semTempo: 2, total: 2 });
+  });
+
+  it("metade das falas fora, ou uma fala só fora: a parte entra sem marca, em qualquer tentativa", async () => {
+    responder({ corpo: respostaJson({ segmentos: [
+      { inicio: "09:50", fim: "09:55", falante: "F1", texto: "dentro" },
+      { inicio: "10:30", fim: "10:35", falante: "F2", texto: "fora" },
+    ] }) });
+    const metade = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: false });
+    expect(metade.segmentos).toHaveLength(2);
+    expect(metade).not.toHaveProperty("tempos");
+    responder({ corpo: respostaJson({ segmentos: [{ inicio: "10:30", fim: "10:35", falante: "F1", texto: "só uma" }] }) });
+    const uma = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: false });
+    expect(uma.segmentos).toHaveLength(1);
+    expect(uma).not.toHaveProperty("tempos");
   });
 });

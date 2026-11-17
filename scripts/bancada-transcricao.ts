@@ -65,10 +65,13 @@ for (const [seq, arquivo] of partes.entries()) {
   const duracao = medida ?? 600;
   const comeco = Date.now();
   try {
-    const { segmentos, modelo } = await transcreverFatia({ audio, mimeType, idioma, inicioSegundos: inicio, duracaoSegundos: duracao, anterior });
+    // A bancada tenta uma vez só, então é sempre a última tentativa: a parte com
+    // os tempos degradados entra, como na fila, e as contagens vão na medida.
+    const { segmentos, modelo, tempos } = await transcreverFatia({ audio, mimeType, idioma, inicioSegundos: inicio, duracaoSegundos: duracao, anterior, ultimaTentativa: true });
     const vozes = [...new Set(segmentos.map(s => s.falante))];
-    console.log(`parte ${seq + 1}: ${modelo} · ${Math.round((Date.now() - comeco) / 1000)} s · ${segmentos.length} falas · vozes ${vozes.join(", ") || "nenhuma"}`);
-    resultado.push({ parte: seq + 1, modelo, segundos: (Date.now() - comeco) / 1000, falas: segmentos.length, vozes, duracaoChutada: medida === null });
+    const degradados = tempos ? ` · TEMPOS DEGRADADOS: ${tempos.presasNoFim} presas no fim e ${tempos.semTempo} sem tempo, de ${tempos.total}` : "";
+    console.log(`parte ${seq + 1}: ${modelo} · ${Math.round((Date.now() - comeco) / 1000)} s · ${segmentos.length} falas · vozes ${vozes.join(", ") || "nenhuma"}${degradados}`);
+    resultado.push({ parte: seq + 1, modelo, segundos: (Date.now() - comeco) / 1000, falas: segmentos.length, vozes, duracaoChutada: medida === null, ...(tempos ? { tempos } : {}) });
     fatias.push({ seq, inicioSegundos: inicio, duracaoSegundos: duracao, segmentos });
     anterior = contextoParaAProxima(segmentos, anterior);
   } catch (erro) {

@@ -22,6 +22,7 @@ const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, mee
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const { GeminiIndisponivelError } = await import("./gemini");
+const { TemposForaDaParteError } = await import("./transcricao-de-fatia");
 const { marcarReunioesInterrompidas, iniciarReprocessamento, REGRA_DOS_ROTULOS_NA_EXTRACAO, ReprocessamentoRecusado } = await import("./meeting-service");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
@@ -170,6 +171,30 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     [p] = await partesDe(id);
     expect(p).toMatchObject({ status: "failed", attempts: 3 });
     expect(transcreverFatia).toHaveBeenCalledTimes(3);
+  });
+
+  it("tempos quase todos fora da parte: volta à fila antes da última tentativa; na última, entra transcrita com as contagens no result", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0);
+    const tempos = { presasNoFim: 3, semTempo: 0, total: 3 };
+    // O dublê faz o que a G6 faz: lança antes da última tentativa e, na última,
+    // devolve as falas empilhadas no fim, com as contagens.
+    transcreverFatia.mockImplementation(async ({ ultimaTentativa }: { ultimaTentativa?: boolean }) => {
+      if (!ultimaTentativa) throw new TemposForaDaParteError(tempos);
+      return { segmentos: [{ inicio: 602, fim: 602, falante: "F1", texto: "Empilhada no fim." }], idioma: "pt-BR", modelo: "gemini-teste", tempos };
+    });
+    await rodar();
+    let [p] = await partesDe(id);
+    expect(p).toMatchObject({ status: "received", attempts: 1, lastError: "TEMPOS_FORA_DA_PARTE", lockToken: null });
+    for (let i = 0; i < 2; i++) {
+      await (await db()).update(meetingAudioSlices).set({ lockedUntil: AGORA() - 1 }).where(eq(meetingAudioSlices.meetingId, id));
+      await rodar();
+    }
+    [p] = await partesDe(id);
+    expect(transcreverFatia.mock.calls.map(([entrada]) => entrada.ultimaTentativa)).toEqual([false, false, true]);
+    expect(p).toMatchObject({ status: "transcribed", attempts: 3, lastError: null });
+    // Uma consulta acha a parte degradada pelas contagens no result.
+    expect(p.result).toEqual({ segmentos: [{ inicio: 602, fim: 602, falante: "F1", texto: "Empilhada no fim." }], contexto: expect.any(Object), tempos });
   });
 
   it("a extração recebe o texto montado inteiro, e o contador cobra só o transcrito (a lacuna não)", async () => {

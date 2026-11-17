@@ -7,7 +7,7 @@ import { extrairDadosDaReuniao, gravarResultadoDaReuniao, mensagemDaFalha, Reuni
 import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
 import { entradaDoResumo } from "./resumo-da-reuniao";
 import { TAMANHO_MAXIMO_DA_PARTE } from "./fatias-de-reuniao";
-import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento } from "./transcricao-de-fatia";
+import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento } from "./transcricao-de-fatia";
 
 /**
  * A fila de transcrição da reunião gravada em partes (G7 do desenho do
@@ -20,7 +20,9 @@ import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, tra
  * Dois tipos de trabalho, cada um com reserva atômica (UPDATE condicional com o
  * token da execução, conferido em toda escrita):
  * 1. a PARTE 'received': transcrita pela G6 (transcreverFatia), na ordem, com o
- *    contexto da anterior (vozes e últimas falas), e marcada 'transcribed';
+ *    contexto da anterior (vozes e últimas falas), e marcada 'transcribed' (a
+ *    que volta com os tempos quase todos fora dela tenta de novo, e na última
+ *    tentativa entra com as contagens em result.tempos);
  * 2. a REUNIÃO encerrada ('uploading') com todas as partes resolvidas: monta a
  *    transcrição, extrai (em janelas, G8), grava pelo mesmo caminho do envio
  *    único (gravarResultadoDaReuniao) e avisa quem se pendurou em aoFicarPronta.
@@ -111,6 +113,7 @@ function codigoDoErro(erro: unknown): string {
   if (erro instanceof GeminiRecusouChamadaError) return "IA_RECUSOU";
   if (erro instanceof GeminiRespostaCortadaError) return "IA_CORTOU";
   if (erro instanceof GeminiIndisponivelError) return "IA_INDISPONIVEL";
+  if (erro instanceof TemposForaDaParteError) return "TEMPOS_FORA_DA_PARTE";
   if (ehErroDeBancoIndisponivel(erro)) return "BANCO_INDISPONIVEL";
   return "ERRO";
 }
@@ -237,21 +240,27 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
     .innerJoin(meetings, and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId)))
     .where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token))).limit(1);
   if (!linha) return;
+  // A reserva já somou esta tentativa: na última, a G6 aceita a parte com os
+  // tempos degradados (e devolve as contagens) em vez de pedir outra.
+  const ultimaTentativa = linha.attempts >= TENTATIVAS_POR_PARTE;
   try {
     const { inicioMs, anterior } = await contextoDaAnterior(db, parte.meetingId, parte.seq);
     const audio = await storageGetBytes(linha.storageKey, TAMANHO_MAXIMO_DA_PARTE);
-    const { segmentos, modelo } = await comVagaDeIA(() => transcreverFatia({
+    const { segmentos, modelo, tempos } = await comVagaDeIA(() => transcreverFatia({
       audio, mimeType: linha.mimeType, idioma: linha.idioma, inicioSegundos: inicioMs / 1000, duracaoSegundos: linha.durationMs / 1000, anterior,
+      ultimaTentativa,
     }));
     const contexto = contextoParaAProxima(segmentos, anterior);
     // Só grava quem ainda tem a reserva: outra instância que a retomou depois
-    // de vencer, ou a exclusão da reunião, vencem esta escrita.
+    // de vencer, ou a exclusão da reunião, vencem esta escrita. A parte aceita
+    // com os tempos degradados leva as contagens (`tempos`) no result, para
+    // uma consulta achá-la.
     await db.update(meetingAudioSlices).set({
-      status: "transcribed", result: { segmentos, contexto }, model: modelo.slice(0, 80), offsetMs: inicioMs,
+      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}) }, model: modelo.slice(0, 80), offsetMs: inicioMs,
       lastError: null, lockToken: null, lockedUntil: null, updatedAt: Date.now(),
     }).where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token)));
   } catch (erro) {
-    const definitivo = ehDefinitivo(erro) || linha.attempts >= TENTATIVAS_POR_PARTE;
+    const definitivo = ehDefinitivo(erro) || ultimaTentativa;
     console.error(`[Fila] a parte ${parte.seq} de uma reunião falhou (${definitivo ? "sem nova tentativa" : "volta à fila"}):`, descreverErroDeBanco(erro));
     // Na falha passageira a reserva vira uma espera curta e crescente antes da
     // próxima tentativa; na definitiva, a parte vira lacuna na montagem.

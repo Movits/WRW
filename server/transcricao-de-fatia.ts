@@ -38,6 +38,12 @@ const FALAS_DE_CONTEXTO = 4;
 const LETRAS_DE_CONTEXTO = 1_200;
 // Folga para o modelo marcar um fim um pouco depois do fim declarado da fatia.
 const FOLGA_DO_FIM_SEGUNDOS = 2;
+// A evidência de que os números vieram com os minutos e os segundos juntos
+// (leituraDosNumeros): dois inícios mais de 30 s depois do fim da parte, ou um
+// mais de 1 min depois do teto. Um início poucos segundos depois do fim é comum
+// em segundos de verdade (o arredondamento, a última fala) e não decide nada.
+const DOIS_INICIOS_ALEM_DO_FIM_SEGUNDOS = 30;
+const UM_INICIO_ALEM_DO_TETO_SEGUNDOS = 60;
 const FALANTE_VALIDO = /^F([1-9]\d?)$/;
 // O tempo que o modelo escreve: "MM:SS" ou, a partir de uma hora, "H:MM:SS"
 // (décimos aceitos na leitura, embora o esquema não os peça). O texto só com
@@ -87,7 +93,11 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
   // As partes têm até 12 min (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS); o "H:MM:SS"
   // só vale para a bancada, que aceita parte de qualquer tamanho.
   const comHoras = input.duracaoSegundos >= 3600;
-  const fimDoTrecho = tempoEmTexto(input.duracaoSegundos, comHoras);
+  // A última parte é o resto da gravação e pode ter menos de 1 s: "o trecho tem
+  // 00:00 de áudio", de "00:00" a "00:00", não é pedido que o modelo entenda.
+  const menosDeUmSegundo = input.duracaoSegundos < 1;
+  const fimDoTrecho = tempoEmTexto(menosDeUmSegundo ? 1 : input.duracaoSegundos, comHoras);
+  const tamanhoDoTrecho = menosDeUmSegundo ? "menos de 1 segundo" : fimDoTrecho;
   const formato = comHoras
     ? '"H:MM:SS" (horas, minutos e segundos: "0:00:07", "0:01:05", "1:02:30")'
     : '"MM:SS" (minutos e segundos, cada um com dois dígitos: "00:07", "01:05", "09:58")';
@@ -96,7 +106,7 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
     `O idioma predominante esperado é ${nomeDoIdioma(input.idioma)}; transcreva cada fala no idioma em que foi dita, sem traduzir.`,
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
-    `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${fimDoTrecho} de áudio: transcreva até o fim dele.`,
+    `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${tamanhoDoTrecho} de áudio: transcreva até o fim dele.`,
     '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo. Nunca use nomes de pessoas no rótulo.',
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
     "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
@@ -156,23 +166,54 @@ function minutosESegundosJuntos(n: number): number | null {
 
 /**
  * Como ler os tempos que vieram como NÚMERO: o formato de antes desta correção,
- * ou um modelo que fuja do texto pedido. A leitura só vale se for coerente com
- * a parte inteira:
- * - em segundos, se nenhuma fala começa depois do fim da parte (o fim que passa
- *   um pouco dele é comum, e fica preso nele);
- * - em minutos e segundos juntos (1:00 escrito 100, o defeito de 17/11), se
- *   alguma começa depois do fim e TODOS os tempos cabem na parte nessa leitura;
- * - se nenhuma das duas é coerente, em segundos, e o que passa do fim fica
- *   preso nele, sem perder a fala.
- * Na dúvida (todos cabem nas duas leituras), fica em segundos: a resposta
- * antiga com fala só nos primeiros 6 min de cada parte não se distingue, e é o
- * esquema em texto que evita o caso.
+ * ou um modelo que fuja do texto pedido. Quem decide são os INÍCIOS, nos dois
+ * sentidos: o fim que passa do fim da parte fica preso nele nas duas leituras,
+ * como no tempo em texto, e não muda a leitura da parte inteira.
+ * - Em minutos e segundos juntos (1:00 escrito 100, o defeito de 17/11) só com
+ *   evidência clara: lidos em segundos, dois inícios passam mais de 30 s do fim
+ *   da parte, ou um passa mais de 1 min do teto (no defeito, 700 a 959 numa
+ *   parte de 600). E a leitura tem de ser possível: todo número com os segundos
+ *   abaixo de 60 (105, e não 175) e todo início dentro da parte nessa leitura.
+ * - Senão, em segundos: o início que passa poucos segundos do fim é comum (o
+ *   arredondamento, a última fala) e fica preso nele, sem perder a fala. Lidos
+ *   como minutos e segundos, os segundos de verdade encolheriam (300 viraria
+ *   180).
+ * Na dúvida, fica em segundos: a resposta antiga com fala só nos primeiros 6 min
+ * de cada parte não se distingue, e é o esquema em texto que evita o caso.
  */
-function leituraDosNumeros(inicios: number[], todos: number[], teto: number): { ler: (n: number) => number; juntos: boolean } {
+function leituraDosNumeros(inicios: number[], todos: number[], duracao: number): { ler: (n: number) => number; juntos: boolean } {
   const emSegundos = { ler: (n: number) => n, juntos: false };
-  if (inicios.every(n => n <= teto)) return emSegundos;
-  if (!todos.every(n => { const lido = minutosESegundosJuntos(n); return lido !== null && lido <= teto; })) return emSegundos;
+  const teto = duracao + FOLGA_DO_FIM_SEGUNDOS;
+  const bemDepoisDoFim = inicios.filter(n => n > duracao + DOIS_INICIOS_ALEM_DO_FIM_SEGUNDOS).length;
+  const evidencia = bemDepoisDoFim >= 2 || inicios.some(n => n > teto + UM_INICIO_ALEM_DO_TETO_SEGUNDOS);
+  if (!evidencia) return emSegundos;
+  if (!todos.every(n => minutosESegundosJuntos(n) !== null)) return emSegundos;
+  if (!inicios.every(n => (minutosESegundosJuntos(n) ?? Infinity) <= teto)) return emSegundos;
   return { ler: n => minutosESegundosJuntos(n) ?? n, juntos: true };
+}
+
+/** As falas da parte cujo início não deu para usar, de quantas vieram com texto. */
+export type TemposDaParte = { presasNoFim: number; semTempo: number; total: number };
+
+/**
+ * Parte com os tempos degradados: de 2 falas em diante, mais da metade com o
+ * início depois do fim da parte (presa nele) ou ilegível (com o início da
+ * anterior). As falas ficam empilhadas num ponto só.
+ */
+export function temposDegradados(tempos: TemposDaParte): boolean {
+  return tempos.total >= 2 && tempos.presasNoFim + tempos.semTempo > tempos.total / 2;
+}
+
+/**
+ * Erro passageiro: a transcrição da parte veio com os tempos degradados. A fila
+ * tenta de novo; na última tentativa (transcreverFatia com `ultimaTentativa`),
+ * a parte é aceita, porque o texto não se perde, com as contagens no result.
+ */
+export class TemposForaDaParteError extends Error {
+  constructor(readonly tempos: TemposDaParte) {
+    super(`A transcrição da parte veio com ${tempos.presasNoFim + tempos.semTempo} de ${tempos.total} falas com o tempo fora dela ou ilegível.`);
+    this.name = "TemposForaDaParteError";
+  }
 }
 
 /**
@@ -184,23 +225,38 @@ function leituraDosNumeros(inicios: number[], todos: number[], teto: number): { 
  * presas no fim, a sem tempo logo depois da anterior) ficam na ordem em que o
  * modelo as escreveu. Falante fora do formato `F<n>` vira o último falante
  * válido (ou F1): o rótulo é dado de tela, e um nome inventado pelo modelo não
- * pode ir ao banco.
+ * pode ir ao banco. O item sem "texto" em texto (outra chave, número, item
+ * nulo) está fora do formato, o que é diferente do texto vazio (silêncio): se
+ * todos vieram assim, é erro, e não parte em silêncio.
  */
 export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): Segmento[] {
+  return normalizarComContagens(bruto, inicioSegundos, duracaoSegundos).segmentos;
+}
+
+/** O mesmo que normalizarSegmentos, com as contagens das falas cujo início não deu para usar. */
+function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): { segmentos: Segmento[]; tempos: TemposDaParte } {
   const itens = (bruto as { segmentos?: unknown })?.segmentos;
   if (!Array.isArray(itens)) throw new Error("A transcrição da parte veio sem a lista de falas.");
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
   const falas: Array<{ inicio: TempoLido | null; fim: TempoLido | null; falante: unknown; texto: string }> = [];
+  let foraDoFormato = 0;
   for (const item of itens) {
     const { inicio, fim, falante, texto } = (item ?? {}) as Record<string, unknown>;
-    if (typeof texto !== "string" || !texto.trim()) continue;
+    if (typeof texto !== "string") {
+      foraDoFormato++;
+      continue;
+    }
+    if (!texto.trim()) continue;
     falas.push({ inicio: lerTempo(inicio), fim: lerTempo(fim), falante, texto: texto.trim() });
   }
+  // Tudo fora do formato não é silêncio: a parte ficaria transcrita sem fala, e
+  // a montagem não abriria lacuna. Passageiro, como o JSON inválido.
+  if (itens.length && foraDoFormato === itens.length) throw new Error("A transcrição da parte veio com falas fora do formato.");
   // Os números se leem juntos, porque um só não diz se 105 é 1:45 ou 1:05.
   const numeros = (lidos: Array<TempoLido | null>) => lidos.filter((t): t is TempoLido => !!t?.numero).map(t => t.segundos);
   const iniciosEmNumero = numeros(falas.map(f => f.inicio));
   const todosEmNumero = numeros(falas.flatMap(f => [f.inicio, f.fim]));
-  const leitura = leituraDosNumeros(iniciosEmNumero, todosEmNumero, teto);
+  const leitura = leituraDosNumeros(iniciosEmNumero, todosEmNumero, duracaoSegundos);
   const emSegundos = (t: TempoLido | null) => (t === null ? null : t.numero ? leitura.ler(t.segundos) : t.segundos);
 
   const segmentos: Segmento[] = [];
@@ -230,12 +286,13 @@ export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, dura
   // Avisos para quem acompanha a bancada e o log (só contagens, nunca a fala):
   // o rótulo trocado funde vozes, o tempo fora do formato pede atenção ao
   // modelo, e uma parte longa sem fala nenhuma pode ser falha dele, não silêncio.
+  if (foraDoFormato) console.warn(`[Transcrição] ${foraDoFormato} de ${itens.length} itens vieram fora do formato (sem "texto" em texto) e ficaram de fora`);
   if (todosEmNumero.length) console.warn(`[Transcrição] ${todosEmNumero.length} tempos vieram como número, e não como "MM:SS"; lidos como ${leitura.juntos ? "minutos e segundos juntos (105 = 1:05)" : "segundos"}`);
   if (presasNoFim) console.warn(`[Transcrição] ${presasNoFim} de ${segmentos.length} falas começavam depois do fim da parte (${Math.round(duracaoSegundos)} s) e ficaram presas nele`);
   if (semTempo) console.warn(`[Transcrição] ${semTempo} de ${segmentos.length} falas vieram sem tempo legível e ficaram com o início da anterior`);
   if (rotulosTrocados) console.warn(`[Transcrição] ${rotulosTrocados} de ${segmentos.length} falas vieram sem rótulo F<n> e ficaram com o falante anterior`);
   if (!segmentos.length && duracaoSegundos > 30) console.warn(`[Transcrição] parte de ${Math.round(duracaoSegundos)} s sem nenhuma fala`);
-  return segmentos.sort((a, b) => a.inicio - b.inicio);
+  return { segmentos: segmentos.sort((a, b) => a.inicio - b.inicio), tempos: { presasNoFim, semTempo, total: segmentos.length } };
 }
 
 function arredondar(segundos: number) {
@@ -253,6 +310,12 @@ export function contextoParaAProxima(segmentos: Segmento[], anterior?: ContextoD
   };
 }
 
+/**
+ * Transcreve uma parte. Com os tempos degradados (temposDegradados), lança
+ * TemposForaDaParteError para a fila tentar de novo, menos na última tentativa:
+ * aí a parte entra, porque o texto não se perde, com as contagens em `tempos`,
+ * que a fila grava no result da parte para uma consulta achar as degradadas.
+ */
 export async function transcreverFatia(input: {
   audio: Buffer;
   mimeType: string;
@@ -260,7 +323,9 @@ export async function transcreverFatia(input: {
   inicioSegundos: number;
   duracaoSegundos: number;
   anterior?: ContextoDaFatiaAnterior;
-}): Promise<{ segmentos: Segmento[]; idioma: IdiomaDaReuniao; modelo: string }> {
+  // A última tentativa da parte na fila (e a bancada, que tenta uma vez só).
+  ultimaTentativa: boolean;
+}): Promise<{ segmentos: Segmento[]; idioma: IdiomaDaReuniao; modelo: string; tempos?: TemposDaParte }> {
   const idioma = idiomaDaReuniao(input.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   const { texto, modelo } = await gerarComAudioNoGemini({
     audio: input.audio,
@@ -274,7 +339,11 @@ export async function transcreverFatia(input: {
   } catch (erro) {
     throw new Error("A transcrição da parte veio num formato inválido.", { cause: erro });
   }
-  return { segmentos: normalizarSegmentos(bruto, input.inicioSegundos, input.duracaoSegundos), idioma, modelo };
+  const { segmentos, tempos } = normalizarComContagens(bruto, input.inicioSegundos, input.duracaoSegundos);
+  if (!temposDegradados(tempos)) return { segmentos, idioma, modelo };
+  if (!input.ultimaTentativa) throw new TemposForaDaParteError(tempos);
+  console.warn(`[Transcrição] parte aceita na última tentativa com ${tempos.presasNoFim + tempos.semTempo} de ${tempos.total} falas com o tempo fora dela ou ilegível`);
+  return { segmentos, idioma, modelo, tempos };
 }
 
 /**
