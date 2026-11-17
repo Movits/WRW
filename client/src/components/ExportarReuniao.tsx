@@ -51,8 +51,13 @@ export function nomeDoArquivo(reuniao: Pick<ReuniaoExportada, "titulo" | "criada
 
 export function ExportarReuniao({ meetingId, confirmados }: {
   meetingId: string;
-  /** Quantos itens do resumo a dona confirmou: o aviso diz quantos vão no PDF. */
-  confirmados: number;
+  /**
+   * Quantos itens do resumo a dona confirmou: o aviso diz quantos vão no PDF.
+   * Null quando a tela não sabe (o resumo ainda não chegou, ou a consulta dele
+   * falhou): o aviso fica só com o texto de sempre, que já diz que vão os
+   * confirmados, sem afirmar uma contagem que o servidor pode desmentir.
+   */
+  confirmados: number | null;
 }) {
   const { t } = useTranslation();
   const [aberto, setAberto] = useState(false);
@@ -67,7 +72,7 @@ export function ExportarReuniao({ meetingId, confirmados }: {
   </>;
 }
 
-function DialogoDaExportacao({ meetingId, confirmados, aoFechar }: { meetingId: string; confirmados: number; aoFechar: () => void }) {
+function DialogoDaExportacao({ meetingId, confirmados, aoFechar }: { meetingId: string; confirmados: number | null; aoFechar: () => void }) {
   const { t, i18n } = useTranslation();
   const [exportada, setExportada] = useState<ReuniaoExportada | null>(null);
   const exportar = trpc.meetings.exportar.useMutation();
@@ -123,9 +128,9 @@ function DialogoDaExportacao({ meetingId, confirmados, aoFechar }: { meetingId: 
           <FileDown size={18} className="text-amber-300" aria-hidden="true"/>{t("meetings.export.title")}
         </h3>
         <p id={idDoAviso} className="text-sm leading-6 text-white/70">{t("meetings.export.notice")}</p>
-        <p className="mt-3 text-sm text-amber-100/85">
+        {confirmados !== null && <p className="mt-3 text-sm text-amber-100/85">
           {confirmados > 0 ? t("meetings.export.confirmedItems", { n: confirmados }) : t("meetings.export.noConfirmedItems")}
-        </p>
+        </p>}
         {exportada ? <>
           <p role="status" className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">{t("meetings.export.ready")}</p>
           {noAppInstalado && <p className="mt-2 text-xs text-white/55">{t("meetings.export.installedAppHint")}</p>}

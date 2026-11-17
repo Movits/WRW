@@ -2,9 +2,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { _reiniciarParaTestes } from "@/hooks/useImportacaoEmPartes";
 import { cortarMp3, lerBlob, type CorteDoMp3 } from "@/lib/corte-do-mp3";
 import type { OpcoesDoCorteNoWorker } from "@/lib/corte-do-mp3-no-worker";
-import { sessaoOcupada } from "@/lib/sessao-ocupada";
+import { liberarTodas, sessaoOcupada } from "@/lib/sessao-ocupada";
 import { id3v2, juntar, MPEG1_128K, quadroDeEtiqueta, quadros } from "@/test/mp3-sintetico";
 import Meetings from "./Meetings";
 
@@ -57,6 +58,7 @@ const duble = vi.hoisted(() => {
       },
     },
     enviarParte: vi.fn(),
+    guardarParte: vi.fn(),
   };
 });
 
@@ -70,7 +72,7 @@ vi.mock("@/lib/envio-das-partes", () => ({
   travaDoNavegador: async (_nome: string, trabalho: () => Promise<unknown>) => trabalho(),
 }));
 vi.mock("@/lib/partes-no-aparelho", () => ({
-  guardarParte: async () => undefined,
+  guardarParte: (...a: unknown[]) => duble.guardarParte(...a),
   apagarParte: async () => undefined,
   apagarPartesDaReuniao: async () => undefined,
   apagarTodasAsPartes: async () => undefined,
@@ -127,6 +129,8 @@ const excluir = () => duble.utils.client.meetings.delete.mutate;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A importação em curso mora fora da tela (decisão 5 da H9a): a de um teste anterior não vale aqui.
+  _reiniciarParaTestes();
   // O descarte que falhou num teste fica guardado (lib/descartes-pendentes.ts), e a retomada do seguinte o repetiria.
   localStorage.clear();
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); }
@@ -145,6 +149,7 @@ beforeEach(() => {
   encerrarGravacao().mockResolvedValue({ partes: 3 });
   excluir().mockResolvedValue({ success: true });
   duble.enviarParte.mockResolvedValue({ tipo: "recebida" });
+  duble.guardarParte.mockResolvedValue(undefined);
   vi.mocked(useAuth).mockReturnValue({
     user: { id: 1, name: "Glenda", role: "silver" },
     loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
@@ -153,6 +158,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  delete (navigator as { wakeLock?: unknown }).wakeLock;
+  // O teste que falha no meio de uma importação deixa a sessão ocupada (o
+  // ocupar é do módulo): sem isto, o seguinte falharia junto, por tabela.
+  liberarTodas();
 });
 
 function abrir(caminho = "/gravar") {
@@ -193,7 +202,8 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     }));
     expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Andamento do envio do arquivo" })).toHaveAttribute("aria-valuenow", "0");
-    expect(screen.getByText("Mantenha o app aberto até o envio terminar.")).toBeInTheDocument();
+    // O jsdom não tem Wake Lock: a tela acesa não está garantida, e o aviso diz que o envio para se ela apagar.
+    expect(screen.getByRole("note")).toHaveTextContent("Mantenha esta tela aberta e o aparelho desbloqueado até o envio terminar");
     // O formulário trava, e os botões do gravador dão lugar ao andamento.
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toBeDisabled();
@@ -288,12 +298,19 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(sessaoOcupada()).toBe(false);
   });
 
-  it("o arquivo que não pôde ser lido: o aviso da leitura, sem reunião", async () => {
-    duble.cortar.mockRejectedValue(new Error("o arquivo sumiu"));
-    abrir();
-    enviar(arquivoMp3());
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível ler o arquivo de áudio."));
-    expect(iniciarGravacao()).not.toHaveBeenCalled();
+  it("o arquivo que não pôde ser lido: o aviso da leitura, sem reunião; o motivo fica no console, para quem atende a dona", async () => {
+    const falha = new Error("o arquivo sumiu");
+    duble.cortar.mockRejectedValue(falha);
+    const consoleDeErro = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      abrir();
+      enviar(arquivoMp3());
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível ler o arquivo de áudio."));
+      expect(iniciarGravacao()).not.toHaveBeenCalled();
+      expect(consoleDeErro).toHaveBeenCalledWith(expect.stringContaining("[Importação]"), falha);
+    } finally {
+      consoleDeErro.mockRestore();
+    }
   });
 
   it("o servidor que recusa criar a reunião: o aviso no idioma da tela, e o formulário volta", async () => {
@@ -333,5 +350,185 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     enviar(new File(["som"], "reuniao.m4a", { type: "audio/m4a" }));
     await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ mimeType: "audio/m4a" })));
     expect(duble.cortar).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A revisão do pacote 4a: a parte que não chega vai de novo antes da seguinte
+ * (o arquivo é a cópia), o fim que falha não convida a mandar o arquivo de
+ * novo, a sessão só acaba no Sair, a tela fica acesa durante o envio, e sair
+ * de Reuniões no meio não para nem esconde o envio.
+ */
+describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do pacote 4a)", () => {
+  const FINS = "wrw:fins-de-gravacao-pendentes";
+  const SEM_COPIA = "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.";
+
+  it("a parte que não sobe vai de novo, lida do arquivo, antes de a seguinte entrar, mesmo sem a cópia no aparelho; o fim vai com as 3 partes", async () => {
+    duble.guardarParte.mockRejectedValue(new Error("QuotaExceededError"));
+    duble.enviarParte.mockResolvedValueOnce({ tipo: "passageira" });
+    abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("A conexão falhou. Tentando enviar de novo a parte 1 de 3…")).toBeInTheDocument();
+    expect(toast.warning).toHaveBeenCalledWith(SEM_COPIA, expect.anything());
+    // A parte 2 não entra enquanto a 1 não chegou: nada vai para o aparelho, nem para o servidor.
+    await act(async () => { await new Promise(r => setTimeout(r, 20)); });
+    expect(duble.enviarParte.mock.calls.map(c => c[1])).toEqual([0]);
+    expect(screen.getByRole("button", { name: /Cancelar envio/ })).toBeEnabled();
+    // A conexão voltou.
+    act(() => { window.dispatchEvent(new Event("online")); });
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(duble.enviarParte.mock.calls.map(c => c[1])).toEqual([0, 0, 1, 2]);
+    const bytes = async (indice: number) => new Uint8Array(await (duble.enviarParte.mock.calls[indice][2] as Blob).arrayBuffer());
+    expect(await bytes(1)).toEqual(await bytes(0));
+    // Sem a cópia no aparelho, o aviso dela sai uma vez; o arquivo inteiro chegou mesmo assim.
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`));
+  });
+
+  it("o fim que falha por rede depois de todas as partes: sem o aviso de envio que falhou; o aviso diz que o app termina sozinho, a tela vai ao detalhe e o formulário volta limpo", async () => {
+    encerrarGravacao().mockRejectedValue(new TypeError("Failed to fetch"));
+    abrir();
+    enviar(arquivoMp3());
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(
+      "O arquivo foi enviado, mas a confirmação do fim do envio ficou pendente. O app tenta de novo sozinho: não envie o arquivo outra vez.",
+      expect.objectContaining({ duration: Infinity, closeButton: true }),
+    ));
+    expect(toast.error).not.toHaveBeenCalled();
+    // O fim ficou guardado, com a conta, e a retomada o declara.
+    expect(JSON.parse(localStorage.getItem(FINS)!)).toEqual({ [VINICOLA]: { partes: 3, dona: "dona-1" } });
+    await waitFor(() => expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`));
+    expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
+    // De volta ao gravador: o formulário está limpo, e o arquivo não volta a parecer "por enviar".
+    act(() => { window.history.pushState(null, "", "/gravar"); window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("");
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("o cache da conta que sai da memória no meio (getData sem nada, e não o null do Sair) não para o envio", async () => {
+    const subir = partesPresas();
+    duble.utils.auth.me.fetch.mockResolvedValue({ openId: "dona-1" });
+    abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    // Cinco minutos sem nenhuma tela observando o auth.me: o React Query o tira do cache.
+    duble.utils.auth.me.getData.mockReturnValue(undefined);
+    await subir();
+    await subir();
+    await subir();
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(3);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("o Sair (o cache da conta em null) para o envio sem mandar o resto", async () => {
+    const subir = partesPresas();
+    abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    duble.utils.auth.me.getData.mockReturnValue(null);
+    await subir();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(1);
+    expect(encerrarGravacao()).not.toHaveBeenCalled();
+  });
+
+  it("o servidor que responde que a sessão venceu (401) para o envio, com o aviso", async () => {
+    duble.enviarParte.mockResolvedValueOnce({ tipo: "sem-sessao" });
+    abrir();
+    enviar(arquivoMp3());
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("O envio do arquivo parou porque a sessão terminou. Entre de novo, exclua da lista a reunião que ficou incompleta e envie o arquivo outra vez."));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(1);
+    expect(encerrarGravacao()).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
+  });
+
+  it("a reunião excluída em outro aparelho no meio do envio: o aviso da recusa, e o resto do arquivo não sobe", async () => {
+    duble.enviarParte.mockResolvedValueOnce({ tipo: "recusada", codigo: "SEM_REUNIAO" });
+    abrir();
+    enviar(arquivoMp3());
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio.", expect.anything()));
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
+    expect(duble.enviarParte).toHaveBeenCalledTimes(1);
+    expect(encerrarGravacao()).not.toHaveBeenCalled();
+    expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
+  });
+
+  it("a tela fica acesa enquanto o arquivo sobe (Wake Lock) e é solta no fim; com ela garantida, no computador, só a dica de manter o app aberto", async () => {
+    const sentinela = { released: false, release: vi.fn(async () => { sentinela.released = true; }) };
+    const pedir = vi.fn(async () => sentinela);
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: pedir } });
+    const subir = partesPresas();
+    abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    await waitFor(() => expect(pedir).toHaveBeenCalledWith("screen"));
+    expect(screen.getByText("Mantenha o app aberto até o envio terminar.")).toBeInTheDocument();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(sentinela.release).not.toHaveBeenCalled();
+    await subir();
+    await subir();
+    await subir();
+    await waitFor(() => expect(sentinela.release).toHaveBeenCalled());
+    expect(pedir).toHaveBeenCalledTimes(1);
+  });
+
+  it("no iPhone, mesmo com a tela acesa garantida, o aviso de manter a tela aberta durante o envio", async () => {
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: async () => ({ released: false, release: async () => {} }) } });
+    const agente = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)");
+    try {
+      const subir = partesPresas();
+      abrir();
+      enviar(arquivoMp3());
+      expect(await screen.findByRole("note")).toHaveTextContent("se a tela apagar ou você trocar de app, o envio para até você voltar");
+      // O envio termina: a sessão não fica ocupada para o teste seguinte.
+      await subir();
+      await subir();
+      await subir();
+      await waitFor(() => expect(sessaoOcupada()).toBe(false));
+    } finally {
+      agente.mockRestore();
+    }
+  });
+
+  it("sair de Reuniões no meio não para o envio: as partes seguintes sobem, o fim é declarado com o total, a URL não muda e a sessão fica ocupada até o fim", async () => {
+    const subir = partesPresas();
+    const pagina = abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    pagina.unmount();
+    expect(sessaoOcupada()).toBe(true);
+    await subir();
+    await subir();
+    expect(sessaoOcupada()).toBe(true);
+    await subir();
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(duble.enviarParte.mock.calls.map(c => c[1])).toEqual([0, 1, 2]);
+    expect(excluir()).not.toHaveBeenCalled();
+    // Quem saiu não é levada ao detalhe.
+    expect(window.location.pathname).toBe("/gravar");
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("voltar a Reuniões no meio: a tela nova mostra o andamento e o Cancelar da mesma importação, sem deixar mandar o arquivo de novo, e o Cancelar exclui a reunião dela", async () => {
+    const subir = partesPresas();
+    const pagina = abrir();
+    enviar(arquivoMp3());
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    pagina.unmount();
+    abrir();
+    expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Enviar arquivo de áudio/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Iniciar gravação/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Cancelar envio/ }));
+    expect(await screen.findByText("Cancelando o envio…")).toBeInTheDocument();
+    await subir();
+    await waitFor(() => expect(excluir()).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na WRW."));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(1);
+    expect(iniciarGravacao()).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toBeInTheDocument());
   });
 });

@@ -77,12 +77,12 @@ function retratar() {
 // A implementação entra no beforeEach: o projeto client zera os dublês antes de cada teste (mockReset).
 const imprimir = vi.fn();
 
-function abrir(props: { confirmados?: number } = {}) {
+function abrir(props: { confirmados?: number | null } = {}) {
   const queryClient = new QueryClient();
   const client = trpc.createClient({ links: [linkFalso() as never] });
   return render(<trpc.Provider client={client} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
-      <ExportarReuniao meetingId={ID} confirmados={props.confirmados ?? 3}/>
+      <ExportarReuniao meetingId={ID} confirmados={props.confirmados === undefined ? 3 : props.confirmados}/>
     </QueryClientProvider>
   </trpc.Provider>);
 }
@@ -120,6 +120,14 @@ describe("Baixar PDF — o aviso vem antes", () => {
     abrir({ confirmados: 0 });
     fireEvent.click(botaoDaPagina());
     expect(dialogo()).toHaveTextContent("Nenhum item do resumo foi confirmado ainda: o PDF leva só a transcrição.");
+  });
+
+  it("sem a contagem (o resumo ainda não chegou, ou a consulta falhou), o aviso não afirma contagem nenhuma: fica o texto que diz que vão os confirmados", () => {
+    abrir({ confirmados: null });
+    fireEvent.click(botaoDaPagina());
+    expect(dialogo()).toHaveAccessibleDescription(/e só os itens do resumo que você confirmou/);
+    expect(dialogo()).not.toHaveTextContent("só a transcrição");
+    expect(dialogo()).not.toHaveTextContent("Itens do resumo confirmados que vão no PDF");
   });
 
   it("Cancelar (ou Esc) fecha sem pedir nada ao servidor, e o foco volta ao botão", () => {

@@ -134,7 +134,7 @@ beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); m.data = undefined; }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
   // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
-  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
   // A URL escolhe o ramo da tela (lista, gravador, detalhe), e o setup limpa só
   // o state do histórico: sem isto, o detalhe aberto num teste abriria o seguinte.
   window.history.replaceState(null, "", "/meetings");
@@ -271,12 +271,26 @@ describe("Detalhe da reunião — baixar o PDF (H8)", () => {
   it("pronta, o detalhe tem o botão, e o aviso diz quantos itens confirmados vão no PDF; nada é pedido antes de confirmar", () => {
     duble.resumoGuardado.mockReturnValue({
       data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [{ id: "i1", status: "confirmed" }, { id: "i2", status: "pending" }, { id: "i3", status: "ignored" }] },
-      isLoading: false, isError: false, error: null, refetch: vi.fn(),
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
     });
     abrirDetalhe({ status: "ready" });
     fireEvent.click(screen.getByRole("button", { name: "Baixar PDF" }));
     expect(screen.getByRole("dialog", { name: "Baixar a reunião em PDF" })).toHaveTextContent("Itens do resumo confirmados que vão no PDF: 1.");
     expect(duble.mutacoes.exportar.mutate).not.toHaveBeenCalled();
+  });
+
+  // O servidor põe no PDF os itens confirmados que estão no banco: "não sei" não é zero.
+  it.each([
+    ["a consulta do resumo falhou (as 3 tentativas)", { data: undefined, isLoading: false, isSuccess: false, isError: true, error: { message: MENSAGEM, data: { code: "INTERNAL_SERVER_ERROR" } }, refetch: vi.fn() }],
+    ["o resumo ainda está chegando (rede lenta)", { data: undefined, isLoading: true, isSuccess: false, isError: false, error: null, refetch: vi.fn() }],
+  ])("%s: o aviso não diz que nenhum item foi confirmado", (_caso, consulta) => {
+    duble.resumoGuardado.mockReturnValue(consulta);
+    abrirDetalhe({ status: "ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Baixar PDF" }));
+    const aviso = screen.getByRole("dialog", { name: "Baixar a reunião em PDF" });
+    expect(aviso).not.toHaveTextContent("Nenhum item do resumo foi confirmado");
+    expect(aviso).not.toHaveTextContent("Itens do resumo confirmados que vão no PDF");
+    expect(aviso).toHaveTextContent("só os itens do resumo que você confirmou");
   });
 
   it.each(["processing", "failed", "recording", "uploading"])("'%s': sem o botão (o servidor também recusa)", status => {

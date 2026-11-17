@@ -556,23 +556,133 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     expect(d.enviarParte).toHaveBeenCalledWith("r-1", 0, blob, "audio/mpeg");
   });
 
-  it("esperarFila resolve só quando a parte que entrou na fila saiu dela", async () => {
+  const parteDoArquivo = (seq: number) => ({ blob: new Blob(["quadros"], { type: "audio/mpeg" }), mimeType: "audio/mpeg" as const, duracaoMs: 599_976, seq });
+
+  it("a parte do arquivo responde o que houve com ela: recebida sai do aparelho; passageira fica nele, sem contar como áudio por enviar; a trava com outra aba é 'ocupada'", async () => {
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    await retomadaDaMontagemFeita();
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    d.enviarParte.mockResolvedValueOnce({ tipo: "recebida" });
+    await act(async () => { expect(await result.current.subirParteDoArquivo(id, parteDoArquivo(0))).toEqual({ tipo: "recebida" }); });
+    expect(d.guardarParte.mock.calls[0][0]).toMatchObject({ meetingId: "r-1", seq: 0, mimeType: "audio/mpeg", dona: "dona-1" });
+    expect(d.apagarParte).toHaveBeenLastCalledWith("r-1", 0);
+    d.apagarParte.mockClear();
+    d.enviarParte.mockResolvedValueOnce({ tipo: "passageira", codigo: "MUITOS_PEDIDOS" });
+    await act(async () => { expect(await result.current.subirParteDoArquivo(id, parteDoArquivo(1))).toEqual({ tipo: "passageira", codigo: "MUITOS_PEDIDOS" }); });
+    // Fica no aparelho (a página que recarrega a sobe pela retomada), mas a importação ainda a está mandando.
+    expect(d.apagarParte).not.toHaveBeenCalled();
+    expect(motivoDaOcupacao()).not.toBe("audio-nao-enviado");
+    d.enviarParte.mockResolvedValueOnce(null);
+    await act(async () => { expect(await result.current.subirParteDoArquivo(id, parteDoArquivo(1))).toEqual({ tipo: "ocupada" }); });
+  });
+
+  it("a parte do arquivo cancelado que esperava a vez não sobe nem vai ao aparelho: 'descartada'", async () => {
     let soltar: (resultado: unknown) => void = () => {};
     d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
     const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
-    await act(async () => { await result.current.iniciar(INICIO); });
-    act(() => result.current.receberParte(parte(0, false)));
-    let vazia = false;
-    void result.current.esperarFila().then(() => { vazia = true; });
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    let primeira: Promise<unknown> = Promise.resolve();
+    let segunda: Promise<unknown> = Promise.resolve();
+    act(() => {
+      primeira = result.current.subirParteDoArquivo(id, parteDoArquivo(0));
+      segunda = result.current.subirParteDoArquivo(id, parteDoArquivo(1));
+    });
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
-    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
-    expect(vazia).toBe(false);
+    let cancelamento: Promise<unknown> = Promise.resolve();
+    act(() => { cancelamento = result.current.cancelar(id); });
     await act(async () => { soltar({ tipo: "recebida" }); });
-    await waitFor(() => expect(vazia).toBe(true));
-    // A falha da parte não rejeita a espera: ela já saiu pelos avisos.
-    d.enviarParte.mockRejectedValueOnce(new Error("rede"));
-    act(() => result.current.receberParte(parte(1, false)));
-    await act(async () => { await expect(result.current.esperarFila()).resolves.toBeUndefined(); });
+    expect(await primeira).toEqual({ tipo: "recebida" });
+    expect(await segunda).toEqual({ tipo: "descartada" });
+    expect(await cancelamento).toBe("descartada");
+    expect(d.enviarParte).toHaveBeenCalledTimes(1);
+    expect(d.guardarParte).toHaveBeenCalledTimes(1);
+  });
+
+  it("o fim do arquivo: declara com o total e vai ao detalhe ('declarado')", async () => {
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    let fim: unknown;
+    await act(async () => { fim = await result.current.encerrarArquivo(id, 4); });
+    expect(fim).toBe("declarado");
+    expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 4 });
+    expect(aoEncerrar).toHaveBeenCalledWith("r-1");
+    // Encerrado, o Descartar não tem mais o que descartar.
+    let descarte: ResultadoDoDescarte | undefined;
+    await act(async () => { descarte = await result.current.descartar(); });
+    expect(descarte).toBe("nada");
+  });
+
+  it("o fim do arquivo que falha por rede: 'pendente', guardado para a retomada, sem o aviso de envio que falhou", async () => {
+    d.encerrar.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const aoEncerrar = vi.fn();
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    await retomadaDaMontagemFeita();
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    let fim: unknown;
+    await act(async () => { fim = await result.current.encerrarArquivo(id, 3); });
+    expect(fim).toBe("pendente");
+    expect(JSON.parse(localStorage.getItem("wrw:fins-de-gravacao-pendentes")!)).toEqual({ "r-1": { partes: 3, dona: "dona-1" } });
+    expect(aoFalhar).not.toHaveBeenCalled();
+    expect(aoEncerrar).not.toHaveBeenCalled();
+  });
+
+  it("o fim do arquivo que o servidor recusa de vez (a reunião excluída em outro aparelho): 'recusado', com o aviso, e nada guardado", async () => {
+    d.encerrar.mockRejectedValueOnce({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    let fim: unknown;
+    await act(async () => { fim = await result.current.encerrarArquivo(id, 3); });
+    expect(fim).toBe("recusado");
+    expect(aoFalhar).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("wrw:fins-de-gravacao-pendentes")).toBeNull();
+  });
+
+  it("cancelado enquanto o fim do arquivo estava no ar: a tela não vai ao detalhe ('descartada'), e a exclusão vem logo atrás", async () => {
+    let confirmarOFim: (resposta: unknown) => void = () => {};
+    d.encerrar.mockImplementationOnce(() => new Promise(resolver => { confirmarOFim = resolver; }));
+    const aoEncerrar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    let id = "";
+    await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
+    let fim: Promise<unknown> = Promise.resolve();
+    act(() => { fim = result.current.encerrarArquivo(id, 3); });
+    await waitFor(() => expect(d.encerrar).toHaveBeenCalledTimes(1));
+    let cancelamento: Promise<unknown> = Promise.resolve();
+    act(() => { cancelamento = result.current.cancelar(id); });
+    // A exclusão espera o fim que já estava no ar.
+    expect(d.excluir).not.toHaveBeenCalled();
+    await act(async () => { confirmarOFim({ partes: 3 }); });
+    expect(await fim).toBe("descartada");
+    expect(await cancelamento).toBe("descartada");
+    expect(aoEncerrar).not.toHaveBeenCalled();
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+  });
+
+  it("a última parte da gravação, cancelada enquanto o fim estava no ar: também não vai ao detalhe", async () => {
+    d.enviarParte.mockResolvedValue({ tipo: "recebida" });
+    let confirmarOFim: (resposta: unknown) => void = () => {};
+    d.encerrar.mockImplementationOnce(() => new Promise(resolver => { confirmarOFim = resolver; }));
+    const aoEncerrar = vi.fn();
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    let id = "";
+    await act(async () => { id = await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, true)));
+    await waitFor(() => expect(d.encerrar).toHaveBeenCalledTimes(1));
+    let cancelamento: Promise<unknown> = Promise.resolve();
+    act(() => { cancelamento = result.current.cancelar(id); });
+    await act(async () => { confirmarOFim({ partes: 1 }); await cancelamento; });
+    expect(aoEncerrar).not.toHaveBeenCalled();
+    expect(aoFalhar).not.toHaveBeenCalled();
+    expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
   });
 
   it("cancelada enquanto a ÚLTIMA parte subia: o fim não é declarado, a tela não vai ao detalhe, e a reunião sai", async () => {

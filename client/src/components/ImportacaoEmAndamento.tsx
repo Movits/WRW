@@ -1,6 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { Loader2, X } from "lucide-react";
+import { CircleAlert, Loader2, X } from "lucide-react";
 import type { AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
+
+/** A parte que está subindo (a seguinte às já enviadas) e o total, para "parte N de M". */
+const parteDaVez = ({ enviadas, total }: { enviadas: number; total: number }) => ({ atual: Math.min(enviadas + 1, total), total });
 
 /**
  * O andamento do MP3 importado em partes (H9a), no lugar dos botões do
@@ -8,8 +11,14 @@ import type { AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
  * enviadas, e o Cancelar, que exclui a reunião que o envio criou. Não pede
  * confirmação: o arquivo continua no aparelho da dona, e enviar de novo é só
  * escolhê-lo outra vez.
+ *
+ * A parte que não subiu (rede, servidor ocupado) vai de novo: o texto diz que
+ * o envio está tentando de novo, e o Cancelar segue valendo. Sem a tela acesa
+ * garantida (`telaPodeApagar`: o iPhone, ou o navegador sem Wake Lock), o
+ * aviso de manter o app aberto vira o de manter a tela acesa, porque o
+ * aparelho bloqueado suspende a página e o envio para.
  */
-export function ImportacaoEmAndamento({ andamento, aoCancelar }: { andamento: Exclude<AndamentoDaImportacao, { fase: "parada" }>; aoCancelar: () => void }) {
+export function ImportacaoEmAndamento({ andamento, aoCancelar, telaPodeApagar = false }: { andamento: Exclude<AndamentoDaImportacao, { fase: "parada" }>; aoCancelar: () => void; telaPodeApagar?: boolean }) {
   const { t } = useTranslation();
   const cancelando = andamento.fase === "cancelando";
   const porcento = andamento.fase === "lendo"
@@ -18,7 +27,7 @@ export function ImportacaoEmAndamento({ andamento, aoCancelar }: { andamento: Ex
   const texto = andamento.fase === "lendo"
     ? t("meetings.importReading", { porcento })
     : andamento.fase === "enviando"
-      ? t("meetings.importSending", { atual: Math.min(andamento.enviadas + 1, andamento.total), total: andamento.total })
+      ? andamento.tentandoDeNovo ? t("meetings.importRetrying", parteDaVez(andamento)) : t("meetings.importSending", parteDaVez(andamento))
       : t("meetings.importCanceling");
   return (
     <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4">
@@ -27,7 +36,9 @@ export function ImportacaoEmAndamento({ andamento, aoCancelar }: { andamento: Ex
       <div role="progressbar" aria-label={t("meetings.importProgressLabel")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={porcento ?? undefined} aria-valuetext={texto} className="h-2 w-full overflow-hidden rounded-full bg-white/10">
         <div className={`h-full rounded-full bg-amber-300 transition-all ${porcento === null ? "w-full animate-pulse" : ""}`} style={porcento === null ? undefined : { width: `${porcento}%` }}/>
       </div>
-      <p className="text-xs text-white/45">{t("meetings.importKeepOpen")}</p>
+      {telaPodeApagar
+        ? <p role="note" className="rounded-xl border border-amber-300/25 bg-amber-300/10 p-3 text-xs text-amber-100"><CircleAlert size={14} className="inline mr-2"/>{t("meetings.importKeepScreenOpenNotice")}</p>
+        : <p className="text-xs text-white/45">{t("meetings.importKeepOpen")}</p>}
       <button type="button" onClick={aoCancelar} disabled={cancelando} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75 hover:bg-white/5 inline-flex justify-center gap-2 disabled:opacity-40"><X size={16}/> {t("meetings.importCancel")}</button>
     </div>
   );

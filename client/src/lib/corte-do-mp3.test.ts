@@ -5,8 +5,8 @@ import {
   type CorteDoMp3, type RespostaDoCorte,
 } from "./corte-do-mp3";
 import {
-  apev2, id3v1, id3v2, juntar, leitorDe, leitorDeQuadrosRepetidos, MPEG1_128K, MPEG1_128K_CRC, MPEG1_128K_MONO,
-  MPEG25_8K, MPEG2_64K, quadro, quadroDeEtiqueta, quadros, type FormatoDoQuadro,
+  apev2, id3v1, id3v2, juntar, leitorDe, leitorDeQuadrosRepetidos, MPEG1_128K, MPEG1_128K_CRC, MPEG1_128K_ENCHIMENTO, MPEG1_128K_MONO,
+  MPEG25_8K, MPEG2_64K, quadro, quadroDeEtiqueta, quadros, quadrosVariaveis, sequencia, type FormatoDoQuadro,
 } from "@/test/mp3-sintetico";
 
 /**
@@ -155,6 +155,48 @@ describe("cortarMp3: o tamanho das partes", () => {
   });
 });
 
+describe("cortarMp3: o enchimento e o bitrate variável do MP3 de verdade", () => {
+  // O cabeçalho de 418 bytes é o de 417 com o bit de enchimento ligado (0x90 → 0x92).
+  it("o quadro com enchimento tem um byte a mais, e o corte anda por ele inteiro", async () => {
+    expect(MPEG1_128K_ENCHIMENTO.tamanho).toBe(MPEG1_128K.tamanho + 1);
+    const { bytes } = sequencia(Array.from({ length: 60 }, () => MPEG1_128K_ENCHIMENTO));
+    const [parte] = partesDe(await cortar(bytes));
+    expect(parte.faixas).toEqual([{ inicio: 0, fim: 60 * 418 }]);
+    expect(parte.duracaoMs).toBe(ms(MPEG1_128K, 60));
+  });
+
+  it("quadros de 417 e 418 bytes alternados e de 128, 160 e 192 kbps no mesmo fluxo: cada parte cai nas divisas dos quadros, sem lixo, com a duração dos quadros dela", async () => {
+    const formatos = quadrosVariaveis(500);
+    expect(new Set(formatos.map(f => f.tamanho))).toEqual(new Set([417, 418, 522, 627]));
+    const { bytes, divisas } = sequencia(formatos);
+    const corte = await cortar(bytes, { segundosPorParte: 1 });
+    // 1 s a 44,1 kHz são 38 quadros de 1152 amostras, qualquer que seja o bitrate.
+    const esperadas = [];
+    for (let i = 0; i < formatos.length; i += 38) {
+      const fim = Math.min(i + 38, formatos.length);
+      esperadas.push({ faixas: [{ inicio: divisas[i], fim: divisas[fim] }], bytes: divisas[fim] - divisas[i], duracaoMs: ms(MPEG1_128K, fim - i) });
+    }
+    expect(partesDe(corte)).toEqual(esperadas);
+    expect(corte).toMatchObject({ ok: true, duracaoMs: ms(MPEG1_128K, 500) });
+  });
+
+  it("o teto de bytes com quadros de tamanhos diferentes: cada parte fecha no último quadro inteiro que cabe", async () => {
+    const formatos = quadrosVariaveis(200);
+    const { bytes, divisas } = sequencia(formatos);
+    const partes = partesDe(await cortar(bytes, { bytesPorParte: 5_000 }));
+    expect(partes.flatMap(p => p.faixas.map(f => f.inicio))).toEqual(partes.map((_p, i) => partes.slice(0, i).reduce((soma, q) => soma + q.bytes, 0)));
+    for (const [i, parte] of partes.entries()) {
+      const [faixa] = parte.faixas;
+      expect(divisas).toContain(faixa.inicio);
+      expect(divisas).toContain(faixa.fim);
+      expect(parte.bytes).toBeLessThanOrEqual(5_000);
+      // O quadro seguinte não cabia: senão a parte o teria levado.
+      if (i < partes.length - 1) expect(parte.bytes + formatos[divisas.indexOf(faixa.fim)].tamanho).toBeGreaterThan(5_000);
+    }
+    expect(partes.at(-1)!.faixas[0].fim).toBe(bytes.length);
+  });
+});
+
 describe("cortarMp3: o teto de 12 h", () => {
   it("o teto padrão é o da gravação em partes", () => {
     expect(GRAVACAO_EM_PARTES_SEGUNDOS_MAX).toBe(12 * 3600);
@@ -217,11 +259,18 @@ describe("atenderPedidoDeCorte (o que o Worker faz)", () => {
     expect(respostas.at(-1)).toEqual({ tipo: "pronto", corte: await cortar(audio) });
   });
 
-  it("a leitura que falha vira erro, sem detalhe", async () => {
+  it("a leitura que falha vira erro, sem detalhe na resposta; o detalhe vai ao console do Worker", async () => {
     const arquivo = new Blob([quadros(MPEG1_128K, 5)]);
-    vi.spyOn(arquivo, "slice").mockImplementation(() => { throw new Error("o arquivo sumiu"); });
-    const respostas: RespostaDoCorte[] = [];
-    await atenderPedidoDeCorte({ arquivo }, r => respostas.push(r));
-    expect(respostas).toEqual([{ tipo: "erro" }]);
+    const falha = new Error("o arquivo sumiu");
+    vi.spyOn(arquivo, "slice").mockImplementation(() => { throw falha; });
+    const consoleDeErro = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const respostas: RespostaDoCorte[] = [];
+      await atenderPedidoDeCorte({ arquivo }, r => respostas.push(r));
+      expect(respostas).toEqual([{ tipo: "erro" }]);
+      expect(consoleDeErro).toHaveBeenCalledWith(expect.stringContaining("corte do MP3"), falha);
+    } finally {
+      consoleDeErro.mockRestore();
+    }
   });
 });

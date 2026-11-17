@@ -27,6 +27,24 @@ describe("ImportacaoEmAndamento", () => {
     expect(aoCancelar).toHaveBeenCalledTimes(1);
   });
 
+  it("a parte que não subiu e vai de novo: o texto diz isso, a barra fica onde estava e o Cancelar segue valendo", () => {
+    const aoCancelar = vi.fn();
+    render(<ImportacaoEmAndamento andamento={{ fase: "enviando", enviadas: 1, total: 4, tentandoDeNovo: true }} aoCancelar={aoCancelar}/>);
+    expect(screen.getByRole("status")).toHaveTextContent("A conexão falhou. Tentando enviar de novo a parte 2 de 4…");
+    expect(barra()).toHaveAttribute("aria-valuenow", "25");
+    fireEvent.click(screen.getByRole("button", { name: /Cancelar envio/ }));
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
+  });
+
+  it("com a tela acesa garantida, a dica de manter o app aberto; sem ela (iPhone, navegador sem Wake Lock), o aviso de manter a tela acesa, no lugar da dica", () => {
+    const { rerender } = render(<ImportacaoEmAndamento andamento={{ fase: "enviando", enviadas: 0, total: 2 }} aoCancelar={vi.fn()}/>);
+    expect(screen.getByText("Mantenha o app aberto até o envio terminar.")).toBeInTheDocument();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    rerender(<ImportacaoEmAndamento andamento={{ fase: "enviando", enviadas: 0, total: 2 }} aoCancelar={vi.fn()} telaPodeApagar/>);
+    expect(screen.getByRole("note")).toHaveTextContent("Mantenha esta tela aberta e o aparelho desbloqueado até o envio terminar: se a tela apagar ou você trocar de app, o envio para até você voltar.");
+    expect(screen.queryByText("Mantenha o app aberto até o envio terminar.")).not.toBeInTheDocument();
+  });
+
   it("cancelando: a barra fica sem valor (indeterminada) e o Cancelar, desligado", () => {
     render(<ImportacaoEmAndamento andamento={{ fase: "cancelando" }} aoCancelar={vi.fn()}/>);
     expect(screen.getByRole("status")).toHaveTextContent("Cancelando o envio…");

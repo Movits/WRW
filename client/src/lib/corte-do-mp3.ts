@@ -367,7 +367,11 @@ export async function atenderPedidoDeCorte(pedido: PedidoDeCorte, responder: (re
       aoLer: (lidos, total) => responder({ tipo: "lendo", lidos, total }),
     });
     responder({ tipo: "pronto", corte });
-  } catch {
+  } catch (erro) {
+    // A resposta à página não leva o detalhe; o console do Worker (que aparece
+    // no DevTools da página) leva, para distinguir um arquivo estragado de um
+    // defeito no corte.
+    console.error("[Importação] o corte do MP3 falhou no Worker:", erro);
     responder({ tipo: "erro" });
   }
 }

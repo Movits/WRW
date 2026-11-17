@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cortarMp3, PARTE_DO_MP3_BYTES_MAX, PARTE_DO_MP3_SEGUNDOS_MAX, type ParteDoMp3 } from "@/lib/corte-do-mp3";
-import { id3v1, id3v2, juntar, leitorDe, MPEG1_128K, MPEG2_64K, quadroDeEtiqueta, quadros } from "@/test/mp3-sintetico";
+import { id3v1, id3v2, juntar, leitorDe, MPEG1_128K, MPEG2_64K, quadroDeEtiqueta, quadros, quadrosVariaveis, sequencia } from "@/test/mp3-sintetico";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -52,6 +52,23 @@ describe("o MP3 cortado na tela e a rota das partes (H9a)", () => {
     }
     const esperado = 2000 * MPEG1_128K.segundos + 3000 * MPEG2_64K.segundos;
     expect(Math.abs(corte.duracaoMs - esperado * 1000)).toBeLessThanOrEqual(1);
+  });
+
+  it("o MP3 de verdade, com o enchimento alternando 417 e 418 bytes e o bitrate variável: o servidor mede cada parte com a duração que a tela calculou", async () => {
+    const { bytes } = sequencia(quadrosVariaveis(3000));
+    const arquivo = juntar(id3v2(1200), quadroDeEtiqueta(MPEG1_128K, "Xing"), bytes, id3v1());
+    const corte = await cortarMp3(leitorDe(arquivo), arquivo.length, { segundosPorParte: 20 });
+    if (!corte.ok) throw new Error(corte.codigo);
+    expect(corte.partes.length).toBe(4);
+    expect(corte.partes.reduce((soma, parte) => soma + parte.bytes, 0)).toBe(bytes.length);
+    for (const parte of corte.partes) {
+      const montada = montar(arquivo, parte);
+      expect(montada.length).toBe(parte.bytes);
+      const medida = medirDuracaoDoAudio(montada);
+      expect(medida).not.toBeNull();
+      expect(Math.abs(medida! * 1000 - parte.duracaoMs)).toBeLessThanOrEqual(1);
+    }
+    expect(Math.abs(corte.duracaoMs - 3000 * MPEG1_128K.segundos * 1000)).toBeLessThanOrEqual(1);
   });
 
   it("o arquivo inteiro, que ainda tem o quadro Xing, o servidor mede com um quadro a mais que a soma das partes", async () => {

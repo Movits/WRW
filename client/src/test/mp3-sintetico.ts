@@ -4,13 +4,24 @@
  * pseudoaleatórios (com 0xFF, como no áudio de verdade), e as etiquetas que o
  * corte tira (ID3v2 com uma "capa" cheia de falsos começos de quadro, o quadro
  * Xing/Info/VBRI, o ID3v1 e o APEv2). Serve aos testes do client e ao do
- * servidor que mede as partes com server/duracao-do-audio.ts.
+ * servidor que mede as partes com server/duracao-do-audio.ts. Os quadros com
+ * o bit de enchimento e os de bitrate variável (quadrosVariaveis) são os do
+ * MP3 de verdade: sem eles, a conta do enchimento no corte nunca rodaria.
  */
 
 export type FormatoDoQuadro = { cabecalho: readonly [number, number, number, number]; tamanho: number; segundos: number };
 
 /** MPEG-1 Layer III, 128 kbps, 44,1 kHz, estéreo, sem CRC: 417 bytes e 1152 amostras. */
 export const MPEG1_128K: FormatoDoQuadro = { cabecalho: [0xff, 0xfb, 0x90, 0x00], tamanho: 417, segundos: 1152 / 44100 };
+/**
+ * O mesmo, com o bit de enchimento: 418 bytes. A 128 kbps e 44,1 kHz o quadro
+ * teria 417,96 bytes, e o codificador alterna quadros de 417 e 418 para
+ * acertar a conta: é o MP3 de verdade mais comum.
+ */
+export const MPEG1_128K_ENCHIMENTO: FormatoDoQuadro = { cabecalho: [0xff, 0xfb, 0x92, 0x00], tamanho: 418, segundos: 1152 / 44100 };
+/** O mesmo fluxo a 160 kbps (522 bytes) e a 192 kbps com enchimento (627 bytes): os quadros do bitrate variável. */
+export const MPEG1_160K: FormatoDoQuadro = { cabecalho: [0xff, 0xfb, 0xa0, 0x00], tamanho: 522, segundos: 1152 / 44100 };
+export const MPEG1_192K_ENCHIMENTO: FormatoDoQuadro = { cabecalho: [0xff, 0xfb, 0xb2, 0x00], tamanho: 627, segundos: 1152 / 44100 };
 /** O mesmo, mono: a informação lateral tem 17 bytes, e não 32. */
 export const MPEG1_128K_MONO: FormatoDoQuadro = { cabecalho: [0xff, 0xfb, 0x90, 0xc0], tamanho: 417, segundos: 1152 / 44100 };
 /** O mesmo, com CRC (bit de proteção zerado): 2 bytes de CRC depois do cabeçalho. */
@@ -45,6 +56,29 @@ export function quadros(formato: FormatoDoQuadro, n: number, semente = 1): Uint8
   const saida = new Uint8Array(formato.tamanho * n);
   for (let i = 0; i < n; i++) saida.set(quadro(formato, semente * 100_003 + i), i * formato.tamanho);
   return saida;
+}
+
+/**
+ * Os quadros de `formatos`, nesta ordem, cada um com um miolo diferente.
+ * Devolve os bytes e as divisas: onde começa cada quadro e, no fim, onde o
+ * último termina, para o teste conferir que o corte caiu nelas.
+ */
+export function sequencia(formatos: readonly FormatoDoQuadro[], semente = 1): { bytes: Uint8Array; divisas: number[] } {
+  const divisas = [0];
+  for (const formato of formatos) divisas.push(divisas[divisas.length - 1] + formato.tamanho);
+  const bytes = new Uint8Array(divisas[divisas.length - 1]);
+  formatos.forEach((formato, i) => bytes.set(quadro(formato, semente * 100_003 + i), divisas[i]));
+  return { bytes, divisas };
+}
+
+/**
+ * `n` quadros de um MP3 de bitrate variável, num fluxo só (MPEG-1 Layer III a
+ * 44,1 kHz): o de 128 kbps alternando 417 e 418 bytes, como o MP3 de verdade,
+ * e quadros de 160 e 192 kbps no meio. Todos têm 1152 amostras.
+ */
+export function quadrosVariaveis(n: number): FormatoDoQuadro[] {
+  const ciclo = [MPEG1_128K, MPEG1_128K_ENCHIMENTO, MPEG1_128K, MPEG1_160K, MPEG1_128K_ENCHIMENTO, MPEG1_192K_ENCHIMENTO, MPEG1_128K_ENCHIMENTO];
+  return Array.from({ length: n }, (_, i) => ciclo[i % ciclo.length]);
 }
 
 /** O quadro sem som que leva a etiqueta Xing, Info ou VBRI, no lugar em que cada uma fica. */
