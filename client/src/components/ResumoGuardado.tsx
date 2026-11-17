@@ -124,8 +124,9 @@ type DoLink = {
 const ORDEM_DAS_SECOES: readonly Secao[] = ["action", "focus", "task", "decision", "blocker", "question"];
 
 // Cada ramo chama t() com a chave literal, para o teste das chaves usadas
-// (server/i18n-chaves-usadas.test.ts) conferir que todas existem.
-function tituloDaSecao(t: TranslateFn, secao: Secao) {
+// (server/i18n-chaves-usadas.test.ts) conferir que todas existem. O PDF da
+// reunião (H8, ImpressaoDaReuniao.tsx) usa os mesmos títulos, no idioma dela.
+export function tituloDaSecao(t: TranslateFn, secao: Secao) {
   switch (secao) {
     case "action": return t("meetings.summary.actionsHeading");
     case "focus": return t("meetings.summary.focusHeading");

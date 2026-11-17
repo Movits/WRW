@@ -41,6 +41,8 @@ import { traduzirResumoDaDona } from "../traducao-do-resumo";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
+import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
+import { exportarReuniao } from "../exportar-reuniao";
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -122,6 +124,13 @@ export const tetoDaTraducaoDoResumo = criarTeto(
   10 * 60_000,
   "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
 );
+
+// Exportar a reunião (H8) lê a transcrição inteira (até 16 MiB) e grava uma
+// linha de auditoria a cada vez: teto próprio por dona, em memória como os
+// outros, de 30 exportações a cada 10 minutos. Só conta a exportação que saiu:
+// a recusa (outra conta, reunião que não está pronta) e a falha (banco fora do
+// ar, auditoria que não entrou) devolvem a vaga.
+export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -442,6 +451,29 @@ export const meetingsRouter = router({
         idioma: input.idioma,
         vozDoDestinatario: input.vozDoDestinatario,
       });
+    }),
+
+  // H8: o conteúdo do PDF da reunião, que a tela imprime (só PDF, decisão do
+  // Roberto de 16/11/2026). Só a dona: o link aberto (routers/reuniaoAberta.ts)
+  // não exporta. A leitura e a auditoria MEETING_EXPORTED vão na mesma
+  // transação (server/exportar-reuniao.ts): sem a linha, nada sai. A vaga é
+  // reservada antes do await, como a do reprocesso, e volta se a exportação
+  // não sai.
+  exportar: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), formato: z.enum(FORMATOS_DA_EXPORTACAO) }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaExportacao.reservar(ctx.user.openId);
+      try {
+        return await exportarReuniao(ctx.user.openId, input.meetingId, {
+          formato: input.formato,
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
     }),
 
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o

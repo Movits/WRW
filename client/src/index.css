@@ -607,3 +607,141 @@
       z-index: 1;
     }
   }
+
+/* Exportar a reunião em PDF (H8). O PDF sai da impressão do aparelho:
+   components/ImpressaoDaReuniao.tsx monta o documento num portal no fim do
+   <body>, e o body ganha a classe imprimindo-a-reuniao enquanto ele existe.
+   Na tela o portal não aparece; na impressão só ele aparece, em fundo branco,
+   e o app inteiro (o #root, os avisos, o player do rodapé) some. Sem a classe,
+   imprimir qualquer tela continua como antes. As regras ficam fora das
+   camadas do Tailwind de propósito: assim valem mais que a base dos títulos
+   (a fonte Manrope, o tamanho 5xl e o espaçamento negativo, que separaria as
+   letras do árabe). A fonte é a do sistema, que tem o árabe, o hindi, o
+   chinês e o japonês; o `lang` do documento escolhe a do chinês ou a do
+   japonês. Medidas em pt, a régua do papel. */
+.impressao-da-reuniao {
+  display: none;
+}
+
+@media print {
+  html:has(> body.imprimindo-a-reuniao),
+  body.imprimindo-a-reuniao {
+    background: #fff !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  body.imprimindo-a-reuniao > :not(.impressao-da-reuniao) {
+    display: none !important;
+  }
+  body.imprimindo-a-reuniao > .impressao-da-reuniao {
+    display: block;
+  }
+}
+
+.documento-da-reuniao {
+  background: #fff;
+  color: #111;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  text-align: start;
+}
+.documento-da-reuniao h1,
+.documento-da-reuniao h2,
+.documento-da-reuniao h3 {
+  break-after: avoid;
+  page-break-after: avoid;
+  color: #111;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: normal;
+  line-height: 1.25;
+}
+.documento-da-reuniao h1 {
+  font-size: 20pt;
+  margin: 0 0 4pt;
+}
+.documento-da-reuniao h2 {
+  border-bottom: 1px solid #c98f70;
+  font-size: 14pt;
+  margin: 18pt 0 8pt;
+  padding-bottom: 3pt;
+}
+.documento-da-reuniao h3 {
+  font-size: 11.5pt;
+  margin: 12pt 0 4pt;
+}
+.documento-da-reuniao p {
+  margin: 0;
+}
+.documento-da-reuniao ul,
+.documento-da-reuniao ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.documento-da-reuniao__emoji {
+  margin-inline-end: 0.3em;
+}
+.documento-da-reuniao__data {
+  color: #555;
+  font-size: 10pt;
+}
+.documento-da-reuniao__item {
+  align-items: flex-start;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  display: flex;
+  gap: 6pt;
+  margin: 0 0 6pt;
+}
+.documento-da-reuniao__caixa {
+  border: 1px solid #555;
+  border-radius: 2pt;
+  flex: none;
+  font-size: 8pt;
+  height: 10pt;
+  line-height: 10pt;
+  margin-top: 3pt;
+  text-align: center;
+  width: 10pt;
+}
+.documento-da-reuniao__detalhe {
+  color: #555;
+  font-size: 9.5pt;
+}
+.documento-da-reuniao__fala {
+  margin: 0 0 7pt;
+}
+/* O tempo e o nome lado a lado, com o vão do flex: a margem do lado do fim no
+   tempo (dir="ltr") cairia do lado de fora no árabe, e o nome grudaria nele. */
+.documento-da-reuniao__quem {
+  align-items: baseline;
+  break-after: avoid;
+  page-break-after: avoid;
+  color: #444;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 9.5pt;
+  font-weight: 600;
+  gap: 0 6pt;
+}
+.documento-da-reuniao__tempo {
+  color: #8e5a3f;
+  font-variant-numeric: tabular-nums;
+}
+.documento-da-reuniao__lacuna {
+  color: #777;
+  font-size: 9.5pt;
+  margin: 0 0 7pt;
+}
+.documento-da-reuniao__texto-corrido {
+  white-space: pre-wrap;
+}
+.documento-da-reuniao__rodape {
+  border-top: 1px solid #ddd;
+  color: #777;
+  font-size: 9pt;
+  margin-top: 18pt;
+  padding-top: 6pt;
+}

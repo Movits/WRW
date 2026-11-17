@@ -95,6 +95,8 @@ vi.mock("@/lib/trpc", () => ({
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+      // O PDF da reunião (H8): só monta quando a dona abre o aviso do "Baixar PDF".
+      exportar: duble.registrar("exportar"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -260,6 +262,26 @@ describe("Detalhe da reunião — excluir pede confirmação", () => {
     expect(toast.error).toHaveBeenCalledWith("x");
     // a reunião continua aberta: o detalhe não foi trocado pela lista
     expect(screen.getByRole("button", { name: /^Excluir$/ })).toBeInTheDocument();
+  });
+});
+
+// H8: o "Baixar PDF" fica ao lado do selo de status, só na reunião pronta. O
+// aviso, o pedido e a impressão estão em components/ExportarReuniao.test.tsx.
+describe("Detalhe da reunião — baixar o PDF (H8)", () => {
+  it("pronta, o detalhe tem o botão, e o aviso diz quantos itens confirmados vão no PDF; nada é pedido antes de confirmar", () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [{ id: "i1", status: "confirmed" }, { id: "i2", status: "pending" }, { id: "i3", status: "ignored" }] },
+      isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    });
+    abrirDetalhe({ status: "ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Baixar PDF" }));
+    expect(screen.getByRole("dialog", { name: "Baixar a reunião em PDF" })).toHaveTextContent("Itens do resumo confirmados que vão no PDF: 1.");
+    expect(duble.mutacoes.exportar.mutate).not.toHaveBeenCalled();
+  });
+
+  it.each(["processing", "failed", "recording", "uploading"])("'%s': sem o botão (o servidor também recusa)", status => {
+    abrirDetalhe({ status });
+    expect(screen.queryByRole("button", { name: "Baixar PDF" })).not.toBeInTheDocument();
   });
 });
 

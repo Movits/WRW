@@ -1728,6 +1728,25 @@
       "reviewNotice": "Sugestões da IA para conferir com os trechos da transcrição. Nada disto foi gravado.",
       "translateSubtext": "Escolha o idioma em que você quer ler a transcrição."
     },
+    "export": {
+      "button": "Baixar PDF",
+      "title": "Baixar a reunião em PDF",
+      "notice": "O PDF leva a transcrição desta reunião, com os nomes que você deu às vozes, e só os itens do resumo que você confirmou. Depois de baixado, o arquivo fica fora da WRW: guarde-o com cuidado e compartilhe só com quem participou da reunião ou autorizou.",
+      "confirmedItems": "Itens do resumo confirmados que vão no PDF: {{n}}.",
+      "noConfirmedItems": "Nenhum item do resumo foi confirmado ainda: o PDF leva só a transcrição.",
+      "confirm": "Baixar PDF",
+      "cancel": "Cancelar",
+      "preparing": "Preparando o PDF…",
+      "ready": "Na tela de impressão, escolha “Salvar como PDF”. No iPhone e no iPad, toque em Compartilhar e depois em “Salvar em Arquivos”.",
+      "installedAppHint": "No app instalado, se a tela de impressão não abrir, abra esta reunião no navegador e baixe o PDF por lá.",
+      "printAgain": "Abrir a impressão de novo",
+      "close": "Fechar",
+      "error": "Não foi possível preparar o PDF. Tente de novo.",
+      "onlyReady": "Só dá para baixar o PDF de uma reunião pronta.",
+      "tooMany": "Muitos PDFs baixados em sequência. Aguarde alguns minutos e tente de novo.",
+      "doneTag": "(feita)",
+      "footer": "Exportado da WRW em {{data}}."
+    },
     "followUp": {
       "title": "E-mail de retorno",
       "intro": "A IA escreve um rascunho a partir dos itens que você confirmou no resumo. A WRW não envia nada: você revisa, abre no seu app de e-mail ou copia.",

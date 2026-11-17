@@ -1728,6 +1728,25 @@
       "reviewNotice": "Vorschläge der KI zum Abgleich mit den Auszügen aus der Transkription. Nichts davon wurde gespeichert.",
       "translateSubtext": "Wählen Sie die Sprache, in der Sie die Transkription lesen möchten."
     },
+    "export": {
+      "button": "PDF herunterladen",
+      "title": "Meeting als PDF herunterladen",
+      "notice": "Das PDF enthält die Transkription dieses Meetings mit den Namen, die Sie den Stimmen gegeben haben, und nur die Punkte der Zusammenfassung, die Sie bestätigt haben. Nach dem Herunterladen liegt die Datei außerhalb von WRW: Bewahren Sie sie sorgfältig auf und teilen Sie sie nur mit Personen, die am Meeting teilgenommen oder zugestimmt haben.",
+      "confirmedItems": "Bestätigte Punkte der Zusammenfassung im PDF: {{n}}.",
+      "noConfirmedItems": "Noch kein Punkt der Zusammenfassung wurde bestätigt: Das PDF enthält nur die Transkription.",
+      "confirm": "PDF herunterladen",
+      "cancel": "Abbrechen",
+      "preparing": "PDF wird vorbereitet…",
+      "ready": "Wählen Sie im Druckfenster „Als PDF speichern“. Tippen Sie auf dem iPhone und iPad auf Teilen und dann auf „In Dateien sichern“.",
+      "installedAppHint": "Wenn sich in der installierten App das Druckfenster nicht öffnet, öffnen Sie dieses Meeting im Browser und laden Sie das PDF dort herunter.",
+      "printAgain": "Druckfenster erneut öffnen",
+      "close": "Schließen",
+      "error": "Das PDF konnte nicht vorbereitet werden. Versuchen Sie es erneut.",
+      "onlyReady": "Das PDF kann nur für ein fertiges Meeting heruntergeladen werden.",
+      "tooMany": "Zu viele PDFs nacheinander heruntergeladen. Warten Sie einige Minuten und versuchen Sie es erneut.",
+      "doneTag": "(erledigt)",
+      "footer": "Aus WRW exportiert am {{data}}."
+    },
     "followUp": {
       "title": "Follow-up-E-Mail",
       "intro": "Die KI schreibt einen Entwurf aus den Punkten, die Sie in der Zusammenfassung bestätigt haben. WRW sendet nichts: Sie prüfen ihn, öffnen ihn in Ihrer E-Mail-App oder kopieren ihn.",
