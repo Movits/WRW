@@ -389,7 +389,11 @@ export function trechoEstaNaFonte(trecho: string | null | undefined, fonte: stri
  *   sujeito, "vir a" ou "ser" ("poderia precisar", "talvez a gente precise",
  *   "podemos vir a precisar", "talvez seja necessário", "pode ser que a gente
  *   precise", "quem sabe", "might need"), ou uma condição o rege ("se a gente
- *   precisar", "caso precisemos", "if we need"); ou um "talvez" fica logo antes
+ *   precisar", "se precisássemos", "caso precisemos", "if we need"); ou o
+ *   próprio verbo está no condicional ("precisaria", "precisaríamos",
+ *   "necesitaría", "eu precisaria saber o preço"), ou um condicional o rege
+ *   ("would need", "we'd need", "seria necessário", "sería necesario", "iria
+ *   precisar", o falado "a gente ia precisar"); ou um "talvez" fica logo antes
  *   do item ("precisamos de um distribuidor e talvez de um contador");
  * - declarada: o verbo sem nada disso e sem negação ("não precisamos");
  * - neutra: nenhum verbo rege o item ("conheci um distribuidor no Chile"), o
@@ -403,10 +407,14 @@ export function trechoEstaNaFonte(trecho: string | null | undefined, fonte: stri
  * A lista é curta e do lado conservador: "may" fica de fora (o mês de maio,
  * "In May we need"), e "eventualmente" também, porque com o verbo no presente
  * é "de vez em quando" ("eventualmente precisamos de frete refrigerado" é
- * necessidade declarada). O "se" só vale com o futuro do subjuntivo ("se a
- * gente precisar"): "o que se precisa" e o espanhol "se necesita" declaram. O
- * pedido educado sem verbo de necessidade ("você poderia me apresentar um
- * investidor?") não é tocado. Só vale para O QUE PRECISO.
+ * necessidade declarada). O "se" só vale com o futuro ou o imperfeito do
+ * subjuntivo ("se a gente precisar", "se a gente precisasse"): "o que se
+ * precisa" e o espanhol "se necesita" declaram. O condicional só vale para o
+ * verbo de necessidade: o futuro ("precisaremos", "necesitaremos") declara, o
+ * condicional de outro verbo também ("eu diria que precisamos"), e o da busca e
+ * do querer fica como estava ("querríamos un distribuidor"). O pedido educado
+ * sem verbo de necessidade ("você poderia me apresentar um investidor?") não é
+ * tocado. Só vale para O QUE PRECISO.
  */
 const VERBO_DE_NECESSIDADE = /^(precis|necessit|necesit|need)|^(necess?ari[oa]s?|necessary)$/;
 /** Busca e querer declaram como a necessidade ("buscamos um distribuidor"); "procuração", "querida" e "querosene" não são verbo. */
@@ -432,12 +440,38 @@ const ALCANCE_DO_MODAL = 4;
 /** Quantas unidades antes do item o verbo que o rege pode estar ("talvez a gente precise de um contador e de um | advogado"). */
 const ALCANCE_DO_VERBO = 8;
 
-/** A condição que rege o verbo: "se" com o futuro do subjuntivo, "caso" com o presente, "if" com "need". */
+/**
+ * A condição que rege o verbo: "se" com o futuro ou o imperfeito do subjuntivo ("se precisarmos", "se
+ * precisássemos"), "caso" com o presente ou o imperfeito ("caso precisemos", "caso precisássemos"), "if" com
+ * "need" ("if we need", "if we needed").
+ */
 function condicaoRegeOVerbo(palavra: string, verbo: string): boolean {
-  if (palavra === "se") return /^(precis|necessit)ar(mos|em)?$/.test(verbo);
-  if (palavra === "caso") return /^(precis|necessit)(e|emos|em)$/.test(verbo);
+  if (palavra === "se") return /^(precis|necessit)(ar(mos|em)?|asse(s|mos|m)?)$/.test(verbo);
+  if (palavra === "caso") return /^(precis|necessit)(e|emos|em|asse(s|mos|m)?)$/.test(verbo);
   return palavra === "if" && /^need/.test(verbo);
 }
+
+/**
+ * O condicional no próprio verbo de necessidade (conferência de tela da N5 com a IA real): "precisaria de um
+ * contador", "precisaríamos", "necessitariam", "necesitaría", "necesitaríamos", e também "eu precisaria saber o
+ * preço". O futuro ("precisaremos", "necesitaremos") e o pretérito ("precisaram") não entram.
+ */
+const CONDICIONAL_DA_NECESSIDADE = /^(precis|necessit|necesit)ari(a|as|amos|am|eis|an|ais)$/;
+const NEED_OU_NECESSARY = /^need|^necessary$/;
+const NECESSARIO_OU_PRECISO = /^(necess?ari[oa]s?|precis[oa]s?)$/;
+const PRECISAR_NO_INFINITIVO = /^(precis|necessit)ar$/;
+/**
+ * O condicional de fora do verbo e o verbo de necessidade que ele rege: "would need", "we'd need" (o apóstrofo
+ * separa o "d", que só vale com o verbo inglês: "o plano D precisa" declara), "it would be necessary", "seria
+ * necessário", "seria preciso", "sería necesario", "iria precisar" e o falado "a gente ia precisar" (o "ia" só
+ * com o infinitivo: "a IA precisa de dados" declara). Um Map, e não um objeto: "constructor" não é auxiliar.
+ */
+const AUXILIARES_DO_CONDICIONAL = new Map<string, RegExp>([
+  ["would", NEED_OU_NECESSARY], ["d", NEED_OU_NECESSARY],
+  ["seria", NECESSARIO_OU_PRECISO], ["seriam", NECESSARIO_OU_PRECISO], ["serian", NECESSARIO_OU_PRECISO],
+  ["iria", PRECISAR_NO_INFINITIVO], ["iriam", PRECISAR_NO_INFINITIVO], ["iriamos", PRECISAR_NO_INFINITIVO],
+  ["ia", PRECISAR_NO_INFINITIVO], ["iam", PRECISAR_NO_INFINITIVO], ["iamos", PRECISAR_NO_INFINITIVO],
+]);
 
 type ClasseDaOcorrencia = "declarada" | "hipotetica" | "neutra";
 
@@ -447,7 +481,8 @@ export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: st
   const { daFonte, oracao } = lida;
   const ehVerbo = (unidade: string) => VERBO_DE_NECESSIDADE.test(unidade) || VERBO_DE_BUSCA.test(unidade);
   const doItem = typeof texto === "string"
-    ? unidades(texto).filter(unidade => ehConteudo(unidade) && !ehVerbo(unidade) && !MODAIS_DE_HIPOTESE.has(unidade)) : [];
+    ? unidades(texto).filter(unidade => ehConteudo(unidade) && !ehVerbo(unidade) && !MODAIS_DE_HIPOTESE.has(unidade)
+      && !AUXILIARES_DO_CONDICIONAL.has(unidade)) : [];
   const antes = (j: number, n: number) => (j - n >= 0 && oracao[j - n] === oracao[j] ? daFonte[j - n] : "");
   const modalTerminaEm = (j: number) => {
     const palavra = daFonte[j];
@@ -455,10 +490,13 @@ export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: st
     if (palavra === "sabe") return antes(j, 1) === "quem";
     return palavra === "que" && (POSSIBILIDADES.has(antes(j, 1)) || (antes(j, 1) === "ser" && MODAIS_DE_HIPOTESE.has(antes(j, 2))));
   };
-  // O modal (ou a condição) rege o verbo da unidade v: no meio, só o que ENTRE_O_MODAL_E_O_VERBO aceita.
+  // O verbo da unidade v está no condicional, ou o modal, a condição ou o condicional de fora o rege: no meio,
+  // só o que ENTRE_O_MODAL_E_O_VERBO aceita.
   const hipoteticoEm = (v: number) => {
+    if (CONDICIONAL_DA_NECESSIDADE.test(daFonte[v])) return true;
     for (let j = v - 1; j >= Math.max(0, v - ALCANCE_DO_MODAL) && oracao[j] === oracao[v]; j -= 1) {
       if (modalTerminaEm(j) || condicaoRegeOVerbo(daFonte[j], daFonte[v])) return true;
+      if (AUXILIARES_DO_CONDICIONAL.get(daFonte[j])?.test(daFonte[v])) return true;
       if (!ENTRE_O_MODAL_E_O_VERBO.has(daFonte[j])) return false;
     }
     return false;

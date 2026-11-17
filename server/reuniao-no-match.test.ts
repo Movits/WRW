@@ -39,6 +39,15 @@ describe("o portão: necessidade hipotética não é necessidade declarada", () 
     expect(filtrada.oQuePreciso.map(item => item.texto)).toEqual(["Distribuidor no Chile"]);
   });
 
+  it("'a gente precisaria de um contador', o condicional do próprio verbo, também não vira 'preciso'", () => {
+    const fonte = "Eu sou a Ana. A gente precisaria de um contador no ano que vem. Hoje precisamos de um distribuidor no Chile.";
+    const filtrada = filtrarPelaFonte(proposta([
+      preciso("Contador", "precisaria de um contador"),
+      preciso("Distribuidor no Chile", "precisamos de um distribuidor no Chile"),
+    ]), fonte);
+    expect(filtrada.oQuePreciso.map(item => item.texto)).toEqual(["Distribuidor no Chile"]);
+  });
+
   it.each([
     ["Contador", "poderíamos precisar de contador", "Nós poderíamos precisar de contador."],
     ["Contador", "talvez a gente precise de um contador", "Talvez a gente precise de um contador para a filial."],
@@ -54,6 +63,24 @@ describe("o portão: necessidade hipotética não é necessidade declarada", () 
     ["Advogado tributarista", "caso precisemos de um advogado tributarista", "Caso precisemos de um advogado tributarista, ligamos."],
     ["Accountant", "if we need an accountant", "If we need an accountant, we will call you."],
     ["Contador", "precisamos de um distribuidor e talvez de um contador", "Precisamos de um distribuidor e talvez de um contador."],
+    // Conferência de tela com a IA real: o condicional do próprio verbo passava como declarado.
+    ["Contador", "precisaria de um contador", "A gente precisaria de um contador para a filial."],
+    ["Contador", "precisaríamos de um contador", "Nós precisaríamos de um contador."],
+    ["Contador", "necessitariam de um contador", "Eles necessitariam de um contador."],
+    ["Saber o preço", "eu precisaria saber o preço", "Eu precisaria saber o preço antes de fechar."],
+    ["Contador", "precisamos de um distribuidor e precisaríamos de um contador", "Precisamos de um distribuidor e precisaríamos de um contador."],
+    ["Accountant", "we would need an accountant", "We would need an accountant next year."],
+    ["Accountant", "we'd also need an accountant", "We'd also need an accountant."],
+    ["Accountant", "it would be necessary to hire an accountant", "It would be necessary to hire an accountant."],
+    ["Contador", "necesitaría un contador", "Necesitaría un contador para la sucursal."],
+    ["Contador", "necesitaríamos un contador", "Necesitaríamos un contador."],
+    ["Contador", "sería necesario un contador", "Sería necesario un contador."],
+    // As formas próximas: "seria necessário", o condicional com "ir" e o imperfeito do subjuntivo na condição.
+    ["Contador", "seria necessário um contador", "Seria necessário um contador."],
+    ["Contador", "a gente ia precisar de um contador", "A gente ia precisar de um contador."],
+    ["Contador", "iríamos precisar de um contador", "Iríamos precisar de um contador."],
+    ["Contador", "se a gente precisasse de um contador", "Se a gente precisasse de um contador, a gente ligava."],
+    ["Advogado", "caso precisássemos de um advogado", "Caso precisássemos de um advogado, ligaríamos."],
   ])("'%s' de '%s' é hipotética", (texto, trecho, fonte) => {
     expect(necessidadeHipotetica(texto, trecho, fonte)).toBe(true);
   });
@@ -77,6 +104,19 @@ describe("o portão: necessidade hipotética não é necessidade declarada", () 
     ["Contador", "quem sabe do assunto diz que precisamos de um contador", "Quem sabe do assunto diz que precisamos de um contador."],
     // O "talvez" depois do item não o alcança.
     ["Contador", "precisamos de um contador que talvez ajude na filial", "Precisamos de um contador que talvez ajude na filial."],
+    // O condicional só vale para o verbo de necessidade: "preciso", "precisamos" e o futuro declaram.
+    ["Contador", "preciso de um contador", "Eu preciso de um contador."],
+    ["Saber o preço", "eu preciso saber o preço", "Eu preciso saber o preço antes de fechar."],
+    ["Contador", "precisaremos de um contador", "No ano que vem precisaremos de um contador."],
+    ["Contador", "necesitaremos un contador", "Necesitaremos un contador."],
+    // O condicional de outro verbo não alcança a necessidade, nem o "would" depois do item.
+    ["Contador", "eu diria que precisamos de um contador", "Eu diria que precisamos de um contador."],
+    ["Accountant", "we need an accountant who would help", "We need an accountant who would help with the branch."],
+    // O "ia" só com o infinitivo, e o "d" só com o verbo inglês.
+    ["Dados de clientes", "a IA precisa de dados de clientes", "A IA precisa de dados de clientes."],
+    ["Contador", "precisamos de um contador", "Para o plano D precisamos de um contador."],
+    // O condicional da busca e do querer fica como estava.
+    ["Distribuidor en Chile", "querríamos un distribuidor en Chile", "Querríamos un distribuidor en Chile."],
   ])("'%s' de '%s' é declarada", (texto, trecho, fonte) => {
     expect(necessidadeHipotetica(texto, trecho, fonte)).toBe(false);
   });
@@ -88,6 +128,7 @@ describe("o portão: necessidade hipotética não é necessidade declarada", () 
     ["Talvez a gente precise de contador, mas precisamos mesmo de um distribuidor no Chile.", "Talvez a gente precise de contador, mas precisamos mesmo de um distribuidor no Chile"],
     ["a gente precisa de um distribuidor no Chile, isso é urgente, e talvez a gente precise de um contador lá também", "a gente precisa de um distribuidor no Chile, isso é urgente, e talvez a gente precise de um contador lá também"],
     ["Precisamos de um distribuidor no Chile porque talvez a gente precise expandir.", "precisamos de um distribuidor no Chile porque talvez a gente precise expandir"],
+    ["Precisamos de um distribuidor no Chile e precisaríamos de um contador no ano que vem.", "Precisamos de um distribuidor no Chile e precisaríamos de um contador"],
   ])("o verbo hipotético de outra necessidade não derruba a declarada: '%s'", (fonte, trecho) => {
     expect(necessidadeHipotetica("Distribuidor no Chile", trecho, fonte)).toBe(false);
     expect(filtrarPelaFonte(proposta([preciso("Distribuidor no Chile", trecho)]), fonte).oQuePreciso.map(item => item.texto)).toEqual(["Distribuidor no Chile"]);

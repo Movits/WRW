@@ -718,4 +718,10 @@ describe("completar por texto ou voz: o portão do 'preciso' hipotético", () =>
     const proposta = await interpretarComplemento("Ela talvez precise de tradutor juramentado.", { nomeDoContato: "Camila Duarte" });
     expect(proposta.oQuePreciso).toEqual([]);
   });
+
+  it("'precisaria', o condicional do próprio verbo, é hipotética: a sugestão não aparece", async () => {
+    invokeLLM.mockResolvedValue(resposta("precisaria de tradutor juramentado"));
+    const proposta = await interpretarComplemento("Ela precisaria de tradutor juramentado.", { nomeDoContato: "Camila Duarte" });
+    expect(proposta.oQuePreciso).toEqual([]);
+  });
 });
