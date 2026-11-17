@@ -23,7 +23,18 @@ const NOVA_TENTATIVA_MS = 30_000;
  */
 export type ResultadoDoDescarte = "descartada" | "pendente" | "nada";
 
-type Inicio = { title: string; language: string; consentNoticeVersion: typeof VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO; contactId?: number | null; contextId?: string | null };
+/**
+ * O começo da reunião em partes. A `origem` diz de onde vem o áudio: o
+ * microfone (o padrão) ou o arquivo importado em partes (H9a,
+ * useImportacaoEmPartes).
+ */
+type Inicio = { title: string; language: string; consentNoticeVersion: typeof VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO; contactId?: number | null; contextId?: string | null; origem?: "gravacao" | "arquivo" };
+
+/**
+ * Uma parte a enviar: a que o gravador fecha (AudioGravado) ou a de um MP3
+ * importado em partes (H9a), que sobe como audio/mpeg.
+ */
+export type ParteParaEnviar = Omit<AudioGravado, "mimeType"> & { mimeType: AudioGravado["mimeType"] | "audio/mpeg"; seq: number; ultima: boolean };
 
 /**
  * A gravação em partes do lado da tela (G9 do desenho do gravador): a reunião
@@ -60,6 +71,11 @@ type Inicio = { title: string; language: string; consentNoticeVersion: typeof VE
  * As closures sobrevivem ao desmonte: a parte que o gravador entrega depois de
  * a tela sair (o desmonte gravando para e entrega, G13b) sobe e encerra a
  * gravação do mesmo jeito.
+ *
+ * O MP3 importado em partes (H9a, hooks/useImportacaoEmPartes.ts) passa por
+ * aqui também: a reunião nasce com a origem "arquivo", cada parte cortada entra
+ * pelo receberParte como audio/mpeg, e o esperarFila segura o corte até a
+ * parte anterior subir.
  *
  * Com `ativo` falso (o envio único, ?envioUnico=1), nada aqui toca o servidor.
  */
@@ -112,8 +128,8 @@ export function useGravacaoEmPartes(opcoes: {
   // Sem nenhuma parte com áudio, a reunião sai, em vez de ficar "gravando".
   const encerrar = useCallback((id: string, partes: number) => declararFim(servidorDaGravacao, id, partes), [servidorDaGravacao]);
 
-  const iniciar = useCallback(async (inicio: Inicio) => {
-    const { id } = await utils.client.meetings.iniciarGravacao.mutate({ ...inicio, consentGranted: true, origem: "gravacao" });
+  const iniciar = useCallback(async ({ origem = "gravacao", ...inicio }: Inicio) => {
+    const { id } = await utils.client.meetings.iniciarGravacao.mutate({ ...inicio, consentGranted: true, origem });
     meetingId.current = id;
     const quem = utils.auth.me.getData()?.openId;
     if (quem) donas.current.set(id, quem);
@@ -157,8 +173,8 @@ export function useGravacaoEmPartes(opcoes: {
     return id ? cancelar(id) : "nada";
   }, [cancelar]);
 
-  /** Uma parte que o gravador fechou: aparelho, depois servidor. Na última, encerra. */
-  const receberParte = useCallback((parte: AudioGravado & { seq: number; ultima: boolean }) => {
+  /** Uma parte que o gravador fechou (ou que a importação cortou): aparelho, depois servidor. Na última, encerra. */
+  const receberParte = useCallback((parte: ParteParaEnviar) => {
     const id = meetingId.current;
     if (!id) return atuais.current.aoFalhar(new Error("Gravação em partes sem reunião."));
     // A última parte encerra a gravação já ao entrar na fila, e não quando sobe:
@@ -190,6 +206,10 @@ export function useGravacaoEmPartes(opcoes: {
         if (resultado?.tipo === "recusada" && !descartadas.current.has(id)) atuais.current.aoRecusarParte?.(resultado.codigo);
       }
       if (parte.ultima) {
+        // Cancelada enquanto esta última parte subia (a importação em partes,
+        // H9a): a exclusão vem logo atrás, na fila, e o fim não é declarado —
+        // senão a tela iria ao detalhe de uma reunião que está para sair.
+        if (descartadas.current.has(id)) return;
         const total = parte.blob.size > 0 ? parte.seq + 1 : parte.seq;
         try {
           await encerrar(id, total);
@@ -209,6 +229,15 @@ export function useGravacaoEmPartes(opcoes: {
       liberar();
     });
   }, [dona, encerrar]);
+
+  /**
+   * Espera a fila esvaziar: as partes que já entraram nela subiram (ou ficaram
+   * no aparelho, para a retomada) e, se a última estava entre elas, o fim foi
+   * declarado. A importação em partes (H9a) manda a parte seguinte só depois,
+   * para não ter o arquivo inteiro na memória nem no aparelho. Nunca rejeita:
+   * a falha de cada parte já saiu pelos avisos.
+   */
+  const esperarFila = useCallback(() => fila.current, []);
 
   // A retomada, a cada 30 s com a tela aberta: as gravações descartadas desta
   // conta cuja exclusão falhou, as partes que ficaram no aparelho e os fins que
@@ -257,5 +286,5 @@ export function useGravacaoEmPartes(opcoes: {
     return aoTerminarUmDescarte(id => atuais.current.aoConcluirDescarte?.(id));
   }, [opcoes.ativo]);
 
-  return { iniciar, cancelar, descartar, receberParte, enviando: pendentes > 0 };
+  return { iniciar, cancelar, descartar, receberParte, esperarFila, enviando: pendentes > 0 };
 }

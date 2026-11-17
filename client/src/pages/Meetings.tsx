@@ -33,6 +33,8 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
+import { useImportacaoEmPartes, type AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
+import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
@@ -277,6 +279,10 @@ export default function Meetings() {
     // que ele não tinha terminado deixa de valer.
     aoConcluirDescarte: () => toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE),
   });
+  // O MP3 enviado em partes (H9a): cortado nos quadros e enviado pelo mesmo
+  // caminho da gravação em partes, com o aoEncerrar acima levando ao detalhe.
+  // O Sair no meio para o envio (a sessão acabou).
+  const importacao = useImportacaoEmPartes({ partes: gravacaoEmPartes, temSessao: () => Boolean(utils.auth.me.getData()) });
   const gravador = useGravadorDeAudio({
     // Em partes (G13a), sem o teto de 10 min: o aviso de hora pede o OK a cada
     // hora cheia, e as 12 h são só o teto técnico. O envio único segue nos 10 min.
@@ -550,6 +556,9 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
     const mimeType = supportedAudioMime(file);
     if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
+    // O MP3 vai em partes (H9a), de qualquer tamanho até 12 h; os outros
+    // formatos, e tudo no ?envioUnico=1, seguem no envio único abaixo.
+    if (emPartes && mimeType === "audio/mpeg") return importarMp3(file);
     if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
@@ -583,6 +592,51 @@ export default function Meetings() {
       else toast.error(mensagem);
     } finally {
       setFinalizing(false);
+      liberarEnvio();
+    }
+  }
+
+  // O MP3 em partes (H9a). Por que todo MP3, e não só o que passa dos 10 min:
+  // a escolha é pelo formato, e não por uma duração que o navegador estima (no
+  // MP3 de bitrate variável sem o quadro Xing ela é um palpite, e o servidor
+  // mede quadro a quadro); o caminho é o da gravação, o padrão desde a G13b,
+  // com a cópia no aparelho e a retomada que o envio único não tem; e o MP3
+  // curto de bitrate alto (8 min a 320 kbps são 19 MB) deixa de bater nos
+  // 10 MB. O título e a autorização já foram conferidos por uploadAudio; o
+  // formulário trava enquanto o arquivo é lido e enviado (MeetingRecorder), e
+  // o aoEncerrar da gravação em partes leva ao detalhe no fim.
+  async function importarMp3(file: File) {
+    // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
+    // enquanto o arquivo é lido, se for a do ?agendada do clique.
+    const agendaNoClique = agendaNaTela.current;
+    const agendadaNoClique = agendada;
+    // Os avisos que ficam até ser fechados falam do envio anterior.
+    toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
+    toast.dismiss(ID_DO_AVISO_SEM_COPIA);
+    toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
+    // Como no envio de arquivo: a sessão fica ocupada do clique ao fim.
+    const liberarEnvio = ocupar("enviando");
+    try {
+      const resultado = await importacao.importar(
+        file,
+        { title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO },
+        meetingId => ligarAAgenda(agendaNoClique ?? agendaQueCarregou(agendadaNoClique), meetingId),
+      );
+      if (resultado.tipo === "recusada") {
+        if (resultado.motivo === "LONGO_DEMAIS") toast.error(t("meetings.importTooLong", { horas: HORAS_DA_GRAVACAO_EM_PARTES }));
+        else if (resultado.motivo === "NAO_E_MP3") toast.error(t("meetings.importNotMp3"));
+        else toast.error(t("meetings.audioReadError"));
+      } else if (resultado.tipo === "cancelada") {
+        if (resultado.exclusao) void utils.meetings.list.invalidate();
+        // A exclusão que falhou fica guardada, e a retomada de toda tela logada
+        // a repete e fecha este aviso (o mesmo id do Descartar da gravação).
+        if (resultado.exclusao === "pendente") toast.error(t("meetings.importCancelPending"), { id: ID_DO_AVISO_DO_DESCARTE_PENDENTE, duration: Infinity, closeButton: true });
+        else toast.success(t("meetings.importCanceled"));
+      }
+    } catch (error) {
+      // A reunião não chegou a nascer (o servidor recusou o início).
+      toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.uploadError"));
+    } finally {
       liberarEnvio();
     }
   }
@@ -657,6 +711,7 @@ export default function Meetings() {
       idioma={idiomaFalado} setIdioma={setIdiomaFalado} emPartes={emPartes}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       starting={iniciando}
+      importacao={importacao.andamento} onCancelImport={importacao.cancelar}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onDiscardRecording={emPartes ? discardRecording : undefined}
@@ -707,11 +762,13 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; daAgenda?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; daAgenda?: React.ReactNode }) {
   const { t } = useTranslation();
   // Iniciando (G13b), o formulário trava como gravando: a autorização desmarcada
   // ou o título trocado no meio não mudariam a reunião que o servidor já cria.
-  const locked = props.recording || props.processing || props.starting;
+  // O MP3 em partes (H9a) trava do mesmo jeito, da leitura ao fim do envio.
+  const importacao = props.importacao.fase === "parada" ? null : props.importacao;
+  const locked = props.recording || props.processing || props.starting || importacao !== null;
   // A confirmação do Descartar da gravação em partes (G13b), dentro da página:
   // o window.confirm pararia a página inteira, e no celular some com a troca de
   // app. A gravação segue enquanto ela está aberta (ver DescartarGravacao).
@@ -741,12 +798,13 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
         <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
       </div>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
+      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): o arquivo
-          enviado segue no envio único, com os 10 minutos e 10 MB dele, até a H9a. */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60, mb: ENVIO_UNICO_BYTES_MAX / (1024 * 1024) })}</p>}</div>}
+      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
+          os tetos do arquivo enviado, o MP3 em partes até 12 h (H9a) e os outros
+          formatos no envio único, com os 10 minutos e 10 MB dele. */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES, minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60, mb: ENVIO_UNICO_BYTES_MAX / (1024 * 1024) })}</p>}</div>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
