@@ -2254,6 +2254,13 @@
       "smartNetworkDesc": "Meetings, contacts and opportunities in your network"
     }
   },
+  "travaDoApp": {
+    "title": "Open the app with Face ID or fingerprint",
+    "subtitle": "On this phone",
+    "switchLabel": "Ask for Face ID or fingerprint when opening the app",
+    "unavailable": "This phone has no Face ID, fingerprint or screen lock set up. Set one up in the phone's settings to use the lock.",
+    "explanation": "With this on, the app asks for this phone's Face ID, fingerprint or screen lock when it opens and when you come back after 10 minutes. WRW never receives your biometrics: the phone itself does the check."
+  },
   "conta": {
     "excluir": {
       "titulo": "Delete my account",

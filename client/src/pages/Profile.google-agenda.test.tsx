@@ -24,6 +24,7 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { name: "Ana", email: "ana@exemplo.com", role: "silver" } }) }));
 vi.mock("@/components/ExcluirMinhaConta", () => ({ ExcluirMinhaConta: () => <div data-testid="zona-de-risco" /> }));
 vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => <div data-testid="google-agenda" /> }));
+vi.mock("@/components/TravaDoApp", () => ({ TravaDoApp: () => <div data-testid="trava-do-app" /> }));
 vi.mock("@/components/QualificacaoDoPerfil", () => ({ QualificacaoDoPerfil: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
