@@ -598,7 +598,9 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
       act(() => { vi.advanceTimersByTime(600_500); });
       expect(gravadores).toHaveLength(2);
       expect(gravadores[1].fluxo).toBe(gravadores[0].fluxo);
-      // O gravador da parte seguinte começa ANTES de o da atual parar: nada cai entre as duas.
+      // O gravador da parte seguinte começa ANTES de o da atual parar. No navegador
+      // ainda fica um buraco de dezenas de ms (o fim que o codificador segurava e o
+      // stop() descarta), que o dublê não imita.
       expect(linhaDoTempo).toEqual(["começa 0", "começa 1", "para 0"]);
       expect(aoFecharParte).toHaveBeenCalledTimes(1);
       expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, mimeType: "audio/mp4", duracaoMs: 600_000 });
@@ -893,7 +895,11 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
 // A emenda entre as partes (pedido do Roberto em 16/11: "a fala não pode se
 // perder"). Antes, a troca parava o gravador da parte e só abria o da seguinte
 // quando o navegador entregava o fim do arquivo: o áudio desse intervalo caía
-// entre as duas, e a palavra dita bem na troca saía cortada.
+// entre as duas, e a palavra dita bem na troca saía cortada. Estes testes provam
+// o que o hook controla: nenhum pedaço que o gravador entrega fica fora de uma
+// parte, e a troca espera a pausa da fala. O dublê não imita o buraco de dezenas
+// de ms que o navegador ainda deixa (o fim que o codificador segurava e o stop()
+// descarta); é a espera pela pausa que o faz cair no silêncio.
 describe("useGravadorDeAudio — a emenda das partes, sem corte", () => {
   const HORA_DA_TROCA = 600_000;
   const RELOGIO_FALSO: Parameters<typeof vi.useFakeTimers>[0] = { shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] };

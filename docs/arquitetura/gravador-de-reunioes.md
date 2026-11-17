@@ -210,11 +210,15 @@ gravação contínua).
    MediaRecorder a cada fatia e pede mp4 antes de webm (o webm já falhou no Gemini; ver a
    PR #158). A troca de parte não pode deixar buraco no áudio. A bancada B, que conferiria
    a emenda, foi trocada em 15/11 (ver "As duas bancadas de teste"). Desde 16/11 o
-   MediaRecorder da parte seguinte começa antes de o da atual parar (o trecho em comum fica
-   em milissegundos), e a troca espera uma pausa da fala de uns 300 ms, ouvida por um
-   AnalyserNode no mesmo fluxo: sem pausa, troca aos 620 s; sem AudioContext, ou com o
-   contexto suspenso do iPhone, troca no tempo, aos 600 s
-   (`client/src/hooks/useGravadorDeAudio.ts` e `client/src/lib/detector-de-pausa.ts`).
+   MediaRecorder da parte seguinte começa antes de o da atual parar, e a troca espera uma
+   pausa da fala de uns 300 ms, ouvida por um AnalyserNode no mesmo fluxo: sem pausa, troca
+   aos 620 s; sem AudioContext, ou com o contexto suspenso do iPhone, troca no tempo, aos
+   600 s (`client/src/hooks/useGravadorDeAudio.ts` e `client/src/lib/detector-de-pausa.ts`).
+   A emenda ainda deixa um buraco de dezenas de milissegundos, porque o stop() descarta
+   o fim que o codificador AAC segurava: medido só no Chrome, de 10 a 58 ms (num cenário,
+   as duas partes gravaram 153 ms em comum). Nenhuma palavra se perdeu na medida, porque a
+   troca caiu numa pausa da fala; a troca sem pausa, ou no tempo, pode pôr o buraco no meio
+   da fala.
 2. **Cópia no aparelho.** A fatia fica no IndexedDB até o servidor confirmar. O trecho
    em curso também vai para o aparelho aos poucos, e não só no fim da fatia, para um
    travamento perder no máximo os últimos segundos. Queda de rede, recarregar a página e

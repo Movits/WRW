@@ -43,14 +43,18 @@ export type OpcoesDoGravador = {
    * arquivo válido por si) sai por `aoFecharParte`, a última com `ultima`. A
    * última também sai por `aoTerminar`, como antes.
    *
-   * A emenda não perde fala. O gravador da parte seguinte começa ANTES de o da
-   * atual parar, e o trecho que as duas têm em comum fica em milissegundos. E a
-   * troca espera uma pausa da fala, de uns 300 ms (lib/detector-de-pausa.ts),
-   * por até ESPERA_PELA_PAUSA_MS depois de `fatiaSegundos`, para a palavra não
-   * sair cortada entre dois arquivos; sem pausa, troca no fim dessa espera. Sem
-   * como ouvir (sem AudioContext, ou o contexto que não começa a rodar, como o
-   * suspenso do iPhone), troca no tempo. As partes saem sempre na ordem da
-   * gravação.
+   * A emenda ainda deixa um buraco de dezenas de milissegundos. O gravador da
+   * parte seguinte começa ANTES de o da atual parar, mas o stop() descarta o
+   * fim que o codificador AAC ainda segurava. Medido só no Chrome, o buraco
+   * ficou entre 10 e 58 ms, e num dos cenários as duas partes gravaram 153 ms
+   * em comum. Por isso a troca espera uma pausa da fala, de uns 300 ms
+   * (lib/detector-de-pausa.ts), por até ESPERA_PELA_PAUSA_MS depois de
+   * `fatiaSegundos`: o buraco cai no silêncio, e a palavra não sai cortada
+   * entre dois arquivos. Sem pausa, troca no fim dessa espera; sem como ouvir
+   * (sem AudioContext, ou o contexto que não começa a rodar, como o suspenso
+   * do iPhone), troca no tempo. Nesses casos, e com a aba em segundo plano
+   * (ATRASO_MAXIMO_MS), o buraco pode cair no meio da fala. As partes saem
+   * sempre na ordem da gravação.
    */
   fatiaSegundos?: number;
   aoFecharParte?: (parte: AudioGravado & { seq: number; ultima: boolean }) => void;
@@ -277,9 +281,11 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
 
   /**
    * A troca de parte: abre o gravador da parte seguinte no mesmo fluxo e só
-   * então para o da atual. O trecho que as duas gravam juntas fica em
-   * milissegundos, e nada cai entre elas. A atual entrega o arquivo quando o
-   * navegador termina de fechá-lo, já com a seguinte gravando.
+   * então para o da atual. Mesmo assim fica entre as duas um buraco de dezenas
+   * de milissegundos, o fim que o codificador segurava e o stop() descarta (ver
+   * `fatiaSegundos`), e por isso conferirATroca espera a pausa da fala. A atual
+   * entrega o arquivo quando o navegador termina de fechá-lo, já com a seguinte
+   * gravando.
    */
   function trocarDeParte() {
     pararDeOuvir();
