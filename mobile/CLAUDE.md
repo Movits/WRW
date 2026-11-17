@@ -38,7 +38,19 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
   consentimento.
 - O texto de permissão do microfone (`NSMicrophoneUsageDescription`) aparece na revisão
   da Apple. Precisa dizer para que o microfone serve.
-- O user agent termina em `WRWApp/1.0`, para o site saber que está dentro do app.
+- O user agent termina em `WRWApp/1.1`, para o site saber que está dentro do app. O build
+  que liga as chaves de acesso na WebView acrescenta `WRWChaves/1`; o site só mostra o
+  login com chave dentro do app quando vê esse sinal.
+- **Chaves de acesso dentro do app (M1, só Android por enquanto):** o módulo nativo nosso
+  `modules/chaves-na-webview` liga a WebAuthn na WebView do react-native-webview
+  (`WebSettingsCompat.setWebAuthenticationSupport`, modo `FOR_APP`), sem remendar a
+  biblioteca. O Android só libera a chave com o site associado ao app pelo
+  `https://wrwglobal.org/.well-known/assetlinks.json` (pacote `org.wrwglobal.app` e o
+  SHA-256 da assinatura, que sai de `eas credentials`). Na WebView não há sugestão
+  automática no campo (`mediation: "conditional"`): o login com chave é pelo botão. O
+  módulo não existe no Expo Go; para testar, o APK do perfil `preview`, instalado por
+  `adb` (o Android no Brasil bloqueia instalar fora da loja sem desenvolvedor
+  verificado). No iPhone falta o Associated Domains, que depende do Team ID da Apple.
 - **A trava do app** (`trava.ts` e `App.tsx`): com ela ligada, o app pede o Face ID, a
   digital ou o bloqueio de tela ao abrir e ao voltar depois de 10 minutos em segundo plano.
   Desligada por padrão. A escolha fica no cofre do celular (`expo-secure-store`, chaves

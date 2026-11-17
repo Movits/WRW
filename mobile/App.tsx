@@ -11,7 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, BackHandler, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { AppState, BackHandler, findNodeHandle, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
@@ -23,8 +23,15 @@ import {
   precisaTravarAoVoltar,
   scriptDoEstado,
 } from './trava';
+import { chavesNaWebViewDisponiveis, ligarChavesNaWebView } from './modules/chaves-na-webview';
 
 const ORIGEM = 'https://wrwglobal.org';
+
+// O user agent termina em WRWApp/<versão>, para o site saber que está no app. O
+// WRWChaves/1 diz que este build liga as chaves de acesso na WebView (M1, só
+// Android, só num build próprio: no Expo Go o módulo nativo não existe). O site
+// só mostra o login com chave dentro do app quando vê esse sinal.
+const NOME_NO_USER_AGENT = chavesNaWebViewDisponiveis ? 'WRWApp/1.1 WRWChaves/1' : 'WRWApp/1.1';
 const HOSTS_DA_WRW = new Set(['wrwglobal.org', 'www.wrwglobal.org']);
 
 function ehDaWrw(url: string): boolean {
@@ -238,6 +245,19 @@ export default function App() {
     contarAoSite({ disponivel: biometria, ligada });
   }, [biometria, ligada, ligar, desligar, contarAoSite]);
 
+  // As chaves de acesso na WebView (M1): ligadas logo depois de a WebView nascer.
+  // Se a página já tinha carregado antes, ela recarrega uma vez, para enxergar
+  // a WebAuthn que acabou de ser ligada.
+  const jaCarregou = useRef(false);
+  useEffect(() => {
+    if (!chavesNaWebViewDisponiveis) return;
+    let ativo = true;
+    void ligarChavesNaWebView(findNodeHandle(webview.current)).then(ligou => {
+      if (ativo && ligou && jaCarregou.current) webview.current?.reload();
+    });
+    return () => { ativo = false; };
+  }, []);
+
   // Botão "voltar" do Android: volta no histórico do site antes de fechar o app.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -279,8 +299,9 @@ export default function App() {
           onShouldStartLoadWithRequest={aoPedirCarga}
           onNavigationStateChange={aoNavegar}
           onMessage={evento => void aoReceberMensagem(evento)}
+          onLoadEnd={() => { jaCarregou.current = true; }}
           renderError={() => <TelaDeErro aoTentarDeNovo={() => webview.current?.reload()} />}
-          applicationNameForUserAgent="WRWApp/1.0"
+          applicationNameForUserAgent={NOME_NO_USER_AGENT}
           sharedCookiesEnabled
           allowsBackForwardNavigationGestures
           allowsInlineMediaPlayback
