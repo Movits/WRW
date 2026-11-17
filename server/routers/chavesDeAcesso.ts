@@ -97,8 +97,13 @@ const respostaDeEntrada = z.object({
 const idDaChave = z.string().min(1).max(36);
 
 export const chavesDeAcessoRouter = router({
-  // Público e sem banco: a tela pergunta antes de mostrar o botão.
-  estado: publicProcedure.query(({ ctx }) => ({ disponivel: configuracaoParaOPedido(ctx.req) !== null })),
+  // Público e sem banco: a tela pergunta antes de mostrar o botão. O RP ID não
+  // é segredo (as opções de entrada e de cadastro já o mandam): a tela o usa
+  // para avisar o aparelho da chave que não vale mais (a Signal API do WebAuthn).
+  estado: publicProcedure.query(({ ctx }) => {
+    const configuracao = configuracaoParaOPedido(ctx.req);
+    return configuracao ? { disponivel: true as const, rpId: configuracao.rpId } : { disponivel: false as const };
+  }),
 
   // Mutação, e não consulta: grava o desafio (e o POST leva o cabeçalho Origin).
   // Só com a sessão recente; senão CHAVE_REAUTENTICAR (server/chaves-de-acesso.ts).

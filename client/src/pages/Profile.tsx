@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
 import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
+import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
@@ -696,6 +697,10 @@ export default function Profile() {
         {/* A Google Agenda (H16b): só aparece com a função disponível no
             servidor; fora da edição, como a zona de risco abaixo. */}
         {!editing && <ConexaoGoogleAgenda />}
+
+        {/* As chaves de acesso (A7): entrar com Face ID ou digital. Só aparece
+            com a função disponível neste endereço e fora da casca das lojas. */}
+        {!editing && <ChavesDeAcesso />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}

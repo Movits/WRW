@@ -36,6 +36,15 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
     },
+    // As chaves de acesso (A7) ficam desligadas aqui: os casos delas estão em
+    // Login.chaves-de-acesso.test.tsx.
+    chavesDeAcesso: {
+      estado: { useQuery: () => ({ data: { disponivel: false } }) },
+      opcoesDeEntrada: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      entrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      opcoesDeCadastro: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      cadastrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    },
   },
 }));
 vi.mock("wouter", () => ({
