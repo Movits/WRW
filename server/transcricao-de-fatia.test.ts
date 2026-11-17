@@ -9,7 +9,7 @@ const ambiente = vi.hoisted(() => ({ ENV: { llmApiKey: "chave-de-teste-que-nunca
 vi.mock("./_core/env", () => ambiente);
 
 const { gerarComAudioNoGemini, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, raciocinioBaixo } = await import("./gemini");
-const { contextoParaAProxima, montarTranscricao, normalizarSegmentos, promptDaFatia, transcreverFatia } = await import("./transcricao-de-fatia");
+const { contextoParaAProxima, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, transcreverFatia } = await import("./transcricao-de-fatia");
 
 let fetchOriginal: typeof globalThis.fetch;
 let pedidos: Array<{ url: string; corpo: Record<string, any> }> = [];
@@ -179,6 +179,110 @@ describe("normalizarSegmentos", () => {
   });
 });
 
+/**
+ * O defeito de 17/11/2026 (bancada da tela do pacote 4a, MP3 sintético de 25 min
+ * com "Minute N" no começo de cada minuto): pedido como número de segundos, o
+ * modelo escrevia os minutos e os segundos juntos (1:00 virava 100). O servidor
+ * lia 100 como segundos, e o que passava do fim da parte ficava preso nele:
+ * "Minute two" saía em 01:40, "Minute seven" em 10:00, e os minutos 8 a 10 da
+ * primeira parte nem vieram. Agora o tempo vem como texto "MM:SS".
+ */
+describe("tempo da fala em 'MM:SS'", () => {
+  // Um "Minute N" no começo de cada minuto de uma parte de 10 min.
+  const minutos = (tempo: (minuto: number) => string | number) => ({
+    segmentos: Array.from({ length: 10 }, (_, i) => ({
+      inicio: tempo(i), fim: tempo(i), falante: i % 2 ? "F2" : "F1", texto: `Minute ${i + 1}.`,
+    })),
+  });
+
+  it("a conversão: 'MM:SS' e 'H:MM:SS' viram segundos; número volta marcado como número; o resto é null", () => {
+    expect(lerTempo("00:07")).toEqual({ segundos: 7, numero: false });
+    expect(lerTempo("01:05")).toEqual({ segundos: 65, numero: false });
+    expect(lerTempo(" 9:58 ")).toEqual({ segundos: 598, numero: false });
+    expect(lerTempo("10:00")).toEqual({ segundos: 600, numero: false });
+    expect(lerTempo("00:07.5")).toEqual({ segundos: 7.5, numero: false });
+    expect(lerTempo("1:02:03")).toEqual({ segundos: 3723, numero: false });
+    expect(lerTempo("0:09:00")).toEqual({ segundos: 540, numero: false });
+    // Número (ou texto só com número) não se decide sozinho: 105 pode ser 1:45 ou 1:05.
+    expect(lerTempo(105)).toEqual({ segundos: 105, numero: true });
+    expect(lerTempo("105")).toEqual({ segundos: 105, numero: true });
+    expect(lerTempo("41,5")).toEqual({ segundos: 41.5, numero: true });
+    for (const invalido of ["01:75", "1:60:00", "abc", "", "1h05", "-00:05", -3, Number.NaN, null, undefined, {}]) {
+      expect(lerTempo(invalido)).toBeNull();
+    }
+  });
+
+  it("tempoEmTexto escreve como o modelo deve escrever", () => {
+    expect(tempoEmTexto(0)).toBe("00:00");
+    expect(tempoEmTexto(65)).toBe("01:05");
+    expect(tempoEmTexto(599.98)).toBe("10:00");
+    expect(tempoEmTexto(3723)).toBe("1:02:03");
+    expect(tempoEmTexto(7, true)).toBe("0:00:07");
+  });
+
+  it("a fala aos 9 min de uma parte que começa aos 10 min sai em 19:00, inteira, com todas as outras", () => {
+    const s = normalizarSegmentos(minutos(i => tempoEmTexto(i * 60)), 600, 599.98);
+    expect(s).toHaveLength(10);
+    expect(s.map(x => x.inicio)).toEqual([600, 660, 720, 780, 840, 900, 960, 1020, 1080, 1140]);
+    expect(s[9]).toEqual({ inicio: 1140, fim: 1140, falante: "F2", texto: "Minute 10." });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("a resposta MMSS antiga (1:00 escrito 100): a fala aos 9 min sai em 9:00, e não presa no fim; nada se perde", () => {
+    // Como nas partes do defeito, em que o banco guardou 0, 100, 200... 600 e o resto preso em 602.
+    const s = normalizarSegmentos(minutos(i => i * 100), 599.98, 599.98);
+    expect(s.map(x => x.texto)).toEqual(Array.from({ length: 10 }, (_, i) => `Minute ${i + 1}.`));
+    expect(s.map(x => Math.round(x.inicio - 599.98))).toEqual([0, 60, 120, 180, 240, 300, 360, 420, 480, 540]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("lidos como minutos e segundos juntos"));
+    // Com décimos e no texto: 101.6 é 1:01,6; "905" é 9:05.
+    const decimos = normalizarSegmentos({ segmentos: [
+      { inicio: 101.6, fim: 106.2, falante: "F2", texto: "um" },
+      { inicio: "905", fim: "911", falante: "F1", texto: "dois" },
+    ] }, 0, 600);
+    expect(decimos.map(x => [x.inicio, x.fim])).toEqual([[61.6, 66.2], [545, 551]]);
+  });
+
+  it("número que cabe na parte em segundos fica em segundos (na dúvida, a leitura literal)", () => {
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: 0, fim: 12, falante: "F1", texto: "a" },
+      { inicio: 75, fim: 130, falante: "F2", texto: "b" },
+      { inicio: 590, fim: 605, falante: "F1", texto: "c" },
+    ] }, 0, 600);
+    expect(s.map(x => [x.inicio, x.fim])).toEqual([[0, 12], [75, 130], [590, 602]]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("lidos como segundos"));
+  });
+
+  it("a fala no fim da parte, e a que começa depois dele, ficam presas no fim, com o texto e na ordem", () => {
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: "09:50", fim: "09:57", falante: "F1", texto: "quase no fim" },
+      { inicio: "09:58", fim: "10:04", falante: "F2", texto: "atravessa o fim" },
+      { inicio: "10:30", fim: "10:40", falante: "F1", texto: "depois do fim" },
+      { inicio: "15:00", fim: "15:05", falante: "F2", texto: "bem depois do fim" },
+    ] }, 1200, 600);
+    expect(s).toEqual([
+      { inicio: 1790, fim: 1797, falante: "F1", texto: "quase no fim" },
+      { inicio: 1798, fim: 1802, falante: "F2", texto: "atravessa o fim" },
+      { inicio: 1802, fim: 1802, falante: "F1", texto: "depois do fim" },
+      { inicio: 1802, fim: 1802, falante: "F2", texto: "bem depois do fim" },
+    ]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("2 de 4 falas começavam depois do fim da parte (600 s) e ficaram presas nele"));
+  });
+
+  it("a ordem: pelo início; a fala sem tempo legível fica logo depois da anterior, e as de mesmo início na ordem em que vieram", () => {
+    const s = normalizarSegmentos({ segmentos: [
+      { inicio: "00:00", fim: "00:10", falante: "F1", texto: "primeira" },
+      { inicio: "00:30", fim: "00:40", falante: "F2", texto: "segunda" },
+      { inicio: "?", fim: "", falante: "F1", texto: "sem tempo, depois da segunda" },
+      { inicio: "02:00", fim: "02:05", falante: "F2", texto: "quarta" },
+      { inicio: "01:00", fim: "01:05", falante: "F1", texto: "terceira, veio fora de ordem" },
+      { inicio: "02:00", fim: "02:01", falante: "F1", texto: "quinta, mesmo início da quarta" },
+    ] }, 0, 600);
+    expect(s.map(x => x.texto)).toEqual(["primeira", "segunda", "sem tempo, depois da segunda", "terceira, veio fora de ordem", "quarta", "quinta, mesmo início da quarta"]);
+    expect(s[2]).toMatchObject({ inicio: 30, fim: 30 });
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("1 de 6 falas vieram sem tempo legível"));
+  });
+});
+
 describe("contexto entre as partes", () => {
   it("o prompt da parte seguinte leva as vozes e as últimas falas, com o tempo absoluto", () => {
     const anterior = contextoParaAProxima([
@@ -203,6 +307,22 @@ describe("contexto entre as partes", () => {
     expect(longa).toContain("Últimas falas do trecho anterior");
     expect(longa).toMatch(/F1: x{1000,}…/);
     expect(longa.length).toBeLessThan(5000);
+  });
+
+  it("o prompt pede o tempo como texto 'MM:SS', de 00:00 ao fim da parte, nunca como número de segundos", () => {
+    const prompt = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 599.98 });
+    expect(prompt).toContain('escrito como texto "MM:SS"');
+    expect(prompt).toContain('de "00:00" a "10:00"');
+    expect(prompt).toContain("Nunca escreva o tempo como número.");
+    expect(prompt).toContain("O trecho tem 10:00 de áudio: transcreva até o fim dele.");
+    // O pedido de antes, que o modelo respondia com 1:00 escrito 100.
+    expect(prompt).not.toContain("segundos dentro");
+    expect(prompt).not.toMatch(/de 0 a \d+/);
+    expect(promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 300.069 })).toContain('de "00:00" a "05:00"');
+    // A bancada aceita parte de qualquer tamanho: a partir de uma hora, "H:MM:SS".
+    const longa = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 3725 });
+    expect(longa).toContain('escrito como texto "H:MM:SS"');
+    expect(longa).toContain('de "0:00:00" a "1:02:05"');
   });
 
   it("a primeira parte não fala de trecho anterior, e a voz nova soma às de antes, em ordem numérica", () => {
@@ -262,10 +382,29 @@ describe("montarTranscricao", () => {
 
 describe("transcreverFatia", () => {
   it("chama a IA com o idioma pelo nome e devolve os segmentos absolutos", async () => {
-    responder({ corpo: respostaJson({ segmentos: [{ inicio: 2, fim: 4, falante: "F1", texto: "Hello" }] }) });
+    responder({ corpo: respostaJson({ segmentos: [{ inicio: "00:02", fim: "00:04", falante: "F1", texto: "Hello" }] }) });
     const r = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "en-US", inicioSegundos: 1200, duracaoSegundos: 600 });
     expect(r).toEqual({ segmentos: [{ inicio: 1202, fim: 1204, falante: "F1", texto: "Hello" }], idioma: "en", modelo: "gemini-3.5-flash" });
     expect(JSON.stringify(pedidos[0].corpo)).toContain("inglês");
+  });
+
+  it("pede o tempo como TEXTO com o padrão 'MM:SS', na ordem do contrato, e a fala aos 9 min sai certa", async () => {
+    responder({ corpo: respostaJson({ segmentos: [
+      { inicio: "00:00", fim: "00:01", falante: "F1", texto: "Minute one." },
+      { inicio: "09:00", fim: "09:02", falante: "F1", texto: "Minute ten." },
+    ] }) });
+    const r = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mpeg", idioma: "pt-BR", inicioSegundos: 599.98, duracaoSegundos: 599.98 });
+    expect(r.segmentos.map(s => [s.inicio, s.texto])).toEqual([[600, "Minute one."], [1140, "Minute ten."]]);
+    const item = pedidos[0].corpo.generationConfig.responseSchema.properties.segmentos.items;
+    expect(item.propertyOrdering).toEqual(["inicio", "fim", "falante", "texto"]);
+    expect(item.required).toEqual(["inicio", "fim", "falante", "texto"]);
+    for (const campo of ["inicio", "fim"]) {
+      expect(item.properties[campo]).toMatchObject({ type: "STRING", description: expect.stringContaining('"MM:SS"') });
+      const padrao = new RegExp(item.properties[campo].pattern);
+      for (const ok of ["00:00", "09:58", "7:05", "10:00", "1:02:05"]) expect(padrao.test(ok), ok).toBe(true);
+      for (const nao of ["100", "600", "9:60", "00:7", "1:2:3", "09:58.5"]) expect(padrao.test(nao), nao).toBe(false);
+    }
+    expect(pedidos[0].corpo.contents[0].parts[0].text).toContain('de "00:00" a "10:00"');
   });
 
   it("JSON inválido é erro, não transcrição vazia", async () => {

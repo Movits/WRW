@@ -14,6 +14,13 @@ import { gerarComAudioNoGemini } from "./gemini";
  * em JSON. A fatia leva adiante as vozes já identificadas e as últimas falas da
  * fatia anterior, para o mesmo `F<n>` continuar sendo a mesma pessoa.
  *
+ * O modelo escreve o tempo DENTRO da fatia como texto "MM:SS" (o formato em que
+ * o Gemini marca tempo de áudio), e o servidor o converte em segundos. Pedido
+ * como número de segundos ("de 0 a 600"), ele escrevia os minutos e os segundos
+ * juntos (1:00 virava 100): a fala depois dos ~6 min de cada parte era achatada
+ * no fim dela ou nem vinha, já que, contando assim, aos 6 min ele chegava ao
+ * "600" do pedido (bancada da tela do pacote 4a, 17/11/2026).
+ *
  * O raciocínio do modelo tem orçamento FIXO e baixo: ele conta dentro do teto
  * de saída, e num áudio de 38 min o gemini-3.5-flash parou em MAX_TOKENS com
  * 62,9 mil tokens de raciocínio e só 2,6 mil de texto (14/11/2026). Resposta
@@ -32,9 +39,20 @@ const LETRAS_DE_CONTEXTO = 1_200;
 // Folga para o modelo marcar um fim um pouco depois do fim declarado da fatia.
 const FOLGA_DO_FIM_SEGUNDOS = 2;
 const FALANTE_VALIDO = /^F([1-9]\d?)$/;
+// O tempo que o modelo escreve: "MM:SS" ou, a partir de uma hora, "H:MM:SS"
+// (décimos aceitos na leitura, embora o esquema não os peça). O texto só com
+// número ("105") não casa aqui: é lido como número (leituraDosNumeros).
+const TEMPO_EM_TEXTO = /^(?:(\d{1,2}):)?(\d{1,3}):(\d{1,2})(?:[.,](\d+))?$/;
+const NUMERO_EM_TEXTO = /^\d+(?:[.,]\d+)?$/;
+// O mesmo formato no esquema, sem atalhos de regex, para o decodificador do
+// Gemini: "07:05", "7:05" ou "1:02:05".
+const PADRAO_DO_TEMPO = "^([0-9]+:)?[0-5]?[0-9]:[0-5][0-9]$";
+const DESCRICAO_DO_TEMPO = 'Tempo dentro deste trecho, contado do começo dele, como texto "MM:SS" (a partir de uma hora, "H:MM:SS").';
 
 // O responseSchema do Gemini (subconjunto do OpenAPI), com os tipos em
-// maiúsculas, como a API os define.
+// maiúsculas, como a API os define. O tempo é TEXTO com padrão, nunca número:
+// ver o cabeçalho. A ordem das propriedades é a do contrato (propertyOrdering):
+// sem ela, a API pode gerá-las em ordem alfabética, com o fim antes do início.
 const ESQUEMA_DA_RESPOSTA = {
   type: "OBJECT",
   properties: {
@@ -43,25 +61,42 @@ const ESQUEMA_DA_RESPOSTA = {
       items: {
         type: "OBJECT",
         properties: {
-          inicio: { type: "NUMBER" },
-          fim: { type: "NUMBER" },
+          inicio: { type: "STRING", description: DESCRICAO_DO_TEMPO, pattern: PADRAO_DO_TEMPO },
+          fim: { type: "STRING", description: DESCRICAO_DO_TEMPO, pattern: PADRAO_DO_TEMPO },
           falante: { type: "STRING" },
           texto: { type: "STRING" },
         },
         required: ["inicio", "fim", "falante", "texto"],
+        propertyOrdering: ["inicio", "fim", "falante", "texto"],
       },
     },
   },
   required: ["segmentos"],
 } as const;
 
+/** Segundos como o modelo os escreve: "MM:SS" ou, com horas, "H:MM:SS". */
+export function tempoEmTexto(segundos: number, comHoras = segundos >= 3600): string {
+  const total = Math.max(0, Math.round(segundos));
+  const doisDigitos = (n: number) => String(n).padStart(2, "0");
+  const horas = Math.floor(total / 3600);
+  const minutosESegundos = `${doisDigitos(Math.floor((total % 3600) / 60))}:${doisDigitos(total % 60)}`;
+  return comHoras || horas ? `${horas}:${minutosESegundos}` : minutosESegundos;
+}
+
 export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
+  // As partes têm até 12 min (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS); o "H:MM:SS"
+  // só vale para a bancada, que aceita parte de qualquer tamanho.
+  const comHoras = input.duracaoSegundos >= 3600;
+  const fimDoTrecho = tempoEmTexto(input.duracaoSegundos, comHoras);
+  const formato = comHoras
+    ? '"H:MM:SS" (horas, minutos e segundos: "0:00:07", "0:01:05", "1:02:30")'
+    : '"MM:SS" (minutos e segundos, cada um com dois dígitos: "00:07", "01:05", "09:58")';
   const linhas = [
     "Transcreva integralmente a fala deste trecho de áudio de uma reunião.",
     `O idioma predominante esperado é ${nomeDoIdioma(input.idioma)}; transcreva cada fala no idioma em que foi dita, sem traduzir.`,
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
-    `2) "inicio" e "fim" são os segundos dentro DESTE trecho, de 0 a ${Math.round(input.duracaoSegundos)}.`,
+    `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${fimDoTrecho} de áudio: transcreva até o fim dele.`,
     '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo. Nunca use nomes de pessoas no rótulo.',
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
     "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
@@ -89,37 +124,115 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
   return linhas.join("\n");
 }
 
+/** Um tempo da resposta, em segundos, e se ele veio como número (ou texto só com número). */
+export type TempoLido = { segundos: number; numero: boolean };
+
+/**
+ * Lê um tempo da resposta do modelo. Texto "MM:SS" ou "H:MM:SS" vira segundos
+ * (segundos de 60 em diante, ou minutos de 60 em diante depois da hora, não são
+ * tempo). Número, ou texto só com número ("105"), volta marcado como número:
+ * quem decide o que ele quer dizer é leituraDosNumeros, olhando a resposta
+ * inteira. Negativo, vazio ou qualquer outra coisa: null.
+ */
+export function lerTempo(valor: unknown): TempoLido | null {
+  if (typeof valor === "number") return Number.isFinite(valor) && valor >= 0 ? { segundos: valor, numero: true } : null;
+  if (typeof valor !== "string") return null;
+  const texto = valor.trim();
+  if (NUMERO_EM_TEXTO.test(texto)) return { segundos: Number(texto.replace(",", ".")), numero: true };
+  const partes = TEMPO_EM_TEXTO.exec(texto);
+  if (!partes) return null;
+  const [, horas, minutos, segundos, decimos] = partes;
+  const s = Number(`${segundos}.${decimos ?? "0"}`);
+  if (s >= 60 || (horas !== undefined && Number(minutos) >= 60)) return null;
+  return { segundos: Number(horas ?? 0) * 3600 + Number(minutos) * 60 + s, numero: false };
+}
+
+/** O número com os minutos e os segundos juntos (105 = 1:05), em segundos; null se ele não tem essa forma. */
+function minutosESegundosJuntos(n: number): number | null {
+  const inteiro = Math.floor(n);
+  const segundos = (inteiro % 100) + (n - inteiro);
+  return segundos < 60 ? Math.floor(inteiro / 100) * 60 + segundos : null;
+}
+
+/**
+ * Como ler os tempos que vieram como NÚMERO: o formato de antes desta correção,
+ * ou um modelo que fuja do texto pedido. A leitura só vale se for coerente com
+ * a parte inteira:
+ * - em segundos, se nenhuma fala começa depois do fim da parte (o fim que passa
+ *   um pouco dele é comum, e fica preso nele);
+ * - em minutos e segundos juntos (1:00 escrito 100, o defeito de 17/11), se
+ *   alguma começa depois do fim e TODOS os tempos cabem na parte nessa leitura;
+ * - se nenhuma das duas é coerente, em segundos, e o que passa do fim fica
+ *   preso nele, sem perder a fala.
+ * Na dúvida (todos cabem nas duas leituras), fica em segundos: a resposta
+ * antiga com fala só nos primeiros 6 min de cada parte não se distingue, e é o
+ * esquema em texto que evita o caso.
+ */
+function leituraDosNumeros(inicios: number[], todos: number[], teto: number): { ler: (n: number) => number; juntos: boolean } {
+  const emSegundos = { ler: (n: number) => n, juntos: false };
+  if (inicios.every(n => n <= teto)) return emSegundos;
+  if (!todos.every(n => { const lido = minutosESegundosJuntos(n); return lido !== null && lido <= teto; })) return emSegundos;
+  return { ler: n => minutosESegundosJuntos(n) ?? n, juntos: true };
+}
+
 /**
  * Converte a resposta do modelo em segmentos do contrato: tempos absolutos
- * (somados ao início da fatia), presos à duração dela, em ordem, sem texto
- * vazio. Falante fora do formato `F<n>` vira o último falante válido (ou F1):
- * o rótulo é dado de tela, e um nome inventado pelo modelo não pode ir ao banco.
+ * (somados ao início da fatia), em ordem, sem texto vazio. NENHUMA fala com
+ * texto se perde por causa do tempo: a que passa do fim da parte fica presa
+ * nele (com a folga de 2 s), e a sem tempo legível fica com o início da
+ * anterior. A ordenação é pelo início e estável: falas com o mesmo início (as
+ * presas no fim, a sem tempo logo depois da anterior) ficam na ordem em que o
+ * modelo as escreveu. Falante fora do formato `F<n>` vira o último falante
+ * válido (ou F1): o rótulo é dado de tela, e um nome inventado pelo modelo não
+ * pode ir ao banco.
  */
 export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): Segmento[] {
   const itens = (bruto as { segmentos?: unknown })?.segmentos;
   if (!Array.isArray(itens)) throw new Error("A transcrição da parte veio sem a lista de falas.");
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
-  const segmentos: Segmento[] = [];
-  let ultimoFalante = "F1";
-  let rotulosTrocados = 0;
+  const falas: Array<{ inicio: TempoLido | null; fim: TempoLido | null; falante: unknown; texto: string }> = [];
   for (const item of itens) {
     const { inicio, fim, falante, texto } = (item ?? {}) as Record<string, unknown>;
     if (typeof texto !== "string" || !texto.trim()) continue;
-    const de = Math.min(Math.max(Number.isFinite(inicio) ? Number(inicio) : 0, 0), teto);
-    const ate = Math.min(Math.max(Number.isFinite(fim) ? Number(fim) : de, de), teto);
-    const valido = typeof falante === "string" && FALANTE_VALIDO.test(falante.trim());
+    falas.push({ inicio: lerTempo(inicio), fim: lerTempo(fim), falante, texto: texto.trim() });
+  }
+  // Os números se leem juntos, porque um só não diz se 105 é 1:45 ou 1:05.
+  const numeros = (lidos: Array<TempoLido | null>) => lidos.filter((t): t is TempoLido => !!t?.numero).map(t => t.segundos);
+  const iniciosEmNumero = numeros(falas.map(f => f.inicio));
+  const todosEmNumero = numeros(falas.flatMap(f => [f.inicio, f.fim]));
+  const leitura = leituraDosNumeros(iniciosEmNumero, todosEmNumero, teto);
+  const emSegundos = (t: TempoLido | null) => (t === null ? null : t.numero ? leitura.ler(t.segundos) : t.segundos);
+
+  const segmentos: Segmento[] = [];
+  let ultimoFalante = "F1";
+  let inicioAnterior = 0;
+  let rotulosTrocados = 0;
+  let semTempo = 0;
+  let presasNoFim = 0;
+  for (const fala of falas) {
+    const lidoDe = emSegundos(fala.inicio);
+    if (lidoDe === null) semTempo++;
+    else if (lidoDe > teto) presasNoFim++;
+    const de = Math.min(lidoDe ?? inicioAnterior, teto);
+    const ate = Math.min(Math.max(emSegundos(fala.fim) ?? de, de), teto);
+    inicioAnterior = de;
+    const valido = typeof fala.falante === "string" && FALANTE_VALIDO.test(fala.falante.trim());
     if (!valido) rotulosTrocados++;
-    const rotulo = valido ? (falante as string).trim() : ultimoFalante;
+    const rotulo = valido ? (fala.falante as string).trim() : ultimoFalante;
     ultimoFalante = rotulo;
     segmentos.push({
       inicio: arredondar(inicioSegundos + de),
       fim: arredondar(inicioSegundos + ate),
       falante: rotulo,
-      texto: texto.trim(),
+      texto: fala.texto,
     });
   }
-  // Avisos para quem acompanha a bancada e o log: o rótulo trocado funde vozes,
-  // e uma parte longa sem fala nenhuma pode ser falha do modelo, não silêncio.
+  // Avisos para quem acompanha a bancada e o log (só contagens, nunca a fala):
+  // o rótulo trocado funde vozes, o tempo fora do formato pede atenção ao
+  // modelo, e uma parte longa sem fala nenhuma pode ser falha dele, não silêncio.
+  if (todosEmNumero.length) console.warn(`[Transcrição] ${todosEmNumero.length} tempos vieram como número, e não como "MM:SS"; lidos como ${leitura.juntos ? "minutos e segundos juntos (105 = 1:05)" : "segundos"}`);
+  if (presasNoFim) console.warn(`[Transcrição] ${presasNoFim} de ${segmentos.length} falas começavam depois do fim da parte (${Math.round(duracaoSegundos)} s) e ficaram presas nele`);
+  if (semTempo) console.warn(`[Transcrição] ${semTempo} de ${segmentos.length} falas vieram sem tempo legível e ficaram com o início da anterior`);
   if (rotulosTrocados) console.warn(`[Transcrição] ${rotulosTrocados} de ${segmentos.length} falas vieram sem rótulo F<n> e ficaram com o falante anterior`);
   if (!segmentos.length && duracaoSegundos > 30) console.warn(`[Transcrição] parte de ${Math.round(duracaoSegundos)} s sem nenhuma fala`);
   return segmentos.sort((a, b) => a.inicio - b.inicio);
