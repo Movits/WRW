@@ -1245,7 +1245,11 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   presence: varchar("presence", { length: 12, enum: ["present", "mentioned"] }),
   sourceEntityIds: jsonCompat("source_entity_ids"),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
-  status: mysqlEnum("status", ["pending", "created", "linked", "ignored"]).default("pending").notNull(),
+  // 'self' (N5): a dona disse "Sou eu". Nenhum contato nasce; o que a pessoa
+  // tem e precisa espera a confirmação dela com destino no PERFIL dela
+  // (network_sugestoes.alvo = 'perfil'). No fim da lista: o valor novo não
+  // reordena os que já estão gravados.
+  status: mysqlEnum("status", ["pending", "created", "linked", "ignored", "self"]).default("pending").notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1691,6 +1695,12 @@ export const networkSugestoes = mysqlTable("network_sugestoes", {
   trecho:              text("trecho"),
   confianca:           decimal("confianca", { precision: 4, scale: 3 }).default("0.000").notNull(),
   status:              varchar("status", { length: 12, enum: ["pendente", "confirmada", "ignorada"] }).default("pendente").notNull(),
+  // Para onde o item vai quando a dona confirma (N5): o CONTATO (contact_id,
+  // como sempre) ou o PERFIL da própria dona, quando ela disse "Sou eu" na
+  // reunião (só "tenho" e "preciso"; contact_id fica nulo). A linha
+  // confirmada guarda a origem do item (reunião, trecho e valor): os itens
+  // não ganham coluna. Varchar com o enum só no TypeScript, como em origem.
+  alvo:                varchar("alvo", { length: 8, enum: ["contato", "perfil"] }).default("contato").notNull(),
   decididaEm:          bigint("decidida_em", { mode: "number" }),
   createdAt:           bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:           bigint("updated_at", { mode: "number" }).notNull(),

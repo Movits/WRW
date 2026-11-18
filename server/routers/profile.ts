@@ -20,6 +20,7 @@ import {
 } from "../../shared/o-que-busca";
 import { esquemaDasDemandas, esquemaDoWhatINeed, prepararOQuePreciso } from "../o-que-preciso";
 import { cortarSemPartirEmoji, LIMITE_DA_BIO_GRAVADA, LIMITE_DA_BIO_NO_CADASTRO } from "../../shared/apresentacao";
+import { LIMITE_DO_QUE_TENHO } from "../../shared/reuniao-no-match";
 
 // ============================================================
 // PERFIL DO USUÁRIO
@@ -95,9 +96,10 @@ function conferirCadastroEmpresarial(personType: string | undefined, companyCnpj
  * campo próprio, porque é assim que os motores leem os ativos. Os tetos são de
  * produto, para um texto livre não virar um item enorme numa coluna json; a tela
  * já corta em 200. Nada aqui recusa dado antigo: os ids gravados têm 25 letras
- * no máximo e as listas, 11 itens.
+ * no máximo e as listas, 11 itens. O teto de itens é o mesmo da confirmação que
+ * a reunião leva ao perfil (N5, LIMITE_DO_QUE_TENHO).
  */
-const esquemaDoWhatIHave = z.array(z.string().max(500)).max(50);
+const esquemaDoWhatIHave = z.array(z.string().max(500)).max(LIMITE_DO_QUE_TENHO);
 
 export const profileRouter = router({
   get: protectedProcedure.query(async ({ ctx }) => {

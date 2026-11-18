@@ -234,6 +234,19 @@ tela e a rota usam (`/gravar?emPartes=1` e `/api/reunioes/:id/partes/:seq`).
 
 - **Segmento da transcrição:** `{inicio, fim, falante, texto, lacuna?}`.
   - O tempo vai em segundos absolutos da reunião.
+  - O modelo escreve o tempo da fala DENTRO da parte como texto `"MM:SS"`, num esquema com
+    padrão, e o servidor o converte em segundos e soma o início da parte
+    (`server/transcricao-de-fatia.ts`). Pedido como número de segundos, o Gemini escrevia
+    os minutos e os segundos juntos (1:00 virava 100): na bancada de 17/11, a fala depois
+    dos ~6 min de cada parte ficou presa no fim dela ou não veio. Fala com tempo fora da
+    parte fica presa no fim, nunca é descartada. Tempo que ainda chegar como número se lê
+    em segundos; os minutos e os segundos juntos só valem com evidência clara nos inícios
+    (dois mais de 30 s depois do fim da parte, ou um mais de 1 min depois do teto).
+  - Parte com mais da metade das falas (de 2 em diante) presas no fim ou sem tempo
+    legível volta à fila (`TEMPOS_FORA_DA_PARTE`); na última tentativa entra, com as
+    contagens em `result.tempos` (`{presasNoFim, semTempo, total}`) para uma consulta
+    achá-la. Resposta com todas as falas fora do formato (sem `texto`) é erro, como o
+    JSON inválido, e não parte em silêncio.
   - O falante é gravado como `F1`, `F2`... O rótulo "Falante 1" só existe na tela, numa
     chave de texto só.
   - Os nomes que a dona dá às vozes (H3, #204) aparecem para ela e, desde a H3b
