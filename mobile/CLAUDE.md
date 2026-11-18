@@ -51,7 +51,7 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
   módulo não existe no Expo Go; para testar, o APK do perfil `preview`, instalado por
   `adb` (o Android no Brasil bloqueia instalar fora da loja sem desenvolvedor
   verificado). No iPhone falta o Associated Domains, que depende do Team ID da Apple.
-- **A trava do app** (`trava.ts` e `App.tsx`): com ela ligada, o app pede o Face ID, a
+- **A trava do app** (`regras/trava.ts` e `App.tsx`): com ela ligada, o app pede o Face ID, a
   digital ou o bloqueio de tela ao abrir e ao voltar depois de 10 minutos em segundo plano.
   Desligada por padrão. A escolha fica no cofre do celular (`expo-secure-store`, chaves
   `wrw.trava` e `wrw.trava.aviso`); a biometria fica com o sistema
@@ -59,7 +59,7 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
   oferece ligar; o Perfil do site (`client/src/components/TravaDoApp.tsx`) liga e desliga
   pela ponte da WebView: o site manda `{tipo: "wrw:trava", acao}` por
   `window.ReactNativeWebView.postMessage`, e o app responde com o evento `wrw:trava`
-  (`scriptDoEstado`). Só aceita mensagem de página da WRW. As regras puras de `trava.ts`
+  (`scriptDoEstado`). Só aceita mensagem de página da WRW. As regras puras de `regras/trava.ts`
   são testadas em `server/trava-do-app.test.ts`, porque esta pasta não tem suíte. No Expo
   Go a digital do Android funciona; o Face ID do iPhone só num development build.
 - Nenhuma credencial vai no repositório: as chaves das lojas ficam no EAS (`eas credentials`).

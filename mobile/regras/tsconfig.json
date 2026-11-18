@@ -1,0 +1,12 @@
+{
+  "//": "As regras puras do app (sem React Native), testadas pela suíte da raiz (server/trava-do-app.test.ts). Este tsconfig existe para o Vitest da raiz não herdar o mobile/tsconfig.json, que estende expo/tsconfig.base e só resolve com as dependências do app instaladas (a CI da raiz não instala o mobile/). O tsc do app continua checando estes arquivos pelo mobile/tsconfig.json.",
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["*.ts"]
+}

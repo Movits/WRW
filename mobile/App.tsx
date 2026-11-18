@@ -3,7 +3,7 @@
 // recursos nativos (gravação em segundo plano, chaves de acesso na WebView,
 // push) entram em PRs próprias; ver mobile/CLAUDE.md.
 //
-// A trava (mobile/trava.ts): com ela ligada, o app pede o Face ID, a digital ou
+// A trava (mobile/regras/trava.ts): com ela ligada, o app pede o Face ID, a digital ou
 // o bloqueio de tela ao abrir e ao voltar depois de 10 minutos em segundo
 // plano. Desligada por padrão. Depois do login, um aviso pequeno oferece
 // ligar; o Perfil do site, dentro do app, liga e desliga.
@@ -22,7 +22,7 @@ import {
   lerPedidoDoSite,
   precisaTravarAoVoltar,
   scriptDoEstado,
-} from './trava';
+} from './regras/trava';
 import { chavesNaWebViewDisponiveis, ligarChavesNaWebView } from './modules/chaves-na-webview';
 
 const ORIGEM = 'https://wrwglobal.org';
