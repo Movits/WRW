@@ -2,7 +2,7 @@
 // digital ou o bloqueio de tela ao abrir o app" (cartão "App: pedir Face ID ao
 // abrir como opção", pedido da Glenda em 11/11/2026). Só aparece dentro da
 // casca (#180): quem guarda a escolha e pede a biometria é o próprio app
-// (mobile/trava.ts), no celular. O site só conversa com ele.
+// (mobile/regras/trava.ts), no celular. O site só conversa com ele.
 //
 // A conversa: o site manda ao app, por window.ReactNativeWebView.postMessage, um
 // JSON {tipo: "wrw:trava", acao: "estado" | "ligar" | "desligar"}; o app
@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { abertoNaCascaDasLojas } from "@/lib/instalacao-do-app";
 
-/** O nome do evento e do tipo da mensagem, iguais aos de mobile/trava.ts. */
+/** O nome do evento e do tipo da mensagem, iguais aos de mobile/regras/trava.ts. */
 export const EVENTO_DA_TRAVA = "wrw:trava";
 
 type EstadoDaTrava = { disponivel: boolean; ligada: boolean };

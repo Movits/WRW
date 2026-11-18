@@ -6,10 +6,10 @@ import {
   MINUTOS_PARA_TRAVAR_DE_NOVO,
   precisaTravarAoVoltar,
   scriptDoEstado,
-} from "../mobile/trava";
+} from "../mobile/regras/trava";
 
 /**
- * A trava do app das lojas (mobile/trava.ts): as regras que não dependem do
+ * A trava do app das lojas (mobile/regras/trava.ts): as regras que não dependem do
  * React Native. Ficam aqui porque a pasta mobile/ não tem suíte própria e o CI
  * da raiz não olha para ela (mobile/CLAUDE.md); a função é pura, como as do
  * client testadas em server/*.test.ts.
