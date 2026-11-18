@@ -48,8 +48,12 @@ const duble = vi.hoisted(() => {
     pendencias: vi.fn(),
     duracao: vi.fn(),
     resumoGuardado: vi.fn(),
+    conexoes: vi.fn(),
+    candidatos: vi.fn(),
+    buscaNaRede: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
+      auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
     },
@@ -83,6 +87,9 @@ vi.mock("@/lib/trpc", () => ({
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      // N5: as conexões que nasceram da reunião e o "Vincular a um contato".
+      conexoes: { useQuery: (...args: unknown[]) => duble.conexoes(...args) },
+      candidatosParaVincular: { useQuery: (...args: unknown[]) => duble.candidatos(...args) },
       pedirResumo: duble.registrar("pedirResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
@@ -108,7 +115,12 @@ vi.mock("@/lib/trpc", () => ({
     // Meu Network Inteligente: as sugestões de Tenho/Preciso por pessoa da reunião.
     networkInteligente: {
       pendencias: { useQuery: (...args: unknown[]) => duble.pendencias(...args) },
+      // N5: a dona decide cada item ali mesmo.
+      confirmarPendencia: duble.registrar("confirmarPendencia"),
+      ignorarPendencia: duble.registrar("ignorarPendencia"),
     },
+    // N5: a busca do "Vincular a um contato" na rede da dona.
+    network: { list: { useQuery: (...args: unknown[]) => duble.buscaNaRede(...args) } },
   },
 }));
 // O jsdom não carrega mídia: a leitura da duração pelo navegador é dublada
@@ -133,6 +145,9 @@ vi.mock("@/components/MapaMental", () => ({
 beforeEach(() => {
   for (const m of Object.values(duble.mutacoes)) { m.mutate.mockReset(); m.mutateAsync.mockReset(); m.data = undefined; }
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  duble.conexoes.mockReturnValue({ data: undefined, isError: false, error: null, refetch: vi.fn() });
+  duble.candidatos.mockReturnValue({ data: [], isError: false, error: null, refetch: vi.fn() });
+  duble.buscaNaRede.mockReturnValue({ data: undefined, isError: false, error: null, refetch: vi.fn() });
   // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
   // A URL escolhe o ramo da tela (lista, gravador, detalhe), e o setup limpa só
@@ -1456,5 +1471,84 @@ describe("Detalhe da reunião — a tradução do resumo e do mapa (H11), ligada
     abrirDetalhe({ status: "ready", shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345" } as never, { transcript: TRANSCRICAO });
     fireEvent.click(screen.getByRole("button", { name: "Acrescentar item" }));
     expect(screen.getByRole("form", { name: "Acrescentar item" })).toHaveAccessibleDescription("O link desta reunião está ligado: o que você salvar aqui aparece também para quem tem o link.");
+  });
+});
+
+// N5: a reunião vira conexões e refina o perfil. As quatro saídas da pessoa,
+// os itens decididos ali mesmo e a linha das conexões no resumo.
+describe("Detalhe da reunião — a pessoa da reunião na N5", () => {
+  const abaContatos = () => screen.getByRole("button", { name: /Contatos/ });
+  const pessoa = { ...sugestaoPendente, phone: null, existingContactId: null, existingContactName: null, presence: "present", pareceSerADona: false };
+  const itemDe = (id: string, campo: string, valor: string, sugestao = "s1") => ({
+    id, meetingSuggestionId: sugestao, campo, valor, trecho: `disse ${valor.toLowerCase()}`, contactId: null, alvo: "contato", origem: "reuniao", confianca: 0.9,
+  });
+
+  it("pendente: Criar contato, Vincular a um contato, Sou eu e Ignorar; 'Sou eu' e 'Ignorar' decidem pelo servidor", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [pessoa] });
+    fireEvent.click(abaContatos());
+    for (const nome of [/Criar contato/, /Vincular a um contato/, /Sou eu/, /Ignorar/]) expect(screen.getByRole("button", { name: nome })).toBeInTheDocument();
+    expect(screen.queryByText("É você?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Sou eu/ }));
+    expect(duble.mutacoes.decideContactSuggestion.mutate).toHaveBeenCalledWith({ suggestionId: "s1", action: "self" });
+  });
+
+  it("o nome ou o e-mail da conta: a tela pergunta 'É você?' ao lado do 'Sou eu'", () => {
+    abrirDetalhe({ status: "ready" }, { suggestions: [{ ...pessoa, pareceSerADona: true }] });
+    fireEvent.click(abaContatos());
+    expect(screen.getByText("É você?")).toBeInTheDocument();
+  });
+
+  it("Vincular: a tela sugere o contato de mesmo nome, e escolher vincula a ele", () => {
+    duble.candidatos.mockReturnValue({ data: [{ id: 42, nome: "Ana Souza", empresa: null, motivo: "nome" }], isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { suggestions: [pessoa] });
+    fireEvent.click(abaContatos());
+    fireEvent.click(screen.getByRole("button", { name: /Vincular a um contato/ }));
+    expect(duble.candidatos).toHaveBeenCalledWith({ suggestionId: "s1" }, expect.anything());
+    const painel = screen.getByRole("group", { name: "Vincular a qual contato?" });
+    expect(within(painel).getByText(/mesmo nome/)).toBeInTheDocument();
+    fireEvent.click(within(painel).getByRole("button", { name: /Ana Souza/ }));
+    expect(duble.mutacoes.decideContactSuggestion.mutate).toHaveBeenCalledWith({ suggestionId: "s1", action: "link", contactId: 42 });
+  });
+
+  it("decidida: 'É você' e 'Vinculada a…' dizem como ficou, e os itens esperam a dona ali mesmo, com o trecho", () => {
+    duble.pendencias.mockReturnValue({
+      data: [itemDe("p1", "tenho", "Exportar café"), { ...itemDe("p2", "preciso", "Distribuidor no Chile", "s2"), alvo: "perfil" }],
+      isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    });
+    abrirDetalhe({ status: "ready" }, { suggestions: [
+      { ...pessoa, status: "linked", existingContactId: 42, existingContactName: "Ana Souza Lima" },
+      { ...pessoa, id: "s2", fullName: "Glenda Souza", status: "self" },
+    ] });
+    fireEvent.click(abaContatos());
+    expect(screen.getByText("Itens esperando você: 2")).toBeInTheDocument();
+    expect(screen.getByText("Vinculada a Ana Souza Lima")).toBeInTheDocument();
+    expect(screen.getByText("É você")).toBeInTheDocument();
+    expect(screen.getByText("Trecho: “disse exportar café”")).toBeInTheDocument();
+    // No "Sou eu", o aviso de que o item entra nas conexões, e a categoria da demanda.
+    expect(screen.getByText(/entra no seu perfil e passa a gerar conexões/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Categoria" })).toHaveValue("outra_necessidade");
+    const confirmar = screen.getAllByRole("button", { name: /Confirmar/ });
+    fireEvent.click(confirmar[0]);
+    expect(duble.mutacoes.confirmarPendencia.mutate).toHaveBeenCalledWith({ id: "p1" });
+    fireEvent.click(confirmar[1]);
+    expect(duble.mutacoes.confirmarPendencia.mutate).toHaveBeenCalledWith({ id: "p2", categoria: "outra_necessidade" });
+    // Decidido o item, a tela relê o que espera a dona e as conexões da reunião.
+    act(() => { duble.mutacoes.confirmarPendencia.opcoes.onSuccess?.({ promovidaAPrata: false }, undefined); });
+    expect(duble.utils.meetings.conexoes.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+  });
+
+  it("a aba Resumo diz quantas conexões a reunião gerou, com o caminho para elas; sem conexão, nada", () => {
+    duble.conexoes.mockReturnValue({ data: { pessoas: [], totalDeConexoes: 3 }, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" } });
+    expect(screen.getByText("Conexões geradas por esta reunião: 3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ver conexões" })).toHaveAttribute("href", "/intelligent-matches");
+  });
+
+  it("a consulta das conexões que falha é erro com tentar de novo, nunca 'nenhuma conexão'", () => {
+    const refetch = vi.fn();
+    duble.conexoes.mockReturnValue(emErro(refetch));
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" } });
+    fireEvent.click(screen.getByRole("button", { name: "↻ Tentar novamente" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

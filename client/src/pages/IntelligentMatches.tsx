@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { rotaDaReuniao } from "@shared/rotas";
 import { ArrowLeft, Check, History, Lightbulb, Plus, RefreshCw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -62,7 +63,7 @@ export function seloDoMatch(match: { matchType: string; matchedAssets: ItemDoMat
 }
 
 export default function IntelligentMatches() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   // Etapa 11: sem o termo aceito, o servidor recusa o cruzamento. A tela pergunta
@@ -304,6 +305,15 @@ export default function IntelligentMatches() {
                   <h2 className="text-lg font-semibold">{match.contactA?.name ?? t("intelligentMatches.contatoAFallback")} <span className="text-white/35">→</span> {match.contactB?.name ?? t("intelligentMatches.contatoBFallback")}</h2>
                   <p className="mt-2 text-sm text-white/65">{match.reasonText}</p>
                   <p className="mt-3 text-xs text-white/40">{t("intelligentMatches.rotuloOferece")} {match.matchedAssets.map(item => item.label).join(", ")} {t("intelligentMatches.rotuloProcura")} {match.matchedNeeds.map(item => item.label).join(", ")}</p>
+                  {/* N5: a reunião de que a conexão nasceu, com o trecho que a dona confirmou. */}
+                  {match.origem && (
+                    <p className="mt-2 text-xs text-emerald-200/80">
+                      <Link href={rotaDaReuniao(match.origem.meetingId)} className="font-semibold underline-offset-4 hover:underline">
+                        {t("reuniaoNoMatch.origemDaConexao", { titulo: match.origem.titulo, data: new Date(match.origem.em).toLocaleDateString(i18n.language) })}
+                      </Link>
+                      {match.origem.trecho && <span dir="auto" className="italic text-white/45">{` ${t("networkInteligente.suggestions.evidence", { trecho: match.origem.trecho })}`}</span>}
+                    </p>
+                  )}
                 </div>
                 {match.status === "pending" || match.status === "viewed" ? (
                   <div className="flex shrink-0 flex-wrap gap-2 self-start">

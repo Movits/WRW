@@ -11,7 +11,11 @@ import {
   meetingSummaries,
   meetingSummaryItems,
   meetingSummaryTranslations,
+  privateContacts,
+  userProfiles,
+  users,
 } from "../drizzle/schema";
+import { pareceSerADona } from "@shared/reuniao-no-match";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
@@ -1864,6 +1868,14 @@ export async function limparGravacoesVencidas(opcoes: {
   return resultado;
 }
 
+/** O nome e o e-mail da conta da dona, e o nome do perfil dela: o que a tela compara para perguntar "É você?". */
+async function contaDaDona(db: Banco, ownerId: string): Promise<{ nomes: Array<string | null>; email: string | null } | null> {
+  const [conta] = await db.select({ name: users.name, email: users.email, displayName: userProfiles.displayName }).from(users)
+    .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+    .where(eq(users.openId, ownerId)).limit(1);
+  return conta ? { nomes: [conta.name, conta.displayName], email: conta.email } : null;
+}
+
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
@@ -1872,7 +1884,21 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
-  const suggestions = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
+  const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
+  // N5: o nome do contato a que a pessoa foi vinculada ("Vinculada a…"), só da
+  // rede da dona; contato excluído depois fica sem nome.
+  const idsDosContatos = Array.from(new Set(sugestoesGravadas.map(s => s.existingContactId).filter((id): id is number => id !== null)));
+  const nomesDosContatos = idsDosContatos.length
+    ? new Map((await db.select({ id: privateContacts.id, fullName: privateContacts.fullName }).from(privateContacts)
+        .where(and(eq(privateContacts.ownerId, ownerId), inArray(privateContacts.id, idsDosContatos)))).map(c => [Number(c.id), c.fullName]))
+    : new Map<number, string>();
+  // E se a pessoa pendente parece ser a própria dona (o mesmo e-mail ou o
+  // mesmo nome da conta): a tela pergunta "É você?" ao lado do "Sou eu".
+  const conta = sugestoesGravadas.some(s => s.status === "pending") ? await contaDaDona(db, ownerId) : null;
+  const suggestions = sugestoesGravadas.map(s => ({
+    ...s, existingContactName: s.existingContactId === null ? null : nomesDosContatos.get(Number(s.existingContactId)) ?? null,
+    pareceSerADona: conta !== null && s.status === "pending" && pareceSerADona({ fullName: s.fullName, email: s.email }, conta),
+  }));
   const emPartes = meeting.audioPipeline === "slices";
   const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, ownerId, meetingId, {
     createdAt: meeting.createdAt, status: meeting.status, emPartes,
