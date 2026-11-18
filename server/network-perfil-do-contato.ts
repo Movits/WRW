@@ -9,6 +9,8 @@ import { garantirCodigosAnonimos } from "./network-codigo-anonimo";
 import { listarPendencias } from "./network-extracao";
 import { listarConexoesDaSolicitante, type ConexaoVisivel, type Solicitante } from "./network-registro";
 import { ACOES_NO_PERFIL_DO_CONTATO, proximasAcoesDoContato } from "./proximas-acoes";
+import { origemDosItensDoContato } from "./reuniao-no-match";
+import { slugDoItem } from "../shared/reuniao-no-match";
 
 /**
  * O perfil de um contato no Meu Network Inteligente — spec da Glenda de 14/09,
@@ -120,9 +122,9 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
   if (!contato) return null;
 
   const [tenho, preciso, sugestoesDaReuniao, vinculos, confirmacoes, pendencias, acoes] = await Promise.all([
-    db.select({ id: contactAssets.id, label: contactAssets.tagLabel, category: contactAssets.category, createdAt: contactAssets.createdAt })
+    db.select({ id: contactAssets.id, slug: contactAssets.tagSlug, label: contactAssets.tagLabel, category: contactAssets.category, createdAt: contactAssets.createdAt })
       .from(contactAssets).where(and(eq(contactAssets.ownerId, quem.openId), eq(contactAssets.contactId, contactId))),
-    db.select({ id: contactNeeds.id, label: contactNeeds.tagLabel, category: contactNeeds.category, createdAt: contactNeeds.createdAt })
+    db.select({ id: contactNeeds.id, slug: contactNeeds.tagSlug, label: contactNeeds.tagLabel, category: contactNeeds.category, createdAt: contactNeeds.createdAt })
       .from(contactNeeds).where(and(eq(contactNeeds.ownerId, quem.openId), eq(contactNeeds.contactId, contactId))),
     db.select({ meetingId: meetingContactSuggestions.meetingId }).from(meetingContactSuggestions)
       .where(and(eq(meetingContactSuggestions.ownerId, quem.openId), eq(meetingContactSuggestions.existingContactId, contactId))),
@@ -170,6 +172,11 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
 
   const conexoes = opcoes.termoSmartMatch ? await listarConexoesDaSolicitante(quem, { contactId }) : [];
 
+  // N5: de qual reunião veio cada item, pela linha confirmada com o mesmo slug.
+  const comSlug = (itens: Array<{ id: number; slug: string; label: string }>) =>
+    itens.map(item => ({ id: Number(item.id), slug: item.slug || slugDoItem(item.label) }));
+  const origens = await origemDosItensDoContato(quem.openId, contactId, { tenho: comSlug(tenho), preciso: comSlug(preciso) });
+
   return {
     contato: {
       id: Number(contato.id),
@@ -179,8 +186,8 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
       disponibilidadeAlteradaEm: contato.disponibilidadeAlteradaEm ?? null,
       criadoEm: contato.createdAt,
     },
-    tenho: tenho.map(t => ({ id: Number(t.id), label: t.label, category: t.category })),
-    preciso: preciso.map(p => ({ id: Number(p.id), label: p.label, category: p.category })),
+    tenho: tenho.map(t => ({ id: Number(t.id), label: t.label, category: t.category, origem: origens.tenho.get(Number(t.id)) ?? null })),
+    preciso: preciso.map(p => ({ id: Number(p.id), label: p.label, category: p.category, origem: origens.preciso.get(Number(p.id)) ?? null })),
     faltando: camposFaltantes({
       fullName: contato.fullName, phone: contato.phone, whatsapp: contato.whatsapp, email: contato.email,
       totalTenho: tenho.length, totalPreciso: preciso.length,

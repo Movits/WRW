@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, not, or } from "drizzle-orm";
 import { contactAssets, contactNeeds, meetingContactSuggestions, meetingTranscripts, networkSugestoes, privateContacts } from "../drizzle/schema";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
+import { lerDemandas } from "@shared/o-que-preciso";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
 import { invokeLLM } from "./_core/llm";
@@ -297,6 +298,28 @@ function fonteLida(fonte: string) {
  */
 type PalavraDoApoio = { unidade: string; negada: boolean; marca: boolean; complemento: boolean; negadasPeloSem: string[]; dentro: boolean };
 
+/** Os pedaços de um trecho citado: as reticências do modelo o partem, e o pedaço com menos de 4 letras não prova nada. */
+function pedacosDoTrecho(trecho: string): string[][] {
+  return trecho.split(/\.{3}|…/).map(parte => unidadesPorOracao(parte).lista).filter(pedaco => pedaco.join("").length >= 4);
+}
+
+/**
+ * A ocorrência do trecho (das unidades `inicio` a `fim`) que a fonte
+ * desmente: a negação dentro dela ("não precisamos de investidores"), a que
+ * vem logo antes, se o alcance dela ainda chega ao trecho ("não tem um |
+ * distribuidor"), e, se o trecho só vale pela restrição, a de qualquer ponto
+ * antes, na mesma oração: em "Não precisamos de um investidor que não entenda
+ * do setor", o primeiro "não" desmente a declaração, e o segundo só
+ * restringiria o nome. A mesma régua serve a apoioDoTrecho e a
+ * necessidadeHipotetica.
+ */
+function ocorrenciaDesmentida(lida: ReturnType<typeof fonteLida>, inicio: number, fim: number): boolean {
+  const leitura = leituraDoTrecho(lida.daFonte, lida.oracao, inicio, fim);
+  if (leitura === "desmente") return true;
+  const abertaPor = lida.abertaPor[inicio];
+  return (abertaPor >= 0 && inicio - abertaPor <= ALCANCE_DA_NEGACAO) || (leitura === "restringe" && lida.negada[inicio]);
+}
+
 /**
  * O que a fonte diz em volta do trecho citado, ou null se o trecho não a
  * sustenta. Aspas e reticências do modelo saem; com reticência no meio
@@ -311,7 +334,7 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
   if (typeof trecho !== "string") return null;
   const lida = fonteLida(fonte);
   const { daFonte, oracao } = lida;
-  const pedacos = trecho.split(/\.{3}|…/).map(parte => unidadesPorOracao(parte).lista).filter(pedaco => pedaco.join("").length >= 4);
+  const pedacos = pedacosDoTrecho(trecho);
   if (!pedacos.length || pedacos.reduce((soma, pedaco) => soma + pedaco.filter(ehConteudo).length, 0) < 2) return null;
   const apoio: PalavraDoApoio[] = [];
   for (const pedaco of pedacos) {
@@ -319,15 +342,7 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
     for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
       if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
       const fim = inicio + pedaco.length;
-      const leitura = leituraDoTrecho(daFonte, oracao, inicio, fim);
-      if (leitura === "desmente") continue;
-      // A negação logo antes do trecho, se o alcance dela ainda chega a ele
-      // ("não tem um | distribuidor"). Se o trecho só vale pela restrição,
-      // também a de qualquer ponto antes, na mesma oração: em "Não precisamos
-      // de um investidor que não entenda do setor", o primeiro "não" desmente
-      // a declaração, e o segundo só restringiria o nome.
-      const abertaPor = lida.abertaPor[inicio];
-      if ((abertaPor >= 0 && inicio - abertaPor <= ALCANCE_DA_NEGACAO) || (leitura === "restringe" && lida.negada[inicio])) continue;
+      if (ocorrenciaDesmentida(lida, inicio, fim)) continue;
       achou = true;
       const de = Math.max(0, inicio - JANELA_DO_TRECHO);
       const ate = Math.min(daFonte.length, fim + JANELA_DO_TRECHO);
@@ -353,6 +368,198 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
 /** O trecho citado está na fonte, diz alguma coisa e não é negado por ela? */
 export function trechoEstaNaFonte(trecho: string | null | undefined, fonte: string): boolean {
   return apoioDoTrecho(trecho, fonte) !== null;
+}
+
+/**
+ * Necessidade HIPOTÉTICA não é necessidade declarada (N5, desenho de 16/11;
+ * a regra da demanda expressa: "não fazemos match porque alguém poderia
+ * precisar"). O prompt já pede isso (REGRAS_DAS_TRES_DIMENSOES), mas prompt é
+ * pedido, não garantia: "a gente poderia precisar de contador" passava pelo
+ * portão como o "preciso" "Contador", e a N5 o leva às conexões.
+ *
+ * Cada ocorrência do trecho na fonte é lida pelo verbo que REGE o item
+ * (revisão da N5): o verbo de necessidade ("precisar", "necessitar",
+ * "necessário", "need") ou de busca ("procurar", "buscar", "querer", "want")
+ * mais próximo antes do item, na mesma oração. Os outros verbos do trecho não
+ * contam: em "Precisamos de um distribuidor no Chile e talvez a gente precise
+ * de um contador", "Distribuidor no Chile" é declarada, e "Contador",
+ * hipotética. O item, na fonte, é o grupo de palavras dele que reúne mais
+ * palavras diferentes do texto do item. A ocorrência é:
+ * - hipotética: o modal rege o próprio verbo de necessidade, com no meio só o
+ *   sujeito, "vir a" ou "ser" ("poderia precisar", "talvez a gente precise",
+ *   "podemos vir a precisar", "talvez seja necessário", "pode ser que a gente
+ *   precise", "quem sabe", "might need"), ou uma condição o rege ("se a gente
+ *   precisar", "se precisássemos", "caso precisemos", "if we need"); ou o
+ *   próprio verbo está no condicional ("precisaria", "precisaríamos",
+ *   "necesitaría", "eu precisaria saber o preço"), ou um condicional o rege
+ *   ("would need", "we'd need", "seria necessário", "sería necesario", "iria
+ *   precisar", o falado "a gente ia precisar"); ou um "talvez" fica logo antes
+ *   do item ("precisamos de um distribuidor e talvez de um contador");
+ * - declarada: o verbo sem nada disso e sem negação ("não precisamos");
+ * - neutra: nenhum verbo rege o item ("conheci um distribuidor no Chile"), o
+ *   verbo é negado, ou é de busca e vem com modal ("podemos buscar", que
+ *   também é oferta).
+ * A necessidade é hipotética quando alguma ocorrência é hipotética e nenhuma é
+ * declarada: a fonte que também declara a necessidade a sustenta, e a menção
+ * neutra não (a hipotética que reaparece em outra frase segue hipotética). A
+ * ocorrência que a fonte desmente não conta.
+ *
+ * A lista é curta e do lado conservador: "may" fica de fora (o mês de maio,
+ * "In May we need"), e "eventualmente" também, porque com o verbo no presente
+ * é "de vez em quando" ("eventualmente precisamos de frete refrigerado" é
+ * necessidade declarada). O "se" só vale com o futuro ou o imperfeito do
+ * subjuntivo ("se a gente precisar", "se a gente precisasse"): "o que se
+ * precisa" e o espanhol "se necesita" declaram. O condicional só vale para o
+ * verbo de necessidade: o futuro ("precisaremos", "necesitaremos") declara, o
+ * condicional de outro verbo também ("eu diria que precisamos"), e o da busca e
+ * do querer fica como estava ("querríamos un distribuidor"). O pedido educado
+ * sem verbo de necessidade ("você poderia me apresentar um investidor?") não é
+ * tocado. Só vale para O QUE PRECISO.
+ */
+const VERBO_DE_NECESSIDADE = /^(precis|necessit|necesit|need)|^(necess?ari[oa]s?|necessary)$/;
+/** Busca e querer declaram como a necessidade ("buscamos um distribuidor"); "procuração", "querida" e "querosene" não são verbo. */
+const VERBO_DE_BUSCA = /^(procur(?!ac|ador)|busc|quer(?!id|os)|want|seek|looking)/;
+const MODAIS_DE_HIPOTESE = new Set([
+  "poderia", "poderiam", "poderiamos", "podemos", "pode", "possa", "possam", "possamos", "podera", "poderao", "poderemos",
+  "talvez", "possivelmente",
+  "podria", "podrian", "podriamos", "puede", "pueden", "quizas", "quiza", "posiblemente",
+  "might", "could", "maybe", "perhaps", "possibly",
+]);
+/** "É possível que", "é provável que", "es posible que": o "que" fecha o modal. */
+const POSSIBILIDADES = new Set(["possivel", "provavel", "posible", "probable"]);
+/** O que pode ficar entre o modal e o verbo: o sujeito, "vir a" e "ser" ("talvez a gente precise", "podemos vir a precisar", "talvez seja necessário"). */
+const ENTRE_O_MODAL_E_O_VERBO = new Set([
+  "a", "gente", "nos", "eu", "ela", "ele", "elas", "eles", "voce", "voces", "vir", "ainda", "tambem", "ser", "seja",
+  "nosotros", "yo", "llegar", "sea", "we", "i", "they", "you", "also", "still", "be",
+]);
+/** O advérbio de dúvida também vale entre o verbo e o item, com no meio só preposição e artigo ("e TALVEZ DE UM contador"). */
+const ADVERBIOS_DE_DUVIDA = new Set(["talvez", "possivelmente", "quizas", "quiza", "posiblemente", "maybe", "perhaps", "possibly"]);
+const ENTRE_A_DUVIDA_E_O_ITEM = new Set(["de", "do", "da", "dos", "das", "um", "uma", "uns", "umas", "o", "a", "os", "as", "del", "un", "una", "of", "an", "the"]);
+/** Quantas unidades antes do verbo o modal alcança ("pode ser que a gente | precise"). */
+const ALCANCE_DO_MODAL = 4;
+/** Quantas unidades antes do item o verbo que o rege pode estar ("talvez a gente precise de um contador e de um | advogado"). */
+const ALCANCE_DO_VERBO = 8;
+
+/**
+ * A condição que rege o verbo: "se" com o futuro ou o imperfeito do subjuntivo ("se precisarmos", "se
+ * precisássemos"), "caso" com o presente ou o imperfeito ("caso precisemos", "caso precisássemos"), "if" com
+ * "need" ("if we need", "if we needed").
+ */
+function condicaoRegeOVerbo(palavra: string, verbo: string): boolean {
+  if (palavra === "se") return /^(precis|necessit)(ar(mos|em)?|asse(s|mos|m)?)$/.test(verbo);
+  if (palavra === "caso") return /^(precis|necessit)(e|emos|em|asse(s|mos|m)?)$/.test(verbo);
+  return palavra === "if" && /^need/.test(verbo);
+}
+
+/**
+ * O condicional no próprio verbo de necessidade (conferência de tela da N5 com a IA real): "precisaria de um
+ * contador", "precisaríamos", "necessitariam", "necesitaría", "necesitaríamos", e também "eu precisaria saber o
+ * preço". O futuro ("precisaremos", "necesitaremos") e o pretérito ("precisaram") não entram.
+ */
+const CONDICIONAL_DA_NECESSIDADE = /^(precis|necessit|necesit)ari(a|as|amos|am|eis|an|ais)$/;
+const NEED_OU_NECESSARY = /^need|^necessary$/;
+const NECESSARIO_OU_PRECISO = /^(necess?ari[oa]s?|precis[oa]s?)$/;
+const PRECISAR_NO_INFINITIVO = /^(precis|necessit)ar$/;
+/**
+ * O condicional de fora do verbo e o verbo de necessidade que ele rege: "would need", "we'd need" (o apóstrofo
+ * separa o "d", que só vale com o verbo inglês: "o plano D precisa" declara), "it would be necessary", "seria
+ * necessário", "seria preciso", "sería necesario", "iria precisar" e o falado "a gente ia precisar" (o "ia" só
+ * com o infinitivo: "a IA precisa de dados" declara). Um Map, e não um objeto: "constructor" não é auxiliar.
+ */
+const AUXILIARES_DO_CONDICIONAL = new Map<string, RegExp>([
+  ["would", NEED_OU_NECESSARY], ["d", NEED_OU_NECESSARY],
+  ["seria", NECESSARIO_OU_PRECISO], ["seriam", NECESSARIO_OU_PRECISO], ["serian", NECESSARIO_OU_PRECISO],
+  ["iria", PRECISAR_NO_INFINITIVO], ["iriam", PRECISAR_NO_INFINITIVO], ["iriamos", PRECISAR_NO_INFINITIVO],
+  ["ia", PRECISAR_NO_INFINITIVO], ["iam", PRECISAR_NO_INFINITIVO], ["iamos", PRECISAR_NO_INFINITIVO],
+]);
+
+type ClasseDaOcorrencia = "declarada" | "hipotetica" | "neutra";
+
+export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: string): boolean {
+  if (typeof trecho !== "string") return false;
+  const lida = fonteLida(fonte);
+  const { daFonte, oracao } = lida;
+  const ehVerbo = (unidade: string) => VERBO_DE_NECESSIDADE.test(unidade) || VERBO_DE_BUSCA.test(unidade);
+  const doItem = typeof texto === "string"
+    ? unidades(texto).filter(unidade => ehConteudo(unidade) && !ehVerbo(unidade) && !MODAIS_DE_HIPOTESE.has(unidade)
+      && !AUXILIARES_DO_CONDICIONAL.has(unidade)) : [];
+  const antes = (j: number, n: number) => (j - n >= 0 && oracao[j - n] === oracao[j] ? daFonte[j - n] : "");
+  const modalTerminaEm = (j: number) => {
+    const palavra = daFonte[j];
+    if (MODAIS_DE_HIPOTESE.has(palavra)) return true;
+    if (palavra === "sabe") return antes(j, 1) === "quem";
+    return palavra === "que" && (POSSIBILIDADES.has(antes(j, 1)) || (antes(j, 1) === "ser" && MODAIS_DE_HIPOTESE.has(antes(j, 2))));
+  };
+  // O verbo da unidade v está no condicional, ou o modal, a condição ou o condicional de fora o rege: no meio,
+  // só o que ENTRE_O_MODAL_E_O_VERBO aceita.
+  const hipoteticoEm = (v: number) => {
+    if (CONDICIONAL_DA_NECESSIDADE.test(daFonte[v])) return true;
+    for (let j = v - 1; j >= Math.max(0, v - ALCANCE_DO_MODAL) && oracao[j] === oracao[v]; j -= 1) {
+      if (modalTerminaEm(j) || condicaoRegeOVerbo(daFonte[j], daFonte[v])) return true;
+      if (AUXILIARES_DO_CONDICIONAL.get(daFonte[j])?.test(daFonte[v])) return true;
+      if (!ENTRE_O_MODAL_E_O_VERBO.has(daFonte[j])) return false;
+    }
+    return false;
+  };
+  // "Precisamos de um distribuidor e talvez de um | contador": a dúvida fica logo antes do item, com no meio só
+  // preposição e artigo, e vale com ou sem o verbo à vista.
+  const duvidaAntesDoItem = (a: number, daOracao: number) => {
+    let j = a - 1;
+    while (j >= 0 && oracao[j] === daOracao && ENTRE_A_DUVIDA_E_O_ITEM.has(daFonte[j])) j -= 1;
+    return j >= 0 && oracao[j] === daOracao && (ADVERBIOS_DE_DUVIDA.has(daFonte[j]) || (daFonte[j] === "sabe" && antes(j, 1) === "quem"));
+  };
+  const negado = (v: number) => lida.abertaPor[v] >= 0 && v - lida.abertaPor[v] <= ALCANCE_DA_NEGACAO;
+  // O verbo que rege o item que começa na unidade `a`, na oração `daOracao`.
+  const classeEm = (a: number, daOracao: number): ClasseDaOcorrencia => {
+    if (duvidaAntesDoItem(a, daOracao)) return "hipotetica";
+    for (let v = a - 1; v >= Math.max(0, a - ALCANCE_DO_VERBO) && oracao[v] === daOracao; v -= 1) {
+      if (!ehVerbo(daFonte[v])) continue;
+      // "Precise buscar": a busca é complemento da necessidade, que é quem rege.
+      const rege = VERBO_DE_NECESSIDADE.test(daFonte[v]) ? v
+        : [v - 1, v - 2].find(u => u >= 0 && oracao[u] === daOracao && VERBO_DE_NECESSIDADE.test(daFonte[u])) ?? v;
+      if (negado(rege)) return "neutra";
+      if (!hipoteticoEm(rege)) return "declarada";
+      return VERBO_DE_NECESSIDADE.test(daFonte[rege]) ? "hipotetica" : "neutra";
+    }
+    return "neutra";
+  };
+  // Onde o item está, de `de` a `ate`: o início dos grupos (na mesma oração, até JANELA_DO_TRECHO unidades
+  // entre uma palavra e a seguinte) que reúnem mais palavras diferentes do texto do item.
+  const gruposDoItem = (de: number, ate: number): number[] => {
+    const grupos: Array<{ inicio: number; ultimo: number; palavras: Set<number> }> = [];
+    for (let k = Math.max(0, de); k < Math.min(daFonte.length, ate); k += 1) {
+      if (ehVerbo(daFonte[k])) continue;
+      const qual = doItem.findIndex(palavra => mesmaRaiz(palavra, daFonte[k]));
+      if (qual < 0) continue;
+      const atual = grupos[grupos.length - 1];
+      if (atual && oracao[atual.ultimo] === oracao[k] && k - atual.ultimo <= JANELA_DO_TRECHO) {
+        atual.ultimo = k;
+        atual.palavras.add(qual);
+      } else grupos.push({ inicio: k, ultimo: k, palavras: new Set([qual]) });
+    }
+    const maior = Math.max(0, ...grupos.map(grupo => grupo.palavras.size));
+    return grupos.filter(grupo => grupo.palavras.size === maior).map(grupo => grupo.inicio);
+  };
+  // O item na própria ocorrência, senão logo depois dela, senão logo antes. Sem o item (o texto não veio, ou
+  // nenhuma palavra dele está ali), vale o verbo mais próximo antes do fim da ocorrência.
+  const classeDaOcorrencia = (inicio: number, fim: number): ClasseDaOcorrencia => {
+    const regioes: Array<[number, number]> = [[inicio, fim], [fim, fim + JANELA_DO_TRECHO], [inicio - JANELA_DO_TRECHO, inicio]];
+    const ancoras = regioes.map(([de, ate]) => gruposDoItem(de, ate)).find(grupos => grupos.length > 0) ?? [];
+    const classes = ancoras.length ? ancoras.map(a => classeEm(a, oracao[a])) : [classeEm(fim, oracao[fim - 1])];
+    return classes.includes("declarada") ? "declarada" : classes.includes("hipotetica") ? "hipotetica" : "neutra";
+  };
+  let hipotetica = false;
+  for (const pedaco of pedacosDoTrecho(trecho)) {
+    for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
+      if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
+      const fim = inicio + pedaco.length;
+      if (ocorrenciaDesmentida(lida, inicio, fim)) continue;
+      const classe = classeDaOcorrencia(inicio, fim);
+      if (classe === "declarada") return false;
+      if (classe === "hipotetica") hipotetica = true;
+    }
+  }
+  return hipotetica;
 }
 
 /**
@@ -562,9 +769,11 @@ export function filtrarPelaFonte(proposta: PerfilProposto, fonte: string, identi
     nomes: [...(identificacao.nomes ?? []), quemSou.nome],
     telefones: [...(identificacao.telefones ?? []), quemSou.telefone],
   };
-  const itens = (lista: unknown): ItemProposto[] => (Array.isArray(lista) ? lista : [])
+  const itens = (lista: unknown, campo: "tenho" | "preciso"): ItemProposto[] => (Array.isArray(lista) ? lista : [])
     .filter((item): item is ItemProposto => Boolean(item) && typeof item.texto === "string" && item.texto.trim().length >= 2)
     .filter(item => textoSustentadoPeloTrecho(item.texto, item.trecho, fonte))
+    // "Poderíamos precisar de contador" não é necessidade declarada (N5).
+    .filter(item => campo !== "preciso" || !necessidadeHipotetica(item.texto, item.trecho, fonte))
     .filter(item => !itemIdentificaOContato(item.texto, quem))
     .map(item => ({
       texto: item.texto.trim().slice(0, LIMITES_DO_CAMPO.tenho),
@@ -580,7 +789,7 @@ export function filtrarPelaFonte(proposta: PerfilProposto, fonte: string, identi
   const email = typeof quemSou.email === "string" && quemSou.email.trim().length <= LIMITES_DO_CAMPO.email && emailEstaNaFonte(quemSou.email, fonte)
     ? quemSou.email.trim().toLowerCase() : null;
   const tipoPessoa = quemSou.tipoPessoa === "fisica" || quemSou.tipoPessoa === "juridica" ? quemSou.tipoPessoa : "nao_informado";
-  return { quemSou: { tipoPessoa, nome, telefone, email }, oQueTenho: itens(proposta.oQueTenho), oQuePreciso: itens(proposta.oQuePreciso) };
+  return { quemSou: { tipoPessoa, nome, telefone, email }, oQueTenho: itens(proposta.oQueTenho, "tenho"), oQuePreciso: itens(proposta.oQuePreciso, "preciso") };
 }
 
 // ─── A IA: interpretar texto ou fala sobre UM contato ─────────────────────────
@@ -841,12 +1050,16 @@ export async function identificacaoDoContato(db: Banco, ownerId: string, contato
   };
 }
 
-/** Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro. */
-export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string }) {
+/**
+ * Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro.
+ * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona.
+ */
+export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string; alvo?: "contato" | "perfil" }) {
   const db = await exigirDb();
   const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")];
   if (filtro.contactId !== undefined) condicoes.push(eq(networkSugestoes.contactId, filtro.contactId));
   if (filtro.meetingId !== undefined) condicoes.push(eq(networkSugestoes.meetingId, filtro.meetingId));
+  if (filtro.alvo !== undefined) condicoes.push(eq(networkSugestoes.alvo, filtro.alvo));
   const linhas = await db.select().from(networkSugestoes).where(and(...condicoes)).orderBy(desc(networkSugestoes.createdAt)).limit(100);
   return linhas.map(linha => ({
     id: linha.id,
@@ -854,6 +1067,7 @@ export async function listarPendencias(ownerId: string, filtro: { contactId?: nu
     meetingId: linha.meetingId,
     meetingSuggestionId: linha.meetingSuggestionId,
     origem: linha.origem,
+    alvo: linha.alvo,
     campo: linha.campo,
     valor: linha.valor,
     categoria: linha.categoria,
@@ -902,8 +1116,13 @@ export const MENSAGEM_ITEM_COM_IDENTIFICACAO =
  */
 export async function confirmarPendencia(ownerId: string, id: string, valorCorrigido?: string) {
   const db = await exigirDb();
+  // Só a pendência do CONTATO: a que vai ao perfil da dona (N5, alvo 'perfil')
+  // é confirmada por server/reuniao-no-match.ts, e nunca vira dado de contato.
   const [pendencia] = await db.select().from(networkSugestoes)
-    .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"))).limit(1);
+    .where(and(
+      eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+      eq(networkSugestoes.alvo, "contato"),
+    )).limit(1);
   if (!pendencia || pendencia.contactId === null) throw new PendenciaNaoEncontrada();
   const contactId = Number(pendencia.contactId);
   const campo = pendencia.campo;
@@ -925,7 +1144,10 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
   const inseriu = await db.transaction(async tx => {
     const [tomada] = await tx.update(networkSugestoes)
       .set({ status: "confirmada", valor, decididaEm: agora, updatedAt: agora })
-      .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")));
+      .where(and(
+        eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+        eq(networkSugestoes.alvo, "contato"),
+      ));
     if (!((tomada as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
 
     switch (campo) {
@@ -972,7 +1194,19 @@ export async function ignorarPendencia(ownerId: string, id: string) {
  * - vincular a um contato que já existe: idem, e o QUEM SOU, o cargo e a
  *   empresa da sugestão que diferem do contato viram pendência (nada
  *   sobrescreve o que a dona gravou);
- * - ignorar: tudo que veio daquela pessoa é ignorado.
+ * - ignorar: tudo que veio daquela pessoa é ignorado;
+ * - "Sou eu" (N5, `self`): nenhum contato nasce. O QUE TENHO e O QUE PRECISO
+ *   da pessoa passam a ter o PERFIL da dona como destino (alvo 'perfil'),
+ *   ainda pendentes; o resto (tipo de pessoa) é ignorado, e nome, telefone,
+ *   e-mail, cargo e empresa nem viram pendência. O que o perfil já tem (o
+ *   mesmo slug em "O que tenho", a mesma descrição numa demanda) é ignorado.
+ *
+ * No vincular, o que o contato já tem (o mesmo slug em contact_assets ou
+ * contact_needs) é ignorado (N5): na segunda reunião com a mesma pessoa, a
+ * dona não confirma de novo o que já confirmou. O que ele só espera de outra
+ * fonte (a mesma pendência aberta em outra reunião) segue pendente aqui
+ * (revisão da N5): ignorado, o item sumia de vez quando a outra reunião era
+ * excluída antes da decisão (apagarPendenciasDaReuniao).
  *
  * As pendências novas levam a confiança que a extração deu à pessoa
  * (meeting_contact_suggestions.confidence), e não um número fixo que nenhum
@@ -985,13 +1219,15 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
   ownerId: string;
   meetingSuggestionId: string;
   meetingId: string;
-  acao: "create" | "link" | "ignore";
+  acao: "create" | "link" | "ignore" | "self";
   contactId: number | null;
   quemSouDaSugestao?: {
     fullName: string; phone: string | null; email: string | null; jobTitle?: string | null; company?: string | null;
     /** A confiança da sugestão, como a coluna a guarda ("0.900"). */
     confianca: unknown;
   };
+  /** No "Sou eu": o que o perfil da dona já tem, para não pedir de novo. */
+  perfilDaDona?: { whatIHave: unknown; whatINeedDetails: unknown };
 }) {
   const agora = Date.now();
   const daPessoa = and(
@@ -999,11 +1235,31 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
     eq(networkSugestoes.meetingSuggestionId, entrada.meetingSuggestionId),
     eq(networkSugestoes.status, "pendente"),
   );
+  const tenhoOuPreciso = inArray(networkSugestoes.campo, ["tenho", "preciso"]);
+  if (entrada.acao === "self") {
+    await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
+      .where(and(daPessoa, not(tenhoOuPreciso)));
+    await db.update(networkSugestoes).set({ alvo: "perfil", updatedAt: agora }).where(and(daPessoa, tenhoOuPreciso));
+    await ignorarRepetidas(db, entrada.ownerId, entrada.meetingSuggestionId, {
+      tenho: slugsDaLista(entrada.perfilDaDona?.whatIHave),
+      preciso: new Set(lerDemandas(entrada.perfilDaDona?.whatINeedDetails).map(demanda => slugifyMatchTag(demanda.description ?? "")).filter(Boolean)),
+    });
+    return;
+  }
   if (entrada.acao === "ignore" || entrada.contactId === null) {
     await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora }).where(daPessoa);
     return;
   }
   await db.update(networkSugestoes).set({ contactId: entrada.contactId, updatedAt: agora }).where(daPessoa);
+  // No vincular, o retrato do contato serve às duas conferências: o que ele já tem não volta a pedir confirmação.
+  const retrato = entrada.acao === "link" ? await retratoDoContato(db, entrada.ownerId, entrada.contactId) : null;
+  if (entrada.acao === "link") {
+    // O que o contato já TEM não volta a pedir confirmação; o que só está aberto em outra fonte, sim.
+    await ignorarRepetidas(db, entrada.ownerId, entrada.meetingSuggestionId, {
+      tenho: new Set((retrato?.tenho ?? []).map(slugifyMatchTag)),
+      preciso: new Set((retrato?.preciso ?? []).map(slugifyMatchTag)),
+    });
+  }
   const sugestao = entrada.quemSouDaSugestao;
   if (!sugestao) return;
   const confianca = confiancaValida(sugestao.confianca);
@@ -1020,11 +1276,40 @@ export async function decidirPendenciasDaPessoaSugerida(db: BancoOuTransacao, en
     await gravar(apoio);
     return;
   }
-  const atual = await retratoDoContato(db, entrada.ownerId, entrada.contactId);
+  const atual = retrato ?? await retratoDoContato(db, entrada.ownerId, entrada.contactId);
   if (!atual) return;
   await gravar(semRepeticao([
     ...linha("nome", sugestao.fullName), ...linha("telefone", sugestao.phone), ...linha("email", sugestao.email), ...apoio,
   ], atual));
+}
+
+/** Os slugs de uma lista de texto gravada numa coluna JSON (lida com desconfiança: pode não ser lista). */
+function slugsDaLista(valor: unknown): Set<string> {
+  const lista = Array.isArray(valor) ? valor.filter((item): item is string => typeof item === "string") : [];
+  return new Set(lista.map(slugifyMatchTag).filter(Boolean));
+}
+
+/**
+ * Ignora as pendências de Tenho/Preciso da pessoa da reunião que o destino já
+ * tem (`jaTem`, por slug). Status no WHERE: só a que ainda está pendente.
+ */
+async function ignorarRepetidas(
+  db: BancoOuTransacao, ownerId: string, meetingSuggestionId: string,
+  jaTem: { tenho: ReadonlySet<string>; preciso: ReadonlySet<string> },
+) {
+  const daPessoa = await db.select({ id: networkSugestoes.id, campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
+    .where(and(
+      eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.meetingSuggestionId, meetingSuggestionId),
+      eq(networkSugestoes.status, "pendente"), inArray(networkSugestoes.campo, ["tenho", "preciso"]),
+    ));
+  const repetidas = daPessoa.filter(linha => {
+    const lista = linha.campo === "tenho" ? jaTem.tenho : jaTem.preciso;
+    return lista.has(slugifyMatchTag(linha.valor));
+  }).map(linha => linha.id);
+  if (!repetidas.length) return;
+  const agora = Date.now();
+  await db.update(networkSugestoes).set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
+    .where(and(eq(networkSugestoes.ownerId, ownerId), inArray(networkSugestoes.id, repetidas), eq(networkSugestoes.status, "pendente")));
 }
 
 /**

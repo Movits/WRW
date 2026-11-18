@@ -54,6 +54,8 @@ vi.mock("@/lib/trpc", () => ({
       delete: duble.mutacao(),
       reprocess: duble.mutacao(),
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
+      // N5: a linha "Conexões geradas por esta reunião" (sem conexões, não aparece).
+      conexoes: { useQuery: () => ({ data: undefined }) },
       pedirResumo: duble.mutacao(),
       decidirItemDoResumo: duble.mutacao(),
       confirmarItensDoResumo: duble.mutacao(),
