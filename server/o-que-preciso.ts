@@ -53,6 +53,15 @@ const MENSAGENS: Record<NonNullable<ReturnType<typeof problemaDaDemanda>>, (cate
 };
 
 /**
+ * A frase da recusa de uma demanda, com o rótulo da categoria em português.
+ * Serve também ao "preciso" que a reunião leva ao perfil da dona (N5,
+ * server/reuniao-no-match.ts): a mesma regra, a mesma frase.
+ */
+export function mensagemDoProblemaDaDemanda(problema: NonNullable<ReturnType<typeof problemaDaDemanda>>, categoria: string): string {
+  return MENSAGENS[problema](rotuloDoQuePreciso(categoria));
+}
+
+/**
  * O par (whatINeed, whatINeedDetails) pronto para gravar.
  *
  * - Sem `whatINeedDetails` no pedido (Onboarding em cache no deploy, Perfil

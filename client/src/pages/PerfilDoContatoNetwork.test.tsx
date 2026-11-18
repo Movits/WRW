@@ -153,6 +153,22 @@ describe("perfil do contato — Quem Sou, Tenho, Preciso", () => {
   });
 });
 
+// N5: de qual reunião veio cada item, pela linha que a dona confirmou.
+describe("perfil do contato — a origem do item (N5)", () => {
+  it("o item que veio de reunião leva o título e a data, com o link; o digitado fica sem origem", () => {
+    responde(perfil({ tenho: [
+      { id: 1, label: "Distribuição de medicamentos", category: null, origem: { meetingId: "m-1", titulo: "Café na feira", em: Date.UTC(2026, 8, 1, 12), trecho: "distribuímos medicamentos" } },
+      { id: 2, label: "Armazém em Santos", category: null, origem: null },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const tenho = screen.getByRole("heading", { name: "O Que Tenho" }).closest("section")!;
+    const link = within(tenho).getByRole("link", { name: /Reunião “Café na feira”/ });
+    expect(link).toHaveAttribute("href", "/meetings/m-1");
+    expect(link.closest("li")).toHaveAttribute("title", "distribuímos medicamentos");
+    expect(within(tenho).getAllByRole("link")).toHaveLength(1);
+  });
+});
+
 describe("perfil do contato — nada entra sem confirmação", () => {
   it("a sugestão mostra origem, confiança e trecho; confirmar envia o valor corrigido; ignorar envia o id", () => {
     responde(perfil());

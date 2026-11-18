@@ -214,8 +214,14 @@ export default function PerfilDoContatoNetwork() {
                     ) : (
                       <ul className="mt-3 flex flex-wrap gap-2">
                         {itens.map(item => (
-                          <li key={item.id} className={`rounded-full border px-3 py-1 text-sm ${cor}`}>
+                          <li key={item.id} className={`rounded-full border px-3 py-1 text-sm ${cor}`} title={item.origem?.trecho ?? undefined}>
                             {item.label}{item.category ? <span className="text-white/40"> · {item.category}</span> : null}
+                            {/* N5: a reunião de onde o item veio, pela linha que a dona confirmou. */}
+                            {item.origem && (
+                              <Link href={rotaDaReuniao(item.origem.meetingId)} className="ms-2 text-xs text-white/50 underline-offset-2 hover:text-white hover:underline">
+                                {t("reuniaoNoMatch.origemDoItem", { titulo: item.origem.titulo, data: new Date(item.origem.em).toLocaleDateString(i18n.language) })}
+                              </Link>
+                            )}
                           </li>
                         ))}
                       </ul>

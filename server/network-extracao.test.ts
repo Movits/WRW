@@ -493,6 +493,27 @@ describe("a pessoa sugerida pela reunião — criar, vincular, ignorar", () => {
     expect(insert.params).not.toContain("Maria Silva");
     expect(insert.params).not.toContain("(11) 98765-4321");
   });
+
+  // Revisão da N5: o item que só está aberto em outra reunião segue pendente no vincular. Ignorado, ele sumia
+  // de vez quando a outra reunião era excluída antes da decisão (apagarPendenciasDaReuniao).
+  it("vincular: o que o contato já tem é ignorado; o que só está aberto em outra reunião segue pendente", async () => {
+    estado.responder = sql => {
+      // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company
+      if (/from `private_contacts`/.test(sql)) return [[7, "Carla Dias", null, null, null, null, null, null]];
+      if (/from `contact_assets`/.test(sql)) return [["Armazém em Santos"]];
+      // A mesma "Exportar café" aberta para o contato em outra reunião (campo, valor).
+      if (/from `network_sugestoes`/.test(sql) && /`contact_id` = \?/.test(sql)) return [["tenho", "Exportar café"]];
+      // As pendências desta pessoa (id, campo, valor).
+      if (/from `network_sugestoes`/.test(sql)) return [["p-1", "tenho", "Armazém em Santos"], ["p-2", "tenho", "Exportar café"]];
+      return [];
+    };
+    const db = await exigirDb();
+    await decidirPendenciasDaPessoaSugerida(db, { ownerId: "dona-1", meetingSuggestionId: "s-2", meetingId: "m-2", acao: "link", contactId: 7 });
+    const ignorar = estado.consultas.filter(c => /^update `network_sugestoes` set `status` = \?/.test(c.sql));
+    expect(ignorar).toHaveLength(1);
+    expect(ignorar[0].params).toEqual(expect.arrayContaining(["ignorada", "dona-1", "p-1", "pendente"]));
+    expect(ignorar[0].params).not.toContain("p-2");
+  });
 });
 
 /**
@@ -675,5 +696,32 @@ describe("a empresa que a reunião deu ao contato, ainda não gravada nele, não
       nomeDoContato: "Camila Duarte", identificacao: { nomes: ["Cacau Tupinã"] },
     });
     expect(proposta.oQueTenho.map(i => i.texto)).toEqual(["Chocolate em barras"]);
+  });
+});
+
+// Revisão da N5: o portão hipotético também passa pelo completar por texto e por voz (interpretarComplemento).
+describe("completar por texto ou voz: o portão do 'preciso' hipotético", () => {
+  const resposta = (trecho: string) => ({ choices: [{ message: { content: JSON.stringify({
+    quemSou: { tipoPessoa: "nao_informado", nome: null, telefone: null, email: null },
+    oQueTenho: [],
+    oQuePreciso: [{ texto: "Tradutor juramentado", trecho, confianca: 0.9 }],
+  }) } }] });
+
+  it("'eventualmente precisa', com o verbo no presente, é necessidade declarada: a sugestão aparece", async () => {
+    invokeLLM.mockResolvedValue(resposta("eventualmente precisa de tradutor juramentado"));
+    const proposta = await interpretarComplemento("Ela eventualmente precisa de tradutor juramentado.", { nomeDoContato: "Camila Duarte" });
+    expect(proposta.oQuePreciso.map(i => i.texto)).toEqual(["Tradutor juramentado"]);
+  });
+
+  it("'talvez precise' é hipotética: a sugestão não aparece", async () => {
+    invokeLLM.mockResolvedValue(resposta("talvez precise de tradutor juramentado"));
+    const proposta = await interpretarComplemento("Ela talvez precise de tradutor juramentado.", { nomeDoContato: "Camila Duarte" });
+    expect(proposta.oQuePreciso).toEqual([]);
+  });
+
+  it("'precisaria', o condicional do próprio verbo, é hipotética: a sugestão não aparece", async () => {
+    invokeLLM.mockResolvedValue(resposta("precisaria de tradutor juramentado"));
+    const proposta = await interpretarComplemento("Ela precisaria de tradutor juramentado.", { nomeDoContato: "Camila Duarte" });
+    expect(proposta.oQuePreciso).toEqual([]);
   });
 });
