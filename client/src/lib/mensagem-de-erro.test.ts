@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
+import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
@@ -181,6 +182,31 @@ describe("mensagemDaRecusaDaParte — o código da recusa vira aviso no idioma d
     expect(mensagemDaRecusaDaParte(undefined, t)).toBe("[meetings.partRejected]");
     // O que vem do protótipo do objeto não é código da tabela.
     expect(mensagemDaRecusaDaParte("toString", t)).toBe("[meetings.partRejected]");
+  });
+});
+
+// As recusas do PDF da reunião (H8): a reunião que não está pronta
+// (server/exportar-reuniao.ts) e o teto de exportações (routers/meetings.ts).
+describe("mensagemDeErroParaTela — as recusas do PDF da reunião no idioma da tela", () => {
+  const recusa = (codigo: string, mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: codigo, httpStatus: 412 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["PRECONDITION_FAILED", MENSAGEM_EXPORTAR_SO_PRONTA, "meetings.export.onlyReady", "You can only download the PDF of a meeting that is ready."],
+    ["TOO_MANY_REQUESTS", MENSAGEM_EXPORTACOES_DEMAIS, "meetings.export.tooMany", "Too many PDFs downloaded in a row. Wait a few minutes and try again."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (codigo, mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (codigo, mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
   });
 });
 

@@ -12,6 +12,7 @@ import {
 } from "@shared/const";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
+import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -68,6 +69,9 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO]: "meetings.followUp.needsConfirmed",
   // O item que a dona acrescenta passaria do teto do resumo (H4f).
   [MENSAGEM_RESUMO_CHEIO]: "meetings.summary.errorFull",
+  // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
+  [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
+  [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
 };
 
 /**
