@@ -837,6 +837,7 @@
     "saveProfile": "Profil speichern",
     "editProfile": "Profil bearbeiten",
     "updated": "Profil erfolgreich aktualisiert!",
+    "changedElsewhere": "Ihr Profil wurde in einem anderen Fenster geändert, während Sie es bearbeitet haben. Nichts wurde gespeichert, damit diese Änderung nicht verloren geht: Laden Sie die Seite neu und bearbeiten Sie es erneut.",
     "badgeGold": "Gold",
     "badgeSilver": "Silber",
     "badgeBronze": "Bronze",

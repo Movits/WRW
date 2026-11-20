@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -67,8 +68,8 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
     if (!db) return;
     const ids = [idDaDona, idDaExcluida].filter(Boolean);
     if (ids.length) {
-      await db.delete(googleAgendaConexoes).where(inArray(googleAgendaConexoes.userId, ids));
-      await db.delete(auditLogs).where(inArray(auditLogs.userId, ids));
+      await apagarPelaChave(db, googleAgendaConexoes, inArray(googleAgendaConexoes.userId, ids));
+      await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, ids));
     }
     await db.delete(users).where(inArray(users.openId, [DONA, EXCLUIDA]));
   });
@@ -150,7 +151,7 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
     expect(revogacao).not.toHaveBeenCalled();
     // A conexão da outra conta continua lá; a da que exclui, também (sai pelo plano da exclusão).
     expect(await linhasDa(idDaDona)).toHaveLength(1);
-    await (await getDb())!.delete(googleAgendaConexoes).where(inArray(googleAgendaConexoes.userId, [idDaDona, idDaExcluida]));
+    await apagarPelaChave((await getDb())!, googleAgendaConexoes, inArray(googleAgendaConexoes.userId, [idDaDona, idDaExcluida]));
   });
 
   it("excluir a conta revoga o token na Google e leva a conexão junto", async () => {

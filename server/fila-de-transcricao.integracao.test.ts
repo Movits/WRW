@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -24,6 +25,7 @@ const { ObjetoAusenteNoStorageError } = await import("./storage");
 const { GeminiIndisponivelError } = await import("./gemini");
 const { TemposForaDaParteError } = await import("./transcricao-de-fatia");
 const { marcarReunioesInterrompidas, iniciarReprocessamento, REGRA_DOS_ROTULOS_NA_EXTRACAO, ReprocessamentoRecusado } = await import("./meeting-service");
+const { terminaComALinhaPresa: comALinhaPresa } = await import("./test/linha-presa");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 // A rodada só olha as reuniões desta dona: o Vitest roda os arquivos em
@@ -43,14 +45,21 @@ async function reuniao(status: "recording" | "uploading", esperadas: number | nu
   return id;
 }
 
+const linhaDaParte = (meetingId: string, seq: number, extra: Record<string, unknown> = {}) => ({
+  id: crypto.randomUUID(), meetingId, ownerId: DONA, seq, status: "received" as const, storageKey: `meetings/${DONA}/${meetingId}/partes/${seq}.m4a`,
+  storageUrl: `/manus-storage/meetings/${DONA}/${meetingId}/partes/${seq}.m4a`, mimeType: "audio/mp4", sizeBytes: 10,
+  sha256: crypto.randomUUID().replace(/-/g, "").padEnd(64, "0"), durationMs: 600_000, expiresAt: AGORA() + 86_400_000,
+  createdAt: AGORA() + seq, updatedAt: AGORA(), ...extra,
+});
+
 async function parte(meetingId: string, seq: number, extra: Record<string, unknown> = {}) {
-  await (await db()).insert(meetingAudioSlices).values({
-    id: crypto.randomUUID(), meetingId, ownerId: DONA, seq, status: "received", storageKey: `meetings/${DONA}/${meetingId}/partes/${seq}.m4a`,
-    storageUrl: `/manus-storage/meetings/${DONA}/${meetingId}/partes/${seq}.m4a`, mimeType: "audio/mp4", sizeBytes: 10,
-    sha256: crypto.randomUUID().replace(/-/g, "").padEnd(64, "0"), durationMs: 600_000, expiresAt: AGORA() + 86_400_000,
-    createdAt: AGORA() + seq, updatedAt: AGORA(), ...extra,
-  });
+  await (await db()).insert(meetingAudioSlices).values(linhaDaParte(meetingId, seq, extra));
 }
+
+type Transacao = import("./test/linha-presa").Transacao;
+/** O trabalho terminou com a linha de `segurar` presa por outra transação, sem commit (server/test/linha-presa.ts)? */
+const terminaComALinhaPresa = async (segurar: (tx: Transacao) => Promise<unknown>, trabalho: () => Promise<unknown>) =>
+  comALinhaPresa(await db(), segurar, trabalho);
 
 const partesDe = async (meetingId: string) => (await db()).select().from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId)).orderBy(meetingAudioSlices.seq);
 const reuniaoDe = async (meetingId: string) => (await (await db()).select().from(meetings).where(eq(meetings.id, meetingId)))[0];
@@ -61,20 +70,20 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     const banco = await getDb();
     if (!banco) return;
     // A reunião que fica pronta ganha o pedido do resumo guardado (H4c).
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-    await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
     await banco.delete(users).where(eq(users.openId, DONA));
   });
   beforeEach(async () => {
     const banco = await db();
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-    await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
     fila.religarParaTestes();
     transcreverFatia.mockReset();
     storageGetBytes.mockReset();
@@ -274,12 +283,29 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     for (const id of ids) await parte(id, 0);
     let simultaneas = 0;
     let pico = 0;
+    // A primeira chamada da rodada só termina quando a segunda já entrou, sem
+    // prazo fixo: com os 30 ms de antes, a primeira terminava antes de a
+    // segunda começar quando outro CI rodava na mesma máquina ("expected 1 to
+    // be 2", 18/11). Se a fila deixasse uma só, a primeira esperaria a segunda
+    // para sempre e o teste venceria o prazo, em vez de passar.
+    let abrir = () => {};
+    let segundaEntrou = Promise.resolve();
     transcreverFatia.mockImplementation(async () => {
+      if (simultaneas === 0) segundaEntrou = new Promise<void>(resolve => { abrir = resolve; });
       simultaneas += 1;
       pico = Math.max(pico, simultaneas);
-      await new Promise(resolve => setTimeout(resolve, 30));
+      if (simultaneas === 2) abrir();
+      await segundaEntrou;
       simultaneas -= 1;
       return { segmentos: [], idioma: "pt-BR", modelo: "m" };
+    });
+    // A segunda leitura do áudio de cada rodada demora, como com a máquina
+    // carregada: com o prazo fixo de antes, este teste falhava sempre assim.
+    let leituras = 0;
+    storageGetBytes.mockImplementation(async () => {
+      leituras += 1;
+      if (leituras % 2 === 0) await new Promise(resolve => setTimeout(resolve, 100));
+      return Buffer.from("audio");
     });
     // Duas por rodada (as vagas de IA), e nunca mais de duas ao mesmo tempo.
     await rodar();
@@ -336,6 +362,42 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     expect((await partesDe(deOutra))[0].lockToken).not.toBeNull();
     await rodar();
     expect(transcreverFatia).not.toHaveBeenCalled();
+  });
+
+  // Os três abaixo provam que as varreduras da fila travam só pela chave das
+  // linhas delas. Os arquivos de integração rodam em paralelo no mesmo banco, e
+  // os UPDATEs por intervalo do índice travavam partes e reuniões de outras
+  // reuniões e donas (deadlock da desistência das partes no laço de 19/11).
+  it("a desistência das partes esgotadas vai pela chave: não espera pela parte que outra transação acabou de criar", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0, { attempts: fila.TENTATIVAS_POR_PARTE });
+    const outra = await reuniao("recording", null);
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetingAudioSlices).values(linhaDaParte(outra, 0)), rodar)).toBe(true);
+    expect((await partesDe(id))[0]).toMatchObject({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS" });
+    expect(transcreverFatia).not.toHaveBeenCalled();
+  });
+
+  it("a montagem presa volta pela chave: não espera pela reunião em montagem que outra transação acabou de criar", async () => {
+    const presa = await reuniao("uploading", null, { status: "processing", lockToken: "processo-morto".padEnd(36, "x"), lockedUntil: AGORA() - 1, attempts: 1 });
+    const outra = {
+      id: crypto.randomUUID(), ownerId: DONA, title: "Outra em montagem", status: "processing" as const, consentGranted: true, audioPipeline: "slices" as const,
+      lockedUntil: AGORA() - 1, attempts: 1, createdAt: AGORA(), updatedAt: AGORA(),
+    };
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetings).values(outra), rodar)).toBe(true);
+    expect(await reuniaoDe(presa)).toMatchObject({ status: "uploading", lockToken: null, lockedUntil: null });
+    // A da outra transação foi desfeita, e nada dela ficou.
+    expect(await reuniaoDe(outra.id)).toBeUndefined();
+  });
+
+  it("o desligamento devolve as reservas pela chave: não espera pela parte que outra transação acabou de criar", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0, { lockToken: fila._paraTestes.novoToken(), lockedUntil: AGORA() + 600_000, attempts: 1 });
+    const outra = await reuniao("recording", null);
+    const reservadaPorOutra = linhaDaParte(outra, 0, { lockToken: crypto.randomUUID(), lockedUntil: AGORA() + 600_000, attempts: 1 });
+    let devolvidas: unknown;
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetingAudioSlices).values(reservadaPorOutra), async () => { devolvidas = await fila.pararFila(); })).toBe(true);
+    expect(devolvidas).toEqual({ partes: 1, reunioes: 0 });
+    expect((await partesDe(id))[0]).toMatchObject({ lockToken: null, lockedUntil: null, attempts: 0, status: "received" });
   });
 
   it("montagem presa (o processo caiu sem SIGTERM e a reserva venceu) volta a 'uploading' e é retomada", async () => {

@@ -146,6 +146,15 @@ export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa d
 /** O item que a dona acrescenta passaria do teto (ITENS_DO_RESUMO_MAX, shared/item-do-resumo.ts). */
 export const MENSAGEM_RESUMO_CHEIO = "Este resumo já chegou ao máximo de itens.";
 
+/**
+ * O salvar do Meu Perfil achou "O que tenho" ou "O que preciso" mudado de um
+ * jeito que não dá para somar ao que a tela manda (outra aba salvou, um item
+ * saiu), ou a soma passaria de um teto (server/listas-do-perfil.ts). Nada foi
+ * gravado. A tela traduz pela tabela de client/src/lib/mensagem-de-erro.ts
+ * (chave profile.changedElsewhere).
+ */
+export const MENSAGEM_PERFIL_MUDOU_NO_MEIO = "Seu perfil foi alterado em outra tela enquanto você editava. Nada foi salvo, para não apagar essa alteração: recarregue a página e edite de novo.";
+
 /** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
 export const NOME_DO_FALANTE_MAX = 60;
 /** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */

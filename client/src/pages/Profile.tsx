@@ -17,6 +17,7 @@ import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
 import { DemandasDoPerfil, EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, lerDemandas, type DemandaDetalhada } from "@shared/o-que-preciso";
 import { toast } from "sonner";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { exigeCadastroEmpresarial, mascararCadastroEmpresarial, normalizarCadastroEmpresarial } from "@shared/business-registration";
 import { sortOptionsAlphabetically, sortTextAlphabetically } from "@shared/option-sorting";
 import { rotulosComLegado } from "@shared/setores";
@@ -193,6 +194,11 @@ export default function Profile() {
   // A segunda camada (14/09): as demandas detalhadas e as categorias que já estavam gravadas ao abrir a edição.
   const [whatINeedDetails, setWhatINeedDetails] = useState<DemandaDetalhada[]>([]);
   const [categoriasJaSalvas, setCategoriasJaSalvas] = useState<string[]>([]);
+  // A versão de "O que tenho" e "O que preciso" que ESTA edição carregou, guardada ao abrir
+  // a edição junto com as listas, e não lida de `data` ao salvar: o perfil pode ser relido
+  // no meio (a reunião confirmou um item em outra aba). O servidor a usa para acrescentar
+  // o que entrou depois, em vez de apagar (server/listas-do-perfil.ts).
+  const [versaoDasListas, setVersaoDasListas] = useState<string | undefined>(undefined);
 
   const startEditing = () => {
     setDisplayName(profile?.displayName || user?.name || "");
@@ -218,6 +224,7 @@ export default function Profile() {
     setWhatINeed(necessidadesSalvas);
     setWhatINeedDetails(lerDemandas((profile as any)?.whatINeedDetails));
     setCategoriasJaSalvas(necessidadesSalvas);
+    setVersaoDasListas(data?.versaoDasListas);
     setEditing(true);
   };
 
@@ -238,7 +245,9 @@ export default function Profile() {
       // primeira mensagem em vez do array cru.
       let msg = err.message;
       try { const issues = JSON.parse(err.message); if (Array.isArray(issues) && issues[0]?.message) msg = issues[0].message; } catch { /* mensagem simples */ }
-      toast.error(msg);
+      // As frases conhecidas do servidor saem no idioma da tela: entre elas, a do perfil
+      // que mudou em outra tela com a edição aberta (CONFLICT; nada foi salvo).
+      toast.error(traduzirMensagemDoServidor(msg, t));
     },
   });
 
@@ -274,6 +283,7 @@ export default function Profile() {
       whatINeed,
       // Cada demanda separada, sem as em branco; o servidor valida de novo.
       whatINeedDetails: demandasParaGravar(whatINeed, whatINeedDetails),
+      versaoDasListas,
     });
   };
 

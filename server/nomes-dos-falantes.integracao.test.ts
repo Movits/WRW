@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -30,9 +31,9 @@ describe.skipIf(!temBanco)("Nomes das vozes da reunião (integração)", () => {
     if (!db) return;
     // O reprocesso abaixo passa por gravarResultadoDaReuniao, que cria o pedido
     // do resumo guardado da reunião (H4c).
-    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     for (const dona of [DONA, OUTRA]) await db.delete(users).where(eq(users.openId, dona));
   });
 

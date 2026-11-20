@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -65,13 +66,13 @@ async function limpar() {
   const banco = await db();
   for (const dona of [DONA, EXCLUIDA]) {
     const contas = await banco.select({ id: users.id }).from(users).where(eq(users.openId, dona));
-    if (contas.length) await banco.delete(platformNotifications).where(inArray(platformNotifications.userId, contas.map(conta => conta.id)));
-    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
-    await banco.delete(agendaReunioes).where(eq(agendaReunioes.ownerId, dona));
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    if (contas.length) await apagarPelaChave(banco, platformNotifications, inArray(platformNotifications.userId, contas.map(conta => conta.id)));
+    await apagarPelaChave(banco, lembretes, eq(lembretes.ownerId, dona));
+    await apagarPelaChave(banco, agendaReunioes, eq(agendaReunioes.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
   }
 }
 

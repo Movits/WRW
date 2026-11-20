@@ -837,6 +837,7 @@
     "saveProfile": "Guardar perfil",
     "editProfile": "Editar perfil",
     "updated": "¡Perfil actualizado con éxito!",
+    "changedElsewhere": "Tu perfil se modificó en otra pantalla mientras lo editabas. No se guardó nada, para no borrar ese cambio: recarga la página y vuelve a editar.",
     "badgeGold": "Oro",
     "badgeSilver": "Plata",
     "badgeBronze": "Bronce",

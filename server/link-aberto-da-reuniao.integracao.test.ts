@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 // O bucket é dublê: a leitura do áudio vencido o tira do bucket com todas as
 // versões, e este arquivo não pode falar com um bucket de verdade.
@@ -116,13 +117,13 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
-    await db.delete(meetingEntities).where(eq(meetingEntities.ownerId, DONA));
-    await db.delete(meetingContactSuggestions).where(eq(meetingContactSuggestions.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingRecordings, eq(meetingRecordings.ownerId, DONA));
+    await apagarPelaChave(db, meetingEntities, eq(meetingEntities.ownerId, DONA));
+    await apagarPelaChave(db, meetingContactSuggestions, eq(meetingContactSuggestions.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
-    await db.delete(auditLogs).where(eq(auditLogs.userId, PROVA.userId));
+    await apagarPelaChave(db, auditLogs, eq(auditLogs.userId, PROVA.userId));
   });
 
   it("pedidos simultâneos de ligar ficam com o MESMO link, e ligar de novo devolve o mesmo", async () => {
@@ -273,7 +274,7 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       expect(await chaveDoAudioDoLink(token, 2)).toBeNull();
       expect(await chaveDoAudioDoLink(token, 9)).toBeNull();
     } finally {
-      await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, EM_PARTES));
+      await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.meetingId, EM_PARTES));
     }
   });
 

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { margemDoReprocesso } from "@shared/const";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -125,13 +126,13 @@ async function limparDaDona() {
   const banco = await db();
   // O teste da exclusão cortada no meio do expurgo marca uma reunião na agenda
   // (H16a) e dá o aviso de pronta no sino (H15).
-  await banco.delete(agendaReunioes).where(eq(agendaReunioes.ownerId, DONA));
+  await apagarPelaChave(banco, agendaReunioes, eq(agendaReunioes.ownerId, DONA));
   const contas = await banco.select({ id: users.id }).from(users).where(eq(users.openId, DONA));
-  for (const conta of contas) await banco.delete(platformNotifications).where(eq(platformNotifications.userId, conta.id));
-  await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-  await banco.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
-  await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-  await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
+  for (const conta of contas) await apagarPelaChave(banco, platformNotifications, eq(platformNotifications.userId, conta.id));
+  await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+  await apagarPelaChave(banco, meetingRecordings, eq(meetingRecordings.ownerId, DONA));
+  await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+  await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
 }
 
 describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integração)", () => {

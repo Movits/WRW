@@ -837,6 +837,7 @@
     "saveProfile": "Save profile",
     "editProfile": "Edit profile",
     "updated": "Profile updated successfully!",
+    "changedElsewhere": "Your profile was changed on another screen while you were editing. Nothing was saved, so as not to erase that change: reload the page and edit again.",
     "badgeGold": "Gold",
     "badgeSilver": "Silver",
     "badgeBronze": "Bronze",

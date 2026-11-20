@@ -28,6 +28,7 @@ import { normalizar } from "@shared/direcao-do-termo";
 import { BancoIndisponivel } from "./banco-indisponivel";
 import { condicaoDeStatusNasListas } from "./oportunidade-acesso";
 import { consolidarPerfil } from "./perfil-consolidado";
+import { mesclarOQueEntrouDepois, oQueEntrouDepois, PerfilMudouNoMeio, type ListasRecebidas } from "./listas-do-perfil";
 import { avaliarQualificacaoDoPerfil } from "@shared/qualificacao-do-perfil";
 import { contextoParaOferecer } from "./contexto-oferecido";
 import { nomeDoTipoDeContexto } from "./nome-do-tipo-de-contexto";
@@ -162,13 +163,38 @@ export function computeProfileCompleteness(profile: Record<string, unknown> | nu
   return Math.round((filled / CAMPOS_DA_COMPLETUDE_DO_PERFIL.length) * 100);
 }
 
-export async function upsertUserProfile(userId: number, data: Record<string, unknown>) {
+/**
+ * Grava o perfil. Com `versaoDasListas` (o Meu Perfil, que devolve "O que
+ * tenho" e "O que preciso" inteiros), a escrita confere antes, com a linha
+ * travada, que as listas gravadas são as que a tela carregou, e acrescenta o
+ * que entrou depois no fim delas (server/listas-do-perfil.ts). Lança
+ * PerfilMudouNoMeio, sem gravar nada, quando elas mudaram de outro jeito.
+ * Sem a versão (o Perfil antigo em cache, o cadastro), grava como sempre.
+ */
+export async function upsertUserProfile(userId: number, data: Record<string, unknown>, versaoDasListas?: string) {
   const db = await exigirDb();
-  const existing = await getUserProfile(userId);
-  if (existing) {
-    await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+  if (versaoDasListas !== undefined) {
+    await db.transaction(async tx => {
+      // FOR UPDATE, como a confirmação que a reunião leva ao perfil (confirmarItemDaDona):
+      // a conferência e a escrita não deixam um item entrar no meio.
+      const [gravadas] = await tx.select({ whatIHave: userProfiles.whatIHave, whatINeed: userProfiles.whatINeed, whatINeedDetails: userProfiles.whatINeedDetails })
+        .from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1).for("update");
+      const entrou = oQueEntrouDepois(versaoDasListas, gravadas);
+      const listas = entrou && mesclarOQueEntrouDepois(data as ListasRecebidas, entrou);
+      if (!listas) throw new PerfilMudouNoMeio();
+      if (gravadas) {
+        await tx.update(userProfiles).set({ ...data, ...listas, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+      } else {
+        await tx.insert(userProfiles).values({ userId, ...data, ...listas } as any);
+      }
+    });
   } else {
-    await db.insert(userProfiles).values({ userId, ...data } as any);
+    const existing = await getUserProfile(userId);
+    if (existing) {
+      await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+    } else {
+      await db.insert(userProfiles).values({ userId, ...data } as any);
+    }
   }
   const atual = await getUserProfile(userId);
   const completeness = computeProfileCompleteness(atual as Record<string, unknown> | null);

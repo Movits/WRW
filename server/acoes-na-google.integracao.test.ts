@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -77,7 +78,7 @@ async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
 
 async function desconectarNoBanco() {
   conexaoGoogle.esquecerAcesso(idDaDona);
-  await (await getDb())!.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, idDaDona));
+  await apagarPelaChave((await getDb())!, googleAgendaConexoes, eq(googleAgendaConexoes.userId, idDaDona));
 }
 
 /** Uma reunião pronta da dona com o resumo pronto e uma ação confirmada; devolve o item. */
@@ -105,12 +106,12 @@ async function itemConfirmado() {
 async function limpar() {
   const banco = (await getDb())!;
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
-    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
-    await banco.delete(privateContacts).where(eq(privateContacts.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, lembretes, eq(lembretes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, privateContacts, eq(privateContacts.ownerId, dona));
   }
 }
 
@@ -126,8 +127,8 @@ describe.skipIf(!temBanco)("Próximas ações na Google Agenda (integração)", 
     if (!db) return;
     await limpar();
     if (idDaDona) {
-      await db.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, idDaDona));
-      await db.delete(auditLogs).where(inArray(auditLogs.userId, [idDaDona]));
+      await apagarPelaChave(db, googleAgendaConexoes, eq(googleAgendaConexoes.userId, idDaDona));
+      await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, [idDaDona]));
     }
     await db.delete(users).where(eq(users.openId, DONA));
   });

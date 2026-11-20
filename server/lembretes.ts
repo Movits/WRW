@@ -197,11 +197,19 @@ export async function avisarReuniaoPronta(ex: Executor, ownerId: string, meeting
     .limit(1);
   if (!reuniao) return false;
   const endereco = rotaDaReuniao(meetingId);
-  await ex.delete(platformNotifications).where(and(
+  // O aviso anterior sai pela chave. O DELETE pela conta travava o intervalo
+  // dela no índice pnotif_userId_idx, com o vão até a conta vizinha: duas
+  // reuniões de contas vizinhas ficando prontas ao mesmo tempo travavam uma o
+  // INSERT da outra (deadlock no CI de 18/11). A leitura sem trava basta:
+  // quem chama segura a linha do resumo desta reunião (gravarResumo e
+  // registrarFalha, em server/fila-do-resumo.ts), então outro aviso dela não
+  // entra no meio.
+  const anteriores = await ex.select({ id: platformNotifications.id }).from(platformNotifications).where(and(
     eq(platformNotifications.userId, reuniao.contaId),
     eq(platformNotifications.type, "reuniao_pronta"),
     eq(platformNotifications.actionUrl, endereco),
   ));
+  for (const { id } of anteriores) await ex.delete(platformNotifications).where(eq(platformNotifications.id, id));
   const parametros: ParametrosDaReuniaoPronta = { titulo: reuniao.titulo, resumo };
   await ex.insert(platformNotifications).values({
     userId: reuniao.contaId, type: "reuniao_pronta", title: tituloDoAviso(reuniao.titulo), body: null,
