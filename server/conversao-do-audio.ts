@@ -11,7 +11,9 @@ import { ObjetoAusenteNoStorageError } from "./storage";
 /**
  * A conversão do áudio que a dona baixa (H8c): as partes da reunião, em
  * qualquer mistura de formatos (WebM/Opus do Chrome e do Android, MP4/AAC do
- * Safari e do iPhone, MP3 da importação, o WAV ou o OGG do envio único), viram
+ * Safari e do iPhone, MP3 da importação, o WAV ou o OGG do envio único, e o
+ * FLAC e o AAC cru, em ADTS, que a importação em partes da H9b manda como
+ * chegaram: todo tipo de TIPOS_DAS_PARTES, em fatias-de-reuniao.ts), viram
  * UM arquivo MP3 ou M4A, transmitido enquanto é feito, sem guardar o resultado.
  *
  * Como: um ffmpeg CODIFICADOR fica aberto a download inteiro e recebe áudio
@@ -94,11 +96,11 @@ export type DependenciasDaConversao = {
 
 const EXTENSAO: Record<string, string> = {
   "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav",
-  "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3",
+  "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/flac": "flac", "audio/mpeg": "mp3",
 };
 
-/** Os demuxers que o áudio da reunião usa: WebM (matroska), MP4/M4A (mov), MP3, OGG, WAV e AAC cru. */
-const FORMATOS_LIDOS = "matroska,mov,mp3,ogg,wav,aac";
+/** Os demuxers que o áudio da reunião usa: WebM (matroska), MP4/M4A (mov), MP3, OGG, WAV, AAC cru e FLAC. */
+const FORMATOS_LIDOS = "matroska,mov,mp3,ogg,wav,aac,flac";
 /** Os decodificadores de áudio desses formatos. Vídeo de um MP4 do envio único fica de fora (só o áudio é lido). */
 const DECODIFICADORES = [
   "opus", "libopus", "aac", "aac_fixed", "mp3float", "mp3", "vorbis", "libvorbis", "flac", "alac",

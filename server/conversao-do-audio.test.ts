@@ -10,6 +10,11 @@ import {
 } from "./conversao-do-audio";
 import { ObjetoAusenteNoStorageError } from "./storage";
 
+// Os tipos que a rota das partes aceita (server/fatias-de-reuniao.ts): o módulo
+// pede o JWT_SECRET ao carregar, como em corte-dos-formatos-no-servidor.test.ts.
+process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
+const { TIPOS_DAS_PARTES } = await import("./fatias-de-reuniao");
+
 /**
  * A conversão do áudio que a dona baixa (H8c), com o ffmpeg DE VERDADE: as
  * partes de teste são tons e silêncios gerados pelo próprio ffmpeg (nenhuma
@@ -55,7 +60,7 @@ describe("o ffmpeg roda contido", () => {
     const args = argumentosDoDecodificador("/tmp/x/parte-0001.webm");
     const valor = (opcao: string) => args[args.indexOf(opcao) + 1];
     expect(valor("-protocol_whitelist")).toBe("file");
-    expect(valor("-format_whitelist").split(",")).toEqual(["matroska", "mov", "mp3", "ogg", "wav", "aac"]);
+    expect(valor("-format_whitelist").split(",")).toEqual(["matroska", "mov", "mp3", "ogg", "wav", "aac", "flac"]);
     expect(valor("-codec_whitelist").split(",")).toEqual(expect.arrayContaining(["opus", "aac", "mp3float", "vorbis", "flac", "pcm_s16le"]));
     expect(valor("-codec_whitelist")).not.toMatch(/h264|hevc|png|mjpeg|subrip/);
     // As opções valem para a entrada: vêm antes do -i.
@@ -97,6 +102,9 @@ describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
     // O envio único também aceita WAV e OGG.
     audio.wav = gerar("tom550.wav", ["-f", "lavfi", "-i", "sine=frequency=550:duration=1", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"]);
     audio.ogg = gerar("tom330.ogg", ["-f", "lavfi", "-i", "sine=frequency=330:duration=1", "-ac", "1", "-c:a", "libopus", "-b:a", "24k"]);
+    // A importação em partes (H9b) manda o FLAC e o AAC cru (ADTS) como chegaram, sem recodificar.
+    audio.flac = gerar("tom770.flac", ["-f", "lavfi", "-i", "sine=frequency=770:duration=1", "-ac", "1", "-ar", "44100", "-c:a", "flac"]);
+    audio.adts = gerar("tom990.aac", ["-f", "lavfi", "-i", "sine=frequency=990:duration=1", "-ac", "1", "-c:a", "aac", "-b:a", "64k", "-f", "adts"]);
   }, 60_000);
   afterAll(() => { if (pasta) rmSync(pasta, { recursive: true, force: true }); });
 
@@ -188,6 +196,23 @@ describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
     expect(r.bytes.subarray(0, 3).toString("latin1")).not.toBe("ID3");
     expect(r.bytes.subarray(0, 400).toString("latin1")).not.toMatch(/Xing|Info/);
     expect(r.avisos).toEqual([]);
+  }, 60_000);
+
+  it("todo tipo que a rota das partes aceita toca no áudio baixado, também o FLAC e o AAC cru da importação em partes", async () => {
+    // Uma amostra com tom para cada tipo: um tipo novo na rota sem amostra aqui faz este teste falhar.
+    const amostras: Record<string, string> = {
+      "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mp4": "m4aIndiceNoFim", "audio/m4a": "m4aIndiceNoFim",
+      "audio/mpeg": "mp3", "audio/flac": "flac", "audio/aac": "adts",
+    };
+    expect(Object.keys(amostras).sort()).toEqual([...TIPOS_DAS_PARTES].sort());
+    // Uma parte a cada 5 s: o vão de mais de 1 s ganha silêncio, então cada parte começa no tempo dela,
+    // e a que não decodifica deixa o lugar dela em silêncio, sem a seguinte tomar o lugar.
+    const partes = TIPOS_DAS_PARTES.map((tipo, seq) => parte(seq, amostras[tipo], tipo, seq * 5000, tipo === "audio/mpeg" ? 3000 : 1000));
+    const r = await converter(partes);
+    expect(r.avisos).toEqual([]);
+    const m = medir(r.bytes, "mp3");
+    const tocou = partes.map(p => ({ tipo: p.mimeType, tocou: m.volume(p.inicioMs / 1000 + 0.2, p.inicioMs / 1000 + 0.8) > ALTO }));
+    expect(tocou).toEqual(partes.map(p => ({ tipo: p.mimeType, tocou: true })));
   }, 60_000);
 
   it("em M4A: AAC fragmentado, mono, 24 kHz, com a duração da reunião", async () => {
