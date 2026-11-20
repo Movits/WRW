@@ -190,7 +190,7 @@ export function flac(o: OpcoesDoFlac) {
   const streaminfo = [
     ...u16be(bloco), ...u16be(bloco), ...u24be(0), ...u24be(0),
     (taxa >> 12) & 0xff, (taxa >> 4) & 0xff, ((taxa & 0xf) << 4) | ((canais - 1) << 1) | ((bits - 1) >> 4),
-    (((bits - 1) & 0xf) << 4) | Math.floor(total / 2 ** 32), ...u32be(total >>> 0), ...aleatorios(16, 11),
+    (((bits - 1) & 0xf) << 4) | Math.floor(total / 2 ** 32), ...u32be(total >>> 0), ...Array.from(aleatorios(16, 11)),
   ];
   // VORBIS_COMMENT e PICTURE (com falsos começos de quadro na capa), e a SEEKTABLE vazia: o corte tira todos.
   const capa = aleatorios(3000, 17);

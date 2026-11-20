@@ -803,13 +803,13 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     await act(async () => { fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Descartar gravação" })); });
   }
 
-  it.each(["/gravar", "/gravar?emPartes=1"])("%s grava em partes: sob o relógio, o aviso de hora e as 12 h, e os tetos do arquivo (o MP3 em partes, H9a); a reunião nasce no Iniciar", async caminho => {
+  it.each(["/gravar", "/gravar?emPartes=1"])("%s grava em partes: sob o relógio, o aviso de hora e as 12 h, e o teto do arquivo (em partes, H9a, H9b e H9c); a reunião nasce no Iniciar", async caminho => {
     window.history.replaceState(null, "", caminho);
     render(<Meetings />);
     expect(screen.getByText("A cada hora de gravação, confirme que ela continua. Limite: 12 horas.")).toBeInTheDocument();
     expect(screen.queryByText("Limite por gravação: 10 minutos ou 10 MB")).not.toBeInTheDocument();
-    // O arquivo enviado: o MP3 em partes, até 12 h (H9a); os outros formatos no envio único, com o teto dele.
-    expect(screen.getByText("Arquivo MP3: até 12 horas. Outros formatos: até 10 minutos ou 10 MB.")).toBeInTheDocument();
+    // O arquivo enviado: todos os formatos em partes, até 12 h (H9a, H9b e H9c).
+    expect(screen.getByText("Áudio ou vídeo (MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC, AAC): até 12 horas.")).toBeInTheDocument();
     preencher();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
