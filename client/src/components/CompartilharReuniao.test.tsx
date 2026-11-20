@@ -454,12 +454,16 @@ describe("a senha e o áudio do link (H23)", () => {
     expect(toast.success).toHaveBeenCalledWith("Senha tirada: o link abre sem senha.");
   });
 
-  it("sem senha: Pôr senha cria a senha na hora, sem pergunta (não derruba ninguém)", () => {
+  it("sem senha: Pôr senha cria a senha na hora, sem pergunta, e ela sai com o texto pronto para mandar a quem já tem o link", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
     expect(screen.getByText("Este link abre sem senha: basta ter o endereço.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Trocar a senha" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Pôr senha" }));
     expect(duble.mutacoes.novaSenha.mutate).toHaveBeenCalledWith({ meetingId: ID });
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "246801" }));
+    expect(screen.getByRole("textbox", { name: "Texto pronto para mandar" })).toHaveValue(`Reunião “Reunião” na WRW: ${endereco}\nSenha: 246801`);
+    const atualizar = duble.setData.mock.calls.at(-1)![1] as (anterior: unknown) => unknown;
+    expect(atualizar({ meeting: { id: ID, linkComSenha: false } })).toEqual({ meeting: { id: ID, linkComSenha: true } });
   });
 
   it("o áudio do link ligado: desmarcar manda o servidor tirar o áudio, e a tela explica o que muda", () => {
