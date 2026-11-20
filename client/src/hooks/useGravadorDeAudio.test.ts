@@ -1,47 +1,142 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
-import { PAUSA_MAXIMA_MS, useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador } from "./useGravadorDeAudio";
+import {
+  ATRASO_MAXIMO_MS, ESPERA_PELA_PAUSA_MS, PAUSA_MAXIMA_MS, PREPARO_DO_DETECTOR_MS, useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador,
+} from "./useGravadorDeAudio";
 
 /** O MediaRecorder do navegador, que grava só os formatos da lista. */
 type GravadorFalso = {
+  /** A ordem em que o gravador foi criado (o de `gravadores[indice]`). */
+  indice: number;
   fluxo: unknown;
   opcoes: MediaRecorderOptions | undefined;
   mimeType: string;
   state: "inactive" | "recording" | "paused";
   ondataavailable: ((evento: { data: Blob }) => void) | null;
   onstop: (() => void) | null;
+  /** O que o microfone captou enquanto este gravador gravava (ver `falar`). */
+  falas: string[];
   /** Com o fim atrasado: entrega os pedaços e o fim, como o navegador faz depois do stop(). */
   terminar: () => void;
 };
 let gravadores: GravadorFalso[] = [];
+/** O começo e o fim de cada gravador, na ordem em que aconteceram: "começa 1", "para 0"... */
+let linhaDoTempo: string[] = [];
 
-function navegadorQueGrava(formatos: string[], { fimAtrasado = false } = {}) {
+function navegadorQueGrava(formatos: string[], { fimAtrasado = false, recusarAPartirDe = Infinity, umPorVez = false } = {}) {
   vi.stubGlobal("MediaRecorder", class {
     static isTypeSupported = (tipo: string) => formatos.includes(tipo);
+    indice: number;
     fluxo: unknown;
     opcoes: MediaRecorderOptions | undefined;
     mimeType: string;
     state: "inactive" | "recording" | "paused" = "inactive";
     ondataavailable: ((evento: { data: Blob }) => void) | null = null;
     onstop: (() => void) | null = null;
+    falas: string[] = [];
     constructor(fluxo: unknown, opcoes?: MediaRecorderOptions) {
+      // O navegador que recusa o gravador a partir do enésimo (a trilha do microfone que caiu, por exemplo).
+      if (gravadores.length >= recusarAPartirDe) throw new DOMException("recusado", "NotSupportedError");
       this.fluxo = fluxo;
       this.opcoes = opcoes;
       // Sem mimeType nas opções, o navegador grava no padrão dele.
       this.mimeType = opcoes?.mimeType ?? "audio/webm;codecs=opus";
+      this.indice = gravadores.length;
       gravadores.push(this);
     }
-    start() { this.state = "recording"; }
+    start() {
+      // O navegador que não grava o mesmo fluxo com dois gravadores ao mesmo tempo.
+      if (umPorVez && gravadores.some(outro => outro !== this && outro.state !== "inactive")) throw new DOMException("ocupado", "InvalidStateError");
+      this.state = "recording";
+      linhaDoTempo.push(`começa ${this.indice}`);
+    }
     pause() { this.state = "paused"; }
     resume() { this.state = "recording"; }
     stop() {
       this.state = "inactive";
+      linhaDoTempo.push(`para ${this.indice}`);
       if (!fimAtrasado) this.terminar();
     }
     terminar() {
-      this.ondataavailable?.({ data: new Blob(["som"], { type: this.mimeType }) });
+      this.ondataavailable?.({ data: new Blob(this.falas.length ? this.falas : ["som"], { type: this.mimeType }) });
       this.onstop?.();
+    }
+  });
+}
+
+/** A fala que o microfone capta agora: vai para todo gravador que está gravando (o pausado e o parado não gravam). */
+function falar(trecho: string) {
+  for (const gravador of gravadores) if (gravador.state === "recording") gravador.falas.push(trecho);
+}
+
+// O som no ar, para o detector de pausa da troca de parte: a amplitude (de 0 a
+// 1) a partir de cada instante do relógio (falso, nos testes que o usam).
+let trechosDeSom: Array<{ desde: number; nivel: number }> = [];
+const FALA = 0.3;
+const SILENCIO = 0.001;
+function somDesde(desde: number, nivel: number) {
+  trechosDeSom = [...trechosDeSom.filter(trecho => trecho.desde < desde), { desde, nivel }];
+}
+function nivelEm(instante: number) {
+  let nivel = 0;
+  for (const trecho of trechosDeSom) if (trecho.desde <= instante) nivel = trecho.nivel;
+  return nivel;
+}
+
+/** O AudioContext do navegador, com o AnalyserNode que lê o som no ar. */
+type ContextoFalso = {
+  state: string;
+  fechado: boolean;
+  resume: ReturnType<typeof vi.fn>;
+  fonte: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> };
+};
+let contextos: ContextoFalso[] = [];
+
+/**
+ * O navegador com Web Audio. `estadoInicial` "suspended" é o iPhone, que só
+ * deixa o contexto rodar a partir de um toque: o resume() nunca responde. Com
+ * `rodaDepoisDeMs`, o contexto que nasce suspenso roda sozinho esse tanto
+ * depois de criado: é o Firefox, que segue a especificação do Web Audio e só
+ * o roda numa tarefa seguinte (o Chrome já o cria rodando).
+ */
+function navegadorQueOuve({ estadoInicial = "running", recusar = false, rodaDepoisDeMs = Infinity } = {}) {
+  vi.stubGlobal("AudioContext", class {
+    sampleRate = 48_000;
+    estado = estadoInicial;
+    criadoEm = Date.now();
+    fechado = false;
+    resume = vi.fn(() => new Promise<void>(() => {}));
+    fonte = { connect: vi.fn(), disconnect: vi.fn() };
+    constructor() {
+      if (recusar) throw new DOMException("recusado", "NotSupportedError");
+      contextos.push(this);
+    }
+    /** Quando o contexto começou a rodar: o relógio dele (currentTime) conta daí. */
+    get rodandoDesde() { return estadoInicial === "running" ? this.criadoEm : this.criadoEm + rodaDepoisDeMs; }
+    get state() {
+      if (this.estado === "suspended" && Date.now() >= this.rodandoDesde) this.estado = "running";
+      return this.estado;
+    }
+    get currentTime() { return this.state === "running" ? (Date.now() - this.rodandoDesde) / 1000 : 0; }
+    close() {
+      this.estado = "closed";
+      this.fechado = true;
+      return Promise.resolve();
+    }
+    createMediaStreamSource() { return this.fonte; }
+    createAnalyser() {
+      const amostrasPorSegundo = this.sampleRate;
+      return {
+        fftSize: 2048,
+        getFloatTimeDomainData(destino: Float32Array) {
+          // A última amostra é a de agora; as de antes, 1/48000 s cada uma mais velha.
+          const agora = Date.now();
+          for (let i = 0; i < destino.length; i++) {
+            destino[i] = nivelEm(agora - ((destino.length - 1 - i) * 1000) / amostrasPorSegundo) * Math.sin(i / 3);
+          }
+        },
+      };
     }
   });
 }
@@ -54,6 +149,9 @@ let microfoneOriginal: PropertyDescriptor | undefined;
 
 beforeEach(() => {
   gravadores = [];
+  linhaDoTempo = [];
+  trechosDeSom = [];
+  contextos = [];
   trilha = { stop: vi.fn() };
   getUserMedia = vi.fn(async () => microfone());
   microfoneOriginal = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
@@ -500,8 +598,12 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
       act(() => { vi.advanceTimersByTime(600_500); });
       expect(gravadores).toHaveLength(2);
       expect(gravadores[1].fluxo).toBe(gravadores[0].fluxo);
+      // O gravador da parte seguinte começa ANTES de o da atual parar. No navegador
+      // ainda fica um buraco de dezenas de ms (o fim que o codificador segurava e o
+      // stop() descarta), que o dublê não imita.
+      expect(linhaDoTempo).toEqual(["começa 0", "começa 1", "para 0"]);
       expect(aoFecharParte).toHaveBeenCalledTimes(1);
-      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, mimeType: "audio/mp4" });
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, mimeType: "audio/mp4", duracaoMs: 600_000 });
       expect(result.current.estado).toBe("gravando");
       expect(trilha.stop).not.toHaveBeenCalled();
       act(() => { vi.advanceTimersByTime(100_000); });
@@ -515,25 +617,172 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     }
   });
 
-  it("o Parar que chega DURANTE a troca de parte encerra a gravação (não abre a parte seguinte)", async () => {
+  it.each([
+    ["da anterior", [0, 1]],
+    ["da seguinte", [1, 0]],
+  ])("o Parar logo depois de uma troca, com a parte anterior ainda fechando o arquivo: as duas saem na ordem (com o fim %s primeiro), e só então o microfone é solto", async (_primeiro, fins) => {
     vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
     try {
       navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
       const aoFecharParte = vi.fn();
       const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
       await act(async () => { await result.current.comecar(); });
-      act(() => { vi.advanceTimersByTime(600_500); });
-      // O gravador da parte 0 parou, o navegador ainda não entregou o fim: a troca está no meio.
+      act(() => { vi.advanceTimersByTime(600_000); });
+      // A troca: a parte 1 já grava, e a 0 parou, mas o navegador ainda não entregou o fim dela.
+      expect(gravadores.map(gravador => gravador.state)).toEqual(["inactive", "recording"]);
+      act(() => { vi.advanceTimersByTime(3_000); });
+      act(() => result.current.parar());
+      expect(result.current.estado).toBe("finalizando");
+      act(() => gravadores[fins[0]].terminar());
+      // O fim da seguinte que chega primeiro espera o da anterior: a última parte sai por último.
+      expect(aoFecharParte.mock.calls.map(([parte]) => parte.seq)).toEqual(fins[0] === 0 ? [0] : []);
+      expect(result.current.estado).toBe("finalizando");
+      expect(trilha.stop).not.toHaveBeenCalled();
+      expect(aoTerminar).not.toHaveBeenCalled();
+      act(() => gravadores[fins[1]].terminar());
+      expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.duracaoMs])).toEqual([[0, false, 600_000], [1, true, 3_000]]);
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(aoTerminar.mock.calls[0][0]).toMatchObject({ duracaoMs: 3_000 });
+      expect(result.current.estado).toBe("parado");
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Pausar logo depois de uma troca, com a parte anterior ainda fechando o arquivo: cada parte sai com a sua duração, e a pausa conta só na seguinte", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const { result } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
+      act(() => result.current.pausar());
+      expect(result.current.estado).toBe("pausado");
+      expect(gravadores.map(gravador => gravador.state)).toEqual(["inactive", "paused"]);
+      act(() => { vi.advanceTimersByTime(30_000); });
+      // O fim da parte 0 chega com a gravação pausada: ela sai inteira, sem a pausa da seguinte.
+      act(() => gravadores[0].terminar());
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: 600_000 });
+      expect(result.current.estado).toBe("pausado");
+      act(() => result.current.continuar());
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => result.current.parar());
+      act(() => gravadores[1].terminar());
+      expect(aoFecharParte.mock.calls[1][0]).toMatchObject({ seq: 1, ultima: true, duracaoMs: 10_000 });
+      expect(gravadores).toHaveLength(2);
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Descartar logo depois de uma troca: nem a parte anterior, que ainda fechava o arquivo, nem a atual saem, e o microfone é solto", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
+      act(() => result.current.descartar());
+      expect(gravadores.map(gravador => gravador.state)).toEqual(["inactive", "inactive"]);
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+      expect(result.current.estado).toBe("parado");
+      // Os fins que o navegador ainda entregaria não chegam a ninguém.
+      act(() => { for (const gravador of gravadores) gravador.terminar(); });
+      expect(aoFecharParte).not.toHaveBeenCalled();
+      expect(aoTerminar).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("com entregarAoSair, desmontar logo depois de uma troca entrega as duas partes na ordem e avisa uma vez", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const aoEntregarAoSair = vi.fn();
+      const { result, unmount, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte, entregarAoSair: true, aoEntregarAoSair });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
+      unmount();
+      expect(aoEntregarAoSair).toHaveBeenCalledTimes(1);
+      gravadores[1].terminar();
+      gravadores[0].terminar();
+      expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o navegador que não grava o mesmo fluxo com dois gravadores: troca como antes da emenda (a seguinte abre quando a atual fecha o arquivo), e a gravação continua", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { umPorVez: true });
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
+      // O gravador 1 foi recusado; o 2 abriu depois de o 0 fechar o arquivo.
+      expect(linhaDoTempo).toEqual(["começa 0", "para 0", "começa 2"]);
+      expect(result.current.estado).toBe("gravando");
+      expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.duracaoMs])).toEqual([[0, false, 600_000]]);
+      act(() => { vi.advanceTimersByTime(100_000); });
+      act(() => result.current.parar());
+      expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("nessa troca como antes, o Parar que chega antes do fim do arquivo vale como o fim, e a parte seguinte não abre; pausar no meio dela não pausa", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { umPorVez: true, fimAtrasado: true });
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
       expect(gravadores[0].state).toBe("inactive");
+      act(() => result.current.pausar());
+      expect(result.current.estado).toBe("gravando");
       act(() => result.current.parar());
       expect(result.current.estado).toBe("finalizando");
       act(() => gravadores[0].terminar());
-      expect(gravadores).toHaveLength(1);
-      expect(aoFecharParte).toHaveBeenCalledTimes(1);
-      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: true });
+      expect(linhaDoTempo).toEqual(["começa 0", "para 0"]);
+      expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, true]]);
       expect(aoTerminar).toHaveBeenCalledTimes(1);
       expect(result.current.estado).toBe("parado");
-      expect(trilha.stop).toHaveBeenCalled();
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o gravador da parte seguinte recusado na troca e de novo no fim do arquivo (a trilha do microfone que caiu): a gravação encerra e entrega o que gravou como a última parte", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      navegadorQueGrava(["audio/mp4"], { recusarAPartirDe: 1 });
+      const aoFecharParte = vi.fn();
+      const { result, aoTerminar, aoFalhar } = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte });
+      await act(async () => { await result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(600_000); });
+      expect(gravadores).toHaveLength(1);
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: true, duracaoMs: 600_000 });
+      expect(aoTerminar).toHaveBeenCalledTimes(1);
+      expect(result.current.estado).toBe("parado");
+      expect(trilha.stop).toHaveBeenCalledTimes(1);
+      // Nada a avisar: o que foi gravado foi entregue.
+      expect(aoFalhar).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -640,6 +889,346 @@ describe("useGravadorDeAudio — gravação em partes (G9)", () => {
     expect(gravadores).toHaveLength(1);
     expect(aoFecharParte).toHaveBeenCalledWith(expect.objectContaining({ seq: 0, ultima: true }));
     expect(aoTerminar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A emenda entre as partes (pedido do Roberto em 16/11: "a fala não pode se
+// perder"). Antes, a troca parava o gravador da parte e só abria o da seguinte
+// quando o navegador entregava o fim do arquivo: o áudio desse intervalo caía
+// entre as duas, e a palavra dita bem na troca saía cortada. Estes testes provam
+// o que o hook controla: nenhum pedaço que o gravador entrega fica fora de uma
+// parte, e a troca espera a pausa da fala. O dublê não imita o buraco de dezenas
+// de ms que o navegador ainda deixa (o fim que o codificador segurava e o stop()
+// descarta); é a espera pela pausa que o faz cair no silêncio.
+describe("useGravadorDeAudio — a emenda das partes, sem corte", () => {
+  const HORA_DA_TROCA = 600_000;
+  const RELOGIO_FALSO: Parameters<typeof vi.useFakeTimers>[0] = { shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] };
+
+  async function gravarEmPartes(opcoes: Partial<OpcoesDoGravador> = {}) {
+    const aoFecharParte = vi.fn<(parte: AudioGravado & { seq: number; ultima: boolean }) => void>();
+    const montado = montar({ limiteSegundos: 3600, fatiaSegundos: 600, aoFecharParte, ...opcoes });
+    await act(async () => { await montado.result.current.comecar(); });
+    return { ...montado, aoFecharParte, comecouEm: Date.now() };
+  }
+
+  /** Anda o relógio falso até `ms` depois do começo da gravação (sem pausas no meio). */
+  function andarAte(comecouEm: number, ms: number) {
+    act(() => { vi.advanceTimersByTime(comecouEm + ms - Date.now()); });
+  }
+
+  it("nenhum pedaço de áudio cai entre as partes: a fala de antes, durante e depois da troca está numa parte, na ordem, mesmo com o fim do arquivo chegando depois", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+      const { result, aoFecharParte, comecouEm } = await gravarEmPartes();
+      const faladas: string[] = [];
+      const falarPor = (ms: number) => {
+        for (let passados = 0; passados < ms; passados += 100) {
+          const trecho = `[fala ${faladas.length}]`;
+          faladas.push(trecho);
+          falar(trecho);
+          act(() => { vi.advanceTimersByTime(100); });
+        }
+      };
+      andarAte(comecouEm, HORA_DA_TROCA - 1_000);
+      // Fala sem pausa (sem detector, a troca sai no tempo) até 2 s depois da troca.
+      falarPor(3_000);
+      expect(gravadores).toHaveLength(2);
+      // O navegador só agora entrega o fim da parte 0, e a fala continua.
+      act(() => gravadores[0].terminar());
+      falarPor(1_000);
+      act(() => result.current.parar());
+      act(() => gravadores[1].terminar());
+      const partes = aoFecharParte.mock.calls.map(([parte]) => parte);
+      expect(partes.map(parte => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+      const ouvidas = (await Promise.all(partes.map(parte => parte.blob.text()))).flatMap(texto => texto.match(/\[fala \d+\]/g) ?? []);
+      expect(ouvidas).toEqual(faladas);
+      expect(linhaDoTempo).toEqual(["começa 0", "começa 1", "para 0", "para 1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a troca espera a pausa da fala: o detector abre 2 s antes da hora, a calma antes dela não troca, e a troca sai no primeiro trecho calmo de 300 ms depois dela", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      // Uma pausa logo antes da hora, com o detector já aberto: a parte ainda não chegou aos 600 s.
+      somDesde(comecouEm + HORA_DA_TROCA - 1_500, SILENCIO);
+      somDesde(comecouEm + HORA_DA_TROCA - 200, FALA);
+      // A pausa da fala depois da hora, aos 607 s.
+      somDesde(comecouEm + HORA_DA_TROCA + 7_000, SILENCIO);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS - 100);
+      expect(contextos).toHaveLength(0);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS);
+      expect(contextos).toHaveLength(1);
+      expect(contextos[0].fonte.connect).toHaveBeenCalledTimes(1);
+      // A hora chega com fala: não troca.
+      andarAte(comecouEm, HORA_DA_TROCA + 7_200);
+      expect(gravadores).toHaveLength(1);
+      expect(aoFecharParte).not.toHaveBeenCalled();
+      // 300 ms calmos: troca.
+      andarAte(comecouEm, HORA_DA_TROCA + 7_300);
+      expect(gravadores).toHaveLength(2);
+      expect(linhaDoTempo).toEqual(["começa 0", "começa 1", "para 0"]);
+      expect(aoFecharParte).toHaveBeenCalledTimes(1);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: HORA_DA_TROCA + 7_300 });
+      // A troca solta o fluxo e fecha o contexto; a parte seguinte abre o seu na hora dela.
+      expect(contextos[0].fechado).toBe(true);
+      expect(contextos[0].fonte.disconnect).toHaveBeenCalled();
+      // O primeiro tique do relógio (a cada 500 ms) depois dos 598 s da parte 1.
+      andarAte(comecouEm, HORA_DA_TROCA + 7_300 + HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS + 500);
+      expect(contextos).toHaveLength(2);
+      expect(gravadores).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("em silêncio, troca logo na hora, e não antes", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, SILENCIO);
+      andarAte(comecouEm, HORA_DA_TROCA - 100);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sem pausa na fala, troca aos 620 s, abaixo dos 720 s que o servidor aceita", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA + ESPERA_PELA_PAUSA_MS - 100);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + ESPERA_PELA_PAUSA_MS);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(620_000);
+      expect(contextos[0].fechado).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sem AudioContext, troca no tempo, na hora, como antes", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      andarAte(comecouEm, HORA_DA_TROCA - 500);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o AudioContext que o navegador recusa: troca no tempo, na hora", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ recusar: true });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA - 500);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o contexto suspenso (o iPhone sem o toque da dona): pede para rodar, troca no tempo, na hora, e fecha o contexto", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended" });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA - 100);
+      expect(contextos).toHaveLength(1);
+      expect(contextos[0].resume).toHaveBeenCalledTimes(1);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA);
+      expect(contextos[0].fechado).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o tique atrasado (a aba em segundo plano, com os timers espaçados) troca na hora, sem esperar a pausa", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA - 10_000);
+      // O navegador segura os timers: o relógio de parede anda 12 s sem tique.
+      vi.setSystemTime(Date.now() + ATRASO_MAXIMO_MS + 7_000);
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA + 2_500);
+      // Nem chegou a abrir o detector.
+      expect(contextos).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pausar perto da troca fecha o detector; na volta ele abre de novo, e a troca sai na pausa da fala, sem contar a pausa da gravação", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const { result, aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA + 5_000);
+      expect(contextos).toHaveLength(1);
+      act(() => result.current.pausar());
+      expect(contextos[0].fechado).toBe(true);
+      act(() => { vi.advanceTimersByTime(30_000); });
+      // Pausada, não troca, e nenhum detector abre.
+      expect(gravadores).toHaveLength(1);
+      expect(contextos).toHaveLength(1);
+      act(() => result.current.continuar());
+      const voltouEm = Date.now();
+      somDesde(voltouEm + 2_000, SILENCIO);
+      act(() => { vi.advanceTimersByTime(2_200); });
+      expect(contextos).toHaveLength(2);
+      expect(gravadores).toHaveLength(1);
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: HORA_DA_TROCA + 5_000 + 2_300 });
+      expect(contextos[1].fechado).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o contexto que nasce suspenso e só roda depois (o Firefox), reaberto na volta de uma pausa depois da hora: a troca espera a pausa da fala, e não sai no meio dela", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended", rodaDepoisDeMs: 5 });
+      const { result, aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      // Aberto aos 598 s, o contexto teve tempo de rodar: com fala, a troca espera.
+      andarAte(comecouEm, HORA_DA_TROCA + 5_000);
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      act(() => result.current.pausar());
+      act(() => { vi.advanceTimersByTime(10_000); });
+      act(() => result.current.continuar());
+      const voltouEm = Date.now();
+      somDesde(voltouEm + 3_000, SILENCIO);
+      // O primeiro tique da volta reabre o detector ainda suspenso, no meio da fala: não troca.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(2);
+      expect(gravadores).toHaveLength(1);
+      act(() => { vi.advanceTimersByTime(2_700); });
+      expect(gravadores).toHaveLength(1);
+      // 300 ms calmos: troca.
+      act(() => { vi.advanceTimersByTime(100); });
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: HORA_DA_TROCA + 5_000 + 3_300 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o primeiro tique depois dos 598 s que já cai depois da hora (a página travada por 3 s), com o contexto que nasce suspenso e só roda depois: a troca espera a pausa da fala", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended", rodaDepoisDeMs: 5 });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      somDesde(comecouEm + HORA_DA_TROCA + 4_000, SILENCIO);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS - 500);
+      expect(contextos).toHaveLength(0);
+      // A trava é menor que a da aba em segundo plano (ATRASO_MAXIMO_MS): o tique seguinte, aos 601 s, abre o detector e espera.
+      vi.setSystemTime(Date.now() + 3_000);
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 4_200);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 4_300);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA + 4_300);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o contexto que nunca roda (o iPhone sem o toque da dona), aberto já depois da hora: a troca não espera a pausa da fala, só o tempo de o contexto começar (PREPARO_DO_DETECTOR_MS)", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve({ estadoInicial: "suspended" });
+      const { aoFecharParte, comecouEm } = await gravarEmPartes();
+      somDesde(comecouEm, FALA);
+      andarAte(comecouEm, HORA_DA_TROCA - PREPARO_DO_DETECTOR_MS - 500);
+      vi.setSystemTime(Date.now() + 3_000);
+      // Aberto aos 601 s, ainda pode começar a rodar: espera.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(contextos).toHaveLength(1);
+      expect(gravadores).toHaveLength(1);
+      andarAte(comecouEm, HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS - 100);
+      expect(gravadores).toHaveLength(1);
+      // Não rodou no prazo: troca no tempo, com fala, e fecha o contexto.
+      andarAte(comecouEm, HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS);
+      expect(gravadores).toHaveLength(2);
+      expect(aoFecharParte.mock.calls[0][0].duracaoMs).toBe(HORA_DA_TROCA + 1_000 + PREPARO_DO_DETECTOR_MS);
+      expect(contextos[0].fechado).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("encerrar com o detector aberto fecha o contexto; a gravação de uma parte só (o ditado, a voz) nem o abre", async () => {
+    vi.useFakeTimers(RELOGIO_FALSO);
+    try {
+      navegadorQueGrava(["audio/mp4"]);
+      navegadorQueOuve();
+      const emPartes = await gravarEmPartes();
+      somDesde(emPartes.comecouEm, FALA);
+      andarAte(emPartes.comecouEm, HORA_DA_TROCA + 1_000);
+      expect(contextos).toHaveLength(1);
+      act(() => emPartes.result.current.parar());
+      expect(contextos[0].fechado).toBe(true);
+      expect(emPartes.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, true]]);
+      emPartes.unmount();
+
+      const ditado = montar({ limiteSegundos: 3600 });
+      await act(async () => { await ditado.result.current.comecar(); });
+      act(() => { vi.advanceTimersByTime(HORA_DA_TROCA + ESPERA_PELA_PAUSA_MS); });
+      expect(contextos).toHaveLength(1);
+      act(() => ditado.result.current.parar());
+      expect(ditado.aoTerminar).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
