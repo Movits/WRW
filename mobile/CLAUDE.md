@@ -57,8 +57,9 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
   `wrw.trava` e `wrw.trava.aviso`); a biometria fica com o sistema
   (`expo-local-authentication`), e a WRW não recebe nada. Ligar e desligar pedem o Face ID
   ou a digital antes (`mudarATrava`), para quem pega o celular com o app aberto não
-  desligar a trava. Depois do login, um aviso nativo oferece ligar; o Perfil do site (`client/src/components/TravaDoApp.tsx`) liga e desliga
-  pela ponte da WebView: o site manda `{tipo: "wrw:trava", acao}` por
+  desligar a trava. Depois do login, um aviso nativo oferece ligar; o Perfil do site
+  (`client/src/components/TravaDoApp.tsx`) liga e desliga pela ponte da WebView: o site
+  manda `{tipo: "wrw:trava", acao}` por
   `window.ReactNativeWebView.postMessage`, e o app responde com o evento `wrw:trava`
   (`scriptDoEstado`). Só aceita mensagem de página da WRW. As regras puras de `regras/trava.ts`
   são testadas em `server/trava-do-app.test.ts`, porque esta pasta não tem suíte. No Expo
