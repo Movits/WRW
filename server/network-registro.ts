@@ -239,7 +239,7 @@ export async function registrarConexoesInternasDepoisDoRecalculo(ownerId: string
  * conexão veio e a nota que a sustentou.
  */
 export function motivoEntreMembras(pontuacao: number): string {
-  return `Conexão sugerida pelo motor de perfis entre duas membras da plataforma, com o termo do Smart Match aceito pelas duas: compatibilidade de ${Math.round(pontuacao)}%.`;
+  return `Conexão sugerida pelo motor de perfis entre dois membros da plataforma, com o termo do Smart Match aceito pelos dois: compatibilidade de ${Math.round(pontuacao)}%.`;
 }
 
 export type ParDeMembras = { outraUserId: number; pontuacao: number };
