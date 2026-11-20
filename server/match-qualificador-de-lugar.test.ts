@@ -178,4 +178,26 @@ describe("motor de perfis: o mesmo qualificador conta como necessidade atendida"
     // tem dado, sem encaixe
     expect(r.complementarity).toBe(20);
   });
+
+  it("tirar o lugar não junta concorrentes: o motor de perfis não ganha encaixe novo entre duas pontas do mesmo lado", () => {
+    // O motor de perfis não aplica a regra dos concorrentes (server/CLAUDE.md, decisão de produto em aberto), e o
+    // qualificador não pode aumentar o que ele já deixa passar: estes pares davam 20 antes do qualificador e seguem em
+    // 20, enquanto o motor privado os zera como concorrentes.
+    for (const [tenho, preciso] of [
+      ["Exportar café", "Exportar café do Brasil"],
+      ["Exportar café do Brasil", "Exportar café para a Europa"],
+      ["Export wine", "Export wine in Chile"],
+      ["Buy coffee", "Buy coffee from Angola"],
+      ["Import wine from Angola", "Import wine into Brazil"],
+      ["Vender vino", "Vender vino en Chile"],
+      ["Exportar soja del Brasil", "Exportar soja hacia Europa"],
+    ]) {
+      expect(nota(tenho, preciso), `${tenho} × ${preciso}`).toEqual({ score: 0, type: "semantic", bloqueio: "concorrentes" });
+      expect(nomeiamAMesmaCoisa(tenho, preciso), `${tenho} × ${preciso}`).toBe(false);
+      expect(calculateCompatibilityScore(perfil([tenho], []), perfil([], [preciso])).complementarity, `${tenho} × ${preciso}`).toBe(20);
+    }
+    // O serviço escrito igual dos dois lados não é concorrência, com o lugar ou sem ele: segue atendido.
+    expect(nomeiamAMesmaCoisa("Exportação de café", "Exportação de café do Brasil")).toBe(true);
+    expect(calculateCompatibilityScore(perfil(["Exportação de café"], []), perfil([], ["Exportação de café do Brasil"])).complementarity).toBe(60);
+  });
 });

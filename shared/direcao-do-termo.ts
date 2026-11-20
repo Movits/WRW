@@ -851,15 +851,26 @@ export function mesmoObjetoAMenosDoLugar(objetoA: string, objetoB: string): bool
  * "Exportação de café" × "Importação de café do Brasil" falam ambas de café,
  * como "Exportação de café do Brasil" × "Importação de café para a Europa",
  * que dizem a rota (`mesmaSubstanciaAMenosDoLugar`, com a mesma guarda).
+ *
+ * Só fora da concorrência: tirar o lugar nunca junta dois concorrentes. O
+ * motor privado já os zera antes de perguntar isto, mas o motor de perfis
+ * (`satisfaz`, em server/matching.ts) não aplica a regra dos concorrentes, e o
+ * lugar não pode aumentar o que ele já deixa passar: "Exportar café" ×
+ * "Exportar café do Brasil" e "Buy coffee" × "Buy coffee from Angola" seguem
+ * sem nomear a mesma coisa, como antes do qualificador.
  */
 export function nomeiamAMesmaCoisa(rotuloOferta: string, rotuloDemanda: string): boolean {
   const termoOferta = analisarTermo(rotuloOferta);
   const termoDemanda = analisarTermo(rotuloDemanda);
   const direcaoDeclarada = termoOferta.verbo !== null || termoDemanda.verbo !== null;
   const ehSubstancia = (x: string) => !!x && !(direcaoDeclarada && ehLugar(x.split("-")));
-  const mesma = (x: string, y: string) => (ehSubstancia(x) && x === y) || mesmaSubstanciaAMenosDoLugar(x, y, ehSubstancia);
-  if (mesma(termoOferta.objeto, termoDemanda.objeto)) return true;
-  return mesma(nucleoDoTermo(rotuloOferta), nucleoDoTermo(rotuloDemanda));
+  if (ehSubstancia(termoOferta.objeto) && termoOferta.objeto === termoDemanda.objeto) return true;
+  const nucleoOferta = nucleoDoTermo(rotuloOferta);
+  const nucleoDemanda = nucleoDoTermo(rotuloDemanda);
+  if (ehSubstancia(nucleoOferta) && nucleoOferta === nucleoDemanda) return true;
+  const aMenosDoLugar = mesmaSubstanciaAMenosDoLugar(termoOferta.objeto, termoDemanda.objeto, ehSubstancia)
+    || mesmaSubstanciaAMenosDoLugar(nucleoOferta, nucleoDemanda, ehSubstancia);
+  return aMenosDoLugar && !saoConcorrentes(rotuloOferta, rotuloDemanda);
 }
 
 /**
