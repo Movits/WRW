@@ -92,7 +92,8 @@ describe("Home — Meu Network Inteligente no lugar de Segurança", () => {
       "DESCUBRA NEGÓCIOS NA SUA PRÓPRIA REDE",
       "FAÇA SUA REDE GERAR VALOR",
     ]);
-    expect(s.getByText("Registre e transcreva gratuitamente reuniões de até 10 minutos e transforme conversas em memória estratégica.")).toBeInTheDocument();
+    // Desde a G13b a gravação vai até as 12 h da gravação em partes, sem o teto de 10 minutos.
+    expect(s.getByText("Registre e transcreva gratuitamente reuniões de até 12 horas e transforme conversas em memória estratégica.")).toBeInTheDocument();
 
     expect(s.getByText("Quantos negócios estão escondidos hoje entre as pessoas que você já conhece?")).toBeInTheDocument();
     expect(s.getByText("Transforme reuniões em memória. Memória em inteligência. Inteligência em conexões. E conexões em negócios.")).toBeInTheDocument();

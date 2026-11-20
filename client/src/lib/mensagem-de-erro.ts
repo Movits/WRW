@@ -1,9 +1,18 @@
 import {
   MENSAGEM_BANCO_INDISPONIVEL,
+  MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_RESUMO_CHEIO,
+  MENSAGEM_RESUMO_SENDO_GERADO,
+  MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
   UNAUTHED_ERR_MSG,
+  type CodigoDaRecusaDaParte,
 } from "@shared/const";
+import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
+import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
+import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -18,8 +27,8 @@ import {
  * TRPCClientError montado no cliente, com texto técnico em inglês. Isso não é
  * para a usuária ler. O 429 do limite da API (responderLimite,
  * server/_core/limite-de-requisicoes.ts) vem no envelope, com data.code
- * TOO_MANY_REQUESTS e sem path, e passa com a frase do servidor; 429 em texto
- * puro só existe fora de /api/trpc.
+ * TOO_MANY_REQUESTS e sem path, e passa pela tabela abaixo, no idioma da tela;
+ * 429 em texto puro só existe fora de /api/trpc.
  *
  * O sinal é `data.code`: só um erro devolvido pelo servidor tem o `data` do
  * shape (TRPCClientError.from monta `data` a partir de `result.error.data`,
@@ -47,6 +56,22 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_ERRO_DE_CONSULTA]: "errors.queryFailed",
   [UNAUTHED_ERR_MSG]: "errors.notAuthenticated",
   [NOT_ADMIN_ERR_MSG]: "errors.notAuthorized",
+  [MENSAGEM_DO_LIMITE]: "errors.tooManyRequests",
+  // As recusas das decisões do resumo guardado (server/resumo-guardado.ts).
+  [MENSAGEM_RESUMO_SENDO_GERADO]: "meetings.summary.errorRegenerating",
+  [MENSAGEM_ITEM_NAO_ENCONTRADO]: "meetings.summary.errorItemGone",
+  [MENSAGEM_SO_ACAO_TEM_CAIXA]: "meetings.summary.errorOnlyActions",
+  // As recusas das próximas ações (server/proximas-acoes.ts).
+  [MENSAGEM_ACAO_NAO_ENCONTRADA]: "proximasAcoes.errorGone",
+  [MENSAGEM_CONTATO_FORA_DA_REDE]: "proximasAcoes.errorContactOutside",
+  // As recusas do rascunho de e-mail de retorno (server/email-de-retorno.ts).
+  [MENSAGEM_EMAIL_SEM_RESUMO_PRONTO]: "meetings.followUp.summaryNotReady",
+  [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO]: "meetings.followUp.needsConfirmed",
+  // O item que a dona acrescenta passaria do teto do resumo (H4f).
+  [MENSAGEM_RESUMO_CHEIO]: "meetings.summary.errorFull",
+  // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
+  [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
+  [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
 };
 
 /**
@@ -68,4 +93,36 @@ export function mensagemDeErroParaTela(erro: unknown, t: (chave: string) => stri
     }
   }
   return t("errorBoundary.serverUnavailable");
+}
+
+/**
+ * O aviso de uma parte da gravação em partes que o servidor recusou de vez
+ * (G13b). A rota das partes (server/_core/rota-das-partes.ts) responde só o
+ * CÓDIGO da recusa, nunca frase, porque não sabe o idioma de quem grava; aqui
+ * ele vira o aviso no idioma da tela. Para a dona a gravação é contínua: o
+ * aviso fala de "um trecho", e diz que ele fica de fora da transcrição.
+ *
+ * O Record é pelo tipo do servidor (shared/const.ts): código novo lá não
+ * compila aqui sem o aviso dele. Cada valor chama t() com a chave literal, para
+ * o teste de chaves usadas (server/i18n-chaves-usadas.test.ts) conferir que
+ * todas existem. Código desconhecido (uma recusa 4xx que não é da tabela) cai
+ * no aviso genérico, nunca no código cru.
+ */
+const AVISO_POR_RECUSA_DA_PARTE: Record<CodigoDaRecusaDaParte, (t: (chave: string) => string) => string> = {
+  // A reunião foi excluída (em outra aba, por exemplo) ou já não recebe áudio.
+  SEM_REUNIAO: t => t("meetings.partRejectedMeetingGone"),
+  FORA_DO_ESTADO: t => t("meetings.partRejectedMeetingGone"),
+  GRANDE_DEMAIS: t => t("meetings.partRejectedTooLarge"),
+  LONGA_DEMAIS: t => t("meetings.partRejectedTooLarge"),
+  FORMATO: t => t("meetings.partRejectedUnreadable"),
+  SEM_DURACAO: t => t("meetings.partRejectedUnreadable"),
+  CONTEUDO_DIFERENTE: t => t("meetings.partRejected"),
+  POSICAO: t => t("meetings.partRejected"),
+};
+
+export function mensagemDaRecusaDaParte(codigo: string | undefined, t: (chave: string) => string): string {
+  const aviso = codigo && Object.prototype.hasOwnProperty.call(AVISO_POR_RECUSA_DA_PARTE, codigo)
+    ? AVISO_POR_RECUSA_DA_PARTE[codigo as CodigoDaRecusaDaParte]
+    : null;
+  return aviso ? aviso(t) : t("meetings.partRejected");
 }

@@ -26,17 +26,28 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const jarra = vi.hoisted(() => {
   type Handler = (req: unknown, res: unknown) => Promise<unknown>;
   const rotas = new Map<string, Handler>();
+  // A ordem do que o index.ts monta: a rota das partes (G5) tem de vir antes
+  // do express.json e do urlencoded, que leriam o corpo binário primeiro.
+  const ordem: string[] = [];
+  const leitorJson = Object.assign((_req: unknown, _res: unknown, next?: () => void) => next?.(), { leitor: "json" });
+  const leitorUrlencoded = Object.assign((_req: unknown, _res: unknown, next?: () => void) => next?.(), { leitor: "urlencoded" });
   let servidorNoAr: () => void = () => {};
   let subidaFalhou: (erro: unknown) => void = () => {};
   const noAr = new Promise<void>((resolve, reject) => { servidorNoAr = resolve; subidaFalhou = reject; });
   const passa = (_req: unknown, _res: unknown, next?: () => void) => next?.();
   const app = {
     set: () => app,
-    use: () => app,
+    use: (...args: unknown[]) => {
+      const ultimo = args.at(-1) as { leitor?: string; name?: string } | undefined;
+      if (ultimo?.leitor) ordem.push(`${ultimo.leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
+      else if (ultimo?.name === "tratarCorpoGrandeDasPartes") ordem.push("tratador das partes");
+      return app;
+    },
     get: () => app,
-    post: (caminho: string, handler: Handler) => { rotas.set(caminho, handler); return app; },
+    // O último argumento é o handler: a rota das partes passa o leitor de corpo antes dele.
+    post: (caminho: string, ...handlers: Handler[]) => { rotas.set(caminho, handlers[handlers.length - 1]); ordem.push(`post ${caminho}`); return app; },
   };
-  return { rotas, noAr, servidorNoAr: () => servidorNoAr(), subidaFalhou: (erro: unknown) => subidaFalhou(erro), passa, app };
+  return { rotas, ordem, leitorJson, leitorUrlencoded, noAr, servidorNoAr: () => servidorNoAr(), subidaFalhou: (erro: unknown) => subidaFalhou(erro), passa, app };
 });
 
 const authenticateRequest = vi.fn();
@@ -44,11 +55,11 @@ vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest: (...args: unknown[])
 
 // --- a jarra: o que startServer toca e não é o que está em teste ---
 vi.mock("express", () => {
-  const fabrica = Object.assign(() => jarra.app, { json: () => jarra.passa, urlencoded: () => jarra.passa, static: () => jarra.passa });
+  const fabrica = Object.assign(() => jarra.app, { json: () => jarra.leitorJson, urlencoded: () => jarra.leitorUrlencoded, raw: () => jarra.passa, static: () => jarra.passa });
   return { default: fabrica, ...fabrica };
 });
 vi.mock("http", () => {
-  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { aoSubir?.(); jarra.servidorNoAr(); } });
+  const createServer = () => ({ listen: (_porta: number, aoSubir?: () => void) => { jarra.ordem.push("listen"); aoSubir?.(); jarra.servidorNoAr(); }, close: (aoFechar?: () => void) => aoFechar?.() });
   return { default: { createServer }, createServer };
 });
 vi.mock("net", () => {
@@ -71,10 +82,38 @@ vi.mock("./security", () => ({
 }));
 const limparGravacoesVencidas = vi.fn(async () => ({ encontradas: 0, apagadas: 0 }));
 const marcarReunioesInterrompidas = vi.fn(async () => ({ encontradas: 0, marcadas: 0 }));
+// A fila da reunião em partes (G7) liga no boot com banco; aqui é dublê.
+const fila = vi.hoisted(() => ({ iniciarFila: vi.fn(), pararFila: vi.fn(async () => ({ partes: 2, reunioes: 1 })) }));
+vi.mock("./fila-de-transcricao", () => fila);
+const filaDoResumo = vi.hoisted(() => ({ iniciarFilaDoResumo: vi.fn(), pararFilaDoResumo: vi.fn(async () => ({ resumos: 1 })) }));
+vi.mock("./fila-do-resumo", () => filaDoResumo);
+// O laço da varredura das gravações vencidas liga no boot com banco, depois do
+// listen, e para no desligar junto com as filas; aqui é dublê (o laço em si está
+// em server/varredura-de-gravacoes.test.ts).
+const varredura = vi.hoisted(() => ({
+  iniciarVarreduraDeGravacoes: vi.fn(),
+  pararVarreduraDeGravacoes: vi.fn(async () => ({ emCurso: false, terminou: true })),
+}));
+vi.mock("./varredura-de-gravacoes", () => ({
+  iniciarVarreduraDeGravacoes: (...args: unknown[]) => { jarra.ordem.push("iniciarVarredura"); return varredura.iniciarVarreduraDeGravacoes(...args); },
+  pararVarreduraDeGravacoes: (...args: unknown[]) => varredura.pararVarreduraDeGravacoes(...(args as [])),
+}));
+// O laço dos lembretes no sino (H15) liga junto; aqui é dublê.
+const lacoDosLembretes = vi.hoisted(() => ({ iniciarLembretes: vi.fn(), pararLembretes: vi.fn(async () => ({ lembretes: 1 })) }));
+vi.mock("./lembretes", () => lacoDosLembretes);
+// A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
+vi.mock("./fatias-de-reuniao", () => ({
+  receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
+}));
 vi.mock("./meeting-service", () => ({
   limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...(args as [])),
   marcarReunioesInterrompidas: (...args: unknown[]) => marcarReunioesInterrompidas(...(args as [])),
 }));
+// A ida e a volta da conexão com a Google Agenda (H16b) sobem junto; aqui só se
+// confere que foram montadas no app (o comportamento está em
+// server/rotas-da-google-agenda.test.ts).
+const googleAgenda = vi.hoisted(() => ({ registrarRotasDaGoogleAgenda: vi.fn() }));
+vi.mock("./rotas-da-google-agenda", () => googleAgenda);
 
 const { autenticarCron } = await import("./_core/cron");
 
@@ -89,6 +128,8 @@ vi.spyOn(console, "log").mockImplementation(() => {});
 await import("./_core/index");
 await jarra.noAr;
 const varredurasNoBoot = marcarReunioesInterrompidas.mock.calls.length;
+// Lido antes do restoreAllMocks, que zera o histórico dos dublês.
+const appsDaGoogleAgendaNoBoot = googleAgenda.registrarRotasDaGoogleAgenda.mock.calls.map(chamada => chamada[0]);
 vi.restoreAllMocks();
 afterAll(() => {
   vi.useRealTimers();
@@ -114,6 +155,68 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => { vi.restoreAllMocks(); });
+
+describe("a fila da reunião em partes no index.ts real (G7)", () => {
+  it("as duas filas, o laço dos lembretes e a varredura das gravações ligam no boot com banco, e o SIGTERM para os quatro ANTES de o processo sair", async () => {
+    expect(fila.iniciarFila).toHaveBeenCalledTimes(1);
+    expect(filaDoResumo.iniciarFilaDoResumo).toHaveBeenCalledTimes(1);
+    expect(varredura.iniciarVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
+    expect(lacoDosLembretes.iniciarLembretes).toHaveBeenCalledTimes(1);
+    const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const ordem: string[] = [];
+    fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
+    // A falha da fila do resumo não segura a saída nem a parada dos outros laços.
+    filaDoResumo.pararFilaDoResumo.mockImplementationOnce(async () => { ordem.push("pararFilaDoResumo"); throw new Error("banco caiu"); });
+    // A varredura das gravações termina por último (a passada em curso estourou
+    // a espera): a saída espera por ela também, como pelas filas.
+    let soltarVarredura: () => void = () => {};
+    varredura.pararVarreduraDeGravacoes.mockImplementationOnce(() => new Promise(resolver => {
+      soltarVarredura = () => { ordem.push("pararVarredura"); resolver({ emCurso: true, terminou: false }); };
+    }));
+    lacoDosLembretes.pararLembretes.mockImplementationOnce(async () => { ordem.push("pararLembretes"); return { lembretes: 1 }; });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    sair.mockImplementation(((codigo?: number) => { ordem.push(`exit ${codigo}`); }) as never);
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.emit("SIGTERM");
+    // Só microtarefas: o setInterval deste arquivo é falso, e o vi.waitFor o
+    // avançaria, disparando a varredura que o teste seguinte conta.
+    const esperar = async () => { for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve)); };
+    await esperar();
+    expect(varredura.pararVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes"]);
+    soltarVarredura();
+    await esperar();
+    expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes", "pararVarredura", "exit 0"]);
+    expect(JSON.stringify(logs.mock.calls)).toContain("a passada em curso fica para a próxima instância");
+    // O SIGINT do dev também está ligado (process.once: um por sinal).
+    expect(process.listenerCount("SIGINT")).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a varredura das gravações liga uma vez, DEPOIS do listen: a subida não espera o bucket", () => {
+    expect(jarra.ordem.filter(item => item === "iniciarVarredura")).toHaveLength(1);
+    expect(jarra.ordem.indexOf("listen")).toBeGreaterThanOrEqual(0);
+    expect(jarra.ordem.indexOf("iniciarVarredura")).toBeGreaterThan(jarra.ordem.indexOf("listen"));
+  });
+});
+
+describe("as rotas da Google Agenda no index.ts real (H16b)", () => {
+  it("são montadas uma vez, no app do servidor", () => {
+    expect(appsDaGoogleAgendaNoBoot).toEqual([jarra.app]);
+  });
+});
+
+describe("ordem no index.ts real", () => {
+  it("a rota binária das partes (G5) é montada ANTES de todo express.json e do urlencoded", () => {
+    const rota = jarra.ordem.indexOf("post /api/reunioes/:meetingId/partes/:seq");
+    expect(rota).toBeGreaterThanOrEqual(0);
+    const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
+    expect(leitores.length).toBeGreaterThan(5);
+    for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
+    // O 413 em JSON da rota: o tratador vem logo depois dela (sem ele, o
+    // Express responderia HTML ao corpo grande).
+    expect(jarra.ordem.indexOf("tratador das partes")).toBe(rota + 1);
+  });
+});
 
 describe("autenticarCron — sem sessão é 401, usuária comum é 403, cron passa", () => {
   it("cookie ausente ou inválido: 401 (não 500) e o endpoint não segue", async () => {

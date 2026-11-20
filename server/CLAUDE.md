@@ -23,6 +23,12 @@ Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
 nenhum recorte por caminho). Upload novo entra nos dois lugares.
 
+A exceção é binária: as partes da reunião gravada em partes chegam por
+`POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
+cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por
+`server/agendados-autenticacao.test.ts`. A linha da parte é gravada antes do upload, com a
+chave exata do objeto (`storagePut(..., { chaveExata: true })`).
+
 ## tRPC, procedures e papéis
 
 Cada área de negócio tem um router em `server/routers/`, agregados em `server/routers.ts`
@@ -124,6 +130,17 @@ exigência.
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
 reunião nascem `pending`; o SIVC pondera a fonte em `CONFIDENCE_WEIGHTS`.
 
+**Da reunião ao perfil e às conexões (N5, `server/reuniao-no-match.ts`):** decidida a
+pessoa da reunião (criar, vincular ou "Sou eu"), a dona confirma cada Tenho/Preciso ali
+mesmo. No "Sou eu" o destino é o PERFIL dela (`network_sugestoes.alvo = 'perfil'`): o
+"tenho" vai a `whatIHave`, o "preciso" vira demanda de "O que preciso", item que nomeia
+alguém da reunião é recusado e o motor de perfis recalcula uma vez por reunião. A origem do
+item é a linha confirmada de `network_sugestoes` (excluir a reunião a apaga; o item fica).
+O portão derruba o "preciso" hipotético (`necessidadeHipotetica`): conta o verbo que rege o
+item, com modal ("poderia precisar", "talvez a gente precise", "pode ser que") ou condição
+("se a gente precisar"); a menção sem verbo não sustenta a hipótese, e "eventualmente
+precisamos" é declarada. Forma nova entra com teste negativo e positivo.
+
 ## Acesso a dados: banco fora do ar é erro
 
 `server/db.ts` é a camada única (usuárias, oportunidades, Ouro, segurança, matches, rede
@@ -222,7 +239,11 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
 
 `server/_core/` é a infraestrutura herdada do Manus (o projeto nasceu na plataforma Manus
 e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie HttpOnly
-(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev.
+(`sdk.ts`), e-mail (Resend), storage S3 com URLs assinadas, Vite em dev. A sessão de
+usuária nasce só por `abrirSessao` (`server/sessao.ts`: a linha em `sessions` e o JWT com o
+`sessionToken` dela, 90 dias desde o último uso), e o `sdk.authenticateRequest` recusa JWT
+de usuária sem `sessionToken`, que escaparia da revogação (só o cron, openId `cron_`, passa
+sem ele).
 
 - **IA:** as chamadas de texto passam por `server/_core/llm.ts`, que aceita qualquer
   endpoint compatível com a API da OpenAI via `fetch` (não há SDK de IA no projeto),
@@ -236,18 +257,51 @@ e foi extraído: ver `docs/recuperacao-do-manus.md`): entrada, auth por cookie H
   porque vai sempre ao Gemini, com o id na URL. O do texto (`LLM_MODEL`) não fica preso ao
   Gemini: recusa só `latest` e id sem número de versão, e aceita id de outro provedor
   (`gpt-4o-2024-08-06`). Vazio usa o padrão em silêncio; recusado avisa no log uma vez por
-  origem e valor e também cai no padrão. O boot imprime `[IA] áudio … · reserva … · texto …`
-  sem a chave (id de outro provedor no texto sai como "fora do log", porque a guarda do
-  texto não o distingue de uma chave colada no campo errado). Os ids que a chave do Gemini
-  enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
+  origem e valor e também cai no padrão. O boot imprime `[IA] áudio … · reserva … · texto …
+  · extração … · resumo … · pergunta …` sem a chave (id de outro provedor no texto sai como
+  "fora do log", porque a guarda do texto não o distingue de uma chave colada no campo
+  errado), e logo depois `[IA] raciocínio · extração … · resumo … · pergunta …`. Os ids que
+  a chave do Gemini enxerga saem de `node scripts/listar-modelos-gemini.mjs`.
+- **Modelo de texto por função:** quem chama `invokeLLM` (ou `pedirJsonAIA`, de
+  `server/ia-em-json.ts`, onde a função é obrigatória) passa a `funcao`, e não o id. A
+  ordem é `LLM_MODEL_<FUNÇÃO>` > o padrão da função no código > `LLM_MODEL` > o padrão
+  (`FUNCOES_DE_TEXTO`, em `_core/modelos-de-ia.ts`); o padrão da função só vale com o
+  `LLM_API_URL` na API do Gemini. Hoje são três, todas sem padrão próprio (seguem o
+  `LLM_MODEL`): a extração da reunião (`extracao`), o resumo guardado (`resumo`) e o
+  Pergunte (`pergunta`). O Lite que a bancada A de texto (16/11) indicou para a extração
+  não devolveu as entidades de cargo, ativo, necessidade e oportunidade, que a tela usa:
+  leia o `docs/deploy.md` antes de trocar. Chamada nova de texto sem função fica no
+  `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example` (um
+  teste confere os dois).
+- **Raciocínio:** o `invokeLLM` manda `reasoning_effort`, no nível de cima do corpo, só
+  quando recebe `raciocinio`. Os campos `reasoning` e `thinking` saíram: o endpoint do
+  Gemini compatível com a OpenAI recusa os dois com 400. Passados por fora do tipo (de um
+  script em JS), eles e o `reasoning_effort` falham antes do fetch, em vez de sumirem em
+  silêncio. A extração, o resumo guardado e o Pergunte pedem o nível da variável da
+  própria função (`LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e
+  `LLM_RACIOCINIO_PERGUNTA`, guarda em `_core/raciocinio-de-ia.ts`, lidas a cada chamada);
+  sem ela, nada vai e o modelo raciocina no padrão dele. As funções do raciocínio são as
+  mesmas do modelo (`FuncaoDeTexto`, um tipo só).
+- **Função que a bancada não mediu** (o mapa mental, a tradução do resumo, o e-mail de
+  retorno) passa `funcao: null` ao `pedirJsonAIA`: fica no `LLM_MODEL`, sem raciocínio, e
+  não lê nenhuma das variáveis de função. Rotulá-la com uma das três a faria seguir as
+  variáveis de outra. A `funcao` é obrigatória justamente para isso: num merge que
+  reescreva quem chama, o `pnpm check` acusa a função que sumiu, em vez de o pedido voltar
+  ao `LLM_MODEL` em silêncio enquanto as linhas `[IA]` do boot mostram o da função.
 - **Arquivos** (áudio de reunião, documentos, mídia de contexto) vão para storage
   compatível com S3 (`STORAGE_*`; Backblaze B2 em produção), servidos pelo proxy
   autenticado `/manus-storage/*`, que exige sessão e posse. Esse prefixo está gravado nas
-  URLs do banco: não renomeie sem migração de dados.
+  URLs do banco: não renomeie sem migração de dados. A única exceção é o áudio da reunião
+  com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
+  `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
+  (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
-  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/auth.ts`).
+  (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
   `server/security.ts` e `server/matching.ts` derivam a chave do cofre do `JWT_SECRET`.
+  A exceção é a Google Agenda (H16b, `server/google-oauth.ts`): sem ela, com 32
+  caracteres ou mais, a conexão some, porque o refresh token não pode ficar preso ao
+  `JWT_SECRET`.
 
 ## Reunião que falha na IA se reprocessa pelo áudio guardado
 

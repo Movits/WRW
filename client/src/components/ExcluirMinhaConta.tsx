@@ -16,6 +16,7 @@ import { useLocation } from "wouter";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { liberarTodas } from "@/lib/sessao-ocupada";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,6 +53,18 @@ export function ExcluirMinhaConta() {
       } else {
         toast.success(t("conta.excluir.sucesso"));
       }
+      // A conexão com a Google Agenda saiu com a conta, mas a Google não
+      // confirmou a revogação (H16b): a WRW aparece ainda na conta Google
+      // dela, com acesso à agenda, até ela tirar.
+      if (resultado.googleNaoConfirmou) {
+        toast.warning(t("conta.excluir.googleNaoConfirmou"), { duration: 15000 });
+      }
+      // As ocupações da sessão saem com a conta (lib/sessao-ocupada.ts), como
+      // no logout do useAuth: o envio avulso que segue no ar não pode deixar a
+      // aba deslogada ocupada, nem fazer o navegador perguntar ao fechá-la ou
+      // no próximo login nela. O diálogo do Sair não entra: a exclusão já tem a
+      // confirmação dela.
+      liberarTodas();
       // A conta não existe mais: o cache em memória é a única coisa que ainda
       // a considera logada.
       utils.auth.me.setData(undefined, null);

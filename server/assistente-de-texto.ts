@@ -53,7 +53,23 @@ export const MAXIMO_DE_CHAVES_POR_TETO = 5000;
 export function criarTeto(maximo: number, janelaMs: number, mensagem: string) {
   const pedidos = new Map<string, number[]>();
   return {
-    reservar(chave: string) {
+    /**
+     * Recusa como `reservar`, sem gastar vaga: para quem precisa de vaga em
+     * dois tetos e não pode deixar uma gasta quando o outro recusa.
+     */
+    conferir(chave: string) {
+      const agora = Date.now();
+      const recentes = (pedidos.get(chave) ?? []).filter(momento => agora - momento < janelaMs);
+      if (recentes.length >= maximo) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: mensagem });
+      }
+    },
+    /**
+     * Reserva a vaga e devolve `liberar`, para o pedido que falha ANTES de usá-la
+     * (banco fora do ar, por exemplo) devolver a vaga. Quem ignora o retorno não
+     * muda nada. `liberar` tira uma marca só, e uma vez só.
+     */
+    reservar(chave: string): () => void {
       const agora = Date.now();
       const recentes = (pedidos.get(chave) ?? []).filter(momento => agora - momento < janelaMs);
       if (recentes.length >= maximo) {
@@ -67,6 +83,16 @@ export function criarTeto(maximo: number, janelaMs: number, mensagem: string) {
         if (maisAntiga === undefined) break;
         pedidos.delete(maisAntiga);
       }
+      let liberada = false;
+      return () => {
+        if (liberada) return;
+        liberada = true;
+        // Relê a lista da chave: a reserva seguinte troca o array (o filter
+        // acima), e a desta reserva pode já ter saído do Map.
+        const atuais = pedidos.get(chave);
+        const posicao = atuais?.indexOf(agora) ?? -1;
+        if (atuais && posicao >= 0) atuais.splice(posicao, 1);
+      };
     },
     /** Só para os testes: o teto é estado de módulo. */
     esquecer() {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { opportunitySectorLabel } from "@/lib/opportunity-sectors";
@@ -18,6 +18,7 @@ import { SmartMatchConsent } from "@/components/SmartMatchConsent";
 import { GlobalMenu } from "@/components/AppHeader";
 import { BrandMark } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { CartaoDeProximasAcoes } from "@/components/ProximasAcoes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -966,8 +967,7 @@ function DealRoomsTab() {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { t, i18n } = useTranslation();
-  const { user, isAuthenticated, loading, logout } = useAuth();
-  const [, navigate] = useLocation();
+  const { user, isAuthenticated, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<"matches" | "connections" | "dealrooms" | "profile">("matches");
   const [tabVisible, setTabVisible] = useState(true);
 
@@ -1084,9 +1084,6 @@ export default function Dashboard() {
       toast.success(data.count > 0 ? t("dashboard.newMatches", { count: data.count }) : t("dashboard.analysisDone"));
       matchesQuery.refetch();
     },
-  });
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => { logout(); navigate("/"); },
   });
 
   // Reteste v4 (item 6.4): "N novas conexões sugeridas esperando pela sua
@@ -1231,6 +1228,11 @@ export default function Dashboard() {
           </Link>
         </div>
 
+        {/* ─── PRÓXIMAS AÇÕES (H5a) ───
+            As 5 abertas por prazo, do que a dona confirmou nos resumos das
+            reuniões e do que anotou; a lista inteira mora em /proximas-acoes. */}
+        <CartaoDeProximasAcoes />
+
         {/* ─── STATS ─── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {[
@@ -1313,7 +1315,9 @@ export default function Dashboard() {
               <span className="mt-1 block text-xs font-semibold text-[#efcba8]">
                 {t("networkInteligente.dashboard.minutesLine", {
                   usados: minutosDoNetwork.data.usadosNoMesSegundos > 0 ? Math.max(1, Math.round(minutosDoNetwork.data.usadosNoMesSegundos / 60)) : 0,
-                  limite: Math.round(minutosDoNetwork.data.limitePorReuniaoSegundos / 60),
+                  // O limite por reunião é o da gravação em partes desde a G13b
+                  // (12 h): em horas inteiras, para baixo, para nunca prometer mais.
+                  horas: Math.floor(minutosDoNetwork.data.limitePorReuniaoSegundos / 3600),
                 })}
                 {!minutosDoNetwork.data.ampliacao.disponivel && ` · ${t("networkInteligente.dashboard.expandSoon")}`}
               </span>

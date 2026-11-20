@@ -1,6 +1,7 @@
 // Lista os modelos do Gemini que a chave enxerga, para escolher LLM_AUDIO_MODEL,
-// LLM_AUDIO_MODEL_RESERVA e LLM_MODEL (quando o texto também vai ao Gemini)
-// entre ids que existem de fato.
+// LLM_AUDIO_MODEL_RESERVA, LLM_MODEL e os de cada função do texto
+// (LLM_MODEL_EXTRACAO, LLM_MODEL_RESUMO e LLM_MODEL_PERGUNTA), quando o texto
+// também vai ao Gemini, entre ids que existem de fato.
 //
 // Não toca banco e não lê o .env: a chave vem do AMBIENTE (LLM_API_KEY ou, sem
 // ela, GOOGLE_API_KEY, a mesma ordem de server/_core/env.ts), vai no cabeçalho

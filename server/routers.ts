@@ -1,6 +1,7 @@
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 import { authRouter } from "./routers/auth";
+import { chavesDeAcessoRouter } from "./routers/chavesDeAcesso";
 import { contaRouter } from "./routers/conta";
 import { profileRouter } from "./routers/profile";
 import { opportunitiesRouter } from "./routers/opportunities";
@@ -20,11 +21,15 @@ import { enrichmentRouter } from "./routers/enrichment";
 import { dealRoomRouter } from "./routers/dealRoom";
 import { sivcRouter } from "./routers/sivc";
 import { meetingsRouter } from "./routers/meetings";
+import { reuniaoAbertaRouter } from "./routers/reuniaoAberta";
 import { memoryRouter } from "./routers/memory";
 import { intelligentMatchesRouter } from "./routers/matches";
 import { distribuicaoRouter } from "./routers/distribuicao";
 import { networkInteligenteRouter } from "./routers/networkInteligente";
 import { assistenteTextoRouter } from "./routers/assistenteTexto";
+import { proximasAcoesRouter } from "./routers/proximasAcoes";
+import { agendaRouter } from "./routers/agenda";
+import { googleAgendaRouter } from "./routers/googleAgenda";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -34,6 +39,8 @@ export const appRouter = router({
   dealRoom: dealRoomRouter,
   sivc: sivcRouter,
   auth: authRouter,
+  // Entrar com Face ID ou digital (chaves de acesso, A6): server/chaves-de-acesso.ts.
+  chavesDeAcesso: chavesDeAcessoRouter,
   conta: contaRouter,
   profile: profileRouter,
   opportunities: opportunitiesRouter,
@@ -51,12 +58,21 @@ export const appRouter = router({
   contexts: contextsRouter,
   enrichment: enrichmentRouter,
   meetings: meetingsRouter,
+  // O link aberto da reunião: público, sem sessão (12/11/2026).
+  reuniaoAberta: reuniaoAbertaRouter,
   memory: memoryRouter,
   intelligentMatches: intelligentMatchesRouter,
   distribuicao: distribuicaoRouter,
   networkInteligente: networkInteligenteRouter,
   // "Gravar áudio" e "Revisar texto" dos campos livres (cadastro, Perfil, oportunidade).
   assistenteTexto: assistenteTextoRouter,
+  // As próximas ações da dona (H5a): o que ela confirmou nos resumos e o que anotou.
+  proximasAcoes: proximasAcoesRouter,
+  // A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora".
+  agenda: agendaRouter,
+  // A conexão com a Google Agenda (H16b): o estado e o desconectar. Conectar
+  // é navegação (server/rotas-da-google-agenda.ts).
+  googleAgenda: googleAgendaRouter,
 });
 
 export type AppRouter = typeof appRouter;

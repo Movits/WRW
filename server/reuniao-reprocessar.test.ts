@@ -1,5 +1,5 @@
-import type { SQL } from "drizzle-orm";
-import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { mapUpdateSet, type SQL } from "drizzle-orm";
+import { MySqlDialect, type MySqlTable } from "drizzle-orm/mysql-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -39,6 +39,9 @@ type Operacao = Predicado & {
   tabela: unknown;
   valores?: Record<string, unknown>;
   linhas?: Record<string, unknown>[];
+  // O set do onDuplicateKeyUpdate, como o Drizzle o monta para o banco; ausente
+  // no insert que não o usa.
+  noDuplicado?: Predicado;
   ordenada?: boolean;
   ordem?: string;
 };
@@ -104,9 +107,23 @@ vi.mock("./db", () => ({
       Object.assign(estado.reuniao, valores);
       return [{ affectedRows: 1 }];
     } }) }),
-    insert: (tabela: unknown) => ({ values: async (valores: Record<string, unknown> | Record<string, unknown>[]) => {
-      estado.operacoes.push({ tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] });
-      estado.aoInserir?.(tabela);
+    // Preguiçoso como o builder do Drizzle: grava ao ser aguardado, ou pelo
+    // onDuplicateKeyUpdate (o contador de minutos e o resumo guardado). O set
+    // do conflito fica registrado, para o teste ver o que ele faria com a linha
+    // que já existe.
+    insert: (tabela: unknown) => ({ values: (valores: Record<string, unknown> | Record<string, unknown>[]) => {
+      const operacao: Operacao = { tipo: "insert", tabela, linhas: Array.isArray(valores) ? valores : [valores], sql: "", params: [] };
+      const gravar = async () => {
+        estado.operacoes.push(operacao);
+        estado.aoInserir?.(tabela);
+      };
+      return {
+        then: (ok: (valor: unknown) => unknown, falha: (erro: unknown) => unknown) => gravar().then(ok, falha),
+        onDuplicateKeyUpdate: ({ set }: { set: Record<string, unknown> }) => {
+          operacao.noDuplicado = renderizar(dialeto.buildUpdateSet(tabela as MySqlTable, mapUpdateSet(tabela as MySqlTable, set)));
+          return gravar();
+        },
+      };
     } }),
     delete: (tabela: unknown) => ({ where: async (condicao?: SQL) => {
       estado.operacoes.push({ tipo: "delete", tabela, ...renderizar(condicao) });
@@ -117,12 +134,18 @@ vi.mock("./db", () => ({
 const storageGetBytes = vi.fn();
 const storagePut = vi.fn(async () => ({ key: "k", url: "/manus-storage/k" }));
 const storageDelete = vi.fn(async () => {});
+// O áudio de reunião sai do bucket com todas as versões (storageApagarTodasAsVersoes).
+const apagarAudio = vi.fn(async (_chave: string) => {});
 // As classes de erro e chaveDoStorageDaDona vêm do módulo real: o serviço faz
 // instanceof e confere a chave com elas.
 vi.mock("./storage", async importOriginal => ({
   ...await importOriginal<typeof import("./storage")>(),
   storagePut: (...args: unknown[]) => storagePut(...(args as [])),
   storageDelete: (...args: unknown[]) => storageDelete(...(args as [])),
+  storageApagarTodasAsVersoes: (...args: unknown[]) => {
+    estado.operacoes.push({ tipo: "bucket", tabela: "expurgo", sql: "", params: args });
+    return apagarAudio(...(args as [string]));
+  },
   storageGetBytes: (...args: unknown[]) => {
     estado.operacoes.push({ tipo: "bucket", tabela: "leitura", sql: "", params: args });
     return storageGetBytes(...(args as []));
@@ -178,8 +201,8 @@ const primeira = (filtro: (o: Operacao) => boolean) => estado.operacoes.findInde
 const ultima = (filtro: (o: Operacao) => boolean) => estado.operacoes.reduce((achada, o, i) => (filtro(o) ? i : achada), -1);
 const linhasInseridas = (tabela: unknown) => de("insert", tabela).flatMap(o => o.linhas ?? []);
 const falhasGravadas = () => de("update", schema.meetings).filter(o => o.valores?.status === "failed");
-const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations"];
-const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations];
+const TABELAS_DERIVADAS = ["meeting_contact_suggestions", "network_sugestoes", "meeting_entities", "meeting_transcripts", "meeting_transcript_translations", "meeting_summary_translations", "meeting_summary_items", "meeting_summaries"];
+const derivadas = () => [schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts, schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries];
 
 async function reprocessar() {
   const { trabalho } = await servico.iniciarReprocessamento(DONA, REUNIAO);
@@ -209,6 +232,8 @@ beforeEach(() => {
   storageGetBytes.mockResolvedValue(AUDIO);
   storagePut.mockClear();
   storageDelete.mockClear();
+  apagarAudio.mockReset();
+  apagarAudio.mockImplementation(async () => {});
   transcribeWithGemini.mockReset();
   // O nome da sugestão precisa estar na fala (nomeSustentadoPelaTranscricao).
   transcribeWithGemini.mockResolvedValue({ text: "Transcrição nova da conversa com a Ana Souza.", segments: [], language: "pt" });
@@ -372,6 +397,23 @@ describe("reprocessar — com o áudio guardado", () => {
     expect(linhasInseridas(schema.meetingContactSuggestions).map(sugestao => sugestao.fullName)).toEqual(["Ana Souza"]);
     expect(falhasGravadas()).toEqual([]);
   });
+
+  it("o resumo guardado é refeito: o antigo sai com os derivados, e o pedido novo, pendente e da transcrição nova, entra antes do 'ready'", async () => {
+    await reprocessar();
+    const apagouOResumo = primeira(o => o.tipo === "delete" && o.tabela === schema.meetingSummaries);
+    expect(apagouOResumo).toBeGreaterThanOrEqual(0);
+    const [transcricao] = linhasInseridas(schema.meetingTranscripts);
+    const [pedido, ...outros] = de("insert", schema.meetingSummaries);
+    expect(outros).toEqual([]);
+    expect(pedido.linhas).toEqual([expect.objectContaining({ meetingId: REUNIAO, ownerId: DONA, status: "pending", transcriptId: transcricao.id })]);
+    // Idempotente: no conflito com a linha que já existir (índice único da
+    // reunião), o banco executa meeting_id = meeting_id, e a linha fica como está.
+    expect(pedido.noDuplicado).toEqual({ sql: "`meeting_id` = `meeting_summaries`.`meeting_id`", params: [] });
+    const posicaoDoPedido = estado.operacoes.indexOf(pedido);
+    const posicaoDoReady = estado.operacoes.findIndex(o => o.tipo === "update" && o.tabela === schema.meetings && o.valores?.status === "ready");
+    expect(posicaoDoPedido).toBeGreaterThan(apagouOResumo);
+    expect(posicaoDoPedido).toBeLessThan(posicaoDoReady);
+  });
 });
 
 describe("reprocessar — quando falha de novo", () => {
@@ -441,8 +483,19 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     });
     await reprocessar();
     expect(de("insert")).toEqual([]);
+    // O arquivo sai do bucket com todas as versões, e só então a linha da
+    // gravação, pelo id; sem partes, não há DELETE de partes. O que a IA gerou
+    // sai antes do bucket (não aponta para objeto nenhum, e o expurgo é a parte
+    // longa da exclusão).
+    expect(apagarAudio).toHaveBeenCalledWith(CHAVE);
+    expect(storageDelete).not.toHaveBeenCalled();
     expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
-    expect(storageDelete).toHaveBeenCalledWith(CHAVE);
+    expect(soPredicado(de("delete", schema.meetingRecordings)[0])).toEqual({
+      sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: [DONA, "gravacao-1"],
+    });
+    const expurgo = primeira(o => o.tipo === "bucket" && o.tabela === "expurgo");
+    expect(expurgo).toBeGreaterThan(primeira(o => o.tipo === "delete"));
+    expect(expurgo).toBeLessThan(primeira(o => o.tipo === "delete" && o.tabela === schema.meetingRecordings));
     expect(falhasGravadas()).toEqual([]);
   });
 
@@ -453,6 +506,7 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     await reprocessar();
     const depoisDasEscritas = estado.operacoes.slice(primeira(o => o.tipo === "insert"));
     expect(depoisDasEscritas.filter(o => o.tipo === "delete")).toEqual([]);
+    expect(apagarAudio).not.toHaveBeenCalled();
     expect(storageDelete).not.toHaveBeenCalled();
     expect(falhasGravadas()).toEqual([]);
     expect(estado.reuniao!.status).toBe("processing");
@@ -487,5 +541,33 @@ describe("envio original — a mesma trava da ficha", () => {
     expect(linhasInseridas(schema.meetingRecordings)).toHaveLength(1);
     expect(de("delete")).toEqual([]);
     expect(estado.reuniao!.status).toBe("ready");
+  });
+
+  it("a exclusão vence entre o pedido do resumo e o 'ready': o UPDATE não acha a linha, a releitura a vê excluída, o pedido recém-gravado sai com os itens e a execução lança a exclusão", async () => {
+    estado.reuniao = reuniaoComFalha({ status: "recording", processingError: null });
+    estado.gravacoes = [];
+    // A dona exclui a reunião logo depois do insert do pedido do resumo.
+    estado.aoInserir = tabela => {
+      if (tabela === schema.meetingSummaries) Object.assign(estado.reuniao!, { status: "deleted" });
+    };
+
+    await expect(servico.processMeetingRecording(envio())).rejects.toBeInstanceOf(servico.ReuniaoExcluidaDuranteProcessamento);
+
+    const pedido = primeira(o => o.tipo === "insert" && o.tabela === schema.meetingSummaries);
+    const pronta = primeira(o => o.tipo === "update" && o.tabela === schema.meetings && o.valores?.status === "ready");
+    const releitura = ultima(o => o.tipo === "select" && o.tabela === schema.meetings);
+    expect(pedido).toBeGreaterThanOrEqual(0);
+    expect(pronta).toBeGreaterThan(pedido);
+    // O 'ready' não pegou a linha (0 linhas), e a releitura depois dele a viu excluída.
+    expect(estado.reuniao!.status).toBe("deleted");
+    expect(releitura).toBeGreaterThan(pronta);
+    // A limpeza vem depois do pedido: os itens, e então a linha do resumo, da reunião da dona.
+    const apagouItens = ultima(o => o.tipo === "delete" && o.tabela === schema.meetingSummaryItems);
+    const apagouResumo = ultima(o => o.tipo === "delete" && o.tabela === schema.meetingSummaries);
+    expect(apagouItens).toBeGreaterThan(releitura);
+    expect(apagouResumo).toBeGreaterThan(apagouItens);
+    expect(soPredicado(estado.operacoes[apagouItens])).toEqual(daReuniaoDaDona("meeting_summary_items"));
+    expect(soPredicado(estado.operacoes[apagouResumo])).toEqual(daReuniaoDaDona("meeting_summaries"));
+    expect(falhasGravadas()).toEqual([]);
   });
 });

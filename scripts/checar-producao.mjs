@@ -32,8 +32,8 @@
 //   aprovada (não nasce rejeitada pelo compliance) E há ao menos uma conta Ouro/
 //   presidente/admin REAL com perfil, e o prompt dele leva setor/possui/procura
 //   dessas contas ao Gemini. O exame imprime esse número como INFO antes de criar.
-// - O Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega
-//   não é verificada.
+// - O Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o
+//   manda à Resend (TLD reservado, nunca entrega), então não há envio nem devolução.
 // - O contato QA fica marcado 'ouro' por poucos segundos; a oportunidade QA
 //   (confidencial, ativa) fica visível para contas Ouro reais até o fim da
 //   execução: dezenas de segundos, mais de dois minutos com --com-ia ou quando a
@@ -53,7 +53,7 @@ import { randomBytes } from "node:crypto";
 import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { parse as analisarEnv } from "dotenv";
-import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente } from "./exame/relatorio.mjs";
+import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente, avaliarRedirecionamentoComCache } from "./exame/relatorio.mjs";
 import { planejarLimpeza, planejarFaxinaDuravel, planejarColetaDeConexoes } from "./exame/limpeza.mjs";
 
 // ── Argumentos e ambiente ────────────────────────────────────────────────────
@@ -524,7 +524,7 @@ async function blocoMatch() {
     const itens = lista(d);
     return itens.length >= 1 && itens.every(m => estado.contatos.S.includes(m.contactAId) && estado.contatos.S.includes(m.contactBId));
   });
-  rel.info("o Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega não é verificada pelo exame");
+  rel.info("o Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o manda à Resend (TLD reservado), e o notified_at fica vazio");
   const notificadas = await contar("SELECT COUNT(*) n FROM `ai_match_suggestions` WHERE `owner_id` = ? AND `notified_at` IS NOT NULL", [QA.P.openId]);
   rel.info(`sugestões da presidente QA com notified_at preenchido: ${notificadas}`);
 }
@@ -545,9 +545,17 @@ async function blocoContextosEStorage() {
   if (!checar("upload para o storage (contexts.uploadMedia)", up, d => typeof d?.storagePath === "string" && d.storagePath.startsWith("/manus-storage/contexts/"))) return;
 
   pararSeInterrompido();
-  const proxy = await fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const abrirComoDona = () => fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const proxy = await abrirComoDona();
   const location = proxy.headers.get("location") || "";
-  rel.ok("proxy autenticado redireciona a dona (307 + no-store)", proxy.status === 307 && /no-store/.test(proxy.headers.get("cache-control") || "") && !!location, `status ${proxy.status}`);
+  // Segunda abertura, como a tela reaberta: imagem da dona volta com a MESMA URL
+  // assinada e o mesmo cache curto (ver avaliarRedirecionamentoComCache).
+  const proxyDeNovo = await abrirComoDona();
+  const redirecionamento = avaliarRedirecionamentoComCache(
+    { status: proxy.status, cacheControl: proxy.headers.get("cache-control"), location },
+    { status: proxyDeNovo.status, location: proxyDeNovo.headers.get("location") },
+  );
+  rel.ok("proxy autenticado redireciona a dona (307 + private, max-age=300) e repete a URL assinada", redirecionamento.ok, redirecionamento.detalhe);
   if (location) {
     const objeto = await fetch(location, { signal: AbortSignal.timeout(30_000) });
     const bytes = Buffer.from(await objeto.arrayBuffer());

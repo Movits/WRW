@@ -193,6 +193,11 @@ function eventosGravados() {
   return estado.inseridos.filter(l => l.tabela === "security_events").map(l => l.valores);
 }
 
+/** As linhas de risco alto "novo IP e novo dispositivo" que foram para audit_logs. */
+function acessosSuspeitos() {
+  return estado.inseridos.filter(l => l.tabela === "audit_logs" && l.valores.action === "SUSPICIOUS_ACCESS").map(l => l.valores);
+}
+
 beforeEach(() => {
   estado.sessoes = [];
   estado.totalDeSessoes = 0;
@@ -426,5 +431,87 @@ describe("G) o UPDATE que bloqueia leva a condição no WHERE", () => {
       eventosGravados().filter(e => e.eventType === "account_locked"),
       "o painel administrativo regravava account_locked a cada clique",
     ).toHaveLength(0);
+  });
+});
+
+// ═══ H) o IP da sessão acompanha a usuária (PR #179) ═════════════════════════
+/**
+ * Revisão da PR #179: o IP da sessão era gravado só no login. Com a sessão de
+ * 90 dias desde o último uso, quem trocava do wi-fi para o 4G passava a gravar
+ * um SUSPICIOUS_ACCESS de risco alto em TODA requisição, por meses. Agora,
+ * alertado o IP novo, a sessão desta requisição passa a guardá-lo: o alerta
+ * sai uma vez por troca de rede.
+ */
+describe("H) depois do alerta de IP novo, a sessão passa a conhecer o IP", () => {
+  const OUTRO_IP = "198.51.100.77";
+  const TOKEN = "t".repeat(64);
+  const atualizacoesDeSessao = () => estado.atualizacoes.filter(a => a.tabela === "sessions");
+
+  it("IP novo, com sessionToken: alerta e grava o IP na sessão desta requisição", async () => {
+    estado.sessoes = [sessao(1)];
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(eventosGravados().map(e => e.eventType)).toContain("suspicious_ip");
+    const [atualizacao, ...resto] = atualizacoesDeSessao();
+    expect(resto).toEqual([]);
+    expect(atualizacao.valores).toEqual({ ipAddress: OUTRO_IP });
+    expect(colunasCitadas(atualizacao.condicao)).toEqual(new Set(["sessionToken"]));
+    expect(valoresDe(atualizacao.condicao)).toEqual([TOKEN]);
+  });
+
+  it("IP já conhecido: nenhum alerta e nenhuma escrita na sessão", async () => {
+    estado.sessoes = [sessao(1)];
+    await detectSessionAnomaly(1, IP, "navegador-de-teste", TOKEN);
+
+    expect(eventosGravados()).toEqual([]);
+    expect(atualizacoesDeSessao()).toEqual([]);
+  });
+
+  it("IP novo barrado pela dedupe (já houve suspicious_ip na janela): a sessão NÃO passa a conhecê-lo", async () => {
+    // Segunda revisão da #179: a dedupe de 30 min não olha o IP. Se o IP fosse
+    // gravado mesmo sem evento, um terceiro IP dentro da janela (o de quem
+    // copiou o token) viraria "conhecido" sem nunca ter alertado.
+    estado.sessoes = [sessao(1)];
+    estado.jaExisteEventoIgual = true;
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(eventosGravados()).toEqual([]);
+    expect(atualizacoesDeSessao()).toEqual([]);
+  });
+
+  it("IP novo com alerta: uma linha SUSPICIOUS_ACCESS de risco alto em audit_logs", async () => {
+    estado.sessoes = [sessao(1)];
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(acessosSuspeitos()).toEqual([expect.objectContaining({ userId: 1, riskLevel: "high", ipAddress: OUTRO_IP })]);
+  });
+
+  it("IP novo barrado pela dedupe: nenhuma linha SUSPICIOUS_ACCESS, nem por requisição", async () => {
+    // Pendência da validação da #179: com a sessão de 90 dias, durante a janela
+    // da dedupe cada requisição de um IP ainda não aprendido gravava uma linha
+    // de risco alto em audit_logs (cada foto pedida ao storageProxy, inclusive).
+    estado.sessoes = [sessao(1)];
+    estado.jaExisteEventoIgual = true;
+    for (let i = 0; i < 5; i++) await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(acessosSuspeitos()).toEqual([]);
+  });
+
+  it("várias requisições do mesmo IP novo: só a primeira, a que alertou, grava SUSPICIOUS_ACCESS", async () => {
+    estado.sessoes = [sessao(1)];
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+    // O suspicious_ip da primeira já está na janela: as seguintes caem na dedupe.
+    estado.jaExisteEventoIgual = true;
+    for (let i = 0; i < 4; i++) await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", TOKEN);
+
+    expect(acessosSuspeitos()).toHaveLength(1);
+  });
+
+  it("sem sessionToken (o parâmetro segue opcional, embora o sdk já recuse token sem ele): alerta como antes, sem tocar em sessão nenhuma", async () => {
+    estado.sessoes = [sessao(1)];
+    await detectSessionAnomaly(1, OUTRO_IP, "navegador-de-teste", null);
+
+    expect(eventosGravados().map(e => e.eventType)).toContain("suspicious_ip");
+    expect(atualizacoesDeSessao()).toEqual([]);
   });
 });

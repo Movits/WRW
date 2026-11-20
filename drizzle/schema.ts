@@ -13,6 +13,7 @@ import {
   float,
   tinyint,
   mediumtext,
+  date,
 } from "drizzle-orm/mysql-core";
 import { decimal } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
@@ -321,11 +322,21 @@ export const platformNotifications = mysqlTable("platform_notifications", {
   type: mysqlEnum("type", [
     "new_match", "interest_received", "gold_granted", "gold_revoked",
     "opportunity_approved", "opportunity_rejected", "new_message",
-    "compliance_update", "system"
+    "compliance_update", "system",
+    // Os avisos do gravador (H15 do plano do gravador), no FIM da lista de
+    // propósito: acrescentar valor no fim de um enum é alteração instantânea
+    // no MySQL 8. 'lembrete' é o da próxima ação e o da reunião da agenda;
+    // 'reuniao_pronta', o de quando a transcrição e o resumo terminam.
+    "lembrete", "reuniao_pronta",
   ]).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   body: text("body"),
   actionUrl: varchar("actionUrl", { length: 500 }),
+  // Nos dois tipos do gravador, a tela escreve o aviso pelo tipo, no idioma de
+  // quem lê, com o que fica aqui (o texto da ação, o título e a hora da
+  // reunião; shared/lembretes.ts). title guarda só o título da origem, para a
+  // tela antiga. Nos outros tipos é nulo, e o texto pronto fica em title e body.
+  parametros: jsonCompat("parametros").$type<Record<string, unknown>>(),
   isRead: boolean("isRead").default(false),
   readAt: timestamp("readAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -418,6 +429,62 @@ export const trustedDevices = mysqlTable("trusted_devices", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   userIdIdx: index("device_userId_idx").on(table.userId),
+}));
+
+// ============================================================
+// CHAVES DE ACESSO (passkeys, WebAuthn) — A6 do desenho do gravador
+// Entrar com Face ID, digital ou o bloqueio de tela do aparelho
+// (server/chaves-de-acesso.ts). O aparelho confere a pessoa e manda só uma
+// assinatura: a WRW guarda a chave PÚBLICA e dados técnicos da chave, nunca
+// biometria. Varchar com o enum só no TypeScript, como em network_sugestoes.
+// ============================================================
+export const chavesDeAcesso = mysqlTable("chaves_de_acesso", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull(),
+  // O id da credencial, em base64url, como o aparelho o manda na entrada.
+  credencialId: varchar("credencial_id", { length: 512 }).notNull(),
+  // A chave pública no formato COSE, em base64url.
+  chavePublica: text("chave_publica").notNull(),
+  // O contador de usos que o aparelho assina; o que volta é recusado.
+  contador: bigint("contador", { mode: "number" }).default(0).notNull(),
+  // As formas de conexão da chave (internal, hybrid, usb...), para a entrada.
+  transportes: jsonCompat("transportes").$type<string[]>(),
+  // singleDevice: presa a um aparelho; multiDevice: pode ser sincronizada.
+  tipoDoAparelho: varchar("tipo_do_aparelho", { length: 16, enum: ["singleDevice", "multiDevice"] }).notNull(),
+  // A chave está numa cópia sincronizada (iCloud, Google, gerenciador de senhas).
+  sincronizada: boolean("sincronizada").default(false).notNull(),
+  // O identificador da conta que o aparelho guarda com a chave (user handle):
+  // aleatório, o mesmo em todas as chaves da conta, nunca o id nem o e-mail.
+  identificadorDaUsuaria: varchar("identificador_da_usuaria", { length: 64 }).notNull(),
+  // O modelo do autenticador (AAGUID); zeros quando o aparelho não diz.
+  aaguid: varchar("aaguid", { length: 36 }),
+  apelido: varchar("apelido", { length: 60 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  ultimoUsoEm: bigint("ultimo_uso_em", { mode: "number" }),
+}, (table) => ({
+  credencialUnique: uniqueIndex("chaves_de_acesso_credencial_unique").on(table.credencialId),
+  userIdx: index("chaves_de_acesso_user_idx").on(table.userId),
+}));
+
+// O desafio de uso único de cada cadastro ou entrada com chave de acesso.
+// Fica fora do audit_logs de propósito: o insert de lá engole o erro, e um
+// desafio que falhasse em ser gasto continuaria valendo. É gasto por UPDATE
+// condicional (consumido_em ainda nulo e prazo vivo) e vence em 5 minutos.
+// `userId` é nulo na entrada, que começa sem saber quem é a pessoa.
+export const desafiosDeChaveDeAcesso = mysqlTable("desafios_de_chave_de_acesso", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  desafio: varchar("desafio", { length: 128 }).notNull(),
+  finalidade: varchar("finalidade", { length: 12, enum: ["cadastro", "entrada"] }).notNull(),
+  userId: int("userId"),
+  // No cadastro, o identificador que foi para o aparelho e que a chave vai guardar.
+  identificadorDaUsuaria: varchar("identificador_da_usuaria", { length: 64 }),
+  expiraEm: bigint("expira_em", { mode: "number" }).notNull(),
+  consumidoEm: bigint("consumido_em", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  desafioUnique: uniqueIndex("desafios_de_chave_de_acesso_desafio_unique").on(table.desafio),
+  expiraIdx: index("desafios_de_chave_de_acesso_expira_idx").on(table.expiraEm),
+  userIdx: index("desafios_de_chave_de_acesso_user_idx").on(table.userId),
 }));
 
 // ============================================================
@@ -1011,6 +1078,11 @@ export const meetings = mysqlTable("meetings", {
   // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
   // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
   consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
+  // Os nomes que a dona deu às vozes da transcrição por falante (H3 do desenho
+  // do gravador): { "F1": "Ana", "F2": "Bia" }. Nulo: nenhuma voz nomeada, e a
+  // tela mostra "Falante n". A dona vê, e o link aberto também, quando foi
+  // ligado com a confirmação que fala dos nomes (H3b, decisão de 16/11/2026).
+  speakerNames: jsonCompat("speaker_names").$type<Record<string, string>>(),
   // Quantas partes a gravação teve, informado quando ela termina. Nulo
   // enquanto grava e no envio único.
   expectedSlices: int("expected_slices"),
@@ -1021,11 +1093,20 @@ export const meetings = mysqlTable("meetings", {
   attempts: int("attempts").default(0).notNull(),
   lockedUntil: bigint("locked_until", { mode: "number" }),
   lockToken: varchar("lock_token", { length: 36 }),
+  // O link aberto da reunião (pedido do Roberto em 12/11/2026, "por enquanto"):
+  // quem tem o endereço /r/{shareToken} ouve a gravação, lê a transcrição e
+  // pergunta à IA sobre a reunião, sem conta na WRW. Nulo: a reunião não está
+  // compartilhada. Desligar o link volta a nulo, e um link novo tem outro valor.
+  // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
+  // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
+  shareToken: varchar("share_token", { length: 64 }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
   // A fila acha as reuniões em partes pelo estado, sem varrer as do envio único.
   pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
+  // O link aberto acha a reunião pelo token; o MySQL aceita vários nulos.
+  shareTokenUnique: uniqueIndex("meetings_share_token_unique").on(table.shareToken),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
@@ -1156,14 +1237,350 @@ export const meetingContactSuggestions = mysqlTable("meeting_contact_suggestions
   company: varchar("company", { length: 200 }),
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 320 }),
+  // Participou da reunião ('present') ou a reunião disse que ela não estava
+  // ('mentioned'), como a extração disse (achado 7 da bancada de 16/11): a tela
+  // separa as citadas das participantes. Nula nas sugestões anteriores e na
+  // dúvida (a extração diz 'unknown'), que a tela mostra com as participantes.
+  // Varchar com o enum só no TypeScript, como em network_sugestoes.
+  presence: varchar("presence", { length: 12, enum: ["present", "mentioned"] }),
   sourceEntityIds: jsonCompat("source_entity_ids"),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
-  status: mysqlEnum("status", ["pending", "created", "linked", "ignored"]).default("pending").notNull(),
+  // 'self' (N5): a dona disse "Sou eu". Nenhum contato nasce; o que a pessoa
+  // tem e precisa espera a confirmação dela com destino no PERFIL dela
+  // (network_sugestoes.alvo = 'perfil'). No fim da lista: o valor novo não
+  // reordena os que já estão gravados.
+  status: mysqlEnum("status", ["pending", "created", "linked", "ignored", "self"]).default("pending").notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
   ownerMeetingIdx: index("meeting_contact_suggestions_owner_meeting_idx").on(table.ownerId, table.meetingId),
   statusIdx: index("meeting_contact_suggestions_status_idx").on(table.ownerId, table.status),
+}));
+
+// O resumo GUARDADO da reunião (H4 do desenho do gravador,
+// docs/arquitetura/gravador-de-reunioes.md), no formato que a cliente pediu:
+// ações com caixa de marcar, foco, tarefas por assunto, decisões, bloqueios e
+// questões pendentes. Uma linha por reunião, gerada em segundo plano pela fila
+// do resumo; os itens ficam em meeting_summary_items. Varchar com o enum só no
+// TypeScript, como em network_sugestoes: valor novo não pede migração.
+export const meetingSummaries = mysqlTable("meeting_summaries", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // A transcrição de que o resumo saiu: o reprocessamento troca a transcrição,
+  // e o resumo da anterior não é gravado.
+  transcriptId: varchar("transcript_id", { length: 36 }),
+  status: varchar("status", { length: 12, enum: ["pending", "ready", "failed"] }).default("pending").notNull(),
+  // O modelo de resumo (H4d): o que a dona escolheu ao pedir o resumo ou no
+  // "Refazer como…". A lista da tela mora em shared/modelos-de-resumo.ts, e
+  // server/modelos-de-resumo.ts confere que é a mesma deste enum.
+  template: varchar("template", { length: 16, enum: ["general", "networking", "mentoring", "sales", "one_on_one"] }).default("general").notNull(),
+  // O idioma em que o resumo foi escrito: o da reunião.
+  language: varchar("language", { length: 12 }),
+  // O emoji do título, como no app de referência da cliente. Nulo: sem emoji.
+  emoji: varchar("emoji", { length: 16 }),
+  // O id do modelo de IA que escreveu o resumo.
+  model: varchar("model", { length: 80 }),
+  // Sobe a cada resumo que a fila grava, e só aí: editar ou acrescentar um item
+  // (H4f) não a muda. A tradução do resumo (H11) guarda de qual versão saiu e é
+  // refeita inteira quando ela muda; o item editado (a impressão digital do
+  // texto não bate) e o acrescentado (o id não tem tradução) são traduzidos
+  // sozinhos.
+  version: int("version").default(0).notNull(),
+  generatedAt: bigint("generated_at", { mode: "number" }),
+  // Controle da fila do resumo; fica no servidor.
+  attempts: int("attempts").default(0).notNull(),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  lockToken: varchar("lock_token", { length: 36 }),
+  // Código nosso, nunca o texto da IA ou do driver.
+  lastError: varchar("last_error", { length: 40 }),
+  // O mapa mental (H10): o mesmo trabalho da fila, numa chamada à IA depois
+  // do resumo, com as mesmas colunas de reserva. O mapa que falha não derruba
+  // o resumo pronto. A árvore guardada já passou pela conferência de
+  // shared/mapa-mental.ts (de 2 a 12 ramos, até 8 folhas por ramo, até 4
+  // filhos por folha, até 150 nós, rótulos de até 60 caracteres e nenhum
+  // rótulo de voz); a raiz é o título da reunião e não fica guardada.
+  mindMap: jsonCompat("mind_map"),
+  // Nulo: o resumo é de antes do mapa, e a dona o pede na aba do mapa.
+  mindMapStatus: varchar("mind_map_status", { length: 12, enum: ["pending", "ready", "failed"] }),
+  // Quando o mapa foi gravado: a tradução do resumo (H11) refaz a do mapa
+  // quando ela muda (a `version` sobe só com o resumo).
+  mindMapGeneratedAt: bigint("mind_map_generated_at", { mode: "number" }),
+  // Código nosso, como o last_error.
+  mindMapError: varchar("mind_map_error", { length: 40 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  meetingUnique: uniqueIndex("meeting_summaries_meeting_unique").on(table.meetingId),
+  ownerMeetingIdx: index("meeting_summaries_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // A fila reserva pelo estado e pela reserva vencida.
+  statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
+  // E o mapa pendente (H10) pelo estado dele, sem varrer os resumos prontos.
+  mindMapStatusLockedIdx: index("meeting_summaries_mind_map_status_locked_idx").on(table.mindMapStatus, table.lockedUntil),
+}));
+
+// Cada item do resumo guardado. Nada extraído por IA entra sozinho
+// (CLAUDE.md): o item nasce 'pending', com a confiança e o TRECHO literal da
+// transcrição que o sustenta, e só vale como dado da dona quando ela confirma.
+// Quem falou aparece como o rótulo da voz ({F2}), que a tela troca pelo nome
+// que a dona deu (meetings.speaker_names); o servidor nunca escreve o nome.
+// A dona também edita o item e acrescenta item à mão (H4f): o que ela escreve
+// vale como confirmado, e a origem diz quem escreveu o item.
+export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  section: varchar("section", { length: 12, enum: ["action", "focus", "task", "decision", "blocker", "question"] }).notNull(),
+  position: int("position").notNull(),
+  // O assunto das tarefas ("Publicação nas lojas"); nulo nas outras seções.
+  subject: varchar("subject", { length: 120 }),
+  text: text("text").notNull(),
+  // Quem ficou responsável: o rótulo da voz ("{F2}") ou o nome como foi dito, um
+  // ou mais ("{F2}, {F3}"). Nulo quando a transcrição não sustenta todos.
+  assignee: varchar("assignee", { length: 120 }),
+  // O prazo como foi dito ("até sexta-feira"). Nulo quando não foi dito.
+  due: varchar("due", { length: 120 }),
+  // Vazio no item que a dona acrescentou: ele não sai de um trecho.
+  excerpt: text("excerpt").notNull(),
+  // O segundo da reunião em que o trecho começa; nulo sem tempo (envio único).
+  startSeconds: int("start_seconds"),
+  confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000").notNull(),
+  status: varchar("status", { length: 12, enum: ["pending", "confirmed", "ignored"] }).default("pending").notNull(),
+  // A caixa de marcar das ações.
+  done: boolean("done").default(false).notNull(),
+  decidedAt: bigint("decided_at", { mode: "number" }),
+  doneAt: bigint("done_at", { mode: "number" }),
+  // Quem escreveu o item (H4f): a IA, a partir da transcrição, ou a dona, à
+  // mão. O item da dona nasce confirmado, sem trecho, sem tempo e sem
+  // confiança. Não muda quando a dona edita: o item da IA editado continua
+  // vindo da reunião, com o trecho e o tempo, e o edited_at marca a edição.
+  // Varchar com o enum só no TypeScript: a origem que vier depois (a busca na
+  // web da H4i) não pede migração.
+  origin: varchar("origin", { length: 12, enum: ["ai", "owner"] }).default("ai").notNull(),
+  // Quando a dona mudou por último o texto, o assunto, o responsável ou o
+  // prazo do item. Nulo: o item está como foi escrito. O item escrito pela
+  // dona (acrescentado ou editado) não volta a "para conferir".
+  editedAt: bigint("edited_at", { mode: "number" }),
+  // O estado de antes do Ignorar (H4f), para o Desfazer voltar a ele: o
+  // status (pending ou confirmed) e a hora em que a ação foi marcada feita
+  // (nula: não estava feita). Gravado ao ignorar e só lido enquanto o item
+  // está ignorado. Nulo no item ignorado antes destas colunas, quando só o
+  // item pendente tinha Ignorar: o Desfazer o devolve pendente.
+  statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
+  doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  summaryPositionIdx: index("meeting_summary_items_summary_position_idx").on(table.summaryId, table.position),
+  ownerMeetingIdx: index("meeting_summary_items_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  // As próximas ações (H5) leem os itens confirmados de todas as reuniões da dona.
+  ownerSectionStatusIdx: index("meeting_summary_items_owner_section_status_idx").on(table.ownerId, table.section, table.status),
+}));
+
+// As próximas ações da dona (H5a do desenho do gravador,
+// docs/arquitetura/gravador-de-reunioes.md): o que ela confirmou como ação ou
+// tarefa no resumo guardado de uma reunião (origem 'reuniao') e o que anotou à
+// mão (origem 'manual'). A da reunião nasce na mesma transação em que a dona
+// confirma o item (server/proximas-acoes.ts) e copia dele o texto, o
+// responsável, o prazo como foi dito e o trecho. Os rótulos de voz ({F2}) ficam
+// como no item, e a tela os troca pelos nomes enquanto a ação está presa a ele.
+// A reunião excluída ou reprocessada solta a ação: os nomes das vozes viram
+// texto e item_id fica nulo; na exclusão, meeting_id e o trecho também. Excluir
+// o contato anula contact_id. Varchar com o enum só no TypeScript, como em
+// network_sugestoes.
+export const proximasAcoes = mysqlTable("proximas_acoes", {
+  id:          varchar("id", { length: 36 }).primaryKey(),
+  ownerId:     varchar("owner_id", { length: 128 }).notNull(),
+  texto:       text("texto").notNull(),
+  detalhe:     text("detalhe"),
+  // Quem ficou responsável: o rótulo da voz ou o nome como foi dito (vem do
+  // item), ou o que a dona escreveu.
+  responsavel: varchar("responsavel", { length: 120 }),
+  // O prazo em data, que a dona escolhe. O que foi dito na reunião ("até
+  // sexta-feira") fica em prazo_dito, como no item.
+  prazo:       date("prazo", { mode: "string" }),
+  prazoDito:   varchar("prazo_dito", { length: 120 }),
+  contactId:   bigint("contact_id", { mode: "number" }),
+  meetingId:   varchar("meeting_id", { length: 36 }),
+  itemId:      varchar("item_id", { length: 36 }),
+  trecho:      text("trecho"),
+  origem:      varchar("origem", { length: 8, enum: ["reuniao", "manual"] }).notNull(),
+  feita:       boolean("feita").default(false).notNull(),
+  feitaEm:     bigint("feita_em", { mode: "number" }),
+  // A ação na Google Agenda conectada da dona (H5c do plano do gravador), com
+  // os estados de agenda_reunioes.google. Nulo enquanto ela não está lá: sem
+  // prazo, feita, sem a Google Agenda conectada, com o dia do prazo encerrado
+  // antes de ir, ou depois que a conta Google sai ou muda (server/google-agenda.ts).
+  // "pendente" do momento em que o banco gravou até a Google responder; "ok"
+  // quando a Google tem a versão daqui; "falhou" quando não tem, e a tela
+  // mostra "Tentar de novo". O id do evento lá é "acao" mais o id daqui sem os
+  // hífens (server/acoes-na-google.ts): não há coluna para ele. Enum só no
+  // TypeScript, como em agenda_reunioes.google.
+  google:      varchar("google", { length: 16, enum: ["pendente", "ok", "falhou"] }),
+  createdAt:   bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:   bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma ação por item: confirmar de novo, ou duas abas ao mesmo tempo, não
+  // duplica. A manual e a solta têm item_id nulo, e nulos não colidem.
+  ownerItemUnique: uniqueIndex("proximas_acoes_owner_item_unique").on(table.ownerId, table.itemId),
+  // A página e o cartão do Dashboard: as abertas da dona, por prazo.
+  ownerFeitaPrazoIdx: index("proximas_acoes_owner_feita_prazo_idx").on(table.ownerId, table.feita, table.prazo),
+  // Soltar as ações da reunião excluída e anular o contato excluído.
+  ownerMeetingIdx: index("proximas_acoes_owner_meeting_idx").on(table.ownerId, table.meetingId),
+  ownerContactIdx: index("proximas_acoes_owner_contact_idx").on(table.ownerId, table.contactId),
+}));
+
+// A agenda de reuniões da dona (H16a do plano do gravador): a reunião marcada
+// para depois, com o convite por WhatsApp e por e-mail aberto no app da própria
+// dona e o .ics feito no navegador. Só a dona lê e escreve: owner_id no WHERE de
+// tudo (server/agenda-de-reunioes.ts). A gravação só nasce quando ela toca em
+// "Gravar agora"; aqui fica só o ponteiro (meeting_id), que a exclusão da
+// reunião volta a nulo.
+export const agendaReunioes = mysqlTable("agenda_reunioes", {
+  id:              varchar("id", { length: 36 }).primaryKey(),
+  ownerId:         varchar("owner_id", { length: 128 }).notNull(),
+  titulo:          varchar("titulo", { length: 200 }).notNull(),
+  // O início em UTC (ms) e a duração em minutos. O fuso (IANA, como
+  // "America/Sao_Paulo") é o do aparelho de quem marcou: o convite diz a hora
+  // como ela marcou, com o nome do fuso.
+  inicioEm:        bigint("inicio_em", { mode: "number" }).notNull(),
+  duracaoMinutos:  int("duracao_minutos").notNull(),
+  fuso:            varchar("fuso", { length: 64 }).notNull(),
+  // O endereço ou o link da chamada (Meet, Zoom, Teams), como a dona escreveu.
+  local:           varchar("local", { length: 500 }),
+  // Quem vai: o nome e o e-mail, cada um opcional, nunca os dois vazios. É dado
+  // de terceiros na base particular da dona, como os contatos: sai com a conta
+  // dela (server/exclusao-de-conta.ts).
+  participantes:   jsonCompat("participantes").$type<Array<{ nome: string | null; email: string | null }>>().notNull(),
+  // Minutos antes do início; nulo é sem lembrete. Vai no .ics (VALARM).
+  lembreteMinutos: int("lembrete_minutos"),
+  // A gravação feita pelo "Gravar agora". Nulo enquanto ninguém gravou; a
+  // exclusão da reunião volta a nulo (deletePrivateMeeting).
+  meetingId:       varchar("meeting_id", { length: 36 }),
+  // A reunião na Google Agenda conectada da dona (H16c do plano do gravador).
+  // Nulo enquanto ela nunca foi mandada para lá (a dona não tinha a Google
+  // Agenda conectada), e de novo quando a conta Google sai ou muda: o estado é
+  // da conta conectada (server/google-agenda.ts). A reunião que já acabou não é
+  // criada lá e fica nula. "pendente" do momento em que o banco gravou até a Google
+  // responder; "ok" quando a Google tem a versão que está aqui; "falhou" quando
+  // não tem, e a tela mostra "Tentar de novo". O id do evento lá é o id daqui
+  // sem os hífens (server/google-agenda-eventos.ts): não há coluna para ele.
+  // Enum só no TypeScript, como em google_agenda_conexoes.falha.
+  google:          varchar("google", { length: 16, enum: ["pendente", "ok", "falhou"] }),
+  // "A Google manda o convite pela sua conta": só com ela marcada os
+  // participantes com e-mail entram no evento como convidados, e a Google manda
+  // o convite (e os avisos de mudança e de cancelamento) pela conta da dona.
+  // Falso por padrão: o evento fica só na agenda dela, sem convidados, e a WRW
+  // não faz a Google mostrar nem mandar nada a terceiros sem ela marcar.
+  googleConvites:  boolean("google_convites").default(false).notNull(),
+  createdAt:       bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:       bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // A tela lê a agenda da dona pela data.
+  ownerInicioIdx: index("agenda_reunioes_owner_inicio_idx").on(table.ownerId, table.inicioEm),
+  // Uma gravação liga a uma reunião da agenda só; o MySQL aceita vários nulos.
+  meetingUnique:  uniqueIndex("agenda_reunioes_meeting_unique").on(table.meetingId),
+}));
+
+// A conta Google que a dona conectou para a Google Agenda (H16b do plano do
+// gravador), por OAuth com PKCE e sem biblioteca (server/google-oauth.ts). Só o
+// refresh token fica no banco, cifrado com a VAULT_ENCRYPTION_KEY (encryptData,
+// server/security.ts); o token de acesso vive só na memória do processo, menos
+// de 1 hora. Uma conexão por conta: reconectar troca a linha. A Google revoga
+// por conta Google e projeto, não por token, então o token anterior só é
+// revogado quando a conta Google mudou e nenhuma outra conexão usa a anterior.
+// Desconectar e excluir a conta revogam o token (menos quando outra conta da
+// WRW usa a mesma conta Google) e apagam a linha (server/google-agenda.ts e
+// server/exclusao-de-conta.ts).
+export const googleAgendaConexoes = mysqlTable("google_agenda_conexoes", {
+  id:                  varchar("id", { length: 36 }).primaryKey(),
+  userId:              int("userId").notNull(),
+  // O `sub` do id_token: o id da conta Google, que nunca muda nem é reusado (o
+  // e-mail pode mudar). Duas linhas com o mesmo sub dividem a mesma
+  // autorização na Google: revogar o token de uma derruba a outra. É por ele
+  // que a WRW decide se pode revogar.
+  googleSub:           varchar("google_sub", { length: 255 }).notNull(),
+  // O e-mail da conta Google, tirado do id_token, só para a dona saber qual
+  // conta está ligada. Nulo quando a Google não o manda.
+  emailGoogle:         varchar("email_google", { length: 320 }),
+  // "iv:authTag:dados", o formato de encryptData. Nunca vai à tela nem ao log.
+  refreshTokenCifrado: text("refresh_token_cifrado").notNull(),
+  // Os escopos que a Google devolveu na troca do código, separados por espaço.
+  escopos:             varchar("escopos", { length: 1000 }).notNull(),
+  // Nulo enquanto a conexão vale. "revogada" quando ela parou de funcionar: a
+  // Google recusou o refresh token (invalid_grant) ou ele não se decifra mais.
+  // A tela pede "Reconectar". Enum só no TypeScript, como em chaves_de_acesso.
+  falha:               varchar("falha", { length: 32, enum: ["revogada"] }),
+  createdAt:           bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:           bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma conexão por conta: o reconectar é INSERT ... ON DUPLICATE KEY UPDATE.
+  userUnique: uniqueIndex("google_agenda_conexoes_user_unique").on(table.userId),
+  // Antes de revogar, a WRW procura outra conexão com a mesma conta Google.
+  // Não é único: duas contas da WRW podem ligar a mesma conta Google.
+  subIdx: index("google_agenda_conexoes_sub_idx").on(table.googleSub),
+}));
+
+// Os lembretes no sino (H15 do plano do gravador): o da próxima ação com prazo
+// (H5a) e o da reunião da agenda com lembrete (H16a). Uma linha por origem,
+// escrita junto com ela (server/lembretes.ts): marcar o prazo ou a hora agenda,
+// mudar reagenda, apagar a origem apaga o lembrete. O laço do servidor reserva
+// os que venceram por token, a cada 60 s, e grava o aviso no sino e a marca de
+// disparado na mesma transação. O texto não fica aqui: no disparo, o laço lê a
+// origem (e troca os rótulos de voz pelos nomes). Varchar com o enum só no
+// TypeScript, como em network_sugestoes.
+export const lembretes = mysqlTable("lembretes", {
+  id:          varchar("id", { length: 36 }).primaryKey(),
+  ownerId:     varchar("owner_id", { length: 128 }).notNull(),
+  // De onde vem: a próxima ação ('acao', proximas_acoes.id) ou a reunião da
+  // agenda ('agenda', agenda_reunioes.id).
+  origem:      varchar("origem", { length: 8, enum: ["acao", "agenda"] }).notNull(),
+  origemId:    varchar("origem_id", { length: 36 }).notNull(),
+  // Quando avisar e até quando o aviso ainda serve (o dia do prazo passou, a
+  // reunião acabou): vencido, sai sem aviso. Em ms UTC.
+  dispararEm:  bigint("disparar_em", { mode: "number" }).notNull(),
+  expiraEm:    bigint("expira_em", { mode: "number" }).notNull(),
+  // A marca: o aviso desta hora já saiu (ou venceu sem sair). Reagendar para
+  // outra hora a zera; a mesma hora, não, para o aviso não sair duas vezes.
+  disparadoEm: bigint("disparado_em", { mode: "number" }),
+  lockToken:   varchar("lock_token", { length: 36 }),
+  lockedUntil: bigint("locked_until", { mode: "number" }),
+  createdAt:   bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:   bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Um lembrete por origem: agendar de novo, ou duas abas ao mesmo tempo, não duplica.
+  ownerOrigemUnique: uniqueIndex("lembretes_owner_origem_unique").on(table.ownerId, table.origem, table.origemId),
+  // O laço: os que ainda não saíram, pela hora; e os que ele reservou, pelo token.
+  disparoIdx: index("lembretes_disparo_idx").on(table.disparadoEm, table.dispararEm),
+  lockIdx: index("lembretes_lock_idx").on(table.lockToken),
+}));
+
+// A tradução do resumo guardado (H11) para o idioma de quem lê: o resumo é
+// escrito no idioma da reunião, e a IA o traduz em segundo plano quando alguém
+// o lê em outro idioma. Uma linha por dona, reunião e idioma. O conteúdo vai
+// por id de item, com a impressão digital do texto de que saiu, mais os
+// rótulos do mapa mental (H10): item novo ou editado não acha a tradução e é
+// traduzido de novo, e a tradução de outra versão do resumo não vale. O trecho
+// nunca é traduzido (é a prova, no idioma original), e os rótulos de voz
+// ({F2}) vão como estão: a tela é que os troca pelo nome.
+export const meetingSummaryTranslations = mysqlTable("meeting_summary_translations", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  // O resumo de que a tradução saiu: reprocessar a reunião cria outro.
+  summaryId: varchar("summary_id", { length: 36 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  language: varchar("language", { length: 12 }).notNull(),
+  // A versão do resumo (meeting_summaries.version) de que a tradução saiu.
+  sourceVersion: int("source_version").notNull(),
+  // { itens: { [id do item]: { h, subject, text, due } }, mapa: { [rótulo]: tradução } }
+  content: jsonCompat("content").notNull(),
+  // O id do modelo de IA que traduziu.
+  model: varchar("model", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerMeetingLanguageIdx: uniqueIndex("meeting_summary_translations_owner_meeting_language_idx").on(table.ownerId, table.meetingId, table.language),
 }));
 
 // ============================================================
@@ -1271,12 +1688,19 @@ export const networkSugestoes = mysqlTable("network_sugestoes", {
   meetingId:           varchar("meeting_id", { length: 36 }),
   meetingSuggestionId: varchar("meeting_suggestion_id", { length: 36 }),
   origem:              varchar("origem", { length: 10, enum: ["reuniao", "voz", "texto"] }).notNull(),
-  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso"] }).notNull(),
+  // cargo e empresa: o apoio da pessoa da reunião, que criar ou vincular não grava sozinho (achado 6 da bancada de 16/11).
+  campo:               varchar("campo", { length: 12, enum: ["nome", "telefone", "email", "tipo_pessoa", "tenho", "preciso", "cargo", "empresa"] }).notNull(),
   valor:               varchar("valor", { length: 320 }).notNull(),
   categoria:           varchar("categoria", { length: 120 }),
   trecho:              text("trecho"),
   confianca:           decimal("confianca", { precision: 4, scale: 3 }).default("0.000").notNull(),
   status:              varchar("status", { length: 12, enum: ["pendente", "confirmada", "ignorada"] }).default("pendente").notNull(),
+  // Para onde o item vai quando a dona confirma (N5): o CONTATO (contact_id,
+  // como sempre) ou o PERFIL da própria dona, quando ela disse "Sou eu" na
+  // reunião (só "tenho" e "preciso"; contact_id fica nulo). A linha
+  // confirmada guarda a origem do item (reunião, trecho e valor): os itens
+  // não ganham coluna. Varchar com o enum só no TypeScript, como em origem.
+  alvo:                varchar("alvo", { length: 8, enum: ["contato", "perfil"] }).default("contato").notNull(),
   decididaEm:          bigint("decidida_em", { mode: "number" }),
   createdAt:           bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:           bigint("updated_at", { mode: "number" }).notNull(),

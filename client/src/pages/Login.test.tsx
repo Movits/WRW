@@ -17,7 +17,14 @@ type Opcoes = {
   onError: (erro: { message: string }) => void;
 };
 
-const duble = vi.hoisted(() => ({ opcoes: null as unknown as Opcoes, mutate: vi.fn() }));
+type Sessao = { user: { onboardingCompleted: boolean } | null; loading: boolean };
+
+const duble = vi.hoisted(() => ({
+  opcoes: null as unknown as Opcoes,
+  mutate: vi.fn(),
+  navigate: vi.fn(),
+  sessao: { user: null, loading: false } as Sessao,
+}));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -29,10 +36,24 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
     },
+    // As chaves de acesso (A7) ficam desligadas aqui: os casos delas estão em
+    // Login.chaves-de-acesso.test.tsx.
+    chavesDeAcesso: {
+      estado: { useQuery: () => ({ data: { disponivel: false } }) },
+      opcoesDeEntrada: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      entrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      opcoesDeCadastro: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      cadastrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    },
   },
 }));
-vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+vi.mock("wouter", () => ({
+  Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useLocation: () => ["/login", duble.navigate],
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// O hook de verdade fala com o tRPC (auth.me); aqui ele devolve a sessão que cada caso pede.
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => duble.sessao }));
 
 import Login from "./Login";
 
@@ -45,6 +66,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   destino = { href: "" };
   vi.stubGlobal("location", destino);
+  duble.sessao = { user: null, loading: false };
+  duble.navigate.mockClear();
 });
 
 afterEach(async () => {
@@ -131,5 +154,91 @@ describe("Login — saudação do primeiro acesso", () => {
       expect(texto, idioma).toContain("ANA");
     }
     expect(primeira, idioma).not.toBe(devolta);
+  });
+});
+
+/**
+ * Pedido do Roberto em 10/11/2026: quem já entrou não digita e-mail e senha
+ * de novo. Com a sessão viva (auth.me devolve a usuária), o /login segue
+ * direto para o destino que o login daria, sem mostrar o formulário.
+ */
+describe("Login — quem já está logada não vê o formulário", () => {
+  it("cadastro concluído: segue ao gravador, trocando a entrada do histórico", () => {
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    const { container } = render(<Login />);
+    expect(duble.navigate).toHaveBeenCalledWith("/gravar", { replace: true });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("com ?voltar= seguro, segue à tela que pediu", () => {
+    vi.stubGlobal("location", { href: "", search: "?voltar=%2Fnetwork" });
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    render(<Login />);
+    expect(duble.navigate).toHaveBeenCalledWith("/network", { replace: true });
+  });
+
+  // Pendência da validação da #179: o caminho de quem já está logada só tinha o
+  // ?voltar= seguro. Endereço de fora, barra dupla, barra invertida e a própria
+  // tela de entrada são ignorados, e a pessoa segue ao gravador.
+  it.each([
+    "?voltar=https%3A%2F%2Fexemplo.com",
+    "?voltar=%2F%2Fexemplo.com",
+    "?voltar=%2F%5Cexemplo.com",
+    "?voltar=%2F..%2F%2Fexemplo.com",
+    "?voltar=%2Flogin",
+  ])("com ?voltar= inseguro ou de tela de entrada (%s), ignora e segue ao gravador", search => {
+    vi.stubGlobal("location", { href: "", search });
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    render(<Login />);
+    expect(duble.navigate).toHaveBeenCalledWith("/gravar", { replace: true });
+  });
+
+  it("cadastro por concluir: segue ao /onboarding", () => {
+    duble.sessao = { user: { onboardingCompleted: false }, loading: false };
+    render(<Login />);
+    expect(duble.navigate).toHaveBeenCalledWith("/onboarding", { replace: true });
+  });
+
+  it("enquanto confere a sessão, não pisca o formulário nem navega", () => {
+    duble.sessao = { user: null, loading: true };
+    const { container } = render(<Login />);
+    expect(container).toBeEmptyDOMElement();
+    expect(duble.navigate).not.toHaveBeenCalled();
+  });
+
+  it("sem sessão, mostra o formulário e fica no /login", () => {
+    const { container } = render(<Login />);
+    expect(container.querySelector("input[type=email]")).not.toBeNull();
+    expect(duble.navigate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Revisão da PR #179: o cadastro e a redefinição de senha mandam ao login
+ * ("agora faça login"). Num aparelho com OUTRA conta logada, seguir sozinho
+ * levava quem acabou de criar a conta para dentro da conta alheia. Eles mandam
+ * a `LOGIN_COM_FORMULARIO` (`/login?entrar=1`), e aí o formulário aparece.
+ */
+describe("Login — ?entrar mostra o formulário mesmo com sessão viva", () => {
+  it("com outra conta logada e ?entrar=1: formulário, sem seguir adiante", () => {
+    vi.stubGlobal("location", { href: "", search: "?entrar=1" });
+    duble.sessao = { user: { onboardingCompleted: true }, loading: false };
+    const { container } = render(<Login />);
+    expect(container.querySelector("input[type=email]")).not.toBeNull();
+    expect(duble.navigate).not.toHaveBeenCalled();
+  });
+
+  it("com ?entrar=1, o formulário não espera a sessão carregar", () => {
+    vi.stubGlobal("location", { href: "", search: "?entrar=1" });
+    duble.sessao = { user: null, loading: true };
+    const { container } = render(<Login />);
+    expect(container.querySelector("input[type=email]")).not.toBeNull();
+  });
+
+  it("o endereço que o cadastro e a redefinição usam é o /login com ?entrar", async () => {
+    const { LOGIN_COM_FORMULARIO } = await import("@/lib/caminho-de-volta");
+    const url = new URL(LOGIN_COM_FORMULARIO, "https://wrw.invalid");
+    expect(url.pathname).toBe("/login");
+    expect(url.searchParams.has("entrar")).toBe(true);
   });
 });

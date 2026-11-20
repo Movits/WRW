@@ -1,0 +1,349 @@
+import { createHash } from "node:crypto";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import i18n, { CODIGOS } from "@/i18n";
+import { VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
+import { CompartilharReuniao, enderecoDoLinkAberto, linkDoEmail, linkDoWhatsApp } from "./CompartilharReuniao";
+
+/**
+ * O painel "Compartilhar por link" no detalhe da reunião (pedido do Roberto em
+ * 12/11/2026): ligar pede a confirmação de que as pessoas autorizaram, a caixa
+ * que fala dos nomes das vozes (versão 2, H3b); ligado, o link sai por cópia,
+ * WhatsApp e e-mail, e o link da caixa antiga avisa a dona que tem nomes;
+ * desligar pede confirmação. O tRPC é um dublê que registra o mutate e as
+ * opções, no molde de Meetings.test.tsx; o que o servidor faz está em
+ * server/reuniao-aberta-rota.test.ts.
+ */
+
+type Opcoes = { onSuccess?: (data: unknown) => void; onError?: (erro: unknown) => void };
+
+const duble = vi.hoisted(() => {
+  const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn> }> = {};
+  const registrar = (nome: string) => ({
+    useMutation: (opcoes: Opcoes = {}) => {
+      const m = (mutacoes[nome] ??= { opcoes, mutate: vi.fn() });
+      m.opcoes = opcoes;
+      return { mutate: m.mutate, isPending: false };
+    },
+  });
+  return { mutacoes, registrar, setData: vi.fn(), invalidate: vi.fn() };
+});
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }));
+vi.mock("@/lib/trpc", () => ({
+  trpc: {
+    useUtils: () => ({ meetings: { get: { setData: duble.setData, invalidate: duble.invalidate } } }),
+    meetings: {
+      ligarLinkAberto: duble.registrar("ligar"),
+      desligarLinkAberto: duble.registrar("desligar"),
+    },
+  },
+}));
+
+const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+const erroDoServidor = (code: string, message = "frase do servidor") => Object.assign(new Error(message), { data: { code } });
+
+beforeEach(() => {
+  for (const m of Object.values(duble.mutacoes)) m.mutate.mockReset();
+  duble.setData.mockReset();
+  duble.invalidate.mockReset();
+  vi.mocked(toast.success).mockReset();
+  vi.mocked(toast.error).mockReset();
+  vi.mocked(toast.message).mockReset();
+});
+// O jsdom não tem área de transferência: cada teste põe a sua e tira no fim.
+const porAreaDeTransferencia = (writeText: (texto: string) => Promise<void>) =>
+  Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText } });
+afterEach(() => { Reflect.deleteProperty(window.navigator, "clipboard"); });
+
+describe("os endereços que o painel monta", () => {
+  it("o link é o domínio em que a dona está mais /r/{token}", () => {
+    expect(enderecoDoLinkAberto(TOKEN, "https://wrwglobal.org")).toBe(`https://wrwglobal.org/r/${TOKEN}`);
+    expect(enderecoDoLinkAberto(TOKEN)).toBe(`${window.location.origin}/r/${TOKEN}`);
+  });
+
+  it("WhatsApp e e-mail levam a mensagem inteira codificada: & ? # e quebra de linha não cortam o texto", () => {
+    const mensagem = "Reunião “Vinho & café? #1”\nhttps://wrwglobal.org/r/x";
+    const whatsapp = new URL(linkDoWhatsApp(mensagem));
+    expect(whatsapp.origin).toBe("https://wa.me");
+    expect(whatsapp.searchParams.get("text")).toBe(mensagem);
+    const email = linkDoEmail("Assunto & tal?", mensagem);
+    expect(email.startsWith("mailto:?subject=")).toBe(true);
+    // Sem destinatário: quem escolhe é a dona, no app de e-mail dela.
+    const parametros = new URLSearchParams(email.slice("mailto:?".length));
+    expect(parametros.get("subject")).toBe("Assunto & tal?");
+    expect(parametros.get("body")).toBe(mensagem);
+  });
+});
+
+describe("sem link: ligar pede a confirmação de que as pessoas autorizaram", () => {
+  it("o botão Criar link só aparece depois de Compartilhar e só funciona com a caixa marcada", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={null}/>);
+    expect(screen.getByRole("heading", { name: "Compartilhar por link" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Criar link/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    const criar = screen.getByRole("button", { name: /Criar link/ });
+    expect(criar).toBeDisabled();
+    fireEvent.click(criar);
+    expect(duble.mutacoes.ligar.mutate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /com os nomes que eu der às vozes/ }));
+    expect(criar).toBeEnabled();
+    fireEvent.click(criar);
+    // A prova leva a frase que a dona viu, o idioma da tela dela e a versão da
+    // caixa: a 2 fala dos nomes das vozes, e só com ela o link os mostra (H3b).
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith({
+      meetingId: ID,
+      autorizacaoDasPessoas: true,
+      idioma: "pt-BR",
+      textoExibido: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram que quem receber o link ouça a gravação e leia a transcrição, com os nomes que eu der às vozes.",
+      versaoDaAutorizacao: 2,
+    });
+  });
+
+  it("a caixa vai com a frase e o idioma da tela de quem confirma: em inglês, a frase em inglês, com a mesma versão", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    try {
+      render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+      fireEvent.click(screen.getByRole("button", { name: /Share/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /with the names I give the voices/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Create link/ }));
+      expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith(expect.objectContaining({
+        idioma: "en",
+        textoExibido: "I confirm that everyone who spoke in this meeting agreed that whoever receives the link may listen to the recording and read the transcript, with the names I give the voices.",
+        versaoDaAutorizacao: 2,
+      }));
+    } finally {
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
+  });
+
+  it("antes de ligar, o painel diz que quem tem o link vê os nomes que a dona der às vozes", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByText(/Os nomes que você der às vozes aparecem para quem tem o link/)).toBeInTheDocument();
+  });
+
+  it("Cancelar volta ao começo e desmarca a caixa", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("ligado no servidor, o token entra na tela na hora, já mostrando os nomes, e a reunião é relida", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    act(() => duble.mutacoes.ligar.opcoes.onSuccess?.({ token: TOKEN }));
+    expect(duble.setData).toHaveBeenCalledWith({ meetingId: ID }, expect.any(Function));
+    const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
+    // Este painel liga sempre com a caixa que fala dos nomes: o link novo os mostra.
+    expect(atualizar({ meeting: { id: ID, shareToken: null, linkMostraNomes: false }, transcript: null }))
+      .toEqual({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true }, transcript: null });
+    expect(atualizar(undefined)).toBeUndefined();
+    expect(duble.invalidate).toHaveBeenCalledWith({ meetingId: ID });
+  });
+
+  it("recusa do servidor vira frase traduzida, não a do servidor", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    act(() => duble.mutacoes.ligar.opcoes.onError?.(erroDoServidor("PRECONDITION_FAILED")));
+    expect(toast.error).toHaveBeenCalledWith("Só dá para compartilhar uma reunião pronta.");
+    act(() => duble.mutacoes.ligar.opcoes.onError?.(erroDoServidor("BAD_REQUEST")));
+    expect(toast.error).toHaveBeenLastCalledWith("Não foi possível mudar o compartilhamento. Tente de novo.");
+  });
+});
+
+/**
+ * A frase da caixa nos 10 idiomas (H3b). A tela manda a versão 2 seja qual for
+ * o idioma de quem confirma, e só a versão 2 abre os nomes das vozes pelo link:
+ * em todo idioma, a frase marcada tem de ser a que fala dos nomes. O
+ * conferir-locales só confere as chaves, e os testes acima só leem pt-BR e en;
+ * um conflito de JSON resolvido para o lado errado, ou uma revisão que tire os
+ * nomes de um idioma, passaria em silêncio. O sha256 é o mesmo `textoHash` que
+ * a auditoria grava ao ligar o link.
+ */
+describe("a frase da caixa nos 10 idiomas, com a versão que ela grava (H3b)", () => {
+  // As frases de 12/11/2026, que não falavam dos nomes: as da versão 1.
+  const SHA256_DA_FRASE_DE_12_11: Record<string, string> = {
+    "pt-BR": "80ff7ceb97a05f379d15b7a9cb1679a7ae2fcfc68a2fd1d62b7e80e79b4ffcc7",
+    en: "5934e5107b998f63a6cdd608cceff826cd910447e442e4a811618b8de13b0d02",
+    es: "2d6582aabf5d6c8d048c39cda7abe11ef3731a8d12d341625b656fe05b7d5e5e",
+    fr: "4100a1954345d545d13cd6b9ce2d0b383cc3a52546e7049833d3ec3df584c491",
+    de: "e7707b42cc0a72901c48b41fe46c0f5d48427b2a29c8a5313c8253228d3478f0",
+    ru: "8a9654ff26172134ea7a0c74b7d64acfa57bb0eabf157b5a3eb6db902919e162",
+    hi: "deb8a46a89ae28c1a8f92e90f1dabb90458870b9fa2a85763052746dd509886f",
+    ar: "9a8bacc2f06a740c0723292f5072ad5a6506ab8c1d67800be54c6426d6ccd8df",
+    zh: "a60d9e54523c332eef06b0bda88904f5605b4c645f0118234b0e6f382034356b",
+    ja: "70f8e36f72bcf6a7e43c3f20daa48a93f5caf00d965eb775544e03d4aea756bd",
+  };
+  // As frases da versão 2, que falam dos nomes que a dona der às vozes. Mudou a
+  // frase de algum idioma (a revisão da Cris, por exemplo)? Decida antes se
+  // VERSAO_DA_AUTORIZACAO_COM_NOMES sobe, porque os links ligados com a frase
+  // anterior seguem mostrando os nomes; só então troque o hash aqui.
+  const SHA256_DA_VERSAO_2: Record<string, string> = {
+    "pt-BR": "da77276a96d51cf1ba34f23ccdc50f602323793d0a1d1aed4d32bc340546b7c9",
+    en: "af90b43ef3ca0a90fd97aecb9eceda793aa2330f485ff7f8c4c9fd66dd8e8d30",
+    es: "6017e9d59a278904aef5b1e7841de4ae2dcfdc20d1334855bbd237b3a71b3147",
+    fr: "f170c383af9ca82ddc2a746d719b0302a0ac756e721283e459a2a5c3ece06d39",
+    de: "3bb0e1e5b50470bd78666541c1f3efc9a2f67029bdc0b79c66604533916d4b80",
+    ru: "f7e1091a34348c9e1dce2592066fca4aed0f98974781f0e284fbb8e0b8969f77",
+    hi: "9fba46552a0eeb7b0f2b6a3a3d8e55ad3076180cc9f0056a0e318f72f39caad9",
+    ar: "07e94fdf3dc5b9fcb26fffe3552b05bc53e486b92f13de79ef11c9afefdcd10c",
+    zh: "fbd46c449dea8d95d459c2aa69cb50ae5014b08c52f3f95ae15b18d9dfa8eca8",
+    ja: "644af344d1d59e9ebdff35937711fb142504f1625c9718390d953c3e6478b6b6",
+  };
+  const sha256 = (texto: string) => createHash("sha256").update(texto).digest("hex");
+
+  it("as duas listas cobrem os 10 idiomas da tela", () => {
+    expect(Object.keys(SHA256_DA_FRASE_DE_12_11).sort()).toEqual([...CODIGOS].sort());
+    expect(Object.keys(SHA256_DA_VERSAO_2).sort()).toEqual([...CODIGOS].sort());
+  });
+
+  it.each(CODIGOS)("%s: a dona marca a frase da versão 2, e ela vai para a prova com a versão 2, nunca a frase de 12/11", async idioma => {
+    await act(async () => { await i18n.changeLanguage(idioma); });
+    try {
+      render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.button") }));
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.createButton") }));
+      expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledTimes(1);
+      const { idioma: idiomaDaProva, textoExibido, versaoDaAutorizacao } = duble.mutacoes.ligar.mutate.mock.calls[0][0];
+      expect(idiomaDaProva).toBe(idioma);
+      expect(versaoDaAutorizacao).toBe(VERSAO_DA_AUTORIZACAO_COM_NOMES);
+      // A caixa marcada mostra a mesma frase que vai para a prova.
+      expect(screen.getByRole("checkbox", { name: textoExibido })).toBeChecked();
+      expect(sha256(textoExibido), `${idioma}: voltou a frase de 12/11, que não fala dos nomes`).not.toBe(SHA256_DA_FRASE_DE_12_11[idioma]);
+      expect(sha256(textoExibido), `${idioma}: mudou a frase? decida se VERSAO_DA_AUTORIZACAO_COM_NOMES sobe`).toBe(SHA256_DA_VERSAO_2[idioma]);
+    } finally {
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
+  });
+});
+
+describe("com link: copiar, WhatsApp, e-mail e desligar", () => {
+  const endereco = `${window.location.origin}/r/${TOKEN}`;
+
+  it("mostra o endereço, e WhatsApp e e-mail levam o título e o link", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN}/>);
+    expect(screen.getByRole("heading", { name: "Compartilhada por link" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveValue(endereco);
+    const mensagem = `Reunião “Reunião com a Ana” na WRW: ${endereco}`;
+    const whatsapp = screen.getByRole("link", { name: /WhatsApp/ });
+    expect(new URL(whatsapp.getAttribute("href")!).searchParams.get("text")).toBe(mensagem);
+    expect(whatsapp).toHaveAttribute("target", "_blank");
+    expect(whatsapp).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    const email = screen.getByRole("link", { name: /E-mail/ }).getAttribute("href")!;
+    const parametros = new URLSearchParams(email.slice("mailto:?".length));
+    expect(parametros.get("subject")).toBe("Reunião “Reunião com a Ana” na WRW");
+    expect(parametros.get("body")).toBe(mensagem);
+  });
+
+  it("copiar põe o endereço na área de transferência e avisa", async () => {
+    const writeText = vi.fn(async () => {});
+    porAreaDeTransferencia(writeText);
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Copiar link/ })); });
+    expect(writeText).toHaveBeenCalledWith(endereco);
+    expect(toast.success).toHaveBeenCalledWith("Link copiado.");
+  });
+
+  it("sem área de transferência, o endereço fica selecionado no campo e a tela diz para copiar dali", async () => {
+    porAreaDeTransferencia(vi.fn(async () => { throw new Error("sem permissão"); }));
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    const campo = screen.getByRole("textbox", { name: "Link da reunião" }) as HTMLInputElement;
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Copiar link/ })); });
+    expect(toast.message).toHaveBeenCalledWith(expect.stringContaining("copie por ali"));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(campo.selectionStart).toBe(0);
+    expect(campo.selectionEnd).toBe(endereco.length);
+  });
+
+  it("desligar pede confirmação; Manter não chama o servidor", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    expect(screen.getByText(/deixa de abrir a reunião na hora/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Manter" }));
+    expect(duble.mutacoes.desligar.mutate).not.toHaveBeenCalled();
+    expect(screen.queryByText(/deixa de abrir a reunião na hora/)).not.toBeInTheDocument();
+  });
+
+  it("confirmado, desliga a reunião certa, tira o token da tela e avisa", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Desligar" }));
+    expect(duble.mutacoes.desligar.mutate).toHaveBeenCalledWith({ meetingId: ID });
+    act(() => duble.mutacoes.desligar.opcoes.onSuccess?.(undefined));
+    const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
+    expect(atualizar({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true } })).toEqual({ meeting: { id: ID, shareToken: null, linkMostraNomes: false } });
+    expect(toast.success).toHaveBeenCalledWith("Link desligado.");
+  });
+});
+
+describe("com link da confirmação antiga: o aviso de que os nomes não aparecem (H3b)", () => {
+  const AVISO = /não vê os nomes que você deu às vozes/;
+
+  it("com nomes dados e o link da caixa antiga, o painel avisa e diz como mostrar os nomes", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} linkMostraNomes={false} temNomes/>);
+    expect(screen.getByText(AVISO)).toHaveTextContent("desligue o link e compartilhe de novo");
+  });
+
+  it.each([
+    ["o link já mostra os nomes", { linkMostraNomes: true, temNomes: true }],
+    ["nenhuma voz tem nome", { linkMostraNomes: false, temNomes: false }],
+  ])("sem aviso quando %s", (_caso, props) => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} {...props}/>);
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("sem link, não há aviso: ligar agora já usa a caixa nova", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null} linkMostraNomes={false} temNomes/>);
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+});
+
+describe("o painel anuncia o que mudou e não perde o foco", () => {
+  it("Compartilhar: o foco vai para a caixa de autorização", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getByRole("checkbox")).toHaveFocus();
+  });
+
+  it("ligado: avisa \"Link criado\" e o foco vai para o campo do link", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    act(() => duble.mutacoes.ligar.opcoes.onSuccess?.({ token: TOKEN }));
+    expect(toast.success).toHaveBeenCalledWith("Link criado.");
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveFocus();
+  });
+
+  it("abrir a reunião que já tem link não rouba o foco", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).not.toHaveFocus();
+  });
+
+  it("desligar: a pergunta abre com o foco em Manter; desligado, o foco volta para Compartilhar", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    const manter = screen.getByRole("button", { name: "Manter" });
+    expect(manter).toHaveFocus();
+    expect(manter).toHaveAccessibleDescription(/deixa de abrir a reunião na hora/);
+    act(() => duble.mutacoes.desligar.opcoes.onSuccess?.(undefined));
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByRole("button", { name: /Compartilhar/ })).toHaveFocus();
+  });
+
+  it("o endereço fica da esquerda para a direita, também numa tela em árabe", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveAttribute("dir", "ltr");
+  });
+});
+
+describe("o que o link mostra do resumo (H4f)", () => {
+  it("antes de ligar, o painel diz que o link mostra o resumo como a dona o deixar, com o que ela escrever, e o mapa mental", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByText("O link mostra também o resumo como você o deixar, com os itens que você escrever ou editar, e o mapa mental.")).toBeInTheDocument();
+  });
+});

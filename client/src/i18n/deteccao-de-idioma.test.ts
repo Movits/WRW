@@ -10,9 +10,8 @@ import { CODIGOS, converterIdiomaDetectado, opcoesBase } from "./index";
  * ["en-US", "pt-BR"] e toda usuária estrangeira recebia português — e o
  * "en-US" ainda ficava gravado no localStorage.
  *
- * Instância própria com os 10 JSONs e as MESMAS opções do app (opcoesBase),
- * molde aviso-de-sessao-plural.test.ts: o que se prova é a resolução de
- * idioma, não a tela.
+ * Instância própria com os 10 JSONs e as MESMAS opções do app (opcoesBase):
+ * o que se prova é a resolução de idioma, não a tela.
  */
 
 async function instancia() {

@@ -41,13 +41,28 @@ export interface SendEmailOptions {
   text?: string;
 }
 
-function escapeHtml(value: string) {
+export function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
   }[character] ?? character));
 }
 
+/**
+ * Destinatário no TLD reservado `.invalid` (RFC 2606): nunca entrega. São as
+ * contas QA do exame de produção (`qa-exame-...@exame.invalid`). Mandar para a
+ * Resend só gera devolução (Bounced, vista em 14/11/2026), e devolução acumulada
+ * pode suspender o domínio remetente, o mesmo do "Esqueci a senha" das usuárias.
+ */
+export function destinatarioNuncaEntrega(to: string): boolean {
+  return /\.invalid\.?$/i.test(to.trim().replace(/>$/, ""));
+}
+
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
+  if (destinatarioNuncaEntrega(options.to)) {
+    // Sem o endereço no log: só o domínio reservado, que não identifica ninguém.
+    console.warn("[Email] Destinatário no domínio reservado .invalid — e-mail não enviado.");
+    return false;
+  }
   const client = getResendClient();
   if (!client) {
     console.warn("[Email] RESEND_API_KEY não configurada — e-mail não enviado.");

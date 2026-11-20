@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import i18n from "@/i18n";
+import { MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
+import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
-import { mensagemDeErroParaTela } from "./mensagem-de-erro";
+import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
+import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
  * O que a tela mostra quando a consulta falha (revisão da PR-A): só a
@@ -60,5 +65,171 @@ describe("mensagemDeErroParaTela — mensagem do servidor ou o genérico traduzi
     expect(mensagemDeErroParaTela(undefined, t)).toBe(GENERICO);
     expect(mensagemDeErroParaTela(null, t)).toBe(GENERICO);
     expect(mensagemDeErroParaTela("Failed to fetch", t)).toBe(GENERICO);
+  });
+});
+
+// O 429 do limite geral da API (responderLimite) chega no envelope, com a frase
+// do servidor em português. Antes ela saía em português nos dez idiomas.
+describe("mensagemDeErroParaTela — a frase do limite da API no idioma da tela", () => {
+  const limite = () =>
+    TRPCClientError.from({ error: { code: -32029, message: MENSAGEM_DO_LIMITE, data: { code: "TOO_MANY_REQUESTS", httpStatus: 429 } } });
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("em português é a frase do servidor, caractere a caractere", () => {
+    expect(i18n.t("errors.tooManyRequests")).toBe(MENSAGEM_DO_LIMITE);
+    expect(mensagemDeErroParaTela(limite(), chave => i18n.t(chave))).toBe(MENSAGEM_DO_LIMITE);
+  });
+
+  it("em inglês sai traduzida", async () => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(limite(), chave => i18n.t(chave))).toBe("Too many requests in a short time. Wait a few seconds and try again.");
+  });
+});
+
+// As recusas das decisões do resumo guardado (H4c, server/resumo-guardado.ts)
+// chegam no envelope, com a frase do servidor em português, e saem no idioma
+// da tela pela mesma tabela.
+describe("mensagemDeErroParaTela — as recusas do resumo guardado no idioma da tela", () => {
+  const recusa = (codigo: string, mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32009, message: mensagem, data: { code: codigo, httpStatus: 409 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["CONFLICT", MENSAGEM_RESUMO_SENDO_GERADO, "meetings.summary.errorRegenerating", "This meeting's summary is being regenerated. Wait for it to finish before deciding."],
+    ["NOT_FOUND", MENSAGEM_ITEM_NAO_ENCONTRADO, "meetings.summary.errorItemGone", "This summary item no longer exists. Refresh the page."],
+    ["BAD_REQUEST", MENSAGEM_SO_ACAO_TEM_CAIXA, "meetings.summary.errorOnlyActions", "Only the summary's actions have a checkbox."],
+    // O item que a dona acrescenta passaria do teto do resumo (H4f).
+    ["PRECONDITION_FAILED", MENSAGEM_RESUMO_CHEIO, "meetings.summary.errorFull", "This summary has reached the maximum number of items."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (codigo, mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (codigo, mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// As recusas do rascunho de e-mail de retorno (H20, server/email-de-retorno.ts)
+// seguem o mesmo caminho: a frase do servidor em português, traduzida pela tabela.
+describe("mensagemDeErroParaTela — as recusas do e-mail de retorno no idioma da tela", () => {
+  const recusa = (mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: "PRECONDITION_FAILED", httpStatus: 412 } } });
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_EMAIL_SEM_RESUMO_PRONTO, "meetings.followUp.summaryNotReady", "This meeting's summary is not ready. Wait for it to finish to write the email."],
+    [MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, "meetings.followUp.needsConfirmed", "Confirm at least one summary item to write the email."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("'%s': em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("'%s': em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+/**
+ * A parte da gravação em partes que o servidor recusou de vez (G13b): a rota
+ * das partes responde só o código, e a tela avisa a dona no idioma dela. Todo
+ * código do servidor tem aviso traduzido, e nenhum sai cru.
+ */
+describe("mensagemDaRecusaDaParte — o código da recusa vira aviso no idioma da tela", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  const AVISO: Array<[CodigoDaRecusaDaParte, string]> = [
+    ["SEM_REUNIAO", "Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio."],
+    ["FORA_DO_ESTADO", "Um trecho da gravação não foi guardado: a reunião foi excluída ou já não recebe áudio."],
+    ["GRANDE_DEMAIS", "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição."],
+    ["LONGA_DEMAIS", "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição."],
+    ["FORMATO", "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição."],
+    ["SEM_DURACAO", "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição."],
+    ["CONTEUDO_DIFERENTE", "O servidor recusou um trecho da gravação, que ficou de fora da transcrição."],
+    ["POSICAO", "O servidor recusou um trecho da gravação, que ficou de fora da transcrição."],
+  ];
+
+  it.each(AVISO)("%s: o aviso em português, nunca o código", (codigo, aviso) => {
+    expect(mensagemDaRecusaDaParte(codigo, c => i18n.t(c))).toBe(aviso);
+  });
+
+  it.each(AVISO)("%s: em inglês sai traduzido", async (codigo, aviso) => {
+    await i18n.changeLanguage("en");
+    const emIngles = mensagemDaRecusaDaParte(codigo, c => i18n.t(c));
+    expect(emIngles).not.toBe(aviso);
+    expect(emIngles).not.toContain(codigo);
+    expect(emIngles).toMatch(/recording/);
+  });
+
+  it("código desconhecido ou ausente: o aviso genérico, sem o código cru", () => {
+    expect(mensagemDaRecusaDaParte("OUTRA_COISA", t)).toBe("[meetings.partRejected]");
+    expect(mensagemDaRecusaDaParte(undefined, t)).toBe("[meetings.partRejected]");
+    // O que vem do protótipo do objeto não é código da tabela.
+    expect(mensagemDaRecusaDaParte("toString", t)).toBe("[meetings.partRejected]");
+  });
+});
+
+// As recusas do PDF da reunião (H8): a reunião que não está pronta
+// (server/exportar-reuniao.ts) e o teto de exportações (routers/meetings.ts).
+describe("mensagemDeErroParaTela — as recusas do PDF da reunião no idioma da tela", () => {
+  const recusa = (codigo: string, mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: codigo, httpStatus: 412 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["PRECONDITION_FAILED", MENSAGEM_EXPORTAR_SO_PRONTA, "meetings.export.onlyReady", "You can only download the PDF of a meeting that is ready."],
+    ["TOO_MANY_REQUESTS", MENSAGEM_EXPORTACOES_DEMAIS, "meetings.export.tooMany", "Too many PDFs downloaded in a row. Wait a few minutes and try again."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (codigo, mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (codigo, mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// As recusas das próximas ações (H5a, server/proximas-acoes.ts), pela mesma tabela.
+describe("mensagemDeErroParaTela — as recusas das próximas ações no idioma da tela", () => {
+  const recusa = (mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32004, message: mensagem, data: { code: "NOT_FOUND", httpStatus: 404 } } });
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_ACAO_NAO_ENCONTRADA, "proximasAcoes.errorGone", "This next action no longer exists. Refresh the page."],
+    [MENSAGEM_CONTATO_FORA_DA_REDE, "proximasAcoes.errorContactOutside", "This contact isn't in your network."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
   });
 });

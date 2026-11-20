@@ -16,6 +16,8 @@ const duble = vi.hoisted(() => ({ perfil: null as Record<string, unknown> | null
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // N5: o bloco "Sugestões das suas reuniões" (sem nada esperando, não aparece).
+    networkInteligente: { pendenciasDoPerfil: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) } },
     profile: {
       get: { useQuery: () => ({ data: { user: { name: "Ana" }, profile: duble.perfil }, isLoading: false }) },
       update: { useMutation: () => ({ mutate: () => {}, isPending: false }) },
@@ -29,6 +31,9 @@ vi.mock("@/lib/trpc", () => ({
 }));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { name: "Ana", email: "ana@exemplo.com", role: "bronze" } }) }));
 vi.mock("@/components/ExcluirMinhaConta", () => ({ ExcluirMinhaConta: () => null }));
+// A seção da Google Agenda (H16b) tem o teste dela (ConexaoGoogleAgenda.test.tsx).
+vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => null }));
+vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

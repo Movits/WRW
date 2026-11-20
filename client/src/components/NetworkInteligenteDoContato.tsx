@@ -33,6 +33,9 @@ function rotuloDoCampo(t: Traduzir, campo: string) {
     case "tipo_pessoa": return t("networkInteligente.contact.personType");
     case "tenho": return t("networkPanel.fields.tenho");
     case "preciso": return t("networkPanel.fields.preciso");
+    // O apoio da pessoa da reunião, que criar o contato não grava sozinho.
+    case "cargo": return t("networkPanel.fields.cargo");
+    case "empresa": return t("networkPanel.fields.empresa");
     default: return campo;
   }
 }
@@ -193,7 +196,7 @@ function lerComoDataUrl(blob: Blob) {
 }
 
 export function CompletarInformacoes({ contactId }: { contactId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   const [modo, setModo] = useState<"texto" | "voz">("texto");
   const [texto, setTexto] = useState("");
@@ -233,7 +236,7 @@ export function CompletarInformacoes({ contactId }: { contactId: number }) {
     if (!blob.size) return;
     try {
       const audioBase64 = await lerComoDataUrl(blob);
-      porVoz.mutate({ contactId, audioBase64, mimeType, durationSeconds: duracao });
+      porVoz.mutate({ contactId, audioBase64, mimeType, durationSeconds: duracao, idioma: i18n.resolvedLanguage ?? i18n.language });
     } catch {
       toast.error(t("networkInteligente.complete.error"));
     }

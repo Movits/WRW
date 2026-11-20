@@ -4,7 +4,8 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
-import InactivityGuard from "./components/InactivityGuard";
+import { RetomadaDasPartes } from "./components/RetomadaDasPartes";
+import { RetomadaDosDescartes } from "./components/RetomadaDosDescartes";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { PageTransition } from "./components/PageTransition";
 import { PrivacyPage, TermsPage } from "@/pages/LegalPage";
@@ -34,6 +35,9 @@ const Memory = lazy(() => import("./pages/Memory"));
 const IntelligentMatches = lazy(() => import("./pages/IntelligentMatches"));
 const MeuNetworkInteligente = lazy(() => import("./pages/MeuNetworkInteligente"));
 const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork"));
+const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
+const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
+const Agenda = lazy(() => import("./pages/Agenda"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -56,8 +60,10 @@ function PageLoader() {
 }
 
 /**
- * Uma tela autenticada: a guarda de acesso, o corte por inatividade e o
- * cabeçalho com o menu global, montado UMA vez, aqui.
+ * Uma tela autenticada: a guarda de acesso e o cabeçalho com o menu global,
+ * montado UMA vez, aqui. Não há mais corte por inatividade (saiu em 10/11/2026,
+ * pedido do Roberto): a sessão dura 90 dias desde o último uso, e quem decide
+ * quando ela acaba é o servidor (server/duracao-da-sessao.ts).
  *
  * Pedido do Rosber em 14/09/2026: "o ideal é que o menu fique sempre visível na
  * página. Entra em oportunidades: o menu some. Para acessar o menu de novo ele
@@ -73,6 +79,12 @@ function PageLoader() {
  *
  * Exportada só para o teste montá-la sozinha (App.tela-autenticada.test.tsx);
  * quem usa é o Router logo abaixo.
+ *
+ * Aqui também moram as retomadas da gravação em partes: a dos descartes que não
+ * terminaram (G13b, components/RetomadaDosDescartes.tsx) e a das partes que
+ * ficaram no aparelho e dos fins que o servidor não confirmou (G13c,
+ * components/RetomadaDasPartes.tsx). Uma vez por tela logada, no mesmo lugar em
+ * todas, para elas seguirem montadas de uma tela a outra.
  */
 export function TelaAutenticada({
   children,
@@ -88,10 +100,10 @@ export function TelaAutenticada({
 }) {
   return (
     <ProtectedRoute {...guarda}>
-      <InactivityGuard>
-        {!cabecalhoProprio && <AppHeader />}
-        {children}
-      </InactivityGuard>
+      <RetomadaDosDescartes />
+      <RetomadaDasPartes />
+      {!cabecalhoProprio && <AppHeader />}
+      {children}
     </ProtectedRoute>
   );
 }
@@ -113,7 +125,11 @@ function Router() {
         <Route path={"/forgot-password"} component={ForgotPassword} />
         <Route path={"/reset-password"} component={ResetPassword} />
 
-        {/* Rota de onboarding — protegida, mas sem InactivityGuard e, de
+        {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
+            caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
+        <Route path="/r/:token" component={ReuniaoAberta} />
+
+        {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra
             rota protegida devolve a pessoa para cá (ver ProtectedRoute), e um
             menu aqui seria um beco sem saída. */}
@@ -235,9 +251,27 @@ function Router() {
           </TelaAutenticada>
         </Route>
 
+        {/* A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora",
+            que abre o /gravar com a reunião marcada. O caminho é
+            ROTA_DA_AGENDA, de shared/rotas.ts. */}
+        <Route path="/agenda">
+          <TelaAutenticada>
+            <Agenda />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/memory">
           <TelaAutenticada cabecalhoProprio>
             <Memory />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Próximas ações (H5a): o que a dona confirmou nos resumos das reuniões
+            e o que anotou à mão. O caminho é ROTA_DAS_PROXIMAS_ACOES, de
+            shared/proximas-acoes.ts. */}
+        <Route path="/proximas-acoes">
+          <TelaAutenticada>
+            <ProximasAcoes />
           </TelaAutenticada>
         </Route>
 

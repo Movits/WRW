@@ -38,29 +38,38 @@
 //    (`opportunity_documents.fileKey`, `user_profiles.avatarUrl`) não prova
 //    nada: apagar por ela transformaria a exclusão da própria conta numa
 //    exclusão de arquivo alheio. Essas linhas saem do banco e o objeto fica.
-// 6. A linha de uma PARTE do áudio de reunião (meeting_audio_slices) só sai
-//    quando o objeto dela saiu do bucket. Se o bucket recusou, a linha é o único
-//    ponteiro para a voz de quem participou: ela fica, sem a transcrição, com o
-//    prazo vencido e fora da fila (ver `fatiasComAudioNoBucket`). As gravações
-//    inteiras (meeting_recordings) ainda saem do banco mesmo com o objeto no
-//    bucket; a #134 aplica a elas a mesma regra.
+// 6. A linha do ÁUDIO de reunião, a parte (meeting_audio_slices) e a gravação
+//    inteira (meeting_recordings), só sai quando o objeto dela saiu do bucket,
+//    com todas as versões (`storageApagarTodasAsVersoes`: no B2, que guarda
+//    versões, o DELETE simples só esconderia a voz). Se o bucket recusou, a
+//    linha é o único ponteiro para a voz de quem participou: ela fica, com o
+//    prazo vencido e, na parte, sem a transcrição e fora da fila (ver
+//    `audiosQueFicaramNoBucket`). Sem a reunião, a varredura das gravações
+//    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
 import type { exigirDb } from "./db";
-import { chaveDoStorageDaDona } from "./storage";
+import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
+// Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
+import type { RevogacaoNaExclusao } from "./google-agenda";
+import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
+import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  aiMatchSuggestions, auditLogs, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
-  meetingEntities, meetingRecordings, meetingTranscriptTranslations, meetingTranscripts,
-  meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
+  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
   strategicGroups, trustedDevices, userProfiles, users,
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
+  proximasAcoes,
+  googleAgendaConexoes,
 } from "../drizzle/schema";
 
 /**
@@ -91,11 +100,13 @@ export type ChavesDaConta = {
 type Origem = "id" | "openId" | "email" | "oportunidades" | "salas" | "verificacoes";
 
 /**
- * O que só se sabe depois de passar pelo bucket: as partes do áudio de reunião
- * (ids de meeting_audio_slices) cujo objeto NÃO saiu. Essas linhas ficam.
+ * O que só se sabe depois de passar pelo bucket: o áudio de reunião cujo objeto
+ * NÃO saiu, as partes (ids de meeting_audio_slices) e as gravações inteiras
+ * (ids de meeting_recordings). Essas linhas ficam.
  */
 export type ContextoDaExclusao = {
   fatiasQueFicam: string[];
+  gravacoesQueFicam?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -154,6 +165,15 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },
   { tabela: meetingTranscriptTranslations, coluna: meetingTranscriptTranslations.ownerId, origem: "openId" },
   { tabela: meetingTranscripts, coluna: meetingTranscripts.ownerId, origem: "openId" },
+  // As próximas ações (H5a): o que a dona confirmou nos resumos (com o trecho) e o que anotou.
+  { tabela: proximasAcoes, coluna: proximasAcoes.ownerId, origem: "openId" },
+  // Os lembretes no sino (H15): a hora de cada aviso da próxima ação e da agenda.
+  // Os avisos que já saíram estão em platform_notifications, que sai pelo id.
+  { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
+  // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens, que carregam trechos da transcrição.
+  { tabela: meetingSummaryTranslations, coluna: meetingSummaryTranslations.ownerId, origem: "openId" },
+  { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
+  { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {
     tabela: meetingAudioSlices, coluna: meetingAudioSlices.ownerId, origem: "openId",
     filtro: (_chaves, contexto) => (contexto?.fatiasQueFicam.length
@@ -161,7 +181,16 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a parte cujo áudio não saiu do bucket fica, sem a transcrição, como o único ponteiro para o objeto",
   },
-  { tabela: meetingRecordings, coluna: meetingRecordings.ownerId, origem: "openId" },
+  {
+    tabela: meetingRecordings, coluna: meetingRecordings.ownerId, origem: "openId",
+    filtro: (_chaves, contexto) => (contexto?.gravacoesQueFicam?.length
+      ? notInArray(meetingRecordings.id, contexto.gravacoesQueFicam)
+      : undefined),
+    motivo: "a gravação cujo áudio não saiu do bucket fica como o único ponteiro para o objeto",
+  },
+  // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
+  // (nome e e-mail de terceiros) que a dona marcou.
+  { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
@@ -182,6 +211,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
 
   // ── módulo institucional: chave id ────────────────────────────────────────
   { tabela: consents, coluna: consents.userId, origem: "id" },
+  {
+    tabela: googleAgendaConexoes, coluna: googleAgendaConexoes.userId, origem: "id",
+    motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
+  },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
@@ -196,6 +229,11 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: matches, coluna: matches.userId, origem: "id" },
   { tabela: matches, coluna: matches.matchedUserId, origem: "id" },
   { tabela: passwordResetTokens, coluna: passwordResetTokens.userId, origem: "id" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas: a chave pública e
+  // o identificador da conta que o aparelho guarda. O desafio de ENTRADA nasce
+  // sem conta e vence em 5 minutos; sai pelo prazo.
+  { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
+  { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
   { tabela: trustedDevices, coluna: trustedDevices.userId, origem: "id" },
   { tabela: securityEvents, coluna: securityEvents.userId, origem: "id" },
   { tabela: sessions, coluna: sessions.userId, origem: "id" },
@@ -260,6 +298,13 @@ export type RelatorioDeExclusao = {
   arquivosApagados: number;
   arquivosComFalha: string[];
   linhasApagadas: number;
+  /**
+   * A conexão com a Google Agenda (H16b): o token revogado na Google, nenhuma
+   * conexão, a autorização mantida porque outra conta da WRW usa a mesma conta
+   * Google, ou a revogação falhou (a linha sai do banco assim mesmo, e a falha
+   * vai ao log, à auditoria da exclusão e ao aviso da tela).
+   */
+  googleAgenda: RevogacaoNaExclusao | "falhou";
 };
 
 /** Descobre os ids que o plano precisa antes de apagar qualquer coisa. */
@@ -381,24 +426,29 @@ export async function tirarDosGruposAlheios(
 export const MOTIVO_DA_PARTE_QUE_FICOU = "conta excluída; o áudio desta parte não saiu do bucket";
 
 /**
- * As partes do áudio de reunião cujo objeto NÃO saiu do bucket (ids de
- * meeting_audio_slices). Casa pelo ID da linha, não pela chave: a chave de
- * `arquivosComFalha` passou por chaveDoStorageDaDona (sem "/manus-storage/",
- * sem barra no começo), e uma linha com a chave escrita de outro jeito não
- * bateria num filtro pela coluna. Só lê o banco quando algum áudio falhou.
+ * O áudio de reunião cujo objeto NÃO saiu do bucket: os ids das partes
+ * (meeting_audio_slices) e das gravações inteiras (meeting_recordings). Casa
+ * pelo ID da linha, não pela chave: a chave de `arquivosComFalha` passou por
+ * chaveDoStorageDaDona (sem "/manus-storage/", sem barra no começo), e uma
+ * linha com a chave escrita de outro jeito não bateria num filtro pela coluna.
+ * Só lê o banco quando algum áudio falhou.
  */
-async function fatiasComAudioNoBucket(
+async function audiosQueFicaramNoBucket(
   db: Db,
   chaves: ChavesDaConta,
   arquivosComFalha: string[],
-): Promise<string[]> {
+): Promise<{ fatias: string[]; gravacoes: string[] }> {
   const audiosComFalha = new Set(arquivosComFalha.filter(chave => chave.startsWith("meetings/")));
-  if (!audiosComFalha.size) return [];
+  if (!audiosComFalha.size) return { fatias: [], gravacoes: [] };
+  const ficou = (chave: string) => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, chave) ?? "");
   const partes = await db.select({ id: meetingAudioSlices.id, chave: meetingAudioSlices.storageKey })
     .from(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, chaves.openId));
-  return partes
-    .filter(parte => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, parte.chave) ?? ""))
-    .map(parte => parte.id);
+  const gravacoes = await db.select({ id: meetingRecordings.id, chave: meetingRecordings.storageKey })
+    .from(meetingRecordings).where(eq(meetingRecordings.ownerId, chaves.openId));
+  return {
+    fatias: partes.filter(parte => ficou(parte.chave)).map(parte => parte.id),
+    gravacoes: gravacoes.filter(gravacao => ficou(gravacao.chave)).map(gravacao => gravacao.id),
+  };
 }
 
 /**
@@ -423,6 +473,17 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
 }
 
 /**
+ * A gravação inteira que fica guarda só o ponteiro (a linha não tem fala de
+ * ninguém: chave, tipo, tamanho e duração) e vence na hora, para a varredura
+ * tentar o objeto de novo e só então apagar a linha.
+ */
+async function deixarSoOPonteiroDasGravacoes(db: Db, chaves: ChavesDaConta, gravacoesQueFicam: string[]): Promise<number> {
+  const [resultado] = await db.update(meetingRecordings).set({ expiresAt: Date.now() })
+    .where(and(eq(meetingRecordings.ownerId, chaves.openId), inArray(meetingRecordings.id, gravacoesQueFicam)));
+  return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+}
+
+/**
  * Apaga a conta e tudo que é dela. Recebe o `db` por parâmetro para o teste
  * executar a lógica de verdade, sem banco, como `apagarRastroDoContato`.
  *
@@ -430,19 +491,47 @@ async function deixarSoOPonteiro(db: Db, chaves: ChavesDaConta, fatiasQueFicam: 
  * desenvolvimento não há `STORAGE_*`: sem bucket configurado, a exclusão do
  * banco não pode parar. Falha de arquivo nunca aborta o resto — ela volta no
  * relatório, em `arquivosComFalha`, e o chamador é obrigado a contá-la para a
- * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é parte do
- * áudio de uma reunião, a linha dela fica como ponteiro (regra 6 no topo).
+ * dona (ver o bloco sobre o bucket, dentro da função). Se o arquivo é áudio de
+ * reunião (parte ou gravação inteira), a linha dele fica como ponteiro, e a
+ * varredura das gravações tenta de novo (regra 6 no topo).
+ *
+ * `revogarGoogle` é injetável pelo mesmo motivo: revoga na Google o token da
+ * Google Agenda da conta (H16b) antes de a linha dele sair no plano. Falha da
+ * Google também não aborta: vai ao log e ao relatório (`googleAgenda`). Banco
+ * fora do ar aborta, antes de apagar qualquer linha.
  */
 export async function excluirConta(
   db: Db,
   conta: { id: number; openId: string; email: string | null },
-  opcoes: { apagarArquivo?: (chave: string) => Promise<void> } = {},
+  opcoes: {
+    apagarArquivo?: (chave: string) => Promise<void>;
+    revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
+  } = {},
 ): Promise<RelatorioDeExclusao> {
-  // Import tardio do bucket: sem ele, importar este módulo puxaria o SDK da AWS
-  // para dentro do teste, que injeta o próprio apagador e nunca fala com o B2.
-  const apagarArquivo = opcoes.apagarArquivo
-    ?? (async (chave: string) => (await import("./storage")).storageDelete(chave));
+  // O apagador do bucket só é montado quando o teste não injeta o próprio, e
+  // UMA vez, antes do laço que roda vários arquivos ao mesmo tempo (imports
+  // dinâmicos simultâneos de um módulo dublado chegavam a devolver o módulo
+  // real no Vitest). O áudio de reunião (chaves meetings/) sai com todas as
+  // versões; os outros arquivos (fotos, contextos, Sala, SIVC) seguem com o
+  // DELETE simples.
+  const apagarArquivo = opcoes.apagarArquivo ?? await (async () => {
+    const bucket = await import("./storage");
+    return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
+  })();
+  // Import tardio, como o do bucket: o módulo da Google Agenda só entra quando
+  // a exclusão roda de verdade, e o teste injeta o próprio revogador.
+  const revogarGoogle = opcoes.revogarGoogle
+    ?? (async (userId: number) => (await import("./google-agenda")).revogarGoogleDaConta(db, userId));
   const chaves = await lerChavesDaConta(db, conta);
+
+  // As reuniões da conta viram 'deleted' ANTES de ler as chaves, como na
+  // exclusão de uma reunião (deletePrivateMeeting): é o sinal que uma parte
+  // ainda subindo de outro aparelho lê depois do upload (receberParte), para
+  // tirar o próprio objeto em vez de virar 'received' e perder a linha no plano
+  // abaixo, com a voz no bucket; nenhuma parte nova entra numa reunião
+  // 'deleted', e o processamento em curso também para.
+  await db.update(meetings).set({ status: "deleted", updatedAt: Date.now() })
+    .where(eq(meetings.ownerId, chaves.openId));
   const arquivos = await chavesDeArquivosDaConta(db, chaves);
 
   // Os objetos saem ANTES das linhas, porque é aqui que a linha ainda diz onde o
@@ -457,22 +546,27 @@ export async function excluirConta(
   // no log (aqui) e na auditoria (server/routers/conta.ts, que grava o
   // procedimento com status "failure"), e a tela mostra aviso em vez de
   // "excluídos" (client/src/components/ExcluirMinhaConta.tsx).
-  const arquivosComFalha: string[] = [];
-  let arquivosApagados = 0;
-  for (const chave of arquivos) {
+  //
+  // Até CONCORRENCIA_DO_EXPURGO_DO_AUDIO arquivos por vez: a dona espera a
+  // resposta, e cada áudio de reunião custa 4 a 5 chamadas ao bucket (uma conta
+  // com reuniões longas tem centenas de partes). Todos são tentados, e o
+  // relatório segue a ordem de `arquivos`.
+  const tentativas = await comConcorrenciaLimitada(arquivos, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, async chave => {
     try {
       await apagarArquivo(chave);
-      arquivosApagados++;
+      return true;
     } catch (erro) {
-      arquivosComFalha.push(chave);
       console.error(`[ExclusãoDeConta] o bucket recusou apagar um objeto (userId ${conta.id}):`, erro instanceof Error ? erro.message : erro);
+      return false;
     }
-  }
+  });
+  const arquivosComFalha = arquivos.filter((_chave, posicao) => !tentativas[posicao]?.valor);
+  const arquivosApagados = arquivos.length - arquivosComFalha.length;
   if (arquivosComFalha.length) {
     // Uma linha com a LISTA das chaves, e não só a contagem: daqui a pouco as
-    // linhas que citavam esses objetos não existem mais (fora a das partes de
-    // áudio, regra 6), e este log é o único lugar em que ainda está escrito o
-    // que precisa de remoção manual no bucket.
+    // linhas que citavam esses objetos não existem mais (fora as do áudio de
+    // reunião, regra 6, que a varredura retenta), e este log é o único lugar em
+    // que ainda está escrito o que precisa de remoção manual no bucket.
     console.error(
       `[ExclusãoDeConta] ${arquivosComFalha.length} objeto(s) ficaram no bucket e a conta foi apagada assim mesmo (userId ${conta.id}). ` +
       `Precisam de remoção manual: ${arquivosComFalha.join(", ")}`,
@@ -482,13 +576,38 @@ export async function excluirConta(
   const passos: { nome: string; linhas: number }[] = [];
   let linhasApagadas = 0;
 
-  // A parte do áudio cujo objeto ficou no bucket não sai (regra 6 no topo):
-  // fica só como ponteiro, e o passo dela no plano deixa essas linhas de fora.
-  const fatiasQueFicam = await fatiasComAudioNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam };
-  if (fatiasQueFicam.length) {
-    const linhas = await deixarSoOPonteiro(db, chaves, fatiasQueFicam);
+  // O áudio cujo objeto ficou no bucket não sai (regra 6 no topo): a parte e a
+  // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
+  // essas linhas de fora.
+  const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
+  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes };
+  if (ficaram.fatias.length) {
+    const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
+  }
+  if (ficaram.gravacoes.length) {
+    const linhas = await deixarSoOPonteiroDasGravacoes(db, chaves, ficaram.gravacoes);
+    if (linhas > 0) passos.push({ nome: "meeting_recordings (ponteiro, UPDATE)", linhas });
+  }
+
+  // A Google Agenda (H16b) antes do laço, enquanto a linha ainda guarda o
+  // token: depois do passo dela, não há mais o que revogar. Se a Google não
+  // confirmar, a exclusão segue (como no bucket), e a linha sai assim mesmo:
+  // a WRW esquece o token, e a dona ainda pode tirar o acesso pela conta Google.
+  let googleAgenda: RelatorioDeExclusao["googleAgenda"];
+  try {
+    googleAgenda = await revogarGoogle(conta.id);
+  } catch (erro) {
+    // Banco fora do ar não é "a Google não confirmou": a leitura da conexão
+    // falhou antes de falar com a Google, e seguir apagaria a única cópia de um
+    // token que continua valendo lá. A exclusão para aqui, antes de apagar
+    // qualquer linha, como pararia no primeiro DELETE com o banco fora.
+    if (ehErroDeBancoIndisponivel(erro)) throw erro;
+    googleAgenda = "falhou";
+    console.error(
+      `[ExclusãoDeConta] o token da Google Agenda não foi revogado na Google (userId ${conta.id}); a conexão sai do banco assim mesmo:`,
+      erro instanceof Error ? erro.message : erro,
+    );
   }
 
   for (const passo of PLANO_DE_EXCLUSAO) {
@@ -537,5 +656,5 @@ export async function excluirConta(
   passos.push({ nome: "users.id + users.openId", linhas: linhasDaConta });
   linhasApagadas += linhasDaConta;
 
-  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas };
+  return { passos, arquivosApagados, arquivosComFalha, linhasApagadas, googleAgenda };
 }

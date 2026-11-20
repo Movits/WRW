@@ -1,29 +1,71 @@
 import crypto from "crypto";
-import { and, desc, eq, inArray, lt, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
+  meetingAudioSlices,
   meetingContactSuggestions,
   meetingEntities,
   meetingRecordings,
   meetings,
   meetingTranscripts,
   meetingTranscriptTranslations,
+  meetingSummaries,
+  meetingSummaryItems,
+  meetingSummaryTranslations,
+  privateContacts,
+  userProfiles,
+  users,
 } from "../drizzle/schema";
-import { CODIGO_ERRO_INTERROMPIDO, LIMITE_PROCESSAMENTO_MS, MENSAGEM_AUDIO_GUARDADO_AUSENTE } from "@shared/const";
+import { pareceSerADona } from "@shared/reuniao-no-match";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
-import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageDelete, storageGetBytes, storagePut } from "./storage";
+import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
+import { dividirEmJanelas } from "./janelas-de-texto";
+import { limparRotulos } from "./trecho-da-transcricao";
+import {
+  chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, ehAcessoNegadoNoBucket, ObjetoAusenteNoStorageError,
+  storageApagarTodasAsVersoes, storageGetBytes, storagePut,
+} from "./storage";
+import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
-  apagarPendenciasDaReuniao, emailEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
+  apagarPendenciasDaReuniao, emailEstaNaFonte, expressaoEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
   REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type ItemProposto,
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
+import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
+import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
+import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 
-export const MAX_MEETING_AUDIO_BYTES = 10 * 1024 * 1024;
-export const MAX_MEETING_DURATION_SECONDS = 10 * 60;
+/**
+ * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
+ * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
+ * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
+ * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
+ * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
+ * reunião do painel de minutos (server/minutos-de-reuniao.ts).
+ */
+export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
+export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
+/**
+ * Quanto o áudio de uma reunião fica guardado: 30 dias contados do envio. No
+ * envio único, do momento em que o áudio inteiro chega (a tomada para
+ * 'processing'). Na gravação em partes, da chegada da ÚLTIMA parte: a cada
+ * parte que chega, o prazo de todas as partes da reunião passa a ser o dela
+ * (receberParte, em fatias-de-reuniao.ts), e elas vencem e saem juntas, como o
+ * áudio inteiro do envio único. A transcrição fica até a dona excluir a reunião.
+ *
+ * Quem cumpre o prazo é a varredura (limparGravacoesVencidas), no boot e a cada
+ * 5 min (server/varredura-de-gravacoes.ts), e a leitura da reunião vencida
+ * (gravacaoParaOuvir). As duas tiram o objeto do bucket com todas as versões
+ * antes de apagar a linha.
+ */
 export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "No modo atual, cada reunião pode ter no máximo 10 minutos.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";
@@ -110,23 +152,28 @@ export type MeetingExtraction = {
     tipoPessoa?: "fisica" | "juridica" | "nao_informado";
     oQueTenho?: ItemProposto[];
     oQuePreciso?: ItemProposto[];
+    // Participou da reunião ou só foi citada nela (achado 7 da bancada de
+    // 16/11): a citada não vira cartão igual ao das participantes. Ausente
+    // numa resposta antiga, ou "unknown", a sugestão fica sem a marca, como antes.
+    presence?: PresencaNaReuniao;
   }>;
 };
 
-export const MEETING_TRANSCRIPT_LANGUAGES = ["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"] as const;
+/**
+ * "present": participou da reunião; "mentioned": a reunião disse que ela não
+ * estava (não veio, vai ser procurada depois); "unknown": só se falou dela,
+ * sem dizer se estava — a dúvida, que se grava sem marca (null) e a tela
+ * mostra com as participantes. Afirmar a ausência na dúvida punha quem
+ * participou em "Pessoas citadas", com o selo "Não participou" (revisão do
+ * pacote P2B).
+ */
+export const PRESENCAS_NA_REUNIAO = ["present", "mentioned", "unknown"] as const;
+export type PresencaNaReuniao = (typeof PRESENCAS_NA_REUNIAO)[number];
 
-export const MEETING_LANGUAGES: Record<(typeof MEETING_TRANSCRIPT_LANGUAGES)[number], string> = {
-  "pt-BR": "português do Brasil",
-  en: "inglês",
-  es: "espanhol",
-  fr: "francês",
-  de: "alemão",
-  ar: "árabe",
-  zh: "chinês simplificado",
-  hi: "hindi",
-  ja: "japonês",
-  ru: "russo",
-};
+// Os idiomas da reunião e os nomes que vão no prompt moram em
+// shared/idioma-da-reuniao.ts (uma função só, nomeDoIdioma). Os nomes antigos
+// seguem exportados para quem já os importa.
+export const MEETING_TRANSCRIPT_LANGUAGES = IDIOMAS_DA_REUNIAO;
 
 function now() {
   return Date.now();
@@ -179,18 +226,203 @@ const ITEM_DO_PERFIL = {
 } as const;
 const ORCAMENTO_DA_EXTRACAO_MS = 60_000;
 
-export async function extractMeetingData(transcript: string): Promise<MeetingExtraction> {
+// O que uma chamada de extração lê. Uma reunião longa (em partes) passa disso e
+// é lida inteira, em janelas (G8), em vez de cortada aos 24 mil caracteres.
+export const JANELA_DA_EXTRACAO = 24_000;
+// Tetos da reunião inteira, depois de juntar as janelas: os de uma janela só
+// (80 e 20) multiplicados por elas encheriam a tela de pendências repetidas.
+const TETO_DE_ENTIDADES = 200;
+const TETO_DE_PESSOAS = 40;
+
+/**
+ * Extrai da transcrição INTEIRA: uma chamada por janela (dividirEmJanelas), uma
+ * depois da outra, e a junção tira as repetidas. Entidade repetida (mesmo tipo e
+ * mesmo valor normalizado) fica com a maior confiança; pessoa repetida (mesmo
+ * e-mail, telefone ou nome) junta o que tem e o que precisa das duas janelas.
+ * Uma janela que falha derruba a extração inteira: meia reunião extraída
+ * passaria por inteira.
+ *
+ * `rotulada`: cada linha começa pelo rótulo da voz ("{F1}: fala"), como a
+ * fila da reunião em partes monta (entradaDoResumo); sem rótulos (envio
+ * único), o texto corrido. Com eles, a IA vê quem fala, e a presença de quem
+ * só fala sem dizer o nome deixa de ser chute (revisão do pacote P2B).
+ */
+export async function extractMeetingData(transcript: string, opcoes: { rotulada?: boolean } = {}): Promise<MeetingExtraction> {
+  const rotulada = opcoes.rotulada === true;
+  const janelas = dividirEmJanelas(transcript, JANELA_DA_EXTRACAO);
+  if (janelas.length <= 1) {
+    const extracao = await extrairDeUmaJanela(transcript, rotulada);
+    return { ...extracao, contacts: semAusenciaDuvidosa(extracao.contacts) };
+  }
+  const partes: MeetingExtraction[] = [];
+  for (const janela of janelas) partes.push(await extrairDeUmaJanela(janela, rotulada));
+  return juntarExtracoes(partes);
+}
+
+/** A ordem da presença na junção: quem falou em alguma janela participou; a ausência dita vale mais que a dúvida. */
+const PESO_DA_PRESENCA: Record<PresencaNaReuniao, number> = { present: 3, mentioned: 2, unknown: 1 };
+const pesoDaPresenca = (presenca: unknown) => PESO_DA_PRESENCA[presenca as PresencaNaReuniao] ?? 0;
+
+/**
+ * A ausência só fica se nada a desmente. A citada ("mentioned") cujo nome é
+ * parte do nome de quem participou, ou o contém ("Ana" e "Ana Ribeiro"), é
+ * provavelmente a mesma pessoa vista numa janela sem a apresentação dela: na
+ * reunião longa, a janela 2 não vê o "Eu sou a Ana Ribeiro" da janela 1. Ela
+ * fica com "unknown" (sem marca, com as participantes), e a tela não afirma
+ * que faltou quem estava lá (revisão do pacote P2B). As duas não se juntam:
+ * juntar pelo primeiro nome fundiria duas Anas diferentes.
+ */
+export function semAusenciaDuvidosa<T extends { fullName: string; presence?: PresencaNaReuniao }>(pessoas: T[]): T[] {
+  const nomesPresentes = pessoas.filter(p => p.presence === "present").map(p => tokensDoTermo(p.fullName ?? ""));
+  const contido = (parte: string[], todo: string[]) => parte.length > 0 && parte.every(palavra => todo.includes(palavra));
+  return pessoas.map(pessoa => {
+    if (pessoa.presence !== "mentioned") return pessoa;
+    const nome = tokensDoTermo(pessoa.fullName ?? "");
+    return nomesPresentes.some(presente => contido(nome, presente) || contido(presente, nome)) ? { ...pessoa, presence: "unknown" } : pessoa;
+  });
+}
+
+export function juntarExtracoes(partes: MeetingExtraction[]): MeetingExtraction {
+  const entidades = new Map<string, MeetingExtraction["entities"][number]>();
+  for (const entidade of partes.flatMap(p => p.entities)) {
+    const chave = `${entidade.type}|${(entidade.normalizedValue || entidade.value).trim().toLocaleLowerCase()}`;
+    const atual = entidades.get(chave);
+    if (!atual || entidade.confidence > atual.confidence) entidades.set(chave, entidade);
+  }
+  const pessoas: MeetingExtraction["contacts"] = [];
+  for (const pessoa of partes.flatMap(p => p.contacts)) {
+    const mesma = pessoas.find(outra => mesmaPessoa(outra, pessoa));
+    if (!mesma) {
+      pessoas.push({ ...pessoa });
+      continue;
+    }
+    // Cargo e empresa já vêm conferidos pela janela (conferirAJanela): fica o
+    // primeiro dito, ou o mais completo ("Ponte Sul Consultoria" no lugar de
+    // "Ponte Sul", que é o começo dele).
+    mesma.jobTitle = maisCompleto(mesma.jobTitle, pessoa.jobTitle);
+    mesma.company = maisCompleto(mesma.company, pessoa.company);
+    mesma.phone ??= pessoa.phone;
+    mesma.email ??= pessoa.email;
+    mesma.confidence = Math.max(mesma.confidence, pessoa.confidence);
+    if (!mesma.tipoPessoa || mesma.tipoPessoa === "nao_informado") mesma.tipoPessoa = pessoa.tipoPessoa;
+    // Quem participou em alguma janela participou da reunião (citada no
+    // começo, chegou depois); a ausência dita numa janela vale mais que a
+    // dúvida de outra.
+    if (pesoDaPresenca(pessoa.presence) > pesoDaPresenca(mesma.presence)) mesma.presence = pessoa.presence;
+    mesma.oQueTenho = semItensRepetidos([...(mesma.oQueTenho ?? []), ...(pessoa.oQueTenho ?? [])]);
+    mesma.oQuePreciso = semItensRepetidos([...(mesma.oQuePreciso ?? []), ...(pessoa.oQuePreciso ?? [])]);
+  }
+  // Acima do teto, ficam as de maior confiança (e não as do começo da reunião).
+  const porConfianca = <T extends { confidence: number }>(lista: T[]) => [...lista].sort((a, b) => b.confidence - a.confidence);
+  return {
+    entities: porConfianca(Array.from(entidades.values())).slice(0, TETO_DE_ENTIDADES),
+    contacts: porConfianca(semAusenciaDuvidosa(pessoas)).slice(0, TETO_DE_PESSOAS),
+  };
+}
+
+/** O primeiro valor, salvo quando o outro é ele mesmo com mais palavras no fim ("Ponte Sul" → "Ponte Sul Consultoria"). */
+function maisCompleto(atual: string | null | undefined, outro: string | null | undefined): string | null {
+  if (!atual) return outro ?? null;
+  if (!outro) return atual;
+  const palavras = tokensDoTermo(atual);
+  const outras = tokensDoTermo(outro);
+  return outras.length > palavras.length && palavras.every((palavra, i) => outras[i] === palavra) ? outro : atual;
+}
+
+function semItensRepetidos<T extends { texto: string }>(itens: T[]): T[] {
+  const vistos = new Set<string>();
+  return itens.filter(item => {
+    const chave = item.texto.trim().toLocaleLowerCase();
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
+
+function mesmaPessoa(a: MeetingExtraction["contacts"][number], b: MeetingExtraction["contacts"][number]) {
+  const igual = (x: string | null | undefined, y: string | null | undefined) => !!x && !!y && x.trim().toLocaleLowerCase() === y.trim().toLocaleLowerCase();
+  const soDigitos = (x: string | null | undefined) => (x ?? "").replace(/\D/g, "");
+  if (igual(a.email, b.email)) return true;
+  if (soDigitos(a.phone).length >= 8 && soDigitos(a.phone) === soDigitos(b.phone)) return true;
+  // Pelo nome, só quando nada as distingue: o mesmo nome com e-mail ou telefone
+  // diferente são duas pessoas (homônimas), e juntar perderia o contato de uma.
+  const conflita = (x: string | null | undefined, y: string | null | undefined, norm: (v: string | null | undefined) => string) => !!norm(x) && !!norm(y) && norm(x) !== norm(y);
+  const email = (v: string | null | undefined) => (v ?? "").trim().toLocaleLowerCase();
+  return igual(a.fullName, b.fullName) && !conflita(a.email, b.email, email) && !conflita(a.phone, b.phone, soDigitos);
+}
+
+/**
+ * O que o prompt da extração pede sobre cada pessoa, além das três dimensões.
+ * Cargo e empresa passam pela conferência da janela (conferirAJanela) e de
+ * gravarResultadoDaReuniao (expressaoEstaNaFonte), e a presença separa, na
+ * tela, quem participou de quem a reunião disse que não estava (achados 6 e 7
+ * da bancada de 16/11). "mentioned" só com a ausência dita; na dúvida,
+ * "unknown", que a tela mostra com as participantes (revisão do pacote P2B).
+ * Os exemplos não são os da reunião sintética da bancada nem os do roteiro do
+ * teste manual, para não ensinar a prova ao modelo.
+ */
+export const REGRAS_DA_PESSOA_NA_REUNIAO = `Em "contacts", fullName, phone e email são o QUEM SOU; jobTitle e company ficam só como apoio e nunca substituem O QUE TENHO.
+- jobTitle e company só com as palavras ditas na reunião sobre aquela pessoa, copiadas como foram ditas ("diretora comercial", "Vinícola Serra Alta"). Não deduza cargo pelo que a pessoa faz ("fundadora", "consultor") nem complete o nome da empresa. Se não foi dito, null.
+- presence diz se a pessoa participou da reunião. "present": ela fala, se apresenta ou é dada como presente ("a Ana e o Bruno estão aqui com a gente"). "mentioned": SÓ quando a reunião diz que ela não está ali: não veio, está fora, ou vai ser procurada ou apresentada depois ("a Carla está viajando", "vou te apresentar a Denise"). "unknown": falam dela, mas ninguém diz se ela está na reunião ("a Luíza cuida do caixa"). Empresa é "present" só se alguém dela participou. Na dúvida, "unknown": nunca diga que alguém não participou sem que isso tenha sido dito.`;
+
+/** Com a transcrição rotulada (a fila da reunião em partes), o que o prompt diz dos rótulos das vozes. */
+export const REGRA_DOS_ROTULOS_NA_EXTRACAO = `Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). O rótulo não é nome: nunca o escreva em fullName, em entities, nos itens nem no trecho, que é só a fala. A voz que diz o próprio nome ("{F2}: Meu nome é Paula") é essa pessoa em todas as linhas dela, e quem tem voz na reunião é "present".`;
+
+/** Entidade que é só o rótulo de uma voz ("{F2}", "F2:", "Falante 2"): não é nome de ninguém. */
+const SO_ROTULO_DE_VOZ = /^\s*(?:\{?\s*F[1-9]\d?\s*\}?\s*:?|falante\s+\d+)\s*$/i;
+
+/** O texto da janela sem os rótulos das vozes, linha a linha: é contra ele que cargo e empresa se conferem. */
+function semRotulosDeVoz(texto: string): string {
+  return texto.split("\n").map(limparRotulos).join("\n");
+}
+
+/**
+ * O que a janela diz, antes da junção das janelas (revisão do pacote P2B):
+ * - cargo e empresa só se a própria janela os diz como estão escritos. Na
+ *   reunião longa, a junção fica com o primeiro valor que acha (`??=`): um
+ *   cargo deduzido na janela 1 ("Consultor") tomava o lugar do dito na
+ *   janela 2 ("mentor convidado") e depois caía na conferência de
+ *   gravarResultadoDaReuniao, sem deixar nenhum;
+ * - com a transcrição rotulada, o rótulo da voz sai do trecho dos itens (a
+ *   conferência é contra a transcrição sem rótulos), e a entidade que é só um
+ *   rótulo não entra.
+ */
+export function conferirAJanela(extracao: MeetingExtraction, janela: string, rotulada: boolean): MeetingExtraction {
+  const fonte = rotulada ? semRotulosDeVoz(janela) : janela;
+  const semRotulo = (itens: ItemProposto[] | undefined) => (rotulada && Array.isArray(itens)
+    ? itens.map(item => (item && typeof item.trecho === "string" ? { ...item, trecho: limparRotulos(item.trecho) } : item))
+    : itens);
+  return {
+    entities: rotulada ? extracao.entities.filter(entidade => !SO_ROTULO_DE_VOZ.test(String(entidade?.value ?? ""))) : extracao.entities,
+    contacts: extracao.contacts.map(pessoa => ({
+      ...pessoa,
+      jobTitle: typeof pessoa?.jobTitle === "string" && expressaoEstaNaFonte(pessoa.jobTitle, fonte) ? pessoa.jobTitle : null,
+      company: typeof pessoa?.company === "string" && expressaoEstaNaFonte(pessoa.company, fonte) ? pessoa.company : null,
+      oQueTenho: semRotulo(pessoa?.oQueTenho),
+      oQuePreciso: semRotulo(pessoa?.oQuePreciso),
+    })),
+  };
+}
+
+async function extrairDeUmaJanela(transcript: string, rotulada = false): Promise<MeetingExtraction> {
+  // O raciocínio só vai com LLM_RACIOCINIO_EXTRACAO (server/_core/raciocinio-de-ia.ts);
+  // sem ela, o pedido sai sem o campo, como sempre saiu.
+  const raciocinio = raciocinioDaFuncao("extracao");
   const response = await invokeLLM({
+    // Segue o LLM_MODEL; LLM_MODEL_EXTRACAO troca sem deploy (FUNCOES_DE_TEXTO,
+    // em _core/modelos-de-ia.ts, diz por que o Lite ainda não é o padrão).
+    funcao: "extracao",
     timeoutMs: TIMEOUT_DA_EXTRACAO_MS,
     orcamentoMs: ORCAMENTO_DA_EXTRACAO_MS,
+    ...(raciocinio ? { raciocinio } : {}),
     messages: [
       {
         role: "system",
-        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\nEm "contacts", fullName, phone e email são o QUEM SOU; jobTitle e company ficam só como apoio e nunca substituem O QUE TENHO.`,
+        content: `Você extrai dados de transcrições de reuniões em português. Não invente dados. Retorne somente JSON estruturado.\nPara cada pessoa ou empresa em "contacts": ${REGRAS_DAS_TRES_DIMENSOES}\n${REGRAS_DA_PESSOA_NA_REUNIAO}${rotulada ? `\n${REGRA_DOS_ROTULOS_NA_EXTRACAO}` : ""}`,
       },
       {
         role: "user",
-        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, 24000)}`,
+        content: `Extraia pessoas, empresas, telefones, e-mails, cargos, ativos, necessidades e oportunidades desta transcrição:\n\n${transcript.slice(0, JANELA_DA_EXTRACAO)}`,
       },
     ],
     response_format: {
@@ -231,8 +463,9 @@ export async function extractMeetingData(transcript: string): Promise<MeetingExt
                   tipoPessoa: { type: "string", enum: ["fisica", "juridica", "nao_informado"] },
                   oQueTenho: { type: "array", items: ITEM_DO_PERFIL },
                   oQuePreciso: { type: "array", items: ITEM_DO_PERFIL },
+                  presence: { type: "string", enum: [...PRESENCAS_NA_REUNIAO] },
                 },
-                required: ["fullName", "jobTitle", "company", "phone", "email", "confidence", "tipoPessoa", "oQueTenho", "oQuePreciso"],
+                required: ["fullName", "jobTitle", "company", "phone", "email", "confidence", "tipoPessoa", "oQueTenho", "oQuePreciso", "presence"],
                 additionalProperties: false,
               },
             },
@@ -247,10 +480,10 @@ export async function extractMeetingData(transcript: string): Promise<MeetingExt
   const content = response.choices?.[0]?.message?.content;
   if (typeof content !== "string") throw new Error("A IA não retornou uma extração válida.");
   const parsed = JSON.parse(content) as MeetingExtraction;
-  return {
+  return conferirAJanela({
     entities: Array.isArray(parsed.entities) ? parsed.entities.slice(0, 80) : [],
     contacts: Array.isArray(parsed.contacts) ? parsed.contacts.slice(0, 20) : [],
-  };
+  }, transcript, rotulada);
 }
 
 /** Texto cortado no tamanho da coluna; vazio ou ausente vira null. */
@@ -286,7 +519,7 @@ export function ajustarSugestaoAosLimites(contato: MeetingExtraction["contacts"]
 }
 
 /** Escritas sem espaço entre as palavras: nelas o nome aparece colado ao resto da fala. */
-const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
+export const ESCRITA_SEM_ESPACO = new RegExp("[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}]", "u");
 
 /**
  * O nome da pessoa sugerida reduzido às palavras que a transcrição sustenta.
@@ -334,15 +567,25 @@ export function nomeSustentadoPelaTranscricao(nome: string, transcricao: string)
 const TIMEOUT_DA_TRADUCAO_MS = 180_000;
 const ORCAMENTO_DA_TRADUCAO_MS = 200_000;
 
-export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string) {
-  const normalizedLanguage = language === "pt" ? "pt-BR" : language;
-  if (!(normalizedLanguage in MEETING_LANGUAGES)) throw new Error("Idioma de tradução não suportado.");
-  const targetLanguage = MEETING_LANGUAGES[normalizedLanguage as keyof typeof MEETING_LANGUAGES];
+/**
+ * `antesDeChamarAIA` roda só quando a tradução não está guardada, logo antes
+ * do pedido à IA, e pode recusar lançando: é o teto do link aberto, que assim
+ * não gasta vaga com a tradução que já está no banco.
+ */
+export async function translatePrivateMeetingTranscript(ownerId: string, meetingId: string, language: string, antesDeChamarAIA?: () => void) {
+  const normalizedLanguage = idiomaDaReuniao(language);
+  if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
+  const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
   const [transcript] = await db.select().from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
-  if (normalizedLanguage === "pt-BR" || transcript.language === normalizedLanguage) {
+  // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
+  // reunião em inglês "traduzida" para pt-BR voltava em inglês. Reunião antiga
+  // guarda 'pt', e idioma gravado fora da lista conta como pt-BR, o padrão de
+  // quando ela foi gravada.
+  const idiomaOriginal = idiomaDaReuniao(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  if (normalizedLanguage === idiomaOriginal) {
     return { language: normalizedLanguage, text: transcript.transcript, cached: true };
   }
   const [cached] = await db.select().from(meetingTranscriptTranslations)
@@ -353,16 +596,95 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     )).limit(1);
   if (cached) return { language: normalizedLanguage, text: cached.translatedText, cached: true };
 
-  const response = await invokeLLM({
-    timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
-    orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
-    messages: [
-      { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.` },
-      { role: "user", content: transcript.transcript.slice(0, 48_000) },
-    ],
-  });
-  const translatedText = String(response.choices?.[0]?.message?.content ?? "").trim();
-  if (!translatedText) throw new Error("Não foi possível traduzir a transcrição.");
+  // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
+  // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
+  // por ela, sem pagar outra chamada nem gastar vaga do teto.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
+  const longa = janelas.length > 1;
+  const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
+  const emCurso = traducoesEmCurso.get(chave);
+  if (emCurso) return longa ? emAndamento : emCurso;
+  // A tradução longa que falhou em segundo plano: o próximo pedido recebe o
+  // erro (uma vez), em vez de recomeçar a tradução em silêncio a cada 5 s.
+  const falha = falhasDaTraducaoLonga.get(chave);
+  if (falha) {
+    falhasDaTraducaoLonga.delete(chave);
+    if (Date.now() - falha.quando < VALIDADE_DA_FALHA_MS) throw falha.erro;
+  }
+  antesDeChamarAIA?.();
+  const trabalho = traduzirEGuardar(db, { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas });
+  traducoesEmCurso.set(chave, trabalho);
+  if (longa) {
+    // Reunião longa: uma chamada por janela leva minutos, mais que o proxy do
+    // Render aguenta. A tradução segue em segundo plano, e a tela pergunta de
+    // novo até ela estar guardada. O trabalho nunca rejeita solto (derrubaria o
+    // processo): a falha fica guardada para o próximo pedido.
+    trabalho.then(
+      () => traducoesEmCurso.delete(chave),
+      erro => {
+        traducoesEmCurso.delete(chave);
+        // descreverErroDeBanco: a mensagem crua do driver traz o SQL com os
+        // valores, e o valor aqui é a tradução da reunião.
+        console.error("[Reuniões] a tradução longa falhou:", descreverErroDeBanco(erro));
+        if (falhasDaTraducaoLonga.size >= TETO_DE_FALHAS_GUARDADAS) falhasDaTraducaoLonga.clear();
+        falhasDaTraducaoLonga.set(chave, { erro: erro instanceof Error ? erro : new Error("Não foi possível traduzir a transcrição."), quando: Date.now() });
+      },
+    );
+    return emAndamento;
+  }
+  try {
+    return await trabalho;
+  } finally {
+    traducoesEmCurso.delete(chave);
+  }
+}
+
+// O que uma chamada de tradução lê e devolve. Mais que isso não cabe com folga
+// na saída do modelo: a reunião longa é traduzida em janelas, uma por chamada.
+export const JANELA_DA_TRADUCAO = 20_000;
+
+type TraducaoPronta = { language: string; text: string; cached: boolean; emAndamento?: false };
+type TraducaoEmAndamento = { language: string; text: null; cached: false; emAndamento: true };
+export type TraducaoDaTranscricao = TraducaoPronta | TraducaoEmAndamento;
+
+// As traduções que estão na IA agora, por dona, reunião, idioma e transcrição.
+// Em memória, como os tetos: basta à instância única do Render. Um deploy no
+// meio perde a tradução longa em curso, e o próximo pedido a recomeça.
+const traducoesEmCurso = new Map<string, Promise<TraducaoPronta>>();
+// A falha da tradução longa vale para o próximo pedido por pouco tempo: quem
+// volta horas depois recomeça, sem receber um erro velho. O teto protege a
+// memória do processo de falhas que ninguém veio buscar.
+const falhasDaTraducaoLonga = new Map<string, { erro: Error; quando: number }>();
+const VALIDADE_DA_FALHA_MS = 2 * 60_000;
+const TETO_DE_FALHAS_GUARDADAS = 200;
+
+async function traduzirEGuardar(db: Banco, alvo: {
+  ownerId: string;
+  meetingId: string;
+  normalizedLanguage: string;
+  targetLanguage: string;
+  transcript: { id: string; transcript: string };
+  janelas: string[];
+}): Promise<TraducaoPronta> {
+  const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
+  // Uma janela por vez, na ordem: o texto traduzido é a junção delas. Janela
+  // que volta vazia derruba a tradução inteira, em vez de guardar um buraco.
+  const traduzidas: string[] = [];
+  for (const janela of janelas) {
+    const response = await invokeLLM({
+      timeoutMs: TIMEOUT_DA_TRADUCAO_MS,
+      orcamentoMs: ORCAMENTO_DA_TRADUCAO_MS,
+      messages: [
+        { role: "system", content: `Traduza a transcrição a seguir para ${targetLanguage}. Preserve nomes próprios, empresas, números, telefones, e-mails e a estrutura dos parágrafos. Não resuma, não explique e não adicione informações.${janelas.length > 1 ? " O texto é um trecho de uma reunião maior: traduza só ele, sem introdução nem fecho." : ""}` },
+        { role: "user", content: janela },
+      ],
+    });
+    const traduzida = String(response.choices?.[0]?.message?.content ?? "").trim();
+    if (!traduzida) throw new Error("Não foi possível traduzir a transcrição.");
+    traduzidas.push(traduzida);
+  }
+  const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
   // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE
@@ -372,15 +694,22 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
   const timestamp = now();
-  await db.insert(meetingTranscriptTranslations).values({
-    id: crypto.randomUUID(),
-    meetingId,
-    ownerId,
-    language: normalizedLanguage,
-    translatedText,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
+  try {
+    await db.insert(meetingTranscriptTranslations).values({
+      id: crypto.randomUUID(),
+      meetingId,
+      ownerId,
+      language: normalizedLanguage,
+      translatedText,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (erro) {
+    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
+    if (!ehColisaoDeChave(erro)) throw erro;
+  }
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -431,7 +760,7 @@ export function processingErrorSeguro(processingError: string | null): string | 
 }
 
 /** A dona excluiu a reunião no meio: não é falha a registrar, é trabalho a descartar. */
-class ReuniaoExcluidaDuranteProcessamento extends Error {
+export class ReuniaoExcluidaDuranteProcessamento extends Error {
   constructor() {
     super(MENSAGEM_EXCLUIDA_DURANTE_PROCESSAMENTO);
     this.name = "ReuniaoExcluidaDuranteProcessamento";
@@ -590,18 +919,30 @@ export async function processMeetingRecording(input: {
       console.error("[Reuniões] o bucket recusou o áudio:", erro instanceof Error ? erro.message : erro);
       throw new Error("Não foi possível guardar o áudio.", { cause: erro });
     }
-    await db.insert(meetingRecordings).values({
-      id: crypto.randomUUID(),
-      meetingId: input.meetingId,
-      ownerId: input.ownerId,
-      storageKey: uploaded.key,
-      storageUrl: uploaded.url,
-      mimeType: input.mimeType,
-      sizeBytes: audio.length,
-      durationSeconds: duracaoMedida,
-      expiresAt: ficha + MEETING_AUDIO_TTL_MS,
-      createdAt: ficha,
-    });
+    try {
+      await db.insert(meetingRecordings).values({
+        id: crypto.randomUUID(),
+        meetingId: input.meetingId,
+        ownerId: input.ownerId,
+        storageKey: uploaded.key,
+        storageUrl: uploaded.url,
+        mimeType: input.mimeType,
+        sizeBytes: audio.length,
+        durationSeconds: duracaoMedida,
+        expiresAt: ficha + MEETING_AUDIO_TTL_MS,
+        createdAt: ficha,
+      });
+    } catch (erro) {
+      // Objeto no bucket sem linha no banco não é achado por varredura
+      // nenhuma: a voz ficaria lá para sempre. Sai antes de a falha ser marcada
+      // (trazido da PR #134). Se o bucket também recusar, não há linha para
+      // servir de ponteiro (foi o banco que recusou), e o log de erro é o único
+      // lugar que ainda diz qual objeto precisa sair à mão.
+      if (!(await apagarArquivoDaGravacao(uploaded.key))) {
+        console.error(`[Reuniões] o áudio ficou no bucket SEM ponteiro no banco (reunião ${input.meetingId}); remoção manual: ${uploaded.key}`);
+      }
+      throw erro;
+    }
 
     return await processarAudioGuardado(db, {
       meetingId: input.meetingId,
@@ -668,13 +1009,43 @@ async function processarAudioGuardado(db: Banco, execucao: {
     throw new Error("Não foi possível transcrever o áudio.", { cause: erro });
   }
 
-  let extraction: MeetingExtraction;
+  const extraction = await extrairDadosDaReuniao(transcription.text);
+  return gravarResultadoDaReuniao(db, {
+    meetingId, ownerId, ficha,
+    limparAntes: execucao.limparAntes,
+    durationSeconds: execucao.durationSeconds,
+    transcription,
+    extraction,
+  });
+}
+
+/** A extração da transcrição, com frase neutra na falha (o original vai ao log e a `cause`). */
+export async function extrairDadosDaReuniao(texto: string, opcoes: { rotulada?: boolean } = {}): Promise<MeetingExtraction> {
   try {
-    extraction = await extractMeetingData(transcription.text);
+    return await extractMeetingData(texto, opcoes);
   } catch (erro) {
     console.error("[Reuniões] a extração falhou:", erro instanceof Error ? erro.message : erro);
     throw new Error("O serviço de IA não conseguiu extrair os dados da transcrição.", { cause: erro });
   }
+}
+
+/**
+ * O fim do processamento, com a transcrição e a extração prontas: releitura,
+ * escritas e promoção a 'ready', tudo arbitrado pela FICHA (o updated_at que a
+ * execução gravou ao tomar a reunião para 'processing'). Serve ao envio único
+ * (processarAudioGuardado, logo depois da IA) e à fila da reunião em partes
+ * (server/fila-de-transcricao.ts, depois de montar a transcrição das partes).
+ */
+export async function gravarResultadoDaReuniao(db: Banco, execucao: {
+  meetingId: string;
+  ownerId: string;
+  ficha: number;
+  limparAntes: boolean;
+  durationSeconds: number;
+  transcription: { text: string; segments: unknown; language: string };
+  extraction: MeetingExtraction;
+}) {
+  const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
 
   // Entre a tomada e aqui passaram 1–2 minutos de Gemini e LLM: tempo de sobra
   // para a dona ter clicado em Excluir, para um reprocessamento novo ou para a
@@ -691,11 +1062,13 @@ async function processarAudioGuardado(db: Banco, execucao: {
   }
   if (viva.status !== "processing" || Number(viva.updatedAt) !== ficha) throw new ReuniaoTomadaPorOutraExecucao();
 
-  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId);
+  if (execucao.limparAntes) await apagarDerivadosSemGravacao(db, ownerId, meetingId, false);
 
   const completedAt = now();
+  // O resumo guardado (mais abaixo) nasce apontando para esta transcrição.
+  const transcriptId = crypto.randomUUID();
   await db.insert(meetingTranscripts).values({
-    id: crypto.randomUUID(),
+    id: transcriptId,
     meetingId,
     ownerId,
     transcript: transcription.text,
@@ -724,14 +1097,27 @@ async function processarAudioGuardado(db: Banco, execucao: {
   // completar — o modelo às vezes "completa" um sobrenome ou um número, ou
   // monta um e-mail com o nome da empresa. O que a pessoa TEM e PRECISA vira
   // pendência à parte (network_sugestoes), só com trecho literal conferido.
+  //
+  // Cargo e empresa também (achado 6 da bancada de 16/11): ficam só se a
+  // transcrição os diz como estão escritos ("fundadora" e "Consultor", que
+  // ninguém disse, caem), e nem assim entram sozinhos no contato — criar ou
+  // vincular a pessoa os transforma em pendências (meetings.decideContactSuggestion).
+  // A presença (achado 7) separa, na tela, quem participou de quem só foi citado.
   const sugestoes = extraction.contacts
     .map(contact => {
       const ajustada = ajustarSugestaoAosLimites(contact);
       return {
         ...ajustada,
         fullName: nomeSustentadoPelaTranscricao(ajustada.fullName, transcription.text),
+        // A conferência é do valor inteiro que a IA deu; o corte para a coluna vem
+        // depois. Conferido já cortado, o cargo ou a empresa acima do teto nunca
+        // estaria na transcrição e sumia.
+        jobTitle: ajustada.jobTitle && expressaoEstaNaFonte(contact.jobTitle, transcription.text) ? ajustada.jobTitle : null,
+        company: ajustada.company && expressaoEstaNaFonte(contact.company, transcription.text) ? ajustada.company : null,
         phone: telefoneEstaNaFonte(ajustada.phone, transcription.text) ? ajustada.phone : null,
         email: emailEstaNaFonte(ajustada.email, transcription.text) ? ajustada.email : null,
+        // Valor fora dos dois (o modelo nem sempre obedece ao enum) fica sem marca, como a sugestão antiga.
+        presence: contact.presence === "present" || contact.presence === "mentioned" ? contact.presence : null,
         id: crypto.randomUUID(),
         confidence: contact.confidence,
         pendencias: pendenciasDaPessoaNaReuniao(contact, transcription.text),
@@ -742,7 +1128,7 @@ async function processarAudioGuardado(db: Banco, execucao: {
     await db.insert(meetingContactSuggestions).values(sugestoes.map(contact => ({
       id: contact.id, meetingId, ownerId,
       fullName: contact.fullName, jobTitle: contact.jobTitle, company: contact.company,
-      phone: contact.phone, email: contact.email, sourceEntityIds: [],
+      phone: contact.phone, email: contact.email, presence: contact.presence, sourceEntityIds: [],
       confidence: confiancaParaGravar(contact.confidence), status: "pending" as const,
       createdAt: completedAt, updatedAt: completedAt,
     })));
@@ -766,12 +1152,27 @@ async function processarAudioGuardado(db: Banco, execucao: {
     if (ehErroDeBancoIndisponivel(erro)) throw erro;
     console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
   }
+  // O resumo guardado (H4): toda reunião que fica pronta ganha o pedido, e a
+  // fila do resumo (server/fila-do-resumo.ts) o gera em segundo plano. Serve ao
+  // envio único, às partes e ao reprocesso, que passam todos por aqui. Fica no
+  // bloco de escritas da ficha, antes do 'ready': a fila só pega resumo de
+  // reunião pronta, e a exclusão no meio leva a linha com os outros derivados
+  // (apagarDerivadosDaReuniao). No reprocesso, a linha antiga já saiu em
+  // apagarDerivadosSemGravacao. Idempotente pelo índice único da reunião: a
+  // linha que já existir fica como está, e a reunião não falha por causa dela
+  // (nenhum caminho de hoje a cria antes: pedir o resumo exige a reunião
+  // 'ready', e esta execução ainda está em 'processing').
+  await db.insert(meetingSummaries).values({
+    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", createdAt: completedAt, updatedAt: completedAt,
+  }).onDuplicateKeyUpdate({ set: { meetingId: sql`${meetingSummaries.meetingId}` } });
   // A releitura acima e este UPDATE não são atômicos: exclusão, reprocessamento
   // novo ou varredura podem ter entrado entre os dois. O WHERE com a ficha faz
   // o banco arbitrar. Zero linhas: relê para saber quem venceu. Excluída, o
   // que acabou de ser gravado sai. Viva com outra ficha, nada é apagado aqui —
   // a execução dona da reunião limpa antes de gravar o resultado dela.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt })
+  // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
+  // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
+  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(execucao.limparAntes ? { speakerNames: null } : {}) })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
@@ -805,9 +1206,10 @@ function recusaPeloStatus(meeting: Reuniao): ReprocessamentoRecusado | null {
 
 /**
  * A chave do áudio que dá para reprocessar, ou null. A gravação tem de:
- * existir; durar ao menos mais LIMITE_PROCESSAMENTO_MS (senão a retenção de 30
- * dias — gravacaoParaOuvir ou limparGravacoesVencidas — apagaria o objeto no
- * meio da execução); ter o tipo e o tamanho que o envio original aceita; e
+ * existir; durar ao menos mais LIMITE_PROCESSAMENTO_MS (a leitura vencida e a
+ * varredura não apagam o áudio de reunião em 'processing', mas reprocessar áudio
+ * a minutos de vencer o guardaria além dos 30 dias, e a tela também não oferece
+ * o botão); ter o tipo e o tamanho que o envio original aceita; e
  * estar no espaço DESTA reunião DESTA dona no bucket, para uma linha legada ou
  * corrompida (a tabela veio do backup do Manus) não virar leitura de chave
  * arbitrária.
@@ -819,6 +1221,51 @@ function chaveReprocessavel(gravacao: Gravacao | undefined, ownerId: string, mee
   if (!(gravacao.sizeBytes > 0 && gravacao.sizeBytes <= MAX_MEETING_AUDIO_BYTES)) return null;
   const chave = chaveDoStorageDaDona("meetings", ownerId, gravacao.storageKey);
   return chave && chave.startsWith(`meetings/${ownerId}/${meetingId}/`) ? chave : null;
+}
+
+/**
+ * O reprocessar da reunião gravada em partes: quem refaz é a fila
+ * (server/fila-de-transcricao.ts). A reunião volta a 'uploading' com as
+ * tentativas zeradas, e as partes que falharam por causa passageira (IA, banco,
+ * tentativas esgotadas) voltam a 'received'. As que não têm áudio (sumiu do
+ * bucket ou nunca subiu) seguem como lacuna. Sem parte nenhuma, não há o que
+ * reprocessar. Responde na hora: a tela acompanha pelo status.
+ *
+ * O prazo, como no envio único (chaveReprocessavel), mas com a margem que
+ * cresce com a gravação (margemDoReprocesso, em shared/const.ts): a fila
+ * transcreve uma parte por vez, e enquanto a reunião está em 'uploading' ou
+ * 'processing' o áudio vencido não sai. Com 15 min para qualquer tamanho, o
+ * reprocesso de 72 partes aceito a 20 min do prazo passava dele, e a fila
+ * seguia lendo áudio que já deveria ter saído. A tela esconde o botão com a
+ * mesma conta, sobre a mesma coluna (`esperadas`, a expected_slices que ela
+ * recebe); sem ela, contam as partes até a maior que chegou. Vale a parte que
+ * vence primeiro: as partes gravadas desde esta regra vencem juntas, e as de
+ * antes podem diferir por alguns minutos.
+ */
+async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string, esperadas: number | null): Promise<{ trabalho: Promise<void> }> {
+  const [partes] = await db.select({
+    quantas: sql<number>`count(*)`,
+    maiorSeq: sql<number | null>`max(${meetingAudioSlices.seq})`,
+    prazo: sql<number | null>`min(${meetingAudioSlices.expiresAt})`,
+  }).from(meetingAudioSlices).where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  if (!Number(partes?.quantas ?? 0)) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
+  if (Number(partes!.prazo ?? 0) <= now() + margemDoReprocesso(esperadas ?? Number(partes!.maiorSeq) + 1)) {
+    throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
+  }
+  const tomada = await db.update(meetings).set({
+    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(),
+    expectedSlices: sql`coalesce(${meetings.expectedSlices}, ${Number(partes!.maiorSeq) + 1})`,
+  }).where(and(
+    eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"),
+    eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+  ));
+  if (!linhasAfetadas(tomada)) throw new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
+  await db.update(meetingAudioSlices).set({ status: "received", attempts: 0, lastError: null, lockToken: null, lockedUntil: null, updatedAt: now() })
+    .where(and(
+      eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), eq(meetingAudioSlices.status, "failed"),
+      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, ["AUDIO_AUSENTE", "NAO_RECEBIDA"])),
+    ));
+  return { trabalho: Promise.resolve() };
 }
 
 /**
@@ -841,6 +1288,7 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
+  if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId, meeting.expectedSlices);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
   // unicidade por reunião no banco.
@@ -950,7 +1398,42 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   processingError: meetings.processingError,
   createdAt: meetings.createdAt,
   updatedAt: meetings.updatedAt,
+  // Como o áudio chegou (envio único ou partes) e quantas partes a gravação
+  // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
+  audioPipeline: meetings.audioPipeline,
+  expectedSlices: meetings.expectedSlices,
+  // Os nomes das vozes (H3). Esta lista e este detalhe são só da dona; o link
+  // aberto lê os nomes por outra consulta, e só quando foi ligado com a
+  // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
+  speakerNames: meetings.speakerNames,
 };
+
+/**
+ * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
+ * Só a dona: a reunião de outra conta é "não encontrada". Devolve os nomes
+ * como ficaram, ou null sem a reunião. A leitura e a gravação vão na mesma
+ * transação com a linha travada: dois nomes salvos juntos não se apagam. O nome
+ * que muda de fato muda também o texto das próximas ações que citam a voz, e o
+ * evento delas na agenda fica para trás (acoesComAVozRenomeada, H5c).
+ */
+export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
+  if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
+  const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
+  const db = await exigirDb();
+  return db.transaction(async tx => {
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
+    if (!reuniao) return null;
+    const nomes = nomesDosFalantes(reuniao.speakerNames);
+    const antes = nomes[falante] ?? "";
+    if (limpo) nomes[falante] = limpo;
+    else delete nomes[falante];
+    const agora = Date.now();
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: agora }).where(daDona);
+    if (antes !== limpo) await acoesComAVozRenomeada(tx, ownerId, meetingId, falante, agora);
+    return nomes;
+  });
+}
 
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
@@ -959,68 +1442,207 @@ export async function listPrivateMeetings(ownerId: string) {
 }
 
 /**
- * Apaga o arquivo de áudio do bucket. Devolve se conseguiu: quem chama decide
- * o que fazer com a falha, e a diferença importa.
+ * Apaga o arquivo de áudio do bucket com TODAS as versões
+ * (storageApagarTodasAsVersoes): o B2 guarda versões, e o DELETE simples só
+ * esconderia a voz das participantes, que continuaria guardada e cobrada.
+ * Devolve se conseguiu.
  *
- * Na EXCLUSÃO da reunião, falhar não pode travar a operação — a dona mandou
- * apagar, e a reunião some (o objeto órfão vira aviso no log, mesmo padrão de
- * routers/contexts.ts). Já na RETENÇÃO, apagar a linha com o arquivo intacto
- * seria pior que não fazer nada: a linha é o único registro de onde o áudio
- * está, e sem ela o objeto fica no bucket para sempre, invisível.
+ * A regra é a mesma em todo lugar: a LINHA do áudio (meeting_recordings ou
+ * meeting_audio_slices) só sai se o objeto saiu. Ela é o único registro de onde
+ * o áudio está, e apagá-la com o objeto intacto deixaria a voz no bucket para
+ * sempre, invisível. Quando o bucket recusa, a linha fica e a varredura
+ * (limparGravacoesVencidas) tenta de novo.
+ *
+ * O log leva a CHAVE (montada pelo servidor: o openId aleatório, o id da reunião
+ * e um sufixo, sem nome nem dado de ninguém): é o que diz qual objeto ficou. A
+ * permissão negada (a chave do B2 sem listFiles ou deleteFiles) é erro do
+ * sistema, não aviso de um arquivo: nenhum áudio sai até alguém mexer no painel.
  */
 async function apagarArquivoDaGravacao(storageKey: string): Promise<boolean> {
   try {
-    await storageDelete(storageKey);
+    await storageApagarTodasAsVersoes(storageKey);
     return true;
   } catch (erro) {
-    console.warn("[Reuniões] o áudio ficou no bucket:", erro instanceof Error ? erro.message : erro);
+    const motivo = erro instanceof Error ? erro.message : erro;
+    if (ehAcessoNegadoNoBucket(erro)) {
+      console.error(`[Reuniões] o bucket NEGOU a permissão de apagar o áudio (a chave precisa de listFiles e deleteFiles); ficou: ${storageKey}`, motivo);
+    } else {
+      console.warn(`[Reuniões] o áudio ficou no bucket: ${storageKey}`, motivo);
+    }
     return false;
   }
 }
 
+/** Uma linha de áudio, da gravação inteira ou de uma parte, a tirar do bucket. */
+type LinhaDeAudio = { id: string; storageKey: string };
+
 /**
- * A gravação que a dona pode ouvir agora — ou nada, quando não existe ou já
- * passou dos 30 dias.
- *
- * O prazo era decorativo: `expiresAt` era gravado e nunca lido, e nada
- * apagava o áudio do bucket, então a tela prometia "expira automaticamente
- * após 30 dias" enquanto o arquivo ficava para sempre. Agora a promessa vira
- * ação no momento em que alguém tenta ouvir: vencida, a gravação é apagada do
- * bucket e do banco, e a tela recebe `expirada` para explicar por quê.
- *
- * Sai só o que a tela precisa — `storageKey` fica no servidor. A `url` é o
- * caminho do proxy autenticado (/manus-storage/...), que confere sessão e
- * posse a cada requisição; não é endereço público do bucket.
+ * Tira do bucket os áudios da lista, até CONCORRENCIA_DO_EXPURGO_DO_AUDIO por
+ * vez (uma requisição da tela espera por eles), e para de começar outros na
+ * primeira recusa: com o bucket fora ou travado (até 30 s por chamada),
+ * insistir em cada áudio prenderia por minutos a tela da reunião ou a exclusão.
+ * Os que já estavam em curso terminam. O que não saiu, ou nem foi tentado, fica
+ * para a varredura. Devolve os ids que saíram e os que ficaram, na ordem da
+ * lista.
  */
-async function gravacaoParaOuvir(
-  db: Awaited<ReturnType<typeof exigirDb>>,
-  ownerId: string,
-  meetingId: string,
-  criadaEm: number,
-) {
+async function tirarDoBucket(linhas: LinhaDeAudio[]): Promise<{ sairam: string[]; ficaram: string[] }> {
+  let houveRecusa = false;
+  const resultados = await comConcorrenciaLimitada(linhas, CONCORRENCIA_DO_EXPURGO_DO_AUDIO, async linha => {
+    const saiu = await apagarArquivoDaGravacao(linha.storageKey);
+    if (!saiu) houveRecusa = true;
+    return saiu;
+  }, () => houveRecusa);
+  const sairam: string[] = [];
+  const ficaram: string[] = [];
+  resultados.forEach((resultado, posicao) => (resultado?.valor ? sairam : ficaram).push(linhas[posicao].id));
+  return { sairam, ficaram };
+}
+
+/** Uma parte do áudio para o player: o contrato `recording.partes` do desenho. */
+export type ParteParaOuvir = { seq: number; url: string; mimeType: string; inicioSegundos: number; duracaoSegundos: number; expiresAt: number };
+
+/** O que a tela da dona e o link aberto recebem sobre o áudio da reunião. */
+export type AudioDaReuniao = {
+  recording: { url: string; mimeType: string; durationSeconds: number; sizeBytes: number; expiresAt: number; partes: ParteParaOuvir[] } | null;
+  /**
+   * O áudio passou do prazo e SAIU do bucket. Sem linha nenhuma, vale para a
+   * reunião mais velha que o prazo: desde a retenção do áudio (novembro de 2026)
+   * a linha só sai depois do objeto com todas as versões, então ou o áudio saiu,
+   * ou nunca houve (a tela só diz "foi apagada" quando há transcrição, que só
+   * existe se houve áudio).
+   *
+   * Exceção que o código não alcança: o áudio cuja linha saiu ANTES dessa regra.
+   * O DELETE antigo (storageDelete, sem VersionId) só escondia o arquivo no B2,
+   * e a versão com a voz ficou guardada sem ponteiro. Para esse passivo, a
+   * regra de ciclo de vida do bucket no prefixo meetings/ ou o expurgo único de
+   * scripts/expurgar-audio-escondido.ts (os dois só com o Roberto).
+   */
+  recordingExpired: boolean;
+  /** O áudio passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
+  recordingDeletionPending: boolean;
+};
+
+/** O estado da reunião que decide o que a leitura faz com o áudio vencido. */
+type ReuniaoDoAudio = { createdAt: number; status: Reuniao["status"]; emPartes: boolean };
+
+/**
+ * Status em que o áudio vencido da reunião em partes NÃO sai, nem na leitura nem
+ * na varredura: em 'processing' a fila ou o reprocesso pode estar lendo o
+ * áudio; em 'recording' e 'uploading' a reunião ainda recebe partes, e cada
+ * parte que chega renova o prazo de todas (renovação pendente). Nesses estados
+ * o áudio vencido só deixa de ser servido, e sai quando a reunião os deixar. No
+ * envio único, só 'processing' segura.
+ */
+const STATUS_QUE_SEGURAM_AS_PARTES: Reuniao["status"][] = ["recording", "uploading", "processing"];
+
+/**
+ * A gravação que se pode ouvir agora e, quando não há, o porquê: o áudio passou
+ * do prazo e saiu (`recordingExpired`), passou do prazo e ainda está saindo
+ * (`recordingDeletionPending`), ou não há áudio guardado.
+ *
+ * Vencido, o áudio deixa de ser servido e sai aqui mesmo, com todas as versões
+ * e só então a linha: a promessa dos 30 dias vale também para quem abre a
+ * reunião antes da próxima varredura. Se o bucket recusar, a linha fica, a tela
+ * diz que o áudio está saindo (e não que "foi apagado"), e a varredura tenta de
+ * novo. Antes, a tela dizia "passou dos 30 dias e foi apagada" na reunião em
+ * partes sem nada ter saído do bucket.
+ *
+ * Sai só o que a tela precisa: `storageKey` fica no servidor. A `url` é o
+ * caminho do proxy autenticado (/manus-storage/...), que confere sessão e posse
+ * a cada requisição; não é endereço público do bucket.
+ */
+export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: string, reuniao: ReuniaoDoAudio): Promise<AudioDaReuniao> {
+  const agora = now();
+  const semAudio = (expirada: boolean, saindo = false): AudioDaReuniao => ({ recording: null, recordingExpired: expirada, recordingDeletionPending: saindo });
+  // Sem linha: ou nunca houve áudio, ou ele já saiu pelo prazo. A data da
+  // reunião distingue os dois casos sem guardar nada a mais (o prazo conta de um
+  // instante posterior à criação); sem isto a tela passaria a dizer "nunca houve
+  // áudio" logo depois de explicar que ele tinha sido apagado.
+  const semLinha = () => semAudio(reuniao.createdAt + MEETING_AUDIO_TTL_MS <= agora);
+
+  if (reuniao.emPartes) {
+    const linhas = await db.select({
+      id: meetingAudioSlices.id, seq: meetingAudioSlices.seq, status: meetingAudioSlices.status,
+      storageKey: meetingAudioSlices.storageKey, storageUrl: meetingAudioSlices.storageUrl, mimeType: meetingAudioSlices.mimeType,
+      durationMs: meetingAudioSlices.durationMs, offsetMs: meetingAudioSlices.offsetMs, expiresAt: meetingAudioSlices.expiresAt,
+    }).from(meetingAudioSlices)
+      .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)))
+      .orderBy(meetingAudioSlices.seq);
+    if (!linhas.length) return semLinha();
+
+    const vencidas = linhas.filter(linha => linha.expiresAt <= agora);
+    let ficaram = 0;
+    if (vencidas.length && STATUS_QUE_SEGURAM_AS_PARTES.includes(reuniao.status)) {
+      ficaram = vencidas.length;
+    } else if (vencidas.length) {
+      const tirada = await tirarDoBucket(vencidas);
+      if (tirada.sairam.length) {
+        await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, tirada.sairam)));
+      }
+      ficaram = tirada.ficaram.length;
+    }
+
+    // As partes que tocam: recebidas ou transcritas, no prazo. O início é o
+    // gravado pela fila (offset) ou, antes de ela transcrever, a soma das
+    // anteriores, contada sobre TODAS as linhas.
+    const partes: ParteParaOuvir[] = [];
+    let acumulado = 0;
+    for (const linha of linhas) {
+      const inicio = linha.offsetMs !== null ? Number(linha.offsetMs) : acumulado;
+      acumulado = inicio + linha.durationMs;
+      if ((linha.status !== "received" && linha.status !== "transcribed") || linha.expiresAt <= agora) continue;
+      partes.push({
+        seq: linha.seq, url: linha.storageUrl, mimeType: linha.mimeType,
+        inicioSegundos: inicio / 1000, duracaoSegundos: linha.durationMs / 1000, expiresAt: linha.expiresAt,
+      });
+    }
+    if (partes.length) {
+      // A reunião em partes toca as partes em sequência; o resumo em
+      // `recording` (url da primeira, duração total, o prazo mais curto) mantém
+      // a tela de antes funcionando.
+      const ultima = partes[partes.length - 1];
+      return {
+        recording: {
+          url: partes[0].url, mimeType: partes[0].mimeType,
+          durationSeconds: Math.round(ultima.inicioSegundos + ultima.duracaoSegundos),
+          sizeBytes: 0, expiresAt: Math.min(...partes.map(p => p.expiresAt)), partes,
+        },
+        recordingExpired: false,
+        recordingDeletionPending: false,
+      };
+    }
+    if (ficaram) return semAudio(false, true);
+    // Nada para ouvir e nada saindo: se todas as partes tinham vencido (e
+    // acabaram de sair), é a gravação que passou do prazo; senão, as que sobram
+    // nunca chegaram ao bucket ou falharam.
+    return semAudio(vencidas.length === linhas.length);
+  }
+
   // Sem unicidade por reunião no banco: `orderBy` torna a escolha determinista
   // (a mais recente), em vez de depender da ordem que o MySQL devolver.
   const [gravacao] = await db.select().from(meetingRecordings)
     .where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)))
     .orderBy(desc(meetingRecordings.createdAt))
     .limit(1);
+  if (!gravacao) return semLinha();
 
-  // Sem linha: ou nunca houve áudio, ou ele já foi descartado pelo prazo. A
-  // data da reunião distingue os dois casos sem guardar nada a mais — e sem
-  // isto a tela passaria a dizer "nunca houve áudio" logo depois de explicar
-  // que a gravação tinha expirado.
-  if (!gravacao) {
-    return { recording: null, recordingExpired: criadaEm + MEETING_AUDIO_TTL_MS <= now() };
+  if (gravacao.expiresAt <= agora) {
+    // Em 'processing' o reprocesso pode estar lendo este áudio: aqui ele só
+    // deixa de ser servido, e a varredura o tira quando a reunião sair desse
+    // estado. Nos outros, sai já: o objeto com todas as versões e, só se ele
+    // saiu, a linha.
+    if (reuniao.status !== "processing" && await apagarArquivoDaGravacao(gravacao.storageKey)) {
+      await db.delete(meetingRecordings).where(and(eq(meetingRecordings.id, gravacao.id), eq(meetingRecordings.ownerId, ownerId)));
+      return semAudio(true);
+    }
+    return semAudio(false, true);
   }
 
-  if (gravacao.expiresAt <= now()) {
-    // A linha só sai se o arquivo saiu. Apagá-la com o objeto intacto deixaria
-    // o áudio no bucket para sempre, sem ninguém sabendo que ele existe.
-    const apagou = await apagarArquivoDaGravacao(gravacao.storageKey);
-    if (apagou) await db.delete(meetingRecordings).where(eq(meetingRecordings.id, gravacao.id));
-    return { recording: null, recordingExpired: true };
-  }
-
+  // O envio único é uma parte só, no mesmo contrato.
+  const partes: ParteParaOuvir[] = [{
+    seq: 0, url: gravacao.storageUrl, mimeType: gravacao.mimeType, inicioSegundos: 0,
+    duracaoSegundos: gravacao.durationSeconds, expiresAt: gravacao.expiresAt,
+  }];
   return {
     recording: {
       url: gravacao.storageUrl,
@@ -1028,80 +1650,379 @@ async function gravacaoParaOuvir(
       durationSeconds: gravacao.durationSeconds,
       sizeBytes: gravacao.sizeBytes,
       expiresAt: gravacao.expiresAt,
+      partes,
     },
     recordingExpired: false,
+    recordingDeletionPending: false,
   };
 }
 
 /**
- * A varredura que faz os 30 dias valerem para TODA gravação — não só para as
- * que alguém reabre. Sem ela, o áudio de uma reunião que ninguém visita mais
- * (o caso comum) ficaria no bucket para sempre, e a promessa da tela seria
- * verdadeira apenas por acaso. A voz das outras participantes não depende de
- * a dona voltar na página.
- *
- * Roda pelo endpoint de tarefa agendada, ao lado da limpeza de sessões.
+ * O andamento da reunião gravada em partes, para a tela dizer o que está
+ * acontecendo: quantas partes chegaram, quantas a IA já transcreveu e quantas a
+ * gravação teve (nulo enquanto grava). Nulo no envio único.
  */
-export async function limparGravacoesVencidas(limite = 200) {
-  const db = await exigirDb();
-  const vencidas = await db.select({ id: meetingRecordings.id, storageKey: meetingRecordings.storageKey })
-    .from(meetingRecordings)
-    .where(lte(meetingRecordings.expiresAt, now()))
-    .limit(limite);
+async function andamentoDaReuniao(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string, esperadas: number | null) {
+  const linhas = await db.select({ status: meetingAudioSlices.status }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  return {
+    recebidas: linhas.filter(l => l.status !== "uploading").length,
+    transcritas: linhas.filter(l => l.status === "transcribed").length,
+    esperadas,
+  };
+}
 
-  let apagadas = 0;
-  for (const gravacao of vencidas) {
-    if (!(await apagarArquivoDaGravacao(gravacao.storageKey))) continue;
-    await db.delete(meetingRecordings).where(eq(meetingRecordings.id, gravacao.id));
-    apagadas += 1;
+/** Linhas por consulta da varredura, em cada tabela. */
+const LOTE_DA_VARREDURA = 200;
+/** Teto de lotes por tabela numa passada: o que sobrar sai na passada seguinte. */
+const MAXIMO_DE_LOTES_DA_VARREDURA = 20;
+/**
+ * Recusas SEGUIDAS do bucket que encerram a volta de UMA tabela: um bucket fora
+ * do ar ou travado (até 30 s por chamada) não pode prender a passada por horas.
+ * A conta é por tabela (as partes são visitadas mesmo quando as gravações batem
+ * no teto) e zera a cada áudio que sai.
+ */
+const RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA = 5;
+
+export type ResultadoDaVarredura = { encontradas: number; apagadas: number };
+
+/**
+ * A passada da varredura parou no meio por um erro (o banco caiu, por exemplo).
+ * O erro continua sendo erro (banco fora do ar nunca vira "nada a apagar"), mas
+ * leva o que JÁ saiu do bucket e do banco nessa passada, para o laço
+ * (server/varredura-de-gravacoes.ts) registrar na auditoria antes de relançar.
+ */
+export class VarreduraInterrompida extends Error {
+  constructor(readonly resultado: ResultadoDaVarredura, causa: unknown) {
+    super("A varredura das gravações vencidas parou no meio.", { cause: causa });
+    this.name = "VarreduraInterrompida";
   }
-  return { encontradas: vencidas.length, apagadas };
+}
+
+/**
+ * Onde cada tabela retoma na passada seguinte quando a anterior parou no meio
+ * (recusas seguidas, teto de lotes ou desligamento): o id da última linha
+ * tentada. Sem isto, toda passada recomeçava do primeiro id, e cinco áudios que
+ * o bucket recusa sempre ficavam na frente e travavam todos os outros. Na
+ * memória do processo: perder a marca num deploy só faz a passada seguinte
+ * começar do começo. Por tabela e, nos testes de integração, por dona.
+ */
+const retomadaDaVarredura = new Map<string, string>();
+
+/** A reunião DO áudio: mesmo id E mesma dona. Sem esse par, o áudio é de reunião que já não existe. */
+const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
+const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
+
+/** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
+type TrechoDaVarredura = { depoisDe: string; ate?: string };
+
+/** As gravações do envio único que saem nesta passada (ver limparGravacoesVencidas). */
+function gravacoesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingRecordings.id, storageKey: meetingRecordings.storageKey })
+    .from(meetingRecordings)
+    .leftJoin(meetings, reuniaoDaGravacao)
+    .where(and(
+      gt(meetingRecordings.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingRecordings.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingRecordings.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        and(lte(meetingRecordings.expiresAt, agora), ne(meetings.status, "processing")),
+      ),
+    ))
+    .orderBy(asc(meetingRecordings.id))
+    .limit(lote);
+}
+
+/** As partes da gravação em partes que saem nesta passada (ver limparGravacoesVencidas). */
+function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey })
+    .from(meetingAudioSlices)
+    .leftJoin(meetings, reuniaoDaParte)
+    .where(and(
+      gt(meetingAudioSlices.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingAudioSlices.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingAudioSlices.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        and(lte(meetingAudioSlices.expiresAt, agora), notInArray(meetings.status, STATUS_QUE_SEGURAM_AS_PARTES)),
+      ),
+    ))
+    .orderBy(asc(meetingAudioSlices.id))
+    .limit(lote);
+}
+
+/**
+ * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
+ * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
+ * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
+ * não pode depender de a dona voltar na página.
+ *
+ * Sai, com todas as versões e só então a linha:
+ * - a gravação do envio único e a parte da gravação em partes cujo prazo
+ *   venceu, menos as da reunião que ainda pode precisar delas: 'processing'
+ *   (a execução ou a fila pode estar lendo o áudio) e, nas partes, também
+ *   'recording' e 'uploading' (renovação pendente: cada parte que chega renova
+ *   o prazo de todas, e a fila ainda as transcreve). As partes de uma reunião
+ *   vencem no mesmo instante (ver MEETING_AUDIO_TTL_MS) e saem na mesma passada;
+ * - na hora, o áudio cuja reunião já não existe ou está sendo excluída
+ *   ('deleted'): é o ponteiro que a exclusão da reunião ou da conta deixou
+ *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
+ *   da exclusão.
+ *
+ * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
+ * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
+ * não volta na mesma passada. Em cada tabela, a volta para depois de
+ * RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA, e a tabela seguinte é visitada assim
+ * mesmo. A passada inteira para entre um áudio e outro quando `deveParar` diz
+ * (o desligamento do servidor). A tabela que parou no meio retoma na passada
+ * seguinte DEPOIS da última linha tentada e dá a volta: o que ficou recusado
+ * passa para o fim da fila, em vez de travar os outros áudios a cada passada.
+ * Rodar de novo sem nada vencido não faz nada.
+ *
+ * Erro no meio (o banco caiu, por exemplo) sobe como VarreduraInterrompida,
+ * com o que já tinha saído.
+ *
+ * Varredura de SISTEMA, sem owner_id de propósito, como
+ * marcarReunioesInterrompidas: não lê nem devolve dado de reunião. `ownerId` só
+ * existe para os testes de integração, que dividem o banco com outros arquivos
+ * rodando em paralelo.
+ *
+ * Roda no boot e a cada 5 min (server/varredura-de-gravacoes.ts) e pelo
+ * endpoint de tarefa agendada.
+ */
+export async function limparGravacoesVencidas(opcoes: {
+  lote?: number;
+  maximoDeLotes?: number;
+  deveParar?: () => boolean;
+  ownerId?: string;
+} = {}): Promise<ResultadoDaVarredura> {
+  const db = await exigirDb();
+  const agora = now();
+  const lote = opcoes.lote ?? LOTE_DA_VARREDURA;
+  const maximoDeLotes = opcoes.maximoDeLotes ?? MAXIMO_DE_LOTES_DA_VARREDURA;
+  const deveParar = opcoes.deveParar ?? (() => false);
+  const resultado: ResultadoDaVarredura = { encontradas: 0, apagadas: 0 };
+
+  const tabelas = [
+    {
+      nome: "gravacoes",
+      ler: (trecho: TrechoDaVarredura) => gravacoesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingRecordings).where(eq(meetingRecordings.id, id)),
+    },
+    {
+      nome: "partes",
+      ler: (trecho: TrechoDaVarredura) => partesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, id)),
+    },
+  ];
+
+  /** Uma volta por uma tabela. Devolve se parou antes do fim e a última linha que tentou. */
+  const varrerTabela = async (tabela: (typeof tabelas)[number], retomada: string) => {
+    // Com marca, a volta começa depois da linha em que a passada anterior parou
+    // e, no fim da tabela, continua do começo até essa linha (inclusive), que
+    // fica por último. Sem marca, do começo ao fim.
+    const trechos: TrechoDaVarredura[] = retomada ? [{ depoisDe: retomada }, { depoisDe: "", ate: retomada }] : [{ depoisDe: "" }];
+    let recusasSeguidas = 0;
+    let lotes = 0;
+    let ultimaTentada: string | null = null;
+    const parar = () => deveParar() || recusasSeguidas >= RECUSAS_SEGUIDAS_QUE_ENCERRAM_A_TABELA;
+    for (const trecho of trechos) {
+      let depoisDe = trecho.depoisDe;
+      for (;;) {
+        if (parar() || lotes >= maximoDeLotes) return { parou: true, ultimaTentada };
+        const linhas = await tabela.ler({ depoisDe, ate: trecho.ate });
+        lotes += 1;
+        for (const linha of linhas) {
+          if (parar()) return { parou: true, ultimaTentada };
+          resultado.encontradas += 1;
+          ultimaTentada = linha.id;
+          if (await apagarArquivoDaGravacao(linha.storageKey)) {
+            await tabela.apagarLinha(linha.id);
+            resultado.apagadas += 1;
+            recusasSeguidas = 0;
+          } else {
+            recusasSeguidas += 1;
+          }
+        }
+        if (linhas.length < lote) break;
+        depoisDe = linhas[linhas.length - 1].id;
+      }
+    }
+    return { parou: false, ultimaTentada };
+  };
+
+  try {
+    for (const tabela of tabelas) {
+      if (deveParar()) break;
+      const chave = `${tabela.nome}|${opcoes.ownerId ?? ""}`;
+      const volta = await varrerTabela(tabela, retomadaDaVarredura.get(chave) ?? "");
+      if (!volta.parou) retomadaDaVarredura.delete(chave);
+      else if (volta.ultimaTentada !== null) retomadaDaVarredura.set(chave, volta.ultimaTentada);
+    }
+  } catch (erro) {
+    throw new VarreduraInterrompida({ ...resultado }, erro);
+  }
+  return resultado;
+}
+
+/** O nome e o e-mail da conta da dona, e o nome do perfil dela: o que a tela compara para perguntar "É você?". */
+async function contaDaDona(db: Banco, ownerId: string): Promise<{ nomes: Array<string | null>; email: string | null } | null> {
+  const [conta] = await db.select({ name: users.name, email: users.email, displayName: userProfiles.displayName }).from(users)
+    .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+    .where(eq(users.openId, ownerId)).limit(1);
+  return conta ? { nomes: [conta.name, conta.displayName], email: conta.email } : null;
 }
 
 export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  const [meeting] = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
+  // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
+  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!meeting) return null;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
-  const suggestions = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
-  const { recording, recordingExpired } = await gravacaoParaOuvir(db, ownerId, meetingId, meeting.createdAt);
+  const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
+  // N5: o nome do contato a que a pessoa foi vinculada ("Vinculada a…"), só da
+  // rede da dona; contato excluído depois fica sem nome.
+  const idsDosContatos = Array.from(new Set(sugestoesGravadas.map(s => s.existingContactId).filter((id): id is number => id !== null)));
+  const nomesDosContatos = idsDosContatos.length
+    ? new Map((await db.select({ id: privateContacts.id, fullName: privateContacts.fullName }).from(privateContacts)
+        .where(and(eq(privateContacts.ownerId, ownerId), inArray(privateContacts.id, idsDosContatos)))).map(c => [Number(c.id), c.fullName]))
+    : new Map<number, string>();
+  // E se a pessoa pendente parece ser a própria dona (o mesmo e-mail ou o
+  // mesmo nome da conta): a tela pergunta "É você?" ao lado do "Sou eu".
+  const conta = sugestoesGravadas.some(s => s.status === "pending") ? await contaDaDona(db, ownerId) : null;
+  const suggestions = sugestoesGravadas.map(s => ({
+    ...s, existingContactName: s.existingContactId === null ? null : nomesDosContatos.get(Number(s.existingContactId)) ?? null,
+    pareceSerADona: conta !== null && s.status === "pending" && pareceSerADona({ fullName: s.fullName, email: s.email }, conta),
+  }));
+  const emPartes = meeting.audioPipeline === "slices";
+  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, ownerId, meetingId, {
+    createdAt: meeting.createdAt, status: meeting.status, emPartes,
+  });
+  const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
+  // Se quem tem o link vê os nomes das vozes (H3b): só com o link ligado com a
+  // confirmação que fala deles. O painel de compartilhar avisa a dona quando há
+  // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
+  // sai também pelo link. Sem link, falso, sem consultar a auditoria.
+  const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError) },
-    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired,
+    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
+    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento,
   };
 }
 
+/** O que fica escrito na parte de áudio que sobra como ponteiro depois da exclusão da reunião (frase nossa, sem dado de ninguém). */
+export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio desta parte não saiu do bucket";
+
 /**
  * Tudo que uma reunião gera fora da própria linha: sugestões, entidades,
- * transcrição, traduções e gravações (linha E objeto no bucket). Serve à
+ * transcrição, traduções e gravações (linha E objeto no bucket), e também os
+ * avisos dela no sino (H15) e o ponteiro da agenda (H16a). Serve à
  * exclusão pela dona e à COMPENSAÇÃO de processMeetingRecording, que usa a
  * mesma lista quando descobre que a reunião foi excluída no meio — duas
  * listas divergiriam na primeira tabela nova.
  *
- * O ÁUDIO sai do bucket, não só a linha do banco: é a voz das pessoas que
- * participaram da reunião, o dado mais sensível daqui. Antes, apagar a
- * reunião deixava o arquivo lá — e sem a linha ninguém sabia que existia.
- * A leitura vem primeiro porque é a linha que diz onde o arquivo está:
- * apagá-la antes tornaria o objeto inalcançável para sempre.
+ * O ÁUDIO sai do bucket com todas as versões, não só a linha do banco: é a voz
+ * das pessoas que participaram da reunião, o dado mais sensível daqui. A
+ * leitura vem primeiro porque é a linha que diz onde o arquivo está: apagá-la
+ * antes tornaria o objeto inalcançável para sempre.
+ *
+ * O que a IA gerou (transcrição, sugestões, traduções, resumo) sai ANTES do
+ * bucket: não aponta para objeto nenhum, e o expurgo do áudio, com 4 a 5
+ * chamadas por arquivo, é a parte longa. Um deploy (SIGTERM) no meio do expurgo
+ * deixava a reunião 'deleted' ainda com a transcrição, e nada retomava isso; o
+ * áudio que ficar a varredura retoma.
+ *
+ * Só sai a linha do áudio cujo objeto saiu, pelo id (e pela dona). Se o bucket
+ * recusar (B2 fora, chave sem permissão de listar), a exclusão não trava: a
+ * reunião sai do mesmo jeito, mas a linha fica como ponteiro, já vencida e, na
+ * parte, sem a transcrição (`result`) e fora da fila; sem a reunião, a
+ * varredura a acha na passada seguinte e tenta o bucket de novo. Apagar pelo id
+ * também poupa o áudio que uma execução ainda em curso gravou depois desta
+ * leitura: ela relê a reunião, a acha excluída e o leva junto (ou, se falhar
+ * antes, a varredura o acha sem reunião).
  */
 async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: string) {
   const gravacoes = await db.select({ id: meetingRecordings.id, storageKey: meetingRecordings.storageKey })
     .from(meetingRecordings)
     .where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
-  for (const gravacao of gravacoes) await apagarArquivoDaGravacao(gravacao.storageKey);
+  // As partes da reunião gravada em partes (G5) são áudio também.
+  const partes = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey, status: meetingAudioSlices.status })
+    .from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 
-  await apagarDerivadosSemGravacao(db, ownerId, meetingId);
-  await db.delete(meetingRecordings).where(and(eq(meetingRecordings.meetingId, meetingId), eq(meetingRecordings.ownerId, ownerId)));
+  await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
+  // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
+  // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião
+  // não encontrada", e nada retoma essa limpeza (a varredura só retoma o
+  // áudio). Logo depois de apagarDerivadosSemGravacao, e não antes: o DELETE do
+  // resumo, lá dentro, espera o registrarFalha em curso (server/fila-do-resumo.ts),
+  // e o aviso de falha que ele gravar sai aqui.
+  await apagarAvisosDaReuniao(db, ownerId, meetingId);
+  // A reunião marcada na agenda (H16a) fica, sem a gravação: volta a ter o
+  // "Gravar agora". Antes da linha da reunião, para não sobrar ponteiro solto.
+  await soltarGravacaoDaAgenda(db, ownerId, meetingId);
+
+  // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
+  // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
+  // ponteiro para a varredura.
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes]);
+  const saiu = new Set(sairam);
+
+  const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
+  const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
+  // A parte lida 'uploading' ainda está subindo: o expurgo dela aqui pode ter
+  // rodado ANTES de o objeto existir (e "dado certo" sem apagar nada). Ela é de
+  // receberParte, que relê a reunião depois do upload, a acha 'deleted' (gravado
+  // antes desta leitura) e tira o próprio objeto. Por isso a linha dela só sai
+  // aqui se continuar 'uploading' (o upload não terminou; se terminar, o
+  // receberParte não acha a linha e tira o objeto do mesmo jeito): se o upload
+  // terminou nesse meio-tempo, a linha é o ponteiro de que receberParte precisa
+  // se o bucket recusar o expurgo dele.
+  const partesQueSairam = partes.filter(parte => saiu.has(parte.id) && parte.status !== "uploading").map(parte => parte.id);
+  const partesSubindoQueSairam = partes.filter(parte => saiu.has(parte.id) && parte.status === "uploading").map(parte => parte.id);
+  const partesQueFicam = partes.filter(parte => !saiu.has(parte.id)).map(parte => parte.id);
+  if (gravacoesQueSairam.length) {
+    await db.delete(meetingRecordings).where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueSairam)));
+  }
+  if (partesQueSairam.length) {
+    await db.delete(meetingAudioSlices).where(and(eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesQueSairam)));
+  }
+  if (partesSubindoQueSairam.length) {
+    await db.delete(meetingAudioSlices).where(and(
+      eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesSubindoQueSairam), eq(meetingAudioSlices.status, "uploading"),
+    ));
+  }
+  const agora = now();
+  if (gravacoesQueFicam.length) {
+    await db.update(meetingRecordings).set({ expiresAt: agora })
+      .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueFicam)));
+  }
+  if (partesQueFicam.length) {
+    await db.update(meetingAudioSlices).set({
+      status: "failed", lastError: MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, result: null,
+      lockedUntil: null, lockToken: null, expiresAt: agora, updatedAt: agora,
+    }).where(and(eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesQueFicam)));
+  }
 }
 
 /**
- * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição e
- * traduções —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
+ * O que a IA gerou a partir do áudio — sugestões, entidades, transcrição,
+ * traduções e resumo guardado —, sem tocar na gravação. É a limpeza do reprocessamento: o áudio
  * fica, porque é dele que sai o resultado novo. Mora dentro da lista única de
  * apagarDerivadosDaReuniao para as duas nunca divergirem.
+ *
+ * As próximas ações (H5a) não saem: são da dona. Elas se soltam primeiro,
+ * enquanto a reunião e os nomes das vozes ainda existem (`reuniaoSai` é a
+ * exclusão; sem ele, o reprocesso, que zera os nomes e refaz os itens).
  */
-async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string) {
+async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string, reuniaoSai: boolean) {
+  await soltarAcoesDaReuniao(db, ownerId, meetingId, reuniaoSai);
   await db.delete(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId)));
   // As pendências de Quem Sou / Tenho / Preciso tiradas desta reunião carregam
   // trechos literais da transcrição: saem com ela.
@@ -1111,6 +2032,12 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   // As TRADUÇÕES são cópias da transcrição em outros idiomas: apagar só o
   // original deixaria o mesmo conteúdo vivo em até nove línguas.
   await db.delete(meetingTranscriptTranslations).where(and(eq(meetingTranscriptTranslations.meetingId, meetingId), eq(meetingTranscriptTranslations.ownerId, ownerId)));
+  // O resumo guardado (H4) foi escrito a partir da transcrição e cita trechos
+  // dela: sai com ela. As traduções dele (H11) e os itens antes do resumo, que
+  // é a linha de que eles saem.
+  await db.delete(meetingSummaryTranslations).where(and(eq(meetingSummaryTranslations.meetingId, meetingId), eq(meetingSummaryTranslations.ownerId, ownerId)));
+  await db.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.meetingId, meetingId), eq(meetingSummaryItems.ownerId, ownerId)));
+  await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
 }
 
 export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
@@ -1124,6 +2051,8 @@ export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   if (!linhasAfetadas(marcada)) return false;
+  // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
+  // dentro, antes do expurgo do bucket.
   await apagarDerivadosDaReuniao(db, ownerId, meetingId);
   await db.delete(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
   return true;
@@ -1145,8 +2074,12 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   const db = await exigirDb();
   const agora = now();
   const corte = agora - limiteMs;
+  // Só o envio único: a reunião em partes em 'processing' é da fila
+  // (server/fila-de-transcricao.ts), que tem a própria reserva com prazo e a
+  // retoma quando ela vence — marcá-la como falha aqui perderia uma montagem
+  // longa que ainda está em curso.
   const presas = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.status, "processing"), lt(meetings.updatedAt, corte)))
+    .where(and(eq(meetings.status, "processing"), eq(meetings.audioPipeline, "single"), lt(meetings.updatedAt, corte)))
     .limit(limite);
   if (!presas.length) return { encontradas: 0, marcadas: 0 };
 
@@ -1159,6 +2092,7 @@ export async function marcarReunioesInterrompidas(limiteMs = LIMITE_PROCESSAMENT
   }).where(and(
     inArray(meetings.id, presas.map(reuniao => reuniao.id)),
     eq(meetings.status, "processing"),
+    eq(meetings.audioPipeline, "single"),
     lt(meetings.updatedAt, corte),
   ));
   return { encontradas: presas.length, marcadas: linhasAfetadas(resultado) };

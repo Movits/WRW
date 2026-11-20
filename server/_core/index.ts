@@ -7,6 +7,8 @@ import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
+import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -14,8 +16,10 @@ import { montarDiretivasCsp } from "./csp";
 import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
+import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
+import { linhaDoRaciocinioDeIa } from "./raciocinio-de-ia";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -86,6 +90,9 @@ async function startServer() {
   // recusado aparece no log do boot, e não só na primeira chamada à IA. Sem a
   // chave, de propósito.
   console.log(linhaDosModelosDeIa());
+  // E o raciocínio que cada função pede: "padrão do modelo" enquanto nenhuma
+  // LLM_RACIOCINIO_* estiver definida, e o aviso de recusa sai aqui também.
+  console.log(linhaDoRaciocinioDeIa());
 
   // Migrações no boot, ANTES de aceitar tráfego — só em produção. O deploy do
   // Render publica o código na hora, mas ninguém no time roda migração na mão:
@@ -193,6 +200,13 @@ async function startServer() {
   if (process.env.RENDER === "true") app.use("/api/trpc", criarDiagnosticoDoIp());
   app.use("/api/trpc", apiLimiter);
 
+  // As partes da reunião gravada em partes chegam em binário (G5): a rota tem o
+  // próprio leitor de corpo (express.raw, até 16 MB) e PRECISA vir antes do
+  // express.json e do urlencoded, que senão leriam o corpo primeiro. Guarda:
+  // server/agendados-autenticacao.test.ts confere a ordem no index.ts real.
+  registrarRotaDasPartes(app);
+  app.use(tratarCorpoGrandeDasPartes);
+
   // Uploads dentro de um LOTE do tRPC ("/api/trpc/a,b"): os recortes por
   // caminho abaixo não casam com a lista; este middleware reconhece cada
   // procedimento da URL (ver server/_core/corpo-grande-para-uploads.ts).
@@ -226,6 +240,13 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
   registerStorageProxy(app);
+  // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
+  // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
+  registrarRotasDoLinkAberto(app);
+  // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
+  // Vite e do estático, que responderiam a página no lugar delas. Sem as
+  // variáveis, 404 (server/rotas-da-google-agenda.ts).
+  registrarRotasDaGoogleAgenda(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
@@ -270,11 +291,11 @@ async function startServer() {
   // Endpoint: POST /api/scheduled/cleanup-recordings
   // Mesma sessão de cron da limpeza de sessões.
   //
-  // Existe porque a tela promete que o áudio "expira automaticamente após 30
-  // dias" e essa promessa é sobre a voz de TODAS as participantes — que não
-  // têm login e nunca vão abrir a página. Sem esta varredura, o descarte só
-  // aconteceria quando a dona reabrisse a reunião, e o caso comum (nunca mais
-  // voltar lá) deixaria o áudio no bucket para sempre.
+  // A tela promete que o áudio "expira automaticamente após 30 dias", e essa
+  // promessa é sobre a voz de TODAS as participantes, que não têm login e nunca
+  // vão abrir a página. O laço da varredura (server/varredura-de-gravacoes.ts,
+  // ligado lá embaixo, depois do listen) já faz esta limpeza no boot e a cada
+  // 5 min; o endpoint fica para o dia em que houver um agendador externo.
   // ============================================================
   app.post("/api/scheduled/cleanup-recordings", async (req: Request, res: Response) => {
     const user = await autenticarCron(req, res);
@@ -308,9 +329,10 @@ async function startServer() {
   // Endpoint: POST /api/scheduled/mark-interrupted-meetings
   // Mesma sessão de cron das limpezas acima.
   //
-  // O boot e o setInterval lá em cima já fazem esta varredura; o endpoint
-  // fica ao lado das outras duas rotas de cron para o dia em que houver um
-  // agendador externo (hoje nenhuma delas tem chamador).
+  // O boot e o setInterval lá em cima já fazem esta varredura (e o laço da
+  // varredura das gravações faz a de cima); o endpoint fica ao lado das outras
+  // duas rotas de cron para o dia em que houver um agendador externo (hoje
+  // nenhuma delas tem chamador).
   // ============================================================
   app.post("/api/scheduled/mark-interrupted-meetings", async (req: Request, res: Response) => {
     const user = await autenticarCron(req, res);
@@ -372,6 +394,58 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // A fila da reunião gravada em partes (G7) transcreve as partes e monta as
+  // reuniões; a do resumo guardado (H4) escreve o resumo das reuniões prontas;
+  // o laço dos lembretes (H15) põe no sino os da próxima ação e os da agenda.
+  // Os três rodam no próprio processo, cada um com o seu laço. O quarto laço é
+  // a varredura das gravações vencidas (server/varredura-de-gravacoes.ts): tira
+  // do bucket, com todas as versões, o áudio de reunião que passou dos 30 dias,
+  // já no boot (sem atrasar o listen, que já foi chamado aqui) e de 5 em 5 min.
+  // Sem banco (dev sem DATABASE_URL), nenhum liga.
+  if (process.env.DATABASE_URL) {
+    const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
+    const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
+    const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
+    const { iniciarLembretes, pararLembretes } = await import("../lembretes");
+    const { descreverErroDeBanco } = await import("../banco-indisponivel");
+    iniciarFila();
+    iniciarFilaDoResumo();
+    iniciarVarreduraDeGravacoes();
+    iniciarLembretes();
+    // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
+    // SIGINT. Os três laços param de reservar e devolvem as reservas desta
+    // instância ANTES de o processo sair, para o próximo retomar na hora (e não
+    // depois de a reserva vencer), e a varredura das gravações não começa outro
+    // áudio; a falha de um laço não segura os outros. Depois, o servidor fecha e
+    // o processo sai.
+    let saindo = false;
+    const desligar = (sinal: string) => {
+      if (saindo) return;
+      saindo = true;
+      console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
+      Promise.allSettled([
+        pararFila()
+          .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))
+          .catch(erro => console.error("[Fila] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararFilaDoResumo()
+          .then(r => console.log(`[Resumo] devolvidos: ${r.resumos} resumo(s).`))
+          .catch(erro => console.error("[Resumo] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararVarreduraDeGravacoes()
+          .then(r => console.log(`[Gravações] varredura parada${r.emCurso ? (r.terminou ? "; a passada em curso terminou." : "; a passada em curso fica para a próxima instância.") : "."}`))
+          .catch(erro => console.error("[Gravações] não foi possível parar a varredura:", descreverErroDeBanco(erro))),
+        pararLembretes()
+          .then(r => console.log(`[Lembretes] devolvidos: ${r.lembretes} lembrete(s).`))
+          .catch(erro => console.error("[Lembretes] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+      ]).finally(() => {
+          server.close(() => process.exit(0));
+          // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.
+          setTimeout(() => process.exit(0), 10_000).unref();
+        });
+    };
+    process.once("SIGTERM", () => desligar("SIGTERM"));
+    process.once("SIGINT", () => desligar("SIGINT"));
+  }
 }
 
 startServer().catch(console.error);

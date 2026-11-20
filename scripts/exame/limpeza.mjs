@@ -39,6 +39,14 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcript_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As próximas ações (H5a), que nascem dos itens do resumo ou à mão.
+  { tabela: "proximas_acoes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os lembretes no sino (H15) da próxima ação e da agenda.
+  { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens.
+  { tabela: "meeting_summary_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as
   // contas QA não têm parte nem objeto no bucket, e este DELETE não olha o
   // bucket. Se o exame passar a gravar, a linha é o ponteiro para o objeto:
@@ -46,6 +54,9 @@ export const PLANO_DE_LIMPEZA = [
   // sair depois dele.
   { tabela: "meeting_audio_slices", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_recordings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
+  // marcar sai com o resto.
+  { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_messages", coluna: "owner_id", chave: "openId", acao: "apagar" },
@@ -77,6 +88,10 @@ export const PLANO_DE_LIMPEZA = [
 
   // ── módulo institucional: chave id (int) ────────────────────────────────
   { tabela: "consents", coluna: "userId", chave: "id", acao: "apagar" },
+  // A conexão com a Google Agenda (H16b). O exame não conecta conta Google,
+  // então o DELETE não encontra nada; se um dia conectar, a linha sai com o
+  // resto (a revogação na Google fica com a exclusão de conta, não com o exame).
+  { tabela: "google_agenda_conexoes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "assinaturas_de_minutos", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_documents", coluna: "userId", chave: "id", acao: "apagar" },
@@ -105,6 +120,11 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "matches", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "matches", coluna: "matchedUserId", chave: "id", acao: "apagar" },
   { tabela: "password_reset_tokens", coluna: "userId", chave: "id", acao: "apagar" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas. O exame não
+  // cadastra chave, então os DELETEs não encontram nada; se um dia cadastrar, a
+  // chave sintética sai junto com o resto.
+  { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "resolvedBy", chave: "id", acao: "alertar", excetoSe: { coluna: "userId", chave: "id" } },

@@ -154,9 +154,11 @@ describe("completar por voz — gravar, transcrever, interpretar, sugerir", () =
       oQuePreciso: [{ texto: "Fornecedores na Índia", categoria: null, trecho: "procura fornecedores na Índia", confianca: 0.9 }],
     }) } }] });
 
-    const r = await chamar().complementarPorVoz({ contactId: 5, audioBase64: audio, mimeType: "audio/webm", durationSeconds: 42 });
+    const r = await chamar().complementarPorVoz({ contactId: 5, audioBase64: audio, mimeType: "audio/webm", durationSeconds: 42, idioma: "es-MX" });
 
     expect(r).toEqual({ transcricao: "A Maria tem uma distribuidora de medicamentos e procura fornecedores na Índia.", pendenciasCriadas: 2 });
+    // O idioma da tela de quem grava vai à transcrição, que o normaliza (G1b).
+    expect(transcribeWithGemini).toHaveBeenCalledWith(expect.objectContaining({ language: "es-MX" }));
     expect(storagePut).not.toHaveBeenCalled();
     const consumo = estado.consultas.find(c => /^insert into `consumo_de_minutos`/.test(c.sql))!;
     expect(consumo.params).toEqual(expect.arrayContaining(["dona-9", "voz", 42]));
@@ -187,6 +189,33 @@ describe("completar por voz — gravar, transcrever, interpretar, sugerir", () =
     await expect(chamar().complementarPorVoz({ contactId: 5, audioBase64: audio, mimeType: "audio/webm", durationSeconds: 10 }))
       .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
+  });
+
+  it("completar por texto: a empresa que a reunião deu ao contato, ainda não gravada nele, não entra no item (revisão da IA3)", async () => {
+    estado.responder = (sql, params) => {
+      // id, fullName, phone, whatsapp, email, tipoPessoa, jobTitle, company: criado pela reunião, sem empresa
+      if (/from `private_contacts`/.test(sql)) return params.includes(5) ? [[5, "Camila Duarte", null, null, null, null, null, null]] : [];
+      // fullName, company, phone da pessoa da reunião que virou o contato
+      if (/from `meeting_contact_suggestions`/.test(sql)) return [["Camila Duarte", "Cacau Tupinã", null]];
+      return undefined;
+    };
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({
+      quemSou: { tipoPessoa: "nao_informado", nome: null, telefone: null, email: null },
+      oQueTenho: [
+        { texto: "Chocolate da Cacau Tupinã em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+        { texto: "Chocolate em barras", trecho: "vende chocolate da Cacau Tupinã em barras", confianca: 0.9 },
+      ],
+      oQuePreciso: [],
+    }) } }] });
+
+    const r = await chamar().complementarPorTexto({ contactId: 5, texto: "A Camila vende chocolate da Cacau Tupinã em barras." });
+
+    expect(r).toEqual({ pendenciasCriadas: 1 });
+    const insert = estado.consultas.find(c => /^insert into `network_sugestoes`/.test(c.sql))!;
+    expect(insert.params).toContain("Chocolate em barras");
+    expect(insert.params).not.toContain("Chocolate da Cacau Tupinã em barras");
+    const leitura = estado.consultas.find(c => /from `meeting_contact_suggestions`/.test(c.sql))!;
+    expect(leitura.params).toEqual(expect.arrayContaining(["dona-9", 5]));
   });
 
   it("teto brando: a 11ª interpretação em 10 minutos é recusada", async () => {
@@ -397,6 +426,7 @@ describe("memória de relacionamento — a linha do tempo", () => {
         id: "c-1", origem: "PRIVATE_NETWORK_MATCH", motivo: "", itens: [], pontuacao: 100, status: "negociacao",
         apresentacaoEm: 800, negociacaoEm: 900, fechamentoEm: null, descartadaEm: null, statusComissao: "sem_negocio", criadaEm: 600, lados: [],
       }],
+      acoes: [],
     });
     expect(eventos.map(e => e.tipo)).toEqual([
       "conexao_etapa", "conexao_etapa", "disponibilidade", "conexao_registrada", "quem_sou_confirmado",
@@ -404,5 +434,137 @@ describe("memória de relacionamento — a linha do tempo", () => {
     ]);
     // a confirmação de "tenho" não duplica o item que ela gravou
     expect(eventos.filter(e => e.tipo === "tenho_adicionado")).toHaveLength(1);
+  });
+
+  const semNada = {
+    contato: { createdAt: 100, disponivelRedeGlobal: false, disponibilidadeAlteradaEm: null },
+    reunioes: [], contextos: [], tenho: [], preciso: [], confirmacoes: [], conexoes: [],
+  };
+
+  it("as próximas ações ligadas ao contato (H5b): a anotada na criação e a feita na hora da caixa, com os rótulos e os nomes das vozes", () => {
+    const eventos = montarLinhaDoTempo({
+      ...semNada,
+      acoes: [
+        { id: "aberta", texto: "{F2} envia a proposta", vozes: { F2: "Carla" }, createdAt: 300, feita: false, feitaEm: null },
+        { id: "feita", texto: "Mandar o catálogo", vozes: {}, createdAt: 200, feita: true, feitaEm: 500 },
+      ],
+    });
+    expect(eventos).toEqual([
+      { tipo: "proxima_acao_feita", em: 500, acaoId: "feita", texto: "Mandar o catálogo", vozes: {} },
+      // O servidor não troca o rótulo pelo nome: manda os dois, e a tela troca.
+      { tipo: "proxima_acao", em: 300, acaoId: "aberta", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } },
+      { tipo: "proxima_acao", em: 200, acaoId: "feita", texto: "Mandar o catálogo", vozes: {} },
+      { tipo: "contato_criado", em: 100 },
+    ]);
+  });
+
+  it("a ação que nasceu já feita (a caixa marcada no resumo antes de virar ação) não fica anotada depois de feita", () => {
+    const eventos = montarLinhaDoTempo({
+      ...semNada,
+      acoes: [{ id: "antiga", texto: "Reservar a sala", vozes: {}, createdAt: 900, feita: true, feitaEm: 400 }],
+    });
+    // Mesma hora: a feita fica acima da anotada, e as duas na hora real da caixa.
+    expect(eventos.map(e => [e.tipo, e.em])).toEqual([["proxima_acao_feita", 400], ["proxima_acao", 400], ["contato_criado", 100]]);
+  });
+
+  it("desmarcada (feita false) não tem evento de feita, mesmo com uma data velha", () => {
+    const eventos = montarLinhaDoTempo({ ...semNada, acoes: [{ id: "a", texto: "Ligar", vozes: {}, createdAt: 300, feita: false, feitaEm: 250 }] });
+    expect(eventos.map(e => e.tipo)).toEqual(["proxima_acao", "contato_criado"]);
+    expect(eventos[0].em).toBe(300);
+  });
+
+  it("cargo e empresa confirmados têm evento próprio: não são Quem Sou (revisão da IA3)", () => {
+    const eventos = montarLinhaDoTempo({
+      contato: { createdAt: 100, disponivelRedeGlobal: false, disponibilidadeAlteradaEm: null },
+      reunioes: [], contextos: [], tenho: [], preciso: [],
+      confirmacoes: [
+        { campo: "cargo", valor: "gerente de compras", origem: "reuniao", decididaEm: 300 },
+        { campo: "empresa", valor: "Farmabras", origem: "reuniao", decididaEm: 200 },
+        { campo: "nome", valor: "Maria Silva", origem: "reuniao", decididaEm: 150 },
+      ],
+      conexoes: [],
+      acoes: [],
+    });
+    expect(eventos).toEqual([
+      { tipo: "apoio_confirmado", em: 300, campo: "cargo", valor: "gerente de compras", origem: "reuniao" },
+      { tipo: "apoio_confirmado", em: 200, campo: "empresa", valor: "Farmabras", origem: "reuniao" },
+      { tipo: "quem_sou_confirmado", em: 150, campo: "nome", valor: "Maria Silva", origem: "reuniao" },
+      { tipo: "contato_criado", em: 100 },
+    ]);
+  });
+});
+
+describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () => {
+  it("a seção e a linha do tempo vêm das ações da dona com este contato, numa leitura com a dona e o contato no WHERE", async () => {
+    hasValidConsent.mockResolvedValue(false);
+    estado.responder = sql => {
+      if (/from `private_contacts`/.test(sql)) {
+        // A conferência de posse (id e código) e o Quem Sou (11 colunas).
+        return /`fullName`/.test(sql)
+          ? [[5, "Maria Silva", null, null, null, null, null, "NW-1", 0, null, 100]]
+          : [[5, "NW-1"]];
+      }
+      if (/from `proximas_acoes`/.test(sql)) {
+        // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, google (H5c),
+        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
+        return [
+          ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", "ok", 300, 310,
+            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva"],
+          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva"],
+        ];
+      }
+      return [];
+    };
+    const perfil = await chamar().contato({ contactId: 5 });
+
+    const leitura = estado.consultas.find(c => /from `proximas_acoes`/.test(c.sql))!;
+    expect(leitura.sql).toContain("where (`proximas_acoes`.`owner_id` = ? and `proximas_acoes`.`contact_id` = ?)");
+    expect(leitura.params).toEqual(expect.arrayContaining(["dona-9", 5]));
+    // Só lê: nenhuma escrita, e nada da lista inteira da dona (o backfill dos itens).
+    expect(estado.consultas.filter(c => /^\s*(insert|update|delete)/i.test(c.sql))).toEqual([]);
+    expect(estado.consultas.filter(c => /from `meeting_summary_items`/.test(c.sql))).toEqual([]);
+
+    expect(perfil.proximasAcoes.limite).toBe(100);
+    expect(perfil.proximasAcoes.lista.map(a => [a.id, a.feita, a.contato])).toEqual([
+      ["acao-1", false, { id: 5, nome: "Maria Silva" }],
+      ["acao-2", true, { id: 5, nome: "Maria Silva" }],
+    ]);
+    expect(perfil.proximasAcoes.lista[0]).toMatchObject({
+      reuniao: { id: "reuniao-1", titulo: "Café na feira", itemId: "item-1" }, vozes: { F2: "Carla" }, prazo: "2026-11-20",
+      // O estado na Google Agenda e a última mudança (H5c), para o perfil mostrar a ação na agenda.
+      google: "ok", updatedAt: 310,
+    });
+    expect(perfil.proximasAcoes.lista[1]).toMatchObject({ google: null, updatedAt: 500 });
+    expect(perfil.linhaDoTempo.map(e => [e.tipo, e.em])).toEqual([
+      ["proxima_acao_feita", 500], ["proxima_acao", 300], ["proxima_acao", 200], ["contato_criado", 100],
+    ]);
+    expect(perfil.linhaDoTempo[1]).toMatchObject({ acaoId: "acao-1", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } });
+  });
+
+  it("o banco caiu só na leitura das ações: o perfil inteiro é erro de banco, nunca a seção vazia", async () => {
+    hasValidConsent.mockResolvedValue(false);
+    const registro = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    estado.responder = sql => {
+      if (/from `private_contacts`/.test(sql)) {
+        return /`fullName`/.test(sql)
+          ? [[5, "Maria Silva", null, null, null, null, null, "NW-1", 0, null, 100]]
+          : [[5, "NW-1"]];
+      }
+      // A queda real chega como o erro do driver mysql2 na consulta que falhou;
+      // o Drizzle o embrulha, e o código fica na causa.
+      if (/from `proximas_acoes`/.test(sql)) throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3306"), { code: "ECONNREFUSED" });
+      return [];
+    };
+    const { MENSAGEM_BANCO_INDISPONIVEL } = await import("@shared/const");
+
+    const erro = await chamar().contato({ contactId: 5 }).then(() => null, (e: unknown) => e);
+
+    // Um catch que devolvesse [] responderia o perfil com "Nenhuma próxima ação
+    // ligada a este contato" e a linha do tempo sem as ações.
+    expect(erro).toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: MENSAGEM_BANCO_INDISPONIVEL });
+    expect(estado.consultas.some(c => /from `proximas_acoes`/.test(c.sql))).toBe(true);
+    // Quem traduziu foi o middleware de server/_core/trpc.ts, que registra a queda.
+    expect(registro).toHaveBeenCalledWith(expect.stringContaining("[Banco] indisponível em contato"));
+    registro.mockRestore();
   });
 });

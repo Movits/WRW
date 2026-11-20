@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft, Briefcase, Brain, ChevronDown, Crown, LogOut,
+  ArrowLeft, Briefcase, Brain, CalendarDays, ChevronDown, Crown, LogOut,
   MapPin, Menu as MenuIcon, Mic, Network, ShieldCheck, Sparkles, Users,
 } from "lucide-react";
 import {
@@ -10,10 +10,12 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NotificationBell } from "@/components/NotificationBell";
-import { ROTA_DAS_REUNIOES } from "@shared/rotas";
+import { ROTA_DA_AGENDA, ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
+import { TRPCClientError } from "@trpc/client";
 import { LANGUAGES } from "@/i18n";
 
 // Header único da área logada. Antes, cada página montava o seu: eram 16
@@ -29,10 +31,12 @@ type Traduzir = (key: string) => string;
 // array fixo em português era o motivo de a navegação primária do app inteiro
 // sair em pt-BR para as outras 9 línguas, ao lado de um título já traduzido.
 // Reuniões vem em primeiro: o gravador é a primeira coisa que a cliente quer
-// ver depois do login (pedido de 20/10/2026; ver shared/rotas.ts).
+// ver depois do login (pedido de 20/10/2026; ver shared/rotas.ts). A agenda
+// (H16a) vem logo depois: é dela que sai o "Gravar agora".
 export function getMenuItems(t: Traduzir) {
   return [
     { href: ROTA_DAS_REUNIOES, icon: Mic, label: t("appHeader.menu.meetings"), desc: t("appHeader.menu.meetingsDesc") },
+    { href: ROTA_DA_AGENDA, icon: CalendarDays, label: t("appHeader.menu.agenda"), desc: t("appHeader.menu.agendaDesc") },
     { href: "/meu-network-inteligente", icon: Network, label: t("appHeader.menu.smartNetwork"), desc: t("appHeader.menu.smartNetworkDesc") },
     { href: "/opportunities", icon: Briefcase, label: t("appHeader.menu.opportunities"), desc: t("appHeader.menu.opportunitiesDesc") },
     { href: "/verification", icon: ShieldCheck, label: t("appHeader.menu.verification"), desc: t("appHeader.menu.verificationDesc") },
@@ -81,9 +85,30 @@ export function GlobalMenu() {
   const { user, logout } = useAuth();
   const [, navigate] = useLocation();
   const { t } = useTranslation();
+  const avisarQueSairFalhou = useAvisoDeSairFalhou();
+  // Depois do auth.logout do menu, o logout do useAuth limpa a sessão desta aba
+  // (no finally dele, de propósito: computador compartilhado). Ele chama o
+  // servidor de novo, já sem cookie; a falha dessa segunda chamada não diz nada
+  // sobre a revogação e não vira aviso.
+  //
+  // Se a revogação falhou (banco fora do ar, servidor sem resposta), a dona vê
+  // o aviso, e a aba sai assim mesmo. Com o banco fora, o servidor já apagou o
+  // cookie e a sessão desta aba acabou; sem resposta do servidor, o cookie
+  // fica, a conta volta a aparecer aberta, e o aviso pede para sair de novo.
+  // "Não autenticada" não é falha: não havia sessão para revogar (o useAuth
+  // também a deixa passar).
   const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => { logout(); navigate("/"); },
+    onSuccess: () => { logout().catch(() => undefined); navigate("/"); },
+    onError: erro => {
+      const semSessao = erro instanceof TRPCClientError && erro.data?.code === "UNAUTHORIZED";
+      if (!semSessao) avisarQueSairFalhou();
+      logout().catch(() => undefined);
+      navigate("/");
+    },
   });
+  // Com gravação, envio ou áudio por enviar nesta aba, o Sair confirma antes
+  // (components/SairDaConta.tsx); sem nada disso, sai direto, como antes.
+  const sairDaConta = useSairDaConta(() => logoutMutation.mutate());
   const itens = getMenuItems(t);
 
   return (
@@ -138,7 +163,7 @@ export function GlobalMenu() {
         )}
         <DropdownMenuSeparator className="bg-white/[0.07] my-2" />
         <DropdownMenuItem
-          onClick={() => logoutMutation.mutate()}
+          onClick={sairDaConta.pedirSaida}
           className="rounded-xl px-3 py-2.5 cursor-pointer text-white/50 focus:bg-red-500/10 focus:text-red-300 data-[highlighted]:bg-red-500/10 data-[highlighted]:text-red-300">
           <span className="flex items-center gap-3 w-full">
             <span className="w-9 h-9 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0">
@@ -148,6 +173,8 @@ export function GlobalMenu() {
           </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
+      {/* Fora do DropdownMenuContent, que desmonta quando o menu fecha ao clicar em Sair. */}
+      {sairDaConta.dialogo}
     </DropdownMenu>
   );
 }

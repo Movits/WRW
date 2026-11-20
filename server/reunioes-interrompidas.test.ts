@@ -116,10 +116,11 @@ describe("marcarReunioesInterrompidas — o que está preso vira falha explicáv
     // marcaria toda reunião velha; `>` ou o corte invertido marcariam as
     // que acabaram de entrar em processamento.
     const leitura = leituras.find(operacao => operacao.tabela === schema.meetings)!;
-    expect(leitura.sql).toBe("(`meetings`.`status` = ? and `meetings`.`updated_at` < ?)");
-    expect(leitura.params).toHaveLength(2);
-    expect(leitura.params[0]).toBe("processing");
-    const corte = Number(leitura.params[1]);
+    // Só o envio único: a reunião em partes em 'processing' é da fila (G7).
+    expect(leitura.sql).toBe("(`meetings`.`status` = ? and `meetings`.`audio_pipeline` = ? and `meetings`.`updated_at` < ?)");
+    expect(leitura.params).toHaveLength(3);
+    expect(leitura.params.slice(0, 2)).toEqual(["processing", "single"]);
+    const corte = Number(leitura.params[2]);
     expect(corte).toBeGreaterThanOrEqual(antes - servico.LIMITE_PROCESSAMENTO_MS);
     expect(corte).toBeLessThanOrEqual(depois - servico.LIMITE_PROCESSAMENTO_MS);
 
@@ -127,8 +128,8 @@ describe("marcarReunioesInterrompidas — o que está preso vira falha explicáv
     // corte: uma reunião que terminou no meio (updated_at novo, status
     // 'ready') não é marcada.
     expect(atualizacoes).toHaveLength(1);
-    expect(atualizacoes[0].sql).toBe("(`meetings`.`id` in (?) and `meetings`.`status` = ? and `meetings`.`updated_at` < ?)");
-    expect(atualizacoes[0].params).toEqual(["reuniao-presa", "processing", corte]);
+    expect(atualizacoes[0].sql).toBe("(`meetings`.`id` in (?) and `meetings`.`status` = ? and `meetings`.`audio_pipeline` = ? and `meetings`.`updated_at` < ?)");
+    expect(atualizacoes[0].params).toEqual(["reuniao-presa", "processing", "single", corte]);
     // e o updated_at gravado é o "agora" de que o corte foi subtraído
     expect(Number(atualizacoes[0].valores.updatedAt) - corte).toBe(servico.LIMITE_PROCESSAMENTO_MS);
   });
@@ -139,7 +140,7 @@ describe("marcarReunioesInterrompidas — o que está preso vira falha explicáv
     const resultado = await servico.marcarReunioesInterrompidas();
 
     expect(resultado).toEqual({ encontradas: 3, marcadas: 3 });
-    expect(atualizacoes[0].sql).toBe("(`meetings`.`id` in (?, ?, ?) and `meetings`.`status` = ? and `meetings`.`updated_at` < ?)");
+    expect(atualizacoes[0].sql).toBe("(`meetings`.`id` in (?, ?, ?) and `meetings`.`status` = ? and `meetings`.`audio_pipeline` = ? and `meetings`.`updated_at` < ?)");
     expect(atualizacoes[0].params.slice(0, 3)).toEqual(["presa-1", "presa-2", "presa-3"]);
   });
 
@@ -149,7 +150,7 @@ describe("marcarReunioesInterrompidas — o que está preso vira falha explicáv
 
     await servico.marcarReunioesInterrompidas(60_000);
 
-    const corte = Number(leituras[0].params[1]);
+    const corte = Number(leituras[0].params[2]);
     expect(corte).toBeGreaterThanOrEqual(antes - 60_000);
     expect(corte).toBeLessThanOrEqual(Date.now() - 60_000);
   });
