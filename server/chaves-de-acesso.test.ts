@@ -211,8 +211,9 @@ describe("chavesDeAcesso — a função some sem a configuração ou fora das or
     const estado = (headers: Record<string, string>) => chavesDeAcessoRouter.createCaller(contexto(headers)).estado();
     expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: false });
     definirAmbiente(PRODUCAO);
-    expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: true });
-    expect(await estado({ host: "www.wrwglobal.org" })).toEqual({ disponivel: true });
+    // Disponível, leva o RP ID: a tela (A7) o usa na Signal API do WebAuthn.
+    expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: true, rpId: "wrwglobal.org" });
+    expect(await estado({ host: "www.wrwglobal.org" })).toEqual({ disponivel: true, rpId: "wrwglobal.org" });
     expect(await estado({ host: "mmm-gud5.onrender.com" })).toEqual({ disponivel: false });
     expect(await estado({ origin: "https://mmm-gud5.onrender.com", host: "wrwglobal.org" })).toEqual({ disponivel: false });
     expect(banco.exigirDb).not.toHaveBeenCalled();

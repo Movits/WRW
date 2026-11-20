@@ -2324,6 +2324,63 @@
       "smartNetworkDesc": "Reuniões, contatos e oportunidades da sua rede"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "A WRW não recebe a sua biometria: quem confere você é o próprio aparelho, que manda à WRW só uma assinatura.",
+    "login": {
+      "fallbackButton": "Entrar com Face ID ou digital"
+    },
+    "invite": {
+      "title": "Entrar mais rápido da próxima vez?",
+      "text": "Ative a entrada com Face ID, digital ou o bloqueio de tela deste aparelho. Da próxima vez, é só tocar no campo de e-mail e escolher a chave, sem digitar a senha.",
+      "activate": "Ativar neste aparelho",
+      "activating": "Ativando…",
+      "notNow": "Agora não"
+    },
+    "toast": {
+      "activated": "Pronto! Da próxima vez, toque no campo de e-mail e escolha a chave deste aparelho.",
+      "renamed": "Nome salvo.",
+      "removed": "Chave removida."
+    },
+    "profile": {
+      "title": "Face ID e digital",
+      "subtitle": "Entrar sem senha nos seus aparelhos",
+      "loading": "Carregando as chaves…",
+      "empty": "Nenhum aparelho entra com Face ID ou digital ainda.",
+      "unnamed": "Chave sem nome",
+      "synced": "Sincronizada",
+      "createdAt": "Ativada em {{date}}",
+      "lastUsed": "último uso em {{date}}",
+      "neverUsed": "ainda não usada",
+      "rename": "Renomear",
+      "nameLabel": "Nome da chave",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "remove": "Remover",
+      "removeConfirm": "Remover esta chave? O aparelho dela deixa de entrar com Face ID ou digital. A senha continua valendo.",
+      "removeYes": "Remover",
+      "removeNo": "Manter",
+      "removing": "Removendo…",
+      "limitReached": "Esta conta chegou ao limite de {{max}} chaves. Remova uma para ativar outro aparelho.",
+      "reauthText": "Por segurança, ativar uma chave pede a senha quando a entrada foi há mais de 10 minutos.",
+      "passwordLabel": "Senha",
+      "reauthConfirm": "Confirmar e ativar",
+      "wrongPassword": "Não foi possível confirmar a senha."
+    },
+    "errors": {
+      "unavailable": "A entrada com Face ID ou digital não está disponível neste endereço. Entre com e-mail e senha.",
+      "expired": "O pedido expirou. Tente de novo.",
+      "refused": "O aparelho não confirmou a entrada. Tente de novo ou entre com e-mail e senha.",
+      "unknownKey": "Esta chave não vale mais. Entre com e-mail e senha e, se quiser, ative a chave de novo.",
+      "accountDisabled": "Esta conta está desativada.",
+      "tooManyAttempts": "Muitas tentativas. Espere alguns minutos e tente de novo.",
+      "alreadyRegistered": "A chave deste aparelho já está ativada.",
+      "limitReached": "Esta conta chegou ao limite de chaves. Remova uma no Perfil para ativar outro aparelho.",
+      "notFound": "Esta chave não existe mais. Atualize a página.",
+      "reauthenticate": "Por segurança, confirme a senha para ativar a chave.",
+      "generic": "Não foi possível concluir agora. Tente de novo.",
+      "device": "O aparelho não conseguiu usar a chave. Tente de novo ou entre com e-mail e senha."
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "Excluir minha conta",

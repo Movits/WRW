@@ -2324,6 +2324,63 @@
       "smartNetworkDesc": "Réunions, contacts et opportunités de votre réseau"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "WRW ne reçoit pas vos données biométriques : c’est votre propre appareil qui vérifie votre identité, et il n’envoie à WRW qu’une signature.",
+    "login": {
+      "fallbackButton": "Se connecter avec Face ID ou l’empreinte digitale"
+    },
+    "invite": {
+      "title": "Se connecter plus vite la prochaine fois ?",
+      "text": "Activez la connexion avec Face ID, l’empreinte digitale ou le verrouillage d’écran de cet appareil. La prochaine fois, il suffit de toucher le champ e-mail et de choisir la clé, sans saisir le mot de passe.",
+      "activate": "Activer sur cet appareil",
+      "activating": "Activation…",
+      "notNow": "Pas maintenant"
+    },
+    "toast": {
+      "activated": "C’est fait ! La prochaine fois, touchez le champ e-mail et choisissez la clé de cet appareil.",
+      "renamed": "Nom enregistré.",
+      "removed": "Clé supprimée."
+    },
+    "profile": {
+      "title": "Face ID et empreinte digitale",
+      "subtitle": "Se connecter sans mot de passe sur vos appareils",
+      "loading": "Chargement des clés…",
+      "empty": "Aucun appareil ne se connecte encore avec Face ID ou l’empreinte digitale.",
+      "unnamed": "Clé sans nom",
+      "synced": "Synchronisée",
+      "createdAt": "Activée le {{date}}",
+      "lastUsed": "dernière utilisation le {{date}}",
+      "neverUsed": "pas encore utilisée",
+      "rename": "Renommer",
+      "nameLabel": "Nom de la clé",
+      "save": "Enregistrer",
+      "cancel": "Annuler",
+      "remove": "Supprimer",
+      "removeConfirm": "Supprimer cette clé ? Son appareil ne pourra plus se connecter avec Face ID ou l’empreinte digitale. Le mot de passe reste valable.",
+      "removeYes": "Supprimer",
+      "removeNo": "Conserver",
+      "removing": "Suppression…",
+      "limitReached": "Ce compte a atteint la limite de {{max}} clés. Supprimez-en une pour activer un autre appareil.",
+      "reauthText": "Par sécurité, activer une clé demande le mot de passe lorsque la connexion date de plus de 10 minutes.",
+      "passwordLabel": "Mot de passe",
+      "reauthConfirm": "Confirmer et activer",
+      "wrongPassword": "Impossible de confirmer le mot de passe."
+    },
+    "errors": {
+      "unavailable": "La connexion avec Face ID ou l’empreinte digitale n’est pas disponible à cette adresse. Connectez-vous avec l’e-mail et le mot de passe.",
+      "expired": "La demande a expiré. Réessayez.",
+      "refused": "L’appareil n’a pas confirmé la connexion. Réessayez ou connectez-vous avec l’e-mail et le mot de passe.",
+      "unknownKey": "Cette clé n’est plus valable. Connectez-vous avec l’e-mail et le mot de passe puis, si vous le souhaitez, réactivez la clé.",
+      "accountDisabled": "Ce compte est désactivé.",
+      "tooManyAttempts": "Trop de tentatives. Attendez quelques minutes et réessayez.",
+      "alreadyRegistered": "La clé de cet appareil est déjà activée.",
+      "limitReached": "Ce compte a atteint la limite de clés. Supprimez-en une dans le Profil pour activer un autre appareil.",
+      "notFound": "Cette clé n’existe plus. Actualisez la page.",
+      "reauthenticate": "Par sécurité, confirmez le mot de passe pour activer la clé.",
+      "generic": "Impossible de terminer pour le moment. Réessayez.",
+      "device": "L’appareil n’a pas pu utiliser la clé. Réessayez ou connectez-vous avec l’e-mail et le mot de passe."
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "Supprimer mon compte",
