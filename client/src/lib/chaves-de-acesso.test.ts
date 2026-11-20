@@ -89,6 +89,13 @@ describe("onde a função aparece", () => {
     expect(podeUsarChavesAqui(UA_DO_APP_COM_CHAVES)).toBe(false);
   });
 
+  it("dentro do app com o sinal, o login é sempre pelo link, mesmo se a WebView disser que sugere no campo", async () => {
+    const UA_DO_APP_COM_CHAVES = "Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 WRWApp/1.1 WRWChaves/1";
+    navegador.sugereNoCampo.mockResolvedValue(true);
+    expect(await sugestaoNoCampoDisponivel(UA_DO_APP_COM_CHAVES)).toBe(false);
+    expect(await sugestaoNoCampoDisponivel(UA_DO_CHROME)).toBe(true);
+  });
+
   it("o sinal só vale dentro do app: um navegador comum com WRWChaves/1 no user agent segue a regra de sempre", () => {
     expect(appComChaves("Mozilla/5.0 Chrome/131.0 WRWChaves/1")).toBe(false);
   });

@@ -65,7 +65,10 @@ export function podeUsarChavesAqui(userAgent: string): boolean {
  * com a chave: o navegador só sugere quando já existe uma chave da WRW neste
  * aparelho, ou seja, depois do primeiro login com o convite aceito.
  */
-export async function sugestaoNoCampoDisponivel(): Promise<boolean> {
+export async function sugestaoNoCampoDisponivel(userAgent: string = window.navigator.userAgent): Promise<boolean> {
+  // Dentro do app, sempre o link: a WebView do Android não faz a sugestão no
+  // campo, e se dissesse que faz, a pessoa ficaria sem o link e sem a sugestão.
+  if (appComChaves(userAgent)) return false;
   try {
     return await browserSupportsWebAuthnAutofill();
   } catch {
