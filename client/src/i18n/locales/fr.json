@@ -2287,6 +2287,13 @@
       "smartNetworkDesc": "Réunions, contacts et opportunités de votre réseau"
     }
   },
+  "travaDoApp": {
+    "title": "Ouvrir l’app avec Face ID ou l’empreinte digitale",
+    "subtitle": "Sur ce téléphone",
+    "switchLabel": "Demander Face ID ou l’empreinte digitale à l’ouverture de l’app",
+    "unavailable": "Ce téléphone n’a ni Face ID, ni empreinte digitale, ni verrouillage d’écran configuré. Configurez-en un dans les réglages du téléphone pour utiliser le verrouillage.",
+    "explanation": "Une fois activé, l’app demande Face ID, l’empreinte digitale ou le verrouillage d’écran de ce téléphone à l’ouverture et au retour après 10 minutes. WRW ne reçoit pas vos données biométriques : c’est le téléphone qui vérifie."
+  },
   "conta": {
     "excluir": {
       "titulo": "Supprimer mon compte",

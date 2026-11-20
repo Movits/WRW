@@ -2287,6 +2287,13 @@
       "smartNetworkDesc": "您人脉中的会议、联系人与机会"
     }
   },
+  "travaDoApp": {
+    "title": "使用面容 ID 或指纹打开应用",
+    "subtitle": "在此手机上",
+    "switchLabel": "打开应用时要求面容 ID 或指纹",
+    "unavailable": "此手机未设置面容 ID、指纹或屏幕锁。请在手机设置中设置其中一种，以使用此锁定。",
+    "explanation": "开启后，打开应用以及离开 10 分钟后返回时，应用会要求此手机的面容 ID、指纹或屏幕锁。WRW 不会收到您的生物识别信息：由手机本身进行验证。"
+  },
   "conta": {
     "excluir": {
       "titulo": "删除我的账户",

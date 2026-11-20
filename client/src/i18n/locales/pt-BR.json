@@ -2287,6 +2287,13 @@
       "smartNetworkDesc": "Reuniões, contatos e oportunidades da sua rede"
     }
   },
+  "travaDoApp": {
+    "title": "Abrir o app com Face ID ou digital",
+    "subtitle": "Neste celular",
+    "switchLabel": "Pedir Face ID ou digital ao abrir o app",
+    "unavailable": "Este celular não tem Face ID, digital nem bloqueio de tela cadastrado. Cadastre um nos ajustes do celular para usar a trava.",
+    "explanation": "Com isso ligado, o app pede o Face ID, a digital ou o bloqueio de tela deste celular ao abrir e ao voltar depois de 10 minutos. A WRW não recebe a sua biometria: quem confere é o próprio celular."
+  },
   "conta": {
     "excluir": {
       "titulo": "Excluir minha conta",

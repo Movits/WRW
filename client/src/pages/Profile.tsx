@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
 import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
+import { TravaDoApp } from "@/components/TravaDoApp";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
@@ -745,6 +746,10 @@ export default function Profile() {
         {/* A Google Agenda (H16b): só aparece com a função disponível no
             servidor; fora da edição, como a zona de risco abaixo. */}
         {!editing && <ConexaoGoogleAgenda />}
+
+        {/* A trava do app das lojas (Face ID ou digital ao abrir): só aparece
+            dentro do app, que guarda a escolha e pede a biometria. */}
+        {!editing && <TravaDoApp />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}

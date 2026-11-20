@@ -2287,6 +2287,13 @@
       "smartNetworkDesc": "Reuniones, contactos y oportunidades de tu red"
     }
   },
+  "travaDoApp": {
+    "title": "Abrir la app con Face ID o huella digital",
+    "subtitle": "En este teléfono",
+    "switchLabel": "Pedir Face ID o huella digital al abrir la app",
+    "unavailable": "Este teléfono no tiene Face ID, huella digital ni bloqueo de pantalla configurado. Configura uno en los ajustes del teléfono para usar el bloqueo.",
+    "explanation": "Con esto activado, la app pide el Face ID, la huella digital o el bloqueo de pantalla de este teléfono al abrirla y al volver después de 10 minutos. WRW no recibe tu biometría: la verificación la hace el propio teléfono."
+  },
   "conta": {
     "excluir": {
       "titulo": "Eliminar mi cuenta",
