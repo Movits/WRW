@@ -694,8 +694,9 @@ describe("Envio de arquivo — a duração não é inventada", () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
     duble.duracao.mockResolvedValue(duracaoLida);
     duble.mutacoes.create?.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    // A duração lida pelo navegador é a do envio único: desde a H9b, o arquivo do /gravar vai em partes.
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
     render(<Meetings />);
-    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Ana" } });
     fireEvent.click(screen.getByRole("checkbox"));
@@ -741,8 +742,9 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
   it("o gravador começa no idioma da tela e manda o idioma escolhido e a versão do aviso", async () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
     duble.duracao.mockResolvedValue(120);
+    // O envio único (?envioUnico=1): desde a H9b, o arquivo do /gravar vai em partes, com o idioma no iniciarGravacao.
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
     render(<Meetings />);
-    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
     const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
     expect(seletor.value).toBe("pt-BR");

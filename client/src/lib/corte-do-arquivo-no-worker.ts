@@ -1,4 +1,5 @@
-import { corteCancelado, cortarMp3, lerBlob, type CorteDoMp3, type RespostaDoCorte } from "./corte-do-mp3";
+import { corteCancelado, lerBlob, type CorteDoArquivo } from "./corte-comum";
+import type { RespostaDoCorte } from "./corte-do-arquivo";
 
 export type OpcoesDoCorteNoWorker = {
   /** A leitura andou: quantos bytes do arquivo já foram lidos, de quantos. */
@@ -7,11 +8,19 @@ export type OpcoesDoCorteNoWorker = {
   sinal?: AbortSignal;
 };
 
-const naPagina = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => cortarMp3(lerBlob(arquivo), arquivo.size, opcoes);
+/**
+ * O corte na página, sem Worker. O módulo dos cortes (com o mp4box) chega só
+ * aqui, por import(): a página das reuniões não o carrega para quem nunca
+ * importa um arquivo, e o Worker tem o dele.
+ */
+const naPagina = async (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => {
+  const { cortarArquivo } = await import("./corte-do-arquivo");
+  return cortarArquivo(lerBlob(arquivo), arquivo.size, opcoes);
+};
 
 /**
- * Corta o MP3 (lib/corte-do-mp3.ts) num Worker em módulo
- * (workers/corte-do-mp3.worker.ts), para a tela não travar enquanto um
+ * Corta o arquivo importado (lib/corte-do-arquivo.ts) num Worker em módulo
+ * (workers/corte-do-arquivo.worker.ts), para a tela não travar enquanto um
  * arquivo de horas é lido. O File vai ao Worker por cópia estruturada, que
  * não copia o áudio.
  *
@@ -20,15 +29,15 @@ const naPagina = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => cortarMp3(ler
  * e devolve a vez à tela entre um bloco e outro. O erro do Worker depois de
  * ele já ter respondido (a leitura que falhou no meio) é falha de leitura.
  */
-export function cortarMp3NoWorker(arquivo: Blob, opcoes: OpcoesDoCorteNoWorker = {}): Promise<CorteDoMp3> {
+export function cortarArquivoNoWorker(arquivo: Blob, opcoes: OpcoesDoCorteNoWorker = {}): Promise<CorteDoArquivo> {
   if (opcoes.sinal?.aborted) return Promise.reject(corteCancelado());
   let worker: Worker;
   try {
-    worker = new Worker(new URL("../workers/corte-do-mp3.worker.ts", import.meta.url), { type: "module" });
+    worker = new Worker(new URL("../workers/corte-do-arquivo.worker.ts", import.meta.url), { type: "module" });
   } catch {
     return naPagina(arquivo, opcoes);
   }
-  return new Promise<CorteDoMp3>((resolver, rejeitar) => {
+  return new Promise<CorteDoArquivo>((resolver, rejeitar) => {
     let respondeu = false;
     const soltar = () => {
       worker.terminate();
