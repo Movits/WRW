@@ -2291,6 +2291,63 @@
       "smartNetworkDesc": "Meetings, contacts and opportunities in your network"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "WRW never receives your biometrics: your own device checks it's you and sends WRW only a signature.",
+    "login": {
+      "fallbackButton": "Sign in with Face ID or fingerprint"
+    },
+    "invite": {
+      "title": "Sign in faster next time?",
+      "text": "Turn on sign-in with Face ID, fingerprint or this device's screen lock. Next time, just tap the email field and pick the passkey, with no password to type.",
+      "activate": "Turn on for this device",
+      "activating": "Turning on…",
+      "notNow": "Not now"
+    },
+    "toast": {
+      "activated": "Done! Next time, tap the email field and pick this device's passkey.",
+      "renamed": "Name saved.",
+      "removed": "Passkey removed."
+    },
+    "profile": {
+      "title": "Face ID and fingerprint",
+      "subtitle": "Sign in without a password on your devices",
+      "loading": "Loading passkeys…",
+      "empty": "No device signs in with Face ID or fingerprint yet.",
+      "unnamed": "Unnamed passkey",
+      "synced": "Synced",
+      "createdAt": "Turned on {{date}}",
+      "lastUsed": "last used {{date}}",
+      "neverUsed": "not used yet",
+      "rename": "Rename",
+      "nameLabel": "Passkey name",
+      "save": "Save",
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "removeConfirm": "Remove this passkey? Its device will no longer sign in with Face ID or fingerprint. Your password still works.",
+      "removeYes": "Remove",
+      "removeNo": "Keep",
+      "removing": "Removing…",
+      "limitReached": "This account has reached the limit of {{max}} passkeys. Remove one to turn on another device.",
+      "reauthText": "For security, turning on a passkey asks for your password when you signed in more than 10 minutes ago.",
+      "passwordLabel": "Password",
+      "reauthConfirm": "Confirm and turn on",
+      "wrongPassword": "We couldn't confirm the password."
+    },
+    "errors": {
+      "unavailable": "Sign-in with Face ID or fingerprint isn't available at this address. Sign in with email and password.",
+      "expired": "The request expired. Please try again.",
+      "refused": "The device didn't confirm the sign-in. Try again or sign in with email and password.",
+      "unknownKey": "This passkey is no longer valid. Sign in with email and password and, if you like, turn the passkey on again.",
+      "accountDisabled": "This account is disabled.",
+      "tooManyAttempts": "Too many attempts. Wait a few minutes and try again.",
+      "alreadyRegistered": "This device's passkey is already turned on.",
+      "limitReached": "This account has reached the passkey limit. Remove one in your Profile to turn on another device.",
+      "notFound": "This passkey no longer exists. Refresh the page.",
+      "reauthenticate": "For security, confirm your password to turn on the passkey.",
+      "generic": "We couldn't finish right now. Please try again.",
+      "device": "The device couldn't use the passkey. Try again or sign in with email and password."
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "Delete my account",
