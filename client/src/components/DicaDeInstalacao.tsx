@@ -49,7 +49,8 @@ export function DicaDeInstalacao({ ambiente, oculta = false }: { ambiente?: Ambi
   if (fechada || instalou || instaladoNestaVisita || plataforma === "app-instalado") return null;
 
   // O botão clicado some com a dica: o foco vai ao último botão antes dela (no
-  // gravador, o "Enviar arquivo de áudio") em vez de se perder no topo da página.
+  // gravador, o "Resumir um PDF ou fotos de um texto", logo abaixo do "Enviar
+  // arquivo de áudio") em vez de se perder no topo da página.
   function focarAntesDaDica() {
     const anterior = secao.current?.previousElementSibling;
     if (!anterior) return;
