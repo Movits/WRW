@@ -50,7 +50,10 @@ export function QualificacaoDoPerfil({ role, perfil, onCompletar }: {
       <div className="flex items-start gap-3">
         <span className="text-2xl leading-none" aria-hidden="true">🥉</span>
         <div className="min-w-0 flex-1">
-          <h2 id="qualificacao-do-perfil-titulo" className="font-bold text-white">
+          {/* Tamanho explícito, como os títulos de seção do Perfil: o h2 sem
+              classe de tamanho herda o tamanho global de h2 (index.css) e
+              engolia o cartão, no Perfil e no Painel da Bronze (U3). */}
+          <h2 id="qualificacao-do-perfil-titulo" className="text-base font-bold leading-tight text-white">
             {t("governanca.perfil.titulo")}
           </h2>
           {qualificado ? (

@@ -6,6 +6,7 @@ import {
   ORDEM_DAS_PENDENCIAS,
   rotuloComConteudo,
   textoComConteudo,
+  veAsConexoesSugeridas,
   type PerfilParaQualificar,
 } from "@shared/qualificacao-do-perfil";
 
@@ -261,5 +262,16 @@ describe("não discrimina idioma nem nome curto", () => {
     expect(rotuloComConteudo("xx")).toBe(false);
     expect(rotuloComConteudo("A")).toBe(false);
     expect(avaliarQualificacaoDoPerfil(com({ displayName: "asdf", city: "zz" })).pendencias).toEqual(["nome", "cidade"]);
+  });
+});
+
+describe("U3: a lista das conexões sugeridas se libera no nível Prata", () => {
+  it("Prata, Ouro, presidente e admin veem a lista; a Bronze, não", () => {
+    for (const nivel of ["silver", "gold", "president", "admin"]) expect(veAsConexoesSugeridas(nivel), nivel).toBe(true);
+    expect(veAsConexoesSugeridas("bronze")).toBe(false);
+  });
+
+  it("lista fechada: nível ausente ou desconhecido não vê a lista", () => {
+    for (const nivel of [undefined, null, "", "user", "Silver", "distribuidor"]) expect(veAsConexoesSugeridas(nivel), String(nivel)).toBe(false);
   });
 });
