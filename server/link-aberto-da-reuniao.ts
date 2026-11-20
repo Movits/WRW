@@ -8,6 +8,7 @@ import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-abert
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { gravacaoParaOuvir } from "./meeting-service";
+import { comCookiesDoPedido, cookiesDoPedido, entradaValida, gerarSenhaDoLink, hashDaSenhaDoLink } from "./senha-do-link-aberto";
 import { storageGetSignedUrl } from "./storage";
 
 /**
@@ -29,22 +30,39 @@ import { storageGetSignedUrl } from "./storage";
  * texto no banco, e não em hash, porque a dona copia o link de novo depois; quem
  * lê `meetings` já lê a transcrição ao lado. Desligar apaga o token, e o link
  * novo sai com outro valor: o endereço antigo para de abrir na hora.
+ *
+ * Desde a H23 (HN-57 do HiNoter), a dona pode pôr no link uma senha de 6
+ * dígitos e escolher se ele leva o áudio. A senha é conferida em reuniaoDoLink,
+ * o ponto por onde passa tudo o que o link abre: sem o cookie de quem acertou a
+ * senha (server/senha-do-link-aberto.ts), a página, o resumo, o mapa, as
+ * traduções, a pergunta e o áudio recusam. Sem o áudio, o link não manda a
+ * gravação nem assina o endereço dela. O link ligado antes da H23 segue sem
+ * senha e com o áudio até a dona mudar.
  */
 
 const BYTES_DO_TOKEN = 24;
-const FORMATO_DO_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+export const FORMATO_DO_TOKEN = /^[A-Za-z0-9_-]{32}$/;
 
 /** Onde a página do link toca o áudio: `${ROTA_DO_AUDIO_DO_LINK}/{token}/audio`. */
 export const ROTA_DO_AUDIO_DO_LINK = "/reuniao-aberta";
 
 export const MENSAGEM_LINK_NAO_ENCONTRADO = "Este link de reunião não existe ou foi desligado.";
 export const MENSAGEM_SO_REUNIAO_PRONTA = "Só dá para compartilhar uma reunião pronta.";
+export const MENSAGEM_SENHA_DO_LINK_PEDIDA = "Este link pede a senha de 6 dígitos.";
+export const MENSAGEM_LINK_DESLIGADO = "O link desta reunião está desligado.";
 const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
 
-/** Recusa com o código que o router repassa e a tela traduz. */
+/** As mudanças da dona no link ligado (H23), cada uma com a linha dela em `audit_logs`, na mesma transação. */
+export const ACAO_SENHA_DO_LINK_LIGADA = "MEETING_OPEN_LINK_PASSWORD_ON";
+export const ACAO_SENHA_DO_LINK_TIRADA = "MEETING_OPEN_LINK_PASSWORD_OFF";
+export const ACAO_AUDIO_DO_LINK = "MEETING_OPEN_LINK_AUDIO";
+
+type CodigoDaRecusa = "NOT_FOUND" | "PRECONDITION_FAILED" | "UNAUTHORIZED";
+
+/** Recusa com o código que o router repassa e a tela traduz. UNAUTHORIZED: o link pede a senha. */
 export class LinkAbertoRecusado extends Error {
-  readonly codigo: "NOT_FOUND" | "PRECONDITION_FAILED";
-  constructor(codigo: "NOT_FOUND" | "PRECONDITION_FAILED", mensagem: string) {
+  readonly codigo: CodigoDaRecusa;
+  constructor(codigo: CodigoDaRecusa, mensagem: string) {
     super(mensagem);
     this.name = "LinkAbertoRecusado";
     this.codigo = codigo;
@@ -62,6 +80,44 @@ export function enderecoDoAudioDoLink(token: string): string {
 // A ação mora em autorizacao-do-link-aberto.ts, que também lê a confirmação;
 // sai daqui também, para quem já a importava deste módulo.
 export { ACAO_LINK_LIGADO };
+
+/** Quem pediu a mudança no link: a dona da sessão, com o IP e o navegador, para a auditoria. */
+type ProvaDaDona = { userId: number; ipAddress: string; userAgent: string | undefined };
+
+/** A palavra da dona ao ligar o link, como vai para a auditoria. */
+export type ProvaDoLinkLigado = ProvaDaDona & {
+  idioma: string; textoExibido: string;
+  versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES;
+  /** De onde a dona ligou, quando não foi pelo painel do link: o resumo por e-mail (H22) liga o link junto com o envio. */
+  origem?: "resumo_por_email";
+};
+
+/** O que a dona escolhe ao ligar o link (H23). Sem escolha, o link de antes: sem senha e com o áudio. */
+export type OpcoesDoLink = { comSenha?: boolean; incluirAudio?: boolean };
+
+/** O link ligado e a senha dele, que sai só para quem acabou de criá-lo (null no link que já estava ligado, ou sem senha). */
+export type LinkLigado = { token: string; senha: string | null };
+
+// Os mesmos cortes do createAuditLog (server/security.ts).
+function quemPediu(prova: ProvaDaDona) {
+  return {
+    userId: prova.userId,
+    ipAddress: prova.ipAddress.substring(0, 45),
+    userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
+  };
+}
+
+// O freio da força bruta volta a zero junto com a senha nova, a tirada e o link desligado.
+const FREIO_DO_LINK_ZERADO = { sharePasswordFailures: 0, sharePasswordFailedAt: null, sharePasswordLockedUntil: null };
+
+/**
+ * O link de antes da H23, sem senha e com o áudio: liga e devolve só o token
+ * (ligarLinkAbertoComOpcoes, abaixo, faz o trabalho). É o que a tela manda
+ * quando não escolhe nada, a aba aberta antes do deploy.
+ */
+export async function ligarLinkAberto(ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<string> {
+  return (await ligarLinkAbertoComOpcoes(ownerId, meetingId, prova)).token;
+}
 
 /**
  * Liga o link da reunião e devolve o token, ou devolve o que já está ligado.
@@ -82,43 +138,65 @@ export { ACAO_LINK_LIGADO };
  * caixa que fala dos nomes das vozes, e 1 quando não manda nada, que é a aba
  * aberta antes do deploy, com a frase antiga. Só a versão 2 deixa o link
  * mostrar os nomes (linkMostraOsNomes, em autorizacao-do-link-aberto.ts).
+ *
+ * Desde a H23, a dona escolhe ao ligar a senha de 6 dígitos, gerada aqui, e se
+ * o link leva o áudio, e a linha da auditoria diz como o link ficou. Tudo no
+ * mesmo UPDATE que grava o token: o link pedido com senha nunca abre um
+ * instante sem ela. A senha em texto volta só a quem criou o link; o banco
+ * guarda o hash. O hash sai antes da transação, para o scrypt não segurar a
+ * linha.
  */
-export async function ligarLinkAberto(
+export async function ligarLinkAbertoComOpcoes(
   ownerId: string,
   meetingId: string,
   prova: ProvaDoLinkLigado,
-): Promise<string> {
+  opcoes: OpcoesDoLink = {},
+): Promise<LinkLigado> {
+  const senha = opcoes.comSenha === true ? gerarSenhaDoLink() : null;
+  const hash = senha ? await hashDaSenhaDoLink(senha) : null;
   const db = await exigirDb();
-  return db.transaction(tx => ligarLinkAbertoNaTransacao(tx, ownerId, meetingId, prova));
+  return db.transaction(tx => ligarNaTransacao(tx, ownerId, meetingId, prova, { senha, hash, incluirAudio: opcoes.incluirAudio !== false }));
 }
-
-/** A palavra da dona ao ligar o link, como vai para a auditoria. */
-export type ProvaDoLinkLigado = {
-  userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string;
-  versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES;
-  /** De onde a dona ligou, quando não foi pelo painel do link: o resumo por e-mail (H22) liga o link junto com o envio. */
-  origem?: "resumo_por_email";
-};
 
 type Transacao = Parameters<Parameters<Awaited<ReturnType<typeof exigirDb>>["transaction"]>[0]>[0];
 
 /**
- * O corpo de ligarLinkAberto, na transação de quem chama: o resumo por e-mail
- * (H22, server/resumo-por-email.ts) liga o link e grava os envios numa
- * transação só, e a recusa de um desfaz o outro. Lançar aqui desfaz o UPDATE.
+ * O link de antes da H23 (sem senha e com o áudio), na transação de quem
+ * chama: o resumo por e-mail (H22, server/resumo-por-email.ts) liga o link e
+ * grava os envios numa transação só, e a recusa de um desfaz o outro. Devolve o
+ * token, como ligarLinkAberto. Lançar aqui desfaz o UPDATE.
  */
 export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<string> {
+  return (await ligarNaTransacao(tx, ownerId, meetingId, prova, { senha: null, hash: null, incluirAudio: true })).token;
+}
+
+/**
+ * O corpo das duas: o token, a senha e o áudio num UPDATE só, e a confirmação
+ * da dona em `audit_logs` na mesma transação.
+ */
+async function ligarNaTransacao(
+  tx: Transacao,
+  ownerId: string,
+  meetingId: string,
+  prova: ProvaDoLinkLigado,
+  escolha: { senha: string | null; hash: string | null; incluirAudio: boolean },
+): Promise<LinkLigado> {
+  const tokenNovo = gerarTokenDoLink();
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
-  await tx.update(meetings).set({ shareToken: gerarTokenDoLink() })
+  await tx.update(meetings).set({ shareToken: tokenNovo, sharePasswordHash: escolha.hash, shareAudio: escolha.incluirAudio, ...FREIO_DO_LINK_ZERADO })
     .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken)));
-  const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
-    .where(daDona).limit(1);
+  const [reuniao] = await tx.select({
+    status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+  }).from(meetings).where(daDona).limit(1);
   // Lançar aqui desfaz o UPDATE.
   if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   // Em gravação, processando ou com falha não há o que compartilhar ainda.
   if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
+  // O link já estava ligado (duplo clique, outra aba): fica como estava, e a
+  // senha sorteada aqui não vale nada. A dona troca a senha para ver uma.
+  const criou = reuniao.shareToken === tokenNovo;
   await tx.insert(auditLogs).values({
-    userId: prova.userId,
+    ...quemPediu(prova),
     action: ACAO_LINK_LIGADO,
     resource: "meetings",
     resourceId: meetingId,
@@ -129,30 +207,119 @@ export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string,
       idioma: prova.idioma,
       textoExibido: prova.textoExibido,
       textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
+      // Como o link ficou (H23): com o pedido de agora, ou como já estava.
+      comSenha: reuniao.sharePasswordHash !== null,
+      incluirAudio: reuniao.shareAudio,
+      // De onde a dona ligou (H22), quando não foi pelo painel do link.
       ...(prova.origem ? { origem: prova.origem } : {}),
     },
-    // Os mesmos cortes do createAuditLog (server/security.ts).
-    ipAddress: prova.ipAddress.substring(0, 45),
-    userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
     status: "success",
     riskLevel: "medium",
   });
-  return reuniao.shareToken;
+  return { token: reuniao.shareToken, senha: criou ? escolha.senha : null };
 }
 
-/** Desliga o link: quem tem o endereço perde o acesso na hora. Desligar duas vezes não é erro. */
+/**
+ * Desliga o link: quem tem o endereço perde o acesso na hora. Desligar duas
+ * vezes não é erro. A senha sai junto: o link novo sai com o que a dona
+ * escolher na hora de ligar.
+ */
 export async function desligarLinkAberto(ownerId: string, meetingId: string): Promise<void> {
   const db = await exigirDb();
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
-  await db.update(meetings).set({ shareToken: null }).where(daDona);
+  await db.update(meetings).set({ shareToken: null, sharePasswordHash: null, ...FREIO_DO_LINK_ZERADO }).where(daDona);
   const [reuniao] = await db.select({ id: meetings.id }).from(meetings).where(daDona).limit(1);
   if (!reuniao) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
 }
 
 /**
- * A reunião por trás de um link ligado, ou null. Só reunião pronta, de conta
- * ativa: a conta desativada pela administração (ou pelo bloqueio automático)
- * deixa de servir o que compartilhou, como deixa de entrar.
+ * A reunião da dona com o link ligado, com a linha travada até o fim da
+ * transação, ou a recusa: outra conta e reunião excluída levam NOT_FOUND; o
+ * link desligado, PRECONDITION_FAILED.
+ */
+async function linkLigadoDaDona(tx: Transacao, ownerId: string, meetingId: string) {
+  const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
+  const [reuniao] = await tx.select({
+    status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+  }).from(meetings).where(daDona).limit(1).for("update");
+  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_LINK_DESLIGADO);
+  return { ...reuniao, daDona };
+}
+
+/**
+ * Uma senha nova para o link ligado (H23): liga a senha no link que não tinha,
+ * ou troca a que havia. A anterior deixa de valer na hora, e quem entrou com
+ * ela perde a entrada (o cookie é preso ao hash). Devolve a senha em texto,
+ * a única vez que ela sai do servidor.
+ */
+export async function novaSenhaDoLink(ownerId: string, meetingId: string, prova: ProvaDaDona): Promise<string> {
+  const senha = gerarSenhaDoLink();
+  const hash = await hashDaSenhaDoLink(senha);
+  const db = await exigirDb();
+  return db.transaction(async tx => {
+    const reuniao = await linkLigadoDaDona(tx, ownerId, meetingId);
+    await tx.update(meetings).set({ sharePasswordHash: hash, ...FREIO_DO_LINK_ZERADO }).where(reuniao.daDona);
+    await tx.insert(auditLogs).values({
+      ...quemPediu(prova),
+      action: ACAO_SENHA_DO_LINK_LIGADA, resource: "meetings", resourceId: meetingId,
+      details: { troca: reuniao.sharePasswordHash !== null },
+      status: "success", riskLevel: "medium",
+    });
+    return senha;
+  });
+}
+
+/**
+ * Tira a senha do link ligado: quem tem o endereço volta a abrir sem senha.
+ * Tirar o que não existe não é erro nem vai à auditoria.
+ */
+export async function tirarSenhaDoLink(ownerId: string, meetingId: string, prova: ProvaDaDona): Promise<void> {
+  const db = await exigirDb();
+  await db.transaction(async tx => {
+    const reuniao = await linkLigadoDaDona(tx, ownerId, meetingId);
+    if (reuniao.sharePasswordHash === null) return;
+    await tx.update(meetings).set({ sharePasswordHash: null, ...FREIO_DO_LINK_ZERADO }).where(reuniao.daDona);
+    await tx.insert(auditLogs).values({
+      ...quemPediu(prova),
+      action: ACAO_SENHA_DO_LINK_TIRADA, resource: "meetings", resourceId: meetingId,
+      status: "success", riskLevel: "medium",
+    });
+  });
+}
+
+/**
+ * Se o link ligado leva o áudio (H23). Desligado, a página do link deixa de
+ * receber a gravação e a rota do áudio recusa na hora; quem já tinha o áudio
+ * carregado segue ouvindo até a URL assinada vencer (1 hora), como ao desligar
+ * o link. A mesma escolha de novo não muda nada nem vai à auditoria.
+ */
+export async function mudarAudioDoLink(ownerId: string, meetingId: string, incluirAudio: boolean, prova: ProvaDaDona): Promise<void> {
+  const db = await exigirDb();
+  await db.transaction(async tx => {
+    const reuniao = await linkLigadoDaDona(tx, ownerId, meetingId);
+    if (reuniao.shareAudio === incluirAudio) return;
+    await tx.update(meetings).set({ shareAudio: incluirAudio }).where(reuniao.daDona);
+    await tx.insert(auditLogs).values({
+      ...quemPediu(prova),
+      action: ACAO_AUDIO_DO_LINK, resource: "meetings", resourceId: meetingId,
+      details: { incluirAudio },
+      status: "success", riskLevel: incluirAudio ? "medium" : "low",
+    });
+  });
+}
+
+/**
+ * A reunião por trás de um link ligado; null quando não há (link que não
+ * existe, desligado, de reunião que não está pronta ou de conta inativa); ou
+ * "senha", quando o link tem senha e o pedido não traz o cookie de quem a
+ * acertou (H23). Só reunião pronta, de conta ativa: a conta desativada pela
+ * administração (ou pelo bloqueio automático) deixa de servir o que
+ * compartilhou, como deixa de entrar.
+ *
+ * Os cookies vêm do contexto do pedido (comCookiesDoPedido, que o router do
+ * link e a rota do áudio abrem). Fora dele não há cookie, e o link com senha
+ * recusa.
  */
 async function reuniaoDoLink(token: string) {
   if (!FORMATO_DO_TOKEN.test(token)) return null;
@@ -165,6 +332,8 @@ async function reuniaoDoLink(token: string) {
     createdAt: meetings.createdAt,
     shareToken: meetings.shareToken,
     audioPipeline: meetings.audioPipeline,
+    sharePasswordHash: meetings.sharePasswordHash,
+    shareAudio: meetings.shareAudio,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -175,7 +344,13 @@ async function reuniaoDoLink(token: string) {
   // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
   // variação de caixa não abrir o link nem virar outro balde do teto.
   if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
-  return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices" };
+  // As duas regras da H23 falham fechadas: hash que não é nulo pede a entrada,
+  // e só o `true` do banco serve o áudio.
+  if (reuniao.sharePasswordHash !== null && !entradaValida(token, reuniao.sharePasswordHash, cookiesDoPedido())) return "senha" as const;
+  return {
+    id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
+    comAudio: reuniao.shareAudio === true,
+  };
 }
 
 /** Os segmentos no contrato do desenho ({inicio, fim, falante, texto, lacuna?}), sem outro campo. */
@@ -191,10 +366,15 @@ export function segmentosDoContrato(bruto: unknown): Array<{ inicio: number; fim
   return saida;
 }
 
-/** A reunião do link, ou a recusa NOT_FOUND: link que não existe e link desligado parecem iguais. */
+/**
+ * A reunião do link, ou a recusa: NOT_FOUND para o link que não existe e o
+ * desligado, que parecem iguais; UNAUTHORIZED para o link com senha sem a
+ * entrada de quem a acertou (H23).
+ */
 export async function exigirReuniaoDoLink(token: string) {
   const reuniao = await reuniaoDoLink(token);
   if (!reuniao) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_LINK_NAO_ENCONTRADO);
+  if (reuniao === "senha") throw new LinkAbertoRecusado("UNAUTHORIZED", MENSAGEM_SENHA_DO_LINK_PEDIDA);
   return reuniao;
 }
 
@@ -219,7 +399,8 @@ async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { 
  * nomes das vozes. O endereço do áudio é o da rota do link, nunca o do proxy
  * da dona (/manus-storage/, que pede a sessão dela), e nada aqui traz o id da
  * dona, o da reunião ou a chave do bucket (a rota do áudio, abaixo, revela o
- * caminho no destino do 307).
+ * caminho no destino do 307). Sem o áudio (H23), a gravação nem é lida:
+ * `audioIncluido` falso, sem gravação e sem os avisos dela.
  */
 export async function verReuniaoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
@@ -232,9 +413,9 @@ export async function verReuniaoPeloLink(token: string) {
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
   // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras).
-  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, {
-    createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes,
-  });
+  const { recording, recordingExpired, recordingDeletionPending } = reuniao.comAudio
+    ? await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, { createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes })
+    : { recording: null, recordingExpired: false, recordingDeletionPending: false };
   const vozes = await vozesDoLink(db, reuniao);
   return {
     titulo: reuniao.title,
@@ -255,16 +436,21 @@ export async function verReuniaoPeloLink(token: string) {
     // "Foi apagada" só quando o áudio saiu do bucket; vencido e ainda saindo é outro aviso.
     gravacaoExpirada: recordingExpired,
     gravacaoSaindo: recordingDeletionPending,
+    // A dona tirou o áudio do link (H23): a página diz isso no lugar do player.
+    audioIncluido: reuniao.comAudio,
     // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
     // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
     vozes,
   };
 }
 
-/** A chave do áudio que o link toca agora, ou null (link desligado, sem áudio ou áudio vencido). */
+/**
+ * A chave do áudio que o link toca agora, ou null: link desligado, com senha
+ * sem a entrada, sem o áudio (H23), sem gravação ou com o áudio vencido.
+ */
 export async function chaveDoAudioDoLink(token: string, parte?: number): Promise<string | null> {
   const reuniao = await reuniaoDoLink(token);
-  if (!reuniao) return null;
+  if (!reuniao || reuniao === "senha" || !reuniao.comAudio) return null;
   const db = await exigirDb();
   // A reunião em partes toca cada parte pela posição (?parte); sem ela, a primeira.
   if (reuniao.emPartes) {
@@ -295,6 +481,8 @@ export async function chaveDoAudioDoLink(token: string, parte?: number): Promise
  *    nenhum dos dois abre nada sem sessão. A URL assinada vale 1 hora
  *    (server/storage.ts): desligar o link barra a página e os pedidos novos na
  *    hora, mas quem já tinha a gravação carregada segue ouvindo até ela vencer.
+ *    O áudio do link com senha (H23) pede o cookie de quem a acertou, que o
+ *    navegador manda junto com o pedido do player.
  * As dependências entram por parâmetro só para o teste da rota trocá-las.
  */
 export function registrarRotasDoLinkAberto(
@@ -314,7 +502,8 @@ export function registrarRotasDoLinkAberto(
     try {
       // ?parte só vale como número inteiro pequeno; qualquer outra coisa é a primeira.
       const parte = /^\d{1,4}$/.test(String(req.query.parte ?? "")) ? Number(req.query.parte) : undefined;
-      chave = await acharChave(String(req.params.token ?? ""), parte);
+      // Os cookies do pedido vão ao contexto: é por eles que o link com senha abre.
+      chave = await comCookiesDoPedido(req.headers.cookie, () => acharChave(String(req.params.token ?? ""), parte));
     } catch (erro) {
       // Banco fora do ar não é "link desligado": 404 faria a página dizer que
       // a gravação sumiu. Fora do tRPC não há middleware que traduza.

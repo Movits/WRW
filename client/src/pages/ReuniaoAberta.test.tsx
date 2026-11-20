@@ -33,6 +33,8 @@ const duble = vi.hoisted(() => ({
   resumoGuardado: vi.fn(),
   opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
+  // A senha do link (H23): a tela da senha manda os 6 dígitos por aqui.
+  entrar: { mutate: vi.fn(), isPending: false },
   // A tradução do resumo guardado (H11): a página pede pelo link; a mutação da dona nunca é chamada aqui.
   traduzirResumo: { mutate: vi.fn() },
   traduzirResumoDaDona: { mutate: vi.fn() },
@@ -63,6 +65,7 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
       traduzir: { useMutation: () => duble.traduzir },
+      entrar: { useMutation: () => duble.entrar },
       traduzirResumo: { useMutation: () => duble.traduzirResumo },
       resumoGuardado: {
         useQuery: (entrada: unknown, opcoes: OpcoesDoResumo) => {
@@ -149,6 +152,7 @@ beforeEach(() => {
   duble.opcoesDoResumo = null;
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
+  duble.entrar = { mutate: vi.fn(), isPending: false };
   duble.traduzirResumo = { mutate: vi.fn() };
   duble.traduzirResumoDaDona = { mutate: vi.fn() };
   duble.propsDaPergunta = null;
@@ -709,5 +713,77 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
     const [, segundo] = duble.traduzirResumo.mutate.mock.calls[1] as Pedido;
     act(() => segundo.onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines" }, itens: ITENS }));
     expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
+  });
+});
+
+/**
+ * O link com senha e o link sem o áudio (H23): a página mostra só a tela da
+ * senha até quem recebeu o link acertar os 6 dígitos, e o link sem o áudio não
+ * tem player. A tela da senha em si está em components/SenhaDoLinkAberto.test.tsx.
+ */
+describe("o link com senha e o link sem o áudio (H23)", () => {
+  it("com senha: só a tela da senha, sem o título nem nada da reunião, e sem tentar de novo sozinha", () => {
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED"));
+    const { container } = abrir();
+    expect(screen.getByRole("heading", { name: "Reunião protegida por senha" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Senha de 6 dígitos" })).toBeInTheDocument();
+    expect(screen.queryByText("REUNIÃO COMPARTILHADA")).not.toBeInTheDocument();
+    expect(screen.queryByText("frase do servidor")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "UNAUTHORIZED" } })).toBe(false);
+    expect(duble.opcoesDaConsulta!.refetchOnReconnect({ state: { error: { data: { code: "UNAUTHORIZED" } } } })).toBe(false);
+    expect(duble.opcoesDoResumo!.retry(0, { data: { code: "UNAUTHORIZED" } })).toBe(false);
+  });
+
+  it("a senha certa relê a reunião pelo mesmo token", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED", refetch));
+    abrir();
+    fireEvent.change(screen.getByRole("textbox", { name: "Senha de 6 dígitos" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir a reunião" }));
+    expect(duble.entrar.mutate).toHaveBeenCalledWith({ token: TOKEN, senha: "482913" }, expect.anything());
+    expect(refetch).not.toHaveBeenCalled();
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a entrada vence com a página aberta: o resumo recusa com UNAUTHORIZED, e a página relê a reunião (que traz a tela da senha)", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    duble.resumoGuardado.mockReturnValue({ data: undefined, isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch: vi.fn() });
+    abrir();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a tela da senha em árabe: a página da direita para a esquerda, o campo da esquerda para a direita", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED"));
+    abrir();
+    expect(document.documentElement.dir).toBe("rtl");
+    expect(screen.getByRole("heading", { name: "اجتماع محمي بكلمة مرور" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "كلمة مرور من 6 أرقام" })).toHaveAttribute("dir", "ltr");
+  });
+
+  it("sem o áudio: a página diz que o áudio não veio no link, sem player e sem a barra do rodapé", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: false, gravacaoSaindo: false, audioIncluido: false }));
+    const { container } = abrir();
+    expect(screen.getByText("Quem compartilhou esta reunião não incluiu o áudio neste link.")).toBeInTheDocument();
+    expect(screen.getByText(/Leia a transcrição ou peça à IA um resumo/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ouça a gravação/)).not.toBeInTheDocument();
+    // E não os avisos da gravação que não existe ou venceu: o áudio existe, só não veio pelo link.
+    expect(screen.queryByText(/Nenhum áudio guardado|passou dos 30 dias/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    // Sem áudio, nada leva o player a um ponto: o resumo e a pergunta não recebem o "ir para".
+    expect(duble.propsDoResumo?.aoIrPara).toBeUndefined();
+    expect(duble.propsDaPergunta?.aoIrPara).toBeUndefined();
+  });
+
+  it("a resposta de um servidor de antes da H23 (sem audioIncluido) segue como antes: com a gravação", () => {
+    duble.ver.mockReturnValue(pronta());
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
+    expect(screen.queryByText(/não incluiu o áudio/)).not.toBeInTheDocument();
   });
 });

@@ -158,7 +158,8 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
 
   it("a resposta do link tem a lista fechada de chaves: nada além do que a página mostra", async () => {
     const vista = await verReuniaoPeloLink(await ligarLinkAberto(DONA, PRONTA, PROVA));
-    expect(Object.keys(vista).sort()).toEqual(["criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "vozes"]);
+    // audioIncluido (H23): se a dona deixou o áudio no link; nada da senha sai daqui.
+    expect(Object.keys(vista).sort()).toEqual(["audioIncluido", "criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "vozes"]);
     expect(Object.keys(vista.transcricao!).sort()).toEqual(["idioma", "segmentos", "texto"]);
     expect(Object.keys(vista.gravacao!).sort()).toEqual(["durationSeconds", "expiresAt", "mimeType", "partes", "url"]);
   });
@@ -352,13 +353,16 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       resource: "meetings", ipAddress: PROVA.ipAddress, userAgent: PROVA.userAgent, status: "success", riskLevel: "medium",
     });
     // A frase e o idioma que a dona viu, com o hash: a frase vai mudar com a revisão jurídica.
-    // Sem a versão (a aba de antes da H3b), a linha leva a 1.
+    // Sem a versão (a aba de antes da H3b), a linha leva a 1. E diz como o link
+    // ficou (H23): ligar sem escolher nada é o link de antes, sem senha e com o áudio.
     expect(depois.at(-1)!.details).toEqual({
       autorizacaoDasPessoas: true,
       versaoDaAutorizacao: 1,
       idioma: PROVA.idioma,
       textoExibido: PROVA.textoExibido,
       textoHash: crypto.createHash("sha256").update(PROVA.textoExibido).digest("hex"),
+      comSenha: false,
+      incluirAudio: true,
     });
     // A caixa que fala dos nomes das vozes grava a versão 2 (H3b).
     await ligarLinkAberto(DONA, PRONTA, { ...PROVA, versaoDaAutorizacao: 2 });

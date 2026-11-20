@@ -1881,8 +1881,12 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
   // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
-  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting) return null;
+  // Da senha do link (H23) sai só se ela existe: o hash fica no servidor.
+  const [linha] = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  if (!linha) return null;
+  const { sharePasswordHash, shareAudio, ...meeting } = linha;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
@@ -1910,8 +1914,13 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
   // sai também pelo link. Sem link, falso, sem consultar a auditoria.
   const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
+  // Como está o link ligado (H23): se pede a senha e se leva o áudio, com a
+  // mesma leitura do link (reuniaoDoLink): só o `true` do banco leva o áudio.
+  // Sem link, sem senha.
+  const linkComSenha = !!meeting.shareToken && sharePasswordHash !== null;
+  const linkComAudio = shareAudio === true;
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
+    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes, linkComSenha, linkComAudio },
     transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento,
   };
 }

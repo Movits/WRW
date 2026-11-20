@@ -302,6 +302,11 @@ sem ele).
   com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
+  Desde a H23 a dona tira o áudio do link (a consulta deixa de servi-lo) e põe uma senha
+  de 6 dígitos: o link com senha só abre com o cookie HttpOnly de quem a acertou
+  (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que
+  `procedimentoDoLink` põe no contexto do pedido. Procedimento novo pelo token usa
+  `procedimentoDoLink`; `server/link-com-senha-rota.test.ts` varre o router.
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
