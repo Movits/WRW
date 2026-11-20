@@ -160,7 +160,9 @@ const RESSALVAS_DA_NEGACAO = new Set(["so", "apenas", "somente", "only", "just"]
  * inglês diante de "need" ("we have no need") e de "longer" ("we no longer
  * need"). O "no" do português é "em + o" e nunca vem antes de verbo: diante
  * de qualquer outra palavra ele segue não negando ("distribuidor no Chile",
- * "no Brasil precisamos de...").
+ * "no Brasil precisamos de..."). O verbo tem de estar na mesma oração: em
+ * "¿Necesitan un contador? No. Necesitamos un distribuidor", o "No." é a
+ * resposta, e não a negação do que vem depois.
  */
 const VERBO_QUE_O_NO_NEGA = /^(necesit|need)/;
 const VERBOS_QUE_O_NO_NEGA = new Set([
@@ -175,17 +177,19 @@ const VERBOS_QUE_O_NO_NEGA = new Set([
   "estamos", "estoy", "vamos", "voy",
 ]);
 const PRONOMES_ATONOS_DO_ESPANHOL = new Set(["lo", "la", "los", "las", "le", "les", "nos", "me", "te", "se"]);
-function noQueNega(lista: readonly string[], k: number): boolean {
+function noQueNega(lista: readonly string[], k: number, oracao?: readonly number[]): boolean {
   if (lista[k] !== "no") return false;
-  if (lista[k + 1] === "longer") return true;
+  const naOracao = (j: number) => !oracao || oracao[j] === oracao[k];
+  if (lista[k + 1] === "longer") return naOracao(k + 1);
   const j = PRONOMES_ATONOS_DO_ESPANHOL.has(lista[k + 1]) ? k + 2 : k + 1;
+  if (!naOracao(j)) return false;
   const verbo = lista[j] ?? "";
   if (verbo === "es" || verbo === "son") return /^necesari/.test(lista[j + 1] ?? "");
   return VERBO_QUE_O_NO_NEGA.test(verbo) || VERBOS_QUE_O_NO_NEGA.has(verbo);
 }
 
-const negaEm = (lista: readonly string[], k: number, negacoes: ReadonlySet<string>) =>
-  (negacoes.has(lista[k]) || noQueNega(lista, k)) && !RESSALVAS_DA_NEGACAO.has(lista[k + 1]);
+const negaEm = (lista: readonly string[], k: number, negacoes: ReadonlySet<string>, oracao?: readonly number[]) =>
+  (negacoes.has(lista[k]) || noQueNega(lista, k, oracao)) && !RESSALVAS_DA_NEGACAO.has(lista[k + 1]);
 /** Quantas unidades antes do trecho, na mesma oração, a negação alcança ("não tem um distribuidor"). */
 const ALCANCE_DA_NEGACAO = 3;
 /** Quantas unidades em volta do trecho ainda o sustentam ("distribuição de medicamentos | em todo o Brasil"). */
@@ -234,7 +238,7 @@ const VERBOS_DA_DECLARACAO = new Set([
   "have", "need", "want", "offer", "sell", "own",
 ]);
 function negacaoRestringeUmNome(lista: readonly string[], oracao: readonly number[], k: number): boolean {
-  if (!negaEm(lista, k, NEGACOES_NO_TRECHO) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
+  if (!negaEm(lista, k, NEGACOES_NO_TRECHO, oracao) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
   return [k - 1, k - 2].some(j => j >= 2 && RELATIVOS.has(lista[j]) && oracao[j - 2] === oracao[k]
     && DETERMINANTES.has(lista[j - 2]) && ehConteudo(lista[j - 1]) && !NAO_SAO_NOME.has(lista[j - 1]));
 }
@@ -257,7 +261,7 @@ function leituraDoTrecho(lista: readonly string[], oracao: readonly number[], in
     else if (negacaoRestringeUmNome(lista, oracao, k)) {
       restricao = oracao[k];
       restringe = true;
-    } else if (negaEm(lista, k, NEGACOES_NO_TRECHO)) return "desmente";
+    } else if (negaEm(lista, k, NEGACOES_NO_TRECHO, oracao)) return "desmente";
   }
   return restringe ? "restringe" : "afirma";
 }
@@ -293,7 +297,7 @@ function alcanceDaNegacao(
   lista: readonly string[],
   oracao: readonly number[],
   faixa: { de: number; ate: number } = { de: 0, ate: lista.length },
-  ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO),
+  ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO, oracao),
 ): AlcanceDaNegacao {
   const alcance: AlcanceDaNegacao = { negada: [], marca: [], complemento: [], complementoDe: [], abertaPor: [] };
   // A asserção evita que o tsc estreite `aberta` para null no laço. `cadeia` é
@@ -414,7 +418,7 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
       achou = true;
       const de = Math.max(0, inicio - JANELA_DO_TRECHO);
       const ate = Math.min(daFonte.length, fim + JANELA_DO_TRECHO);
-      const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO));
+      const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO, oracao));
       for (let k = de; k < ate; k += 1) {
         const complementoDoTrecho = doTrecho.complemento[k - de];
         apoio.push({

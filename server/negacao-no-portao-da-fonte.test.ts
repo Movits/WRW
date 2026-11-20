@@ -93,6 +93,8 @@ describe("o que não é negação continua passando", () => {
     ["Contador", "precisamos de um contador", "No Brasil precisamos de um contador."],
     ["Contador", "precisamos de um contador", "No ES precisamos de um contador."],
     ["Distribuidor", "precisamos de um distribuidor", "No nosso caso, precisamos de um distribuidor."],
+    // o "No." que responde a outra pergunta não nega o verbo da oração seguinte
+    ["Distribuidor en Chile", "No. Necesitamos un distribuidor en Chile", "¿Necesitan un contador? No. Necesitamos un distribuidor en Chile."],
     // "não só", "not just" e "no solo" não negam
     ["Distribuidor", "precisamos de um distribuidor", "Não só precisamos de um distribuidor, como de um sócio."],
     ["Distributor", "need a distributor", "We don't just need a distributor, we need a partner."],
