@@ -432,8 +432,12 @@ Tamanho: P é pequena, M é média e G é grande.
 - **H14:** gravar a aba de uma reunião online, só no Chrome e no Edge do computador. Usa
   o hook da G1a, passando a ele o áudio da aba.
 - **H15:** lembrete no sino.
-- **H9b:** importar WAV, OGG e WebM longos. Até lá, esses formatos seguem no envio único
-  de hoje.
+- **H9b e H9c** (`feat/importar-outros-formatos`): importar em partes, até 12 h, o M4A, o
+  MP4 e o MOV (H9c, só o áudio AAC sai do aparelho, cada parte um MP4 fragmentado), o WAV,
+  o OGG (Opus e Vorbis), o WebM e o MKV (o Opus vira Ogg Opus; o AAC, MP4 fragmentado), o
+  FLAC e o AAC em ADTS (H9b), sem recodificar (`client/src/lib/corte-do-arquivo.ts`). O
+  arquivo curto de um formato que o corte reconhece mas não lê (ALAC, AC-3, o Vorbis no
+  WebM) segue no envio único de hoje; o maior recebe o aviso com o nome do formato.
 - **G14:** tirar o envio único em base64. Só entra quando houver uma semana de logs sem
   `submitRecording`, nenhum cliente fora do repositório que ainda use esse envio, e o
   H9b pronto ou o aval da cliente.

@@ -116,6 +116,14 @@ export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
 export const GRAVACAO_EM_PARTES_SEGUNDOS_MAX = 12 * 60 * 60;
 
 /**
+ * O teto de partes de uma reunião em partes: a rota das partes recusa a
+ * posição 200 em diante, e o encerrar, mais de 200 (server/fatias-de-reuniao.ts).
+ * Mora aqui porque a importação em partes confere o mesmo antes de a reunião
+ * nascer (H9b): o WAV e o FLAC de horas, em partes de 14 MB, passariam dele.
+ */
+export const PARTES_POR_REUNIAO_MAX = 200;
+
+/**
  * O aviso de hora da gravação em partes: a cada hora cheia de gravação (sem as
  * pausas) ele pede um OK. Sem o OK em 10 minutos, contados no relógio de
  * parede, a gravação para sozinha e entrega o que gravou, como no Encerrar.
