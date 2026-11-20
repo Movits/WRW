@@ -2287,6 +2287,63 @@
       "smartNetworkDesc": "Reuniones, contactos y oportunidades de tu red"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "WRW no recibe tu biometría: es tu propio dispositivo el que confirma tu identidad y solo envía a WRW una firma.",
+    "login": {
+      "fallbackButton": "Entrar con Face ID o huella digital"
+    },
+    "invite": {
+      "title": "¿Entrar más rápido la próxima vez?",
+      "text": "Activa el acceso con Face ID, huella digital o el bloqueo de pantalla de este dispositivo. La próxima vez, solo toca el campo de correo y elige la llave, sin escribir la contraseña.",
+      "activate": "Activar en este dispositivo",
+      "activating": "Activando…",
+      "notNow": "Ahora no"
+    },
+    "toast": {
+      "activated": "¡Listo! La próxima vez, toca el campo de correo y elige la llave de este dispositivo.",
+      "renamed": "Nombre guardado.",
+      "removed": "Llave eliminada."
+    },
+    "profile": {
+      "title": "Face ID y huella digital",
+      "subtitle": "Entrar sin contraseña en tus dispositivos",
+      "loading": "Cargando las llaves…",
+      "empty": "Ningún dispositivo entra todavía con Face ID o huella digital.",
+      "unnamed": "Llave sin nombre",
+      "synced": "Sincronizada",
+      "createdAt": "Activada el {{date}}",
+      "lastUsed": "último uso el {{date}}",
+      "neverUsed": "aún sin usar",
+      "rename": "Cambiar nombre",
+      "nameLabel": "Nombre de la llave",
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "remove": "Eliminar",
+      "removeConfirm": "¿Eliminar esta llave? Su dispositivo dejará de entrar con Face ID o huella digital. La contraseña sigue funcionando.",
+      "removeYes": "Eliminar",
+      "removeNo": "Mantener",
+      "removing": "Eliminando…",
+      "limitReached": "Esta cuenta llegó al límite de {{max}} llaves. Elimina una para activar otro dispositivo.",
+      "reauthText": "Por seguridad, activar una llave pide la contraseña cuando el acceso fue hace más de 10 minutos.",
+      "passwordLabel": "Contraseña",
+      "reauthConfirm": "Confirmar y activar",
+      "wrongPassword": "No se pudo confirmar la contraseña."
+    },
+    "errors": {
+      "unavailable": "El acceso con Face ID o huella digital no está disponible en esta dirección. Entra con correo y contraseña.",
+      "expired": "La solicitud venció. Inténtalo de nuevo.",
+      "refused": "El dispositivo no confirmó el acceso. Inténtalo de nuevo o entra con correo y contraseña.",
+      "unknownKey": "Esta llave ya no es válida. Entra con correo y contraseña y, si quieres, activa la llave de nuevo.",
+      "accountDisabled": "Esta cuenta está desactivada.",
+      "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+      "alreadyRegistered": "La llave de este dispositivo ya está activada.",
+      "limitReached": "Esta cuenta llegó al límite de llaves. Elimina una en el Perfil para activar otro dispositivo.",
+      "notFound": "Esta llave ya no existe. Actualiza la página.",
+      "reauthenticate": "Por seguridad, confirma la contraseña para activar la llave.",
+      "generic": "No se pudo completar ahora. Inténtalo de nuevo.",
+      "device": "El dispositivo no pudo usar la llave. Inténtalo de nuevo o entra con correo y contraseña."
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "Eliminar mi cuenta",

@@ -2287,6 +2287,63 @@
       "smartNetworkDesc": "您人脉中的会议、联系人与机会"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "WRW 不会收到您的生物识别信息：由您的设备本身确认身份，只向 WRW 发送一个签名。",
+    "login": {
+      "fallbackButton": "使用面容 ID 或指纹登录"
+    },
+    "invite": {
+      "title": "下次更快地登录？",
+      "text": "开启使用此设备的面容 ID、指纹或屏幕锁登录。下次只需点按邮箱字段并选择通行密钥，无需输入密码。",
+      "activate": "在此设备上开启",
+      "activating": "正在开启…",
+      "notNow": "暂不"
+    },
+    "toast": {
+      "activated": "完成！下次点按邮箱字段并选择此设备的通行密钥即可。",
+      "renamed": "名称已保存。",
+      "removed": "通行密钥已移除。"
+    },
+    "profile": {
+      "title": "面容 ID 和指纹",
+      "subtitle": "在您的设备上无需密码即可登录",
+      "loading": "正在加载通行密钥…",
+      "empty": "目前还没有设备使用面容 ID 或指纹登录。",
+      "unnamed": "未命名的通行密钥",
+      "synced": "已同步",
+      "createdAt": "开启于 {{date}}",
+      "lastUsed": "上次使用于 {{date}}",
+      "neverUsed": "尚未使用",
+      "rename": "重命名",
+      "nameLabel": "通行密钥名称",
+      "save": "保存",
+      "cancel": "取消",
+      "remove": "移除",
+      "removeConfirm": "移除此通行密钥？对应的设备将无法再使用面容 ID 或指纹登录。密码仍然有效。",
+      "removeYes": "移除",
+      "removeNo": "保留",
+      "removing": "正在移除…",
+      "limitReached": "此账户已达到 {{max}} 个通行密钥的上限。请移除一个后再开启其他设备。",
+      "reauthText": "为了安全，如果登录已超过 10 分钟，开启通行密钥需要输入密码。",
+      "passwordLabel": "密码",
+      "reauthConfirm": "确认并开启",
+      "wrongPassword": "无法确认密码。"
+    },
+    "errors": {
+      "unavailable": "此地址不支持使用面容 ID 或指纹登录。请使用邮箱和密码登录。",
+      "expired": "请求已过期。请重试。",
+      "refused": "设备未确认登录。请重试，或使用邮箱和密码登录。",
+      "unknownKey": "此通行密钥已失效。请使用邮箱和密码登录，如有需要可重新开启通行密钥。",
+      "accountDisabled": "此账户已停用。",
+      "tooManyAttempts": "尝试次数过多。请等待几分钟后再试。",
+      "alreadyRegistered": "此设备的通行密钥已开启。",
+      "limitReached": "此账户已达到通行密钥上限。请在个人资料中移除一个，再开启其他设备。",
+      "notFound": "此通行密钥已不存在。请刷新页面。",
+      "reauthenticate": "为了安全，请确认密码以开启通行密钥。",
+      "generic": "暂时无法完成。请重试。",
+      "device": "设备无法使用通行密钥。请重试，或使用邮箱和密码登录。"
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "删除我的账户",

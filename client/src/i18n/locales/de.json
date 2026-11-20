@@ -2287,6 +2287,63 @@
       "smartNetworkDesc": "Meetings, Kontakte und Chancen in Ihrem Netzwerk"
     }
   },
+  "chavesDeAcesso": {
+    "privacyNote": "WRW erhält keine biometrischen Daten: Ihr eigenes Gerät prüft, dass Sie es sind, und sendet WRW nur eine Signatur.",
+    "login": {
+      "fallbackButton": "Mit Face ID oder Fingerabdruck anmelden"
+    },
+    "invite": {
+      "title": "Nächstes Mal schneller anmelden?",
+      "text": "Aktivieren Sie die Anmeldung mit Face ID, Fingerabdruck oder der Bildschirmsperre dieses Geräts. Beim nächsten Mal tippen Sie einfach auf das E-Mail-Feld und wählen den Passkey, ganz ohne Passwort.",
+      "activate": "Auf diesem Gerät aktivieren",
+      "activating": "Wird aktiviert…",
+      "notNow": "Jetzt nicht"
+    },
+    "toast": {
+      "activated": "Fertig! Tippen Sie beim nächsten Mal auf das E-Mail-Feld und wählen Sie den Passkey dieses Geräts.",
+      "renamed": "Name gespeichert.",
+      "removed": "Passkey entfernt."
+    },
+    "profile": {
+      "title": "Face ID und Fingerabdruck",
+      "subtitle": "Ohne Passwort auf Ihren Geräten anmelden",
+      "loading": "Passkeys werden geladen…",
+      "empty": "Noch kein Gerät meldet sich mit Face ID oder Fingerabdruck an.",
+      "unnamed": "Passkey ohne Namen",
+      "synced": "Synchronisiert",
+      "createdAt": "Aktiviert am {{date}}",
+      "lastUsed": "zuletzt verwendet am {{date}}",
+      "neverUsed": "noch nicht verwendet",
+      "rename": "Umbenennen",
+      "nameLabel": "Name des Passkeys",
+      "save": "Speichern",
+      "cancel": "Abbrechen",
+      "remove": "Entfernen",
+      "removeConfirm": "Diesen Passkey entfernen? Sein Gerät kann sich dann nicht mehr mit Face ID oder Fingerabdruck anmelden. Das Passwort gilt weiterhin.",
+      "removeYes": "Entfernen",
+      "removeNo": "Behalten",
+      "removing": "Wird entfernt…",
+      "limitReached": "Dieses Konto hat das Limit von {{max}} Passkeys erreicht. Entfernen Sie einen, um ein weiteres Gerät zu aktivieren.",
+      "reauthText": "Aus Sicherheitsgründen verlangt das Aktivieren eines Passkeys das Passwort, wenn die Anmeldung mehr als 10 Minuten zurückliegt.",
+      "passwordLabel": "Passwort",
+      "reauthConfirm": "Bestätigen und aktivieren",
+      "wrongPassword": "Das Passwort konnte nicht bestätigt werden."
+    },
+    "errors": {
+      "unavailable": "Die Anmeldung mit Face ID oder Fingerabdruck ist unter dieser Adresse nicht verfügbar. Melden Sie sich mit E-Mail und Passwort an.",
+      "expired": "Die Anfrage ist abgelaufen. Versuchen Sie es erneut.",
+      "refused": "Das Gerät hat die Anmeldung nicht bestätigt. Versuchen Sie es erneut oder melden Sie sich mit E-Mail und Passwort an.",
+      "unknownKey": "Dieser Passkey ist nicht mehr gültig. Melden Sie sich mit E-Mail und Passwort an und aktivieren Sie den Passkey bei Bedarf erneut.",
+      "accountDisabled": "Dieses Konto ist deaktiviert.",
+      "tooManyAttempts": "Zu viele Versuche. Warten Sie einige Minuten und versuchen Sie es erneut.",
+      "alreadyRegistered": "Der Passkey dieses Geräts ist bereits aktiviert.",
+      "limitReached": "Dieses Konto hat das Passkey-Limit erreicht. Entfernen Sie einen im Profil, um ein weiteres Gerät zu aktivieren.",
+      "notFound": "Dieser Passkey existiert nicht mehr. Laden Sie die Seite neu.",
+      "reauthenticate": "Bestätigen Sie aus Sicherheitsgründen das Passwort, um den Passkey zu aktivieren.",
+      "generic": "Das hat gerade nicht geklappt. Versuchen Sie es erneut.",
+      "device": "Das Gerät konnte den Passkey nicht verwenden. Versuchen Sie es erneut oder melden Sie sich mit E-Mail und Passwort an."
+    }
+  },
   "conta": {
     "excluir": {
       "titulo": "Mein Konto löschen",
