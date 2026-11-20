@@ -158,7 +158,9 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
 
   it("a resposta do link tem a lista fechada de chaves: nada além do que a página mostra", async () => {
     const vista = await verReuniaoPeloLink(await ligarLinkAberto(DONA, PRONTA, PROVA));
-    expect(Object.keys(vista).sort()).toEqual(["criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "vozes"]);
+    expect(Object.keys(vista).sort()).toEqual(["criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "videoDoYoutube", "vozes"]);
+    // A reunião gravada não veio de um vídeo do YouTube (H13): o id do vídeo é nulo.
+    expect(vista.videoDoYoutube).toBeNull();
     expect(Object.keys(vista.transcricao!).sort()).toEqual(["idioma", "segmentos", "texto"]);
     expect(Object.keys(vista.gravacao!).sort()).toEqual(["durationSeconds", "expiresAt", "mimeType", "partes", "url"]);
   });
