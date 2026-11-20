@@ -33,8 +33,11 @@ const STATUS_DA_RECUSA: Record<CodigoDaRecusa, number> = {
 };
 
 // Uma parte a cada ~10 min por gravação; o teto cobre reenvios e algumas
-// gravações ao mesmo tempo, e barra quem martela a rota.
-const tetoDasPartes = criarTeto(60, 10 * 60_000, "Muitas partes enviadas em pouco tempo.");
+// gravações ao mesmo tempo, e barra quem martela a rota. O MP3 importado em
+// partes (H9a) manda as partes uma atrás da outra, na velocidade da rede: o de
+// 12 h a 320 kbps tem 118 partes de 14 MB, e por isso o teto é de 120 (eram 60).
+export const PARTES_POR_DONA_EM_10_MIN = 120;
+const tetoDasPartes = criarTeto(PARTES_POR_DONA_EM_10_MIN, 10 * 60_000, "Muitas partes enviadas em pouco tempo.");
 
 const ID_DA_REUNIAO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -1161,6 +1161,8 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
   });
 });
 
+// O MP3 vai em partes desde a H9a (Meetings.importacao.test.tsx): o envio
+// único do /gravar, aqui, é o dos outros formatos, com os 10 min e 10 MB dele.
 describe("Reuniões — envio de arquivo", () => {
   it("o formulário trava do começo ao fim do envio: a autorização não se desmarca no meio", async () => {
     let entregarDuracao: (segundos: number | null) => void = () => {};
@@ -1170,7 +1172,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.create.mutateAsync.mockImplementation(() => new Promise(resolver => { entregarCriacao = resolver; }));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    const arquivo = new File(["som"], "reuniao.mp3", { type: "audio/mpeg" });
+    const arquivo = new File(["som"], "reuniao.m4a", { type: "audio/m4a" });
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivo] } });
     // Enquanto o navegador lê o arquivo, nada do formulário muda.
     expect(screen.getByRole("checkbox")).toBeDisabled();
@@ -1186,7 +1188,7 @@ describe("Reuniões — envio de arquivo", () => {
     expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
     await act(async () => { entregarCriacao({ id: "reuniao-do-arquivo" }); });
     await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
-      meetingId: "reuniao-do-arquivo", mimeType: "audio/mpeg", durationSeconds: 30,
+      meetingId: "reuniao-do-arquivo", mimeType: "audio/m4a", durationSeconds: 30,
     })));
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
@@ -1200,7 +1202,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.submitRecording.mutateAsync.mockRejectedValue(new Error("Não foi possível processar o áudio."));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível processar o áudio.", { id: "reuniao-falhou-reuniao-do-arquivo" }));
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
     expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
@@ -1215,7 +1217,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.submitRecording.mutateAsync.mockRejectedValue(new Error(""));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.processError"), { id: "reuniao-falhou-reuniao-do-arquivo" }));
     expect(toast.error).not.toHaveBeenCalledWith("", expect.anything());
   });
@@ -1227,7 +1229,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
     fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("errors.databaseUnavailable")));
   });
 
@@ -1243,18 +1245,18 @@ describe("Reuniões — envio de arquivo", () => {
   it("sem a autorização marcada, o arquivo não sobe: o create, que grava consentGranted, nem é chamado", async () => {
     abrirEm("/gravar");
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Marque a caixa de autorização antes de enviar o áudio."));
     nadaSubiuEOFormularioSegueLivre();
   });
 
   it.each([
-    { caso: "sem título", titulo: "", arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "Dê um título para a reunião." },
+    { caso: "sem título", titulo: "", arquivo: () => new File(["som"], "reuniao.m4a", { type: "audio/m4a" }), aviso: "Dê um título para a reunião." },
     // A regra do servidor (meetings.create): de 2 a 200 caracteres depois do trim.
-    { caso: "com título de uma letra só", titulo: "X", arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
-    { caso: "com título de 201 caracteres", titulo: "a".repeat(201), arquivo: () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
+    { caso: "com título de uma letra só", titulo: "X", arquivo: () => new File(["som"], "reuniao.m4a", { type: "audio/m4a" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
+    { caso: "com título de 201 caracteres", titulo: "a".repeat(201), arquivo: () => new File(["som"], "reuniao.m4a", { type: "audio/m4a" }), aviso: "O título precisa ter de 2 a 200 caracteres." },
     { caso: "em formato que a tela não aceita", titulo: "Conversa com a Bia", arquivo: () => new File(["x"], "notas.txt", { type: "text/plain" }), aviso: "Envie um arquivo WebM, MP3, M4A, MP4, OGG ou WAV." },
-    { caso: "acima de 10 MB", titulo: "Conversa com a Bia", arquivo: () => new File([new Uint8Array(11 * 1024 * 1024)], "longa.mp3", { type: "audio/mpeg" }), aviso: "O arquivo de áudio deve ter no máximo 10 MB." },
+    { caso: "acima de 10 MB", titulo: "Conversa com a Bia", arquivo: () => new File([new Uint8Array(11 * 1024 * 1024)], "longa.m4a", { type: "audio/m4a" }), aviso: "O arquivo de áudio deve ter no máximo 10 MB." },
   ])("o arquivo $caso é recusado antes de travar o formulário", async ({ titulo, arquivo, aviso }) => {
     abrirEm("/gravar");
     if (titulo) fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
@@ -1270,7 +1272,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error("Banco de dados indisponível. Tente de novo em instantes."));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Banco de dados indisponível. Tente de novo em instantes."));
     expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
@@ -1284,7 +1286,7 @@ describe("Reuniões — envio de arquivo", () => {
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(""));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.mp3", { type: "audio/mpeg" })] } });
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.uploadError")));
     expect(toast.error).not.toHaveBeenCalledWith("");
     expect(toast.error).not.toHaveBeenCalledWith(i18n.t("meetings.processError"));
