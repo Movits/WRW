@@ -35,6 +35,7 @@ vi.mock("@simplewebauthn/browser", async importOriginal => {
 
 import {
   apelidoSugerido,
+  appComChaves,
   avisarChaveDesconhecida,
   avisarChavesQueValem,
   CHAVE_DO_CONVITE,
@@ -74,8 +75,29 @@ describe("onde a função aparece", () => {
     expect(podeUsarChavesAqui(UA_DO_CHROME)).toBe(true);
   });
 
-  it("não aparece na casca das lojas, até a M1, mesmo com suporte", () => {
+  it("não aparece na casca das lojas que não liga as chaves, mesmo com suporte", () => {
     expect(podeUsarChavesAqui(UA_DA_CASCA)).toBe(false);
+    expect(podeUsarChavesAqui(UA_DA_CASCA.replace("WRWApp/1.0", "WRWApp/1.1"))).toBe(false);
+    expect(appComChaves(UA_DA_CASCA)).toBe(false);
+  });
+
+  it("aparece no app que se anuncia com WRWChaves/1 (M1, Android), se a WebView fala WebAuthn", () => {
+    const UA_DO_APP_COM_CHAVES = "Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 WRWApp/1.1 WRWChaves/1";
+    expect(appComChaves(UA_DO_APP_COM_CHAVES)).toBe(true);
+    expect(podeUsarChavesAqui(UA_DO_APP_COM_CHAVES)).toBe(true);
+    navegador.suporta.mockReturnValue(false);
+    expect(podeUsarChavesAqui(UA_DO_APP_COM_CHAVES)).toBe(false);
+  });
+
+  it("dentro do app com o sinal, o login é sempre pelo link, mesmo se a WebView disser que sugere no campo", async () => {
+    const UA_DO_APP_COM_CHAVES = "Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 WRWApp/1.1 WRWChaves/1";
+    navegador.sugereNoCampo.mockResolvedValue(true);
+    expect(await sugestaoNoCampoDisponivel(UA_DO_APP_COM_CHAVES)).toBe(false);
+    expect(await sugestaoNoCampoDisponivel(UA_DO_CHROME)).toBe(true);
+  });
+
+  it("o sinal só vale dentro do app: um navegador comum com WRWChaves/1 no user agent segue a regra de sempre", () => {
+    expect(appComChaves("Mozilla/5.0 Chrome/131.0 WRWChaves/1")).toBe(false);
   });
 
   it("não aparece no navegador sem WebAuthn, nem quando a checagem falha", () => {
