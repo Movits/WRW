@@ -274,7 +274,10 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: P
                 <input type="checkbox" checked={escolhidasNaLista.has(emailComparavel(participante.email))}
                   onChange={evento => alternar(participante.email, evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
                 <span className="min-w-0">
-                  {participante.nome && <span dir="auto" className="me-1">{participante.nome}</span>}
+                  {/* Um espaço de verdade entre o nome e o e-mail, e não margem: em árabe o
+                      nome em letras latinas vira a ponta do outro lado, e a margem ficava
+                      no lado errado ("ana@…Ana"). */}
+                  {participante.nome && <><span dir="auto">{participante.nome}</span>{" "}</>}
                   <span dir="ltr" className="break-all text-white/50">{participante.email}</span>
                 </span>
               </label>

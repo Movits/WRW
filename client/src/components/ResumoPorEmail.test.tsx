@@ -281,6 +281,9 @@ describe("em árabe e a 375 px", () => {
     expect(screen.getByLabelText("البريد الإلكتروني لمن سيستلم")).toHaveAttribute("dir", "ltr");
     expect(screen.getByText(ANA)).toHaveAttribute("dir", "ltr");
     expect(screen.getByText("(glenda@exemplo.invalid)")).toHaveAttribute("dir", "ltr");
+    // O nome e o e-mail separados por um espaço de verdade: com margem, em árabe
+    // os dois se colavam ("ana@exemplo.invalidAna").
+    expect(screen.getByRole("checkbox", { name: `Ana ${ANA}` })).toBeInTheDocument();
     const previa = screen.getByText("شاركت Glenda معك ملخص اجتماع").closest("[lang]")!;
     expect(previa).toHaveAttribute("lang", "ar");
     expect(previa).toHaveAttribute("dir", "rtl");
