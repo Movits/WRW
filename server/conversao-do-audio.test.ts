@@ -278,8 +278,8 @@ describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
     await expect(falha).rejects.toThrow("bucket fora do ar");
     expect(readdirSync(temporaria)).toEqual([]);
     expect(pids.length).toBeGreaterThan(0);
-    await new Promise(pronto => setTimeout(pronto, 200));
-    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    // Morto, o processo some quando o Node o recolhe: espera isso, sem prazo fixo.
+    await vi.waitFor(() => { for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow(); }, { timeout: 15_000, interval: 50 });
     rmSync(temporaria, { recursive: true, force: true });
   }, 60_000);
 
@@ -294,19 +294,20 @@ describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
     const conversao = converterPartes(longa, "mp3", parada, {
       lerParte: async chave => audio[chave], avisar: () => undefined, aoIniciar: pid => pids.push(pid), pastaTemporaria: temporaria, prioridade: 0,
     }, controle.signal);
-    await new Promise(pronto => setTimeout(pronto, 1500));
-    expect(chegou).toBe(true);
+    // O primeiro pedaço chega à resposta parada; sem prazo fixo, porque a máquina pode estar ocupada.
+    await vi.waitFor(() => expect(chegou).toBe(true), { timeout: 30_000, interval: 50 });
     controle.abort();
     await expect(conversao).rejects.toMatchObject({ name: "AbortError" });
     expect(readdirSync(temporaria)).toEqual([]);
-    await new Promise(pronto => setTimeout(pronto, 200));
-    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    // Morto, o processo some quando o Node o recolhe: espera isso, sem prazo fixo.
+    await vi.waitFor(() => { for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow(); }, { timeout: 15_000, interval: 50 });
     rmSync(temporaria, { recursive: true, force: true });
   }, 60_000);
 
   it(`na produção, cada ffmpeg roda com nice ${PRIORIDADE_DO_FFMPEG}: abaixo do servidor, sem parar quando ele está ocupado`, async () => {
     expect(PRIORIDADE_DO_FFMPEG).toBe(10);
-    const prioridades = vi.spyOn(os, "setPriority");
+    // Só registra: baixar a prioridade de verdade deixaria o teste na fila da CPU numa máquina ocupada.
+    const prioridades = vi.spyOn(os, "setPriority").mockImplementation(() => undefined);
     try {
       const pids: number[] = [];
       await converterPartes([parte(0, "webm", "audio/webm", 0, 1000)], "mp3", new Writable({ write(_p, _c, pronto) { pronto(); } }), {

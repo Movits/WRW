@@ -166,7 +166,7 @@ describe(`GET ${ROTA_DO_AUDIO_BAIXADO}/{ficha}`, () => {
     expect(resposta.status).toBe(200);
     await expect(resposta.arrayBuffer()).rejects.toThrow();
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("parou no meio: o codificador saiu com 1"));
-    await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0));
+    await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0), { timeout: 10_000 });
   });
 
   it("a dona fecha o download: o sinal cancela a conversão, nada vai ao log como erro, e a vaga volta", async () => {
@@ -180,8 +180,8 @@ describe(`GET ${ROTA_DO_AUDIO_BAIXADO}/{ficha}`, () => {
     const resposta = await fetch(`${base}${ROTA_DO_AUDIO_BAIXADO}/${emitir()}`, { signal: controle.signal });
     expect(resposta.status).toBe(200);
     controle.abort();
-    await vi.waitFor(() => expect(sinalDaConversao?.aborted).toBe(true));
-    await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0));
+    await vi.waitFor(() => expect(sinalDaConversao?.aborted).toBe(true), { timeout: 10_000 });
+    await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0), { timeout: 10_000 });
     expect(console.error).not.toHaveBeenCalled();
   });
 });
@@ -287,7 +287,7 @@ describe.skipIf(!comFfmpeg)("de ponta a ponta: a rota de verdade, com o ffmpeg d
       expect(info.streams[0]).toMatchObject({ codec_name: codec, sample_rate: "24000", channels: 1 });
       expect(Number(info.format.duration)).toBeGreaterThan(2.7);
       expect(Number(info.format.duration)).toBeLessThan(3.5);
-      await vi.waitFor(() => expect(balcaoReal.ocupadas()).toBe(0));
+      await vi.waitFor(() => expect(balcaoReal.ocupadas()).toBe(0), { timeout: 10_000 });
     },
     60_000,
   );
