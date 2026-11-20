@@ -6,10 +6,12 @@ import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
-import { meetingContactSuggestions, meetingEntities, meetings, privateContacts } from "../../drizzle/schema";
+import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
 import { createAuditLog } from "../security";
 import { decidirPendenciasDaPessoaSugerida } from "../network-extracao";
+import { candidatosParaVincular, conexoesDaReuniao } from "../reuniao-no-match";
+import { hasValidConsent } from "./consent";
 import {
   ALLOWED_MEETING_AUDIO_TYPES,
   deletePrivateMeeting,
@@ -41,6 +43,8 @@ import { traduzirResumoDaDona } from "../traducao-do-resumo";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
+import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
+import { exportarReuniao } from "../exportar-reuniao";
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -122,6 +126,13 @@ export const tetoDaTraducaoDoResumo = criarTeto(
   10 * 60_000,
   "Muitos pedidos à IA em sequência. Aguarde alguns minutos e tente de novo.",
 );
+
+// Exportar a reunião (H8) lê a transcrição inteira (até 16 MiB) e grava uma
+// linha de auditoria a cada vez: teto próprio por dona, em memória como os
+// outros, de 30 exportações a cada 10 minutos. Só conta a exportação que saiu:
+// a recusa (outra conta, reunião que não está pronta) e a falha (banco fora do
+// ar, auditoria que não entrou) devolvem a vaga.
+export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -444,6 +455,29 @@ export const meetingsRouter = router({
       });
     }),
 
+  // H8: o conteúdo do PDF da reunião, que a tela imprime (só PDF, decisão do
+  // Roberto de 16/11/2026). Só a dona: o link aberto (routers/reuniaoAberta.ts)
+  // não exporta. A leitura e a auditoria MEETING_EXPORTED vão na mesma
+  // transação (server/exportar-reuniao.ts): sem a linha, nada sai. A vaga é
+  // reservada antes do await, como a do reprocesso, e volta se a exportação
+  // não sai.
+  exportar: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), formato: z.enum(FORMATOS_DA_EXPORTACAO) }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaExportacao.reservar(ctx.user.openId);
+      try {
+        return await exportarReuniao(ctx.user.openId, input.meetingId, {
+          formato: input.formato,
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
   // endereço ouve, lê e pergunta à IA sem conta na WRW (routers/reuniaoAberta.ts).
   // Só a dona liga e desliga, e só reunião pronta tem link. Ligar exige de novo
@@ -505,7 +539,9 @@ export const meetingsRouter = router({
   decideContactSuggestion: protectedProcedure
     .input(z.object({
       suggestionId: z.string().uuid(),
-      action: z.enum(["create", "link", "ignore"]),
+      // "self" (N5): "Sou eu". Nenhum contato nasce; o que a pessoa tem e
+      // precisa passa a esperar a dona com destino no perfil dela.
+      action: z.enum(["create", "link", "ignore", "self"]),
       contactId: z.number().int().positive().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -516,7 +552,12 @@ export const meetingsRouter = router({
       if (suggestion.status !== "pending") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_SUGESTAO_JA_DECIDIDA });
       await recusarSeReuniaoProcessando(db, ctx.user.openId, suggestion.meetingId);
 
-      const status = input.action === "create" ? "created" as const : input.action === "link" ? "linked" as const : "ignored" as const;
+      const status = ({ create: "created", link: "linked", ignore: "ignored", self: "self" } as const)[input.action];
+      // No "Sou eu", o que o perfil já tem não volta a pedir confirmação.
+      const [perfilDaDona] = input.action === "self"
+        ? await db.select({ whatIHave: userProfiles.whatIHave, whatINeedDetails: userProfiles.whatINeedDetails }).from(userProfiles)
+            .where(eq(userProfiles.userId, ctx.user.id)).limit(1)
+        : [];
       let linkedContactId: number | null = null;
       if (input.action === "link") {
         if (!input.contactId) throw new TRPCError({ code: "BAD_REQUEST", message: "Selecione um contato para vincular." });
@@ -572,10 +613,33 @@ export const meetingsRouter = router({
             fullName: suggestion.fullName, phone: suggestion.phone, email: suggestion.email,
             jobTitle: suggestion.jobTitle, company: suggestion.company, confianca: suggestion.confidence,
           },
+          perfilDaDona: perfilDaDona ?? undefined,
         });
         return contactId;
       });
       return { success: true, contactId: linkedContactId };
+    }),
+
+  // N5: os contatos da dona que podem ser a pessoa da reunião (o mesmo
+  // e-mail, telefone ou nome), para o "Vincular a um contato".
+  candidatosParaVincular: protectedProcedure
+    .input(z.object({ suggestionId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const candidatos = await candidatosParaVincular(ctx.user.openId, input.suggestionId);
+      if (!candidatos) throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
+      return candidatos;
+    }),
+
+  // N5: cada pessoa da reunião com o que tem e precisa e as conexões que
+  // nasceram dela — o ramo "Conexões desta reunião" do mapa mental e a linha
+  // do resumo. Só para a dona: o link aberto não tem nada disto.
+  conexoes: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const termoSmartMatch = await hasValidConsent(ctx.user.id, "termo_smart_match");
+      const dados = await conexoesDaReuniao(ctx.user.openId, input.meetingId, { termoSmartMatch });
+      if (!dados) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+      return dados;
     }),
 
   /** H3: o nome de uma voz da transcrição por falante; nome vazio tira o nome. */

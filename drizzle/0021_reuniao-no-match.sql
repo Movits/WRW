@@ -1,0 +1,2 @@
+ALTER TABLE `meeting_contact_suggestions` MODIFY COLUMN `status` enum('pending','created','linked','ignored','self') NOT NULL DEFAULT 'pending';--> statement-breakpoint
+ALTER TABLE `network_sugestoes` ADD `alvo` varchar(8) DEFAULT 'contato' NOT NULL;

@@ -55,8 +55,9 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
   digital ou o bloqueio de tela ao abrir e ao voltar depois de 10 minutos em segundo plano.
   Desligada por padrão. A escolha fica no cofre do celular (`expo-secure-store`, chaves
   `wrw.trava` e `wrw.trava.aviso`); a biometria fica com o sistema
-  (`expo-local-authentication`), e a WRW não recebe nada. Depois do login, um aviso nativo
-  oferece ligar; o Perfil do site (`client/src/components/TravaDoApp.tsx`) liga e desliga
+  (`expo-local-authentication`), e a WRW não recebe nada. Ligar e desligar pedem o Face ID
+  ou a digital antes (`mudarATrava`), para quem pega o celular com o app aberto não
+  desligar a trava. Depois do login, um aviso nativo oferece ligar; o Perfil do site (`client/src/components/TravaDoApp.tsx`) liga e desliga
   pela ponte da WebView: o site manda `{tipo: "wrw:trava", acao}` por
   `window.ReactNativeWebView.postMessage`, e o app responde com o evento `wrw:trava`
   (`scriptDoEstado`). Só aceita mensagem de página da WRW. As regras puras de `regras/trava.ts`

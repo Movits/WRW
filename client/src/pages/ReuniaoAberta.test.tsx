@@ -174,9 +174,10 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
     fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
     expect(screen.getByText("Combinamos a entrega na sexta.")).toBeInTheDocument();
-    // Nada do que é só da dona.
+    // Nada do que é só da dona: nem excluir, nem os contatos, nem baixar o PDF (H8).
     expect(screen.queryByRole("button", { name: /Excluir/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Contatos/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Baixar PDF/ })).not.toBeInTheDocument();
   });
 
   it("abre na aba Resumo, como no app de referência; a Transcrição fica na outra aba", () => {

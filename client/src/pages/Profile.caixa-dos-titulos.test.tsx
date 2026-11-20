@@ -29,6 +29,8 @@ const duble = vi.hoisted(() => ({ perfil: null as Record<string, unknown> | null
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // N5: o bloco "Sugestões das suas reuniões" (sem nada esperando, não aparece).
+    networkInteligente: { pendenciasDoPerfil: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) } },
     profile: {
       get: { useQuery: () => ({ data: { user: { name: "Ana" }, profile: duble.perfil }, isLoading: false }) },
       update: { useMutation: () => ({ mutate: () => {}, isPending: false }) },

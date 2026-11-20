@@ -20,6 +20,7 @@ import {
   CHAVE_DA_TRAVA,
   CHAVE_DO_AVISO,
   lerPedidoDoSite,
+  mudarATrava,
   precisaTravarAoVoltar,
   scriptDoEstado,
 } from './regras/trava';
@@ -152,7 +153,7 @@ export default function App() {
   const [travado, setTravado] = useState(false);
   const [biometria, setBiometria] = useState(false);
   const [avisoRespondido, setAvisoRespondido] = useState(true);
-  const [ligando, setLigando] = useState(false);
+  const [mudando, setMudando] = useState(false);
   const saiuEm = useRef<number | null>(null);
   const conferindo = useRef(false);
 
@@ -204,23 +205,21 @@ export default function App() {
     return () => assinatura.remove();
   }, [ligada, desbloquear]);
 
-  /** Liga a trava: confere a pessoa uma vez antes, para saber que funciona neste celular. */
-  const ligar = useCallback(async () => {
-    if (!biometria || ligando) return false;
-    setLigando(true);
-    const ok = await conferirAPessoa('Ligar o Face ID ou a digital na WRW');
-    setLigando(false);
-    if (!ok) return false;
-    await Promise.all([gravarNoCofre(CHAVE_DA_TRAVA, 'ligada'), gravarNoCofre(CHAVE_DO_AVISO, 'respondido')]);
-    setLigada(true);
-    setAvisoRespondido(true);
-    return true;
-  }, [biometria, ligando]);
-
-  const desligar = useCallback(async () => {
-    await gravarNoCofre(CHAVE_DA_TRAVA, null);
-    setLigada(false);
-  }, []);
+  /**
+   * Liga ou desliga a trava (mudarATrava): os dois pedem o Face ID ou a digital
+   * antes, e sem o OK nada muda. Devolve se a trava ficou ligada.
+   */
+  const mudar = useCallback(async (ligar: boolean) => {
+    if (!biometria || mudando) return ligada;
+    setMudando(true);
+    const resultado = await mudarATrava({ ligar, ligadaAgora: ligada }, conferirAPessoa, async valor => {
+      await Promise.all([gravarNoCofre(CHAVE_DA_TRAVA, valor ? 'ligada' : null), gravarNoCofre(CHAVE_DO_AVISO, 'respondido')]);
+      setAvisoRespondido(true);
+    });
+    setMudando(false);
+    setLigada(resultado);
+    return resultado;
+  }, [biometria, mudando, ligada]);
 
   const dispensarAviso = useCallback(async () => {
     await gravarNoCofre(CHAVE_DO_AVISO, 'respondido');
@@ -232,18 +231,13 @@ export default function App() {
     if (!ehDaWrw(evento.nativeEvent.url)) return;
     const pedido = lerPedidoDoSite(evento.nativeEvent.data);
     if (!pedido) return;
-    if (pedido.acao === 'ligar') {
-      const ok = await ligar();
-      contarAoSite({ disponivel: biometria, ligada: ok || ligada });
-      return;
-    }
-    if (pedido.acao === 'desligar') {
-      await desligar();
-      contarAoSite({ disponivel: biometria, ligada: false });
+    if (pedido.acao === 'ligar' || pedido.acao === 'desligar') {
+      const ficouLigada = await mudar(pedido.acao === 'ligar');
+      contarAoSite({ disponivel: biometria, ligada: ficouLigada });
       return;
     }
     contarAoSite({ disponivel: biometria, ligada });
-  }, [biometria, ligada, ligar, desligar, contarAoSite]);
+  }, [biometria, ligada, mudar, contarAoSite]);
 
   // As chaves de acesso na WebView (M1): ligadas logo depois de a WebView nascer.
   // Se a página já tinha carregado antes, ela recarrega uma vez, para enxergar
@@ -311,7 +305,7 @@ export default function App() {
           setSupportMultipleWindows={false}
           startInLoadingState
         />
-        {mostrarAviso && <AvisoDaTrava ligando={ligando} aoLigar={() => void ligar()} aoDispensar={() => void dispensarAviso()} />}
+        {mostrarAviso && <AvisoDaTrava ligando={mudando} aoLigar={() => void mudar(true)} aoDispensar={() => void dispensarAviso()} />}
         {/* Antes de ler o cofre, uma tela preta (sem piscar o site de quem tem a
             trava ligada); com a trava pedindo, a tela da trava. */}
         {!carregada && <View style={estilos.trava} />}
