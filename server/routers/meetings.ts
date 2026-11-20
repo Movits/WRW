@@ -45,6 +45,11 @@ import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
 import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
 import { exportarReuniao } from "../exportar-reuniao";
+import {
+  AUDIOS_POR_JANELA, FORMATOS_DO_AUDIO, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO, ROTA_DO_AUDIO_BAIXADO, VALIDADE_DO_ENDERECO_DO_AUDIO_MS,
+  nomeDoArquivoDoAudio, tamanhoEstimadoDoAudio,
+} from "@shared/baixar-audio";
+import { balcaoDoAudio, ffmpegDisponivel, prepararAudioDaReuniao } from "../baixar-audio-da-reuniao";
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -133,6 +138,14 @@ export const tetoDaTraducaoDoResumo = criarTeto(
 // a recusa (outra conta, reunião que não está pronta) e a falha (banco fora do
 // ar, auditoria que não entrou) devolvem a vaga.
 export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
+
+// Baixar o áudio (H8c) converte a reunião inteira com o ffmpeg, na instância de
+// 1 CPU: teto próprio por dona, de 10 áudios a cada hora, em memória como os
+// outros. Só conta o áudio preparado: a recusa (outra conta, ainda gravando,
+// áudio vencido, instância ocupada) e a falha (banco fora do ar, auditoria que
+// não entrou) devolvem a vaga. A recusa sai como código (RECUSAS_DO_AUDIO), que
+// a tela traduz.
+export const tetoDoAudio = criarTeto(AUDIOS_POR_JANELA, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO.demais);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -473,6 +486,49 @@ export const meetingsRouter = router({
           userAgent: ctx.req.headers["user-agent"],
         });
       } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H8c: o áudio da reunião num arquivo só, em MP3 ou M4A. Este passo confere a
+  // dona, a gravação encerrada e os 30 dias, e lê as partes e grava a auditoria
+  // MEETING_AUDIO_DOWNLOADED na mesma transação (server/baixar-audio-da-reuniao.ts):
+  // sem a linha, nenhum endereço sai. Devolve um endereço de uso único, que
+  // vale 2 minutos e só para a sessão da dona; a rota GET
+  // (server/_core/rota-do-audio-baixado.ts) o transmite enquanto converte. As
+  // chaves das partes ficam no servidor. O link aberto (routers/reuniaoAberta.ts)
+  // não baixa áudio. Ordem: o teto da dona, o ffmpeg, a vaga da instância e só
+  // então a transação, para nenhuma recusa gravar auditoria.
+  baixarAudio: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      formato: z.enum(FORMATOS_DO_AUDIO),
+      // O nome que a tela sugere (o título e a data, como no PDF); o servidor o limpa.
+      nome: z.string().max(300).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDoAudio.reservar(ctx.user.openId);
+      let reserva: ReturnType<typeof balcaoDoAudio.reservar> | null = null;
+      try {
+        if (!await ffmpegDisponivel()) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: RECUSAS_DO_AUDIO.indisponivel });
+        reserva = balcaoDoAudio.reservar();
+        const audio = await prepararAudioDaReuniao(ctx.user.openId, input.meetingId, {
+          formato: input.formato,
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+        const nomeDoArquivo = nomeDoArquivoDoAudio(input.nome, input.formato);
+        const ficha = reserva.emitir({ ownerId: ctx.user.openId, meetingId: input.meetingId, formato: input.formato, nomeDoArquivo, partes: audio.partes });
+        return {
+          endereco: `${ROTA_DO_AUDIO_BAIXADO}/${ficha}`,
+          nomeDoArquivo,
+          validadeMs: VALIDADE_DO_ENDERECO_DO_AUDIO_MS,
+          tamanhoEstimadoBytes: tamanhoEstimadoDoAudio(audio.duracaoSegundos),
+        };
+      } catch (erro) {
+        reserva?.soltar();
         soltarVaga();
         throw erro;
       }

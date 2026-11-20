@@ -13,6 +13,7 @@ import {
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
+import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -125,4 +126,45 @@ export function mensagemDaRecusaDaParte(codigo: string | undefined, t: (chave: s
     ? AVISO_POR_RECUSA_DA_PARTE[codigo as CodigoDaRecusaDaParte]
     : null;
   return aviso ? aviso(t) : t("meetings.partRejected");
+}
+
+/**
+ * As recusas de baixar o áudio da reunião (H8c: server/baixar-audio-da-reuniao.ts
+ * e o teto em routers/meetings.ts). O servidor manda o CÓDIGO como mensagem
+ * (shared/baixar-audio.ts, RECUSAS_DO_AUDIO), nunca frase, e aqui ele vira o
+ * aviso no idioma da tela. O Record é pelo tipo do servidor: código novo lá
+ * não compila aqui sem o aviso dele; cada valor chama t() com a chave literal,
+ * para server/i18n-chaves-usadas.test.ts conferir que todas existem.
+ */
+const AVISO_POR_RECUSA_DO_AUDIO: Record<CodigoDaRecusaDoAudio, (t: (chave: string) => string) => string> = {
+  AUDIO_VENCIDO: t => t("meetings.audioDownload.expired"),
+  AUDIO_AUSENTE: t => t("meetings.audioDownload.noAudio"),
+  AUDIO_AINDA_GRAVANDO: t => t("meetings.audioDownload.stillRecording"),
+  AUDIOS_DEMAIS: t => t("meetings.audioDownload.tooMany"),
+  AUDIO_OCUPADO: t => t("meetings.audioDownload.busy"),
+  AUDIO_INDISPONIVEL: t => t("meetings.audioDownload.unavailable"),
+};
+
+/**
+ * O que a tela diz quando preparar o áudio falha: a reunião que não é da dona
+ * (ou excluída) pelo código NOT_FOUND; as recusas do áudio pelo código delas;
+ * as mensagens comuns do servidor (banco fora do ar, sessão, limite da API)
+ * pela tabela acima; e o resto, inclusive a rede fora, no aviso genérico do
+ * áudio, nunca o texto cru.
+ */
+export function mensagemDaRecusaDoAudio(erro: unknown, t: (chave: string) => string): string {
+  if (erro && typeof erro === "object") {
+    const { message, data } = erro as { message?: unknown; data?: unknown };
+    const codigo = data && typeof data === "object" ? (data as { code?: unknown }).code : undefined;
+    if (typeof codigo === "string") {
+      if (codigo === "NOT_FOUND") return t("meetings.meetingNotFound");
+      if (typeof message === "string") {
+        if (Object.prototype.hasOwnProperty.call(AVISO_POR_RECUSA_DO_AUDIO, message)) {
+          return AVISO_POR_RECUSA_DO_AUDIO[message as CodigoDaRecusaDoAudio](t);
+        }
+        if (Object.prototype.hasOwnProperty.call(CHAVE_POR_MENSAGEM_DO_SERVIDOR, message)) return t(CHAVE_POR_MENSAGEM_DO_SERVIDOR[message]);
+      }
+    }
+  }
+  return t("meetings.audioDownload.error");
 }
