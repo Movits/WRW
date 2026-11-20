@@ -4,7 +4,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 /**
  * A OFERTA GENÉRICA ATENDE A NECESSIDADE DA MESMA FAMÍLIA COM PÚBLICO — pela
- * nota da família, nunca pela de serviço igual.
+ * nota da família, salvo o destinatário comum, que é o mesmo serviço.
  *
  * É a metade "60" do item 4 da revisão do Nicolas na #135 (15/09). O que havia
  * antes não era uma nota baixa: era ZERO com bloqueio, porque `cobrePublico`
@@ -17,11 +17,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *   2. "Logística" × "preciso de logística para exportar meu café" tinha caído
  *      de 60 (main) para 0, que foi a regressão que ele apontou.
  *
- * A outra metade do item 4 — dar 100 quando o público é um dos destinatários
- * comuns — continua sendo decisão do Roberto, e por isso NÃO está aqui: 100
- * dispara e-mail, e a lista `DESTINATARIOS_COMUNS` está marcada no próprio
- * código como a confirmar com ele. Os casos abaixo travam os dois lados disso:
- * o que passou a valer 60 e o que continua valendo 0.
+ * A outra metade do item 4 foi decidida pelo Roberto em 16/09 (D2 e D4 da
+ * validação da #135): quando o público é um dos `DESTINATARIOS_COMUNS` (MEI,
+ * pequenas empresas, startups...), vale 100 dos dois lados, e manda e-mail. O
+ * público que não é destinatário comum e a finalidade continuam em 60. Os casos
+ * abaixo travam os três: 100, 60 e o que continua valendo 0.
  */
 
 const { scoreMatch, slugifyMatchTag } = await import("./match-service");
@@ -33,15 +33,16 @@ const item = (label: string, category: string | null = null) =>
 const nota = (oferta: string, necessidade: string) => scoreMatch(item(oferta), item(necessidade)).score;
 
 describe("oferta genérica diante de necessidade com público ou finalidade", () => {
-  it("'Contabilidade' × 'Contador para pequenas empresas' vale a nota da família", () => {
-    expect(nota("Contabilidade", "Contador para pequenas empresas")).toBe(60);
-    expect(necessidadeGenericaNomeiaOServico("Contabilidade", null, "Contador para pequenas empresas")).toBe(true);
-    expect(mesmaFamiliaEEspecialidade("Contabilidade", null, "Contador para pequenas empresas")).toBe(false);
+  it("'Contabilidade' × 'Contador para pequenas empresas' é o mesmo serviço: 100 (decisão de 16/09)", () => {
+    expect(nota("Contabilidade", "Contador para pequenas empresas")).toBe(100);
+    expect(mesmaFamiliaEEspecialidade("Contabilidade", null, "Contador para pequenas empresas")).toBe(true);
+    expect(necessidadeGenericaNomeiaOServico("Contabilidade", null, "Contador para pequenas empresas")).toBe(false);
   });
 
-  it("o público incomum vale o mesmo que o comum, porque a diferença ainda é decisão em aberto", () => {
-    expect(nota("Contabilidade", "Contador para MEI")).toBe(60);
+  it("o destinatário comum vale 100 e o público incomum fica na nota da família", () => {
+    expect(nota("Contabilidade", "Contador para MEI")).toBe(100);
     expect(nota("Contabilidade", "Contador para clínicas veterinárias")).toBe(60);
+    expect(necessidadeGenericaNomeiaOServico("Contabilidade", null, "Contador para clínicas veterinárias")).toBe(true);
   });
 
   it("a regressão da logística desfeita: o par voltou a valer o que valia", () => {
