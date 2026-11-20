@@ -1381,9 +1381,8 @@ async function executarReprocessamento(db: Banco, execucao: {
  *
  * Ficam no servidor as colunas de controle da fila de transcrição (attempts,
  * lockedUntil e lockToken): a reserva de quem está processando a reunião não é
- * dado da dona e não tem uso na tela. As outras colunas da migração 0014
- * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
- * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
+ * dado da dona e não tem uso na tela. A consentNoticeVersion, da migração
+ * 0014, entra aqui quando uma tela precisar dela.
  */
 const COLUNAS_DA_REUNIAO_NA_TELA = {
   id: meetings.id,
@@ -1406,6 +1405,12 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // aberto lê os nomes por outra consulta, e só quando foi ligado com a
   // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
   speakerNames: meetings.speakerNames,
+  // De onde a reunião veio e, no vídeo do YouTube (H13), a URL canônica dele:
+  // a tela mostra o vídeo no lugar da gravação, e o "▶" de cada fala abre o
+  // vídeo no segundo dela. O link aberto leva só o id do vídeo, por outra
+  // consulta (server/link-aberto-da-reuniao.ts).
+  origem: meetings.origem,
+  sourceUrl: meetings.sourceUrl,
 };
 
 /**

@@ -1,0 +1,1 @@
+ALTER TABLE `meetings` ADD `source_url` varchar(512);

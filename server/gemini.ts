@@ -41,9 +41,12 @@ export class GeminiCotaEsgotadaError extends GeminiIndisponivelError {
 // 404 modelo inexistente): não melhora repetindo nem trocando de modelo. A
 // mensagem é para a dona da reunião — ela vai parar em `processing_error` e
 // na caixa vermelha da tela; o JSON do Google (que cita "API key", o nome do
-// modelo, o endpoint) fica só no log, para quem for diagnosticar.
+// modelo, o endpoint) fica só no log, para quem for diagnosticar. O começo dele
+// fica também em `detalhe`, que nunca vai à tela nem ao banco: quem chama o lê
+// para escolher o código do erro (o vídeo do YouTube privado é um 400 como o
+// pedido malformado; server/youtube.ts separa um do outro por ele).
 export class GeminiRecusouChamadaError extends GeminiIndisponivelError {
-  constructor(status: number) {
+  constructor(status: number, readonly detalhe = "") {
     super(status, `O serviço de IA recusou a chamada (HTTP ${status}). Avise o suporte.`);
   }
 }
@@ -62,7 +65,9 @@ function getGeminiKey() {
 
 type OpcoesDaChamada = { timeoutMs?: number; orcamentoMs?: number };
 
-async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
+// Exportada para o vídeo do YouTube (server/youtube.ts), que manda a URL do
+// vídeo (file_data) em vez dos bytes e tem prazos próprios.
+export async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
   const timeoutMs = opcoes.timeoutMs ?? TIMEOUT_POR_CHAMADA_MS;
   const orcamentoMs = opcoes.orcamentoMs ?? ORCAMENTO_RETENTATIVAS_MS;
   // Falta de chave é erro de configuração, não de rede: sai antes do laço —
@@ -97,7 +102,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
     // ela acaba gravada em processing_error e mostrada na tela da dona.
     if (!STATUS_PASSAGEIROS.has(response.status)) {
       console.error(`[Gemini] ${response.status} em ${path} (não passageiro): ${details.slice(0, 400)}`);
-      throw new GeminiRecusouChamadaError(response.status);
+      throw new GeminiRecusouChamadaError(response.status, details.slice(0, 400));
     }
     // Cota esgotada não é pico: repetir no mesmo modelo só queima tempo. Sai
     // já — na transcrição, é o que aciona o modelo reserva de imediato.

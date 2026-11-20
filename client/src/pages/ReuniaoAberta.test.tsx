@@ -711,3 +711,83 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
     expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
   });
 });
+
+describe("Reunião aberta pelo link — o vídeo do YouTube (H13)", () => {
+  // A reunião que veio de um vídeo não tem gravação: o servidor manda só o id
+  // do vídeo (videoDoYoutube), e o "▶" abre o YouTube no segundo, numa aba nova.
+  const ID_DO_VIDEO = "dQw4w9WgXcQ";
+  const DO_VIDEO = `https://www.youtube.com/watch?v=${ID_DO_VIDEO}`;
+  const noYoutube = (segundos: number) => `${DO_VIDEO}&t=${segundos}s`;
+  const VISTA_DO_VIDEO = {
+    titulo: "Painel de exportação",
+    criadaEm: 1_700_000_000_000,
+    transcricao: { texto: "Bem-vindas ao painel.\nObrigada pelo convite.", idioma: "pt-BR", segmentos: [
+      { inicio: 7, fim: 12, falante: "F1", texto: "Bem-vindas ao painel." },
+      { inicio: 725, fim: 751, falante: "F2", texto: "Obrigada pelo convite." },
+    ] },
+    gravacao: null,
+    // Sem linha de áudio e criada há mais de 30 dias: o servidor diz "expirada", mas não houve gravação.
+    gravacaoExpirada: true,
+    gravacaoSaindo: false,
+    vozes: {},
+    videoDoYoutube: ID_DO_VIDEO,
+  };
+
+  it("sem player: o link para o vídeo no lugar da gravação, a apresentação do vídeo, e nenhum aviso de gravação apagada", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    const { container } = abrir();
+    expect(screen.getByText(/Quem criou esta página a partir de um vídeo do YouTube compartilhou o link com você/)).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.intro"))).not.toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Abrir o vídeo no YouTube/ });
+    expect(link).toHaveAttribute("href", DO_VIDEO);
+    expect(link).toHaveAttribute("target", "_blank");
+    // O aviso de privacidade é da conta da dona: pelo link, não aparece.
+    expect(screen.queryByText(/A WRW não guarda o vídeo/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio, video, iframe")).toBeNull();
+    expect(screen.queryByText(i18n.t("meetings.recordingExpiredNotice"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.noRecordingStored"))).not.toBeInTheDocument();
+  });
+
+  it("o resumo e a pergunta recebem o link do vídeo no segundo, e não o player", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    abrir();
+    const resumo = duble.propsDoResumo as { aoIrPara?: unknown; linkDoTempo?: (segundo: number) => string };
+    expect(resumo.aoIrPara).toBeUndefined();
+    expect(resumo.linkDoTempo?.(725)).toBe(noYoutube(725));
+    const pergunta = duble.propsDaPergunta as { aoIrPara?: unknown; linkDoTempo?: (segundo: number) => string };
+    expect(pergunta.aoIrPara).toBeUndefined();
+    expect(pergunta.linkDoTempo?.(7)).toBe(noYoutube(7));
+  });
+
+  it("a transcrição: o ▶ de cada fala abre o vídeo no YouTube no segundo dela", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    abrirNaTranscricao();
+    const link = screen.getByRole("link", { name: "Ver no YouTube a partir de 12:05 (abre em nova aba)" });
+    expect(link).toHaveAttribute("href", noYoutube(725));
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("a reunião gravada continua com a gravação: sem campo do vídeo (servidor de antes da H13) ou com ele nulo", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, videoDoYoutube: null }));
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
+    expect(screen.queryByRole("link", { name: /Abrir o vídeo no YouTube/ })).not.toBeInTheDocument();
+    expect((duble.propsDoResumo as { linkDoTempo?: unknown }).linkDoTempo).toBeUndefined();
+  });
+
+  it("em árabe, a 375 px: a página vira da direita para a esquerda, os textos do vídeo em árabe, o ▶ com o mesmo endereço e só lados lógicos no bloco do vídeo", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    // Um vídeo falado em árabe: com a tela no idioma do original, a transcrição aparece por fala (sem tradução).
+    duble.ver.mockReturnValue(pronta({ ...VISTA_DO_VIDEO, transcricao: { ...VISTA_DO_VIDEO.transcricao, idioma: "ar" } }));
+    abrir();
+    expect(document.documentElement.dir).toBe("rtl");
+    expect(screen.getByText(i18n.t("meetings.youtube.linkIntro"))).toBeInTheDocument();
+    const bloco = screen.getByRole("link", { name: new RegExp(i18n.t("meetings.youtube.openOnYoutube")) }).closest("section")!;
+    const ladosFisicos = [bloco, ...bloco.querySelectorAll("*")].flatMap(elemento => [...elemento.classList]
+      .filter(classe => /^(?:[a-z0-9-]+:)*-?(?:left|right|ml|mr|pl|pr|border-l|border-r|rounded-l|rounded-r|text-left|text-right)(?:-|$)/.test(classe)));
+    expect(ladosFisicos).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.transcriptTab") }));
+    expect(screen.getByRole("link", { name: "المشاهدة على YouTube من 12:05 (يُفتح في علامة تبويب جديدة)" })).toHaveAttribute("href", noYoutube(725));
+  });
+});

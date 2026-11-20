@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
+import { idDoVideoDaReuniao } from "@shared/youtube";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
@@ -150,6 +151,8 @@ async function reuniaoDoLink(token: string) {
     createdAt: meetings.createdAt,
     shareToken: meetings.shareToken,
     audioPipeline: meetings.audioPipeline,
+    origem: meetings.origem,
+    sourceUrl: meetings.sourceUrl,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -160,7 +163,13 @@ async function reuniaoDoLink(token: string) {
   // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
   // variação de caixa não abrir o link nem virar outro balde do teto.
   if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
-  return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices" };
+  return {
+    id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
+    // A reunião que veio de um vídeo do YouTube (H13): só o id do vídeo, que é
+    // o que o "▶" precisa para abrir o vídeo no segundo da fala. O vídeo é
+    // público (o Gemini só lê vídeo público), e a URL guardada não sai inteira.
+    videoDoYoutube: idDoVideoDaReuniao(reuniao),
+  };
 }
 
 /** Os segmentos no contrato do desenho ({inicio, fim, falante, texto, lacuna?}), sem outro campo. */
@@ -243,6 +252,10 @@ export async function verReuniaoPeloLink(token: string) {
     // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
     // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
     vozes,
+    // O vídeo do YouTube de onde a reunião veio (H13), ou null: a página não
+    // tem player (a CSP não deixa embutir o YouTube), e o "▶" de cada fala abre
+    // o vídeo no segundo dela, numa aba nova.
+    videoDoYoutube: reuniao.videoDoYoutube,
   };
 }
 

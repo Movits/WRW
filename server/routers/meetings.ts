@@ -45,6 +45,8 @@ import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
 import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
 import { exportarReuniao } from "../exportar-reuniao";
+import { TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE, VERSOES_DO_AVISO_DO_YOUTUBE } from "@shared/youtube";
+import { pedirResumoDoVideo, RecusaDoVideo, refazerResumoDoVideo, type ContaQuePede } from "../youtube";
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -154,6 +156,22 @@ async function recusarSeReuniaoProcessando(db: Awaited<ReturnType<typeof exigirD
   const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (reuniao?.status === "processing") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_REUNIAO_PROCESSANDO });
+}
+
+/** A conta que pede o vídeo do YouTube, para a trava, o teto e a auditoria do pedido (server/youtube.ts). */
+function contaQuePede(ctx: { user: { id: number; openId: string }; req: Parameters<typeof ipDaCliente>[0] }): ContaQuePede {
+  const agente = ctx.req.headers["user-agent"];
+  return { userId: ctx.user.id, openId: ctx.user.openId, ipAddress: ipDaCliente(ctx.req), userAgent: typeof agente === "string" ? agente : null };
+}
+
+/** As recusas do vídeo do YouTube saem com o código tRPC e o código do erro, que a tela traduz. */
+async function comRecusaDoVideo<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDoVideo) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
 }
 
 /**
@@ -270,6 +288,43 @@ export const meetingsRouter = router({
       }
       return { success: true, transcriptLength: result.transcript.length, entities: result.extraction.entities.length, contacts: result.extraction.contacts.length };
     }),
+
+  // O resumo de um vídeo do YouTube (H13, server/youtube.ts): a dona cola o
+  // link de um vídeo público, a IA o lê pela própria URL (só a primeira hora)
+  // e a reunião segue o caminho de sempre. Responde com o id assim que a
+  // reunião nasce, em 'processing'; a tela acompanha por meetings.get. O
+  // servidor nunca busca a URL. Recusas: BAD_REQUEST com YOUTUBE_LINK_INVALIDO
+  // e TOO_MANY_REQUESTS com YOUTUBE_TETO_DIARIO (5 vídeos a cada 24 h, contados
+  // no banco). A versão do aviso do YouTube é obrigatória: a tela que pede
+  // vídeo já nasceu com ela.
+  resumirVideoDoYoutube: protectedProcedure
+    .input(z.object({
+      title: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX),
+      url: z.string().trim().min(1).max(TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE),
+      language: idiomaDaReuniaoNaEntrada,
+      consentGranted: z.literal(true),
+      consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_YOUTUBE),
+    }))
+    .mutation(({ ctx, input }) => comRecusaDoVideo(async () => {
+      const { id, trabalho } = await pedirResumoDoVideo(contaQuePede(ctx), {
+        titulo: input.title, url: input.url, idioma: input.language, versaoDoAviso: input.consentNoticeVersion,
+      });
+      // `trabalho` nunca rejeita: executarVideoDoYoutube termina todo erro em log.
+      void trabalho;
+      return { id };
+    })),
+
+  // O "Tentar de novo" da reunião do YouTube com falha: lê o vídeo outra vez
+  // pela URL guardada e gasta uma vaga do mesmo teto. NOT_FOUND, CONFLICT (não
+  // está com falha, ou alguém chegou antes), PRECONDITION_FAILED (não é do
+  // YouTube) e TOO_MANY_REQUESTS (o teto).
+  refazerVideoDoYoutube: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDoVideo(async () => {
+      const { trabalho } = await refazerResumoDoVideo(contaQuePede(ctx), input.meetingId);
+      void trabalho;
+      return { status: "processing" as const };
+    })),
 
   // Reprocessa uma reunião com falha a partir do áudio que ficou guardado.
   // Devolve assim que a reunião é tomada ('processing'); o resultado aparece em

@@ -427,8 +427,26 @@ Tamanho: P é pequena, M é média e G é grande.
   esquerda (árabe). A aba "Mapa mental" fica no detalhe da reunião e no link aberto.
 - **H11:** tradução do resumo.
 - **H12:** resumo de PDF.
-- **H13:** resumo de vídeo do YouTube. O recurso do Gemini para isso ainda está em
-  prévia.
+- **H13:** resumo de vídeo do YouTube, como no HiNoter que a Glenda viu (o Roberto decidiu
+  em 16/11 que entra). A dona cola o link de um vídeo público, e a reunião nasce com a
+  origem `youtube` e a URL canônica do vídeo em `meetings.source_url` (migração 0022):
+  - `shared/youtube.ts` tira o id do link (watch, youtu.be, shorts, embed, live e v, com e
+    sem parâmetros), com a mesma regra na tela e no servidor;
+  - o servidor nunca busca a URL: o Gemini lê o vídeo pela própria URL (`file_data`), só
+    a primeira hora (`video_metadata.end_offset`), com um quadro a cada 5 s em baixa
+    resolução, e devolve as falas no contrato da transcrição em partes, com os tempos em
+    "MM:SS"; daí em diante é o caminho de sempre (resumo guardado, mapa mental e
+    Pergunte);
+  - teto de 5 vídeos por dona a cada 24 h, contado na auditoria do pedido
+    (`MEETING_YOUTUBE_REQUESTED`), que vale também para o "Tentar de novo";
+  - o aviso do YouTube tem versão própria, gravada em `consent_notice_version`
+    (`docs/termos/aviso-de-gravacao-rascunho.md`);
+  - na tela não há player, porque a CSP proíbe frames de outros sites: o ▶ de cada fala,
+    item e citação abre `youtube.com/watch?v=ID&t=Ns` numa aba nova, também no link
+    aberto;
+  - os erros (vídeo privado, longo demais, sem fala, link inválido, IA ocupada, teto)
+    saem como código traduzido.
+  O recurso do Gemini para vídeo do YouTube ainda está em prévia.
 - **H14:** gravar a aba de uma reunião online, só no Chrome e no Edge do computador. Usa
   o hook da G1a, passando a ele o áudio da aba.
 - **H15:** lembrete no sino.
