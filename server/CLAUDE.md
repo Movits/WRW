@@ -126,6 +126,13 @@ o do acervo. Cai só essa trava: nível 'ouro' no contato, `goldProcedure` e aud
 seguem valendo. Publicar o termo (`scripts/publicar-documento.mjs`) é o que liga a
 exigência.
 
+**O resumo por e-mail (H22, `server/resumo-por-email.ts`)** é o único e-mail que a WRW
+manda a terceiros: o link aberto da reunião, a quem a dona escolhe (ela, participantes da
+agenda, até 10 e-mails digitados), com texto fixo no idioma da reunião (`emailDoResumo.*`
+dos JSONs da tela, importado por `server/email-do-resumo.ts`). Link desligado só liga com a
+confirmação do "Compartilhar", na mesma transação das linhas de `resumo_por_email` e da
+auditoria. O envio automático vai só à dona, com o link da conta, e nunca liga o link.
+
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
 reunião nascem `pending`; o SIVC pondera a fonte em `CONFIDENCE_WEIGHTS`.

@@ -13,6 +13,19 @@ import {
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
+import {
+  MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
+  MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
+  MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA,
+  MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO,
+  MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR,
+  MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
+} from "@shared/resumo-por-email";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -72,6 +85,18 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
   [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
   [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
+  // As recusas do resumo por e-mail (H22, server/resumo-por-email.ts).
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO]: "resumoPorEmail.erros.semResumo",
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA]: "resumoPorEmail.erros.semDestinataria",
+  [MENSAGEM_RESUMO_POR_EMAIL_DEMAIS]: "resumoPorEmail.erros.demais",
+  [MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA]: "resumoPorEmail.erros.foraDaAgenda",
+  [MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO]: "resumoPorEmail.erros.emailInvalido",
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA]: "resumoPorEmail.erros.semEmailDaDona",
+  [MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO]: "resumoPorEmail.erros.linkDesligado",
+  [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO]: "resumoPorEmail.erros.tetoDaReuniao",
+  [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA]: "resumoPorEmail.erros.tetoDaDona",
+  [MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU]: "resumoPorEmail.erros.naoSaiu",
+  [MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR]: "resumoPorEmail.erros.nadaAReenviar",
 };
 
 /**

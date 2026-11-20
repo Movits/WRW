@@ -16,6 +16,7 @@ import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
+import { ResumoPorEmail } from "@/components/ResumoPorEmail";
 import { ExportarReuniao } from "@/components/ExportarReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
@@ -1172,6 +1173,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
       linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}/>}
+    {/* H22: o resumo por e-mail, quando já há um resumo gravado (o pronto, ou o anterior enquanto é refeito). */}
+    {meeting.status === "ready" && (resumoGuardado.data?.estado === "pronto" || resumoGuardado.data?.versaoAnterior) &&
+      <ResumoPorEmail meetingId={meetingId} titulo={meeting.title} linkLigado={!!meeting.shareToken}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que o

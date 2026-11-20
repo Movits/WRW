@@ -152,7 +152,7 @@ código conseguia assinar uma sessão válida.
 | `FRONTEND_URL` | links de e-mail e redirects | o endereço público do site |
 | `LLM_API_URL` | as chamadas de texto: matches, enriquecimento, extração, tradução | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `LLM_API_KEY` | a chave do endpoint acima | Google AI Studio |
-| `RESEND_API_KEY` | e-mail de recuperação de senha | resend.com |
+| `RESEND_API_KEY` | e-mail de recuperação de senha e o resumo por e-mail (H22, até 50 e-mails por conta a cada 24 h); no plano grátis da Resend (100 por dia para a plataforma inteira), o resumo pode esgotar a cota do "Esqueci a senha" | resend.com |
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |

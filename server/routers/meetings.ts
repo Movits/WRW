@@ -45,6 +45,13 @@ import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
 import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
 import { exportarReuniao } from "../exportar-reuniao";
+import { EMAIL_DO_PARTICIPANTE_MAX, PARTICIPANTES_DA_AGENDADA_MAX } from "@shared/agenda";
+import { definirEnvioAutomaticoDoResumo, mandarResumoPorEmail, mandarResumoPorEmailDeNovo, painelDoResumoPorEmail } from "../resumo-por-email";
+
+// Os e-mails que a tela manda ao resumo por e-mail (H22): o zod só barra o
+// tamanho; quem conta, valida e recusa com a frase traduzível é o serviço
+// (server/resumo-por-email.ts).
+const emailsDoPedido = z.array(z.string().trim().max(EMAIL_DO_PARTICIPANTE_MAX)).max(PARTICIPANTES_DA_AGENDADA_MAX);
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -520,6 +527,64 @@ export const meetingsRouter = router({
       });
       return { success: true };
     }),
+
+  // H22: o resumo por e-mail (server/resumo-por-email.ts). Com um toque, a
+  // WRW manda o link aberto da reunião à própria dona, às participantes da
+  // agenda que ela escolher e a e-mails que ela digitar, com texto fixo no
+  // idioma da reunião. O link desligado só liga com a mesma confirmação do
+  // "Compartilhar por link", que vai para a auditoria junto com o envio. Tetos
+  // por envio, por reunião e por dona; a Resend fora do ar deixa o pedido
+  // guardado para o "Tentar de novo". Só a dona: reunião de outra conta é
+  // "não encontrada".
+  resumoPorEmail: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => painelDoResumoPorEmail(ctx.user.openId, input.meetingId)),
+
+  mandarResumoPorEmail: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      paraMim: z.boolean(),
+      participantes: emailsDoPedido,
+      outros: emailsDoPedido,
+      // Só quando o link está desligado: a palavra da dona, como em ligarLinkAberto.
+      autorizacao: z.object({
+        autorizacaoDasPessoas: z.literal(true),
+        idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+        textoExibido: z.string().trim().min(1).max(1000),
+        versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      }).optional(),
+    }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => mandarResumoPorEmail(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      {
+        paraMim: input.paraMim,
+        participantes: input.participantes,
+        outros: input.outros,
+        autorizacao: input.autorizacao
+          ? { idioma: input.autorizacao.idioma, textoExibido: input.autorizacao.textoExibido, versaoDaAutorizacao: input.autorizacao.versaoDaAutorizacao }
+          : undefined,
+      },
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    ))),
+
+  mandarResumoPorEmailDeNovo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => mandarResumoPorEmailDeNovo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
+
+  // O envio automático no fim da reunião (H22), desligado por padrão: vale
+  // para a conta, e não para uma reunião.
+  envioAutomaticoDoResumo: protectedProcedure
+    .input(z.object({ ligado: z.boolean() }))
+    .mutation(({ ctx, input }) => definirEnvioAutomaticoDoResumo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.ligado,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
 
   decideEntity: protectedProcedure
     .input(z.object({ entityId: z.string().uuid(), status: z.enum(["confirmed", "ignored"]) }))

@@ -58,6 +58,10 @@ export const users = mysqlTable("users", {
   // `role` e não é tocado por grantGoldAccess/revokeGoldAccess. Concedido e revogado
   // pelo Painel Ouro (router `distribuicao`); exigido por `distribuidorProcedure`.
   isDistributor: boolean("isDistributor").default(false).notNull(),
+  // O envio automático do resumo por e-mail (H22): ligado, a WRW manda à
+  // própria dona o link de cada reunião cujo primeiro resumo ficar pronto.
+  // Desligado por padrão; só ela liga, no painel do resumo por e-mail.
+  resumoPorEmailAutomatico: boolean("resumoPorEmailAutomatico").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -1581,6 +1585,40 @@ export const meetingSummaryTranslations = mysqlTable("meeting_summary_translatio
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
   ownerMeetingLanguageIdx: uniqueIndex("meeting_summary_translations_owner_meeting_language_idx").on(table.ownerId, table.meetingId, table.language),
+}));
+
+// O resumo por e-mail (H22 do plano do gravador; HN-54 do HiNoter): uma linha
+// por e-mail que a WRW manda com o link de uma reunião, a pedido da dona (um
+// toque no detalhe) ou pelo envio automático dela (users.resumoPorEmailAutomatico).
+// A linha nasce 'pendente' ANTES da Resend, na transação do pedido: a Resend
+// fora do ar deixa 'falhou', e a dona manda de novo sem escolher outra vez. As
+// linhas das últimas 24 h são os tetos por reunião e por dona
+// (server/resumo-por-email.ts). O destinatário é dado de terceiros na base da
+// dona: excluir a reunião o apaga (a linha fica, sem ele, para o teto da dona)
+// e excluir a conta apaga as linhas (server/exclusao-de-conta.ts). Enums só no
+// TypeScript, como em agenda_reunioes.google.
+export const resumoPorEmail = mysqlTable("resumo_por_email", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // O pedido de que a linha saiu: um toque manda a várias pessoas.
+  loteId: varchar("lote_id", { length: 36 }).notNull(),
+  // Nulo depois que a reunião é excluída.
+  destinatario: varchar("destinatario", { length: 320 }),
+  origem: varchar("origem", { length: 16, enum: ["dona", "participante", "digitado"] }).notNull(),
+  // O idioma do texto do e-mail: o da reunião, um dos 10 da tela.
+  idioma: varchar("idioma", { length: 12 }).notNull(),
+  status: varchar("status", { length: 12, enum: ["pendente", "enviado", "falhou"] }).default("pendente").notNull(),
+  // O envio automático do fim da reunião, que vai só para a dona.
+  automatico: boolean("automatico").default(false).notNull(),
+  tentativas: int("tentativas").default(0).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  enviadoEm: bigint("enviado_em", { mode: "number" }),
+}, (table) => ({
+  // Os tetos contam as linhas das últimas 24 h, por dona e por reunião.
+  ownerCreatedIdx: index("resumo_por_email_owner_created_idx").on(table.ownerId, table.createdAt),
+  meetingCreatedIdx: index("resumo_por_email_meeting_created_idx").on(table.meetingId, table.createdAt),
 }));
 
 // ============================================================
