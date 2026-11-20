@@ -1176,7 +1176,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       comSenha={!!meeting.linkComSenha} comAudio={meeting.linkComAudio !== false}/>}
     {/* H22: o resumo por e-mail, quando já há um resumo gravado (o pronto, ou o anterior enquanto é refeito). */}
     {meeting.status === "ready" && (resumoGuardado.data?.estado === "pronto" || resumoGuardado.data?.versaoAnterior) &&
-      <ResumoPorEmail meetingId={meetingId} titulo={meeting.title} linkLigado={!!meeting.shareToken}/>}
+      <ResumoPorEmail meetingId={meetingId} titulo={meeting.title} linkLigado={!!meeting.shareToken}
+        linkComSenha={!!meeting.linkComSenha} linkComAudio={meeting.linkComAudio !== false}/>}
     {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que o

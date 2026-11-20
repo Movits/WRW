@@ -132,6 +132,9 @@ agenda, até 10 e-mails digitados), com texto fixo no idioma da reunião (`email
 dos JSONs da tela, importado por `server/email-do-resumo.ts`). Link desligado só liga com a
 confirmação do "Compartilhar", na mesma transação das linhas de `resumo_por_email` e da
 auditoria. O envio automático vai só à dona, com o link da conta, e nunca liga o link.
+O texto segue a senha e o áudio do link na hora de cada envio (H23): sem o áudio, não
+promete a gravação; com a senha, diz que ela não vai no e-mail, e ela nunca vai. O link
+que o envio liga é o de antes da H23, sem senha e com o áudio.
 
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de

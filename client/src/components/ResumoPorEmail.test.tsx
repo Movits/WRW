@@ -76,8 +76,9 @@ const consulta = (dados: Partial<typeof PAINEL> = {}) => ({ data: { ...PAINEL, .
 const erroDoServidor = (code: string, message: string) => Object.assign(new Error(message), { data: { code } });
 const mutacao = (nome: string) => duble.mutacoes[nome];
 
-function abrir(props: Partial<{ linkLigado: boolean; titulo: string }> = {}) {
-  const resultado = render(<ResumoPorEmail meetingId={ID} titulo={props.titulo ?? "Reunião com a Apex"} linkLigado={props.linkLigado ?? true}/>);
+function abrir(props: Partial<{ linkLigado: boolean; titulo: string; linkComSenha: boolean; linkComAudio: boolean }> = {}) {
+  const resultado = render(<ResumoPorEmail meetingId={ID} titulo={props.titulo ?? "Reunião com a Apex"} linkLigado={props.linkLigado ?? true}
+    linkComSenha={props.linkComSenha} linkComAudio={props.linkComAudio}/>);
   fireEvent.click(screen.getByRole("button", { name: /Mandar por e-mail|Send by email|إرسال بالبريد الإلكتروني/ }));
   return resultado;
 }
@@ -269,6 +270,41 @@ describe("a prévia do e-mail", () => {
     expect(screen.getByText("O e-mail tem um texto fixo e vai em English, o idioma da reunião.")).toBeInTheDocument();
     expect(screen.getByText("Glenda shared a meeting summary with you")).toBeInTheDocument();
     expect(screen.getByText("Glenda shared with you the summary of the meeting “Reunião com a Apex”, recorded on WRW.")).toBeInTheDocument();
+  });
+
+  // Pacote 4d: a prévia segue a senha e o áudio do link (H23), como o servidor.
+  const COM_AUDIO = /ouve a gravação enquanto ela estiver guardada/;
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
+  const PEDE_A_SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
+  const AVISO_DA_SENHA = "O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.";
+
+  it("o link com senha: a prévia diz que ela não vai no e-mail e a quem pedi-la, e o painel avisa a dona de que a senha vai por ela", () => {
+    abrir({ linkComSenha: true });
+    expect(screen.getByText(PEDE_A_SENHA)).toBeInTheDocument();
+    expect(screen.getByText(AVISO_DA_SENHA)).toBeInTheDocument();
+    expect(screen.getByText(COM_AUDIO)).toBeInTheDocument();
+  });
+
+  it("o link com senha e conta sem nome: a senha se pede a quem gravou a reunião", () => {
+    duble.painel.mockReturnValue(consulta({ nomeDaDona: null }));
+    abrir({ linkComSenha: true });
+    expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem gravou a reunião.")).toBeInTheDocument();
+  });
+
+  it("o link sem o áudio: a prévia não promete a gravação, e sem senha nada fala dela", () => {
+    abrir({ linkComAudio: false });
+    expect(screen.getByText(SEM_AUDIO)).toBeInTheDocument();
+    expect(screen.queryByText(COM_AUDIO)).not.toBeInTheDocument();
+    expect(screen.queryByText(PEDE_A_SENHA)).not.toBeInTheDocument();
+    expect(screen.queryByText(AVISO_DA_SENHA)).not.toBeInTheDocument();
+  });
+
+  it("o link desligado liga com o envio como o de antes: a prévia com o áudio e sem a senha, mesmo com a senha e o áudio que ele tinha", () => {
+    abrir({ linkLigado: false, linkComSenha: true, linkComAudio: false });
+    expect(screen.getByText(COM_AUDIO)).toBeInTheDocument();
+    expect(screen.queryByText(SEM_AUDIO)).not.toBeInTheDocument();
+    expect(screen.queryByText(PEDE_A_SENHA)).not.toBeInTheDocument();
+    expect(screen.queryByText(AVISO_DA_SENHA)).not.toBeInTheDocument();
   });
 });
 

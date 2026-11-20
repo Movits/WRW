@@ -51,8 +51,12 @@ const duble = vi.hoisted(() => {
     conexoes: vi.fn(),
     candidatos: vi.fn(),
     buscaNaRede: vi.fn(),
+    painelDoEmail: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
+      meetings: {
+        list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
+        resumoPorEmail: { invalidate: vi.fn(), setData: vi.fn() },
+      },
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
@@ -108,6 +112,11 @@ vi.mock("@/lib/trpc", () => ({
       mudarAudioDoLink: duble.registrar("mudarAudioDoLink"),
       // O PDF da reunião (H8): só monta quando a dona abre o aviso do "Baixar PDF".
       exportar: duble.registrar("exportar"),
+      // O resumo por e-mail (H22): só monta o painel quando a dona o abre.
+      resumoPorEmail: { useQuery: (...args: unknown[]) => duble.painelDoEmail(...args) },
+      mandarResumoPorEmail: duble.registrar("mandarResumoPorEmail"),
+      mandarResumoPorEmailDeNovo: duble.registrar("mandarResumoPorEmailDeNovo"),
+      envioAutomaticoDoResumo: duble.registrar("envioAutomaticoDoResumo"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -1386,6 +1395,25 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
     abrirDetalhe({ status: "ready", speakerNames: { F1: "Ana" } } as never, { transcript: COM_FALAS });
     expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
     expect(abrirCampoDoNome()).not.toHaveAccessibleDescription();
+  });
+
+  // Pacote 4d: o painel do resumo por e-mail (H22) recebe do detalhe a senha e o
+  // áudio do link ligado (H23), e o e-mail que ele mostra segue os dois.
+  it("o resumo por e-mail recebe do detalhe a senha e o áudio do link ligado (Pacote 4d)", () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [] },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    duble.painelDoEmail.mockReturnValue({
+      data: { idioma: "pt-BR", linkLigado: true, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+      isPending: false, isError: false, error: null,
+    });
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: true, linkComAudio: false } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    expect(duble.painelDoEmail).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    expect(screen.getByText("O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.")).toBeInTheDocument();
+    expect(screen.getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.")).toBeInTheDocument();
   });
 });
 

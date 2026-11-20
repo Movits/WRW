@@ -43,6 +43,13 @@ import {
  * o link liga junto com o envio. O que não saiu (a Resend fora do ar) fica
  * guardado, com o "Tentar de novo". A opção do envio automático vale para a
  * conta: no fim de cada reunião, o resumo vai só para ela.
+ *
+ * O texto segue a senha e o áudio do link (H23), como o servidor
+ * (server/email-do-resumo.ts): sem o áudio, não promete a gravação; com a
+ * senha, diz que ela não vai no e-mail, e o painel avisa a dona de que a senha
+ * vai por ela, à parte. Os textos novos (emailDoResumo.oQueAbreSemAudio,
+ * senha, senhaSemNome e senhaDona, e resumoPorEmail.linkComSenha) esperam a
+ * revisão da Cris, nos 10 idiomas.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -86,6 +93,10 @@ type PropsDoResumoPorEmail = {
   titulo: string;
   /** O link aberto está ligado agora (meeting.shareToken): desligado, mandar pede a confirmação. */
   linkLigado: boolean;
+  /** O link ligado pede a senha de 6 dígitos (meeting.linkComSenha, H23). */
+  linkComSenha?: boolean;
+  /** O link ligado leva o áudio (meeting.linkComAudio, H23). */
+  linkComAudio?: boolean;
 };
 
 /**
@@ -112,7 +123,7 @@ export function ResumoPorEmail(props: PropsDoResumoPorEmail) {
   </section>;
 }
 
-function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: PropsDoResumoPorEmail & { idDoPainel: string }) {
+function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = false, linkComAudio = true, idDoPainel }: PropsDoResumoPorEmail & { idDoPainel: string }) {
   const { t, i18n } = useTranslation();
   const utils = trpc.useUtils();
   const id = useId();
@@ -178,6 +189,10 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: P
   if (paraMim && dados.emailDaDona) chaves.add(emailComparavel(dados.emailDaDona));
   const total = chaves.size;
   const precisaAutorizar = !linkLigado;
+  // Como o link vai estar quando o e-mail sair (H23): o desligado liga agora
+  // como o de antes, sem senha e com o áudio; o ligado fica como está.
+  const comSenha = linkLigado && linkComSenha;
+  const comAudio = !linkLigado || linkComAudio;
   const ocupado = mandar.isPending || deNovo.isPending;
   const podeMandar = total > 0 && total <= DESTINATARIAS_POR_ENVIO_MAX && (!precisaAutorizar || autorizou) && !ocupado;
   const nomeDoIdioma = LANGUAGES.find(idioma => idioma.code === dados.idioma)?.label ?? dados.idioma;
@@ -246,7 +261,8 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: P
   const previa = {
     assunto: comNome ? tDoEmail("emailDoResumo.assunto", valoresDaPrevia) : tDoEmail("emailDoResumo.assuntoSemNome", valoresDaPrevia),
     abertura: comNome ? tDoEmail("emailDoResumo.abertura", valoresDaPrevia) : tDoEmail("emailDoResumo.aberturaSemNome", valoresDaPrevia),
-    oQueAbre: tDoEmail("emailDoResumo.oQueAbre"),
+    oQueAbre: comAudio ? tDoEmail("emailDoResumo.oQueAbre") : tDoEmail("emailDoResumo.oQueAbreSemAudio"),
+    senha: !comSenha ? null : comNome ? tDoEmail("emailDoResumo.senha", valoresDaPrevia) : tDoEmail("emailDoResumo.senhaSemNome", valoresDaPrevia),
     botao: tDoEmail("emailDoResumo.botao"),
     aviso: tDoEmail("emailDoResumo.aviso"),
     porQue: comNome ? tDoEmail("emailDoResumo.porQue", valoresDaPrevia) : tDoEmail("emailDoResumo.porQueSemNome", valoresDaPrevia),
@@ -322,6 +338,7 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: P
           </dl>
           <p>{previa.abertura}</p>
           <p>{previa.oQueAbre}</p>
+          {previa.senha && <p>{previa.senha}</p>}
           <p><span className="inline-block rounded-lg bg-[#c98f70] px-3 py-1.5 text-sm font-bold text-[#1a120c]">{previa.botao}</span></p>
           <p className="text-xs text-amber-100/70">{previa.aviso}</p>
           <p className="text-xs text-white/45">{previa.porQue}</p>
@@ -335,6 +352,9 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, idDoPainel }: P
           <span>{t("meetings.share.authorization")}</span>
         </label>
       </div>}
+
+      {/* O link com senha (H23): a senha não vai no e-mail, e quem manda é a dona. */}
+      {comSenha && <p className="rounded-xl border border-amber-300/30 bg-amber-300/[0.06] p-4 text-sm text-amber-100/90">{t("resumoPorEmail.linkComSenha")}</p>}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-white/55" aria-live="polite">{t("resumoPorEmail.contagem", { n: total, max: DESTINATARIAS_POR_ENVIO_MAX })}</p>

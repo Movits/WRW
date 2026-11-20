@@ -112,6 +112,59 @@ describe("montarEmailDoResumo", () => {
     expect(email.html.match(/href="/g)).toHaveLength(2);
   });
 
+  // Pacote 4d: o e-mail (H22) segue a senha e o áudio do link aberto (H23).
+  const COM_AUDIO = "Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião.";
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
+  const SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
+  const SENHA_SEM_NOME = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem gravou a reunião.";
+  const SENHA_DA_DONA = "Este link pede a senha de 6 dígitos que você criou, e ela não vai neste e-mail. Ao encaminhar o link, mande a senha à parte.";
+
+  it("o link sem o áudio (H23): o texto não promete a gravação, às participantes e à dona", () => {
+    for (const modelo of ["participante", "dona"] as const) {
+      const email = montarEmailDoResumo({ ...base, modelo, link: { comSenha: false, comAudio: false } });
+      expect(email.text, modelo).toContain(SEM_AUDIO);
+      expect(email.html, modelo).toContain(SEM_AUDIO);
+      expect(email.text, modelo).not.toContain("ouve a gravação");
+      expect(email.text, modelo).not.toContain("senha");
+    }
+  });
+
+  it("o link com a senha (H23): um parágrafo diz que ela não vai no e-mail e a quem pedi-la; à dona, que ela a manda à parte", () => {
+    const comNome = montarEmailDoResumo({ ...base, modelo: "participante", link: { comSenha: true, comAudio: true } });
+    expect(comNome.text).toContain(`${COM_AUDIO} Não precisa ter conta na WRW.\n\n${SENHA}\n\nAbrir o resumo: ${ABERTO}`);
+    expect(comNome.html).toContain(SENHA);
+    const semNome = montarEmailDoResumo({ ...base, dona: null, modelo: "participante", link: { comSenha: true, comAudio: false } });
+    expect(semNome.text).toContain(`${SEM_AUDIO}\n\n${SENHA_SEM_NOME}`);
+    const daDona = montarEmailDoResumo({ ...base, modelo: "dona", link: { comSenha: true, comAudio: true } });
+    expect(daDona.text).toContain(SENHA_DA_DONA);
+    expect(daDona.text).not.toContain(SENHA);
+  });
+
+  it("sem o link, o de antes da H23 (com o áudio, sem senha); e o automático, que leva o link da conta, não muda com o link aberto", () => {
+    const antes = montarEmailDoResumo({ ...base, modelo: "participante" });
+    expect(antes.text).toContain(COM_AUDIO);
+    expect(antes.text).not.toContain("senha");
+    const nulo = montarEmailDoResumo({ ...base, modelo: "participante", link: null });
+    expect(nulo.text).toBe(antes.text);
+    const pronto = montarEmailDoResumo({ ...base, endereco: NA_CONTA, modelo: "pronto", link: { comSenha: true, comAudio: false } });
+    expect(pronto.text).toBe(montarEmailDoResumo({ ...base, endereco: NA_CONTA, modelo: "pronto" }).text);
+    expect(pronto.text).not.toContain("6 dígitos");
+  });
+
+  it("os textos da senha e do link sem o áudio nos 10 idiomas: a marca do nome só no da senha com nome", () => {
+    for (const idioma of IDIOMAS_DA_REUNIAO) {
+      const textos = TEXTOS_DO_EMAIL_DO_RESUMO[idioma];
+      expect(textos.senha, idioma).toContain("{{dona}}");
+      for (const chave of ["senhaSemNome", "senhaDona", "oQueAbreSemAudio"] as const) expect(textos[chave], `${idioma}.${chave}`).not.toMatch(/\{\{/);
+      expect(textos.oQueAbreSemAudio, idioma).not.toBe(textos.oQueAbre);
+      expect(textos.senha, idioma).toMatch(/6/);
+      const email = montarEmailDoResumo({ ...base, idioma, modelo: "participante", link: { comSenha: true, comAudio: false } });
+      expect(email.text, idioma).toContain(preencher(textos.senha, { dona: "Glenda" }));
+      expect(email.text, idioma).toContain(textos.oQueAbreSemAudio);
+      expect(email.text, idioma).not.toContain(textos.oQueAbre);
+    }
+  });
+
   it("título e nome longos são cortados", () => {
     const email = montarEmailDoResumo({ ...base, titulo: "t".repeat(500), dona: "n".repeat(500), modelo: "participante" });
     expect(email.text).toContain(`“${"t".repeat(TITULO_NO_EMAIL_MAX)}”`);

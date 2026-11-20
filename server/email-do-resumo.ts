@@ -50,6 +50,11 @@ export type EmailDoResumo = { assunto: string; html: string; text: string };
  * Monta o e-mail. `endereco` é o link inteiro (o aberto, /r/{token}, ou o da
  * reunião na conta), que só o servidor escreve. Em árabe, o corpo vai da
  * direita para a esquerda, e o endereço, sempre da esquerda para a direita.
+ *
+ * `link` diz como está o link aberto (H23) nos dois modelos que o levam: sem o
+ * áudio, o texto não promete a gravação; com a senha, um parágrafo diz que ela
+ * não vai no e-mail e a quem pedi-la. A senha nunca entra aqui. Sem `link`, o
+ * link de antes da H23: sem senha e com o áudio.
  */
 export function montarEmailDoResumo(dados: {
   modelo: ModeloDoEmailDoResumo;
@@ -57,11 +62,18 @@ export function montarEmailDoResumo(dados: {
   titulo: string;
   dona: string | null;
   endereco: string;
+  link?: { comSenha: boolean; comAudio: boolean } | null;
 }): EmailDoResumo {
   const textos = TEXTOS_DO_EMAIL_DO_RESUMO[dados.idioma] ?? TEXTOS_DO_EMAIL_DO_RESUMO["pt-BR"];
   const valores = valoresDoEmailDoResumo(dados.titulo, dados.dona);
   const { dona } = valores;
   const t = (texto: string) => preencher(texto, valores);
+  // Sem `link`, o texto de antes da H23: com o áudio e sem senha. Com ele, os
+  // dois valores vêm da leitura do banco (linkDaReuniao, em resumo-por-email.ts),
+  // que já falha fechada: só o `true` do banco leva o áudio, e hash que não é
+  // nulo pede a senha.
+  const oQueAbre = t(dados.link?.comAudio === false ? textos.oQueAbreSemAudio : textos.oQueAbre);
+  const comSenha = dados.link?.comSenha === true;
 
   let assunto: string;
   let paragrafos: string[];
@@ -76,13 +88,13 @@ export function montarEmailDoResumo(dados: {
     porQue = t(textos.porQuePronto);
   } else if (dados.modelo === "dona") {
     assunto = t(textos.assuntoDona);
-    paragrafos = [t(textos.aberturaDona), t(textos.oQueAbre)];
+    paragrafos = [t(textos.aberturaDona), oQueAbre, ...(comSenha ? [t(textos.senhaDona)] : [])];
     botao = t(textos.botao);
     aviso = t(textos.aviso);
     porQue = t(textos.porQueDona);
   } else {
     assunto = t(dona ? textos.assunto : textos.assuntoSemNome);
-    paragrafos = [t(dona ? textos.abertura : textos.aberturaSemNome), t(textos.oQueAbre)];
+    paragrafos = [t(dona ? textos.abertura : textos.aberturaSemNome), oQueAbre, ...(comSenha ? [t(dona ? textos.senha : textos.senhaSemNome)] : [])];
     botao = t(textos.botao);
     aviso = t(textos.aviso);
     porQue = t(dona ? textos.porQue : textos.porQueSemNome);

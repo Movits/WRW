@@ -155,19 +155,25 @@ export async function ligarLinkAbertoComOpcoes(
   const senha = opcoes.comSenha === true ? gerarSenhaDoLink() : null;
   const hash = senha ? await hashDaSenhaDoLink(senha) : null;
   const db = await exigirDb();
-  return db.transaction(tx => ligarNaTransacao(tx, ownerId, meetingId, prova, { senha, hash, incluirAudio: opcoes.incluirAudio !== false }));
+  const ligado = await db.transaction(tx => ligarNaTransacao(tx, ownerId, meetingId, prova, { senha, hash, incluirAudio: opcoes.incluirAudio !== false }));
+  return { token: ligado.token, senha: ligado.senha };
 }
 
 type Transacao = Parameters<Parameters<Awaited<ReturnType<typeof exigirDb>>["transaction"]>[0]>[0];
+
+/** O link ligado e como ele ficou: se pede a senha e se leva o áudio (H23). */
+export type EstadoDoLinkLigado = { token: string; comSenha: boolean; comAudio: boolean };
 
 /**
  * O link de antes da H23 (sem senha e com o áudio), na transação de quem
  * chama: o resumo por e-mail (H22, server/resumo-por-email.ts) liga o link e
  * grava os envios numa transação só, e a recusa de um desfaz o outro. Devolve o
- * token, como ligarLinkAberto. Lançar aqui desfaz o UPDATE.
+ * token e como o link ficou, que o texto do e-mail segue. Lançar aqui desfaz o
+ * UPDATE.
  */
-export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<string> {
-  return (await ligarNaTransacao(tx, ownerId, meetingId, prova, { senha: null, hash: null, incluirAudio: true })).token;
+export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<EstadoDoLinkLigado> {
+  const { token, comSenha, comAudio } = await ligarNaTransacao(tx, ownerId, meetingId, prova, { senha: null, hash: null, incluirAudio: true });
+  return { token, comSenha, comAudio };
 }
 
 /**
@@ -180,7 +186,7 @@ async function ligarNaTransacao(
   meetingId: string,
   prova: ProvaDoLinkLigado,
   escolha: { senha: string | null; hash: string | null; incluirAudio: boolean },
-): Promise<LinkLigado> {
+): Promise<LinkLigado & EstadoDoLinkLigado> {
   const tokenNovo = gerarTokenDoLink();
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
   await tx.update(meetings).set({ shareToken: tokenNovo, sharePasswordHash: escolha.hash, shareAudio: escolha.incluirAudio, ...FREIO_DO_LINK_ZERADO })
@@ -195,6 +201,10 @@ async function ligarNaTransacao(
   // O link já estava ligado (duplo clique, outra aba): fica como estava, e a
   // senha sorteada aqui não vale nada. A dona troca a senha para ver uma.
   const criou = reuniao.shareToken === tokenNovo;
+  // Como o link ficou, com a leitura do link (reuniaoDoLink): hash que não é
+  // nulo pede a senha, e só o `true` do banco leva o áudio.
+  const comSenha = reuniao.sharePasswordHash !== null;
+  const comAudio = reuniao.shareAudio === true;
   await tx.insert(auditLogs).values({
     ...quemPediu(prova),
     action: ACAO_LINK_LIGADO,
@@ -208,7 +218,7 @@ async function ligarNaTransacao(
       textoExibido: prova.textoExibido,
       textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
       // Como o link ficou (H23): com o pedido de agora, ou como já estava.
-      comSenha: reuniao.sharePasswordHash !== null,
+      comSenha,
       incluirAudio: reuniao.shareAudio,
       // De onde a dona ligou (H22), quando não foi pelo painel do link.
       ...(prova.origem ? { origem: prova.origem } : {}),
@@ -216,7 +226,7 @@ async function ligarNaTransacao(
     status: "success",
     riskLevel: "medium",
   });
-  return { token: reuniao.shareToken, senha: criou ? escolha.senha : null };
+  return { token: reuniao.shareToken, senha: criou ? escolha.senha : null, comSenha, comAudio };
 }
 
 /**

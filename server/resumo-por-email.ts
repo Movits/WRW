@@ -34,7 +34,7 @@ import { participantesDe } from "./agenda-de-reunioes";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { montarEmailDoResumo, type ModeloDoEmailDoResumo } from "./email-do-resumo";
-import { ligarLinkAbertoNaTransacao } from "./link-aberto-da-reuniao";
+import { ligarLinkAbertoNaTransacao, type EstadoDoLinkLigado } from "./link-aberto-da-reuniao";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 
 /**
@@ -67,6 +67,11 @@ import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
  * manda só para a dona, quando o primeiro resumo da reunião fica pronto, com o
  * link da reunião na conta dela, e não o link aberto: ligar o link pede a
  * palavra dela, reunião a reunião (decisão do Roberto de 12/11/2026).
+ *
+ * O texto segue o link como ele está na hora do envio (H23): sem o áudio, não
+ * promete a gravação; com a senha, diz que ela não vai no e-mail e a quem
+ * pedi-la. A senha nunca vai no e-mail: o banco só tem o hash. O link que o
+ * envio liga é o de antes da H23, sem senha e com o áudio.
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -190,12 +195,25 @@ async function conferirTetos(ex: Executor, ownerId: string, meetingId: string, n
 
 /** A reunião da dona, travada até o fim da transação, ou NOT_FOUND. */
 async function reuniaoTravada(tx: Transacao, ownerId: string, meetingId: string) {
-  const [reuniao] = await tx.select({ status: meetings.status, titulo: meetings.title, idioma: meetings.language, token: meetings.shareToken })
+  const [reuniao] = await tx.select({
+    status: meetings.status, titulo: meetings.title, idioma: meetings.language, token: meetings.shareToken,
+    senhaDoLink: meetings.sharePasswordHash, audioDoLink: meetings.shareAudio,
+  })
     .from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)))
     .for("update");
   if (!reuniao || reuniao.status === "deleted") throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   return reuniao;
+}
+
+/**
+ * O link aberto ligado e como ele está (H23), com a leitura do link
+ * (reuniaoDoLink): hash que não é nulo pede a senha, e só o `true` do banco
+ * leva o áudio. Null com o link desligado.
+ */
+function linkDaReuniao(reuniao: { token: string | null; senhaDoLink: string | null; audioDoLink: boolean | null }): EstadoDoLinkLigado | null {
+  if (!reuniao.token) return null;
+  return { token: reuniao.token, comSenha: reuniao.senhaDoLink !== null, comAudio: reuniao.audioDoLink === true };
 }
 
 /** Há um resumo gravado (a versão sobe a cada resumo que a fila grava; o refeito mantém a anterior à vista). */
@@ -226,24 +244,26 @@ export function comPrazo<T>(promessa: Promise<T>, ms: number, seEstourar: () => 
 
 /**
  * Manda as linhas pela Resend e grava o resultado de cada uma. O e-mail é
- * montado agora, com o token de agora: o "Tentar de novo" depois de desligar e
- * ligar o link manda o link novo. A falha da Resend não lança: a linha fica
- * 'falhou', e quem chama decide a resposta.
+ * montado agora, com o link de agora: o "Tentar de novo" depois de desligar e
+ * ligar o link manda o link novo, e o texto segue a senha e o áudio dele
+ * (H23). A falha da Resend não lança: a linha fica 'falhou', e quem chama
+ * decide a resposta.
  */
 async function mandarAsLinhas(
   db: Banco,
   ownerId: string,
   meetingId: string,
   linhas: LinhaParaMandar[],
-  contexto: { site: string; token: string | null; titulo: string; nomeDaDona: string | null },
+  contexto: { site: string; link: EstadoDoLinkLigado | null; titulo: string; nomeDaDona: string | null },
 ): Promise<{ enviados: number; falharam: number }> {
   const emails = linhas.map(linha => {
     const modelo: ModeloDoEmailDoResumo = linha.automatico ? "pronto" : linha.origem === "dona" ? "dona" : "participante";
-    const endereco = modelo === "pronto" || !contexto.token
+    const endereco = modelo === "pronto" || !contexto.link
       ? `${contexto.site}${rotaDaReuniao(meetingId)}`
-      : `${contexto.site}${rotaDaReuniaoAberta(contexto.token)}`;
+      : `${contexto.site}${rotaDaReuniaoAberta(contexto.link.token)}`;
     const { assunto, html, text } = montarEmailDoResumo({
       modelo, idioma: idiomaDaReuniao(linha.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO, titulo: contexto.titulo, dona: contexto.nomeDaDona, endereco,
+      link: contexto.link,
     });
     return { to: linha.destinatario, subject: assunto, html, text };
   });
@@ -300,11 +320,11 @@ export async function mandarResumoPorEmail(
     const destinatarias = destinatariasDoPedido(pedido, { emailDaDona: conta.email?.trim() || null, daAgenda });
     await conferirTetos(tx, dona.openId, meetingId, destinatarias.length, agora);
 
-    let token = reuniao.token;
-    const linkLigadoAgora = !token;
-    if (!token) {
+    let link = linkDaReuniao(reuniao);
+    const linkLigadoAgora = !link;
+    if (!link) {
       if (!pedido.autorizacao) throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO);
-      token = await ligarLinkAbertoNaTransacao(tx, dona.openId, meetingId, {
+      link = await ligarLinkAbertoNaTransacao(tx, dona.openId, meetingId, {
         userId: dona.id,
         ipAddress: requisicao.ipAddress,
         userAgent: requisicao.userAgent,
@@ -346,11 +366,11 @@ export async function mandarResumoPorEmail(
       status: "success",
       riskLevel: "medium",
     });
-    return { linhas, token, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
+    return { linhas, link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
   });
 
   const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
-    site, token: preparado.token, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
   });
   // Nada saiu: o pedido está guardado ('falhou'), e a tela diz isso no idioma de quem lê.
   if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
@@ -417,13 +437,13 @@ export async function mandarResumoPorEmailDeNovo(dona: DonaDoEnvio, meetingId: s
         id: linha.id, destinatario: linha.destinatario as string, origem: linha.origem as OrigemDoResumoPorEmail,
         automatico: ligado(linha.automatico), idioma: linha.idioma,
       })),
-      token: reuniao.token,
+      link: linkDaReuniao(reuniao),
       titulo: reuniao.titulo,
       nomeDaDona: conta.nome?.trim() || null,
     };
   });
   const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
-    site, token: preparado.token, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
   });
   if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
   return resultado;
@@ -574,7 +594,7 @@ export async function envioAutomaticoDoResumo(ownerId: string, meetingId: string
       return { linha, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null };
     });
     if (!preparado) return;
-    await mandarAsLinhas(db, ownerId, meetingId, [preparado.linha], { site, token: null, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona });
+    await mandarAsLinhas(db, ownerId, meetingId, [preparado.linha], { site, link: null, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona });
   } catch (erro) {
     console.error(`[ResumoPorEmail] o envio automático da reunião ${meetingId} falhou:`, descreverErroDeBanco(erro));
   }

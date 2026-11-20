@@ -38,7 +38,7 @@ import {
 } from "@shared/resumo-por-email";
 import { VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
-import { ligarLinkAberto, desligarLinkAberto } from "./link-aberto-da-reuniao";
+import { ligarLinkAberto, desligarLinkAberto, mudarAudioDoLink, novaSenhaDoLink } from "./link-aberto-da-reuniao";
 import { deletePrivateMeeting } from "./meeting-service";
 import {
   ACAO_ENVIO_AUTOMATICO_DO_RESUMO,
@@ -407,6 +407,79 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       const erro = await recusaDe(mandarResumoPorEmail(dona, meetingNovo, pedido({ paraMim: true }), REQUISICAO));
       expect(erro).toMatchObject({ code: "TOO_MANY_REQUESTS", message: MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA });
       await expect(painelDoResumoPorEmail(dona.openId, meetingId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+  });
+
+  // Pacote 4d: o e-mail (H22) segue a senha e o áudio do link aberto (H23),
+  // como o link está na hora de cada envio. A senha nunca vai no e-mail.
+  describe("a senha e o áudio do link (H23)", () => {
+    const PEDE_A_SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda Teste.";
+    const PEDE_A_SENHA_DA_DONA = "Este link pede a senha de 6 dígitos que você criou, e ela não vai neste e-mail.";
+    const COM_AUDIO = "ouve a gravação enquanto ela estiver guardada";
+    const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião.";
+    const provaDa = (dona: { id: number }) => ({ userId: dona.id, ...REQUISICAO });
+
+    it("link com senha: o e-mail de cada um diz que ela não vai e a quem pedi-la, e a senha não vai em nenhum", async () => {
+      const { dona, meetingId, email, participantes } = await cenario({ link: true });
+      const senha = await novaSenhaDoLink(dona.openId, meetingId, provaDa(dona));
+      const ana = participantes[0].email!;
+      await mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, participantes: [ana] }), REQUISICAO);
+      const lote = loteMandado();
+      const daAna = lote.find(item => item.to === ana)!;
+      expect(daAna.text).toContain(PEDE_A_SENHA);
+      expect(daAna.html).toContain(PEDE_A_SENHA);
+      expect(daAna.text).toContain(COM_AUDIO);
+      expect(lote.find(item => item.to === email)!.text).toContain(PEDE_A_SENHA_DA_DONA);
+      for (const item of lote) {
+        expect(item.html).not.toContain(senha);
+        expect(item.text).not.toContain(senha);
+        expect(item.subject).not.toContain(senha);
+      }
+    });
+
+    it("link sem o áudio: o e-mail não promete a gravação", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      await mudarAudioDoLink(dona.openId, meetingId, false, provaDa(dona));
+      await mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true }), REQUISICAO);
+      const [item] = loteMandado();
+      expect(item.text).toContain(SEM_AUDIO);
+      expect(item.text).not.toContain(COM_AUDIO);
+      expect(item.text).not.toContain("6 dígitos");
+    });
+
+    it("o link desligado liga como o de antes, sem senha e com o áudio, mesmo com o áudio tirado antes; a auditoria diz como ele ficou", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      await mudarAudioDoLink(dona.openId, meetingId, false, provaDa(dona));
+      await novaSenhaDoLink(dona.openId, meetingId, provaDa(dona));
+      await desligarLinkAberto(dona.openId, meetingId);
+      const db = (await getDb())!;
+      const [antes] = await db.select({ audio: meetings.shareAudio }).from(meetings).where(eq(meetings.id, meetingId));
+      expect(antes.audio).toBe(false);
+
+      await mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, autorizacao: AUTORIZACAO }), REQUISICAO);
+      const [depois] = await db.select({ token: meetings.shareToken, hash: meetings.sharePasswordHash, audio: meetings.shareAudio })
+        .from(meetings).where(eq(meetings.id, meetingId));
+      expect(depois).toMatchObject({ hash: null, audio: true });
+      expect(depois.token).toMatch(/^[A-Za-z0-9_-]{32}$/);
+      const [item] = loteMandado();
+      expect(item.text).toContain(COM_AUDIO);
+      expect(item.text).not.toContain("6 dígitos");
+      const provas = await auditoriaDa(meetingId, ACAO_LINK_LIGADO);
+      const doEnvio = provas.find(prova => (prova.details as Record<string, unknown>).origem === "resumo_por_email");
+      expect(doEnvio?.details).toMatchObject({ comSenha: false, incluirAudio: true, origem: "resumo_por_email", versaoDaAutorizacao: 2 });
+    });
+
+    it("o Tentar de novo segue o link de agora: a senha posta depois da falha entra no e-mail que sai", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      dubles.lote.mockImplementation(async lista => lista.map(() => false));
+      await recusaDe(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true }), REQUISICAO));
+      expect(loteMandado(0)[0].text).not.toContain("6 dígitos");
+      const senha = await novaSenhaDoLink(dona.openId, meetingId, provaDa(dona));
+      dubles.lote.mockImplementation(async lista => lista.map(() => true));
+      await expect(mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO)).resolves.toEqual({ enviados: 1, falharam: 0 });
+      const [item] = loteMandado(1);
+      expect(item.text).toContain(PEDE_A_SENHA_DA_DONA);
+      expect(item.text).not.toContain(senha);
     });
   });
 
