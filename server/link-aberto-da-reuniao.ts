@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
+import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
@@ -150,6 +151,7 @@ async function reuniaoDoLink(token: string) {
     createdAt: meetings.createdAt,
     shareToken: meetings.shareToken,
     audioPipeline: meetings.audioPipeline,
+    origem: meetings.origem,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -160,7 +162,12 @@ async function reuniaoDoLink(token: string) {
   // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
   // variação de caixa não abrir o link nem virar outro balde do teto.
   if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
-  return { id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices" };
+  return {
+    id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
+    // A reunião que nasceu de um documento (H12): o link mostra o texto e o
+    // resumo, como a transcrição de sempre, e NUNCA o arquivo, que é só da dona.
+    documento: ehReuniaoDeDocumento(reuniao.origem),
+  };
 }
 
 /** Os segmentos no contrato do desenho ({inicio, fim, falante, texto, lacuna?}), sem outro campo. */
@@ -216,14 +223,17 @@ export async function verReuniaoPeloLink(token: string) {
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
-  // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras).
-  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, {
-    createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes,
-  });
+  // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras). A de
+  // documento não tem áudio, e o PDF dela não sai pelo link: nem consulta.
+  const { recording, recordingExpired, recordingDeletionPending } = reuniao.documento
+    ? { recording: null, recordingExpired: false, recordingDeletionPending: false }
+    : await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, { createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes });
   const vozes = await vozesDoLink(db, reuniao);
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
+    // A página troca "Transcrição" por "Texto do documento" e não fala de áudio.
+    documento: reuniao.documento,
     // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
     // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
     transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,

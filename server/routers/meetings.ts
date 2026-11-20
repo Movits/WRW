@@ -4,6 +4,9 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
+import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
+import { iniciarDocumento } from "../documento-da-reuniao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
@@ -234,6 +237,19 @@ export const meetingsRouter = router({
     origem: z.enum(["gravacao", "arquivo", "aba"]).default("gravacao"),
   })).mutation(({ ctx, input }) => iniciarReuniaoEmPartes(ctx.user.openId, {
     title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
+    origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+  })),
+
+  // A reunião que nasce de um documento (H12 e H12b): um PDF, ou as fotos de um
+  // texto, que a tela junta num PDF. Nasce em 'uploading', com o consentimento
+  // e a versão do aviso do documento (obrigatória: não há aba antiga sem ela);
+  // o arquivo chega depois pela rota binária (server/_core/rota-do-documento.ts),
+  // e a leitura segue em segundo plano (server/documento-da-reuniao.ts).
+  iniciarDocumento: protectedProcedure.input(createMeetingInput.omit({ consentNoticeVersion: true }).extend({
+    consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_DOCUMENTO),
+    origem: z.enum(ORIGENS_DE_DOCUMENTO),
+  })).mutation(({ ctx, input }) => iniciarDocumento(ctx.user.openId, {
+    title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion,
     origem: input.origem, contactId: input.contactId, contextId: input.contextId,
   })),
 

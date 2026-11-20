@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "wouter";
-import { Clock3, FileText, Loader2, Network } from "lucide-react";
+import { Clock3, FileText, Loader2, Network, ScanText } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
@@ -28,7 +28,8 @@ import { MapaMentalDaReuniao } from "@/components/MapaMental";
  * esses dados para cá (server/link-aberto-da-reuniao.ts). Os nomes que a dona
  * deu às vozes chegam no `vozes` (H3b, decisão do Roberto de 16/11/2026), só
  * quando ela ligou o link com a confirmação que fala deles; sem nome, cada voz
- * é "Falante n".
+ * é "Falante n". A reunião que nasceu de um documento (H12 e H12b) mostra o
+ * texto lido no lugar da transcrição, sem player e sem o arquivo.
  *
  * O player e a tradução repetem os do detalhe da dona; o detalhe único da D1
  * (docs/arquitetura/gravador-de-reunioes.md) junta as duas telas.
@@ -150,6 +151,13 @@ export default function ReuniaoAberta() {
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
+  // A reunião que nasceu de um documento (H12 e H12b): o link mostra o texto
+  // lido e o resumo, como a transcrição de sempre, sem falar de áudio. O
+  // arquivo é só da dona e nem vem do servidor. A resposta de um servidor de
+  // antes da H12 não traz o campo: é reunião de áudio.
+  const ehDocumento = data.documento === true;
+  const rotuloDoTexto = ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab");
+  const IconeDoTexto = ehDocumento ? ScanText : Clock3;
   // Os nomes das vozes, os mesmos no resumo, na pergunta e na transcrição. A
   // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
   const nomes = data.vozes ?? {};
@@ -166,9 +174,9 @@ export default function ReuniaoAberta() {
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
     <h1 dir="auto" className="text-3xl font-bold mt-1">{temTextoParaResumir && resumoGuardado.data?.emoji && <span aria-hidden="true" className="mr-2">{resumoGuardado.data.emoji}</span>}{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
-    <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
+    <p className="mt-4 max-w-3xl text-sm text-white/60">{ehDocumento ? t("meetings.document.openLinkIntro") : t("meetings.openLink.intro")}</p>
 
-    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
+    <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", rotuloDoTexto, IconeDoTexto], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
       <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
 
     {aba === "summary" && <>
@@ -178,7 +186,8 @@ export default function ReuniaoAberta() {
         <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
       </div>}
 
-      <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+      {/* A de documento não tem gravação, e o arquivo dela não sai pelo link. */}
+      {!ehDocumento && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
         <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
@@ -186,15 +195,15 @@ export default function ReuniaoAberta() {
         </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
           : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}
-      </section>
+      </section>}
     </>}
 
     {aba === "transcript" && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><Clock3 size={16}/>{t("meetings.transcriptTab")}</h2>
+      <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><IconeDoTexto size={16}/>{rotuloDoTexto}</h2>
       {transcricao ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{t("meetings.translateHeading")}</p>
-          <p className="mt-1 text-sm text-amber-100/70">{t("meetings.openLink.translateSubtext")}</p>
+          <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.openLinkTranslateSubtext") : t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === idiomaDoOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}

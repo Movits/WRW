@@ -190,11 +190,13 @@ describe("Reuniões — a URL escolhe a tela", () => {
     expect(screen.getByText(/O áudio fica na sua conta por 30 dias/)).toBeInTheDocument();
   });
 
-  it("fechar a dica de instalação no gravador devolve o foco ao 'Enviar arquivo de áudio'", () => {
+  // O foco vai ao último botão antes da dica, logo acima dela. Desde a H12 é o
+  // "Resumir um PDF ou fotos de um texto", que fica abaixo do "Enviar arquivo de áudio".
+  it("fechar a dica de instalação no gravador devolve o foco ao último botão antes dela, o 'Resumir um PDF ou fotos de um texto'", () => {
     abrirEm("/gravar");
     fireEvent.click(screen.getByRole("button", { name: "Fechar a dica de instalação" }));
     expect(screen.queryByRole("region", { name: "Instale a WRW como app" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /Resumir um PDF ou fotos de um texto/ })).toHaveFocus();
     expect(localStorage.getItem("mmm:dica-de-instalacao")).toBe("fechada");
   });
 

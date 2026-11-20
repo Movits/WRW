@@ -282,6 +282,8 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "consentAt", "language", "processingError", "createdAt", "updatedAt",
     // Como o áudio chegou e quantas partes a gravação teve (D1): o andamento na tela.
     "audioPipeline", "expectedSlices",
+    // De onde a reunião veio (H12): a de documento troca o player pelo texto do documento.
+    "origem",
     // Os nomes das vozes (H3): a lista e o detalhe são só da dona.
     "speakerNames",
   ];

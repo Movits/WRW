@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, FileText, Link2, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, Square, Trash2, UserRound, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
-import { mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { causaDaFalhaDoDocumento, mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { DocumentoParaResumir } from "@/components/DocumentoParaResumir";
+import { PaginasDoDocumento } from "@/components/PaginasDoDocumento";
+import { TextoDoDocumento } from "@/components/TextoDoDocumento";
+import { ehReuniaoDeDocumento, paginasDoDocumento } from "@shared/documento-da-reuniao";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { VincularAContato } from "@/components/VincularAContato";
 import { ConexoesGeradasPelaReuniao } from "@/components/ConexoesDaReuniao";
@@ -78,7 +82,9 @@ function gravaEmPartes(busca: string) {
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
-function statusLabel(t: TranslateFn, status: string) {
+// A reunião de documento (H12) recebe um arquivo, e não áudio: o "recebendo" diz isso.
+function statusLabel(t: TranslateFn, status: string, documento = false) {
+  if (documento && status === "uploading") return t("meetings.document.statusUploading");
   return ({ draft: t("meetings.statusDraft"), recording: t("meetings.statusRecording"), processing: t("meetings.statusProcessing"), ready: t("meetings.statusReady"), failed: t("meetings.statusFailed"), deleted: t("meetings.statusDeleted"), uploading: t("meetings.statusUploading") } as Record<string, string>)[status] ?? status;
 }
 
@@ -147,6 +153,9 @@ function avisoDaReuniao(desfecho: "processada" | "falhou", meetingId: string) {
 function causaDaFalha(t: TranslateFn, processingError: string | null | undefined) {
   if (processingError === CODIGO_ERRO_INTERROMPIDO) return t("meetings.processingInterrupted");
   if (processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE) return t("meetings.storedAudioMissing");
+  // Os códigos da leitura do documento (H12), gravados pelo servidor sem frase.
+  const doDocumento = causaDaFalhaDoDocumento(processingError, t);
+  if (doDocumento) return doDocumento;
   return processingError ? traduzirMensagemDoServidor(processingError, t) : null;
 }
 
@@ -748,6 +757,13 @@ export default function Meetings() {
       onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
       onDiscardRecording={emPartes ? discardRecording : undefined}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
+      validarTitulo={avisoDoTitulo}
+      // O documento (H12) enviado: a IA lê em segundo plano, e quem continua no
+      // gravador vai ao detalhe, como no fim do envio do áudio.
+      onDocumentSent={meetingId => {
+        setTitle("");
+        if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
+      }}
       daAgenda={agendada && naGravacao ? (
         // key: outra reunião da agenda lê e preenche de novo.
         <ReuniaoDaAgendaNoGravador key={agendada} id={agendada} tituloAtual={title} aoPreencherTitulo={setTitle}
@@ -777,7 +793,7 @@ export default function Meetings() {
           <button onClick={() => navigate(ROTA_GRAVAR)} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div><h2 className="text-base font-semibold">{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><h2 dir="auto" className="text-base font-semibold break-words">{ehReuniaoDeDocumento(meeting.origem) && <ScanText size={15} aria-label={t("meetings.document.listBadge")} className="inline me-2 text-amber-300"/>}{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`shrink-0 border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehReuniaoDeDocumento(meeting.origem))}</span></div></button>)}</div>}
       </div>
     </main>
   );
@@ -794,13 +810,20 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; daAgenda?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode }) {
   const { t } = useTranslation();
+  // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
+  // fotos de um texto, com o aviso e a autorização do documento. O título e o
+  // idioma são os mesmos do gravador, e travam enquanto o documento sobe.
+  const [modo, setModo] = useState<"gravacao" | "documento">("gravacao");
+  const [documentoOcupado, setDocumentoOcupado] = useState(false);
   // Iniciando (G13b), o formulário trava como gravando: a autorização desmarcada
   // ou o título trocado no meio não mudariam a reunião que o servidor já cria.
   // O MP3 em partes (H9a) trava do mesmo jeito, da leitura ao fim do envio.
   const importacao = props.importacao.fase === "parada" ? null : props.importacao;
-  const locked = props.recording || props.processing || props.starting || importacao !== null;
+  const locked = props.recording || props.processing || props.starting || importacao !== null || documentoOcupado;
+  // A gravação ou o áudio por revisar ficam no modo da gravação.
+  const noDocumento = modo === "documento" && !props.recording && !props.capturedAudio && !importacao;
   // A confirmação do Descartar da gravação em partes (G13b), dentro da página:
   // o window.confirm pararia a página inteira, e no celular some com a troca de
   // app. A gravação segue enquanto ela está aberta (ver DescartarGravacao).
@@ -829,17 +852,26 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
           <p className="text-xs text-white/40 mt-2">{t("meetings.meetingLanguageHint")}</p></div>
         {/* O aviso de privacidade também aqui: o login, o Dashboard e o link
             /gravar chegam ao gravador direto, sem passar pela lista, que era o
-            único lugar com ele antes de gravar. */}
-        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
+            único lugar com ele antes de gravar. No documento, o aviso e a
+            autorização são os dele (DocumentoParaResumir). */}
+        {!noDocumento && <>
+          <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
+          <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
+        </>}
       </div>
+      {noDocumento ? <div className="mt-7"><DocumentoParaResumir titulo={props.title} idioma={props.idioma} validarTitulo={props.validarTitulo}
+        aoMudarOcupado={setDocumentoOcupado} aoVoltar={() => setModo("gravacao")}
+        aoEnviar={meetingId => { setModo("gravacao"); props.onDocumentSent(meetingId); }}/></div> : <>
       <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept="audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
       {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
           os tetos do arquivo enviado, o MP3 em partes até 12 h (H9a) e os outros
-          formatos no envio único, com os 10 minutos e 10 MB dele. */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES, minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60, mb: ENVIO_UNICO_BYTES_MAX / (1024 * 1024) })}</p>}</div>}
+          formatos no envio único, com os 10 minutos e 10 MB dele. */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES, minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60, mb: ENVIO_UNICO_BYTES_MAX / (1024 * 1024) })}</p>}
+          {/* H12 e H12b: um PDF ou as fotos de um texto, resumidos como uma reunião. */}
+          <button type="button" disabled={props.starting} onClick={() => setModo("documento")} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><ScanText size={17}/> {t("meetings.document.openButton")}</button></div>}
+      </>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
@@ -959,7 +991,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // não vai ao servidor; sair da reunião o descarta.
   const emailDeRetorno = useGuardaDoEmailDeRetorno();
   const pedeTranscricao = (Number.isFinite(segundoPedido) && segundoPedido > 0) || !!termoPedido;
-  const [tab, setTab] = useState<"summary" | "transcript" | "mindmap" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
+  // Na reunião de documento (H12), "transcript" é a aba do texto do documento,
+  // e "pages" a das páginas do arquivo guardado (H12b).
+  const [tab, setTab] = useState<"summary" | "transcript" | "pages" | "mindmap" | "contacts">(!itemPedido && pedeTranscricao ? "transcript" : "summary");
   // O player é um só, fixo no rodapé (BarraDoPlayer), para todas as abas.
   const player = useRef<ControleDoPlayer | null>(null);
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
@@ -1110,6 +1144,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   </div></main>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
   const { meeting, transcript, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento } = data;
+  // A reunião que nasceu de um documento (H12 e H12b): sem áudio nem player; o
+  // texto lido fica na aba do texto, página a página, e o arquivo na das páginas.
+  const ehDocumento = ehReuniaoDeDocumento(meeting.origem);
+  const { documento, documentoExpirado, documentoSaindo } = data;
+  const paginasDoTexto = ehDocumento ? paginasDoDocumento(transcript?.segments) : [];
+  const documentoAusente = meeting.processingError === "DOCUMENTO_AUSENTE";
   const partesParaOuvir = recording?.partes ?? (recording ? [{ seq: 0, url: recording.url, mimeType: recording.mimeType, inicioSegundos: 0, duracaoSegundos: recording.durationSeconds }] : []);
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
@@ -1168,11 +1208,27 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   </section>;
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
-    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
-      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}/>}
-    {meeting.status === "failed" && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
+      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0} documento={ehDocumento}/>}
+    {meeting.status === "failed" && ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
+      <p>{motivoDaFalha}</p>
+      {/* O documento (H12) se reprocessa pelo arquivo guardado, com a mesma
+          margem do reprocesso do áudio: perto de vencer, o servidor recusa. */}
+      {documento && !documentoAusente && documento.expiresAt - Date.now() > margemDoReprocesso(null) ? (
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-red-100/75">{t("meetings.document.reprocessHint", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })}</p>
+          <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
+            <RefreshCw size={15} className={reprocessar.isPending ? "animate-spin" : ""}/> {t("meetings.reprocessButton")}
+          </button>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-red-100/75">{t("meetings.document.reprocessUnavailable")}</p>
+      )}
+    </div>}
+    {meeting.status === "failed" && !ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que o
           reprocesso inteiro, que cresce com as partes da gravação: perto de
@@ -1194,8 +1250,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {andamento.esperadas ? t("meetings.progressUploading", { recebidas: andamento.recebidas, esperadas: andamento.esperadas }) : t("meetings.progressRecording")}
       {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
     </div>}
-    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
-    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
+    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.readingStatus") : t("meetings.transcribingStatus")}</div>}
+    {/* O documento que não chegou (a aba fechou, a rede caiu no meio): a reunião espera para sempre. */}
+    {ehDocumento && meeting.status === "uploading" && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100">{t("meetings.document.uploadIncomplete")}</div>}
+    <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{(ehDocumento
+      ? [ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.document.textTab"), ScanText], ["pages", t("meetings.document.pagesTab"), Files], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const
+      : [ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
@@ -1209,7 +1269,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
     </div>}
-    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
+    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
+      {/* O arquivo do documento (H12b) segue a regra dos 30 dias do áudio. */}
+      <p className="text-sm text-white/50 mt-3">{documento
+        ? t("meetings.document.availableUntil", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })
+        : documentoExpirado ? t("meetings.document.fileExpired") : documentoSaindo ? t("meetings.document.fileDeletionPending") : t("meetings.document.noFileStored")}</p>
+      {documento && <button type="button" onClick={() => setTab("pages")} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/75 hover:bg-white/5"><Files size={15}/> {t("meetings.document.pagesTab")}</button>}
+      <p className="text-sm text-white/50 mt-3">{t("meetings.document.privacyNotice")}</p></section> : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
         <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
@@ -1223,13 +1289,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       ) : (
         <p className="text-sm text-white/50 mt-3">{t("meetings.noRecordingStored")}</p>
       )}
-      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></section></div>}
+      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></section>}</div>}
     {tab === "transcript" && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <h2 className="text-base font-semibold mb-4">{t("meetings.transcriptTab")}</h2>
+      <h2 className="text-base font-semibold mb-4">{ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab")}</h2>
       {transcript ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{t("meetings.translateHeading")}</p>
-          <p className="mt-1 text-sm text-amber-100/70">{t("meetings.translateSubtext")}</p>
+          <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}{language.code === idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
@@ -1241,7 +1307,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
           </div>}
-          {mostraFalas
+          {ehDocumento && translationLanguage === idiomaOriginal && paginasDoTexto.length > 0
+            // O texto do documento (H12), página a página, com os destaques de cada página.
+            ? <TextoDoDocumento paginas={paginasDoTexto} entidades={entities} idPrefixo={`documento-${meetingId}`}/>
+            : mostraFalas
             ? <>
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
               <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
@@ -1262,6 +1331,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             : <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{displayTranscript || transcript.transcript}</p>}
         </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
+    </section>}
+    {/* As páginas do arquivo guardado (H12b), só para a dona e só na reunião de documento. */}
+    {tab === "pages" && ehDocumento && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+      <h2 className="text-base font-semibold mb-4">{t("meetings.document.pagesTab")}</h2>
+      <PaginasDoDocumento meetingId={meetingId} documento={documento} documentoExpirado={documentoExpirado} documentoSaindo={documentoSaindo}/>
     </section>}
     {/* O mapa mental (H10) lê a transcrição, como o resumo: só com a reunião
         pronta e com texto. A raiz é o título, com o emoji do resumo. */}

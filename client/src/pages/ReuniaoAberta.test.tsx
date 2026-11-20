@@ -711,3 +711,54 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
     expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
   });
 });
+
+// A reunião que nasceu de um documento (H12 e H12b): o link mostra o texto lido
+// e o resumo, como mostra a transcrição de uma reunião de áudio, sem player,
+// sem a seção da gravação e sem o arquivo, que o servidor nem manda
+// (server/link-aberto-da-reuniao.ts; o texto chega corrido, sem as páginas).
+describe("Reunião aberta pelo link — o documento (H12)", () => {
+  const DOCUMENTO = {
+    titulo: "Proposta da feira",
+    criadaEm: 1_700_000_000_000,
+    documento: true,
+    transcricao: { texto: "Proposta de exportação de café para Lisboa.\n\nContato: Ana Souza.", idioma: "pt-BR", segmentos: [] },
+    gravacao: null,
+    gravacaoExpirada: false,
+    gravacaoSaindo: false,
+  };
+
+  it("o texto do documento no lugar da transcrição, com o resumo e as perguntas, e nada de áudio nem do arquivo", () => {
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    const { container } = abrir();
+    expect(screen.getByText("Quem enviou este documento compartilhou o link com você. Leia o texto do documento ou peça à IA um resumo e respostas sobre ele.")).toBeInTheDocument();
+    expect(screen.getByTestId("resumo")).toHaveTextContent(TOKEN);
+    expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
+    // Sem a seção da gravação, que diria "nenhum áudio guardado", e sem player.
+    expect(screen.queryByText("Gravação")).not.toBeInTheDocument();
+    expect(screen.queryByText(/áudio/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Texto do documento" })).toBeInTheDocument();
+    expect(screen.getByText(/Proposta de exportação de café para Lisboa\./)).toBeInTheDocument();
+    expect(screen.getByText("Escolha o idioma em que você quer ler o texto do documento.")).toBeInTheDocument();
+    // Nenhum caminho para o arquivo guardado.
+    expect(container.innerHTML).not.toMatch(/manus-storage|\/documento|pdfjs|\.pdf/);
+  });
+
+  it("em árabe: a aba e a introdução no idioma da tela", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    abrir();
+    expect(screen.getByRole("button", { name: "نص المستند" })).toBeInTheDocument();
+    expect(screen.getByText(/شارك معك الشخص الذي أرسل هذا المستند الرابط/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Texto do documento|Quem enviou/);
+  });
+
+  it("a resposta de um servidor de antes da H12 (sem o campo) segue como reunião de áudio", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(screen.getByRole("button", { name: "Transcrição" })).toBeInTheDocument();
+    expect(screen.getByText("Gravação")).toBeInTheDocument();
+  });
+});
