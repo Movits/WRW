@@ -133,6 +133,20 @@ jobs:
             node --check "$f" || exit 1
           done
 
+      # O "Baixar o áudio" da reunião (H8c) converte com o ffmpeg, o mesmo que o
+      # Dockerfile põe na imagem. server/conversao-do-audio.test.ts usa o ffmpeg de
+      # verdade (tons sintéticos, nenhuma gravação real) e, com CI=true, não se
+      # pula: sem este passo, a conversão iria para a main sem ninguém a rodar.
+      # Se a imagem do runner já trouxer o ffmpeg, o apt nem roda.
+      - name: ffmpeg
+        run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }
+          ffmpeg -hide_banner -version | sed -n 1p
+          codificadores=$(ffmpeg -hide_banner -encoders)
+          for c in libmp3lame libopus aac; do
+            grep -E " $c " <<<"$codificadores" >/dev/null || { echo "::error::o ffmpeg do runner não tem o codificador $c"; exit 1; }
+          done
+
       - name: Testes
         run: pnpm test
 

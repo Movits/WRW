@@ -104,6 +104,8 @@ vi.mock("@/lib/trpc", () => ({
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
       // O PDF da reunião (H8): só monta quando a dona abre o aviso do "Baixar PDF".
       exportar: duble.registrar("exportar"),
+      // O áudio da reunião (H8c): só monta quando a dona abre o aviso do "Baixar o áudio".
+      baixarAudio: duble.registrar("baixarAudio"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -311,6 +313,47 @@ describe("Detalhe da reunião — baixar o PDF (H8)", () => {
   it.each(["processing", "failed", "recording", "uploading"])("'%s': sem o botão (o servidor também recusa)", status => {
     abrirDetalhe({ status });
     expect(screen.queryByRole("button", { name: "Baixar PDF" })).not.toBeInTheDocument();
+  });
+});
+
+// H8c: o "Baixar o áudio" fica na seção Gravação, só com a gravação encerrada e
+// no prazo dos 30 dias. O aviso, o pedido e o link de salvar estão em
+// components/BaixarAudioDaReuniao.test.tsx.
+describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
+  const botaoDoAudio = () => screen.queryByRole("button", { name: "Baixar o áudio" });
+
+  it.each(["ready", "processing", "failed"])("'%s' com o áudio no prazo: o botão abre o aviso, com o tamanho da gravação; nada é pedido antes de preparar", status => {
+    abrirDetalhe({ status }, { recording: GRAVACAO });
+    fireEvent.click(botaoDoAudio()!);
+    const aviso = screen.getByRole("dialog", { name: "Baixar o áudio da reunião" });
+    // 900 s a 64 kbps: 7,2 MB.
+    expect(aviso).toHaveTextContent("Tamanho aproximado: 7 MB.");
+    expect(duble.mutacoes.baixarAudio.mutate).not.toHaveBeenCalled();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Preparar o arquivo" }));
+    expect(duble.mutacoes.baixarAudio.mutate).toHaveBeenCalledWith(
+      { meetingId: REUNIAO.id, formato: "mp3", nome: "Reunião com a vinícola - 2026-09-04" }, expect.anything(),
+    );
+  });
+
+  it.each(["recording", "uploading"])("'%s' (a gravação ainda chega): sem o botão", status => {
+    abrirDetalhe({ status, audioPipeline: "slices" }, { recording: GRAVACAO });
+    expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["venceu e saiu do bucket", { recording: null, recordingExpired: true }],
+    ["venceu e ainda está saindo do bucket", { recording: null, recordingDeletionPending: true }],
+    ["a página aberta desde antes do prazo", { recording: { ...GRAVACAO, expiresAt: Date.now() - 1 } }],
+  ])("depois dos 30 dias o botão some: %s", (_caso, detalhe) => {
+    abrirDetalhe({ status: "ready" }, detalhe);
+    expect(screen.getByRole("heading", { name: "Gravação" })).toBeInTheDocument();
+    expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  it("sem áudio guardado, sem o botão", () => {
+    abrirDetalhe({ status: "ready" }, { recording: null });
+    expect(screen.getByText("Nenhum áudio guardado para esta reunião.")).toBeInTheDocument();
+    expect(botaoDoAudio()).not.toBeInTheDocument();
   });
 });
 

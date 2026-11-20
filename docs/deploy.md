@@ -363,6 +363,18 @@ ela redirecionava qualquer requisição anônima para a URL assinada. Exceção 
 `/reuniao-aberta/{token}/audio`, sem sessão, enquanto a dona mantém o link ligado
 (`server/link-aberto-da-reuniao.ts`).
 
+**Baixar o áudio da reunião (H8c, 20/11/2026).** A dona baixa o áudio inteiro em MP3 ou
+M4A por `GET /api/reunioes/baixar-audio/{ficha}`: a ficha é de uso único, vale 2 minutos
+e só para a sessão que a pediu (`meetings.baixarAudio`, que audita
+`MEETING_AUDIO_DOWNLOADED` na mesma transação), e as partes vêm do bucket pelo servidor,
+sem URL assinada para o navegador. Quem converte é o **ffmpeg que o `Dockerfile` instala**
+(pacote da Debian bookworm, sem as recomendações): pela conta dos índices da Debian, são
+200 pacotes e cerca de 480 MB a mais na imagem, porque o `libavdevice` do ffmpeg traz o
+Mesa e o LLVM junto, e cerca de 134 MB de download no build. A conversão roda com
+prioridade baixa (nice 10), no máximo 2 por vez, e cada dona baixa até 10 áudios por
+hora. Sem o ffmpeg o servidor sobe do mesmo jeito, e só o "Baixar o áudio" responde
+`AUDIO_INDISPONIVEL` (o log diz `[Áudio] o ffmpeg ... não subiu`).
+
 **Gravação de reunião.** `server/routers/meetings.ts` recebe o áudio como base64
 de até 15 MB em uma requisição e transcreve com LLM dentro dela. Um request pode
 durar minutos. Confirmar o limite de tempo do host antes de contar essa etapa

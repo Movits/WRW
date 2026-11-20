@@ -295,6 +295,11 @@ sem ele).
   com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
+  O download do áudio pela dona (H8c) também não passa pelo proxy: sai por
+  `GET /api/reunioes/baixar-audio/{ficha}` (`_core/rota-do-audio-baixado.ts`), com a ficha
+  de uso único de `meetings.baixarAudio` e a sessão da dona; o servidor lê as partes do
+  bucket e as converte com o ffmpeg da imagem (`server/conversao-do-audio.ts`), que roda
+  sem as variáveis do servidor e, com o Node como root, como o usuário nobody.
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,

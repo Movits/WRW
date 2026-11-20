@@ -16,7 +16,8 @@ import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
-import { ExportarReuniao } from "@/components/ExportarReuniao";
+import { ExportarReuniao, nomeDoArquivo } from "@/components/ExportarReuniao";
+import { BaixarAudioDaReuniao } from "@/components/BaixarAudioDaReuniao";
 import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
@@ -1131,6 +1132,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const emProcessamento = meeting.status === "processing";
   // O áudio sumiu do bucket: reprocessar de novo não adianta.
   const audioGuardadoAusente = meeting.processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE;
+  // H8c: baixar o áudio só com a gravação encerrada (gravando ou recebendo
+  // partes, o arquivo sairia pela metade) e no prazo dos 30 dias; depois dele o
+  // botão some, mesmo com a página aberta desde antes. O servidor recusa os
+  // mesmos casos com código traduzido (server/baixar-audio-da-reuniao.ts).
+  const podeBaixarAudio = !!recording && meeting.status !== "recording" && meeting.status !== "uploading" && recording.expiresAt > Date.now();
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
@@ -1213,6 +1219,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {recording ? <>
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
         <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
+        {/* Só a dona baixa o áudio: este detalhe é o dela, e a página do link aberto (ReuniaoAberta.tsx) não tem o botão. */}
+        {podeBaixarAudio && <BaixarAudioDaReuniao meetingId={meetingId} duracaoSegundos={recording.durationSeconds}
+          nomeSugerido={nomeDoArquivo({ titulo: meeting.title, criadaEm: meeting.createdAt })}/>}
       </> : recordingExpired ? (
         // "A transcrição continua aqui" só é verdade com transcrição, e numa
         // reunião que falhou antes de guardar o áudio não houve gravação apagada.
