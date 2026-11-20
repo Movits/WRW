@@ -497,6 +497,35 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   tela, `CompartilharReuniao.tsx`, `TranscricaoPorFalante.tsx` e `ReuniaoAberta.tsx`. Sem
   migração.
 
+## 16/11/2026 — a reunião se exporta só em PDF, por enquanto (H8)
+
+- **Quem:** Roberto, 16/11, ao mandar fazer a H8: só PDF nesta entrega.
+- **O quê:** a dona baixa a reunião pelo "Baixar PDF" do detalhe. O PDF leva o título com
+  o emoji do resumo e a data, os itens do resumo que ela CONFIRMOU (nas seções da tela,
+  com o responsável, o prazo e a caixa da ação) e a transcrição com os tempos e os nomes
+  das vozes. Os rótulos saem no idioma da reunião, dos 10 JSONs. Antes de baixar, um
+  aviso diz o que vai no arquivo.
+- **Como:** o PDF sai da impressão do aparelho (`window.print()` sobre um documento
+  próprio, com `@media print` e fundo branco), e não de biblioteca. As fontes do sistema
+  já têm o árabe (da direita para a esquerda), o hindi, o chinês e o japonês, no celular
+  e no computador. Uma biblioteca no navegador pediria fontes embutidas de vários
+  megabytes e não montaria as letras do árabe nem do hindi; no servidor, pediria um
+  navegador sem tela na instância de 2 GB.
+- **Regras:** só a dona exporta (o link aberto não tem o botão nem rota); a leitura e a
+  auditoria `MEETING_EXPORTED` vão na mesma transação, e sem a linha nada sai; teto de 30
+  exportações a cada 10 minutos por dona, contando só as que saíram.
+- **Antes:** o plano de 15/11 previa TXT, Markdown, SRT, Word (com a `docx`, aprovada em
+  15/11) e PDF.
+- **Fica de fora:** TXT, Markdown, SRT e Word; a `docx` não entra no `package.json`. Na
+  casca das lojas (PR #180, uma WebView), a impressão pode não abrir sem código nativo: no
+  app instalado, o aviso manda abrir a reunião no navegador.
+- **Com a Cris:** o texto do aviso (`meetings.export.notice`) e a tradução dele nos outros
+  9 idiomas.
+- **Onde:** `server/exportar-reuniao.ts`, `meetings.exportar` em
+  `server/routers/meetings.ts` e `shared/exportar-reuniao.ts`; na tela,
+  `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
+  de `client/src/index.css`. Sem migração.
+
 ---
 
 ## Lições sem data registrada
