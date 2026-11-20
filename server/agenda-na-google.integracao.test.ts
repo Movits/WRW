@@ -32,6 +32,10 @@ const { appRouter } = await import("./routers");
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-agenda-google-${crypto.randomUUID()}`;
+// A conta Google de cada execução é única: os arquivos de integração rodam em paralelo no
+// mesmo banco, e "outra conta da WRW usa esta conta Google?" (outraContaUsa) via a dos outros.
+const SUFIXO_DA_CONTA_GOOGLE = crypto.randomUUID();
+const contaGoogle = (nome: string) => `${nome}-${SUFIXO_DA_CONTA_GOOGLE}`;
 const PROVA = { ipAddress: "203.0.113.9", userAgent: "Navegador de teste" };
 const HORA = 60 * 60_000;
 let idDaDona = 0;
@@ -76,7 +80,7 @@ async function linhaDaAgenda(id: string) {
   return linha;
 }
 
-async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
+async function conectar(sub = contaGoogle("sub-da-dona"), refreshToken = "refresh-da-dona") {
   // Grava a conexão de verdade; o token de acesso dela fica em memória, e a Google só é chamada para os eventos.
   await conexaoGoogle.gravarConexaoGoogle(idDaDona, {
     refreshToken, sub, email: "dona@exemplo.com",
@@ -235,7 +239,7 @@ describe.skipIf(!temBanco)("Agenda na Google Agenda (integração)", () => {
     expect((await linhaDaAgenda(id)).google).toBe("ok");
     await conexaoGoogle.desconectarGoogleAgenda(idDaDona, PROVA, vi.fn(async () => new Response(null, { status: 200 })));
     expect((await linhaDaAgenda(id)).google).toBeNull();
-    await conectar("sub-da-conta-b", "refresh-da-conta-b");
+    await conectar(contaGoogle("sub-da-conta-b"), "refresh-da-conta-b");
     const { proximas } = await rota().agenda.listar();
     expect(proximas.find(r => r.id === id)).toMatchObject({ google: null, googleConvites: true });
   });
@@ -246,7 +250,7 @@ describe.skipIf(!temBanco)("Agenda na Google Agenda (integração)", () => {
     await conectar();
     expect((await linhaDaAgenda(id)).google).toBe("ok");
     await (await getDb())!.update(googleAgendaConexoes).set({ falha: "revogada" }).where(eq(googleAgendaConexoes.userId, idDaDona));
-    await conectar("sub-da-conta-b", "refresh-da-conta-b");
+    await conectar(contaGoogle("sub-da-conta-b"), "refresh-da-conta-b");
     expect((await linhaDaAgenda(id)).google).toBeNull();
   });
 

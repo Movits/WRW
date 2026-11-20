@@ -28,6 +28,10 @@ const { appRouter } = await import("./routers");
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-acoes-google-${crypto.randomUUID()}`;
+// A conta Google de cada execução é única: os arquivos de integração rodam em paralelo no
+// mesmo banco, e "outra conta da WRW usa esta conta Google?" (outraContaUsa) via a dos outros.
+const SUFIXO_DA_CONTA_GOOGLE = crypto.randomUUID();
+const contaGoogle = (nome: string) => `${nome}-${SUFIXO_DA_CONTA_GOOGLE}`;
 const OUTRA = `teste-acoes-google-outra-${crypto.randomUUID()}`;
 const PROVA = { ipAddress: "203.0.113.9", userAgent: "Navegador de teste" };
 const HORA = 60 * 60_000;
@@ -67,7 +71,7 @@ async function linhaDaAcao(id: string) {
   return linha;
 }
 
-async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
+async function conectar(sub = contaGoogle("sub-da-dona"), refreshToken = "refresh-da-dona") {
   // Grava a conexão de verdade; o token de acesso dela fica em memória, e a Google só é chamada para os eventos.
   await conexaoGoogle.gravarConexaoGoogle(idDaDona, {
     refreshToken, sub, email: "dona@exemplo.com",
