@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, MonitorPlay, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -48,6 +48,10 @@ import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } 
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
+import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
+import { VideoDoYoutube } from "@/components/VideoDoYoutube";
+import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
 
 // O relógio do gravador e a duração da reunião no formato da transcrição: a
 // gravação em partes passa de uma hora, e 1 h é 1:00:00, não 60:00.
@@ -156,6 +160,9 @@ function causaDaFalha(t: TranslateFn, processingError: string | null | undefined
   // Os códigos da leitura do documento (H12), gravados pelo servidor sem frase.
   const doDocumento = causaDaFalhaDoDocumento(processingError, t);
   if (doDocumento) return doDocumento;
+  // Os códigos do vídeo do YouTube (H13): vídeo privado, sem fala, longo demais...
+  const doVideo = fraseDoErroDoYoutube(processingError, t);
+  if (doVideo) return doVideo;
   return processingError ? traduzirMensagemDoServidor(processingError, t) : null;
 }
 
@@ -790,10 +797,14 @@ export default function Meetings() {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></div>
-          <button onClick={() => navigate(ROTA_GRAVAR)} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
+          {/* O vídeo do YouTube (H13) ao lado da reunião nova; no celular, um embaixo do outro. */}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <ResumoDoYoutube/>
+            <button onClick={() => navigate(ROTA_GRAVAR)} className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]"><Plus size={18}/> {t("meetings.newMeetingButton")}</button>
+          </div>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><h2 dir="auto" className="text-base font-semibold break-words">{ehReuniaoDeDocumento(meeting.origem) && <ScanText size={15} aria-label={t("meetings.document.listBadge")} className="inline me-2 text-amber-300"/>}{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><span className={`shrink-0 border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehReuniaoDeDocumento(meeting.origem))}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><h2 dir="auto" className="text-base font-semibold break-words">{ehReuniaoDeDocumento(meeting.origem) && <ScanText size={15} aria-label={t("meetings.document.listBadge")} className="inline me-2 text-amber-300"/>}{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}{meeting.origem === "youtube" && <span className="ms-2 inline-flex items-center gap-1 text-[#efcba8]/80"><MonitorPlay size={12} aria-hidden/>{t("meetings.youtube.listBadge")}</span>}</p></div><span className={`shrink-0 border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehReuniaoDeDocumento(meeting.origem))}</span></div></button>)}</div>}
       </div>
     </main>
   );
@@ -1079,6 +1090,21 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     // Aceito ou recusado, o estado real (processando, ou já pronta) vem do servidor.
     onSettled: () => { void utils.meetings.get.invalidate({ meetingId }); void utils.meetings.list.invalidate(); },
   });
+  // O "Tentar de novo" da reunião que veio de um vídeo do YouTube (H13): não há
+  // áudio guardado, e o servidor lê o vídeo outra vez pela URL. Como o
+  // reprocesso, a tela vira 'processing' na hora; a recusa (o teto de vídeos
+  // por dia, por exemplo) sai traduzida pelo código.
+  const refazerVideo = trpc.meetings.refazerVideoDoYoutube.useMutation({
+    onSuccess: () => {
+      toast.success(t("meetings.youtube.retryStarted"));
+      utils.meetings.get.setData({ meetingId }, anterior => anterior && {
+        ...anterior,
+        meeting: { ...anterior.meeting, status: "processing" as const, processingError: null },
+      });
+    },
+    onError: erro => toast.error(fraseDoPedidoDoYoutube(erro, t)),
+    onSettled: () => { void utils.meetings.get.invalidate({ meetingId }); void utils.meetings.list.invalidate(); },
+  });
 
   // O reprocessamento termina sem ninguém esperando a mutation: quem avisa é a
   // troca de status que a consulta periódica traz.
@@ -1151,6 +1177,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const paginasDoTexto = ehDocumento ? paginasDoDocumento(transcript?.segments) : [];
   const documentoAusente = meeting.processingError === "DOCUMENTO_AUSENTE";
   const partesParaOuvir = recording?.partes ?? (recording ? [{ seq: 0, url: recording.url, mimeType: recording.mimeType, inicioSegundos: 0, duracaoSegundos: recording.durationSeconds }] : []);
+  // A reunião que veio de um vídeo do YouTube (H13) não tem áudio nem player: o
+  // "▶" de cada fala, item e citação abre o vídeo no segundo dela, numa aba nova.
+  const idDoVideo = idDoVideoDaReuniao(meeting);
+  const linkDoTempo = idDoVideo ? (segundo: number) => linkDoYoutubeNoSegundo(idDoVideo, segundo) : undefined;
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
   const mostraFalas = falas.length > 0 && translationLanguage === idiomaOriginal;
@@ -1228,7 +1258,19 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         <p className="mt-2 text-sm text-red-100/75">{t("meetings.document.reprocessUnavailable")}</p>
       )}
     </div>}
-    {meeting.status === "failed" && !ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
+    {meeting.status === "failed" && idDoVideo && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
+      <p>{motivoDaFalha}</p>
+      {/* O vídeo não fica guardado aqui: tentar de novo lê o vídeo outra vez
+          pela URL, e gasta uma vaga do teto de vídeos por dia. */}
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-red-100/75">{t("meetings.youtube.retryHint", { n: VIDEOS_DO_YOUTUBE_POR_DIA })}</p>
+        <button type="button" onClick={() => refazerVideo.mutate({ meetingId })} disabled={refazerVideo.isPending}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
+          <RefreshCw size={15} className={refazerVideo.isPending ? "animate-spin" : ""}/> {t("meetings.youtube.retryButton")}
+        </button>
+      </div>
+    </div>}
+    {meeting.status === "failed" && !ehDocumento && !idDoVideo && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* Reprocessar só com áudio guardado que ainda dura mais que o
           reprocesso inteiro, que cresce com as partes da gravação: perto de
@@ -1250,7 +1292,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {andamento.esperadas ? t("meetings.progressUploading", { recebidas: andamento.recebidas, esperadas: andamento.esperadas }) : t("meetings.progressRecording")}
       {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
     </div>}
-    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.readingStatus") : t("meetings.transcribingStatus")}</div>}
+    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.readingStatus") : idDoVideo ? t("meetings.youtube.processing") : t("meetings.transcribingStatus")}</div>}
     {/* O documento que não chegou (a aba fechou, a rede caiu no meio): a reunião espera para sempre. */}
     {ehDocumento && meeting.status === "uploading" && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100">{t("meetings.document.uploadIncomplete")}</div>}
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{(ehDocumento
@@ -1260,14 +1302,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
-        falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}
+        falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken}/>
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}
         nomes={nomesDosFalantes(meeting.speakerNames)} guarda={emailDeRetorno}/>}
       <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)}
-        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
       {/* O arquivo do documento (H12b) segue a regra dos 30 dias do áudio. */}
@@ -1275,7 +1317,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         ? t("meetings.document.availableUntil", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })
         : documentoExpirado ? t("meetings.document.fileExpired") : documentoSaindo ? t("meetings.document.fileDeletionPending") : t("meetings.document.noFileStored")}</p>
       {documento && <button type="button" onClick={() => setTab("pages")} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/75 hover:bg-white/5"><Files size={15}/> {t("meetings.document.pagesTab")}</button>}
-      <p className="text-sm text-white/50 mt-3">{t("meetings.document.privacyNotice")}</p></section> : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
+      <p className="text-sm text-white/50 mt-3">{t("meetings.document.privacyNotice")}</p></section> : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">{idDoVideo ? <VideoDoYoutube id={idDoVideo}/> : <><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
         <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
@@ -1289,7 +1331,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       ) : (
         <p className="text-sm text-white/50 mt-3">{t("meetings.noRecordingStored")}</p>
       )}
-      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></section>}</div>}
+      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></>}</section>}</div>}
     {tab === "transcript" && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="text-base font-semibold mb-4">{ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab")}</h2>
       {transcript ? <>
@@ -1313,7 +1355,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             : mostraFalas
             ? <>
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
-              <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}
+              <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
                 nomes={nomesDosFalantes(meeting.speakerNames)} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });

@@ -1077,6 +1077,12 @@ export const meetings = mysqlTable("meetings", {
   // (H12 e H12b) são as reuniões que nasceram de um documento, e não de áudio:
   // o arquivo fica em meeting_documents, e o texto lido vira a transcrição.
   origem: varchar("origem", { length: 16, enum: ["gravacao", "arquivo", "aba", "pdf", "youtube", "foto"] }),
+  // De onde veio a reunião que não é gravação: na origem 'youtube' (H13), a URL
+  // canônica do vídeo (https://www.youtube.com/watch?v=ID, montada pelo id em
+  // shared/youtube.ts, sem os parâmetros do link colado). O servidor nunca a
+  // busca: ela vai ao Gemini, que lê o vídeo. Nula nas outras origens (o PDF e
+  // as fotos da H12 e da H12b guardam o arquivo em meeting_documents).
+  sourceUrl: varchar("source_url", { length: 512 }),
   // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
   // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
   consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),

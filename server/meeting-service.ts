@@ -1398,11 +1398,10 @@ async function executarReprocessamento(db: Banco, execucao: {
  *
  * Ficam no servidor as colunas de controle da fila de transcrição (attempts,
  * lockedUntil e lockToken): a reserva de quem está processando a reunião não é
- * dado da dona e não tem uso na tela. As outras colunas da migração 0014
- * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
- * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
- * A origem entrou com a reunião de documento (H12): é ela que troca o player e
- * a transcrição pelo texto do documento.
+ * dado da dona e não tem uso na tela. A consentNoticeVersion, da migração
+ * 0014, entra aqui quando uma tela precisar dela. A origem entrou com a
+ * reunião de documento (H12), em que ela troca o player e a transcrição pelo
+ * texto do documento, e com o vídeo do YouTube (H13), que traz a sourceUrl.
  */
 const COLUNAS_DA_REUNIAO_NA_TELA = {
   id: meetings.id,
@@ -1421,12 +1420,17 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
   audioPipeline: meetings.audioPipeline,
   expectedSlices: meetings.expectedSlices,
-  // De onde a reunião veio: 'pdf' e 'foto' são documento (H12).
-  origem: meetings.origem,
   // Os nomes das vozes (H3). Esta lista e este detalhe são só da dona; o link
   // aberto lê os nomes por outra consulta, e só quando foi ligado com a
   // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
   speakerNames: meetings.speakerNames,
+  // De onde a reunião veio: 'pdf' e 'foto' são documento (H12 e H12b), e no
+  // vídeo do YouTube (H13) vem também a URL canônica dele: a tela mostra o
+  // vídeo no lugar da gravação, e o "▶" de cada fala abre o vídeo no segundo
+  // dela. O link aberto leva só o id do vídeo, por outra consulta
+  // (server/link-aberto-da-reuniao.ts).
+  origem: meetings.origem,
+  sourceUrl: meetings.sourceUrl,
 };
 
 /**

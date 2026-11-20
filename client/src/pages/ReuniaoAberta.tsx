@@ -17,6 +17,8 @@ import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from 
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
+import { VideoDoYoutube } from "@/components/VideoDoYoutube";
+import { linkDoYoutubeNoSegundo } from "@shared/youtube";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
@@ -162,6 +164,10 @@ export default function ReuniaoAberta() {
   // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
   const nomes = data.vozes ?? {};
   const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
+  // A reunião que veio de um vídeo do YouTube (H13): sem player, o "▶" de cada
+  // fala abre o vídeo no segundo dela. O servidor de antes da H13 não traz o campo.
+  const idDoVideo = data.videoDoYoutube ?? null;
+  const linkDoTempo = idDoVideo ? (segundo: number) => linkDoYoutubeNoSegundo(idDoVideo, segundo) : undefined;
   const falas = segmentosValidos(transcricao?.segmentos);
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
   const textoNaTela = idiomaDaTraducao === idiomaDoOriginal ? transcricao?.texto : textoTraduzido;
@@ -174,20 +180,22 @@ export default function ReuniaoAberta() {
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
     <h1 dir="auto" className="text-3xl font-bold mt-1">{temTextoParaResumir && resumoGuardado.data?.emoji && <span aria-hidden="true" className="mr-2">{resumoGuardado.data.emoji}</span>}{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
-    <p className="mt-4 max-w-3xl text-sm text-white/60">{ehDocumento ? t("meetings.document.openLinkIntro") : t("meetings.openLink.intro")}</p>
+    <p className="mt-4 max-w-3xl text-sm text-white/60">{ehDocumento ? t("meetings.document.openLinkIntro") : idDoVideo ? t("meetings.youtube.linkIntro") : t("meetings.openLink.intro")}</p>
 
     <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", rotuloDoTexto, IconeDoTexto], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
       <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} traducao={traducaoDoResumo}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}/>
         {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
-        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/>
+        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
       </div>}
 
       {/* A de documento não tem gravação, e o arquivo dela não sai pelo link. */}
       {!ehDocumento && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+        {/* O vídeo do YouTube (H13) no lugar da gravação: o link para ele, sem player. */}
+        {idDoVideo ? <VideoDoYoutube id={idDoVideo} peloLink/> : <>
         <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
@@ -195,6 +203,7 @@ export default function ReuniaoAberta() {
         </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
           : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}
+        </>}
       </section>}
     </>}
 
@@ -222,7 +231,7 @@ export default function ReuniaoAberta() {
               </button>
             </div>}
             {mostraFalas
-              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined}/></div>
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}

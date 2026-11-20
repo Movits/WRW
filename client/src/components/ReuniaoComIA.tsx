@@ -33,6 +33,8 @@ type FonteDaReuniao =
       /** Os nomes que a dona deu às vozes (nomesDosFalantes(meeting.speakerNames)). */
       nomes?: Readonly<Record<string, string>>;
       aoIrPara?: (segundo: number) => void;
+      /** A reunião do YouTube (H13): o "▶" abre o vídeo no segundo (TempoDoTrecho). */
+      linkDoTempo?: (segundo: number) => string;
     }
   | {
       token: string;
@@ -40,6 +42,7 @@ type FonteDaReuniao =
       /** Os nomes das vozes que o link recebeu (o `vozes` de reuniaoAberta.ver, H3b). */
       nomes?: Readonly<Record<string, string>>;
       aoIrPara?: (segundo: number) => void;
+      linkDoTempo?: (segundo: number) => string;
     };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
@@ -78,10 +81,19 @@ export function Trecho({ texto }: { texto: string }) {
 /**
  * O "▶ mm:ss" de um trecho, que leva o player único do rodapé ao segundo em
  * que ele começa. Sem player (a gravação venceu ou não existe), o tempo é só
- * informação: nada de botão desligado anunciando "Ouvir".
+ * informação: nada de botão desligado anunciando "Ouvir". Na reunião que veio
+ * de um vídeo do YouTube (H13) não há player: `linkDoTempo` dá o endereço do
+ * vídeo naquele segundo, e o "▶" é um link que o abre numa aba nova.
  */
-export function TempoDoTrecho({ segundos, aoIrPara }: { segundos: number; aoIrPara?: (segundo: number) => void }) {
+export function TempoDoTrecho({ segundos, aoIrPara, linkDoTempo }: { segundos: number; aoIrPara?: (segundo: number) => void; linkDoTempo?: (segundo: number) => string }) {
   const { t } = useTranslation();
+  if (linkDoTempo) {
+    return <a href={linkDoTempo(segundos)} target="_blank" rel="noopener noreferrer"
+      aria-label={t("meetings.youtube.watchFrom", { tempo: mmss(segundos) })}
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10">
+      <Play size={11} aria-hidden/>{mmss(segundos)}
+    </a>;
+  }
   return aoIrPara
     ? <button type="button" onClick={() => aoIrPara(segundos)}
         aria-label={t("meetings.playFrom", { tempo: mmss(segundos) })}
@@ -158,7 +170,7 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
           <p id={idDasCitacoes} className="text-[10px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.ai.sourcesLabel")}</p>
           <ul aria-labelledby={idDasCitacoes} className="mt-1 space-y-1.5">
             {citacoes.map((citacao, i) => <li key={i} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              {citacao.inicioSegundos !== null && <TempoDoTrecho segundos={citacao.inicioSegundos} aoIrPara={fonte.aoIrPara}/>}
+              {citacao.inicioSegundos !== null && <TempoDoTrecho segundos={citacao.inicioSegundos} aoIrPara={fonte.aoIrPara} linkDoTempo={fonte.linkDoTempo}/>}
               <q dir="auto" className="text-xs italic text-white/55">{citacao.trecho}</q>
             </li>)}
           </ul>

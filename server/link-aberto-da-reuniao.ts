@@ -4,6 +4,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
+import { idDoVideoDaReuniao } from "@shared/youtube";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
@@ -152,6 +153,7 @@ async function reuniaoDoLink(token: string) {
     shareToken: meetings.shareToken,
     audioPipeline: meetings.audioPipeline,
     origem: meetings.origem,
+    sourceUrl: meetings.sourceUrl,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -167,6 +169,10 @@ async function reuniaoDoLink(token: string) {
     // A reunião que nasceu de um documento (H12): o link mostra o texto e o
     // resumo, como a transcrição de sempre, e NUNCA o arquivo, que é só da dona.
     documento: ehReuniaoDeDocumento(reuniao.origem),
+    // A reunião que veio de um vídeo do YouTube (H13): só o id do vídeo, que é
+    // o que o "▶" precisa para abrir o vídeo no segundo da fala. O vídeo é
+    // público (o Gemini só lê vídeo público), e a URL guardada não sai inteira.
+    videoDoYoutube: idDoVideoDaReuniao(reuniao),
   };
 }
 
@@ -253,6 +259,10 @@ export async function verReuniaoPeloLink(token: string) {
     // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
     // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
     vozes,
+    // O vídeo do YouTube de onde a reunião veio (H13), ou null: a página não
+    // tem player (a CSP não deixa embutir o YouTube), e o "▶" de cada fala abre
+    // o vídeo no segundo dela, numa aba nova.
+    videoDoYoutube: reuniao.videoDoYoutube,
   };
 }
 

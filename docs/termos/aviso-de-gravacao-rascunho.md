@@ -79,3 +79,43 @@ autorizaram a gravação e o tratamento privado deste áudio para esta reunião.
 - se o aviso curto basta antes de cada gravação ou se a tela mostra o texto inteiro na
   primeira vez de cada versão (pergunta em aberto com a cliente);
 - a redação do Termo de Gravação de Reuniões a partir dos pontos acima.
+
+## Aviso do resumo de vídeo do YouTube — versão `youtube-2026-11-20`
+
+A H13 resume um vídeo público do YouTube: a dona cola o link, e a IA do Google lê o
+vídeo pelo próprio link. É outro aviso, com versão própria em `shared/youtube.ts`
+(`VERSOES_DO_AVISO_DO_YOUTUBE`), gravada na reunião (`meetings.consent_notice_version`) e
+na auditoria do pedido (`MEETING_YOUTUBE_REQUESTED`, com IP e navegador). A mesma regra
+das versões vale aqui: mudou o que o aviso diz, versão nova no fim da lista.
+
+### O aviso curto, como aparece na tela (pt-BR, `meetings.youtube.notice`)
+
+> O vídeo é lido pela IA do Google (Gemini) direto do YouTube, pelo link, e pode ser
+> processado fora do Brasil. Só vídeos públicos funcionam, e só os primeiros 60 minutos
+> são transcritos. A WRW não guarda o vídeo: guarda o link, a transcrição e o resumo na
+> sua conta até você excluir a reunião. Só você acessa, a menos que ligue o link de
+> compartilhamento. Limite: 5 vídeos a cada 24 horas.
+
+A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li o aviso e quero que a IA do Google leia este vídeo para transcrevê-lo e resumi-lo."
+
+### O que o aviso cobre, ponto a ponto
+
+1. **Quem processa o vídeo.** A IA do Google (Gemini) lê o vídeo direto do YouTube, pelo
+   link; a WRW não baixa nem guarda o vídeo. Daí vêm a transcrição, o resumo, o mapa
+   mental e as respostas sobre o vídeo.
+2. **Transferência internacional.** O Google pode processar o vídeo fora do Brasil.
+3. **Só vídeo público, só a primeira hora.** Vídeo privado, não listado ou restrito não
+   funciona; de um vídeo mais longo, só os primeiros 60 minutos são transcritos.
+4. **Retenção.** Ficam na conta da dona o link do vídeo (o endereço canônico, sem os
+   parâmetros do link colado), a transcrição e o resumo, até ela excluir a reunião ou a
+   conta.
+5. **Quem acessa.** Só a dona, a menos que ela ligue o link aberto da reunião, que mostra
+   o resumo e a transcrição, e o ▶ de cada fala abre o vídeo no YouTube.
+6. **Teto.** Até 5 vídeos por dona a cada 24 horas, contando o "Tentar de novo".
+
+### Para a Cris decidir
+
+- se o aviso deve dizer algo sobre o direito de uso do conteúdo do vídeo (a dona resume
+  vídeo público de terceiros para uso próprio);
+- se o link aberto de uma reunião feita de vídeo pede alguma ressalva própria (hoje ele
+  segue a mesma confirmação do link de qualquer reunião).

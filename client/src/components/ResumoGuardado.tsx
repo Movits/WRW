@@ -96,6 +96,8 @@ type DaDona = {
    */
   falantes?: readonly string[];
   aoIrPara?: (segundo: number) => void;
+  /** A reunião do YouTube (H13): o "▶" do item abre o vídeo no segundo (TempoDoTrecho). */
+  linkDoTempo?: (segundo: number) => string;
   /** O item pedido pelo link (?item=<id>): a tela rola até ele e o destaca. */
   itemDestacado?: string | null;
   /**
@@ -117,6 +119,7 @@ type DoLink = {
    */
   nomes?: Readonly<Record<string, string>>;
   aoIrPara?: (segundo: number) => void;
+  linkDoTempo?: (segundo: number) => string;
   traducao?: TraducaoDoResumoNaTela;
 };
 
@@ -436,7 +439,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
-              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
+              aoIrPara={props.aoIrPara} linkDoTempo={props.linkDoTempo} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito, ...pedidoDaTela(t) }); }}
               formularioDeEdicao={!peloLink && !somenteLeitura && item.id ? fechar => formularioDoItem(item, fechar) : undefined}/>)}
@@ -513,13 +516,14 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
+function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, linkDoTempo, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
   item: ItemNaTela;
   peloLink: boolean;
   comVozes: (texto: string) => string;
   idiomaDoTexto?: string;
   idiomaDoTrecho?: string;
   aoIrPara?: (segundo: number) => void;
+  linkDoTempo?: (segundo: number) => string;
   destacado: boolean;
   decidindo: boolean;
   /** A versão anterior do resumo que está sendo refeito (H4d): a caixa fica, travada, e não há botões de decidir. */
@@ -580,7 +584,7 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
       {/* Sem player (a gravação venceu ou não existe), o tempo é só
           informação: nada de botão desligado anunciando "Ouvir". O mesmo
           "▶" das citações do Pergunte à reunião (TempoDoTrecho). */}
-      {item.startSeconds !== null && <TempoDoTrecho segundos={item.startSeconds} aoIrPara={aoIrPara}/>}
+      {item.startSeconds !== null && <TempoDoTrecho segundos={item.startSeconds} aoIrPara={aoIrPara} linkDoTempo={linkDoTempo}/>}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
       {/* O que a dona escreveu (H4f): para ela, se acrescentou ou editou; pelo
           link, uma marca só, de que não é texto da IA, sem dizer quem é. */}
