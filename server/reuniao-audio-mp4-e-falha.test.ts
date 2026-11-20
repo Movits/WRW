@@ -558,12 +558,15 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     expect(atualizacoes.filter(a => "status" in a).map(a => a.status)).toEqual(["processing"]);
     // As outras escritas: as pendências que já são de um contato e não citam a
     // transcrição ficam com ele, desligadas da reunião (revisão do pacote P2B);
-    // e, como a compensação é a lista da exclusão (apagarDerivadosDaReuniao), a
-    // agenda (H16a) solta o ponteiro da reunião excluída, pela dona.
+    // e, como a compensação é a lista da exclusão (apagarDerivadosDaReuniao), o
+    // resumo por e-mail (H22) perde os endereços de quem recebeu e a agenda
+    // (H16a) solta o ponteiro da reunião excluída, os dois pela dona.
     expect(atualizacoes.filter(a => !("status" in a))).toEqual([
       expect.objectContaining({ meetingId: null, meetingSuggestionId: null }),
+      { destinatario: null, updatedAt: expect.any(Number) },
       { meetingId: null, updatedAt: expect.any(Number) },
     ]);
+    expect(escopos).toContainEqual({ sql: "(`resumo_por_email`.`owner_id` = ? and `resumo_por_email`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
     expect(escopos).toContainEqual({ sql: "(`agenda_reunioes`.`owner_id` = ? and `agenda_reunioes`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
   });
 

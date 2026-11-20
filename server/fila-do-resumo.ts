@@ -472,8 +472,9 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   if (!alvo || parada) return;
   const resumoGravado = await executar(db, alvo, alvo.fase, agora);
   // O e-mail automático do resumo (H22), desligado por padrão: só para a dona
-  // que o ligou, e só no primeiro resumo da reunião. Nunca lança.
-  if (resumoGravado) await envioAutomaticoDoResumo(alvo.ownerId, alvo.meetingId);
+  // que o ligou, e só no primeiro resumo da reunião. Sem await: a Resend lenta
+  // não segura o mapa nem o próximo resumo. Nunca rejeita (o erro vai ao log).
+  if (resumoGravado) void envioAutomaticoDoResumo(alvo.ownerId, alvo.meetingId);
   if (resumoGravado && !parada) await executar(db, alvo, "mapa", Date.now());
 }
 

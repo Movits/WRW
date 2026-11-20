@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
-const { destinatariasDoPedido, hashDoEmail } = await import("./resumo-por-email");
+const { comPrazo, destinatariasDoPedido, hashDoEmail, PRAZO_DA_RESEND_MS } = await import("./resumo-por-email");
 const {
   DESTINATARIAS_POR_ENVIO_MAX,
   EMAILS_DIGITADOS_POR_ENVIO_MAX,
@@ -91,6 +91,27 @@ describe("destinatariasDoPedido", () => {
   it("'para mim' com a conta sem e-mail: PRECONDITION_FAILED", () => {
     expect(recusa(() => destinatariasDoPedido(pedido({ paraMim: true }), { ...contexto, emailDaDona: null })))
       .toMatchObject({ code: "PRECONDITION_FAILED", message: MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA });
+  });
+});
+
+describe("comPrazo: a Resend que não responde não prende a dona", () => {
+  it("a resposta que chega no prazo vale; a que não chega vira o valor do estouro", async () => {
+    vi.useFakeTimers();
+    try {
+      await expect(comPrazo(Promise.resolve([true]), PRAZO_DA_RESEND_MS, () => [false])).resolves.toEqual([true]);
+      const presa = comPrazo(new Promise<boolean[]>(() => {}), PRAZO_DA_RESEND_MS, () => [false]);
+      await vi.advanceTimersByTimeAsync(PRAZO_DA_RESEND_MS - 1);
+      let resolvida = false;
+      void presa.then(() => { resolvida = true; });
+      await Promise.resolve();
+      expect(resolvida).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(presa).resolves.toEqual([false]);
+      // Resolvida no prazo, o relógio sai: nada fica agendado.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

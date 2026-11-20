@@ -208,6 +208,22 @@ async function temResumoGravado(ex: Executor, ownerId: string, meetingId: string
 
 type LinhaParaMandar = { id: string; destinatario: string; origem: OrigemDoResumoPorEmail; automatico: boolean; idioma: string };
 
+/** Quanto a resposta da Resend pode demorar antes de o pedido ficar 'falhou' (e a dona, sem a roda girando). */
+export const PRAZO_DA_RESEND_MS = 30_000;
+
+/**
+ * A promessa, ou o valor de `seEstourar` passado o prazo. O que a Resend
+ * aceitar depois do prazo pode sair mesmo assim: o "Tentar de novo" mandaria
+ * de novo. Aceito: é raro, e sem o prazo a tela da dona ficaria presa.
+ */
+export function comPrazo<T>(promessa: Promise<T>, ms: number, seEstourar: () => T): Promise<T> {
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const estouro = new Promise<T>(resolve => {
+    relogio = setTimeout(() => resolve(seEstourar()), ms);
+  });
+  return Promise.race([promessa, estouro]).finally(() => clearTimeout(relogio));
+}
+
 /**
  * Manda as linhas pela Resend e grava o resultado de cada uma. O e-mail é
  * montado agora, com o token de agora: o "Tentar de novo" depois de desligar e
@@ -231,7 +247,11 @@ async function mandarAsLinhas(
     });
     return { to: linha.destinatario, subject: assunto, html, text };
   });
-  const aceitos = await sendEmailBatch(emails).catch(() => emails.map(() => false));
+  const nenhum = () => emails.map(() => false);
+  const aceitos = await comPrazo(sendEmailBatch(emails).catch(nenhum), PRAZO_DA_RESEND_MS, () => {
+    console.error(`[ResumoPorEmail] a Resend não respondeu em ${PRAZO_DA_RESEND_MS / 1000} s (reunião ${meetingId}); os e-mails ficam para o "Tentar de novo".`);
+    return nenhum();
+  });
   const agora = Date.now();
   const saiu = linhas.filter((_, posicao) => aceitos[posicao] === true).map(linha => linha.id);
   const naoSaiu = linhas.filter((_, posicao) => aceitos[posicao] !== true).map(linha => linha.id);
