@@ -8,6 +8,7 @@ import { exigirDb } from "../db";
 // Inteligente, item 16): o registro mora no fim de recalculatePrivateMatches.
 import { recalculatePrivateMatches, slugifyMatchTag } from "../match-service";
 import { protectedProcedure, router } from "../_core/trpc";
+import { origemDasConexoes } from "../reuniao-no-match";
 import { hasValidConsent } from "./consent";
 
 const matchItem = z.object({ contactId: z.number().int().positive(), tagLabel: z.string().trim().min(2).max(200), category: z.string().trim().max(120).optional(), description: z.string().trim().max(2000).optional() });
@@ -53,7 +54,11 @@ export const intelligentMatchesRouter = router({
       db.select().from(privateContacts).where(eq(privateContacts.ownerId, ctx.user.openId)),
     ]);
     const names = new Map(contacts.map(contact => [contact.id, { name: contact.fullName, company: contact.company, jobTitle: contact.jobTitle }]));
-    return matches.map(match => ({ ...match, contactA: names.get(match.contactAId), contactB: names.get(match.contactBId) }));
+    // N5: a reunião de que a conexão nasceu (o item confirmado que ela cita), com o trecho.
+    const origens = await origemDasConexoes(ctx.user.openId, matches);
+    return matches.map(match => ({
+      ...match, contactA: names.get(match.contactAId), contactB: names.get(match.contactBId), origem: origens.get(match.id) ?? null,
+    }));
   }),
 
   // Devolve, junto com cada contato, o que já foi registrado para ele. A tela

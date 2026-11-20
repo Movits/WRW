@@ -200,8 +200,10 @@ export async function lerMembrosParaCruzamento(excetoUserId: number): Promise<Me
   const comDeclaracao = perfis
     .map(perfil => ({
       userId: Number(perfil.userId),
-      tenho: textos(perfil.whatIHave).slice(0, TETO_DE_ITENS_POR_LADO).map(label => ({ label, category: null })),
-      preciso: textos(necessidadesEscritasDoPerfil(perfil)).slice(0, TETO_DE_ITENS_POR_LADO).map(label => ({ label, category: null })),
+      // Acima do teto, ficam os itens mais NOVOS: a reunião (N5) acrescenta no fim de "O que tenho" e das
+      // demandas, e o corte pelos primeiros tirava justamente o que a dona acabou de confirmar (revisão da N5).
+      tenho: textos(perfil.whatIHave).slice(-TETO_DE_ITENS_POR_LADO).map(label => ({ label, category: null })),
+      preciso: textos(necessidadesEscritasDoPerfil(perfil)).slice(-TETO_DE_ITENS_POR_LADO).map(label => ({ label, category: null })),
     }))
     .filter(membro => membro.tenho.length || membro.preciso.length);
   if (!comDeclaracao.length) return [];

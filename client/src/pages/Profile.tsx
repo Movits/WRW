@@ -13,6 +13,7 @@ import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
 import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
+import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
 import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
 import { DemandasDoPerfil, EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, lerDemandas, type DemandaDetalhada } from "@shared/o-que-preciso";
@@ -98,6 +99,38 @@ function TagButton({
       <span className="uppercase">{label}</span>
       {selected && <CheckCircle size={13} className="text-amber-400 ml-auto" />}
     </button>
+  );
+}
+
+// ─── "O que tenho" escrito à mão ou vindo das reuniões ────────────────────────
+// A lista grava os ids das opções fixas e, como mais um item, o texto livre: o
+// "Outros" do cadastro e, desde a N5, o que a dona confirmou das reuniões. A
+// tela mostrava só as opções fixas, e o texto ficava invisível (achado 6 do
+// desenho da N5).
+const IDS_DAS_OPCOES_DO_QUE_TENHO = new Set(WHAT_I_HAVE_OPTIONS.map(opcao => opcao.id));
+function itensEscritos(lista: string[]): string[] {
+  return lista.filter(item => typeof item === "string" && item.trim() && !IDS_DAS_OPCOES_DO_QUE_TENHO.has(item));
+}
+
+function ItensEscritosDoQueTenho({ itens, aoRemover }: { itens: string[]; aoRemover?: (item: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <p className="text-xs text-white/30 uppercase tracking-wider mb-2">{t("reuniaoNoMatch.outrosItens")}</p>
+      <ul className="flex flex-wrap gap-2">
+        {itens.map(item => (
+          <li key={item} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/8 py-1 ps-3 pe-1.5 text-sm text-amber-200/85">
+            <span dir="auto" className="min-w-0 break-words">{item}</span>
+            {aoRemover && (
+              <button type="button" onClick={() => aoRemover(item)} aria-label={t("reuniaoNoMatch.removerItem", { item })}
+                className="rounded-full p-1 text-amber-200/70 hover:bg-white/10 hover:text-white">
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -383,6 +416,11 @@ export default function Profile() {
           onCompletar={editing ? undefined : startEditing}
         />
 
+        {/* N5: o que a dona disse nas reuniões ("Sou eu"), esperando a
+            confirmação dela para entrar no perfil. Fora da edição: confirmar
+            grava no perfil, e o Salvar da edição regravaria a lista velha. */}
+        {!editing && <SugestoesDasReunioes />}
+
         {/* ── SEÇÃO 1: QUEM SOU ── */}
         <Section
           icon={<User size={16} />}
@@ -623,19 +661,28 @@ export default function Profile() {
           subtitle={t("profile.sections.whatIHaveSubtitle")}
         >
           {editing ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
-                <TagButton
-                  key={opt.id}
-                  icon={opt.icon}
-                  label={opt.label}
-                  selected={whatIHave.includes(opt.id)}
-                  onClick={() => toggleTag(whatIHave, setWhatIHave, opt.id)}
-                />
-              ))}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
+                  <TagButton
+                    key={opt.id}
+                    icon={opt.icon}
+                    label={opt.label}
+                    selected={whatIHave.includes(opt.id)}
+                    onClick={() => toggleTag(whatIHave, setWhatIHave, opt.id)}
+                  />
+                ))}
+              </div>
+              {/* Os itens escritos ("Outros" do cadastro e os que a dona
+                  confirmou das reuniões, N5): cada um com o X, que tira da
+                  lista no Salvar. */}
+              {itensEscritos(whatIHave).length > 0 && (
+                <ItensEscritosDoQueTenho itens={itensEscritos(whatIHave)} aoRemover={item => setWhatIHave(whatIHave.filter(atual => atual !== item))} />
+              )}
             </div>
           ) : (
             profileWhatIHave.length > 0 ? (
+              <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.filter(o => profileWhatIHave.includes(o.id)).map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
                   <div key={opt.id} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20">
@@ -647,6 +694,8 @@ export default function Profile() {
                     <CheckCircle size={13} className="text-amber-400 ml-auto" />
                   </div>
                 ))}
+              </div>
+              {itensEscritos(profileWhatIHave).length > 0 && <ItensEscritosDoQueTenho itens={itensEscritos(profileWhatIHave)} />}
               </div>
             ) : (
               <div className="text-center py-6">

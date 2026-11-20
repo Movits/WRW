@@ -448,3 +448,26 @@ describe("rede global — SIM/NÃO por contato", () => {
     await expect(definirDisponibilidade(DONA, 999, true)).rejects.toBeInstanceOf(ContatoNaoEncontrado);
   });
 });
+
+// Revisão da N5: a reunião acrescenta no fim de "O que tenho" e das demandas da dona; acima do teto de itens por
+// lado, o corte pelos primeiros tirava do cruzamento justamente o item que ela acabou de confirmar.
+describe("rede global — o perfil da membra acima do teto de itens: o mais novo cruza", () => {
+  it("o item mais novo de O que tenho entra no cruzamento; o corte tira os mais antigos", async () => {
+    const antigos = Array.from({ length: TETO_DE_ITENS_POR_LADO }, (_, i) => `Item antigo número ${i + 1}`);
+    redeDeTeste({ membra: { userId: 30, whatIHave: JSON.stringify([...antigos, "Capital para expansão"]), whatINeed: "[]" } });
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    const comMembra = resposta.conexoes.find(c => c.origem === "NETWORK_PLATFORM_MATCH");
+    expect(comMembra?.encontros).toEqual([expect.objectContaining({ tem: "Capital para expansão", precisa: "Capital para expansão" })]);
+  });
+
+  it("a demanda mais nova de O que preciso também", async () => {
+    const antigas = Array.from({ length: TETO_DE_ITENS_POR_LADO }, (_, i) => ({ id: `d${i}`, category: "outra_necessidade", description: `Demanda antiga número ${i + 1}` }));
+    redeDeTeste({ membra: {
+      userId: 30, whatIHave: "[]", whatINeed: JSON.stringify(["outra_necessidade"]),
+      whatINeedDetails: JSON.stringify([...antigas, { id: "nova", category: "outra_necessidade", description: "Distribuição de medicamentos" }]),
+    } });
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    const comMembra = resposta.conexoes.find(c => c.origem === "NETWORK_PLATFORM_MATCH");
+    expect(comMembra?.encontros).toEqual([expect.objectContaining({ tem: "Distribuição de medicamentos", precisa: "Distribuição de medicamentos" })]);
+  });
+});
