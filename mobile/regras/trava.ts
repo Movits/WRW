@@ -58,6 +58,30 @@ export function avisoCabe(estado: { caminho: string; biometria: boolean; ligada:
   return estado.biometria && !estado.ligada && !estado.avisoRespondido && ehAreaLogada(estado.caminho);
 }
 
+/** O texto que o sistema mostra no pedido do Face ID ou da digital, ao ligar e ao desligar. */
+export const MOTIVO_PARA_LIGAR = "Ligar o Face ID ou a digital na WRW";
+export const MOTIVO_PARA_DESLIGAR = "Desligar o Face ID ou a digital na WRW";
+
+/**
+ * Liga ou desliga a trava, sempre passando pela pessoa. Ao ligar, a conferência
+ * prova que a biometria funciona neste celular. Ao desligar, prova que quem
+ * desliga é a dona, e não alguém que pegou o celular com o app aberto (a trava
+ * só volta depois de 10 minutos em segundo plano; revisão da #223). Sem o OK,
+ * nada é gravado. Pedido igual ao estado atual não pede nada. Devolve se a
+ * trava ficou ligada.
+ */
+export async function mudarATrava(
+  pedido: { ligar: boolean; ligadaAgora: boolean },
+  conferir: (motivo: string) => Promise<boolean>,
+  gravar: (ligada: boolean) => Promise<void>,
+): Promise<boolean> {
+  if (pedido.ligar === pedido.ligadaAgora) return pedido.ligadaAgora;
+  const ok = await conferir(pedido.ligar ? MOTIVO_PARA_LIGAR : MOTIVO_PARA_DESLIGAR);
+  if (!ok) return pedido.ligadaAgora;
+  await gravar(pedido.ligar);
+  return pedido.ligar;
+}
+
 /** O que o site (o Perfil, dentro do app) pede ao app. */
 export type PedidoDoSite = { tipo: "wrw:trava"; acao: "estado" | "ligar" | "desligar" };
 

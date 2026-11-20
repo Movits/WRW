@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   avisoCabe,
   ehAreaLogada,
   lerPedidoDoSite,
   MINUTOS_PARA_TRAVAR_DE_NOVO,
+  MOTIVO_PARA_DESLIGAR,
+  MOTIVO_PARA_LIGAR,
+  mudarATrava,
   precisaTravarAoVoltar,
   scriptDoEstado,
 } from "../mobile/regras/trava";
@@ -81,5 +84,49 @@ describe("a conversa com o Perfil do site", () => {
     expect(script).toContain('new CustomEvent("wrw:trava", { detail: {"disponivel":true,"ligada":false} })');
     expect(script).not.toContain("extra");
     expect(script.trim().endsWith("true;")).toBe(true);
+  });
+});
+
+describe("ligar e desligar a trava passam pela pessoa", () => {
+  function dubles(respostaDaPessoa: boolean) {
+    const conferir = vi.fn(async (_motivo: string) => respostaDaPessoa);
+    const gravar = vi.fn(async (_ligada: boolean) => {});
+    return { conferir, gravar };
+  }
+
+  it("desligar pede o Face ID ou a digital antes e só apaga depois do OK (revisão da #223)", async () => {
+    const { conferir, gravar } = dubles(true);
+    const ficouLigada = await mudarATrava({ ligar: false, ligadaAgora: true }, conferir, gravar);
+    expect(conferir).toHaveBeenCalledWith(MOTIVO_PARA_DESLIGAR);
+    expect(gravar).toHaveBeenCalledWith(false);
+    expect(conferir.mock.invocationCallOrder[0]).toBeLessThan(gravar.mock.invocationCallOrder[0]);
+    expect(ficouLigada).toBe(false);
+  });
+
+  it("desligar sem o OK (cancelou, ou não é a dona): a trava segue ligada e nada é gravado", async () => {
+    const { conferir, gravar } = dubles(false);
+    const ficouLigada = await mudarATrava({ ligar: false, ligadaAgora: true }, conferir, gravar);
+    expect(conferir).toHaveBeenCalledTimes(1);
+    expect(gravar).not.toHaveBeenCalled();
+    expect(ficouLigada).toBe(true);
+  });
+
+  it("ligar também pede antes, e sem o OK segue desligada", async () => {
+    const comOk = dubles(true);
+    expect(await mudarATrava({ ligar: true, ligadaAgora: false }, comOk.conferir, comOk.gravar)).toBe(true);
+    expect(comOk.conferir).toHaveBeenCalledWith(MOTIVO_PARA_LIGAR);
+    expect(comOk.gravar).toHaveBeenCalledWith(true);
+
+    const semOk = dubles(false);
+    expect(await mudarATrava({ ligar: true, ligadaAgora: false }, semOk.conferir, semOk.gravar)).toBe(false);
+    expect(semOk.gravar).not.toHaveBeenCalled();
+  });
+
+  it("pedido igual ao estado atual não pede nada nem grava", async () => {
+    const { conferir, gravar } = dubles(true);
+    expect(await mudarATrava({ ligar: true, ligadaAgora: true }, conferir, gravar)).toBe(true);
+    expect(await mudarATrava({ ligar: false, ligadaAgora: false }, conferir, gravar)).toBe(false);
+    expect(conferir).not.toHaveBeenCalled();
+    expect(gravar).not.toHaveBeenCalled();
   });
 });
