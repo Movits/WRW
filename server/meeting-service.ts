@@ -12,6 +12,7 @@ import {
   meetingSummaryItems,
   meetingSummaryTranslations,
   privateContacts,
+  resumoPorEmail,
   userProfiles,
   users,
 } from "../drizzle/schema";
@@ -1956,6 +1957,12 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
+  // sai com a reunião, também antes do bucket. A linha fica, sem ele, para o
+  // teto da dona (server/resumo-por-email.ts): excluir a reunião não devolve
+  // e-mails ao teto.
+  await db.update(resumoPorEmail).set({ destinatario: null, updatedAt: now() })
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId)));
   // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
   // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
   // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião

@@ -86,43 +86,58 @@ export { ACAO_LINK_LIGADO };
 export async function ligarLinkAberto(
   ownerId: string,
   meetingId: string,
-  prova: {
-    userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string;
-    versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES;
-  },
+  prova: ProvaDoLinkLigado,
 ): Promise<string> {
   const db = await exigirDb();
-  return db.transaction(async tx => {
-    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
-    await tx.update(meetings).set({ shareToken: gerarTokenDoLink() })
-      .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken)));
-    const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
-      .where(daDona).limit(1);
-    // Lançar aqui desfaz o UPDATE.
-    if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
-    // Em gravação, processando ou com falha não há o que compartilhar ainda.
-    if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
-    await tx.insert(auditLogs).values({
-      userId: prova.userId,
-      action: ACAO_LINK_LIGADO,
-      resource: "meetings",
-      resourceId: meetingId,
-      details: {
-        autorizacaoDasPessoas: true,
-        // Ausente vale 1: a aba velha, com a frase antiga, nunca grava "2".
-        versaoDaAutorizacao: prova.versaoDaAutorizacao === VERSAO_DA_AUTORIZACAO_COM_NOMES ? VERSAO_DA_AUTORIZACAO_COM_NOMES : 1,
-        idioma: prova.idioma,
-        textoExibido: prova.textoExibido,
-        textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
-      },
-      // Os mesmos cortes do createAuditLog (server/security.ts).
-      ipAddress: prova.ipAddress.substring(0, 45),
-      userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
-      status: "success",
-      riskLevel: "medium",
-    });
-    return reuniao.shareToken;
+  return db.transaction(tx => ligarLinkAbertoNaTransacao(tx, ownerId, meetingId, prova));
+}
+
+/** A palavra da dona ao ligar o link, como vai para a auditoria. */
+export type ProvaDoLinkLigado = {
+  userId: number; ipAddress: string; userAgent: string | undefined; idioma: string; textoExibido: string;
+  versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES;
+  /** De onde a dona ligou, quando não foi pelo painel do link: o resumo por e-mail (H22) liga o link junto com o envio. */
+  origem?: "resumo_por_email";
+};
+
+type Transacao = Parameters<Parameters<Awaited<ReturnType<typeof exigirDb>>["transaction"]>[0]>[0];
+
+/**
+ * O corpo de ligarLinkAberto, na transação de quem chama: o resumo por e-mail
+ * (H22, server/resumo-por-email.ts) liga o link e grava os envios numa
+ * transação só, e a recusa de um desfaz o outro. Lançar aqui desfaz o UPDATE.
+ */
+export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<string> {
+  const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
+  await tx.update(meetings).set({ shareToken: gerarTokenDoLink() })
+    .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken)));
+  const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
+    .where(daDona).limit(1);
+  // Lançar aqui desfaz o UPDATE.
+  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // Em gravação, processando ou com falha não há o que compartilhar ainda.
+  if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
+  await tx.insert(auditLogs).values({
+    userId: prova.userId,
+    action: ACAO_LINK_LIGADO,
+    resource: "meetings",
+    resourceId: meetingId,
+    details: {
+      autorizacaoDasPessoas: true,
+      // Ausente vale 1: a aba velha, com a frase antiga, nunca grava "2".
+      versaoDaAutorizacao: prova.versaoDaAutorizacao === VERSAO_DA_AUTORIZACAO_COM_NOMES ? VERSAO_DA_AUTORIZACAO_COM_NOMES : 1,
+      idioma: prova.idioma,
+      textoExibido: prova.textoExibido,
+      textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
+      ...(prova.origem ? { origem: prova.origem } : {}),
+    },
+    // Os mesmos cortes do createAuditLog (server/security.ts).
+    ipAddress: prova.ipAddress.substring(0, 45),
+    userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,
+    status: "success",
+    riskLevel: "medium",
   });
+  return reuniao.shareToken;
 }
 
 /** Desliga o link: quem tem o endereço perde o acesso na hora. Desligar duas vezes não é erro. */

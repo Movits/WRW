@@ -45,6 +45,8 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens.
   { tabela: "meeting_summary_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O resumo por e-mail (H22): o exame não manda e-mail, mas a conta QA que mandar sai com o resto.
+  { tabela: "resumo_por_email", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as

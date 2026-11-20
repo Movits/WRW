@@ -1,0 +1,581 @@
+import crypto from "crypto";
+import { TRPCError } from "@trpc/server";
+import { and, count, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { emailDoParticipanteValido } from "@shared/agenda";
+import { VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import {
+  DESTINATARIAS_POR_ENVIO_MAX,
+  EMAILS_DIGITADOS_POR_ENVIO_MAX,
+  EMAILS_POR_DONA_EM_24H,
+  EMAILS_POR_REUNIAO_EM_24H,
+  emailComparavel,
+  JANELA_DOS_TETOS_MS,
+  MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
+  MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
+  MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA,
+  MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO,
+  MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR,
+  MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
+  PENDENTE_PRESO_MS,
+  TENTATIVAS_POR_EMAIL_MAX,
+  type EstadoDoResumoPorEmail,
+  type OrigemDoResumoPorEmail,
+} from "@shared/resumo-por-email";
+import { rotaDaReuniao, rotaDaReuniaoAberta } from "@shared/rotas";
+import { agendaReunioes, auditLogs, meetings, meetingSummaries, resumoPorEmail, users } from "../drizzle/schema";
+import { sendEmailBatch } from "./_core/email";
+import { participantesDe } from "./agenda-de-reunioes";
+import { descreverErroDeBanco } from "./banco-indisponivel";
+import { exigirDb } from "./db";
+import { montarEmailDoResumo, type ModeloDoEmailDoResumo } from "./email-do-resumo";
+import { ligarLinkAbertoNaTransacao } from "./link-aberto-da-reuniao";
+import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+
+/**
+ * O resumo por e-mail (H22 do plano do gravador; HN-54 do HiNoter e R-33 da
+ * reunião de 11/11/2026). Com um toque no detalhe da reunião, a dona manda o
+ * link aberto (/r/{token}, o mesmo do "Compartilhar por link") para ela mesma,
+ * para participantes da agenda da reunião (H16a) e para e-mails que ela
+ * digita. Quem recebe não precisa de conta: o link abre o que já abria, com os
+ * nomes das vozes pela regra da H3b. O e-mail não leva nada da reunião além do
+ * título; o nome da conta da dona vai para quem recebe saber de quem é.
+ *
+ * As regras, nesta ordem, numa transação só:
+ *  1. a conta da dona travada (dois envios dela contam o teto um depois do
+ *     outro) e a reunião dela, pronta e com um resumo já gravado. Reunião de
+ *     outra conta é "não encontrada", como a que não existe;
+ *  2. quem recebe: as participantes escolhidas têm de estar na agenda da
+ *     reunião, os e-mails digitados passam pela regra do e-mail da agenda e
+ *     ninguém recebe duas vezes (sem diferença de caixa);
+ *  3. os tetos por reunião e por dona, nas últimas 24 h (shared/resumo-por-email.ts);
+ *  4. o link aberto ligado: desligado, só com a palavra da dona de que as
+ *     pessoas autorizaram (a mesma caixa do "Compartilhar", versão 2), que vai
+ *     para a auditoria (ligarLinkAbertoNaTransacao);
+ *  5. uma linha 'pendente' por e-mail e a auditoria MEETING_SUMMARY_EMAILED,
+ *     com quantos, de que origem e o hash de cada endereço (não o endereço).
+ * Depois, fora da transação, a Resend: o que ela aceita vira 'enviado', o que
+ * não aceita vira 'falhou', e o pedido fica guardado para o "Tentar de novo".
+ * Nada aqui diz se um e-mail digitado é de alguém da WRW.
+ *
+ * O envio automático (desligado por padrão, users.resumoPorEmailAutomatico)
+ * manda só para a dona, quando o primeiro resumo da reunião fica pronto, com o
+ * link da reunião na conta dela, e não o link aberto: ligar o link pede a
+ * palavra dela, reunião a reunião (decisão do Roberto de 12/11/2026).
+ */
+
+type Banco = Awaited<ReturnType<typeof exigirDb>>;
+type Transacao = Parameters<Parameters<Banco["transaction"]>[0]>[0];
+type Executor = Pick<Transacao, "select">;
+
+/** A auditoria de cada envio, do mandar de novo e da troca do envio automático. */
+export const ACAO_RESUMO_POR_EMAIL = "MEETING_SUMMARY_EMAILED";
+export const ACAO_RESUMO_POR_EMAIL_DE_NOVO = "MEETING_SUMMARY_EMAIL_RETRIED";
+export const ACAO_ENVIO_AUTOMATICO_DO_RESUMO = "MEETING_SUMMARY_EMAIL_AUTO";
+
+/** Quantos envios o painel mostra, do mais novo ao mais velho. */
+export const ENVIOS_NO_PAINEL_MAX = 60;
+
+/** A dona, como o router a conhece (ctx.user). */
+export type DonaDoEnvio = { id: number; openId: string };
+
+/** De onde veio o pedido, para a auditoria. */
+export type RequisicaoDoEnvio = { ipAddress: string; userAgent: string | undefined };
+
+/** O pedido da tela: quem recebe e, com o link desligado, a palavra da dona para ligá-lo. */
+export type PedidoDoResumoPorEmail = {
+  paraMim: boolean;
+  participantes: string[];
+  outros: string[];
+  autorizacao?: { idioma: string; textoExibido: string; versaoDaAutorizacao?: typeof VERSAO_DA_AUTORIZACAO_COM_NOMES };
+};
+
+export type Destinataria = { email: string; origem: OrigemDoResumoPorEmail };
+
+function recusa(code: "NOT_FOUND" | "BAD_REQUEST" | "PRECONDITION_FAILED" | "TOO_MANY_REQUESTS" | "SERVICE_UNAVAILABLE", message: string): TRPCError {
+  return new TRPCError({ code, message });
+}
+
+/** A origem dos links do e-mail (FRONTEND_URL), sem barra no fim, ou null. */
+function siteDosLinks(): string | null {
+  const site = process.env.FRONTEND_URL?.trim().replace(/\/+$/, "");
+  return site || null;
+}
+
+/** O hash do endereço na auditoria: prova para quem foi, sem guardar o endereço em claro. */
+export function hashDoEmail(email: string): string {
+  return crypto.createHash("sha256").update(emailComparavel(email)).digest("hex");
+}
+
+/** O tinyint(1) chega como booleano pelo Drizzle, mas pode chegar como 0 e 1. */
+function ligado(valor: unknown): boolean {
+  return valor === true || valor === 1;
+}
+
+/**
+ * Quem recebe, sem repetir ninguém: a dona (o e-mail da conta, nunca o que a
+ * tela manda), as participantes escolhidas, que têm de estar na agenda da
+ * reunião (a grafia gravada lá vale), e os e-mails digitados. A primeira origem
+ * vence: a dona que digita o próprio e-mail recebe o dela. Recusa com a frase
+ * do motivo, que a tela traduz.
+ */
+export function destinatariasDoPedido(
+  pedido: Pick<PedidoDoResumoPorEmail, "paraMim" | "participantes" | "outros">,
+  contexto: { emailDaDona: string | null; daAgenda: string[] },
+): Destinataria[] {
+  const vistas = new Set<string>();
+  const lista: Destinataria[] = [];
+  const somar = (email: string, origem: OrigemDoResumoPorEmail) => {
+    const chave = emailComparavel(email);
+    if (vistas.has(chave)) return;
+    vistas.add(chave);
+    lista.push({ email: email.trim(), origem });
+  };
+  if (pedido.paraMim) {
+    if (!contexto.emailDaDona) throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA);
+    somar(contexto.emailDaDona, "dona");
+  }
+  const agenda = new Map(contexto.daAgenda.map(email => [emailComparavel(email), email.trim()]));
+  for (const escolhida of pedido.participantes) {
+    const naAgenda = agenda.get(emailComparavel(escolhida));
+    if (!naAgenda) throw recusa("BAD_REQUEST", MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA);
+    somar(naAgenda, "participante");
+  }
+  const digitados = pedido.outros.map(email => email.trim()).filter(Boolean);
+  if (new Set(digitados.map(emailComparavel)).size > EMAILS_DIGITADOS_POR_ENVIO_MAX) throw recusa("BAD_REQUEST", MENSAGEM_RESUMO_POR_EMAIL_DEMAIS);
+  for (const email of digitados) {
+    if (!emailDoParticipanteValido(email)) throw recusa("BAD_REQUEST", MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO);
+    somar(email, "digitado");
+  }
+  if (!lista.length) throw recusa("BAD_REQUEST", MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA);
+  if (lista.length > DESTINATARIAS_POR_ENVIO_MAX) throw recusa("BAD_REQUEST", MENSAGEM_RESUMO_POR_EMAIL_DEMAIS);
+  return lista;
+}
+
+/** As participantes da reunião da agenda ligada a esta gravação, só as que têm e-mail válido. */
+async function participantesComEmail(ex: Executor, ownerId: string, meetingId: string): Promise<Array<{ nome: string | null; email: string }>> {
+  const [agenda] = await ex.select({ participantes: agendaReunioes.participantes }).from(agendaReunioes)
+    .where(and(eq(agendaReunioes.meetingId, meetingId), eq(agendaReunioes.ownerId, ownerId)))
+    .limit(1);
+  const vistas = new Set<string>();
+  const lista: Array<{ nome: string | null; email: string }> = [];
+  for (const participante of participantesDe(agenda?.participantes)) {
+    const email = participante.email?.trim();
+    if (!email || !emailDoParticipanteValido(email) || vistas.has(emailComparavel(email))) continue;
+    vistas.add(emailComparavel(email));
+    lista.push({ nome: participante.nome?.trim() || null, email });
+  }
+  return lista;
+}
+
+/**
+ * Os tetos, contados nas linhas das últimas 24 h: primeiro o da reunião, que
+ * diz mais à dona, depois o dela. A linha da reunião excluída perde o endereço
+ * e fica: segue contando para a dona.
+ */
+async function conferirTetos(ex: Executor, ownerId: string, meetingId: string, novos: number, agora: number): Promise<void> {
+  const desde = agora - JANELA_DOS_TETOS_MS;
+  const [daReuniao] = await ex.select({ total: count() }).from(resumoPorEmail)
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId), gt(resumoPorEmail.createdAt, desde)));
+  if (Number(daReuniao?.total ?? 0) + novos > EMAILS_POR_REUNIAO_EM_24H) throw recusa("TOO_MANY_REQUESTS", MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO);
+  const [daDona] = await ex.select({ total: count() }).from(resumoPorEmail)
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), gt(resumoPorEmail.createdAt, desde)));
+  if (Number(daDona?.total ?? 0) + novos > EMAILS_POR_DONA_EM_24H) throw recusa("TOO_MANY_REQUESTS", MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA);
+}
+
+/** A reunião da dona, travada até o fim da transação, ou NOT_FOUND. */
+async function reuniaoTravada(tx: Transacao, ownerId: string, meetingId: string) {
+  const [reuniao] = await tx.select({ status: meetings.status, titulo: meetings.title, idioma: meetings.language, token: meetings.shareToken })
+    .from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)))
+    .for("update");
+  if (!reuniao || reuniao.status === "deleted") throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  return reuniao;
+}
+
+/** Há um resumo gravado (a versão sobe a cada resumo que a fila grava; o refeito mantém a anterior à vista). */
+async function temResumoGravado(ex: Executor, ownerId: string, meetingId: string): Promise<{ versao: number } | null> {
+  const [resumo] = await ex.select({ versao: meetingSummaries.version }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)))
+    .limit(1);
+  return resumo && Number(resumo.versao) > 0 ? { versao: Number(resumo.versao) } : null;
+}
+
+type LinhaParaMandar = { id: string; destinatario: string; origem: OrigemDoResumoPorEmail; automatico: boolean; idioma: string };
+
+/** Quanto a resposta da Resend pode demorar antes de o pedido ficar 'falhou' (e a dona, sem a roda girando). */
+export const PRAZO_DA_RESEND_MS = 30_000;
+
+/**
+ * A promessa, ou o valor de `seEstourar` passado o prazo. O que a Resend
+ * aceitar depois do prazo pode sair mesmo assim: o "Tentar de novo" mandaria
+ * de novo. Aceito: é raro, e sem o prazo a tela da dona ficaria presa.
+ */
+export function comPrazo<T>(promessa: Promise<T>, ms: number, seEstourar: () => T): Promise<T> {
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const estouro = new Promise<T>(resolve => {
+    relogio = setTimeout(() => resolve(seEstourar()), ms);
+  });
+  return Promise.race([promessa, estouro]).finally(() => clearTimeout(relogio));
+}
+
+/**
+ * Manda as linhas pela Resend e grava o resultado de cada uma. O e-mail é
+ * montado agora, com o token de agora: o "Tentar de novo" depois de desligar e
+ * ligar o link manda o link novo. A falha da Resend não lança: a linha fica
+ * 'falhou', e quem chama decide a resposta.
+ */
+async function mandarAsLinhas(
+  db: Banco,
+  ownerId: string,
+  meetingId: string,
+  linhas: LinhaParaMandar[],
+  contexto: { site: string; token: string | null; titulo: string; nomeDaDona: string | null },
+): Promise<{ enviados: number; falharam: number }> {
+  const emails = linhas.map(linha => {
+    const modelo: ModeloDoEmailDoResumo = linha.automatico ? "pronto" : linha.origem === "dona" ? "dona" : "participante";
+    const endereco = modelo === "pronto" || !contexto.token
+      ? `${contexto.site}${rotaDaReuniao(meetingId)}`
+      : `${contexto.site}${rotaDaReuniaoAberta(contexto.token)}`;
+    const { assunto, html, text } = montarEmailDoResumo({
+      modelo, idioma: idiomaDaReuniao(linha.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO, titulo: contexto.titulo, dona: contexto.nomeDaDona, endereco,
+    });
+    return { to: linha.destinatario, subject: assunto, html, text };
+  });
+  const nenhum = () => emails.map(() => false);
+  const aceitos = await comPrazo(sendEmailBatch(emails).catch(nenhum), PRAZO_DA_RESEND_MS, () => {
+    console.error(`[ResumoPorEmail] a Resend não respondeu em ${PRAZO_DA_RESEND_MS / 1000} s (reunião ${meetingId}); os e-mails ficam para o "Tentar de novo".`);
+    return nenhum();
+  });
+  const agora = Date.now();
+  const saiu = linhas.filter((_, posicao) => aceitos[posicao] === true).map(linha => linha.id);
+  const naoSaiu = linhas.filter((_, posicao) => aceitos[posicao] !== true).map(linha => linha.id);
+  const tentativa = sql`${resumoPorEmail.tentativas} + 1`;
+  if (saiu.length) {
+    await db.update(resumoPorEmail).set({ status: "enviado", enviadoEm: agora, updatedAt: agora, tentativas: tentativa })
+      .where(and(eq(resumoPorEmail.ownerId, ownerId), inArray(resumoPorEmail.id, saiu)));
+  }
+  if (naoSaiu.length) {
+    await db.update(resumoPorEmail).set({ status: "falhou", updatedAt: agora, tentativas: tentativa })
+      .where(and(eq(resumoPorEmail.ownerId, ownerId), inArray(resumoPorEmail.id, naoSaiu)));
+    // Sem os endereços no log: o id da reunião basta para achar as linhas.
+    console.error(`[ResumoPorEmail] ${naoSaiu.length} de ${linhas.length} e-mail(s) da reunião ${meetingId} não saíram; ficam para o "Tentar de novo".`);
+  }
+  return { enviados: saiu.length, falharam: naoSaiu.length };
+}
+
+export type ResultadoDoResumoPorEmail = { enviados: number; falharam: number; linkLigadoAgora: boolean };
+
+/** O toque da dona: ver o comentário do módulo. */
+export async function mandarResumoPorEmail(
+  dona: DonaDoEnvio,
+  meetingId: string,
+  pedido: PedidoDoResumoPorEmail,
+  requisicao: RequisicaoDoEnvio,
+): Promise<ResultadoDoResumoPorEmail> {
+  const site = siteDosLinks();
+  if (!site) {
+    // Sem a origem não há link para mandar: nada é gravado, e o link não liga.
+    console.error("[ResumoPorEmail] FRONTEND_URL não definida: é a origem do link do e-mail, e não tem valor padrão.");
+    throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
+  }
+  const db = await exigirDb();
+  const agora = Date.now();
+  const lote = crypto.randomUUID();
+  const preparado = await db.transaction(async tx => {
+    // A conta travada: os envios da mesma dona, em abas ou reuniões diferentes, contam o teto em fila.
+    const [conta] = await tx.select({ email: users.email, nome: users.name }).from(users)
+      .where(and(eq(users.id, dona.id), eq(users.openId, dona.openId))).for("update");
+    if (!conta) throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    const reuniao = await reuniaoTravada(tx, dona.openId, meetingId);
+    if (reuniao.status !== "ready" || !(await temResumoGravado(tx, dona.openId, meetingId))) {
+      throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO);
+    }
+    const daAgenda = (await participantesComEmail(tx, dona.openId, meetingId)).map(participante => participante.email);
+    const destinatarias = destinatariasDoPedido(pedido, { emailDaDona: conta.email?.trim() || null, daAgenda });
+    await conferirTetos(tx, dona.openId, meetingId, destinatarias.length, agora);
+
+    let token = reuniao.token;
+    const linkLigadoAgora = !token;
+    if (!token) {
+      if (!pedido.autorizacao) throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO);
+      token = await ligarLinkAbertoNaTransacao(tx, dona.openId, meetingId, {
+        userId: dona.id,
+        ipAddress: requisicao.ipAddress,
+        userAgent: requisicao.userAgent,
+        idioma: pedido.autorizacao.idioma,
+        textoExibido: pedido.autorizacao.textoExibido,
+        versaoDaAutorizacao: pedido.autorizacao.versaoDaAutorizacao,
+        origem: "resumo_por_email",
+      });
+    }
+
+    const idioma: IdiomaDaReuniao = idiomaDaReuniao(reuniao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+    const linhas = destinatarias.map(destinataria => ({
+      id: crypto.randomUUID(), meetingId, ownerId: dona.openId, loteId: lote,
+      destinatario: destinataria.email, origem: destinataria.origem, idioma,
+      status: "pendente" as const, automatico: false, tentativas: 0, createdAt: agora, updatedAt: agora,
+    }));
+    await tx.insert(resumoPorEmail).values(linhas);
+    // A prova do pedido, na mesma transação: sem ela, nada é gravado nem sai.
+    await tx.insert(auditLogs).values({
+      userId: dona.id,
+      action: ACAO_RESUMO_POR_EMAIL,
+      resource: "meetings",
+      resourceId: meetingId,
+      details: {
+        lote,
+        quantidade: linhas.length,
+        porOrigem: {
+          dona: destinatarias.filter(d => d.origem === "dona").length,
+          participante: destinatarias.filter(d => d.origem === "participante").length,
+          digitado: destinatarias.filter(d => d.origem === "digitado").length,
+        },
+        idioma,
+        linkLigadoAgora,
+        automatico: false,
+        destinatarios: destinatarias.map(d => hashDoEmail(d.email)),
+      },
+      ipAddress: requisicao.ipAddress.substring(0, 45),
+      userAgent: requisicao.userAgent ? requisicao.userAgent.substring(0, 500) : null,
+      status: "success",
+      riskLevel: "medium",
+    });
+    return { linhas, token, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
+  });
+
+  const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
+    site, token: preparado.token, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+  });
+  // Nada saiu: o pedido está guardado ('falhou'), e a tela diz isso no idioma de quem lê.
+  if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
+  return { ...resultado, linkLigadoAgora: preparado.linkLigadoAgora };
+}
+
+/** As linhas que o "Tentar de novo" manda: as que não saíram e as presas em 'pendente' (o envio que não terminou). */
+function condicaoDoMandarDeNovo(ownerId: string, meetingId: string, agora: number) {
+  return and(
+    eq(resumoPorEmail.ownerId, ownerId),
+    eq(resumoPorEmail.meetingId, meetingId),
+    isNotNull(resumoPorEmail.destinatario),
+    lt(resumoPorEmail.tentativas, TENTATIVAS_POR_EMAIL_MAX),
+    or(
+      eq(resumoPorEmail.status, "falhou"),
+      and(eq(resumoPorEmail.status, "pendente"), lt(resumoPorEmail.updatedAt, agora - PENDENTE_PRESO_MS)),
+    ),
+  );
+}
+
+/**
+ * O "Tentar de novo": manda outra vez o que não saiu desta reunião, até
+ * TENTATIVAS_POR_EMAIL_MAX vezes por e-mail. Não cria linha, então não conta
+ * outra vez nos tetos. O e-mail com o link aberto só sai com o link ligado: se
+ * a dona o desligou depois da falha, ela manda de novo pelo painel, com a
+ * confirmação.
+ */
+export async function mandarResumoPorEmailDeNovo(dona: DonaDoEnvio, meetingId: string, requisicao: RequisicaoDoEnvio): Promise<{ enviados: number; falharam: number }> {
+  const site = siteDosLinks();
+  if (!site) {
+    console.error("[ResumoPorEmail] FRONTEND_URL não definida: é a origem do link do e-mail, e não tem valor padrão.");
+    throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
+  }
+  const db = await exigirDb();
+  const agora = Date.now();
+  const preparado = await db.transaction(async tx => {
+    const [conta] = await tx.select({ nome: users.name }).from(users)
+      .where(and(eq(users.id, dona.id), eq(users.openId, dona.openId))).for("update");
+    if (!conta) throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    const reuniao = await reuniaoTravada(tx, dona.openId, meetingId);
+    const linhas = await tx.select({
+      id: resumoPorEmail.id, destinatario: resumoPorEmail.destinatario, origem: resumoPorEmail.origem,
+      automatico: resumoPorEmail.automatico, idioma: resumoPorEmail.idioma, loteId: resumoPorEmail.loteId,
+    }).from(resumoPorEmail).where(condicaoDoMandarDeNovo(dona.openId, meetingId, agora));
+    if (!linhas.length) throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR);
+    if (reuniao.status !== "ready") throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO);
+    if (!reuniao.token && linhas.some(linha => !ligado(linha.automatico))) throw recusa("PRECONDITION_FAILED", MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO);
+    const ids = linhas.map(linha => linha.id);
+    await tx.update(resumoPorEmail).set({ status: "pendente", updatedAt: agora })
+      .where(and(eq(resumoPorEmail.ownerId, dona.openId), inArray(resumoPorEmail.id, ids)));
+    await tx.insert(auditLogs).values({
+      userId: dona.id,
+      action: ACAO_RESUMO_POR_EMAIL_DE_NOVO,
+      resource: "meetings",
+      resourceId: meetingId,
+      details: { quantidade: ids.length, lotes: Array.from(new Set(linhas.map(linha => linha.loteId))) },
+      ipAddress: requisicao.ipAddress.substring(0, 45),
+      userAgent: requisicao.userAgent ? requisicao.userAgent.substring(0, 500) : null,
+      status: "success",
+      riskLevel: "low",
+    });
+    return {
+      linhas: linhas.map(linha => ({
+        id: linha.id, destinatario: linha.destinatario as string, origem: linha.origem as OrigemDoResumoPorEmail,
+        automatico: ligado(linha.automatico), idioma: linha.idioma,
+      })),
+      token: reuniao.token,
+      titulo: reuniao.titulo,
+      nomeDaDona: conta.nome?.trim() || null,
+    };
+  });
+  const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
+    site, token: preparado.token, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+  });
+  if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
+  return resultado;
+}
+
+export type EnvioNoPainel = {
+  id: string;
+  destinatario: string | null;
+  origem: OrigemDoResumoPorEmail;
+  status: EstadoDoResumoPorEmail;
+  automatico: boolean;
+  createdAt: number;
+  enviadoEm: number | null;
+};
+
+/**
+ * O que o painel mostra à dona: o idioma do e-mail, o e-mail e o nome da conta
+ * dela (para a prévia), as participantes da agenda com e-mail, os envios desta
+ * reunião e se há o que mandar de novo. Tudo dela; reunião de outra conta é
+ * "não encontrada".
+ */
+export async function painelDoResumoPorEmail(ownerId: string, meetingId: string) {
+  const db = await exigirDb();
+  const [reuniao] = await db.select({ idioma: meetings.language, token: meetings.shareToken }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .limit(1);
+  if (!reuniao) throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  const [conta] = await db.select({ email: users.email, nome: users.name, automatico: users.resumoPorEmailAutomatico }).from(users)
+    .where(eq(users.openId, ownerId)).limit(1);
+  const participantes = await participantesComEmail(db, ownerId, meetingId);
+  const linhas = await db.select({
+    id: resumoPorEmail.id, destinatario: resumoPorEmail.destinatario, origem: resumoPorEmail.origem, status: resumoPorEmail.status,
+    automatico: resumoPorEmail.automatico, createdAt: resumoPorEmail.createdAt, enviadoEm: resumoPorEmail.enviadoEm,
+  }).from(resumoPorEmail)
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId)))
+    .orderBy(desc(resumoPorEmail.createdAt))
+    .limit(ENVIOS_NO_PAINEL_MAX);
+  const [paraMandarDeNovo] = await db.select({ total: count() }).from(resumoPorEmail)
+    .where(condicaoDoMandarDeNovo(ownerId, meetingId, Date.now()));
+  const envios: EnvioNoPainel[] = linhas.map(linha => ({
+    id: linha.id,
+    destinatario: linha.destinatario,
+    origem: linha.origem as OrigemDoResumoPorEmail,
+    status: linha.status as EstadoDoResumoPorEmail,
+    automatico: ligado(linha.automatico),
+    createdAt: Number(linha.createdAt),
+    enviadoEm: linha.enviadoEm === null ? null : Number(linha.enviadoEm),
+  }));
+  return {
+    idioma: idiomaDaReuniao(reuniao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO,
+    linkLigado: Boolean(reuniao.token),
+    emailDaDona: conta?.email?.trim() || null,
+    nomeDaDona: conta?.nome?.trim() || null,
+    automatico: ligado(conta?.automatico),
+    participantes,
+    envios,
+    podeMandarDeNovo: Number(paraMandarDeNovo?.total ?? 0) > 0,
+  };
+}
+
+/** Liga ou desliga o envio automático da dona, com a auditoria na mesma transação. */
+export async function definirEnvioAutomaticoDoResumo(dona: DonaDoEnvio, ligar: boolean, requisicao: RequisicaoDoEnvio): Promise<{ automatico: boolean }> {
+  const db = await exigirDb();
+  await db.transaction(async tx => {
+    await tx.update(users).set({ resumoPorEmailAutomatico: ligar })
+      .where(and(eq(users.id, dona.id), eq(users.openId, dona.openId)));
+    await tx.insert(auditLogs).values({
+      userId: dona.id,
+      action: ACAO_ENVIO_AUTOMATICO_DO_RESUMO,
+      resource: "users",
+      resourceId: String(dona.id),
+      details: { ligado: ligar },
+      ipAddress: requisicao.ipAddress.substring(0, 45),
+      userAgent: requisicao.userAgent ? requisicao.userAgent.substring(0, 500) : null,
+      status: "success",
+      riskLevel: "low",
+    });
+  });
+  return { automatico: ligar };
+}
+
+/**
+ * O envio automático, chamado pela fila do resumo (server/fila-do-resumo.ts)
+ * logo depois de gravar um resumo. Só faz algo quando a dona ligou a opção, a
+ * conta está ativa e tem e-mail, a reunião está pronta, o resumo é o primeiro
+ * (versão 1) e a reunião ainda não teve e-mail automático: o "Refazer como…" e
+ * o reprocesso não mandam de novo. Vai só para a dona, com o link da reunião
+ * na conta dela, e conta no teto dela; com o teto cheio, não sai. Nunca lança:
+ * a fila do resumo segue, e a falha fica no log e na linha 'falhou', que a
+ * dona manda de novo pelo painel.
+ */
+export async function envioAutomaticoDoResumo(ownerId: string, meetingId: string): Promise<void> {
+  try {
+    const db = await exigirDb();
+    const [opcao] = await db.select({ automatico: users.resumoPorEmailAutomatico }).from(users)
+      .where(eq(users.openId, ownerId)).limit(1);
+    if (!ligado(opcao?.automatico)) return;
+    const site = siteDosLinks();
+    if (!site) {
+      console.error("[ResumoPorEmail] FRONTEND_URL não definida: o envio automático não tem link para mandar.");
+      return;
+    }
+    const agora = Date.now();
+    const lote = crypto.randomUUID();
+    const preparado = await db.transaction(async tx => {
+      const [conta] = await tx.select({ id: users.id, email: users.email, nome: users.name, automatico: users.resumoPorEmailAutomatico, ativa: users.isActive })
+        .from(users).where(eq(users.openId, ownerId)).for("update");
+      const email = conta?.email?.trim();
+      if (!conta || !ligado(conta.automatico) || !ligado(conta.ativa) || !email || !emailDoParticipanteValido(email)) return null;
+      const [reuniao] = await tx.select({ status: meetings.status, titulo: meetings.title, idioma: meetings.language }).from(meetings)
+        .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).for("update");
+      if (reuniao?.status !== "ready") return null;
+      const resumo = await temResumoGravado(tx, ownerId, meetingId);
+      if (resumo?.versao !== 1) return null;
+      const [jaMandado] = await tx.select({ id: resumoPorEmail.id }).from(resumoPorEmail)
+        .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId), eq(resumoPorEmail.automatico, true)))
+        .limit(1);
+      if (jaMandado) return null;
+      try {
+        await conferirTetos(tx, ownerId, meetingId, 1, agora);
+      } catch (erro) {
+        if (erro instanceof TRPCError && erro.code === "TOO_MANY_REQUESTS") {
+          console.warn(`[ResumoPorEmail] o envio automático da reunião ${meetingId} não saiu: a dona está no teto de e-mails do resumo.`);
+          return null;
+        }
+        throw erro;
+      }
+      const idioma: IdiomaDaReuniao = idiomaDaReuniao(reuniao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+      const linha = {
+        id: crypto.randomUUID(), meetingId, ownerId, loteId: lote, destinatario: email, origem: "dona" as const, idioma,
+        status: "pendente" as const, automatico: true, tentativas: 0, createdAt: agora, updatedAt: agora,
+      };
+      await tx.insert(resumoPorEmail).values(linha);
+      await tx.insert(auditLogs).values({
+        userId: conta.id,
+        action: ACAO_RESUMO_POR_EMAIL,
+        resource: "meetings",
+        resourceId: meetingId,
+        details: {
+          lote, quantidade: 1, porOrigem: { dona: 1, participante: 0, digitado: 0 }, idioma,
+          linkLigadoAgora: false, automatico: true, destinatarios: [hashDoEmail(email)],
+        },
+        ipAddress: null,
+        userAgent: null,
+        status: "success",
+        riskLevel: "low",
+      });
+      return { linha, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null };
+    });
+    if (!preparado) return;
+    await mandarAsLinhas(db, ownerId, meetingId, [preparado.linha], { site, token: null, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona });
+  } catch (erro) {
+    console.error(`[ResumoPorEmail] o envio automático da reunião ${meetingId} falhou:`, descreverErroDeBanco(erro));
+  }
+}

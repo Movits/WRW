@@ -70,6 +70,7 @@ import {
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
   proximasAcoes,
   googleAgendaConexoes,
+  resumoPorEmail,
 } from "../drizzle/schema";
 
 /**
@@ -172,6 +173,8 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
   // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens, que carregam trechos da transcrição.
   { tabela: meetingSummaryTranslations, coluna: meetingSummaryTranslations.ownerId, origem: "openId" },
+  // O resumo por e-mail (H22): a quem a dona mandou o link (o e-mail de terceiros) e quando.
+  { tabela: resumoPorEmail, coluna: resumoPorEmail.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {

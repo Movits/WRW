@@ -107,7 +107,9 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 71: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
     // 72: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
     // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
-    expect(PARES).toHaveLength(73);
+    // 74: o resumo por e-mail (H22) somou resumo_por_email.owner_id.
+    expect(PARES).toHaveLength(74);
+    expect(PARES).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "proximas_acoes", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });

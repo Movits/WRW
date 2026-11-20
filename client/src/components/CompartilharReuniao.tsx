@@ -28,7 +28,7 @@ type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 type IdiomaDaTela = "pt-BR" | "en" | "es" | "fr" | "de" | "ar" | "zh" | "hi" | "ja" | "ru";
 
 // O idioma RESOLVIDO, como em ReuniaoComIA.tsx: "en-US" cai fora da lista.
-function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
+export function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
   const atual = i18n.resolvedLanguage ?? i18n.language;
   return (LANGUAGES.some(idioma => idioma.code === atual) ? atual : "pt-BR") as IdiomaDaTela;
 }
