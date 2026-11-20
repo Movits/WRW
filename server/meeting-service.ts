@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, s
 import {
   meetingAudioSlices,
   meetingContactSuggestions,
+  meetingDocuments,
   meetingEntities,
   meetingRecordings,
   meetings,
@@ -16,6 +17,7 @@ import {
   users,
 } from "../drizzle/schema";
 import { pareceSerADona } from "@shared/reuniao-no-match";
+import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
@@ -1042,6 +1044,12 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   ficha: number;
   limparAntes: boolean;
   durationSeconds: number;
+  /**
+   * Conta no contador de minutos? Sim no áudio (o padrão); não na reunião que
+   * nasceu de um documento (server/documento-da-reuniao.ts), que não tem
+   * minutos de fala.
+   */
+  contarMinutos?: boolean;
   transcription: { text: string; segments: unknown; language: string };
   extraction: MeetingExtraction;
 }) {
@@ -1146,11 +1154,13 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // o índice único (dona, origem, referência) impede contar duas vezes, e
   // exclusão no meio não apaga a linha, porque a IA já transcreveu. Outro erro
   // (o banco respondeu) não tira da dona a reunião pronta: fica no log.
-  try {
-    await registrarConsumoDeMinutos(db, { ownerId, origem: "reuniao", referencia: meetingId, segundos: execucao.durationSeconds });
-  } catch (erro) {
-    if (ehErroDeBancoIndisponivel(erro)) throw erro;
-    console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
+  if (execucao.contarMinutos !== false) {
+    try {
+      await registrarConsumoDeMinutos(db, { ownerId, origem: "reuniao", referencia: meetingId, segundos: execucao.durationSeconds });
+    } catch (erro) {
+      if (ehErroDeBancoIndisponivel(erro)) throw erro;
+      console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
+    }
   }
   // O resumo guardado (H4): toda reunião que fica pronta ganha o pedido, e a
   // fila do resumo (server/fila-do-resumo.ts) o gera em segundo plano. Serve ao
@@ -1288,6 +1298,13 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
+  // A reunião que nasceu de um documento (H12) refaz a leitura pelo PDF
+  // guardado. Import tardio: o módulo do documento importa este, e o import no
+  // topo faria um ciclo.
+  if (ehReuniaoDeDocumento(meeting.origem)) {
+    const { iniciarReprocessamentoDoDocumento } = await import("./documento-da-reuniao");
+    return iniciarReprocessamentoDoDocumento(db, { id: meetingId, ownerId, updatedAt: meeting.updatedAt, language: meeting.language });
+  }
   if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId, meeting.expectedSlices);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
@@ -1384,6 +1401,8 @@ async function executarReprocessamento(db: Banco, execucao: {
  * dado da dona e não tem uso na tela. As outras colunas da migração 0014
  * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
  * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
+ * A origem entrou com a reunião de documento (H12): é ela que troca o player e
+ * a transcrição pelo texto do documento.
  */
 const COLUNAS_DA_REUNIAO_NA_TELA = {
   id: meetings.id,
@@ -1402,6 +1421,8 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // teve: a tela mostra o andamento da reunião em partes e o rótulo certo.
   audioPipeline: meetings.audioPipeline,
   expectedSlices: meetings.expectedSlices,
+  // De onde a reunião veio: 'pdf' e 'foto' são documento (H12).
+  origem: meetings.origem,
   // Os nomes das vozes (H3). Esta lista e este detalhe são só da dona; o link
   // aberto lê os nomes por outra consulta, e só quando foi ligado com a
   // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
@@ -1657,6 +1678,49 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
   };
 }
 
+/** O que a tela da dona recebe sobre o arquivo da reunião de documento (H12). O link aberto não recebe nada disto. */
+export type DocumentoDaReuniao = {
+  documento: { url: string; mimeType: string; sizeBytes: number; expiresAt: number } | null;
+  /** O arquivo passou do prazo e SAIU do bucket (sem linha, vale para a reunião mais velha que o prazo, como no áudio). */
+  documentoExpirado: boolean;
+  /** O arquivo passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
+  documentoSaindo: boolean;
+};
+
+/**
+ * O PDF da reunião de documento que a dona pode abrir agora, com a regra do
+ * áudio (gravacaoParaOuvir): vencido, deixa de ser servido e sai aqui mesmo,
+ * com todas as versões e só então a linha, menos na reunião em 'processing',
+ * em que a leitura pode estar usando o arquivo (a varredura o tira depois). Se
+ * o bucket recusar, a linha fica e a tela diz que o arquivo está saindo.
+ *
+ * Sai só o que a tela precisa: `storageKey` fica no servidor, e a `url` é o
+ * caminho do proxy autenticado (/manus-storage/...), que confere sessão e posse
+ * a cada pedido.
+ */
+export async function documentoParaVer(db: Banco, ownerId: string, meetingId: string, reuniao: { createdAt: number; status: Reuniao["status"] }): Promise<DocumentoDaReuniao> {
+  const agora = now();
+  const [linha] = await db.select({
+    id: meetingDocuments.id, storageKey: meetingDocuments.storageKey, storageUrl: meetingDocuments.storageUrl,
+    mimeType: meetingDocuments.mimeType, sizeBytes: meetingDocuments.sizeBytes, expiresAt: meetingDocuments.expiresAt,
+  }).from(meetingDocuments)
+    .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)))
+    .limit(1);
+  if (!linha) return { documento: null, documentoExpirado: reuniao.createdAt + MEETING_AUDIO_TTL_MS <= agora, documentoSaindo: false };
+  if (linha.expiresAt <= agora) {
+    if (reuniao.status !== "processing" && await apagarArquivoDaGravacao(linha.storageKey)) {
+      await db.delete(meetingDocuments).where(and(eq(meetingDocuments.id, linha.id), eq(meetingDocuments.ownerId, ownerId)));
+      return { documento: null, documentoExpirado: true, documentoSaindo: false };
+    }
+    return { documento: null, documentoExpirado: false, documentoSaindo: true };
+  }
+  return {
+    documento: { url: linha.storageUrl, mimeType: linha.mimeType, sizeBytes: linha.sizeBytes, expiresAt: linha.expiresAt },
+    documentoExpirado: false,
+    documentoSaindo: false,
+  };
+}
+
 /**
  * O andamento da reunião gravada em partes, para a tela dizer o que está
  * acontecendo: quantas partes chegaram, quantas a IA já transcreveu e quantas a
@@ -1712,6 +1776,7 @@ const retomadaDaVarredura = new Map<string, string>();
 /** A reunião DO áudio: mesmo id E mesma dona. Sem esse par, o áudio é de reunião que já não existe. */
 const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
 const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
+const reuniaoDoDocumento = and(eq(meetings.id, meetingDocuments.meetingId), eq(meetings.ownerId, meetingDocuments.ownerId));
 
 /** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
 type TrechoDaVarredura = { depoisDe: string; ate?: string };
@@ -1755,6 +1820,30 @@ function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
 }
 
 /**
+ * Os PDFs das reuniões de documento (H12) que saem nesta passada, pela regra da
+ * gravação do envio único: vencidos (menos na reunião em 'processing', em que a
+ * leitura ou o reprocesso pode estar usando o arquivo) e, na hora, o da reunião
+ * que não existe ou está sendo excluída.
+ */
+function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
+    .from(meetingDocuments)
+    .leftJoin(meetings, reuniaoDoDocumento)
+    .where(and(
+      gt(meetingDocuments.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingDocuments.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingDocuments.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        and(lte(meetingDocuments.expiresAt, agora), ne(meetings.status, "processing")),
+      ),
+    ))
+    .orderBy(asc(meetingDocuments.id))
+    .limit(lote);
+}
+
+/**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
  * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
@@ -1770,7 +1859,9 @@ function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
  * - na hora, o áudio cuja reunião já não existe ou está sendo excluída
  *   ('deleted'): é o ponteiro que a exclusão da reunião ou da conta deixou
  *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
- *   da exclusão.
+ *   da exclusão;
+ * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
+ *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -1816,6 +1907,11 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "partes",
       ler: (trecho: TrechoDaVarredura) => partesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, id)),
+    },
+    {
+      nome: "documentos",
+      ler: (trecho: TrechoDaVarredura) => documentosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingDocuments).where(eq(meetingDocuments.id, id)),
     },
   ];
 
@@ -1900,9 +1996,16 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
     pareceSerADona: conta !== null && s.status === "pending" && pareceSerADona({ fullName: s.fullName, email: s.email }, conta),
   }));
   const emPartes = meeting.audioPipeline === "slices";
-  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, ownerId, meetingId, {
-    createdAt: meeting.createdAt, status: meeting.status, emPartes,
-  });
+  // A reunião de documento (H12) não tem áudio: no lugar da gravação, o PDF,
+  // com a mesma regra dos 30 dias. Sem isto, a reunião de documento com mais
+  // de 30 dias diria que "a gravação foi apagada".
+  const ehDocumento = ehReuniaoDeDocumento(meeting.origem);
+  const { recording, recordingExpired, recordingDeletionPending } = ehDocumento
+    ? { recording: null, recordingExpired: false, recordingDeletionPending: false }
+    : await gravacaoParaOuvir(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status, emPartes });
+  const { documento, documentoExpirado, documentoSaindo }: DocumentoDaReuniao = ehDocumento
+    ? await documentoParaVer(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status })
+    : { documento: null, documentoExpirado: false, documentoSaindo: false };
   const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
   // Se quem tem o link vê os nomes das vozes (H3b): só com o link ligado com a
   // confirmação que fala deles. O painel de compartilhar avisa a dona quando há
@@ -1912,6 +2015,7 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   return {
     meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
     transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento,
+    documento, documentoExpirado, documentoSaindo,
   };
 }
 
@@ -1920,7 +2024,8 @@ export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio
 
 /**
  * Tudo que uma reunião gera fora da própria linha: sugestões, entidades,
- * transcrição, traduções e gravações (linha E objeto no bucket), e também os
+ * transcrição, traduções e gravações (linha E objeto no bucket; o PDF da reunião
+ * de documento, H12, entra junto com a mesma regra), e também os
  * avisos dela no sino (H15) e o ponteiro da agenda (H16a). Serve à
  * exclusão pela dona e à COMPENSAÇÃO de processMeetingRecording, que usa a
  * mesma lista quando descobre que a reunião foi excluída no meio — duas
@@ -1954,6 +2059,10 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   const partes = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey, status: meetingAudioSlices.status })
     .from(meetingAudioSlices)
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  // E o PDF da reunião de documento (H12), com a mesma regra do áudio.
+  const documentos = await db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
+    .from(meetingDocuments)
+    .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
   // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
@@ -1971,8 +2080,10 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
   // ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes]);
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos]);
   const saiu = new Set(sairam);
+  const documentosQueSairam = documentos.filter(documento => saiu.has(documento.id)).map(documento => documento.id);
+  const documentosQueFicam = documentos.filter(documento => !saiu.has(documento.id)).map(documento => documento.id);
 
   const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
   const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
@@ -1998,10 +2109,18 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
       eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesSubindoQueSairam), eq(meetingAudioSlices.status, "uploading"),
     ));
   }
+  if (documentosQueSairam.length) {
+    await db.delete(meetingDocuments).where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueSairam)));
+  }
   const agora = now();
   if (gravacoesQueFicam.length) {
     await db.update(meetingRecordings).set({ expiresAt: agora })
       .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueFicam)));
+  }
+  // O PDF que o bucket recusou fica como ponteiro, vencido, para a varredura.
+  if (documentosQueFicam.length) {
+    await db.update(meetingDocuments).set({ expiresAt: agora })
+      .where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueFicam)));
   }
   if (partesQueFicam.length) {
     await db.update(meetingAudioSlices).set({

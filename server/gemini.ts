@@ -227,26 +227,88 @@ const ORCAMENTO_DA_PARTE_MS = 8 * 60_000;
 const SAIDA_MAXIMA_DA_PARTE = 32_768;
 
 /**
- * Uma chamada com áudio inline e resposta (opcionalmente) em JSON, no modelo de
- * áudio e, se ele estiver lotado, no reserva — a mesma cartada do
- * transcribeWithGemini. Devolve o texto das partes que não são raciocínio.
- * Resposta que não terminou em STOP lança GeminiRespostaCortadaError.
+ * O teto de um arquivo inline numa chamada ao Gemini: 50 MB por arquivo, inline
+ * ou pela File API (documentação de documentos da Google, lida em 18/11/2026).
+ * Quem chama gerarComArquivoNoGemini passa o próprio teto, que nunca passa
+ * deste.
  */
-export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
-  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+export const TETO_INLINE_DO_GEMINI_BYTES = 50 * 1000 * 1000;
+
+/**
+ * O teto do áudio inline: o tamanho máximo de uma parte da gravação em partes
+ * (TAMANHO_MAXIMO_DA_PARTE, em server/fatias-de-reuniao.ts, que a rota das
+ * partes já confere). Fica escrito aqui para gemini.ts não importar o módulo
+ * das partes, que traz banco e bucket; um teste confere que os dois batem.
+ */
+export const TETO_INLINE_DO_AUDIO_BYTES = 16 * 1024 * 1024;
+
+/**
+ * O arquivo passou do teto inline de quem chamou (ou está vazio): recusado
+ * ANTES de sair do servidor, sem gastar a chamada nem o envio de megabytes que
+ * a Google recusaria. A mensagem é para o log.
+ */
+export class ArquivoForaDoTetoDoGeminiError extends Error {
+  constructor(readonly bytes: number, readonly teto: number) {
+    super(`O arquivo de ${bytes} bytes está fora do teto de ${teto} bytes da chamada ao Gemini.`);
+    this.name = "ArquivoForaDoTetoDoGeminiError";
+  }
+}
+
+/**
+ * A resposta terminou (STOP) sem texto nenhum fora do raciocínio. A frase é a
+ * de sempre da transcrição; o documento (server/documento-da-reuniao.ts)
+ * reconhece a classe e grava o código dele.
+ */
+export class GeminiSemTextoError extends Error {
+  constructor() {
+    super("O Gemini não retornou uma transcrição válida.");
+    this.name = "GeminiSemTextoError";
+  }
+}
+
+/**
+ * Uma chamada com um arquivo inline (áudio, PDF) e resposta, opcionalmente, em
+ * JSON, no modelo multimodal (o do áudio, LLM_AUDIO_MODEL) e, se ele estiver
+ * lotado, no reserva — a mesma cartada do transcribeWithGemini. Devolve o texto
+ * das partes que não são raciocínio e o modelo que respondeu.
+ *
+ * - O arquivo vazio ou acima de `tetoInlineBytes` (nunca acima de
+ *   TETO_INLINE_DO_GEMINI_BYTES) é recusado antes de qualquer chamada
+ *   (ArquivoForaDoTetoDoGeminiError).
+ * - Resposta que não terminou em STOP lança GeminiRespostaCortadaError, com o
+ *   motivo (MAX_TOKENS, SAFETY, RECITATION...): texto cortado nunca passa por
+ *   inteiro.
+ * - STOP sem texto lança GeminiSemTextoError.
+ * - O raciocínio vai sempre no nível baixo (raciocinioBaixo), dentro do teto de
+ *   saída; os prazos e o teto de saída vêm de quem chama, e o padrão é o da
+ *   parte do áudio.
+ */
+export async function gerarComArquivoNoGemini(input: {
+  bytes: Buffer;
+  mimeType: string;
+  prompt: string;
+  esquemaJson?: unknown;
+  tetoInlineBytes: number;
+  saidaMaxima?: number;
+  timeoutMs?: number;
+  orcamentoMs?: number;
+}): Promise<{ texto: string; modelo: string }> {
+  const teto = Math.min(input.tetoInlineBytes, TETO_INLINE_DO_GEMINI_BYTES);
+  if (!input.bytes.length || input.bytes.length > teto) throw new ArquivoForaDoTetoDoGeminiError(input.bytes.length, teto);
+  const dados = input.bytes.toString("base64");
   const corpo = (modelo: string) => ({
     contents: [{ parts: [
       { text: input.prompt },
-      { inline_data: { mime_type: geminiMimeType, data: input.audio.toString("base64") } },
+      { inline_data: { mime_type: input.mimeType, data: dados } },
     ] }],
     generationConfig: {
       temperature: 0,
-      maxOutputTokens: SAIDA_MAXIMA_DA_PARTE,
+      maxOutputTokens: input.saidaMaxima ?? SAIDA_MAXIMA_DA_PARTE,
       thinkingConfig: raciocinioBaixo(modelo),
       ...(input.esquemaJson ? { responseMimeType: "application/json", responseSchema: input.esquemaJson } : {}),
     },
   });
-  const opcoes = { timeoutMs: TIMEOUT_DA_PARTE_MS, orcamentoMs: ORCAMENTO_DA_PARTE_MS };
+  const opcoes = { timeoutMs: input.timeoutMs ?? TIMEOUT_DA_PARTE_MS, orcamentoMs: input.orcamentoMs ?? ORCAMENTO_DA_PARTE_MS };
   let modelo = modeloDeAudio();
   let payload: RespostaComFim;
   try {
@@ -272,6 +334,18 @@ export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: st
     throw new GeminiRespostaCortadaError(motivo);
   }
   const texto = (candidato?.content?.parts ?? []).filter(parte => !parte.thought).map(parte => parte.text ?? "").join("").trim();
-  if (!texto) throw new Error("O Gemini não retornou uma transcrição válida.");
+  if (!texto) throw new GeminiSemTextoError();
   return { texto, modelo };
+}
+
+/**
+ * A transcrição de uma parte da gravação em partes (server/transcricao-de-fatia.ts):
+ * o áudio inline, com o teto da parte, pela chamada genérica.
+ */
+export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
+  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+  return gerarComArquivoNoGemini({
+    bytes: input.audio, mimeType: geminiMimeType, prompt: input.prompt, esquemaJson: input.esquemaJson,
+    tetoInlineBytes: TETO_INLINE_DO_AUDIO_BYTES,
+  });
 }

@@ -625,7 +625,9 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 71: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
     // 72: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
     // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
-    expect(paresDeUsuariaNoSchema).toHaveLength(73);
+    // 74: o documento da reunião (H12) somou meeting_documents.owner_id.
+    expect(paresDeUsuariaNoSchema).toHaveLength(74);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "proximas_acoes", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });
