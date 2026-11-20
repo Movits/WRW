@@ -74,12 +74,12 @@ describe("faq.ask: o prompt não nega o que a plataforma já oferece", () => {
     expect(linha).toMatch(/nunca nome, telefone, e-mail, áudio, transcrição ou notas/);
   });
 
-  it("a gravação vai até 12 horas, com o aviso de hora; o arquivo enviado segue nos 10 minutos e 10 MB (G13b)", async () => {
+  it("a gravação vai até 12 horas, com o aviso de hora; o arquivo em MP3 também (H9a), e os outros formatos seguem nos 10 minutos e 10 MB (G13b)", async () => {
     const linha = (await promptEnviado("Quanto tempo posso gravar?")).split("\n").find(l => l.includes("Meu Network Inteligente")) ?? "";
     expect(linha).toMatch(/grava reuniões gratuitamente, cada uma com até 12 horas/);
     expect(linha).toMatch(/a cada hora de gravação, a plataforma pede que ela confirme que a gravação continua/);
     expect(linha).toMatch(/sem a confirmação em 10 minutos, a gravação para e o que foi gravado segue para a transcrição/);
-    expect(linha).toMatch(/um arquivo de áudio pronto também pode ser enviado, com até 10 minutos e 10 MB/);
+    expect(linha).toMatch(/um arquivo de áudio pronto também pode ser enviado: em MP3, com até 12 horas; nos outros formatos, com até 10 minutos e 10 MB/);
     // O teto de 10 minutos é do envio único (o arquivo), não mais da gravação.
     expect(linha).not.toMatch(/grava ou envia reuniões de até 10 minutos/);
   });
