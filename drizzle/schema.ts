@@ -1100,6 +1100,23 @@ export const meetings = mysqlTable("meetings", {
   // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
   // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
   shareToken: varchar("share_token", { length: 64 }),
+  // A senha de 6 dígitos do link aberto (H23), que a dona liga, troca e tira.
+  // Só o hash (scrypt com sal, server/senha-do-link-aberto.ts): a senha em
+  // texto sai uma vez, para a dona, na hora de criar ou trocar. Nulo: o link
+  // abre sem senha, como todos os ligados antes da H23. As colunas abaixo não
+  // vão à tela como estão: o detalhe da dona recebe só se o link pede senha e
+  // se leva o áudio (getPrivateMeeting, em server/meeting-service.ts).
+  sharePasswordHash: varchar("share_password_hash", { length: 128 }),
+  // O freio da força bruta por link (server/entrada-no-link-aberto.ts): as
+  // tentativas erradas seguidas, a hora da última e até quando o link recusa
+  // senha. Ficam no banco, e não em memória, para o deploy não zerá-las.
+  sharePasswordFailures: int("share_password_failures").default(0).notNull(),
+  sharePasswordFailedAt: bigint("share_password_failed_at", { mode: "number" }),
+  sharePasswordLockedUntil: bigint("share_password_locked_until", { mode: "number" }),
+  // Se o link serve o áudio e o player (H23). Desligado, o servidor não manda
+  // a gravação nem assina o áudio pelo link. O padrão é o de antes da H23: o
+  // link ligado antes dela segue com o áudio.
+  shareAudio: boolean("share_audio").default(true).notNull(),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),

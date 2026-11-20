@@ -16,7 +16,7 @@ import { CompartilharReuniao, enderecoDoLinkAberto, linkDoEmail, linkDoWhatsApp 
  * server/reuniao-aberta-rota.test.ts.
  */
 
-type Opcoes = { onSuccess?: (data: unknown) => void; onError?: (erro: unknown) => void };
+type Opcoes = { onSuccess?: (data: unknown, pedido?: unknown) => void; onError?: (erro: unknown) => void };
 
 const duble = vi.hoisted(() => {
   const mutacoes: Record<string, { opcoes: Opcoes; mutate: ReturnType<typeof vi.fn> }> = {};
@@ -37,6 +37,10 @@ vi.mock("@/lib/trpc", () => ({
     meetings: {
       ligarLinkAberto: duble.registrar("ligar"),
       desligarLinkAberto: duble.registrar("desligar"),
+      // A senha e o áudio do link ligado (H23).
+      novaSenhaDoLink: duble.registrar("novaSenha"),
+      tirarSenhaDoLink: duble.registrar("tirarSenha"),
+      mudarAudioDoLink: duble.registrar("mudarAudio"),
     },
   },
 }));
@@ -101,6 +105,9 @@ describe("sem link: ligar pede a confirmação de que as pessoas autorizaram", (
       idioma: "pt-BR",
       textoExibido: "Confirmo que todas as pessoas que falaram nesta reunião autorizaram que quem receber o link ouça a gravação e leia a transcrição, com os nomes que eu der às vozes.",
       versaoDaAutorizacao: 2,
+      // As escolhas do link (H23): de início, com senha e com o áudio.
+      comSenha: true,
+      incluirAudio: true,
     });
   });
 
@@ -126,13 +133,17 @@ describe("sem link: ligar pede a confirmação de que as pessoas autorizaram", (
     expect(screen.getByText(/Os nomes que você der às vozes aparecem para quem tem o link/)).toBeInTheDocument();
   });
 
-  it("Cancelar volta ao começo e desmarca a caixa", () => {
+  it("Cancelar volta ao começo: desmarca a confirmação e devolve as escolhas do link ao começo (H23)", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
     fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("checkbox", { name: /autorizaram/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /senha de 6 dígitos/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Incluir o áudio/ }));
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /autorizaram/ })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /senha de 6 dígitos/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Incluir o áudio/ })).toBeChecked();
   });
 
   it("ligado no servidor, o token entra na tela na hora, já mostrando os nomes, e a reunião é relida", () => {
@@ -141,8 +152,9 @@ describe("sem link: ligar pede a confirmação de que as pessoas autorizaram", (
     expect(duble.setData).toHaveBeenCalledWith({ meetingId: ID }, expect.any(Function));
     const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
     // Este painel liga sempre com a caixa que fala dos nomes: o link novo os mostra.
+    // O servidor de antes da H23 não devolve a senha: o link sai sem senha e com o áudio.
     expect(atualizar({ meeting: { id: ID, shareToken: null, linkMostraNomes: false }, transcript: null }))
-      .toEqual({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true }, transcript: null });
+      .toEqual({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true, linkComSenha: false, linkComAudio: true }, transcript: null });
     expect(atualizar(undefined)).toBeUndefined();
     expect(duble.invalidate).toHaveBeenCalledWith({ meetingId: ID });
   });
@@ -207,7 +219,7 @@ describe("a frase da caixa nos 10 idiomas, com a versão que ela grava (H3b)", (
     try {
       render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
       fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.button") }));
-      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("checkbox", { name: i18n.t("meetings.share.authorization") }));
       fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.createButton") }));
       expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledTimes(1);
       const { idioma: idiomaDaProva, textoExibido, versaoDaAutorizacao } = duble.mutacoes.ligar.mutate.mock.calls[0][0];
@@ -277,7 +289,8 @@ describe("com link: copiar, WhatsApp, e-mail e desligar", () => {
     expect(duble.mutacoes.desligar.mutate).toHaveBeenCalledWith({ meetingId: ID });
     act(() => duble.mutacoes.desligar.opcoes.onSuccess?.(undefined));
     const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
-    expect(atualizar({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true } })).toEqual({ meeting: { id: ID, shareToken: null, linkMostraNomes: false } });
+    expect(atualizar({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true, linkComSenha: true, linkComAudio: false } }))
+      .toEqual({ meeting: { id: ID, shareToken: null, linkMostraNomes: false, linkComSenha: false, linkComAudio: false } });
     expect(toast.success).toHaveBeenCalledWith("Link desligado.");
   });
 });
@@ -308,7 +321,7 @@ describe("o painel anuncia o que mudou e não perde o foco", () => {
   it("Compartilhar: o foco vai para a caixa de autorização", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
     fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
-    expect(screen.getByRole("checkbox")).toHaveFocus();
+    expect(screen.getByRole("checkbox", { name: /autorizaram/ })).toHaveFocus();
   });
 
   it("ligado: avisa \"Link criado\" e o foco vai para o campo do link", () => {
@@ -345,5 +358,146 @@ describe("o que o link mostra do resumo (H4f)", () => {
   it("antes de ligar, o painel diz que o link mostra o resumo como a dona o deixar, com o que ela escrever, e o mapa mental", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
     expect(screen.getByText("O link mostra também o resumo como você o deixar, com os itens que você escrever ou editar, e o mapa mental.")).toBeInTheDocument();
+  });
+});
+
+/**
+ * A senha de 6 dígitos e o áudio do link (H23, HN-57 do HiNoter): a dona
+ * escolhe ao ligar (a senha vem marcada, o áudio também) e muda as duas coisas
+ * com o link ligado. A senha vem do servidor e aparece uma vez só, com o texto
+ * pronto (o link e a senha) para o WhatsApp e o e-mail.
+ */
+describe("a senha e o áudio do link (H23)", () => {
+  const endereco = `${window.location.origin}/r/${TOKEN}`;
+  const textoPronto = (senha: string) => `Reunião “Reunião com a Ana” na WRW: ${endereco}\nSenha: ${senha}`;
+
+  it("ligar sem a senha e sem o áudio: as duas escolhas vão ao servidor", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getByRole("checkbox", { name: "Proteger o link com uma senha de 6 dígitos, que a WRW cria para você" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Incluir o áudio da reunião no link" })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: /autorizaram/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /senha de 6 dígitos/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Incluir o áudio/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith(expect.objectContaining({ meetingId: ID, comSenha: false, incluirAudio: false }));
+  });
+
+  it("ligado com senha: a senha aparece uma vez, com o texto pronto (o link e a senha), que recebe o foco e vai pelo WhatsApp e pelo e-mail", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={null}/>);
+    act(() => duble.mutacoes.ligar.opcoes.onSuccess?.({ token: TOKEN, senha: "482913" }, { meetingId: ID, comSenha: true, incluirAudio: true }));
+    const atualizar = duble.setData.mock.calls[0][1] as (anterior: unknown) => unknown;
+    expect(atualizar({ meeting: { id: ID, shareToken: null } })).toEqual({ meeting: { id: ID, shareToken: TOKEN, linkMostraNomes: true, linkComSenha: true, linkComAudio: true } });
+    // O detalhe relido entrega o token ao painel, como a página faz.
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN} comSenha/>);
+    expect(screen.getByText("482913")).toHaveAttribute("dir", "ltr");
+    expect(screen.getByText(/A senha só aparece agora/)).toBeInTheDocument();
+    const caixa = screen.getByRole("textbox", { name: "Texto pronto para mandar" });
+    expect(caixa).toHaveValue(textoPronto("482913"));
+    expect(caixa).toHaveFocus();
+    const [, whatsappDoTexto] = screen.getAllByRole("link", { name: /WhatsApp/ });
+    expect(new URL(whatsappDoTexto.getAttribute("href")!).searchParams.get("text")).toBe(textoPronto("482913"));
+    const [, emailDoTexto] = screen.getAllByRole("link", { name: /E-mail/ });
+    expect(new URLSearchParams(emailDoTexto.getAttribute("href")!.slice("mailto:?".length)).get("body")).toBe(textoPronto("482913"));
+    // Pronto: a senha sai da tela, e nem a memória da tela a guarda mais.
+    fireEvent.click(screen.getByRole("button", { name: "Pronto" }));
+    expect(screen.queryByText("482913")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Texto pronto para mandar" })).not.toBeInTheDocument();
+    expect(screen.getByText(/troque a senha para ver uma nova/)).toBeInTheDocument();
+  });
+
+  it("copiar o texto pronto; sem área de transferência, o texto fica selecionado", async () => {
+    const writeText = vi.fn(async () => {});
+    porAreaDeTransferencia(writeText);
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN} comSenha/>);
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Copiar texto/ })); });
+    expect(writeText).toHaveBeenCalledWith(textoPronto("135791"));
+    expect(toast.success).toHaveBeenCalledWith("Texto copiado.");
+
+    porAreaDeTransferencia(vi.fn(async () => { throw new Error("sem permissão"); }));
+    const caixa = screen.getByRole("textbox", { name: "Texto pronto para mandar" }) as HTMLTextAreaElement;
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Copiar texto/ })); });
+    expect(toast.message).toHaveBeenCalledWith(expect.stringContaining("copie por ali"));
+    expect(caixa.selectionStart).toBe(0);
+    expect(caixa.selectionEnd).toBe(textoPronto("135791").length);
+  });
+
+  it("com senha: trocar pede confirmação; Manter não chama o servidor; confirmado, a senha nova aparece", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN} comSenha/>);
+    expect(screen.getByText("Este link pede uma senha de 6 dígitos.")).toBeInTheDocument();
+    expect(screen.getByText(/Quem tiver este link e a senha abre a reunião/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Trocar a senha" }));
+    expect(screen.getByText(/A senha atual deixa de valer na hora/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Manter" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Manter" }));
+    expect(duble.mutacoes.novaSenha.mutate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Trocar a senha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trocar" }));
+    expect(duble.mutacoes.novaSenha.mutate).toHaveBeenCalledWith({ meetingId: ID });
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
+    expect(screen.getByText("135791")).toBeInTheDocument();
+    expect(screen.queryByText(/A senha atual deixa de valer na hora/)).not.toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith("Senha criada.");
+  });
+
+  it("com senha: tirar pede confirmação e, confirmado, o link volta a abrir sem senha", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha/>);
+    fireEvent.click(screen.getByRole("button", { name: "Tirar a senha" }));
+    expect(screen.getByText(/passa a abrir a reunião sem senha/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tirar" }));
+    expect(duble.mutacoes.tirarSenha.mutate).toHaveBeenCalledWith({ meetingId: ID });
+    act(() => duble.mutacoes.tirarSenha.opcoes.onSuccess?.({ success: true }));
+    const atualizar = duble.setData.mock.calls.at(-1)![1] as (anterior: unknown) => unknown;
+    expect(atualizar({ meeting: { id: ID, shareToken: TOKEN, linkComSenha: true } })).toEqual({ meeting: { id: ID, shareToken: TOKEN, linkComSenha: false } });
+    expect(toast.success).toHaveBeenCalledWith("Senha tirada: o link abre sem senha.");
+  });
+
+  it("sem senha: Pôr senha cria a senha na hora, sem pergunta (não derruba ninguém)", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    expect(screen.getByText("Este link abre sem senha: basta ter o endereço.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Trocar a senha" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pôr senha" }));
+    expect(duble.mutacoes.novaSenha.mutate).toHaveBeenCalledWith({ meetingId: ID });
+  });
+
+  it("o áudio do link ligado: desmarcar manda o servidor tirar o áudio, e a tela explica o que muda", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    const audio = screen.getByRole("checkbox", { name: "Incluir o áudio da reunião no link" });
+    expect(audio).toBeChecked();
+    fireEvent.click(audio);
+    expect(duble.mutacoes.mudarAudio.mutate).toHaveBeenCalledWith({ meetingId: ID, incluirAudio: false });
+    act(() => duble.mutacoes.mudarAudio.opcoes.onSuccess?.({ success: true }, { meetingId: ID, incluirAudio: false }));
+    const atualizar = duble.setData.mock.calls.at(-1)![1] as (anterior: unknown) => unknown;
+    expect(atualizar({ meeting: { id: ID, linkComAudio: true } })).toEqual({ meeting: { id: ID, linkComAudio: false } });
+    expect(toast.success).toHaveBeenCalledWith("O link agora não leva o áudio.");
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comAudio={false}/>);
+    expect(screen.getByRole("checkbox", { name: /Incluir o áudio/ })).not.toBeChecked();
+    expect(screen.getByText(/sem o áudio e sem o player/)).toBeInTheDocument();
+  });
+
+  it("mudança recusada: o link desligado em outra aba e o teto das senhas têm frase própria", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha/>);
+    act(() => duble.mutacoes.novaSenha.opcoes.onError?.(erroDoServidor("PRECONDITION_FAILED")));
+    expect(toast.error).toHaveBeenLastCalledWith("Este link foi desligado. Atualize a tela.");
+    act(() => duble.mutacoes.novaSenha.opcoes.onError?.(erroDoServidor("TOO_MANY_REQUESTS")));
+    expect(toast.error).toHaveBeenLastCalledWith("Muitas senhas novas em sequência. Aguarde alguns minutos e tente de novo.");
+    act(() => duble.mutacoes.mudarAudio.opcoes.onError?.(erroDoServidor("NOT_FOUND")));
+    expect(toast.error).toHaveBeenLastCalledWith(i18n.t("meetings.meetingNotFound"));
+    act(() => duble.mutacoes.tirarSenha.opcoes.onError?.(erroDoServidor("BAD_REQUEST")));
+    expect(toast.error).toHaveBeenLastCalledWith("Não foi possível mudar o compartilhamento. Tente de novo.");
+  });
+
+  it("desligar tira a senha da tela: religado depois, o painel não a traz de volta", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha/>);
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
+    expect(screen.getByText("135791")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Desligar" }));
+    act(() => duble.mutacoes.desligar.opcoes.onSuccess?.(undefined));
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha/>);
+    expect(screen.queryByText("135791")).not.toBeInTheDocument();
   });
 });

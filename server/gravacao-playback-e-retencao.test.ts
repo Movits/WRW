@@ -308,13 +308,26 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
-  it("o detalhe também, mais o token do link aberto, que só a dona recebe, e se o link mostra os nomes das vozes (H3b)", async () => {
-    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
+  it("o detalhe também, mais o token do link aberto, que só a dona recebe, se o link mostra os nomes das vozes (H3b), e se pede senha e leva o áudio (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto", sharePasswordHash: "scrypt$hash-da-senha", shareAudio: false }]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes"].sort());
-    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false });
+    // O hash da senha e o freio da força bruta ficam no servidor: a tela recebe só os dois sim ou não.
+    for (const coluna of ["sharePasswordHash", "sharePasswordFailures", "sharePasswordFailedAt", "sharePasswordLockedUntil", "shareAudio"]) {
+      expect(dados?.meeting).not.toHaveProperty(coluna);
+    }
+    expect(JSON.stringify(dados)).not.toContain("hash-da-senha");
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio"].sort());
+    expect(dados?.meeting).toMatchObject({
+      id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false, linkComSenha: true, linkComAudio: false,
+    });
+  });
+
+  it("sem link, o detalhe diz que não há senha, ainda que a linha guarde um hash (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: null, sharePasswordHash: "scrypt$hash-da-senha", shareAudio: true }]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.meeting).toMatchObject({ shareToken: null, linkComSenha: false, linkComAudio: true });
   });
 
   it("com o link ligado, linkMostraNomes vem da última confirmação da dona na auditoria: só a versão 2 mostra os nomes (H3b)", async () => {

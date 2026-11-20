@@ -17,6 +17,7 @@ import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from 
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
+import { SenhaDoLinkAberto } from "@/components/SenhaDoLinkAberto";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
@@ -32,6 +33,14 @@ import { MapaMentalDaReuniao } from "@/components/MapaMental";
  *
  * O player e a tradução repetem os do detalhe da dona; o detalhe único da D1
  * (docs/arquitetura/gravador-de-reunioes.md) junta as duas telas.
+ *
+ * O link com senha (H23) responde UNAUTHORIZED até quem o recebeu acertar os 6
+ * dígitos: a página mostra só a tela da senha (SenhaDoLinkAberto) e, com a
+ * senha certa, relê a reunião. Se a entrada vencer com a página aberta (o
+ * cookie dura 12 horas), a próxima leitura que recusar traz a tela da senha de
+ * volta. O link sem o áudio não traz a gravação: a página diz isso no lugar do
+ * player (meetings.openLink.introWithoutAudio e audioNotIncluded, que esperam a
+ * revisão da Cris com os outros textos da H23).
  */
 
 
@@ -40,6 +49,9 @@ type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
 // Link que não existe, desligado ou cortado: definitivo, sem tentar de novo.
 const linkNaoAbre = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || codigoDoErro(erro) === "BAD_REQUEST";
+// O link pede a senha (H23): também sem tentar de novo, até quem lê digitá-la.
+const pedeSenha = (erro: unknown) => codigoDoErro(erro) === "UNAUTHORIZED";
+const naoTentarDeNovo = (erro: unknown) => linkNaoAbre(erro) || pedeSenha(erro);
 
 // A frase pelo código: o teto, o link desligado e o banco fora do ar pedem
 // coisas diferentes de quem lê. Mensagem de servidor que a tela não conhece
@@ -72,9 +84,9 @@ export default function ReuniaoAberta() {
   const { token = "" } = useParams<{ token: string }>();
   const { t, i18n } = useTranslation();
   const { data, isLoading, isError, error, refetch } = trpc.reuniaoAberta.ver.useQuery({ token }, {
-    retry: (tentativas, erro) => !linkNaoAbre(erro) && tentativas < 3,
+    retry: (tentativas, erro) => !naoTentarDeNovo(erro) && tentativas < 3,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: consulta => !linkNaoAbre(consulta.state.error),
+    refetchOnReconnect: consulta => !naoTentarDeNovo(consulta.state.error),
   });
   // O resumo guardado (H4), só leitura: sem ids, sem os ignorados e com as
   // vozes como rótulo ({F2}), que o componente troca pelo nome do `vozes` ou
@@ -87,7 +99,7 @@ export default function ReuniaoAberta() {
   const temTextoParaResumir = !!data?.transcricao?.texto?.trim();
   const resumoGuardado = trpc.reuniaoAberta.resumoGuardado.useQuery({ token }, {
     enabled: temTextoParaResumir,
-    retry: (tentativas, erro) => !linkNaoAbre(erro) && tentativas < 3,
+    retry: (tentativas, erro) => !naoTentarDeNovo(erro) && tentativas < 3,
     refetchOnWindowFocus: false,
     refetchInterval: consulta => {
       const estado = consulta.state.data?.estado;
@@ -133,6 +145,13 @@ export default function ReuniaoAberta() {
       onError: () => traducaoLonga.parar(),
     },
   );
+  // A entrada no link com senha venceu com a página aberta: o resumo (que se
+  // relê sozinho enquanto é gerado) ou a tradução recusam com UNAUTHORIZED, e
+  // a releitura da reunião traz a tela da senha.
+  const entradaVencida = pedeSenha(resumoGuardado.error) || pedeSenha(traduzir.error);
+  useEffect(() => {
+    if (entradaVencida) void refetch();
+  }, [entradaVencida]);
   useEffect(() => {
     setTextoTraduzido(null);
     // De volta ao original, o erro da tradução anterior sai junto.
@@ -140,16 +159,30 @@ export default function ReuniaoAberta() {
     pedirTraducao();
   }, [temTranscricao, token, idiomaDaTraducao, idiomaDoOriginal, traducaoLonga.tentativa]);
 
+  // Com a senha certa, a reunião se relê, e o que recusou com a entrada
+  // vencida (o resumo, a tradução) sai do estado de erro.
+  const depoisDaSenha = () => {
+    void refetch();
+    if (pedeSenha(resumoGuardado.error)) void resumoGuardado.refetch();
+    if (pedeSenha(traduzir.error)) traduzir.reset();
+  };
+
   if (isError && linkNaoAbre(error)) return <Moldura>
     <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
       <p className="text-sm text-white/75">{t("meetings.openLink.notFound")}</p>
       <a href="/" className="mt-4 inline-block text-sm font-semibold text-amber-300 hover:text-amber-200">{t("meetings.openLink.goHome")}</a>
     </div>
   </Moldura>;
+  if (isError && pedeSenha(error)) return <Moldura>
+    <SenhaDoLinkAberto token={token} aoEntrar={depoisDaSenha}/>
+  </Moldura>;
   if (isError && !data) return <Moldura><ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()}/></Moldura>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
+  // A dona tirou o áudio deste link (H23). A resposta de um servidor de antes
+  // da H23 não traz o campo: o link levava o áudio.
+  const semAudio = data.audioIncluido === false;
   // Os nomes das vozes, os mesmos no resumo, na pergunta e na transcrição. A
   // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
   const nomes = data.vozes ?? {};
@@ -166,7 +199,7 @@ export default function ReuniaoAberta() {
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
     <h1 dir="auto" className="text-3xl font-bold mt-1">{temTextoParaResumir && resumoGuardado.data?.emoji && <span aria-hidden="true" className="mr-2">{resumoGuardado.data.emoji}</span>}{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
-    <p className="mt-4 max-w-3xl text-sm text-white/60">{t("meetings.openLink.intro")}</p>
+    <p className="mt-4 max-w-3xl text-sm text-white/60">{semAudio ? t("meetings.openLink.introWithoutAudio") : t("meetings.openLink.intro")}</p>
 
     <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
       <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>
@@ -183,7 +216,7 @@ export default function ReuniaoAberta() {
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
           <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {mmss(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
-        </> : <p className="text-sm text-white/50 mt-3">{gravacaoExpirada
+        </> : <p className="text-sm text-white/50 mt-3">{semAudio ? t("meetings.openLink.audioNotIncluded") : gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
           : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}
       </section>

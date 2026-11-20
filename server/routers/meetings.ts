@@ -29,7 +29,14 @@ import {
 } from "../meeting-service";
 import { perguntarAReuniao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { criarTeto } from "../assistente-de-texto";
-import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
+import {
+  desligarLinkAberto,
+  LinkAbertoRecusado,
+  ligarLinkAbertoComOpcoes,
+  mudarAudioDoLink,
+  novaSenhaDoLink,
+  tirarSenhaDoLink,
+} from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
@@ -133,6 +140,17 @@ export const tetoDaTraducaoDoResumo = criarTeto(
 // a recusa (outra conta, reunião que não está pronta) e a falha (banco fora do
 // ar, auditoria que não entrou) devolvem a vaga.
 export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
+
+// Cada senha nova do link aberto (H23) é um scrypt e uma linha de auditoria:
+// teto próprio por dona, em memória como os outros, de 20 a cada 10 minutos.
+// Só conta a senha que saiu: a recusa (outra conta, link desligado) e a falha
+// devolvem a vaga.
+export const SENHAS_DO_LINK_POR_JANELA = 20;
+export const tetoDasSenhasDoLink = criarTeto(
+  SENHAS_DO_LINK_POR_JANELA,
+  10 * 60_000,
+  "Muitas senhas novas em sequência. Aguarde alguns minutos e tente de novo.",
+);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -485,6 +503,11 @@ export const meetingsRouter = router({
   // consentimento da gravação foi para um áudio privado. Essa palavra vai para
   // a auditoria na mesma transação que liga o link (ligarLinkAberto). Ligar o
   // que já está ligado devolve o mesmo link.
+  //
+  // Desde a H23, a dona escolhe ao ligar se o link pede a senha de 6 dígitos
+  // e se leva o áudio. A senha volta em texto só nesta resposta (e na de
+  // novaSenhaDoLink): o banco guarda o hash. A aba aberta antes do deploy não
+  // manda as escolhas, e o link sai como antes, sem senha e com o áudio.
   ligarLinkAberto: protectedProcedure
     .input(z.object({
       meetingId: z.string().uuid(),
@@ -497,17 +520,57 @@ export const meetingsRouter = router({
       // só com ela o link mostra os nomes. A aba aberta antes do deploy não
       // manda nada, e o serviço grava 1: a frase dela não falava dos nomes.
       versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      comSenha: z.boolean().optional(),
+      incluirAudio: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
+      return comRecusaTraduzida(() => ligarLinkAbertoComOpcoes(ctx.user.openId, input.meetingId, {
         userId: ctx.user.id,
         ipAddress: ipDaCliente(ctx.req),
         userAgent: ctx.req.headers["user-agent"],
         idioma: input.idioma,
         textoExibido: input.textoExibido,
         versaoDaAutorizacao: input.versaoDaAutorizacao,
+      }, { comSenha: input.comSenha, incluirAudio: input.incluirAudio }));
+    }),
+
+  // Uma senha nova para o link ligado (H23): liga a senha no link que não
+  // tinha, ou troca a que havia, e a anterior deixa de valer na hora. A
+  // auditoria vai na mesma transação.
+  novaSenhaDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDasSenhasDoLink.reservar(ctx.user.openId);
+      try {
+        const senha = await comRecusaTraduzida(() => novaSenhaDoLink(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+        }));
+        return { senha };
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // Tira a senha do link ligado (H23): quem tem o endereço volta a abrir sem ela.
+  tirarSenhaDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => tirarSenhaDoLink(ctx.user.openId, input.meetingId, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
       }));
-      return { token };
+      return { success: true };
+    }),
+
+  // Se o link ligado leva o áudio e o player (H23). A regra vale na consulta do
+  // link (server/link-aberto-da-reuniao.ts), não só na tela.
+  mudarAudioDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), incluirAudio: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => mudarAudioDoLink(ctx.user.openId, input.meetingId, input.incluirAudio, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+      }));
+      return { success: true };
     }),
 
   desligarLinkAberto: protectedProcedure

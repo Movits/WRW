@@ -102,6 +102,10 @@ vi.mock("@/lib/trpc", () => ({
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+      // A senha e o áudio do link ligado (H23).
+      novaSenhaDoLink: duble.registrar("novaSenhaDoLink"),
+      tirarSenhaDoLink: duble.registrar("tirarSenhaDoLink"),
+      mudarAudioDoLink: duble.registrar("mudarAudioDoLink"),
       // O PDF da reunião (H8): só monta quando a dona abre o aviso do "Baixar PDF".
       exportar: duble.registrar("exportar"),
     },
