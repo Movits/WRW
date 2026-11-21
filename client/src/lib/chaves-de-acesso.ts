@@ -32,9 +32,26 @@ import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 
 type Traduzir = (chave: string) => string;
 
-/** O navegador fala com chaves de acesso, e não é a casca das lojas. */
+/**
+ * O app das lojas que liga as chaves de acesso na WebView (M1, hoje só o
+ * Android) se anuncia com "WRWChaves/1" no user agent (mobile/App.tsx).
+ * Sem esse sinal, a casca é de uma versão que não liga, e nada aparece.
+ */
+const APP_COM_CHAVES = /\bWRWChaves\/1\b/;
+
+/** O app das lojas desta versão sabe usar as chaves de acesso. */
+export function appComChaves(userAgent: string): boolean {
+  return abertoNaCascaDasLojas(userAgent) && APP_COM_CHAVES.test(userAgent);
+}
+
+/**
+ * O navegador fala com chaves de acesso: fora do app das lojas, ou dentro dele
+ * quando ele se anuncia com "WRWChaves/1". Dentro do app não há sugestão no
+ * campo (a WebView do Android não faz mediation "conditional"): o login com a
+ * chave é pelo link de reserva.
+ */
 export function podeUsarChavesAqui(userAgent: string): boolean {
-  if (abertoNaCascaDasLojas(userAgent)) return false;
+  if (abertoNaCascaDasLojas(userAgent) && !appComChaves(userAgent)) return false;
   try {
     return browserSupportsWebAuthn();
   } catch {
@@ -48,7 +65,10 @@ export function podeUsarChavesAqui(userAgent: string): boolean {
  * com a chave: o navegador só sugere quando já existe uma chave da WRW neste
  * aparelho, ou seja, depois do primeiro login com o convite aceito.
  */
-export async function sugestaoNoCampoDisponivel(): Promise<boolean> {
+export async function sugestaoNoCampoDisponivel(userAgent: string = window.navigator.userAgent): Promise<boolean> {
+  // Dentro do app, sempre o link: a WebView do Android não faz a sugestão no
+  // campo, e se dissesse que faz, a pessoa ficaria sem o link e sem a sugestão.
+  if (appComChaves(userAgent)) return false;
   try {
     return await browserSupportsWebAuthnAutofill();
   } catch {
