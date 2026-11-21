@@ -117,8 +117,19 @@ function Editor({ meetingId, detalhes, etiquetasSugeridas, aoFechar }: {
 }) {
   const { t } = useTranslation();
   const utils = trpc.useUtils();
-  const [titulo, setTitulo] = useState(detalhes.titulo);
-  const [etiquetas, setEtiquetas] = useState<string[]>(() => etiquetasDaReuniao(detalhes.etiquetas));
+  // O título pode mudar por fora com o editor aberto (o "Usar este título" do
+  // título sugerido fica logo acima): até a dona digitar, o campo acompanha o
+  // título de agora. O que ela digitou é dela.
+  const [tituloDigitado, setTituloDigitado] = useState<string | null>(null);
+  const titulo = tituloDigitado ?? detalhes.titulo;
+  // Como os detalhes estavam ao abrir: o salvar manda só o que a dona mudou
+  // aqui, para não gravar por cima o que mudou por fora (outra aba, o título
+  // sugerido) com o editor aberto.
+  const [aoAbrir] = useState(() => ({
+    etiquetas: etiquetasDaReuniao(detalhes.etiquetas), ondeFoi: detalhes.ondeFoi?.trim() || null,
+    contactId: detalhes.contato?.id ?? null, contextId: detalhes.contexto?.id ?? null,
+  }));
+  const [etiquetas, setEtiquetas] = useState<string[]>(aoAbrir.etiquetas);
   const [novaEtiqueta, setNovaEtiqueta] = useState("");
   const [ondeFoi, setOndeFoi] = useState(detalhes.ondeFoi ?? "");
   const [contato, setContato] = useState(detalhes.contato ?? null);
@@ -148,11 +159,19 @@ function Editor({ meetingId, detalhes, etiquetasSugeridas, aoFechar }: {
       if (!tituloValido || salvar.isPending) return;
       // A etiqueta escrita e ainda não acrescentada vai junto.
       const finais = novaEtiqueta.trim() ? normalizarEtiquetas([...etiquetas, novaEtiqueta]) ?? [] : etiquetas;
-      salvar.mutate({ meetingId, titulo: titulo.trim(), etiquetas: finais, ondeFoi: ondeFoi.trim() || null, contactId: contato?.id ?? null, contextId: contexto?.id ?? null });
+      // Só o que mudou (o servidor não mexe no que não vem).
+      const campos: { titulo?: string; etiquetas?: string[]; ondeFoi?: string | null; contactId?: number | null; contextId?: string | null } = {};
+      if (tituloDigitado !== null && tituloDigitado.trim() !== detalhes.titulo) campos.titulo = tituloDigitado.trim();
+      if (JSON.stringify(finais) !== JSON.stringify(aoAbrir.etiquetas)) campos.etiquetas = finais;
+      if ((ondeFoi.trim() || null) !== aoAbrir.ondeFoi) campos.ondeFoi = ondeFoi.trim() || null;
+      if ((contato?.id ?? null) !== aoAbrir.contactId) campos.contactId = contato?.id ?? null;
+      if ((contexto?.id ?? null) !== aoAbrir.contextId) campos.contextId = contexto?.id ?? null;
+      if (!Object.keys(campos).length) { aoFechar(); return; }
+      salvar.mutate({ meetingId, ...campos });
     }}>
       <label className="block text-xs text-white/55">
         {t("meetings.details.titleLabel")}
-        <input dir="auto" value={titulo} onChange={evento => setTitulo(evento.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} required minLength={TITULO_DA_REUNIAO_MIN} className={campoDeTexto} />
+        <input dir="auto" value={titulo} onChange={evento => setTituloDigitado(evento.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} required minLength={TITULO_DA_REUNIAO_MIN} className={campoDeTexto} />
       </label>
       <div>
         <label className="block text-xs text-white/55">

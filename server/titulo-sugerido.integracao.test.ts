@@ -10,7 +10,8 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * sozinho" (G16), contra um banco real DE TESTE (sem DATABASE_URL_TESTES, se
  * pula). A IA é dublê: o que se prova é o banco — a fila grava a sugestão à
  * espera da dona; só a dona a vê (o link não); "Usar este título" troca o
- * título sem mexer na ficha da reunião; "Manter o atual" só registra; a
+ * título e avisa a Memória (o updated_at), menos com a reunião em
+ * processamento, cuja ficha não muda; "Manter o atual" só registra; a
  * decisão dupla e a de outra dona não passam; o resumo refeito com o mesmo
  * título não pede de novo; e o resumo sai no idioma da transcrição, também
  * fora dos 10 da tela.
@@ -108,15 +109,38 @@ describe.skipIf(!temBanco)("O título sugerido pela IA e o idioma do resumo (int
     expect((await reuniao(id)).title).toBe("Reunião de terça");
   });
 
-  it("\"Usar este título\" troca o título pela sugestão, sem mexer na ficha da reunião, e a sugestão some", async () => {
+  it("\"Usar este título\" troca o título pela sugestão, muda o updated_at (a Memória vê a reunião renomeada), e a sugestão some", async () => {
     const id = await comResumoPronto("Preparação do aplicativo para as lojas");
     const antes = await reuniao(id);
     expect(await decidirTituloSugerido(DONA, id, true)).toEqual({ titulo: "Preparação do aplicativo para as lojas" });
     const depois = await reuniao(id);
     expect(depois.title).toBe("Preparação do aplicativo para as lojas");
-    expect(depois.updatedAt).toBe(antes.updatedAt);
+    // A assinatura da Memória é a contagem e o max(updated_at) das reuniões
+    // (server/memory-service.ts): sem isto, ela seguiria citando o título antigo.
+    expect(depois.updatedAt).toBeGreaterThan(antes.updatedAt);
     expect(await linhaDoResumo(id)).toMatchObject({ suggestedTitleStatus: "confirmed" });
     expect((await servico.resumoGuardadoDaDona(DONA, id)).tituloSugerido).toBeNull();
+  });
+
+  it("com a reunião em processamento, o título muda sem mexer na ficha (o updated_at) de quem a processa", async () => {
+    const id = await comResumoPronto("Preparação do aplicativo para as lojas");
+    await (await db()).update(meetings).set({ status: "processing" }).where(eq(meetings.id, id));
+    const antes = await reuniao(id);
+    await decidirTituloSugerido(DONA, id, true);
+    const depois = await reuniao(id);
+    expect(depois.title).toBe("Preparação do aplicativo para as lojas");
+    expect(depois.updatedAt).toBe(antes.updatedAt);
+  });
+
+  it("com o resumo sendo refeito, a sugestão da versão anterior não aparece nem se aplica (CONFLICT)", async () => {
+    const id = await comResumoPronto("Preparação do aplicativo para as lojas");
+    gerarResumoDaReuniao.mockResolvedValue(resumoCom("Lançamento nas lojas"));
+    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    // A fila ainda não rodou: o resumo não está pronto.
+    expect((await linhaDoResumo(id)).status).not.toBe("ready");
+    expect((await servico.resumoGuardadoDaDona(DONA, id)).tituloSugerido).toBeNull();
+    await expect(decidirTituloSugerido(DONA, id, true)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await reuniao(id)).title).toBe("Reunião de terça");
   });
 
   it("\"Manter o atual\" só registra a decisão: o título fica, e a sugestão some", async () => {

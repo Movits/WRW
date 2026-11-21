@@ -90,6 +90,15 @@ describe("TituloSugerido", () => {
     expect(duble.invalidadas).toEqual(["resumoGuardado"]);
   });
 
+  it("a reunião excluída noutra aba (NOT_FOUND) sai traduzida pelo código, e não com a frase do servidor", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.resposta = Object.assign(new Error("Reunião não encontrada."), { data: { code: "NOT_FOUND" } });
+    render(<TituloSugerido meetingId={ID} emoji={null} sugestao="Store launch"/>);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Use this title" })); });
+    expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.meetingNotFound"));
+    expect(toast.error).not.toHaveBeenCalledWith("Reunião não encontrada.");
+  });
+
   it("em árabe, os botões e o aviso vêm em árabe", async () => {
     await act(async () => { await i18n.changeLanguage("ar"); });
     render(<TituloSugerido meetingId={ID} emoji={null} sugestao="إطلاق التطبيق"/>);

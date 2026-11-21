@@ -27,12 +27,16 @@ export function TituloSugerido({ meetingId, emoji, sugestao }: { meetingId: stri
       ]);
     },
     // A sugestão que já não espera a dona (decidida noutra aba, trocada por um
-    // resumo refeito): a frase é da tela, pelo código; a sugestão relê.
+    // resumo refeito): a frase é da tela, pelo código; a sugestão relê. A
+    // reunião excluída noutra aba (NOT_FOUND) também sai pelo código, e não
+    // pela frase em português do servidor.
     onError: erro => {
-      if ((erro as { data?: { code?: string } }).data?.code === "CONFLICT") {
+      const codigo = (erro as { data?: { code?: string } }).data?.code;
+      if (codigo === "CONFLICT") {
         toast.error(t("meetings.suggestedTitle.gone"));
         void utils.meetings.resumoGuardado.invalidate({ meetingId });
-      } else toast.error(mensagemDeErroParaTela(erro, t));
+      } else if (codigo === "NOT_FOUND") toast.error(t("meetings.meetingNotFound"));
+      else toast.error(mensagemDeErroParaTela(erro, t));
     },
   });
   if (!sugestao) return null;

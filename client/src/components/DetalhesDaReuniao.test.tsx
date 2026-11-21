@@ -36,11 +36,14 @@ const erroDoServidor = (code: string, message: string) => TRPCClientError.from({
 function abrir(detalhes: DetalhesNaTela, etiquetasSugeridas: string[] = []) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const client = trpc.createClient({ links: [linkFalso() as never] });
-  return render(<trpc.Provider client={client} queryClient={queryClient}>
+  const arvore = (atuais: DetalhesNaTela) => <trpc.Provider client={client} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
-      <DetalhesDaReuniao meetingId={ID} detalhes={detalhes} etiquetasSugeridas={etiquetasSugeridas}/>
+      <DetalhesDaReuniao meetingId={ID} detalhes={atuais} etiquetasSugeridas={etiquetasSugeridas}/>
     </QueryClientProvider>
-  </trpc.Provider>);
+  </trpc.Provider>;
+  const tela = render(arvore(detalhes));
+  // A página relida (meetings.get) com os detalhes de agora, sem remontar o painel.
+  return { ...tela, reler: (atuais: DetalhesNaTela) => tela.rerender(arvore(atuais)) };
 }
 
 beforeEach(() => {
@@ -82,9 +85,44 @@ describe("DetalhesDaReuniao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Detalhes salvos."));
+    // Só o que a dona mudou: o título e o contexto ficaram como estavam e não vão.
     expect(rede.chamadas.find(c => c.path === "meetings.atualizarDetalhes")?.input).toEqual({
-      meetingId: ID, titulo: "Reunião", etiquetas: ["Exportação", "Mentoria"], ondeFoi: "Zoom", contactId: null, contextId: null,
+      meetingId: ID, etiquetas: ["Exportação", "Mentoria"], ondeFoi: "Zoom", contactId: null,
     });
+  });
+
+  it("o título que muda por fora com o editor aberto (\"Usar este título\") não volta ao antigo ao salvar outra coisa", async () => {
+    const tela = abrir({ titulo: "Reunião de terça", etiquetas: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Editar detalhes" }));
+    expect(screen.getByRole("textbox", { name: "Título" })).toHaveValue("Reunião de terça");
+    // O título sugerido foi aceito logo acima: a página relida traz o título novo.
+    tela.reler({ titulo: "🚀 Lançamento nas lojas", etiquetas: [] });
+    expect(screen.getByRole("textbox", { name: "Título" })).toHaveValue("🚀 Lançamento nas lojas");
+    const etiqueta = screen.getByRole("textbox", { name: "Etiquetas" });
+    fireEvent.change(etiqueta, { target: { value: "Clientes" } });
+    fireEvent.keyDown(etiqueta, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(rede.chamadas.some(c => c.path === "meetings.atualizarDetalhes")).toBe(true));
+    expect(rede.chamadas.find(c => c.path === "meetings.atualizarDetalhes")?.input).toEqual({ meetingId: ID, etiquetas: ["Clientes"] });
+  });
+
+  it("o título digitado pela dona vale, mesmo que o de fora mude depois", async () => {
+    const tela = abrir({ titulo: "Reunião de terça" });
+    fireEvent.click(screen.getByRole("button", { name: "Editar detalhes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Título" }), { target: { value: "Conversa com a cooperativa" } });
+    tela.reler({ titulo: "🚀 Lançamento nas lojas" });
+    expect(screen.getByRole("textbox", { name: "Título" })).toHaveValue("Conversa com a cooperativa");
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(rede.chamadas.some(c => c.path === "meetings.atualizarDetalhes")).toBe(true));
+    expect(rede.chamadas.find(c => c.path === "meetings.atualizarDetalhes")?.input).toEqual({ meetingId: ID, titulo: "Conversa com a cooperativa" });
+  });
+
+  it("salvar sem mudar nada fecha o editor sem pedir nada ao servidor", () => {
+    abrir({ titulo: "Reunião", etiquetas: ["Clientes"], ondeFoi: "Zoom", contato: { id: 7, nome: "Carla Mendes" }, contexto: { id: "c1", nome: "Feira" } });
+    fireEvent.click(screen.getByRole("button", { name: "Editar detalhes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(rede.chamadas.some(c => c.path === "meetings.atualizarDetalhes")).toBe(false);
+    expect(screen.getByRole("button", { name: "Editar detalhes" })).toBeInTheDocument();
   });
 
   it("o Enter que confirma a composição do teclado (japonês, chinês) não cria etiqueta", () => {
@@ -113,8 +151,12 @@ describe("DetalhesDaReuniao", () => {
 
   it("a recusa do contato de outra conta sai traduzida, e o editor fica aberto", async () => {
     rede.respostas["meetings.atualizarDetalhes"] = erroDoServidor("NOT_FOUND", RECUSAS_DOS_DETALHES.contato);
-    abrir({ titulo: "Reunião", contato: { id: 9, nome: "Alguém" } });
+    rede.respostas["network.list"] = { data: [{ id: 9, fullName: "Alguém", company: null }], total: 1 };
+    abrir({ titulo: "Reunião" });
     fireEvent.click(screen.getByRole("button", { name: "Editar detalhes" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Escolher" })[0]);
+    fireEvent.change(screen.getByPlaceholderText("Nome, empresa ou cargo"), { target: { value: "Alg" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Alguém/ }));
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Esse contato não está na sua rede."));
     expect(screen.getByRole("button", { name: "Salvar" })).toBeInTheDocument();
