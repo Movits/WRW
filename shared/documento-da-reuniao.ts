@@ -73,6 +73,10 @@ export const CODIGOS_DA_FALHA_DO_DOCUMENTO = [
   "DOCUMENTO_LONGO_DEMAIS",
   // A IA recusou ler (recusa 4xx, ou a resposta parou por segurança ou recitação).
   "DOCUMENTO_RECUSADO",
+  // O arquivo começa como PDF, mas a IA não consegue abri-lo: o Gemini responde
+  // 400 dizendo que ele está vazio, corrompido ou malformado, ou que não tem
+  // páginas. Ler o mesmo arquivo de novo falha igual.
+  "DOCUMENTO_ILEGIVEL",
   // A IA ficou sobrecarregada ou sem cota, mesmo com o modelo reserva.
   "IA_INDISPONIVEL",
   // No reprocesso, o arquivo guardado não estava mais no bucket.
@@ -89,11 +93,12 @@ export function ehCodigoDaFalhaDoDocumento(valor: unknown): valor is CodigoDaFal
 /**
  * As falhas que se repetem com o mesmo arquivo: a leitura vai ao mesmo modelo,
  * com temperatura 0 e o mesmo teto de saída, e para de novo no mesmo ponto
- * (MAX_TOKENS). Reprocessar pagaria outra leitura para falhar igual: a tela não
- * mostra o botão, e o servidor recusa o reprocesso. A frase da causa já diz o
- * que fazer (dividir o arquivo e enviar cada parte).
+ * (MAX_TOKENS); o arquivo corrompido continua corrompido. Reprocessar pagaria
+ * outra leitura para falhar igual: a tela não mostra o botão, e o servidor
+ * recusa o reprocesso. A frase da causa já diz o que fazer (dividir o arquivo e
+ * enviar cada parte; salvar de novo como PDF e enviar outra vez).
  */
-export const FALHAS_DO_DOCUMENTO_QUE_SE_REPETEM: readonly CodigoDaFalhaDoDocumento[] = ["DOCUMENTO_LONGO_DEMAIS"];
+export const FALHAS_DO_DOCUMENTO_QUE_SE_REPETEM: readonly CodigoDaFalhaDoDocumento[] = ["DOCUMENTO_LONGO_DEMAIS", "DOCUMENTO_ILEGIVEL"];
 
 export function falhaDoDocumentoSeRepete(codigo: string | null | undefined): codigo is CodigoDaFalhaDoDocumento {
   return ehCodigoDaFalhaDoDocumento(codigo) && FALHAS_DO_DOCUMENTO_QUE_SE_REPETEM.includes(codigo);

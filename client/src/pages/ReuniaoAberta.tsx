@@ -187,9 +187,9 @@ export default function ReuniaoAberta() {
 
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
-        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}/>
+        <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo} documento={ehDocumento}/>
         {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
-        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
+        <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} documento={ehDocumento}/>
       </div>}
 
       {/* A de documento não tem gravação, e o arquivo dela não sai pelo link. */}
@@ -211,7 +211,7 @@ export default function ReuniaoAberta() {
       <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><IconeDoTexto size={16}/>{rotuloDoTexto}</h2>
       {transcricao ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
-          <p className="font-semibold text-amber-100">{t("meetings.translateHeading")}</p>
+          <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.openLinkTranslateSubtext") : t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
@@ -222,7 +222,7 @@ export default function ReuniaoAberta() {
         {traducaoLonga.aguardando
           ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
           : traduzir.isPending
-          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div>
+          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div>
           : <>
             {traduzir.isError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">
               <span>{mensagemDaTraducao(t, traduzir.error)}</span>
@@ -234,14 +234,14 @@ export default function ReuniaoAberta() {
               ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
-      </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
+      </> : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
     </section>}
 
     {/* O mapa mental (H10), como no detalhe da dona: a raiz é o título, com o emoji do resumo. */}
     {aba === "mindmap" && <div className="mt-6">
       {temTextoParaResumir
-        ? <MapaMentalDaReuniao token={token} titulo={titulo} emoji={resumoGuardado.data?.emoji ?? null} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
-        : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>}
+        ? <MapaMentalDaReuniao token={token} titulo={titulo} emoji={resumoGuardado.data?.emoji ?? null} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa} documento={ehDocumento}/>
+        : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{ehDocumento ? t("meetings.document.mindMapWait") : t("meetings.mindMap.waitTranscript")}</p></section>}
     </div>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}

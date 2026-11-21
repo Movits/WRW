@@ -68,6 +68,16 @@ describe("lerDocumentoComAIA: cada erro da IA vira o código que a tela traduz",
     { caso: "STOP sem texto", erro: () => new GeminiSemTextoError(), codigo: "DOCUMENTO_SEM_TEXTO" },
     { caso: "a chave recusada (403)", erro: () => new GeminiRecusouChamadaError(403, "API key not valid. Please pass a valid API key."), codigo: "DOCUMENTO_RECUSADO" },
     { caso: "o pedido recusado (400)", erro: () => new GeminiRecusouChamadaError(400, "Request contains an invalid argument."), codigo: "DOCUMENTO_RECUSADO" },
+    // O PDF que começa por "%PDF-" e está corrompido (conferência de tela de
+    // 20/11/2026): a resposta exata que o Gemini deu, e a do PDF sem páginas.
+    {
+      caso: "o PDF corrompido (400 'empty, corrupted, or malformed')",
+      erro: () => new GeminiRecusouChamadaError(400, '{\n  "error": {\n    "code": 400,\n    "message": "Unable to process input: the file or media data is empty, corrupted, or malformed.",\n    "status": "INVALID_ARGUMENT"\n  }\n}'),
+      codigo: "DOCUMENTO_ILEGIVEL",
+    },
+    { caso: "o PDF sem páginas (400)", erro: () => new GeminiRecusouChamadaError(400, '{"error":{"code":400,"message":"The document has no pages.","status":"INVALID_ARGUMENT"}}'), codigo: "DOCUMENTO_ILEGIVEL" },
+    // A mesma frase em outro status não é do arquivo.
+    { caso: "a frase do arquivo corrompido num 403", erro: () => new GeminiRecusouChamadaError(403, "the file or media data is empty, corrupted, or malformed"), codigo: "DOCUMENTO_RECUSADO" },
     {
       caso: "o prazo esgotado do lado do Gemini (504)",
       erro: () => new GeminiRecusouChamadaError(504, '{"error":{"code":504,"message":"Deadline expired before operation could complete.","status":"DEADLINE_EXCEEDED"}}'),
@@ -281,8 +291,9 @@ describe("processarDocumento", () => {
 });
 
 describe("falhaDoDocumentoSeRepete", () => {
-  it("só o texto que não cabe numa resposta: o resto pode dar certo numa leitura nova", () => {
+  it("só o texto que não cabe numa resposta e o arquivo corrompido: o resto pode dar certo numa leitura nova", () => {
     expect(falhaDoDocumentoSeRepete("DOCUMENTO_LONGO_DEMAIS")).toBe(true);
+    expect(falhaDoDocumentoSeRepete("DOCUMENTO_ILEGIVEL")).toBe(true);
     for (const codigo of ["DOCUMENTO_SEM_TEXTO", "DOCUMENTO_RECUSADO", "IA_INDISPONIVEL", "DOCUMENTO_AUSENTE", "DOCUMENTO_FALHOU", "ERRO_INTERROMPIDO", null, undefined]) {
       expect(falhaDoDocumentoSeRepete(codigo)).toBe(false);
     }

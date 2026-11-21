@@ -1,4 +1,5 @@
 import { NOME_DO_FALANTE_MAX } from "@shared/const";
+import { textoTemFala } from "@shared/fala-na-transcricao";
 import { useId, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Play, Search } from "lucide-react";
@@ -22,11 +23,16 @@ export function segmentosValidos(bruto: unknown): SegmentoDaTela[] {
     && typeof (s as SegmentoDaTela).texto === "string" && typeof (s as SegmentoDaTela).falante === "string");
 }
 
-/** Quanto tempo cada voz falou, da que mais falou para a que menos falou. */
+/**
+ * Quanto tempo cada voz falou, da que mais falou para a que menos falou. O
+ * trecho que é só marca entre colchetes ([música], [ruído], [inaudível]) não é
+ * fala (textoTemFala): a vinheta de um vídeo do YouTube não vira uma voz que
+ * não existe, nem entra na conta das outras.
+ */
 export function tempoDeFala(segmentos: SegmentoDaTela[]) {
   const porFalante = new Map<string, number>();
   for (const s of segmentos) {
-    if (s.lacuna || !s.falante) continue;
+    if (s.lacuna || !s.falante || !textoTemFala(s.texto)) continue;
     porFalante.set(s.falante, (porFalante.get(s.falante) ?? 0) + Math.max(0, s.fim - s.inicio));
   }
   const total = Array.from(porFalante.values()).reduce((a, b) => a + b, 0);
@@ -181,7 +187,8 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
               </button>
             )}
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-white/55">{rotulo(s.falante)}</p>
+              {/* A marca sem fala ([música]) não tem voz: sem o rótulo, como no tempo de fala. */}
+              {textoTemFala(s.texto) && <p className="text-xs font-semibold text-white/55">{rotulo(s.falante)}</p>}
               <p dir="auto" className="leading-7 text-white/80">{comDestaque(s.texto, busca)}</p>
             </div>
           </li>

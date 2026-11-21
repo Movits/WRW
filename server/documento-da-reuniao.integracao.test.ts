@@ -52,7 +52,7 @@ const {
   deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas, marcarReunioesInterrompidas, MEETING_AUDIO_TTL_MS,
   ReprocessamentoRecusado,
 } = await import("./meeting-service");
-const { GeminiIndisponivelError, GeminiRespostaCortadaError } = await import("./gemini");
+const { GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError } = await import("./gemini");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const fila = await import("./fila-do-resumo");
 const { resumoGuardadoDaDona } = await import("./resumo-guardado");
@@ -244,6 +244,18 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     expect(recusa).toMatchObject({ codigo: "PRECONDITION_FAILED", message: "DOCUMENTO_LONGO_DEMAIS" });
     // Nada foi tomado, lido do bucket nem mandado à IA.
     expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" });
+    expect(storageGetBytes).not.toHaveBeenCalled();
+    expect(gerarComArquivoNoGemini).toHaveBeenCalledTimes(1);
+  });
+
+  it("o PDF corrompido que o Gemini não abre é DOCUMENTO_ILEGIVEL, e não se reprocessa: o mesmo arquivo falharia igual", async () => {
+    gerarComArquivoNoGemini.mockRejectedValueOnce(new GeminiRecusouChamadaError(400, "Unable to process input: the file or media data is empty, corrupted, or malformed."));
+    const id = await documentoPronto();
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_ILEGIVEL" });
+    const recusa = await iniciarReprocessamento(DONA, id).catch(erro => erro);
+    expect(recusa).toBeInstanceOf(ReprocessamentoRecusado);
+    expect(recusa).toMatchObject({ codigo: "PRECONDITION_FAILED", message: "DOCUMENTO_ILEGIVEL" });
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_ILEGIVEL" });
     expect(storageGetBytes).not.toHaveBeenCalled();
     expect(gerarComArquivoNoGemini).toHaveBeenCalledTimes(1);
   });

@@ -426,7 +426,12 @@ Tamanho: P é pequena, M é média e G é grande.
   de 768 px, contorno vertical que recolhe no celular, e funciona também da direita para a
   esquerda (árabe). A aba "Mapa mental" fica no detalhe da reunião e no link aberto.
 - **H11:** tradução do resumo.
-- **H12:** resumo de PDF.
+- **H12:** resumo de PDF. Na reunião de documento, os textos do detalhe e do link aberto
+  falam do documento, e não da transcrição ou do que foi dito (o resumo, o Pergunte, o
+  mapa mental, as entidades e a tradução); com o teto de 10 documentos por hora já
+  cheio, `meetings.iniciarDocumento` recusa antes de a reunião nascer, e a reunião de um
+  envio que não terminou aceito sai quando a dona deixa a tela (menos a da rede que
+  caiu, que o servidor pode ter recebido).
 - **H13:** resumo de vídeo do YouTube, como no HiNoter que a Glenda viu (o Roberto decidiu
   em 16/11 que entra). A dona cola o link de um vídeo público, e a reunião nasce com a
   origem `youtube` e a URL canônica do vídeo em `meetings.source_url` (migração 0022):
@@ -441,9 +446,14 @@ Tamanho: P é pequena, M é média e G é grande.
     (`MEETING_YOUTUBE_REQUESTED`), que vale também para o "Tentar de novo";
   - as falhas que se repetem com o mesmo vídeo (fala demais para uma resposta e nenhuma
     fala) não têm "Tentar de novo", e o servidor o recusa nelas sem gastar vaga; o mesmo
-    vale para o "Reprocessar" do PDF longo demais (H12);
+    vale para o "Reprocessar" do PDF longo demais e do PDF corrompido que o Gemini não
+    abre (`DOCUMENTO_ILEGIVEL`, H12);
   - o aviso do YouTube tem versão própria, gravada em `consent_notice_version`
-    (`docs/termos/aviso-de-gravacao-rascunho.md`);
+    (`docs/termos/aviso-de-gravacao-rascunho.md`), e o link aberto do vídeo tem caixa
+    própria (`meetings.youtube.shareAuthorization`), que fala da transcrição, e não da
+    gravação, que não existe;
+  - a marca entre colchetes sem fala (`[música]`, `[ruído]`) não é voz: fica fora do tempo
+    de fala e sem o rótulo do falante (`shared/fala-na-transcricao.ts`), também no áudio;
   - na tela não há player, porque a CSP proíbe frames de outros sites: o ▶ de cada fala,
     item e citação abre `youtube.com/watch?v=ID&t=Ns` numa aba nova, também no link
     aberto;

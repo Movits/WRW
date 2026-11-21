@@ -110,12 +110,18 @@ A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li 
    parâmetros do link colado), a transcrição e o resumo, até ela excluir a reunião ou a
    conta.
 5. **Quem acessa.** Só a dona, a menos que ela ligue o link aberto da reunião, que mostra
-   o resumo e a transcrição, e o ▶ de cada fala abre o vídeo no YouTube.
+   o resumo e a transcrição, e o ▶ de cada fala abre o vídeo no YouTube. Ao ligar o link
+   de uma reunião feita de vídeo, a caixa é outra que a da reunião gravada (que fala das
+   pessoas que falaram e da gravação, que aqui não existe), e a frase que a dona viu vai
+   para a prova do link, na auditoria (`MEETING_OPEN_LINK_ON`; chave
+   `meetings.youtube.shareAuthorization`): "Confirmo que posso compartilhar a transcrição
+   deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu
+   der às vozes."
 6. **Teto.** Até 5 vídeos por dona a cada 24 horas, contando o "Tentar de novo".
 
 ### Para a Cris decidir
 
 - se o aviso deve dizer algo sobre o direito de uso do conteúdo do vídeo (a dona resume
   vídeo público de terceiros para uso próprio);
-- se o link aberto de uma reunião feita de vídeo pede alguma ressalva própria (hoje ele
-  segue a mesma confirmação do link de qualquer reunião).
+- se a caixa do link aberto de uma reunião feita de vídeo (a frase do item 5, desde a
+  conferência de tela de 20/11/2026) pede alguma ressalva além dessa.

@@ -1,9 +1,8 @@
 import express, { type Express, type Request, type Response } from "express";
 import { TRPCError } from "@trpc/server";
-import { DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, type CodigoDaRecusaDoDocumento } from "@shared/documento-da-reuniao";
+import { DOCUMENTO_BYTES_MAX, type CodigoDaRecusaDoDocumento } from "@shared/documento-da-reuniao";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "../banco-indisponivel";
-import { criarTeto } from "../assistente-de-texto";
-import { FalhaPassageiraDoDocumento, lerDocumentoGuardado, RecusaDoDocumento, receberDocumento } from "../documento-da-reuniao";
+import { FalhaPassageiraDoDocumento, lerDocumentoGuardado, RecusaDoDocumento, receberDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
 import { sdk } from "./sdk";
 
 /**
@@ -53,8 +52,9 @@ const STATUS_DA_RECUSA: Record<CodigoDaRecusaDoDocumento, number> = {
 
 const ID_DA_REUNIAO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** O teto por dona, em memória, como os outros: basta à instância única do Render e zera a cada deploy. */
-export const tetoDosDocumentos = criarTeto(DOCUMENTOS_POR_HORA, 60 * 60_000, "Muitos documentos enviados em pouco tempo.");
+// O teto por dona (tetoDosDocumentos) mora em server/documento-da-reuniao.ts:
+// meetings.iniciarDocumento o confere antes de a reunião nascer.
+export { tetoDosDocumentos };
 
 type Usuaria = { openId: string; onboardingCompleted?: boolean | null; isCron?: boolean };
 

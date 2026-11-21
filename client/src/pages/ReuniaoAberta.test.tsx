@@ -39,6 +39,7 @@ const duble = vi.hoisted(() => ({
   // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
   propsDaPergunta: null as Record<string, unknown> | null,
   propsDoResumo: null as Record<string, unknown> | null,
+  propsDoMapa: null as Record<string, unknown> | null,
   // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
   // resposta da pergunta pelo link daqui (o `data` da mutação).
   perguntaDeVerdade: false,
@@ -107,9 +108,9 @@ vi.mock("@/components/ResumoGuardado", () => ({
 // "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
 type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
-    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
-  }) => (
+  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos, ...resto }: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void; documento?: boolean;
+  }) => (duble.propsDoMapa = { token, meetingId, titulo, ...resto }) && (
     <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
       <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
       {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
@@ -744,6 +745,27 @@ describe("Reunião aberta pelo link — o documento (H12)", () => {
     expect(screen.getByText("Escolha o idioma em que você quer ler o texto do documento.")).toBeInTheDocument();
     // Nenhum caminho para o arquivo guardado.
     expect(container.innerHTML).not.toMatch(/manus-storage|\/documento|pdfjs|\.pdf/);
+  });
+
+  // Conferência de tela de 20/11/2026 (captura 15b): o link aberto do documento
+  // repetia "Trecho da transcrição" e "Traduzir o que foi dito nesta reunião".
+  it("o resumo, o Pergunte e o mapa recebem que é documento, e a tradução fala do texto do documento", () => {
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ token: TOKEN, documento: true });
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN, documento: true });
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByText("Traduzir o texto do documento")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/foi dito|transcrição/);
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(duble.propsDoMapa).toMatchObject({ token: TOKEN, documento: true });
+  });
+
+  it("a reunião de áudio pelo link segue com os textos da transcrição", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ documento: false });
+    expect(duble.propsDaPergunta).toMatchObject({ documento: false });
   });
 
   it("em árabe: a aba e a introdução no idioma da tela", async () => {

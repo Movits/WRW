@@ -1112,7 +1112,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   useEffect(() => {
     const status = data?.meeting.status;
     if (statusAnterior.current === "processing" && status === "ready") {
-      toast.success(t("meetings.processedSuccess"), avisoDaReuniao("processada", meetingId));
+      toast.success(ehReuniaoDeDocumento(data?.meeting.origem) ? t("meetings.document.processedSuccess") : t("meetings.processedSuccess"), avisoDaReuniao("processada", meetingId));
       setTab("summary");
       // As pendências de Tenho/Preciso foram lidas antes do fim, com as pessoas
       // da tentativa anterior (ou nenhuma), e a consulta não se relê sozinha. O
@@ -1241,7 +1241,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
-      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0} documento={ehDocumento}/>}
+      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0} documento={ehDocumento} youtube={!!idDoVideo}/>}
     {meeting.status === "failed" && ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* O documento (H12) se reprocessa pelo arquivo guardado, com a mesma
@@ -1308,15 +1308,15 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
-        comLinkAberto={!!meeting.shareToken}/>
+        comLinkAberto={!!meeting.shareToken} documento={ehDocumento}/>
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}
         nomes={nomesDosFalantes(meeting.speakerNames)} guarda={emailDeRetorno}/>}
-      <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)}
+      <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)} documento={ehDocumento}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
     </div>}
-    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
+    {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{ehDocumento ? t("meetings.document.entitiesHeading") : t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
       {/* O arquivo do documento (H12b) segue a regra dos 30 dias do áudio. */}
       <p className="text-sm text-white/50 mt-3">{documento
         ? t("meetings.document.availableUntil", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })
@@ -1341,7 +1341,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       <h2 className="text-base font-semibold mb-4">{ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab")}</h2>
       {transcript ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
-          <p className="font-semibold text-amber-100">{t("meetings.translateHeading")}</p>
+          <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
@@ -1349,7 +1349,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             </select>
           </label>
         </div>
-        {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div> : <>
+        {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
@@ -1377,7 +1377,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
                 : <span key={i}>{s.texto}</span>)}</p>
             : <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{displayTranscript || transcript.transcript}</p>}
         </>}
-      </> : <p className="text-white/45">{t("meetings.transcriptUnavailable")}</p>}
+      </> : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
     </section>}
     {/* As páginas do arquivo guardado (H12b), só para a dona e só na reunião de documento. */}
     {tab === "pages" && ehDocumento && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
@@ -1387,8 +1387,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {/* O mapa mental (H10) lê a transcrição, como o resumo: só com a reunião
         pronta e com texto. A raiz é o título, com o emoji do resumo. */}
     {tab === "mindmap" && (prontaComTranscricao
-      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa}/>
-      : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{t("meetings.mindMap.waitTranscript")}</p></section>)}
+      ? <MapaMentalDaReuniao meetingId={meetingId} titulo={meeting.title} emoji={emojiDoResumo} traducao={traducaoDoResumo} aoMudarRotulos={setRotulosDoMapa} documento={ehDocumento}/>
+      : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-sm text-white/50">{ehDocumento ? t("meetings.document.mindMapWait") : t("meetings.mindMap.waitTranscript")}</p></section>)}
     {tab === "contacts" && <div className="space-y-3">
       {itensEsperando > 0 && <p role="status" className="text-sm font-semibold text-amber-200">{t("reuniaoNoMatch.itensEsperando", { quantidade: itensEsperando })}</p>}
       {/* Pendências ainda não lidas: carregando, ou erro com tentar de novo —

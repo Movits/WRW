@@ -58,7 +58,7 @@ function mensagemDoErro(t: TranslateFn, erro: unknown) {
   }
 }
 
-export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false, documento = false }: {
+export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false, documento = false, youtube = false }: {
   meetingId: string;
   titulo: string;
   token: string | null;
@@ -72,10 +72,20 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
    * confirmação dizem isso, e a prova guarda a frase do documento.
    */
   documento?: boolean;
+  /**
+   * A reunião veio de um vídeo do YouTube (H13): não há gravação, e o link
+   * mostra a transcrição e o resumo, com os nomes que a dona der às vozes; o
+   * vídeo fica no YouTube. A apresentação e a confirmação dizem isso, e a prova
+   * guarda a frase do vídeo (conferência de tela de 20/11/2026: a caixa e a
+   * prova falavam da gravação, que não existe).
+   */
+  youtube?: boolean;
 }) {
   const { t, i18n } = useTranslation();
-  const apresentacao = documento ? t("meetings.document.shareIntro") : t("meetings.share.intro");
-  const autorizacao = documento ? t("meetings.document.shareAuthorization") : t("meetings.share.authorization");
+  const apresentacao = documento ? t("meetings.document.shareIntro") : youtube ? t("meetings.youtube.shareIntro") : t("meetings.share.intro");
+  const autorizacao = documento ? t("meetings.document.shareAuthorization") : youtube ? t("meetings.youtube.shareAuthorization") : t("meetings.share.authorization");
+  // Sem gravação, ninguém fica "ouvindo até terminar" depois de o link desligar.
+  const perguntaDeDesligar = documento || youtube ? t("meetings.share.turnOffConfirmNoRecording") : t("meetings.share.turnOffConfirm");
   const utils = trpc.useUtils();
   const campo = useRef<HTMLInputElement>(null);
   const botaoCompartilhar = useRef<HTMLButtonElement>(null);
@@ -202,7 +212,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
     </div>
     <div className="mt-4 border-t border-white/10 pt-3">
       {confirmarDesligar ? <div className="space-y-2">
-        <p id="confirmar-desligar-link" className="text-sm text-amber-100/85">{t("meetings.share.turnOffConfirm")}</p>
+        <p id="confirmar-desligar-link" className="text-sm text-amber-100/85">{perguntaDeDesligar}</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => desligar.mutate({ meetingId })} disabled={desligar.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-50">

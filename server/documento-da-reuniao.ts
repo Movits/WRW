@@ -4,9 +4,10 @@ import { meetingDocuments, meetings } from "../drizzle/schema";
 import { LIMITE_PROCESSAMENTO_MS } from "@shared/const";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import {
-  DOCUMENTO_BYTES_MAX, ehReuniaoDeDocumento, falhaDoDocumentoSeRepete,
+  DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehReuniaoDeDocumento, falhaDoDocumentoSeRepete,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento, type OrigemDeDocumento, type PaginaDoDocumento,
 } from "@shared/documento-da-reuniao";
+import { criarTeto } from "./assistente-de-texto";
 import { descreverErroDeBanco, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import {
@@ -51,6 +52,15 @@ import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageApagarTodasAs
  * páginas de texto corrido) limita o pior caso de uma leitura a ~US$ 0,30, e o
  * teto de 10 documentos por hora (DOCUMENTOS_POR_HORA) limita a conta por dona.
  */
+
+/**
+ * O teto de DOCUMENTOS_POR_HORA por dona, em memória, como os outros: basta à
+ * instância única do Render e zera a cada deploy. A rota do arquivo
+ * (server/_core/rota-do-documento.ts) reserva a vaga, que só fica gasta com o
+ * documento aceito; meetings.iniciarDocumento só confere, sem gastar, para a
+ * reunião não nascer quando o teto já está cheio.
+ */
+export const tetoDosDocumentos = criarTeto(DOCUMENTOS_POR_HORA, 60 * 60_000, "Muitos documentos enviados em pouco tempo.");
 
 /** Recusa definitiva do envio: reenviar o mesmo arquivo não muda a resposta. */
 export class RecusaDoDocumento extends Error {
@@ -221,14 +231,29 @@ export async function lerDocumentoComAIA(bytes: Buffer, idioma: string | null | 
 }
 
 /**
+ * O arquivo que o Gemini não consegue abrir: começa por "%PDF-" (passa pela tela
+ * e pela rota), mas está corrompido. O Gemini responde 400 com "Unable to process
+ * input: the file or media data is empty, corrupted, or malformed." (visto na
+ * conferência de tela de 20/11/2026), ou "The document has no pages." para o PDF
+ * sem página que se abra. O mesmo arquivo falha igual em toda leitura.
+ */
+const ARQUIVO_QUE_A_IA_NAO_ABRE = /corrupted|malformed|has no pages/i;
+
+export function arquivoQueAIANaoAbre(erro: unknown): boolean {
+  return erro instanceof GeminiRecusouChamadaError && erro.status === 400 && ARQUIVO_QUE_A_IA_NAO_ABRE.test(erro.detalhe);
+}
+
+/**
  * O código da falha de uma chamada à IA. A ordem decide: GeminiRecusouChamadaError
- * e GeminiCotaEsgotadaError são subclasses de GeminiIndisponivelError, e o prazo
- * esgotado do Gemini (504) chega como recusa sem ser uma.
+ * e GeminiCotaEsgotadaError são subclasses de GeminiIndisponivelError, o prazo
+ * esgotado do Gemini (504) chega como recusa sem ser uma, e o arquivo corrompido
+ * também chega como recusa (400), mas é do arquivo, e não da IA.
  */
 function codigoDaFalhaDaIA(erro: unknown): CodigoDaFalhaDoDocumento {
   if (erro instanceof GeminiRespostaCortadaError) return erro.motivo === "MAX_TOKENS" ? "DOCUMENTO_LONGO_DEMAIS" : "DOCUMENTO_RECUSADO";
   if (erro instanceof GeminiSemTextoError) return "DOCUMENTO_SEM_TEXTO";
   if (prazoEsgotadoNoGemini(erro)) return "IA_INDISPONIVEL";
+  if (arquivoQueAIANaoAbre(erro)) return "DOCUMENTO_ILEGIVEL";
   if (erro instanceof GeminiRecusouChamadaError) return "DOCUMENTO_RECUSADO";
   if (erro instanceof GeminiIndisponivelError) return "IA_INDISPONIVEL";
   if (erro instanceof ArquivoForaDoTetoDoGeminiError) return "DOCUMENTO_RECUSADO";

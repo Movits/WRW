@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { DOCUMENTO_BYTES_MAX, FOTOS_POR_DOCUMENTO_MAX } from "@shared/documento-da-reuniao";
-import { DocumentoParaResumir } from "./DocumentoParaResumir";
+import { DocumentoParaResumir, tamanhoNaTela } from "./DocumentoParaResumir";
 
 /**
  * O resumo de um documento no gravador (H12 e H12b): um PDF ou as fotos de um
@@ -136,6 +136,56 @@ describe("DocumentoParaResumir: o PDF", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Este arquivo não é um PDF.");
     expect(duble.iniciar).not.toHaveBeenCalled();
     expect(duble.liberar).toHaveBeenCalledTimes(1);
+    // O arquivo recusado sai da tela: o Enviar não o manda de novo.
+    expect(screen.queryByText(/disfarcado\.pdf/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar para resumir" })).toBeDisabled();
+  });
+
+  // Conferência de tela de 20/11/2026 (captura 03b): o PDF acima de 15 MB era
+  // recusado, mas o escolhido antes continuava na tela, com o Enviar ativo, e o
+  // Enviar mandava o arquivo anterior.
+  it.each([
+    ["acima de 15 MB", () => { const grande = pdf("grande.pdf"); Object.defineProperty(grande, "size", { value: DOCUMENTO_BYTES_MAX + 1 }); return grande; }],
+    ["de outro tipo", () => new File(["oi"], "notas.docx", { type: "application/msword" })],
+  ])("o arquivo novo recusado (%s) tira o escolhido antes: nada fica para o Enviar mandar", async (_caso, recusado) => {
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf("anterior.pdf"));
+    autorizar();
+    expect(screen.getByText(/anterior\.pdf/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar para resumir" })).toBeEnabled();
+    escolherPdf(recusado());
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/anterior\.pdf/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Escolher o PDF" })).toBeInTheDocument();
+    const botao = screen.getByRole("button", { name: "Enviar para resumir" });
+    expect(botao).toBeDisabled();
+    fireEvent.click(botao);
+    expect(duble.iniciar).not.toHaveBeenCalled();
+    expect(duble.enviar).not.toHaveBeenCalled();
+  });
+
+  // Conferência de tela de 20/11/2026 (capturas 03a e 03b): um PDF de 5 KB e um
+  // de 135 bytes apareciam como "· 0 MB".
+  it.each([
+    [5_120, "· 5 KB"],
+    [135, "· 1 KB"],
+    [999_400, "· 999 KB"],
+    [999_600, "· 1 MB"],
+    [2_480_000, "· 2,5 MB"],
+  ])("o tamanho do arquivo de %i bytes aparece como '%s', nunca '0 MB'", (bytes, tamanho) => {
+    render(<DocumentoParaResumir {...props}/>);
+    const arquivo = pdf("reuniao-3-paginas.pdf");
+    Object.defineProperty(arquivo, "size", { value: bytes });
+    escolherPdf(arquivo);
+    expect(screen.getByText(/reuniao-3-paginas\.pdf/)).toHaveTextContent(`reuniao-3-paginas.pdf ${tamanho}`);
+    expect(screen.queryByText(/· 0 MB/)).not.toBeInTheDocument();
+  });
+
+  it("o tamanho segue o idioma da tela: a unidade e os números", () => {
+    expect(tamanhoNaTela(5_120, "fr", i18n.getFixedT("fr"))).toBe("5 Ko");
+    expect(tamanhoNaTela(2_480_000, "en", i18n.getFixedT("en"))).toBe("2.5 MB");
+    expect(tamanhoNaTela(5_120, "ru", i18n.getFixedT("ru"))).toBe("5 КБ");
+    expect(tamanhoNaTela(0, "pt-BR", i18n.getFixedT("pt-BR"))).toBe("0 KB");
   });
 
   it("PDF acima de 15 MB ou de outro tipo: recusado ao escolher", () => {
@@ -196,6 +246,54 @@ describe("DocumentoParaResumir: o PDF", () => {
     await waitFor(() => expect(props.aoEnviar).toHaveBeenCalledWith(REUNIAO));
     expect(duble.iniciar).toHaveBeenCalledTimes(1);
     expect(duble.enviar.mock.calls).toEqual([[REUNIAO, arquivo], [REUNIAO, arquivo]]);
+    expect(duble.excluir).not.toHaveBeenCalled();
+  });
+
+  // Conferência de tela de 20/11/2026 (capturas 10a e 10d): depois da recusa do
+  // teto da hora, a dona saía da tela e a reunião criada para a tentativa ficava
+  // na lista como "Recebendo o documento".
+  it("o teto da hora cheio ao criar a reunião: a frase do teto, e nada nasce nem sobe", async () => {
+    duble.iniciar.mockRejectedValue(Object.assign(new Error("Muitos documentos enviados em pouco tempo."), { data: { code: "TOO_MANY_REQUESTS" } }));
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Você já enviou 10 documentos na última hora. Espere um pouco para enviar outro.");
+    expect(duble.enviar).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Muitos documentos/)).not.toBeInTheDocument();
+  });
+
+  it("a recusa de passagem e a dona sai da tela: a reunião que esperava o reenvio sai junto, em vez de ficar 'recebendo' na lista", async () => {
+    duble.enviar.mockResolvedValueOnce({ tipo: "recusado", status: 429, codigo: "MUITOS_PEDIDOS" });
+    const { unmount } = render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    await screen.findByRole("alert");
+    expect(duble.excluir).not.toHaveBeenCalled();
+    unmount();
+    expect(duble.excluir).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    await waitFor(() => expect(duble.invalidarLista).toHaveBeenCalled());
+  });
+
+  it("a rede caiu e a dona sai da tela: a reunião fica, porque o servidor pode ter recebido o documento", async () => {
+    duble.enviar.mockResolvedValue({ tipo: "recusado", status: 0, codigo: "REDE" });
+    const { unmount } = render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    await screen.findByRole("alert");
+    unmount();
+    expect(duble.excluir).not.toHaveBeenCalled();
+  });
+
+  it("enviado o documento, sair da tela não exclui nada", async () => {
+    const { unmount } = render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    await waitFor(() => expect(props.aoEnviar).toHaveBeenCalledWith(REUNIAO));
+    unmount();
     expect(duble.excluir).not.toHaveBeenCalled();
   });
 

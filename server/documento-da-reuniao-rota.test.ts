@@ -22,6 +22,8 @@ vi.mock("./documento-da-reuniao", async importOriginal => ({
 }));
 
 const { meetingsRouter } = await import("./routers/meetings");
+const { tetoDosDocumentos } = await import("./documento-da-reuniao");
+const { DOCUMENTOS_POR_HORA } = await import("@shared/documento-da-reuniao");
 const { VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO } = await import("@shared/aviso-do-documento");
 const { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } = await import("@shared/aviso-de-gravacao");
 
@@ -69,5 +71,23 @@ describe("meetings.iniciarDocumento", () => {
   it("o título segue as regras de sempre", async () => {
     await expect(iniciar({ title: "" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(iniciarDocumento).not.toHaveBeenCalled();
+  });
+
+  // Conferência de tela de 20/11/2026: com o teto da hora cheio, a reunião nascia,
+  // a rota recusava o arquivo (429), e ela ficava "recebendo o documento" na
+  // lista quando a dona saía da tela.
+  it("com o teto da hora cheio, a reunião não nasce: TOO_MANY_REQUESTS antes dela, e a conferência não gasta vaga", async () => {
+    tetoDosDocumentos.esquecer();
+    const vagas = Array.from({ length: DOCUMENTOS_POR_HORA }, () => tetoDosDocumentos.reservar("dona-cheia"));
+    await expect(iniciar({}, "dona-cheia")).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(iniciarDocumento).not.toHaveBeenCalled();
+    // O teto é por dona.
+    await expect(iniciar({}, "outra-dona")).resolves.toEqual({ id: "0b6f2c1e-1111-4222-8333-944445555666" });
+    // Uma vaga devolvida (o envio recusado, por exemplo): a reunião volta a nascer,
+    // e a vaga continua livre para a rota do arquivo.
+    vagas[0]();
+    await expect(iniciar({}, "dona-cheia")).resolves.toEqual({ id: "0b6f2c1e-1111-4222-8333-944445555666" });
+    expect(() => tetoDosDocumentos.reservar("dona-cheia")).not.toThrow();
+    tetoDosDocumentos.esquecer();
   });
 });

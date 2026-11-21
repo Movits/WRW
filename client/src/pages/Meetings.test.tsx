@@ -1598,6 +1598,19 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
     expect(document.querySelector("audio, video, iframe")).toBeNull();
   });
 
+  // Conferência de tela de 20/11/2026 (captura 14c): o painel de compartilhar da
+  // reunião do YouTube falava da gravação, e a prova guardava a frase do áudio.
+  it("compartilhar: o painel e a caixa falam do vídeo, e a prova guarda a frase do vídeo, nunca a da gravação", () => {
+    abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+    expect(screen.getByText(/lê a transcrição e pede à IA o resumo e respostas sobre o vídeo/)).toBeInTheDocument();
+    expect(screen.queryByText(/ouve a gravação/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compartilhar" }));
+    const frase = "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.";
+    fireEvent.click(screen.getByRole("checkbox", { name: frase }));
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligarLinkAberto.mutate).toHaveBeenCalledWith(expect.objectContaining({ textoExibido: frase, versaoDaAutorizacao: 2 }));
+  });
+
   it("a transcrição: o ▶ de cada fala abre o vídeo no YouTube no segundo dela, numa aba nova", () => {
     abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));

@@ -6,7 +6,7 @@ import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
-import { iniciarDocumento } from "../documento-da-reuniao";
+import { iniciarDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
@@ -262,14 +262,21 @@ export const meetingsRouter = router({
   // texto, que a tela junta num PDF. Nasce em 'uploading', com o consentimento
   // e a versão do aviso do documento (obrigatória: não há aba antiga sem ela);
   // o arquivo chega depois pela rota binária (server/_core/rota-do-documento.ts),
-  // e a leitura segue em segundo plano (server/documento-da-reuniao.ts).
+  // e a leitura segue em segundo plano (server/documento-da-reuniao.ts). Com o
+  // teto da hora já cheio, nada nasce (TOO_MANY_REQUESTS): a reunião criada para
+  // uma tentativa que a rota recusaria pelo teto ficava "recebendo o documento"
+  // na lista quando a dona saía da tela (conferência de tela de 20/11/2026). Só
+  // confere, sem gastar: a vaga é da rota, e só o documento aceito a gasta.
   iniciarDocumento: protectedProcedure.input(createMeetingInput.omit({ consentNoticeVersion: true }).extend({
     consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_DOCUMENTO),
     origem: z.enum(ORIGENS_DE_DOCUMENTO),
-  })).mutation(({ ctx, input }) => iniciarDocumento(ctx.user.openId, {
-    title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion,
-    origem: input.origem, contactId: input.contactId, contextId: input.contextId,
-  })),
+  })).mutation(({ ctx, input }) => {
+    tetoDosDocumentos.conferir(ctx.user.openId);
+    return iniciarDocumento(ctx.user.openId, {
+      title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion,
+      origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+    });
+  }),
 
   encerrarGravacao: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), partes: z.number().int().min(1).max(PARTES_NO_MAXIMO) }))

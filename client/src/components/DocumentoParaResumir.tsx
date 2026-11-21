@@ -28,7 +28,9 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
  * bucket ou o banco fora, a sessão vencida, a rede que caiu) não exclui nada: a
  * reunião fica guardada, e o próximo Enviar manda o arquivo a ELA, sem criar
  * outra (o servidor aceita o reenvio enquanto ela espera o documento, e
- * reconhece o mesmo arquivo que já chegou).
+ * reconhece o mesmo arquivo que já chegou). Se a dona sai da tela sem reenviar,
+ * essa reunião sai, menos a da rede que caiu. Com o teto da hora já cheio, o
+ * servidor recusa antes de a reunião nascer.
  */
 
 type Foto = { id: string; arquivo: File; url: string };
@@ -40,6 +42,20 @@ type Foto = { id: string; arquivo: File; url: string };
 type ReuniaoPendente = { id: string; titulo: string; idioma: IdiomaDaReuniao; origem: OrigemDeDocumento; incerta: boolean };
 
 const MB = 1_000_000;
+
+type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * O tamanho do arquivo na tela: em KB abaixo de 1 MB, em MB (com uma casa) daí
+ * em diante. Só em MB, o PDF pequeno aparecia como "0 MB" (conferência de tela
+ * de 20/11/2026: um de 5 KB e um de 135 bytes saíam "· 0 MB"). O arquivo com
+ * algum byte mostra ao menos 1 KB.
+ */
+export function tamanhoNaTela(bytes: number, idioma: string, t: TranslateFn): string {
+  const kb = Math.max(bytes > 0 ? 1 : 0, Math.round(bytes / 1000));
+  if (kb < 1000) return t("meetings.document.sizeKb", { kb: kb.toLocaleString(idioma) });
+  return t("meetings.document.sizeMb", { mb: (bytes / MB).toLocaleString(idioma, { maximumFractionDigits: 1 }) });
+}
 
 /** O código tRPC do erro (data.code): só o erro que o servidor devolveu tem um. */
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: unknown } } | null)?.data?.code;
@@ -85,11 +101,31 @@ export function DocumentoParaResumir(props: {
   fotosNaTela.current = fotos;
   useEffect(() => () => { for (const foto of fotosNaTela.current) URL.revokeObjectURL(foto.url); }, []);
 
+  // Ao sair da tela, a reunião de um envio que não terminou aceito sai também,
+  // se o servidor certamente não ficou com o documento: o próximo Enviar a
+  // reaproveitaria, mas sem ele ela ficava "recebendo o documento" na lista
+  // (conferência de tela de 20/11/2026). A da rede que caiu fica, e a lista diz
+  // como ela está.
+  const excluirAoSair = useRef<(id: string) => void>(() => {});
+  useEffect(() => () => {
+    const pendente = reuniaoPendente.current;
+    reuniaoPendente.current = null;
+    if (pendente && !pendente.incerta) excluirAoSair.current(pendente.id);
+  }, []);
+
+  // Recusado o arquivo novo, o escolhido antes também sai: senão ele continuava
+  // na tela, com o Enviar ativo, e o Enviar mandava o arquivo de antes
+  // (conferência de tela de 20/11/2026).
+  function recusarPdf(aviso: string) {
+    setPdf(null);
+    setErro(aviso);
+  }
+
   function escolherPdf(arquivo: File | undefined) {
     setErro(null);
     if (!arquivo) return;
-    if (arquivo.type && arquivo.type !== "application/pdf" && !/\.pdf$/i.test(arquivo.name)) return setErro(t("meetings.document.errorNotPdf"));
-    if (arquivo.size > DOCUMENTO_BYTES_MAX) return setErro(t("meetings.document.errorTooLarge", { mb: DOCUMENTO_BYTES_MAX / MB }));
+    if (arquivo.type && arquivo.type !== "application/pdf" && !/\.pdf$/i.test(arquivo.name)) return recusarPdf(t("meetings.document.errorNotPdf"));
+    if (arquivo.size > DOCUMENTO_BYTES_MAX) return recusarPdf(t("meetings.document.errorTooLarge", { mb: DOCUMENTO_BYTES_MAX / MB }));
     setPdf(arquivo);
   }
 
@@ -126,6 +162,7 @@ export function DocumentoParaResumir(props: {
       })
       .finally(() => { void utils.meetings.list.invalidate(); });
   }
+  excluirAoSair.current = excluirReuniao;
 
   async function enviar() {
     setErro(null);
@@ -139,7 +176,7 @@ export function DocumentoParaResumir(props: {
     try {
       let arquivo: Blob;
       if (origem === "pdf" && pdf) {
-        if (!(await pareceUmPdf(pdf))) return setErro(t("meetings.document.errorNotPdf"));
+        if (!(await pareceUmPdf(pdf))) return recusarPdf(t("meetings.document.errorNotPdf"));
         arquivo = pdf;
       } else {
         setProntas(0);
@@ -200,6 +237,8 @@ export function DocumentoParaResumir(props: {
       // passou por ele (a rede fora no tRPC, a memória do aparelho ao montar o
       // PDF das fotos) traz texto técnico, em inglês, e vira a frase da tela.
       if (falha instanceof FotoIlegivel) setErro(t("meetings.document.photoUnreadable", { numero: falha.posicao + 1 }));
+      // O teto da hora já cheio: o servidor recusa antes de a reunião nascer.
+      else if (codigoDoErro(falha) === "TOO_MANY_REQUESTS") setErro(mensagemDaRecusaDoDocumento("MUITOS_PEDIDOS", t));
       else if (typeof codigoDoErro(falha) === "string") setErro(mensagemDeErroParaTela(falha, t));
       else setErro(t("meetings.document.errorTryAgain"));
     } finally {
@@ -238,7 +277,7 @@ export function DocumentoParaResumir(props: {
       <button type="button" disabled={ocupado} onClick={() => entradaDoPdf.current?.click()} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40">
         <FileText size={17}/> {pdf ? t("meetings.document.changePdf") : t("meetings.document.choosePdf")}
       </button>
-      {pdf && <p dir="auto" className="min-w-0 break-words text-sm text-white/70">{pdf.name} · {t("meetings.document.sizeMb", { mb: (pdf.size / MB).toLocaleString(i18n.language, { maximumFractionDigits: 1 }) })}</p>}
+      {pdf && <p dir="auto" className="min-w-0 break-words text-sm text-white/70">{pdf.name} · {tamanhoNaTela(pdf.size, i18n.language, t)}</p>}
       <p className="text-xs text-white/40">{t("meetings.document.pdfLimit", { mb: DOCUMENTO_BYTES_MAX / MB })}</p>
     </div> : <div className="space-y-3">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

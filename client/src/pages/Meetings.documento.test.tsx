@@ -44,6 +44,7 @@ const duble = vi.hoisted(() => {
     enviarDocumento: vi.fn(),
     excluirPeloCliente: vi.fn(),
     paginas: vi.fn(),
+    mapa: vi.fn(),
     utils: {
       meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
       auth: { me: { invalidate: vi.fn() } },
@@ -107,7 +108,7 @@ vi.mock("@/lib/trpc", () => ({
     network: { list: { useQuery: (...args: unknown[]) => duble.buscaNaRede(...args) } },
   },
 }));
-vi.mock("@/components/MapaMental", () => ({ MapaMentalDaReuniao: () => <div data-testid="mapa-mental"/> }));
+vi.mock("@/components/MapaMental", () => ({ MapaMentalDaReuniao: (props: Record<string, unknown>) => { duble.mapa(props); return <div data-testid="mapa-mental"/>; } }));
 vi.mock("@/lib/envio-do-documento", () => ({ enviarDocumento: (...args: unknown[]) => duble.enviarDocumento(...args) }));
 // A aba das páginas: um marcador que mostra o que recebeu.
 vi.mock("@/components/PaginasDoDocumento", () => ({
@@ -319,6 +320,78 @@ describe("O detalhe da reunião de documento", () => {
     abrirDetalhe({ status: "failed", ...reuniao }, { transcript: null, ...detalhe });
     expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
     expect(screen.getByText("Não dá mais para reprocessar este documento pelo arquivo guardado. Para tentar de novo, exclua esta reunião e envie o documento outra vez.")).toBeInTheDocument();
+  });
+
+  // Conferência de tela de 20/11/2026 (capturas 02b, 04a, 06a e 07a): o detalhe do
+  // documento ainda falava de transcrição, de conversa e do que foi dito.
+  it("o resumo, o Pergunte, as entidades, o mapa e a tradução falam do documento, nunca da transcrição, da conversa ou do que foi dito", () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: {
+        estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, modelo: "geral", versaoAnterior: false,
+        itens: [
+          { id: "i-acao", section: "action", position: 0, subject: null, text: "Enviar o orçamento do transporte", assignee: null, due: null, excerpt: "Ricardo envia o orçamento do transporte", startSeconds: null, status: "pending", done: false, origin: "ai", editedAt: null },
+          { id: "i-foco", section: "focus", position: 1, subject: null, text: "Planejamento da feira", assignee: null, due: null, excerpt: "Ata da reunião de planejamento", startSeconds: null, status: "confirmed", done: false, origin: "ai", editedAt: null },
+          { id: "i-editado", section: "decision", position: 2, subject: null, text: "Feira em março", assignee: null, due: null, excerpt: "a feira será no dia 18 de março", startSeconds: null, status: "confirmed", done: false, origin: "ai", editedAt: Date.UTC(2026, 10, 20, 13) },
+        ],
+      },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    abrirDetalhe();
+    expect(screen.getByRole("heading", { name: "Resumo do documento" })).toBeInTheDocument();
+    expect(screen.getByText(/^Escrito pela IA a partir do texto do documento\./)).toBeInTheDocument();
+    expect(screen.getByText("Trecho do documento", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Trecho do documento", { selector: "summary" })).toBeInTheDocument();
+    expect(screen.getByText("Trecho original do documento", { selector: "summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pergunte ao documento" })).toBeInTheDocument();
+    expect(screen.getByText("A resposta vem só do texto do documento, com os trechos que a sustentam.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Nomes e empresas citados no documento" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|conversa|foi dito|Pergunte à reunião|Resumo da reunião/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByText("Traduzir o texto do documento")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|foi dito/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(duble.mapa).toHaveBeenLastCalledWith(expect.objectContaining({ meetingId: ID, documento: true }));
+  });
+
+  it("a resposta do Pergunte mostra onde está no documento e o aviso de conferir pelos trechos do documento", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, modelo: "geral", versaoAnterior: false, itens: [] }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe();
+    duble.mutacoes.perguntar.data = { respondida: true, resposta: "O prazo é 25/11/2026.", citacoes: [{ trecho: "Ricardo Tavares | 25/11/2026", inicioSegundos: null }] };
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Qual é o prazo?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("Onde isso está no documento")).toBeInTheDocument();
+    expect(screen.getByText("Sugestões da IA para você conferir com os trechos do documento. Nada disto foi gravado nem entra na sua rede sozinho.")).toBeInTheDocument();
+    expect(screen.queryByText(/Onde isso foi dito|trechos da transcrição/)).not.toBeInTheDocument();
+  });
+
+  it("lendo o documento: o texto e o mapa esperam a leitura, e não a transcrição", () => {
+    abrirDetalhe({ status: "processing" }, { transcript: null });
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByText("O texto do documento ainda não está disponível.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(screen.getByText("O mapa mental aparece aqui quando a leitura do documento terminar.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição/);
+  });
+
+  it("a leitura que termina com a tela aberta avisa que o documento foi lido, e não que a reunião foi processada", async () => {
+    const { toast } = await import("sonner");
+    vi.mocked(toast.success).mockClear();
+    const { rerender } = abrirDetalhe({ status: "processing" }, { transcript: null });
+    const anterior = duble.get.mock.results.at(-1)!.value as { data: { meeting: typeof REUNIAO } };
+    duble.get.mockReturnValue({ data: { ...anterior.data, meeting: { ...anterior.data.meeting, status: "ready" }, transcript: TRANSCRICAO }, isLoading: false });
+    rerender(<Meetings />);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Documento lido. Revise o texto e as sugestões.", expect.anything()));
+  });
+
+  it("o PDF corrompido que o Gemini não abre: a causa diz o que fazer, e não há Reprocessar (o mesmo arquivo falharia igual)", () => {
+    abrirDetalhe({ status: "failed", processingError: "DOCUMENTO_ILEGIVEL" }, { transcript: null, documento: { ...DOCUMENTO, expiresAt: Date.now() + 10 * DIA } });
+    expect(screen.getByText("A IA não conseguiu abrir este arquivo: ele parece estar corrompido ou danificado. Confira se ele abre no seu aparelho, salve-o de novo como PDF e envie outra vez.")).toBeInTheDocument();
+    expect(screen.queryByText(/A IA recusou ler este documento/)).not.toBeInTheDocument();
+    expect(screen.queryByText("DOCUMENTO_ILEGIVEL")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/O arquivo deste documento continua guardado até/)).not.toBeInTheDocument();
   });
 
   it("a 375 px e em árabe: as abas rolam de lado sem quebrar, e tudo no idioma da tela", async () => {

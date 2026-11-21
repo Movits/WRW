@@ -6,6 +6,7 @@ import {
   erroDoYoutubeSeRepete, idDoVideoDoYoutube, SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, urlCanonicaDoYoutube, VIDEOS_DO_YOUTUBE_POR_DIA,
   type CodigoDeErroDoYoutube, type VersaoDoAvisoDoYoutube,
 } from "@shared/youtube";
+import { textoTemFala } from "@shared/fala-na-transcricao";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { geminiPost, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, prazoEsgotadoNoGemini, raciocinioBaixo } from "./gemini";
@@ -204,13 +205,13 @@ export function codigoDaFalhaDoVideo(erro: unknown): CodigoDeErroDoYoutube {
   return "YOUTUBE_FALHOU";
 }
 
-// Letra ou número de qualquer escrita (o RegExp com "u", como ESCRITA_SEM_ESPACO
-// em server/meeting-service.ts: o alvo do tsc não aceita o literal /.../u).
-const LETRA_OU_NUMERO = new RegExp("[\\p{L}\\p{N}]", "u");
-
-/** Se alguém fala: algum texto com letra ou número fora das marcas entre colchetes ([música]). */
+/**
+ * Se alguém fala: algum texto com letra ou número fora das marcas entre
+ * colchetes ([música]). A regra é a mesma da tela (textoTemFala, em
+ * shared/fala-na-transcricao.ts).
+ */
 export function temFala(segmentos: readonly Segmento[]): boolean {
-  return segmentos.some(segmento => !segmento.lacuna && LETRA_OU_NUMERO.test(segmento.texto.replace(/\[[^\]]*\]/g, "")));
+  return segmentos.some(segmento => !segmento.lacuna && textoTemFala(segmento.texto));
 }
 
 export type TranscricaoDoVideo = { segmentos: Segmento[]; texto: string; duracaoSegundos: number; modelo: string };

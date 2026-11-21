@@ -178,6 +178,7 @@ const CAUSA_POR_FALHA_DO_DOCUMENTO: Record<CodigoDaFalhaDoDocumento, (t: Traduzi
   DOCUMENTO_SEM_TEXTO: t => t("meetings.document.failedNoText"),
   DOCUMENTO_LONGO_DEMAIS: t => t("meetings.document.failedTooLong"),
   DOCUMENTO_RECUSADO: t => t("meetings.document.failedRefused"),
+  DOCUMENTO_ILEGIVEL: t => t("meetings.document.failedCorrupted"),
   IA_INDISPONIVEL: t => t("meetings.document.failedAiUnavailable"),
   DOCUMENTO_AUSENTE: t => t("meetings.document.failedMissing"),
   DOCUMENTO_FALHOU: t => t("meetings.document.failedGeneric"),
