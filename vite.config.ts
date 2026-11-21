@@ -32,6 +32,15 @@ export default defineConfig({
     assetsInlineLimit: (caminho: string) =>
       /\.(woff2?|ttf|otf|eot)$/i.test(caminho) ? false : undefined,
   },
+  // O pdf.js (o leitor das páginas do documento, H12b, client/src/lib/leitor-de-pdf.ts)
+  // só entra quando a aba das páginas abre, por import() dinâmico e pelo Worker:
+  // a varredura do servidor de dev não o acha na subida, otimiza na primeira
+  // abertura e RECARREGA a página, que volta para a aba Resumo (conferência de
+  // tela de 20/11/2026). Listado aqui, ele é otimizado já na subida. O build de
+  // produção não usa esta lista.
+  optimizeDeps: {
+    include: ["pdfjs-dist/legacy/build/pdf.mjs", "pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
   server: {
     host: true,
     allowedHosts: ["localhost", "127.0.0.1"],

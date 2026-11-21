@@ -96,6 +96,8 @@ type DaDona = {
    */
   falantes?: readonly string[];
   aoIrPara?: (segundo: number) => void;
+  /** A reunião do YouTube (H13): o "▶" do item abre o vídeo no segundo (TempoDoTrecho). */
+  linkDoTempo?: (segundo: number) => string;
   /** O item pedido pelo link (?item=<id>): a tela rola até ele e o destaca. */
   itemDestacado?: string | null;
   /**
@@ -106,6 +108,8 @@ type DaDona = {
   traducao?: TraducaoDoResumoNaTela;
   /** O link aberto está ligado: o formulário do item avisa que o que ela escreve aparece para quem tem o link. */
   comLinkAberto?: boolean;
+  /** A reunião nasceu de um documento (H12): o título, o aviso e os trechos falam do documento, e não da transcrição. */
+  documento?: boolean;
 };
 type DoLink = {
   token: string;
@@ -117,7 +121,9 @@ type DoLink = {
    */
   nomes?: Readonly<Record<string, string>>;
   aoIrPara?: (segundo: number) => void;
+  linkDoTempo?: (segundo: number) => string;
   traducao?: TraducaoDoResumoNaTela;
+  documento?: boolean;
 };
 
 // A ordem do formato da cliente.
@@ -230,6 +236,9 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   const falantes = props.token === undefined ? props.falantes ?? [] : [];
   const itemDestacado = props.token === undefined ? props.itemDestacado ?? null : null;
   const traducao = props.traducao;
+  // O documento (H12) não tem transcrição: o título, o aviso e os trechos falam
+  // dele (conferência de tela de 20/11/2026).
+  const documento = !!props.documento;
   // Com a tradução pronta, os textos dos itens vêm no idioma escolhido.
   const original = props.consulta.data as ResumoDaDona | ResumoDoLink | undefined;
   const dados = traducao ? traducao.aplicar(original) : original;
@@ -421,7 +430,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
       </div>}
       {!peloLink && !somenteLeitura && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <AvisoDeConferir>{t("meetings.summary.reviewNotice")}</AvisoDeConferir>
+        <AvisoDeConferir>{documento ? t("meetings.document.summaryReviewNotice") : t("meetings.summary.reviewNotice")}</AvisoDeConferir>
         <button type="button" disabled={decidindo} onClick={() => confirmarTodos.mutate({ meetingId })}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:opacity-50">
           <Check size={15}/> {t("meetings.summary.confirmAll", { n: pendentes.length })}
@@ -435,8 +444,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         return <section key={secao} aria-labelledby={`secao-do-resumo-${secao}`}>
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
-            {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
-              aoIrPara={props.aoIrPara} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
+            {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} documento={documento} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
+              aoIrPara={props.aoIrPara} linkDoTempo={props.linkDoTempo} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito, ...pedidoDaTela(t) }); }}
               formularioDeEdicao={!peloLink && !somenteLeitura && item.id ? fechar => formularioDoItem(item, fechar) : undefined}/>)}
@@ -473,7 +482,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
 
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{t("meetings.summary.title")}</h2>
+      <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{documento ? t("meetings.document.summaryTitle") : t("meetings.summary.title")}</h2>
       {(comEscolhaDoIdioma || podeRefazer || podeOuvir) && <div className="flex flex-wrap items-center gap-3">
         {/* O idioma do resumo (H11): começa no da tela, e o original fica marcado. */}
         {traducao && comEscolhaDoIdioma && <label className="inline-flex items-center gap-2 text-xs text-amber-100/70">
@@ -513,13 +522,16 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
+function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, linkDoTempo, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
   item: ItemNaTela;
   peloLink: boolean;
+  /** O item de um resumo de documento (H12): o trecho é do texto do documento. */
+  documento: boolean;
   comVozes: (texto: string) => string;
   idiomaDoTexto?: string;
   idiomaDoTrecho?: string;
   aoIrPara?: (segundo: number) => void;
+  linkDoTempo?: (segundo: number) => string;
   destacado: boolean;
   decidindo: boolean;
   /** A versão anterior do resumo que está sendo refeito (H4d): a caixa fica, travada, e não há botões de decidir. */
@@ -580,7 +592,7 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
       {/* Sem player (a gravação venceu ou não existe), o tempo é só
           informação: nada de botão desligado anunciando "Ouvir". O mesmo
           "▶" das citações do Pergunte à reunião (TempoDoTrecho). */}
-      {item.startSeconds !== null && <TempoDoTrecho segundos={item.startSeconds} aoIrPara={aoIrPara}/>}
+      {item.startSeconds !== null && <TempoDoTrecho segundos={item.startSeconds} aoIrPara={aoIrPara} linkDoTempo={linkDoTempo}/>}
       {pendente && !peloLink && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.summary.toReview")}</span>}
       {/* O que a dona escreveu (H4f): para ela, se acrescentou ou editou; pelo
           link, uma marca só, de que não é texto da IA, sem dizer quem é. */}
@@ -594,9 +606,11 @@ function ItemDoResumo({ item, peloLink, comVozes, idiomaDoTexto, idiomaDoTrecho,
         ela editou é o da versão da IA: "trecho original", porque pode não
         sustentar mais o que ela escreveu. */}
     {item.excerpt ? (pendente
-      ? <Trecho texto={item.excerpt}/>
+      ? <Trecho texto={item.excerpt} documento={documento}/>
       : <details className="mt-2">
-          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{editadoPelaDona ? t("meetings.summary.originalExcerptLabel") : t("meetings.ai.excerptLabel")}</summary>
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{editadoPelaDona
+            ? (documento ? t("meetings.document.originalExcerptLabel") : t("meetings.summary.originalExcerptLabel"))
+            : (documento ? t("meetings.document.excerptLabel") : t("meetings.ai.excerptLabel"))}</summary>
           <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>) : null}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}

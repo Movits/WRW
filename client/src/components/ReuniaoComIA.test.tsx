@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
-import { PergunteAReuniao } from "./ReuniaoComIA";
+import { PergunteAReuniao, Trecho } from "./ReuniaoComIA";
 
 /**
  * O "Pergunte à reunião" na tela. O tRPC vira um dublê com estado de verdade:
@@ -252,5 +252,45 @@ describe("O aviso de conferir fala com quem lê", () => {
     render(<PergunteAReuniao meetingId={ID} />);
     perguntarAgora();
     for (const texto of ["Resposta", "Qual o prazo?", "trecho citado"]) expect(screen.getByText(texto)).toHaveAttribute("dir", "auto");
+  });
+});
+
+// Conferência de tela de 20/11/2026 (captura 07a): na reunião de documento (H12),
+// o Pergunte falava "do que foi dito na reunião" e dos "trechos da transcrição".
+describe("Pergunte ao documento (H12)", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+
+  it("da dona: o título, a introdução, a busca, a resposta e o aviso falam do documento", () => {
+    duble.respostas.perguntar = respondida("O prazo é 25/11.", semTempo("Ricardo Tavares | 25/11/2026"));
+    render(<PergunteAReuniao meetingId={ID} documento />);
+    expect(screen.getByRole("heading", { name: "Pergunte ao documento" })).toBeInTheDocument();
+    expect(screen.getByText("A resposta vem só do texto do documento, com os trechos que a sustentam.")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Qual o prazo?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("Onde isso está no documento")).toBeInTheDocument();
+    expect(screen.getByText("Sugestões da IA para você conferir com os trechos do documento. Nada disto foi gravado nem entra na sua rede sozinho.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|foi dito|reunião/);
+  });
+
+  it("o documento que não responde: a tela diz que o texto do documento não responde", () => {
+    duble.respostas.perguntar = { respondida: false };
+    render(<PergunteAReuniao meetingId={ID} documento />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Quem assinou?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("O texto deste documento não responde a esta pergunta.")).toBeInTheDocument();
+  });
+
+  it("pelo link: o aviso de quem lê o link fala dos trechos do documento", () => {
+    duble.respostas.perguntarPeloLink = respondida("Na sexta.", semTempo("entrega na sexta"));
+    render(<PergunteAReuniao token={TOKEN} documento />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Quando?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("Sugestões da IA para conferir com os trechos do documento. Nada disto foi gravado.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|foi dito/);
+  });
+
+  it("o trecho do item do resumo também fala do documento", () => {
+    render(<Trecho texto="a feira será em março" documento />);
+    expect(screen.getByText("Trecho do documento")).toBeInTheDocument();
   });
 });
