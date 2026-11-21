@@ -2261,6 +2261,21 @@ export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, owne
   await soltarGravacaoDaAgenda(tx, ownerId, meetingId);
 }
 
+/**
+ * O que a IA gerou da reunião que FICA na junção (H17), dentro da transação
+ * dela: a transcrição, as traduções, o resumo (com o mapa mental), os itens, as
+ * sugestões e as entidades eram só da primeira reunião, e a montagem os refaz
+ * com todas. É a mesma limpeza da montagem (limparAntes) e do reprocesso: as
+ * próximas ações ficam com a dona, soltas dos itens e com os nomes das vozes
+ * de antes (por isso roda antes de a junção trocar os nomes). Feita aqui, e
+ * não só na montagem, a tela da reunião juntada mostra o andamento das partes
+ * (G15a) em vez do conteúdo antigo, e nada do que a montagem apagaria (confirmar
+ * um item, traduzir, perguntar) fica à mão no meio.
+ */
+export async function apagarDerivadosDoAlvoDaJuncao(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
+  await apagarDerivadosSemGravacao(tx, ownerId, meetingId, false);
+}
+
 export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   // 'deleted' ANTES de apagar, e não um SELECT de existência: é o sinal que

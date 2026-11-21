@@ -43,6 +43,38 @@ export type Segmento = { inicio: number; fim: number; falante: string; texto: st
 /** O que a fatia anterior passa adiante. */
 export type ContextoDaFatiaAnterior = { falantes: string[]; ultimasFalas: Segmento[] };
 
+/**
+ * A marca que a junção que retranscreve (H17, server/juntar-reunioes.ts) põe
+ * no `result` da primeira parte que ela manda transcrever de cada reunião
+ * juntada: ali começa OUTRA conversa, com outras pessoas. A fila
+ * (server/fila-de-transcricao.ts) transcreve essa parte sem o contexto da
+ * anterior ("este trecho continua o anterior; use os mesmos rótulos" faria a
+ * IA dar às vozes novas os rótulos, e os nomes, de quem falou na outra
+ * reunião) e desloca os rótulos dela para depois dos já usados: a mesma
+ * pessoa pode ganhar dois rótulos, mas duas pessoas nunca se fundem num só. A
+ * marca fica no result também depois de transcrita.
+ */
+export const MARCA_DE_OUTRA_REUNIAO = "inicioDeOutraReuniao";
+
+export function ehInicioDeOutraReuniao(result: unknown): boolean {
+  return !!result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>)[MARCA_DE_OUTRA_REUNIAO] === true;
+}
+
+/** O número do rótulo da voz ("F3" é 3); o que não é rótulo vale 0. */
+export function numeroDoRotulo(falante: unknown): number {
+  const casou = typeof falante === "string" ? /^F([1-9]\d*)$/.exec(falante) : null;
+  return casou ? Number(casou[1]) : 0;
+}
+
+/** As falas com os rótulos das vozes deslocados em `deslocamento` (F1 vira F4 com 3); a lacuna e o que não é rótulo ficam. */
+export function deslocarRotulosDasFalas(segmentos: Segmento[], deslocamento: number): Segmento[] {
+  if (!deslocamento) return segmentos;
+  return segmentos.map(segmento => {
+    const numero = numeroDoRotulo(segmento.falante);
+    return numero && !segmento.lacuna ? { ...segmento, falante: `F${numero + deslocamento}` } : segmento;
+  });
+}
+
 export const DURACAO_DA_FATIA_SEGUNDOS = 600;
 // As últimas falas que vão no prompt da fatia seguinte, e o teto de letras delas.
 const FALAS_DE_CONTEXTO = 4;

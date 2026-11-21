@@ -9,7 +9,10 @@ import { extrairDadosDaReuniao, gravarResultadoDaReuniao, mensagemDaFalha, Reuni
 import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
 import { entradaDoResumo } from "./resumo-da-reuniao";
 import { TAMANHO_MAXIMO_DA_PARTE } from "./fatias-de-reuniao";
-import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento } from "./transcricao-de-fatia";
+import {
+  contextoParaAProxima, deslocarRotulosDasFalas, DURACAO_DA_FATIA_SEGUNDOS, ehInicioDeOutraReuniao, MARCA_DE_OUTRA_REUNIAO, montarTranscricao, numeroDoRotulo,
+  TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento,
+} from "./transcricao-de-fatia";
 
 /**
  * A fila de transcrição da reunião gravada em partes (G7 do desenho do
@@ -231,8 +234,18 @@ async function desistirDasEsgotadas(db: Banco, agora: number, escopo: Escopo) {
   }
 }
 
-/** O que a parte anterior passa adiante: onde a reunião está e quem já falou. */
-async function contextoDaAnterior(db: Banco, meetingId: string, seq: number): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior }> {
+/**
+ * O que a parte anterior passa adiante: onde a reunião está e quem já falou.
+ *
+ * Na reunião juntada que retranscreve (H17), a primeira parte de cada reunião
+ * juntada traz a marca de outra conversa (MARCA_DE_OUTRA_REUNIAO, em
+ * server/transcricao-de-fatia.ts); a parte que vem depois de uma dessas sem
+ * nenhuma transcrita da mesma conversa no meio (a marcada falhou de vez)
+ * também começa outra conversa. Aí não vai `anterior`: vem `rotulosUsados`,
+ * os rótulos que as partes de antes já usam, para a fila pôr os desta parte
+ * depois deles.
+ */
+async function contextoDaAnterior(db: Banco, meetingId: string, seq: number, propria: unknown): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior; rotulosUsados?: string[] }> {
   if (seq === 0) return { inicioMs: 0 };
   const anteriores = await db.select({
     seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, durationMs: meetingAudioSlices.durationMs,
@@ -244,7 +257,26 @@ async function contextoDaAnterior(db: Banco, meetingId: string, seq: number): Pr
   const porSeq = new Map(anteriores.map(a => [a.seq, a]));
   let inicioMs = 0;
   for (let s = 0; s < seq; s++) inicioMs += porSeq.get(s)?.durationMs ?? DURACAO_DA_FATIA_SEGUNDOS * 1000;
-  const ultimaTranscrita = [...anteriores].reverse().find(a => a.status === "transcribed");
+  // De trás para a frente: a primeira transcrita é da mesma conversa, a não ser
+  // que antes dela apareça o começo de outra que não foi transcrita.
+  let outraConversa = ehInicioDeOutraReuniao(propria);
+  let ultimaTranscrita: (typeof anteriores)[number] | undefined;
+  if (!outraConversa) {
+    for (const parte of [...anteriores].reverse()) {
+      if (parte.status === "transcribed") { ultimaTranscrita = parte; break; }
+      if (ehInicioDeOutraReuniao(parte.result)) { outraConversa = true; break; }
+    }
+  }
+  if (outraConversa) {
+    const rotulos = new Set<string>();
+    for (const parte of anteriores) {
+      if (parte.status !== "transcribed") continue;
+      const r = parte.result as { segmentos?: Array<{ falante?: unknown }>; contexto?: { falantes?: unknown } } | null;
+      for (const segmento of Array.isArray(r?.segmentos) ? r.segmentos : []) if (numeroDoRotulo(segmento?.falante)) rotulos.add(String(segmento.falante));
+      for (const falante of Array.isArray(r?.contexto?.falantes) ? r.contexto.falantes : []) if (numeroDoRotulo(falante)) rotulos.add(String(falante));
+    }
+    return { inicioMs, rotulosUsados: Array.from(rotulos).sort((a, b) => numeroDoRotulo(a) - numeroDoRotulo(b)) };
+  }
   const contexto = (ultimaTranscrita?.result as { contexto?: ContextoDaFatiaAnterior } | null)?.contexto;
   return { inicioMs, anterior: contexto };
 }
@@ -252,7 +284,7 @@ async function contextoDaAnterior(db: Banco, meetingId: string, seq: number): Pr
 async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: string; seq: number }, token: string) {
   const [linha] = await db.select({
     ownerId: meetingAudioSlices.ownerId, storageKey: meetingAudioSlices.storageKey, mimeType: meetingAudioSlices.mimeType,
-    durationMs: meetingAudioSlices.durationMs, attempts: meetingAudioSlices.attempts, idioma: meetings.language,
+    durationMs: meetingAudioSlices.durationMs, attempts: meetingAudioSlices.attempts, idioma: meetings.language, result: meetingAudioSlices.result,
   }).from(meetingAudioSlices)
     .innerJoin(meetings, and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId)))
     .where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token))).limit(1);
@@ -261,19 +293,27 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
   // tempos degradados (e devolve as contagens) em vez de pedir outra.
   const ultimaTentativa = linha.attempts >= TENTATIVAS_POR_PARTE;
   try {
-    const { inicioMs, anterior } = await contextoDaAnterior(db, parte.meetingId, parte.seq);
+    const { inicioMs, anterior, rotulosUsados } = await contextoDaAnterior(db, parte.meetingId, parte.seq, linha.result);
     const audio = await storageGetBytes(linha.storageKey, TAMANHO_MAXIMO_DA_PARTE);
-    const { segmentos, modelo, tempos } = await comVagaDeIA(() => transcreverFatia({
+    const transcrita = await comVagaDeIA(() => transcreverFatia({
       audio, mimeType: linha.mimeType, idioma: linha.idioma, inicioSegundos: inicioMs / 1000, duracaoSegundos: linha.durationMs / 1000, anterior,
       ultimaTentativa,
     }));
-    const contexto = contextoParaAProxima(segmentos, anterior);
+    const { modelo, tempos } = transcrita;
+    // Outra conversa (a junção, H17): a IA rotulou as vozes do zero (F1, F2...),
+    // e os rótulos vão para depois dos que as partes de antes já usam.
+    const outraConversa = rotulosUsados !== undefined;
+    const segmentos = outraConversa ? deslocarRotulosDasFalas(transcrita.segmentos, Math.max(0, ...rotulosUsados.map(numeroDoRotulo))) : transcrita.segmentos;
+    const contexto = contextoParaAProxima(segmentos, outraConversa ? { falantes: rotulosUsados, ultimasFalas: [] } : anterior);
+    // A marca da outra conversa fica no result depois de transcrita: se a parte
+    // seguinte falhar de vez, a de depois dela não herda a conversa de antes.
+    const marca = ehInicioDeOutraReuniao(linha.result) ? { [MARCA_DE_OUTRA_REUNIAO]: true } : {};
     // Só grava quem ainda tem a reserva: outra instância que a retomou depois
     // de vencer, ou a exclusão da reunião, vencem esta escrita. A parte aceita
     // com os tempos degradados leva as contagens (`tempos`) no result, para
     // uma consulta achá-la.
     await db.update(meetingAudioSlices).set({
-      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}) }, model: modelo.slice(0, 80), offsetMs: inicioMs,
+      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}), ...marca }, model: modelo.slice(0, 80), offsetMs: inicioMs,
       lastError: null, lockToken: null, lockedUntil: null, updatedAt: Date.now(),
     }).where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token)));
   } catch (erro) {
@@ -403,10 +443,12 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     // Só o que foi transcrito conta minutos: a lacuna não é cobrada.
     const durationSeconds = Math.round(partes.filter(p => p.status === "transcribed").reduce((total, p) => total + p.durationMs, 0) / 1000);
     // Os nomes das vozes ficam (zerarNomes: false): a montagem relê as falas
-    // que as partes guardam, com os mesmos rótulos. Quem transcreve de novo os
-    // zera antes (o reprocesso, em meeting-service.ts, e a junção que
-    // retranscreve, em server/juntar-reunioes.ts); a junção sem retranscrever
-    // traz os nomes das reuniões juntadas, já nos rótulos novos.
+    // que as partes guardam, com os mesmos rótulos. O reprocesso, que
+    // transcreve de novo, os zera antes (em meeting-service.ts). A junção
+    // (server/juntar-reunioes.ts) traz os nomes das reuniões juntadas já nos
+    // rótulos novos; quando ela retranscreve, ficam só os de antes da primeira
+    // parte retranscrita, e cada reunião retranscrita começa depois dos
+    // rótulos já usados (contextoDaAnterior), sem herdar as vozes nem os nomes.
     await gravarResultadoDaReuniao(db, {
       meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, zerarNomes: false, durationSeconds,
       // Com "Detectar sozinho" (G16), o idioma da transcrição (e do resumo) é o

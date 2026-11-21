@@ -2,16 +2,18 @@ import crypto from "crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
-import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, MAX_MEETING_AUDIO_BYTES } from "./meeting-service";
+import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, apagarDerivadosDoAlvoDaJuncao, MAX_MEETING_AUDIO_BYTES } from "./meeting-service";
+import { LINK_DESLIGADO } from "./link-aberto-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO } from "./audio-guardado-das-partes";
 import { FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS } from "./fatias-de-reuniao";
-import { DURACAO_DA_FATIA_SEGUNDOS, type Segmento } from "./transcricao-de-fatia";
+import { DURACAO_DA_FATIA_SEGUNDOS, MARCA_DE_OUTRA_REUNIAO, type Segmento } from "./transcricao-de-fatia";
 import { chaveDoStorageDaDona } from "./storage";
 import {
   GRAVACAO_EM_PARTES_SEGUNDOS_MAX, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, nomesDosFalantes, PARTES_POR_REUNIAO_MAX,
 } from "@shared/const";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { etiquetasDaReuniao, normalizarEtiquetas } from "@shared/detalhes-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado } from "@shared/idioma-da-reuniao";
 import { RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX, type CodigoDaRecusaDaJuncao } from "@shared/juntar-reunioes";
 
 /**
@@ -28,22 +30,34 @@ import { RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX, type CodigoDaRecusaDaJuncao
  *    F3, se a primeira tinha F1 e F2): a mesma pessoa pode ganhar dois rótulos,
  *    mas duas pessoas nunca se fundem num só. Os nomes que a dona deu às vozes
  *    (H3) vão junto, nos rótulos novos.
+ *    As falas das reuniões com idioma escolhido levam esse idioma (o campo
+ *    `idioma` da fala, que a G16 grava no "Detectar sozinho"): com o alvo em
+ *    "Detectar sozinho", o idioma da reunião juntada é o que mais aparece em
+ *    todas as falas, e não só nas do alvo.
  * 2. A reunião de envio único (até 10 min, um arquivo só, da época do teto de
  *    10 minutos) não tem falas por voz guardadas: a gravação dela vira uma
  *    parte 'received', que a fila transcreve de novo. Daí em diante, para os
  *    rótulos seguirem uma conta só, todas as partes seguintes também são
- *    transcritas de novo, e os nomes das vozes delas saem.
+ *    transcritas de novo, e os nomes das vozes delas saem. A primeira parte
+ *    retranscrita de cada reunião leva a marca de outra conversa
+ *    (MARCA_DE_OUTRA_REUNIAO): a fila a transcreve sem o contexto da reunião
+ *    de antes, com os rótulos depois dos já usados, e as vozes (e os nomes)
+ *    da reunião de antes não passam para as pessoas desta.
  * 3. O alvo volta a 'uploading' com o total de partes, e a fila
  *    (server/fila-de-transcricao.ts) monta a transcrição, refaz a extração e
  *    pede o resumo de novo, pelo mesmo caminho da gravação em partes. A IA só
- *    transcreve o que o passo 2 marcou.
+ *    transcreve o que o passo 2 marcou. O que a IA gerou do alvo (só da
+ *    primeira reunião) sai já na transação, como na montagem: até ela, a tela
+ *    mostra o andamento das partes, e não o conteúdo antigo.
  * 4. As outras reuniões saem, com tudo o que a IA gerou delas (como na
  *    exclusão: as próximas ações se soltam com os nomes resolvidos, e os
  *    avisos do sino e o ponteiro da agenda saem), mas sem o áudio, que agora é
  *    do alvo.
  * 5. O link aberto do alvo é desligado: quem tinha o link autorizou a reunião
  *    de antes, e não as outras. A dona liga de novo, com a confirmação.
- * 6. A auditoria (MEETINGS_JOINED) vai na mesma transação.
+ * 6. A auditoria (MEETINGS_JOINED) vai na mesma transação, com a prova do
+ *    aviso de gravação de cada reunião (a hora e a versão do aviso aceito):
+ *    as linhas das outras saem, e o áudio delas segue na reunião que fica.
  *
  * O prazo de cada áudio não muda (30 dias desde o envio dele): a junção nunca
  * guarda áudio além do prazo, e o áudio mais novo não vence antes por ter sido
@@ -70,6 +84,8 @@ export type GravacaoParaJuntar = {
 };
 export type ReuniaoParaJuntar = {
   id: string; status: string; audioPipeline: "single" | "slices"; origem: string | null; consentGranted: boolean;
+  /** O idioma escolhido para a reunião (G16): "auto" é o "Detectar sozinho"; nulo, o padrão de antes da escolha. */
+  language?: string | null;
   expectedSlices: number | null; speakerNames: unknown; etiquetas: unknown; ondeFoi: string | null;
   contactId: number | null; contextId: string | null; shareToken: string | null;
   partes: ParteParaJuntar[];
@@ -84,7 +100,11 @@ export type ParteQueMuda = {
   retranscrever: boolean;
 };
 /** A gravação do envio único que vira uma parte da reunião juntada. */
-export type GravacaoQueViraParte = Omit<GravacaoParaJuntar, "durationSeconds" | "id"> & { gravacaoId: string; seq: number; durationMs: number };
+export type GravacaoQueViraParte = Omit<GravacaoParaJuntar, "durationSeconds" | "id"> & {
+  gravacaoId: string; seq: number; durationMs: number;
+  /** A gravação de uma reunião que não é a primeira: outra conversa (MARCA_DE_OUTRA_REUNIAO). */
+  outraReuniao: boolean;
+};
 
 export type PlanoDaJuncao = {
   partes: ParteQueMuda[];
@@ -127,21 +147,24 @@ function ehSegmento(valor: unknown): valor is Segmento {
   return !!s && typeof s === "object" && typeof s.inicio === "number" && typeof s.fim === "number" && typeof s.falante === "string";
 }
 
-function deslocarSegmento(segmento: unknown, rotulos: number, segundos: number): unknown {
+function deslocarSegmento(segmento: unknown, rotulos: number, segundos: number, idioma?: string | null): unknown {
   if (!ehSegmento(segmento)) return segmento;
-  return { ...segmento, falante: deslocarRotulo(segmento.falante, rotulos), inicio: segmento.inicio + segundos, fim: segmento.fim + segundos };
+  const comIdioma = idioma && !segmento.lacuna && typeof segmento.idioma !== "string" ? { idioma } : {};
+  return { ...segmento, falante: deslocarRotulo(segmento.falante, rotulos), inicio: segmento.inicio + segundos, fim: segmento.fim + segundos, ...comIdioma };
 }
 
 /**
  * As falas guardadas de uma parte (o `result` da fila: segmentos, contexto
  * para a parte seguinte e, às vezes, as contagens dos tempos), com os rótulos
- * das vozes deslocados em `rotulos` e os tempos em `segundos`. O resto fica.
+ * das vozes deslocados em `rotulos` e os tempos em `segundos`. Com `idioma`
+ * (o escolhido para a reunião de origem), a fala sem idioma passa a tê-lo. O
+ * resto fica.
  */
-export function deslocarResultado(result: unknown, rotulos: number, segundos: number): unknown {
+export function deslocarResultado(result: unknown, rotulos: number, segundos: number, idioma?: string | null): unknown {
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
   const r = result as { segmentos?: unknown; contexto?: { falantes?: unknown; ultimasFalas?: unknown } };
   const saida: Record<string, unknown> = { ...(result as Record<string, unknown>) };
-  if (Array.isArray(r.segmentos)) saida.segmentos = r.segmentos.map(segmento => deslocarSegmento(segmento, rotulos, segundos));
+  if (Array.isArray(r.segmentos)) saida.segmentos = r.segmentos.map(segmento => deslocarSegmento(segmento, rotulos, segundos, idioma));
   if (r.contexto && typeof r.contexto === "object") {
     saida.contexto = {
       ...r.contexto,
@@ -210,7 +233,7 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
       const durationMs = Math.round(g.durationSeconds * 1000);
       gravacoes.push({
         gravacaoId: g.id, seq: seqBase, durationMs, storageKey: g.storageKey, storageUrl: g.storageUrl, mimeType: g.mimeType,
-        sizeBytes: g.sizeBytes, expiresAt: g.expiresAt, createdAt: g.createdAt,
+        sizeBytes: g.sizeBytes, expiresAt: g.expiresAt, createdAt: g.createdAt, outraReuniao: indice > 0,
       });
       prazos.push(g.expiresAt);
       seqBase += 1;
@@ -225,6 +248,10 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
     const deslocamentoDosRotulos = retranscrever ? 0 : rotulosUsados;
     // O alvo em partes, antes de qualquer retranscrição, fica como está.
     const ficaComoEsta = indice === 0 && !retranscrever;
+    // A primeira parte retranscrita desta reunião começa outra conversa.
+    let marcarOutraConversa = retranscrever && indice > 0;
+    // O idioma escolhido para esta reunião vai às falas dela que não o têm.
+    const idiomaDaReuniao = idiomaFalado(reuniao.language ?? IDIOMA_DA_REUNIAO_PADRAO);
     let tempoDaReuniaoMs = 0;
     for (let seq = 0; seq < esperadas; seq++) {
       const parte = porSeq.get(seq);
@@ -238,12 +265,13 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
           partes.push(semAudio
             // Sem áudio no bucket, a parte segue lacuna, só na posição nova.
             ? { id: parte.id, seq: seqBase + seq, offsetMs: null, result: null, status: "failed", retranscrever: false }
-            : { id: parte.id, seq: seqBase + seq, offsetMs: null, result: null, status: "received", retranscrever: true });
+            : { id: parte.id, seq: seqBase + seq, offsetMs: null, result: marcarOutraConversa ? { [MARCA_DE_OUTRA_REUNIAO]: true } : null, status: "received", retranscrever: true });
+          if (!semAudio) marcarOutraConversa = false;
         } else if (!ficaComoEsta) {
           partes.push({
             id: parte.id, seq: seqBase + seq,
             offsetMs: parte.offsetMs === null ? null : Number(parte.offsetMs) + tempoMs,
-            result: deslocarResultado(parte.result, deslocamentoDosRotulos, tempoMs / 1000),
+            result: deslocarResultado(parte.result, deslocamentoDosRotulos, tempoMs / 1000, idiomaDaReuniao),
             status: parte.status, retranscrever: false,
           });
         }
@@ -308,7 +336,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       id: meetings.id, status: meetings.status, audioPipeline: meetings.audioPipeline, origem: meetings.origem,
       consentGranted: meetings.consentGranted, expectedSlices: meetings.expectedSlices, speakerNames: meetings.speakerNames,
       etiquetas: meetings.etiquetas, ondeFoi: meetings.ondeFoi, contactId: meetings.contactId, contextId: meetings.contextId,
-      shareToken: meetings.shareToken,
+      shareToken: meetings.shareToken, language: meetings.language, consentAt: meetings.consentAt, consentNoticeVersion: meetings.consentNoticeVersion,
     }).from(meetings).where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, ids))).orderBy(asc(meetings.id)).for("update");
     if (linhas.length !== ids.length) throw new RecusaDaJuncao("NOT_FOUND", "REUNIAO_NAO_ENCONTRADA");
 
@@ -329,7 +357,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
 
     const porId = new Map(linhas.map(linha => [linha.id, linha]));
     const reunioes: ReuniaoParaJuntar[] = ids.map(id => {
-      const linha = porId.get(id)!;
+      const { consentAt: _hora, consentNoticeVersion: _versao, ...linha } = porId.get(id)!;
       return {
         ...linha, contactId: linha.contactId === null ? null : Number(linha.contactId),
         partes: linha.audioPipeline === "slices" ? partes.filter(parte => parte.meetingId === id).map(parte => ({
@@ -354,6 +382,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
     for (const gravacao of plano.gravacoes) {
       await tx.insert(meetingAudioSlices).values({
         id: crypto.randomUUID(), meetingId: alvo.id, ownerId, seq: gravacao.seq, status: "received",
+        result: gravacao.outraReuniao ? { [MARCA_DE_OUTRA_REUNIAO]: true } : null,
         storageKey: gravacao.storageKey, storageUrl: gravacao.storageUrl, mimeType: gravacao.mimeType, sizeBytes: gravacao.sizeBytes,
         sha256: marcadorDaGravacao(gravacao.gravacaoId), durationMs: gravacao.durationMs, expiresAt: gravacao.expiresAt,
         createdAt: gravacao.createdAt, updatedAt: agora,
@@ -369,9 +398,12 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
         .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, sobras)));
     }
 
+    // Antes de trocar os nomes: as próximas ações do alvo se soltam com os nomes de antes.
+    await apagarDerivadosDoAlvoDaJuncao(tx, ownerId, alvo.id);
+    // O link desligado como no "Desligar" da dona (LINK_DESLIGADO): sem token e sem a senha (H23).
     await tx.update(meetings).set({
       audioPipeline: "slices", status: "uploading", expectedSlices: plano.linhas, attempts: 0, lockToken: null, lockedUntil: null,
-      processingError: null, updatedAt: agora, speakerNames: plano.nomes, shareToken: null,
+      processingError: null, updatedAt: agora, speakerNames: plano.nomes, ...LINK_DESLIGADO,
       etiquetas: plano.etiquetas, ondeFoi: plano.ondeFoi, contactId: plano.contactId, contextId: plano.contextId,
     }).where(and(eq(meetings.id, alvo.id), eq(meetings.ownerId, ownerId)));
 
@@ -386,10 +418,16 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       action: "MEETINGS_JOINED",
       resource: "meetings",
       resourceId: alvo.id,
-      // Só ids e contagens: nenhum título, nome ou fala.
+      // Só ids, contagens, horas e versões: nenhum título, nome ou fala. A prova
+      // do aviso de gravação de cada reunião (consent_at e consent_notice_version)
+      // fica aqui, porque as linhas das juntadas saem e o áudio delas segue.
       details: {
         juntadas: fontes.map(fonte => fonte.id), partes: plano.esperadas, duracaoSegundos: plano.duracaoSegundos,
         retranscreve: plano.retranscreve, linkAbertoDesligado,
+        avisosDeGravacao: ids.map(id => {
+          const linha = porId.get(id)!;
+          return { id, consentAt: linha.consentAt === null ? null : Number(linha.consentAt), consentNoticeVersion: linha.consentNoticeVersion };
+        }),
       },
       ipAddress: prova.ipAddress.split(",")[0].trim().substring(0, 45),
       userAgent: prova.userAgent ? prova.userAgent.substring(0, 500) : null,

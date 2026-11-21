@@ -6,6 +6,7 @@ const { deslocarResultado, maiorRotuloDaReuniao, planejarJuncao, RecusaDaJuncao,
 type ReuniaoParaJuntar = import("./juntar-reunioes").ReuniaoParaJuntar;
 type ParteParaJuntar = import("./juntar-reunioes").ParteParaJuntar;
 const { RECUSAS_DA_JUNCAO } = await import("@shared/juntar-reunioes");
+const { MARCA_DE_OUTRA_REUNIAO } = await import("./transcricao-de-fatia");
 const { LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, PARTES_POR_REUNIAO_MAX } = await import("@shared/const");
 
 /**
@@ -77,7 +78,22 @@ describe("planejarJuncao — reuniões em partes", () => {
     expect(plano.partes).toHaveLength(1);
     const [movida] = plano.partes;
     expect(movida).toMatchObject({ id: segunda.partes[0].id, seq: 2, offsetMs: 1_200_000, status: "transcribed", retranscrever: false });
-    expect((movida.result as { segmentos: unknown[] }).segmentos).toEqual([fala(1202, "F3", "Caio começa"), fala(1240, "F4", "Duda")]);
+    // A segunda não escolheu idioma (a linha de antes da G16): as falas levam o padrão, em que foram transcritas.
+    expect((movida.result as { segmentos: unknown[] }).segmentos).toEqual([
+      { ...fala(1202, "F3", "Caio começa"), idioma: "pt-BR" }, { ...fala(1240, "F4", "Duda"), idioma: "pt-BR" },
+    ]);
+  });
+
+  it("G16: as falas da reunião com idioma escolhido levam esse idioma; as do \"Detectar sozinho\" ficam com o que a IA viu", () => {
+    const alvoAuto = emPartes("a", [parte(0, [{ ...fala(5, "F1", "Ciao a tutti"), idioma: "it" } as ReturnType<typeof fala>])], { language: "auto" });
+    const emIngles = emPartes("b", [parte(0, [fala(2, "F1", "Hello everyone"), { ...fala(40, "F2", "[inaudível]"), lacuna: true } as ReturnType<typeof fala>])], { language: "en" });
+    const tambemAuto = emPartes("c", [parte(0, [{ ...fala(1, "F1", "Hola"), idioma: "es" } as ReturnType<typeof fala>, fala(9, "F1", "sem idioma")])], { language: "auto" });
+    const plano = planejarJuncao(DONA, [alvoAuto, emIngles, tambemAuto], AGORA);
+    const segmentosDe = (id: string) => (plano.partes.find(p => p.id === id)!.result as { segmentos: Array<Record<string, unknown>> }).segmentos;
+    // A fala do inglês ganha o "en"; a lacuna, não.
+    expect(segmentosDe(emIngles.partes[0].id).map(s => s.idioma)).toEqual(["en", undefined]);
+    // No "Detectar sozinho", o idioma é o que a IA marcou; a fala sem marca fica sem.
+    expect(segmentosDe(tambemAuto.partes[0].id).map(s => s.idioma)).toEqual(["es", undefined]);
   });
 
   it("os nomes das vozes vão junto, nos rótulos novos; os detalhes juntam etiquetas e ficam com o primeiro que houver", () => {
@@ -115,8 +131,11 @@ describe("planejarJuncao — envio único", () => {
     const terceira = emPartes("c", [parte(0, [fala(1, "F1", "Caio")])], { speakerNames: { F1: "Caio" } });
     const plano = planejarJuncao(DONA, [primeira, meio, terceira], AGORA);
     expect(plano.retranscreve).toBe(true);
-    expect(plano.gravacoes).toEqual([expect.objectContaining({ gravacaoId: "gravacao-b", seq: 1, durationMs: 300_000, mimeType: "audio/webm" })]);
-    expect(plano.partes).toEqual([expect.objectContaining({ id: terceira.partes[0].id, seq: 2, status: "received", result: null, offsetMs: null, retranscrever: true })]);
+    // As duas começam outra conversa: a fila as transcreve sem o contexto da anterior.
+    expect(plano.gravacoes).toEqual([expect.objectContaining({ gravacaoId: "gravacao-b", seq: 1, durationMs: 300_000, mimeType: "audio/webm", outraReuniao: true })]);
+    expect(plano.partes).toEqual([expect.objectContaining({
+      id: terceira.partes[0].id, seq: 2, status: "received", result: { [MARCA_DE_OUTRA_REUNIAO]: true }, offsetMs: null, retranscrever: true,
+    })]);
     // A primeira, antes do envio único, guarda os nomes; a terceira, transcrita de novo, não.
     expect(plano.nomes).toEqual({ F1: "Ana" });
     expect(plano.esperadas).toBe(3);
@@ -124,8 +143,18 @@ describe("planejarJuncao — envio único", () => {
 
   it("o alvo de envio único também vira parte, na posição 0", () => {
     const plano = planejarJuncao(DONA, [envioUnico("a"), envioUnico("b")], AGORA);
-    expect(plano.gravacoes.map(g => [g.gravacaoId, g.seq])).toEqual([["gravacao-a", 0], ["gravacao-b", 1]]);
+    expect(plano.gravacoes.map(g => [g.gravacaoId, g.seq, g.outraReuniao])).toEqual([["gravacao-a", 0, false], ["gravacao-b", 1, true]]);
     expect(plano.nomes).toBeNull();
+  });
+
+  it("só a primeira parte retranscrita de cada reunião leva a marca de outra conversa; a lacuna sem áudio não conta", () => {
+    const tres = emPartes("c", [
+      parte(0, [], { status: "failed", lastError: "AUDIO_AUSENTE", result: null }), parte(1, [fala(1, "F1", "x")]), parte(2, [fala(2, "F1", "y")]),
+    ]);
+    const plano = planejarJuncao(DONA, [envioUnico("a"), tres], AGORA);
+    expect(plano.partes.map(p => [p.seq, p.status, p.result])).toEqual([
+      [1, "failed", null], [2, "received", { [MARCA_DE_OUTRA_REUNIAO]: true }], [3, "received", null],
+    ]);
   });
 
   it("parte sem áudio no bucket segue lacuna na retranscrição", () => {
