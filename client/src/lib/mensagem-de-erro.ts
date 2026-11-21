@@ -19,6 +19,9 @@ import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@sh
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
+import { RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
+import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
+import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
 import {
   DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehCodigoDaFalhaDoDocumento,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento,
@@ -91,6 +94,18 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
   [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
+  // Os detalhes da reunião (H7c): o contato ou o contexto que não é da dona, em
+  // qualquer caminho que grave o ponteiro (server/detalhes-da-reuniao.ts).
+  [RECUSAS_DOS_DETALHES.contato]: "meetings.details.contactNotFound",
+  [RECUSAS_DOS_DETALHES.contexto]: "meetings.details.contextNotFound",
+  // O teto da busca entre as reuniões (H7b, routers/meetings.ts).
+  [MENSAGEM_BUSCAS_DEMAIS]: "meetings.search.tooMany",
+  // As recusas da junção de reuniões (H17, server/juntar-reunioes.ts).
+  [RECUSAS_DA_JUNCAO.foraDoEstado]: "meetings.join.errorState",
+  [RECUSAS_DA_JUNCAO.soAudio]: "meetings.join.errorOnlyAudio",
+  [RECUSAS_DA_JUNCAO.semAudio]: "meetings.join.errorNoAudio",
+  [RECUSAS_DA_JUNCAO.longaDemais]: "meetings.join.errorTooLong",
+  [RECUSAS_DA_JUNCAO.demais]: "meetings.join.errorTooMany",
 };
 
 /**

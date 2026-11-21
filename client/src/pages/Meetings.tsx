@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, MonitorPlay, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -52,6 +52,9 @@ import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from 
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { erroDoYoutubeSeRepete, idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
 import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
+import { ListaDeReunioes } from "@/components/ListaDeReunioes";
+import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
+import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
 
@@ -841,7 +844,7 @@ export default function Meetings() {
   ) : screen === "detail" && reuniaoAberta ? (
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
     // Excluir sai com replace: o voltar não reabre a reunião que deixou de existir.
-    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} />
+    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} etiquetasSugeridas={etiquetasDaDona(meetings ?? [], i18n.language)} />
   ) : (
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
@@ -854,7 +857,7 @@ export default function Meetings() {
           </div>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><h2 dir="auto" className="text-base font-semibold break-words">{ehReuniaoDeDocumento(meeting.origem) && <ScanText size={15} aria-label={t("meetings.document.listBadge")} className="inline me-2 text-amber-300"/>}{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}{meeting.origem === "youtube" && <span className="ms-2 inline-flex items-center gap-1 text-[#efcba8]/80"><MonitorPlay size={12} aria-hidden/>{t("meetings.youtube.listBadge")}</span>}</p></div><span className={`shrink-0 border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehReuniaoDeDocumento(meeting.origem))}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <ListaDeReunioes reunioes={meetings} rotuloDoStatus={reuniao => statusLabel(t, reuniao.status, ehReuniaoDeDocumento(reuniao.origem))} classeDoStatus={statusClass} aoAbrir={destino => navigate(destino)}/>}
       </div>
     </main>
   );
@@ -975,7 +978,7 @@ function DescartarGravacao({ aberta, aoAbrirOuFechar, aoDescartar }: { aberta: b
   );
 }
 
-function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; onBack: () => void; aoExcluir: () => void }) {
+function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { meetingId: string; onBack: () => void; aoExcluir: () => void; etiquetasSugeridas?: string[] }) {
   const utils = trpc.useUtils();
   const { t, i18n } = useTranslation();
   // Em processamento (inclusive um reprocessamento em segundo plano), o detalhe
@@ -1310,6 +1313,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    {/* Os detalhes (H7c): etiquetas, "Onde foi", contato e contexto, em qualquer estado da reunião. Só a dona: o link aberto não os tem. */}
+    <DetalhesDaReuniao meetingId={meetingId} etiquetasSugeridas={etiquetasSugeridas}
+      detalhes={{ titulo: meeting.title, etiquetas: meeting.etiquetas, ondeFoi: meeting.ondeFoi, contato: meeting.contato, contexto: meeting.contexto }}/>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
       linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0} documento={ehDocumento} youtube={!!idDoVideo}/>}

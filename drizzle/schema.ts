@@ -1108,6 +1108,15 @@ export const meetings = mysqlTable("meetings", {
   // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
   // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
   shareToken: varchar("share_token", { length: 64 }),
+  // Os detalhes da reunião (H7c do plano do gravador): as etiquetas que a dona
+  // dá à reunião (["Clientes", "Mentoria"]; o vocabulário da tela é
+  // "etiqueta") e "Onde foi" (o lugar ou o canal, em texto livre). Nulos: sem
+  // etiqueta e sem lugar. Só a dona os lê (a lista e o detalhe escolhem as
+  // colunas, em server/meeting-service.ts); o link aberto não os leva. A
+  // normalização (tamanho, quantidade, repetidas) mora em
+  // shared/detalhes-da-reuniao.ts.
+  etiquetas: jsonCompat("etiquetas").$type<string[]>(),
+  ondeFoi: varchar("onde_foi", { length: 120 }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
@@ -1115,6 +1124,10 @@ export const meetings = mysqlTable("meetings", {
   pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
   // O link aberto acha a reunião pelo token; o MySQL aceita vários nulos.
   shareTokenUnique: uniqueIndex("meetings_share_token_unique").on(table.shareToken),
+  // Excluir um contexto anula o ponteiro das reuniões da dona que estavam nele
+  // (deleteContext, em server/db.ts), e o filtro por contexto acha as reuniões
+  // dele, sem varrer as reuniões da dona.
+  ownerContextIdx: index("meetings_owner_context_idx").on(table.ownerId, table.contextId),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
