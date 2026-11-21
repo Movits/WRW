@@ -508,6 +508,7 @@
     "topMatches": "Connexions suggérées (80%+)",
     "interestSent": "Intérêt envoyé ! Un distributeur vérifie la compatibilité avant de le transmettre. L'autre personne ne verra votre nom que si elle manifeste aussi son intérêt.",
     "interestError": "Impossible d'envoyer l'intérêt. Réessayez.",
+    "interestNeedsSilver": "Complétez votre profil pour voir les connexions suggérées et manifester votre intérêt.",
     "connectionAccepted": "Nouvelle connexion ! Vous voyez maintenant tous les deux le nom de l'autre.",
     "connectionDeclined": "Demande refusée.",
     "newMatches_one": "✨ {{count}} nouvelle connexion suggérée !",
@@ -2640,6 +2641,7 @@
       "discardConfirmButton": "Écarter {{codigo}}",
       "discardConfirmCancel": "Annuler",
       "reasonPlatformMatch": "Suggérée par le moteur de profils entre deux membres qui avaient accepté les conditions du Smart Match au moment de l’enregistrement : compatibilité de {{pontuacao}} %.",
+      "reasonPlatformMatchLocked": "Suggérée par le moteur de profils entre deux membres qui avaient accepté les conditions du Smart Match au moment de l’enregistrement. La compatibilité s’affiche lorsque votre profil atteint le niveau Membre Argent.",
       "reasonNoAuthorization": "L’autre partie a retiré son autorisation ; les détails de cette connexion ne sont donc plus affichés."
     },
     "global": {

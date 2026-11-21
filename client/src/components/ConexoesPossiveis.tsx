@@ -21,8 +21,13 @@ export type ConsultaDasConexoesPossiveis = {
  * O número vem pronto do servidor (`matches.conexoesPossiveis`), que nem manda
  * a lista à Bronze: esconder aqui não seria a trava, só a explicação dela.
  */
-export function ConexoesPossiveis({ consulta, role, perfil, aoBuscar, buscando }: {
+export function ConexoesPossiveis({ consulta, ocultas = 0, role, perfil, aoBuscar, buscando }: {
   consulta: ConsultaDasConexoesPossiveis;
+  /**
+   * Etapa 13: quantas conexões o motor achou e esperam o outro lado aceitar o
+   * termo do Smart Match (`matches.redeAguardando`, só a contagem).
+   */
+  ocultas?: number;
   role?: string | null;
   perfil: PerfilParaQualificar | null | undefined;
   /** Roda o motor de novo (`matches.regenerate`), como o botão da lista vazia. */
@@ -41,6 +46,10 @@ export function ConexoesPossiveis({ consulta, role, perfil, aoBuscar, buscando }
   if (total === undefined) {
     return <div aria-hidden="true" className="h-56 rounded-2xl border border-white/8 bg-[#1b1714] animate-pulse" />;
   }
+  // Etapa 13: zero possíveis porque o outro lado ainda não aceitou o termo é
+  // espera da rede, não falta de perfil. Sem isto, a primeira a aceitar via
+  // "Ainda não há conexões possíveis" e o convite a completar o perfil.
+  const redeAutorizando = total === 0 && ocultas > 0;
 
   return (
     <div className="space-y-4 animate-fade-in-up">
@@ -48,13 +57,13 @@ export function ConexoesPossiveis({ consulta, role, perfil, aoBuscar, buscando }
         aria-labelledby="conexoes-possiveis-titulo"
         className="rounded-2xl border border-white/8 bg-[#1b1714] px-5 py-8 text-center sm:px-8"
       >
-        <div className="mb-4 text-5xl" aria-hidden="true">{total > 0 ? "🔒" : "🔍"}</div>
+        <div className="mb-4 text-5xl" aria-hidden="true">{redeAutorizando ? "🕐" : total > 0 ? "🔒" : "🔍"}</div>
         {/* Tamanho explícito: o h3 sem classe de tamanho herda o tamanho global de h3 (index.css). */}
         <h3 id="conexoes-possiveis-titulo" className="mb-2 text-2xl font-black">
-          {t("dashboard.possiveisTitulo", { count: total })}
+          {redeAutorizando ? t("dashboard.redeAutorizandoTitulo") : t("dashboard.possiveisTitulo", { count: total })}
         </h3>
         <p className="mx-auto max-w-md text-white/60">
-          {t(total > 0 ? "dashboard.possiveisTexto" : "dashboard.possiveisTextoNenhuma")}
+          {t(redeAutorizando ? "dashboard.redeAutorizandoDesc" : total > 0 ? "dashboard.possiveisTexto" : "dashboard.possiveisTextoNenhuma")}
         </p>
         <p className="mx-auto mt-2 max-w-md text-xs text-white/40">{t("dashboard.possiveisCalculo")}</p>
         <button

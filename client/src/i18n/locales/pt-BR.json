@@ -506,6 +506,7 @@
     "dismiss": "Sugestão ocultada. Você pode gerar novas sugestões quando quiser.",
     "interestSent": "Interesse enviado! Um distribuidor confere a compatibilidade antes de encaminhar. Seu nome só aparece para a outra pessoa se ela também demonstrar interesse.",
     "interestError": "Não foi possível enviar o interesse. Tente novamente.",
+    "interestNeedsSilver": "Complete seu perfil para ver as conexões sugeridas e demonstrar interesse por elas.",
     "connectionAccepted": "Nova conexão! Vocês agora veem o nome um do outro.",
     "connectionDeclined": "Solicitação recusada.",
     "newMatches_one": "✨ {{count}} nova conexão sugerida!",
@@ -2640,6 +2641,7 @@
       "discardConfirmButton": "Descartar {{codigo}}",
       "discardConfirmCancel": "Cancelar",
       "reasonPlatformMatch": "Sugerida pelo motor de perfis entre duas membras que tinham o termo do Smart Match aceito quando a conexão foi registrada: compatibilidade de {{pontuacao}}%.",
+      "reasonPlatformMatchLocked": "Sugerida pelo motor de perfis entre duas membras que tinham o termo do Smart Match aceito quando a conexão foi registrada. A compatibilidade aparece quando o seu perfil chega a Membro Prata.",
       "reasonNoAuthorization": "O outro lado retirou a autorização, então os detalhes desta conexão deixaram de aparecer."
     },
     "global": {

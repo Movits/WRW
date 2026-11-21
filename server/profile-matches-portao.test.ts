@@ -40,14 +40,15 @@ describe("profileMatches.list — serviço casado por presunção não volta à 
     expect(matchesBloqueados).toHaveBeenCalledWith(1, [2, 3]);
   });
 
-  it("lê a janela inteira (50) e corta no limite DEPOIS do portão: a linha bloqueada não ocupa a vaga de um match legítimo", async () => {
+  it("lê a página (50) e corta no limite DEPOIS do portão: a linha bloqueada não ocupa a vaga de um match legítimo", async () => {
     getMatchesForUser.mockResolvedValueOnce([
       { matchId: 1, matchedUserId: 3, overallScore: 95 }, // bloqueada, nota velha e alta
       { matchId: 2, matchedUserId: 2, overallScore: 90 },
       { matchId: 3, matchedUserId: 4, overallScore: 80 },
     ]);
     const lista = await profileMatchesRouter.createCaller(ctx).list({ limit: 2 });
-    expect(getMatchesForUser).toHaveBeenCalledWith(1, 50);
+    // A primeira página; incompleta, ela é a última (as páginas seguintes estão em conexoes-possiveis.test.ts).
+    expect(getMatchesForUser).toHaveBeenCalledWith(1, 50, 0);
     expect(lista.map(m => m.matchId)).toEqual([2, 3]);
   });
 

@@ -43,7 +43,8 @@ vi.mock("./security", () => ({
   createAuditLog: async () => { estado.chamadas.push("createAuditLog"); },
 }));
 
-const { connectionsRouter, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO } = await import("./routers/connections");
+const { connectionsRouter } = await import("./routers/connections");
+const { MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO } = await import("@shared/const");
 
 const ctx = (role: string, extra: Record<string, unknown> = {}) => ({
   user: { id: 1, openId: "u-1", email: "t@local", role, ...extra },

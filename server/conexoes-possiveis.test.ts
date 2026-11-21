@@ -36,12 +36,12 @@ const matchesBloqueados = vi.fn(async (_userId: number, _ids: number[]) => new S
 vi.mock("./matching", () => ({
   matchesBloqueadosPelaDemandaExpressa: (...args: unknown[]) => matchesBloqueados(...(args as [number, number[]])),
 }));
-// O LIMIT do SQL de verdade: a janela que a procedure pede é a que volta.
-const getMatchesForUser = vi.fn(async (_userId: number, limite: number) => estado.linhas.slice(0, limite));
+// O LIMIT e o OFFSET do SQL de verdade: a página que a procedure pede é a que volta.
+const getMatchesForUser = vi.fn(async (_userId: number, limite: number, pulo = 0) => estado.linhas.slice(pulo, pulo + limite));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => { throw new Error("não deve tocar no banco aqui"); },
-  getMatchesForUser: (...args: unknown[]) => getMatchesForUser(...(args as [number, number])),
+  getMatchesForUser: (...args: unknown[]) => getMatchesForUser(...(args as [number, number, number])),
 }));
 
 const { profileMatchesRouter } = await import("./routers/profileMatches");
@@ -146,6 +146,11 @@ describe("U3 — o número bate com a lista que ela veria ao virar Prata", () =>
       estado.bloqueados = [3, 30, 51];
       estado.linhas = Array.from({ length: 70 }, (_, i) => linha(i + 1, i + 1));
     }],
+    ["50 escondidas no topo e 10 válidas abaixo", () => {
+      estado.comTermo = null;
+      estado.bloqueados = Array.from({ length: 50 }, (_, i) => i + 1);
+      estado.linhas = Array.from({ length: 60 }, (_, i) => linha(i + 1, i + 1));
+    }],
   ];
 
   it.each(casos)("%s", async (_nome, preparar) => {
@@ -155,10 +160,68 @@ describe("U3 — o número bate com a lista que ela veria ao virar Prata", () =>
     expect(total).toBe(lista.length);
   });
 
-  it("os dois leem a mesma janela (50) e passam os mesmos ids ao portão", async () => {
+  it("os dois leem a mesma página (50) e passam os mesmos ids ao portão", async () => {
     await comoBronze().conexoesPossiveis();
     await comoPrata().list({ limit: 20 });
-    expect(getMatchesForUser.mock.calls).toEqual([[1, 50], [1, 50]]);
+    expect(getMatchesForUser.mock.calls).toEqual([[1, 50, 0], [1, 50, 0]]);
     expect(matchesBloqueados.mock.calls).toEqual([[1, [101, 103, 105, 102]], [1, [101, 103, 105, 102]]]);
+  });
+});
+
+/**
+ * Achado 1 da revisão do pacote do match (20/11): as travas vinham DEPOIS de
+ * cortar nas 50 linhas de nota mais alta. O motor não regrava nem apaga a linha
+ * que o portão passou a esconder, e ela fica no topo com a nota velha: com 50
+ * dessas, as válidas da 51ª em diante sumiam do número e da lista. A prova contra
+ * o banco real está em conexoes-possiveis-janela.integracao.test.ts.
+ */
+describe("as travas da leitura vêm antes da janela de 50", () => {
+  beforeEach(() => {
+    estado.comTermo = null;
+    // As 50 de cima o portão esconde; as 10 de baixo são válidas.
+    estado.bloqueados = Array.from({ length: 50 }, (_, i) => i + 1);
+    estado.linhas = Array.from({ length: 60 }, (_, i) => linha(i + 1, i + 1));
+  });
+
+  it("50 escondidas no topo e 10 válidas abaixo: o número e a lista dão 10", async () => {
+    expect(await comoBronze().conexoesPossiveis()).toEqual({ total: 10, listaLiberada: false });
+    const lista = await comoPrata().list({ limit: 50 });
+    expect(lista.map(m => m.matchId)).toEqual(Array.from({ length: 10 }, (_, i) => i + 51));
+  });
+
+  it("a leitura vai à página seguinte só enquanto faltam visíveis, e para na página incompleta", async () => {
+    await comoBronze().conexoesPossiveis();
+    expect(getMatchesForUser.mock.calls).toEqual([[1, 50, 0], [1, 50, 50]]);
+  });
+
+  it("com 50 visíveis na primeira página, a segunda nem é lida", async () => {
+    estado.bloqueados = [];
+    expect(await comoBronze().conexoesPossiveis()).toEqual({ total: 50, listaLiberada: false });
+    expect(getMatchesForUser.mock.calls).toEqual([[1, 50, 0]]);
+  });
+
+  it("as que o outro lado deixou sem termo também não ocupam a janela", async () => {
+    estado.bloqueados = [];
+    estado.comTermo = Array.from({ length: 10 }, (_, i) => i + 51);
+    expect(await comoBronze().conexoesPossiveis()).toEqual({ total: 10, listaLiberada: false });
+    // O portão só lê o perfil de quem tem o termo (etapa 11): as 50 de cima nem chegam a ele.
+    expect(matchesBloqueados.mock.calls.flatMap(([, ids]) => ids)).toEqual(Array.from({ length: 10 }, (_, i) => i + 51));
+  });
+
+  it("a mesma linha lida em duas páginas (uma rodada no meio da leitura) conta uma vez só", async () => {
+    // A 50ª o portão esconde: faltam visíveis, e a leitura vai à segunda página,
+    // que repete a 49ª, como se a nota dela tivesse caído entre as duas leituras.
+    estado.bloqueados = [50];
+    estado.linhas = Array.from({ length: 50 }, (_, i) => linha(i + 1, i + 1));
+    const paginas = [estado.linhas, [linha(49, 49)]];
+    getMatchesForUser.mockImplementation(async () => paginas.shift() ?? []);
+    try {
+      expect(await comoBronze().conexoesPossiveis()).toEqual({ total: 49, listaLiberada: false });
+      paginas.push(estado.linhas, [linha(49, 49)]);
+      const ids = (await comoPrata().list({ limit: 50 })).map(m => m.matchId);
+      expect(new Set(ids).size).toBe(ids.length);
+    } finally {
+      getMatchesForUser.mockImplementation(async (_userId: number, limite: number, pulo = 0) => estado.linhas.slice(pulo, pulo + limite));
+    }
   });
 });

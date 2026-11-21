@@ -167,15 +167,28 @@ async function contaDaDona(ex: Executor, ownerId: string): Promise<number | null
   return conta?.id ?? null;
 }
 
-/** Os avisos do gravador da dona que levam a um endereço. Os de outros tipos ficam. */
+/**
+ * Os avisos do gravador da dona que levam a um endereço. Os de outros tipos ficam.
+ *
+ * Pela chave, como o aviso de pronta (avisarReuniaoPronta, abaixo): o DELETE pela
+ * conta, pelo tipo e pelo endereço travava o intervalo da conta no índice
+ * pnotif_userId_idx, com o vão até a conta vizinha, e esperava pelo aviso que
+ * outra transação acabava de criar na mesma conta; duas contas vizinhas excluindo
+ * uma reunião e recebendo um aviso ao mesmo tempo travavam uma o INSERT da outra
+ * (deadlock). A leitura sem trava basta: o aviso que nascer depois dela, para uma
+ * origem que está saindo, é o caso estreito do lembrete que dispara no mesmo
+ * instante da exclusão, e fica no sino como aviso sem destino; o deadlock fazia a
+ * exclusão inteira falhar.
+ */
 export async function apagarAvisosDoEndereco(ex: Executor, ownerId: string, endereco: string) {
   const contaId = await contaDaDona(ex, ownerId);
   if (contaId === null) return;
-  await ex.delete(platformNotifications).where(and(
+  const avisos = await ex.select({ id: platformNotifications.id }).from(platformNotifications).where(and(
     eq(platformNotifications.userId, contaId),
     inArray(platformNotifications.type, [...TIPOS_DO_GRAVADOR]),
     eq(platformNotifications.actionUrl, endereco),
   ));
+  for (const { id } of avisos) await ex.delete(platformNotifications).where(eq(platformNotifications.id, id));
 }
 
 /** A reunião excluída leva os avisos dela (o de pronta, com o título): nada dela fica no sino. */

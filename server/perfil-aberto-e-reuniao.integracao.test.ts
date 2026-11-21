@@ -146,6 +146,28 @@ describe.skipIf(!temBanco)("O Meu Perfil aberto e o item que a reunião confirma
     expect(perfil.whatIHave).toEqual(["fazenda", "Exportar vinho"]);
   });
 
+  // Revisão do pacote do match (20/11): a versão protegia só as listas, e a bio
+  // reescrita numa aba sumia, sem aviso, quando a outra aba (aberta antes) trocava
+  // a cidade: o Perfil manda todos os campos dele ao salvar.
+  it("duas abas: a bio reescrita na primeira não some quando a segunda, aberta antes, salva a cidade", async () => {
+    const primeira = await rota().profile.get();
+    const segunda = await rota().profile.get();
+    await salvarDoPerfil(primeira, { bio: "Bio reescrita na primeira aba" });
+
+    const perfilDaSegunda = segunda.profile as Record<string, unknown>;
+    await expect(rota().profile.update({
+      bio: perfilDaSegunda.bio as string,
+      city: "Porto",
+      whatIHave: perfilDaSegunda.whatIHave as string[],
+      whatINeed: perfilDaSegunda.whatINeed as string[],
+      whatINeedDetails: lerDemandas(perfilDaSegunda.whatINeedDetails),
+      versaoDasListas: segunda.versaoDasListas,
+    })).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_PERFIL_MUDOU_NO_MEIO });
+    const perfil = await perfilDaDona();
+    expect(perfil.bio).toBe("Bio reescrita na primeira aba");
+    expect(perfil.city).not.toBe("Porto");
+  });
+
   it("o Perfil antigo em cache (sem a versão) grava o que manda, como antes", async () => {
     await rota().profile.update({ bio: "Bio do Perfil antigo", whatIHave: ["licencas"] });
     expect(await perfilDaDona()).toMatchObject({ bio: "Bio do Perfil antigo", whatIHave: ["licencas"], whatINeed: ["investidores"] });

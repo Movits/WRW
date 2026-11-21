@@ -27,15 +27,36 @@ import { LIMITE_DO_QUE_TENHO, slugDoItem } from "@shared/reuniao-no-match";
  * A versão é a contagem e um resumo (sha-256) de cada lista como está gravada.
  * Não é o `updatedAt`: a coluna é TIMESTAMP de segundos, e a confirmação e o
  * salvar no mesmo segundo passariam pela conferência.
+ *
+ * Os outros campos que o Perfil devolve ao salvar (Quem sou, cidade, empresa...,
+ * CAMPOS_DA_EDICAO_DO_PERFIL) entram na versão por um resumo só: a reunião não
+ * mexe neles, e qualquer mudança no banco desde que a edição abriu (outra aba
+ * salvou) é perdida pelo salvar desta aba, que manda todos eles. Mudou, CONFLICT
+ * e nada é gravado. Até a revisão do pacote do match (20/11) a versão protegia só
+ * as três listas: a bio reescrita numa aba sumia, sem aviso, quando a outra aba
+ * (aberta antes) trocava a cidade.
  */
 
 export const LISTAS_DO_PERFIL = ["whatIHave", "whatINeed", "whatINeedDetails"] as const;
 export type ListaDoPerfil = (typeof LISTAS_DO_PERFIL)[number];
-export type ListasGravadas = Partial<Record<ListaDoPerfil, unknown>>;
+
+/**
+ * Os campos de `user_profiles` que o Meu Perfil devolve ao salvar, fora as listas
+ * (o `handleSave` de client/src/pages/Profile.tsx), mais as duas colunas antigas
+ * de cargo e empresa, que a leitura usa quando a nova está vazia
+ * (server/perfil-consolidado.ts). Campo novo na tela de Perfil entra aqui.
+ */
+export const CAMPOS_DA_EDICAO_DO_PERFIL = [
+  "displayName", "bio", "company", "jobTitle", "currentRole", "currentCompany", "city", "country", "gender", "personType",
+  "companySize", "companyCnpj", "activityArea", "institutionalNetwork", "linkedinUrl", "websiteUrl", "interestSectors",
+] as const;
+export type CampoDaEdicaoDoPerfil = (typeof CAMPOS_DA_EDICAO_DO_PERFIL)[number];
+
+export type ListasGravadas = Partial<Record<ListaDoPerfil | CampoDaEdicaoDoPerfil, unknown>>;
 export type OQueEntrouDepois = Record<ListaDoPerfil, unknown[]>;
 
-/** O formato da versão: "v1" e, para cada lista, a contagem e 16 dígitos do resumo. */
-export const FORMATO_DA_VERSAO_DAS_LISTAS = /^v1(?::\d{1,4}-[0-9a-f]{16}){3}$/;
+/** O formato da versão: "v2", para cada lista a contagem e 16 dígitos do resumo, e o resumo dos outros campos. */
+export const FORMATO_DA_VERSAO_DAS_LISTAS = /^v2(?::\d{1,4}-[0-9a-f]{16}){3}:[0-9a-f]{16}$/;
 
 /** A versão que a tela devolve não confere com as listas gravadas, ou a mescla passaria de um teto. */
 export class PerfilMudouNoMeio extends Error {
@@ -56,22 +77,26 @@ function itensDe(valor: unknown): unknown[] {
 
 const resumoDe = (itens: unknown[]) => crypto.createHash("sha256").update(JSON.stringify(itens)).digest("hex").slice(0, 16);
 
-/** A versão das três listas como estão gravadas (a tela não a lê: só a devolve). */
+/** O resumo dos outros campos da edição, como estão gravados (ausente e nulo valem o mesmo). */
+const resumoDosCampos = (perfil: ListasGravadas | null | undefined) => resumoDe(CAMPOS_DA_EDICAO_DO_PERFIL.map(campo => perfil?.[campo] ?? null));
+
+/** A versão das três listas e dos outros campos da edição como estão gravados (a tela não a lê: só a devolve). */
 export function versaoDasListas(perfil: ListasGravadas | null | undefined): string {
-  return "v1" + LISTAS_DO_PERFIL.map(lista => {
+  return "v2" + LISTAS_DO_PERFIL.map(lista => {
     const itens = itensDe(perfil?.[lista]);
     return `:${itens.length}-${resumoDe(itens)}`;
-  }).join("");
+  }).join("") + `:${resumoDosCampos(perfil)}`;
 }
 
 /**
  * O que entrou no FIM de cada lista depois da versão que a tela carregou, ou
  * null quando alguma lista mudou de outro jeito (o começo dela já não é o que
- * a tela viu).
+ * a tela viu) ou quando outro campo da edição mudou no banco.
  */
 export function oQueEntrouDepois(versao: string, gravadas: ListasGravadas | null | undefined): OQueEntrouDepois | null {
   if (!FORMATO_DA_VERSAO_DAS_LISTAS.test(versao)) return null;
   const partes = versao.split(":").slice(1);
+  if (partes[LISTAS_DO_PERFIL.length] !== resumoDosCampos(gravadas)) return null;
   const entrou = {} as OQueEntrouDepois;
   for (let indice = 0; indice < LISTAS_DO_PERFIL.length; indice += 1) {
     const lista: ListaDoPerfil = LISTAS_DO_PERFIL[indice];

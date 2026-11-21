@@ -82,7 +82,9 @@ vi.mock("./_core/llm", () => ({ invokeLLM: (...args: unknown[]) => invokeLLM(...
 // O registro PLATFORM_MATCH tem teste próprio (registro-de-conexoes-nos-motores.test.ts).
 vi.mock("./network-registro", () => ({ registrarConexoesEntreMembrasDepoisDoCalculo: async () => undefined }));
 
-const { calculateCompatibilityScore, generateMatchesForUser, MATCHES_GUARDADOS_POR_RODADA, PERFIS_POR_PAGINA } = await import("./matching");
+const {
+  calculateCompatibilityScore, generateMatchesForUser, LIMITE_DA_MEMORIA_DO_SATISFAZ, MATCHES_GUARDADOS_POR_RODADA, PERFIS_ENTRE_PAUSAS, PERFIS_POR_PAGINA,
+} = await import("./matching");
 
 const dona: Perfil = {
   userId: 1, primarySpecialty: "marketing", secondarySpecialties: ["vendas"], sector: "Saúde", seekingTypes: [],
@@ -246,5 +248,113 @@ describe("motor de perfis — a rodada compara com todos os perfis que podem cas
 
     expect(invokeLLM).toHaveBeenCalledTimes(3);
     expect(gravadas().filter(g => g.comInsight).map(g => g.matchedUserId)).toEqual(altas);
+  });
+
+  // Revisão do pacote do match (20/11): a dispensada é regravada (a nota não fica
+  // velha) e vinha na frente na ordem da nota, gastando a cota com quem a dona não vê.
+  it("a dispensada não gasta a cota do insight: ele vai às visíveis de nota mais alta", async () => {
+    banco.perfis = [
+      ...Array.from({ length: 40 }, (_, i) => complementar(i + 2, { values: [] })),
+      ...Array.from({ length: 4 }, (_, i) => complementar(i + 42, { city: "Brasília" })),
+    ];
+    const altas = melhoresEsperadas(banco.perfis, 4);
+    expect(altas).toEqual([42, 43, 44, 45]);
+    expect(nota(banco.perfis[43]).overall).toBeGreaterThanOrEqual(70);
+    banco.existentes = [{ matchedUserId: 42, aiInsight: null, userDismissed: true }];
+
+    await generateMatchesForUser(1);
+
+    expect(invokeLLM).toHaveBeenCalledTimes(3);
+    expect(gravadas().filter(g => g.comInsight).map(g => g.matchedUserId)).toEqual([43, 44, 45]);
+    // A dispensada continua regravada, sem o insight.
+    expect(gravadas().find(g => g.matchedUserId === 42)).toMatchObject({ comInsight: false });
+  });
+});
+
+describe("motor de perfis — o número que a rodada devolve é o das conexões NOVAS", () => {
+  it("rodar duas vezes sobre os mesmos perfis: a primeira devolve as que gravou, a segunda devolve 0", async () => {
+    banco.perfis = Array.from({ length: 30 }, (_, i) => complementar(i + 2));
+
+    expect(await generateMatchesForUser(1)).toBe(30);
+    // O banco agora tem as 30 linhas: a segunda rodada as regrava (a nota não fica velha), e nenhuma é nova.
+    banco.existentes = gravadas().map(g => ({ matchedUserId: g.matchedUserId, aiInsight: null, userDismissed: false }));
+    banco.consultas = [];
+
+    expect(await generateMatchesForUser(1)).toBe(0);
+    expect(gravadas()).toHaveLength(30);
+  });
+
+  it("as dispensadas e as que a dona já tinha não contam; a que entrou agora conta", async () => {
+    banco.perfis = Array.from({ length: 10 }, (_, i) => complementar(i + 2));
+    banco.existentes = [
+      ...Array.from({ length: 8 }, (_, i) => ({ matchedUserId: i + 2, aiInsight: null, userDismissed: false })),
+      { matchedUserId: 10, aiInsight: null, userDismissed: true },
+    ];
+
+    expect(await generateMatchesForUser(1)).toBe(1);
+  });
+});
+
+/**
+ * A memória do `satisfaz` vale por rodada (revisão do pacote do match, 20/11):
+ * com a chave errada, a resposta de um par valia para o seguinte e as notas
+ * mudavam sem aviso, e a suíte inteira passava, porque cada necessidade aparecia
+ * diante de um só "o que tenho". Aqui a mesma necessidade da dona encontra
+ * "o que tenho" diferentes, e o mesmo "o que tenho" dela encontra necessidades
+ * diferentes, em páginas diferentes.
+ */
+describe("motor de perfis — a memória da rodada não muda nota nenhuma", () => {
+  /** Quatro perfis que se alternam: o mesmo item da dona diante de itens diferentes do outro lado. */
+  const variadas = (quantas: number): Perfil[] => Array.from({ length: quantas }, (_, i) => {
+    const userId = i + 2;
+    switch (i % 4) {
+      case 0: return bloqueada(userId);                                                                  // serviço; precisa de fornecedores
+      case 1: return complementar(userId);                                                               // tem investidores; precisa de tecnologia
+      case 2: return complementar(userId, { whatIHave: ["laboratorio"], whatINeed: ["fornecedores"] });  // nada que a dona precise
+      default: return complementar(userId, { whatIHave: ["tecnologia"], whatINeed: ["consultoria"] });   // a tecnologia da dona atende a consultoria
+    }
+  });
+
+  it("cada nota gravada é a nota de calculateCompatibilityScore sem memória, em todas as páginas", async () => {
+    banco.perfis = variadas(PERFIS_POR_PAGINA + 60);
+
+    await generateMatchesForUser(1);
+
+    const gravadasNaRodada = gravadas();
+    expect(gravadasNaRodada.length).toBeGreaterThan(0);
+    for (const { matchedUserId, overallScore } of gravadasNaRodada) {
+      expect(overallScore, `perfil ${matchedUserId}`).toBe(nota(banco.perfis[matchedUserId - 2]).overall);
+    }
+  });
+
+  it("a mesma memória aquecida por outro par devolve o mesmo resultado que sem ela", () => {
+    const memoria = new Map<string, boolean>();
+    for (const outro of [bloqueada(2), complementar(3), complementar(4, { whatIHave: ["laboratorio"], whatINeed: ["fornecedores"] })]) {
+      calculateCompatibilityScore(dona as never, outro as never, memoria);
+    }
+    for (const perfil of variadas(8)) {
+      expect(calculateCompatibilityScore(dona as never, perfil as never, memoria)).toEqual(nota(perfil));
+    }
+  });
+
+  it("a memória tem teto: cheia, ela não cresce, e a nota continua a mesma", () => {
+    const memoria = new Map<string, boolean>(Array.from({ length: LIMITE_DA_MEMORIA_DO_SATISFAZ }, (_, i) => [`par ${i}`, false]));
+    expect(calculateCompatibilityScore(dona as never, complementar(2) as never, memoria)).toEqual(nota(complementar(2)));
+    expect(memoria.size).toBe(LIMITE_DA_MEMORIA_DO_SATISFAZ);
+  });
+});
+
+describe("motor de perfis — a pontuação devolve a vez ao servidor no meio da página", () => {
+  it(`a cada ${PERFIS_ENTRE_PAUSAS} perfis, outro trabalho do servidor roda antes de a rodada acabar`, async () => {
+    // Uma página só, incompleta: sem pausa no meio dela, a rodada (com o banco
+    // falso, que responde sem I/O) acabaria antes de qualquer outro trabalho.
+    banco.perfis = Array.from({ length: PERFIS_ENTRE_PAUSAS * 2 + 20 }, (_, i) => complementar(i + 2));
+    let rodadaAcabou = false;
+    let outroTrabalhoRodouNoMeio: boolean | null = null;
+    setImmediate(() => { outroTrabalhoRodouNoMeio = !rodadaAcabou; });
+
+    await generateMatchesForUser(1).then(() => { rodadaAcabou = true; });
+
+    expect(outroTrabalhoRodouNoMeio).toBe(true);
   });
 });

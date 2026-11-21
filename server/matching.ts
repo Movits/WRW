@@ -7,6 +7,7 @@ import {
 } from "../drizzle/schema";
 import { eq, ne, and, asc, gt, inArray } from "drizzle-orm";
 import crypto from "crypto";
+import { setImmediate as cederAVez } from "node:timers/promises";
 import { hasValidConsent, usersComConsentimento } from "./routers/consent";
 import { nomeiamAMesmaCoisa, slugDoTermo } from "@shared/direcao-do-termo";
 import { classificarOferta, ehServicoDeAssessoria, necessidadeDeclaraOAssuntoDoServico, necessidadeNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
@@ -261,12 +262,20 @@ function satisfaz(have: string, need: string): boolean {
 /**
  * As respostas de `satisfaz` numa rodada, por par (o que tenho, o que preciso). A rodada compara uma usuária com
  * todos os perfis, e os mesmos itens voltam de perfil em perfil (as opções fixas do cadastro, as categorias de "O que
- * preciso"): cada par custa a análise inteira dos dois termos, e `satisfaz` só depende dos dois textos. Medido com
- * 30 mil perfis sintéticos: 3,7 s sem a memória e 0,6 s com ela numa máquina livre; 12,8 s e 1,3 s em 20/11, com a
- * máquina carregada (a memória divide o tempo da pontuação por 6 a 10). A memória é da rodada (morre com
- * ela), e nunca do módulo: entre uma rodada e outra o vocabulário não cresce sem limite.
+ * preciso"): cada par custa a análise inteira dos dois termos, e `satisfaz` só depende dos dois textos. A memória é
+ * da rodada (morre com ela), e nunca do módulo.
+ *
+ * O ganho depende do vocabulário. Com as opções fixas (a bancada de 20/11: 22 itens, 30 mil perfis), a pontuação cai
+ * de 3,7 s para 0,6 s. Com texto livre quase não há par repetido: a revisão do pacote do match (20/11) mediu 357 a
+ * 385 µs por perfil com a memória, contra 413 µs sem ela, cerca de 13% a menos e não 6 a 10 vezes; a 30 mil perfis
+ * isso dá perto de 11 s de CPU por rodada. A análise por TERMO (O(itens), não O(pares)) é o passo que falta para
+ * texto livre. Por isso a memória tem teto (LIMITE_DA_MEMORIA_DO_SATISFAZ): com itens todos distintos ela chegou a
+ * 1,44 milhão de chaves (191 MB) numa rodada, e o par que passa do teto só não é lembrado.
  */
 export type MemoriaDoSatisfaz = Map<string, boolean>;
+
+/** Quantos pares a memória de uma rodada guarda, no máximo: perto de 3 MB com itens do tamanho comum. */
+export const LIMITE_DA_MEMORIA_DO_SATISFAZ = 20_000;
 
 function satisfazLembrando(have: string, need: string, memoria?: MemoriaDoSatisfaz): boolean {
   if (!memoria) return satisfaz(have, need);
@@ -274,7 +283,7 @@ function satisfazLembrando(have: string, need: string, memoria?: MemoriaDoSatisf
   const lembrada = memoria.get(chave);
   if (lembrada !== undefined) return lembrada;
   const resposta = satisfaz(have, need);
-  memoria.set(chave, resposta);
+  if (memoria.size < LIMITE_DA_MEMORIA_DO_SATISFAZ) memoria.set(chave, resposta);
   return resposta;
 }
 
@@ -624,19 +633,26 @@ const INSIGHTS_POR_RODADA = 3;
  * A rodada compara a usuária com TODOS os perfis que podem casar; antes eram os 50 primeiros que o banco
  * devolvia, sem ordem, e quem casava depois do 50º nunca aparecia (achado do desenho DOC-4, seção 7). Guardar todos
  * os que passam do corte de 40 seria guardar quase todos (um perfil vazio já soma 41): a 30 mil cadastros, cada
- * rodada escreveria 30 mil linhas em `matches` e no registro de conexões. A lista do Dashboard lê no máximo 50
- * (JANELA de routers/profileMatches.ts); a margem cobre o que a leitura ainda esconde depois da rodada (termo
- * revogado, o portão da demanda expressa). A linha que a usuária já tem é regravada mesmo fora das 100, para a nota
- * guardada não ficar velha.
+ * rodada escreveria 30 mil linhas em `matches` e no registro de conexões. A lista do Dashboard mostra no máximo 50
+ * (JANELA de routers/profileMatches.ts), e a leitura dela aplica as travas ANTES de cortar, página a página: a
+ * margem cobre o que a leitura esconde depois da rodada (termo revogado, o portão da demanda expressa). A linha que
+ * a usuária já tem é regravada mesmo fora das 100, para a nota guardada não ficar velha.
  */
 export const MATCHES_GUARDADOS_POR_RODADA = 100;
 
 /**
  * Quantos perfis cada leitura traz, pela ordem do id (o índice único de `user_profiles.userId` serve a leitura, e a
- * próxima página começa depois do último id lido): a rodada não segura os perfis de todo mundo na memória e devolve
- * a vez ao servidor entre uma página e outra, em vez de pontuar 30 mil perfis de uma vez só.
+ * próxima página começa depois do último id lido): a rodada não segura os perfis de todo mundo na memória.
  */
 export const PERFIS_POR_PAGINA = 500;
+
+/**
+ * De quantos em quantos perfis a pontuação devolve a vez ao servidor, dentro da página. A página de 500 é pontuada
+ * sem I/O nenhum no meio: com texto livre, 185 a 218 ms de CPU presa numa instância de 1 CPU (revisão do pacote do
+ * match, 20/11), e todo pedido que chegasse no meio esperava. A cada 50, a espera de quem chega cai para perto de
+ * 20 ms; a conta total da rodada não muda.
+ */
+export const PERFIS_ENTRE_PAUSAS = 50;
 
 /** Um perfil comparado nesta rodada, com a nota que ele tirou. */
 type Comparada<Perfil> = { candidate: Perfil & { userId: number }; scores: ReturnType<typeof calculateCompatibilityScore> };
@@ -661,6 +677,7 @@ function guardarEntreAsMelhores<Perfil>(melhores: Array<Comparada<Perfil>>, comp
 }
 
 // ─── Generate matches for a user ─────────────────────────────
+/** Roda o motor de perfis para a dona e devolve quantas conexões sugeridas NOVAS a rodada gravou (as que ela não tinha). */
 export async function generateMatchesForUser(userId: number): Promise<number> {
   const myProfile = await getUserProfile(userId);
   if (!myProfile) return 0;
@@ -753,7 +770,10 @@ export async function generateMatchesForUser(userId: number): Promise<number> {
     // O outro lado da etapa 11: só cruza o dado de quem também autorizou.
     const autorizadas = await usersComConsentimento(pagina.map(candidate => candidate.userId as number), "termo_smart_match");
 
-    for (const candidate of pagina) {
+    for (let indice = 0; indice < pagina.length; indice += 1) {
+      // A vez ao servidor no meio da página (PERFIS_ENTRE_PAUSAS): a pontuação não tem I/O nenhum.
+      if (indice > 0 && indice % PERFIS_ENTRE_PAUSAS === 0) await cederAVez();
+      const candidate = pagina[indice];
       if (!autorizadas.has(candidate.userId as number)) continue;
       const scores = calculateCompatibilityScore(myProfile as UserProfile, candidate as UserProfile, memoria);
 
@@ -789,23 +809,29 @@ export async function generateMatchesForUser(userId: number): Promise<number> {
   for (const comparada of [...melhores, ...jaGravadas]) daRodada.set(comparada.candidate.userId, comparada);
   const aGravar = Array.from(daRodada.values()).sort(ordemDasMelhores);
 
-  let matchesCreated = 0;
+  // As conexões NOVAS desta rodada (as que a dona ainda não tinha): é o número que
+  // a rodada devolve, e o Painel o mostra como "N novas conexões sugeridas". Contar
+  // as regravadas fazia todo "Buscar" sobre os mesmos perfis dizer "120 novas".
+  let novas = 0;
   let insightsGerados = 0;
   // Os pares que esta rodada gravou como conexão sugerida: vão ao registro da
   // plataforma (PLATFORM_MATCH) depois do laço.
   const paresParaORegistro: ParDeMembras[] = [];
 
   for (const { candidate, scores } of aGravar) {
+    const existente = linhaExistente.get(candidate.userId);
     // Insight de IA só para os melhores, só quando ainda não existe um DE
     // VERDADE (enchimento antigo não conta), e no máximo INSIGHTS_POR_RODADA
     // por rodada — cota é finita e o score não depende dele.
     let aiInsight: string | null = null;
-    const guardado = linhaExistente.get(candidate.userId)?.aiInsight;
+    const guardado = existente?.aiInsight;
     // O texto do prompt antigo que fala em "match", ou o que não passa em
     // insightAceitavel (contato, recado a quem decide o pedido), também não
     // conta: a leitura já não o exibe (vocabulario-da-conexao.ts) e ele é refeito aqui.
     const temInsightReal = !!guardado && !INSIGHTS_DE_ENCHIMENTO.has(guardado) && insightAceitavel(guardado);
-    if (scores.overall >= 70 && !temInsightReal && insightsGerados < INSIGHTS_POR_RODADA) {
+    // A dispensada é regravada (a nota não fica velha), mas a dona não a vê: não
+    // gasta a cota do insight, que vai às visíveis de nota mais alta.
+    if (scores.overall >= 70 && !temInsightReal && !existente?.userDismissed && insightsGerados < INSIGHTS_POR_RODADA) {
       aiInsight = await generateMatchInsight(myProfile as UserProfile, candidate as UserProfile, scores);
       insightsGerados += 1;
     }
@@ -828,7 +854,7 @@ export async function generateMatchesForUser(userId: number): Promise<number> {
       .values({ userId, matchedUserId: candidate.userId as number, ...comInsight })
       .onDuplicateKeyUpdate({ set: comInsight });
 
-    matchesCreated++;
+    if (!existente) novas += 1;
     paresParaORegistro.push({ outraUserId: candidate.userId as number, pontuacao: scores.overall });
   }
 
@@ -844,7 +870,7 @@ export async function generateMatchesForUser(userId: number): Promise<number> {
     .set({ lastAiAnalysisAt: new Date() })
     .where(eq(userProfiles.userId, userId));
 
-  return matchesCreated;
+  return novas;
 }
 
 // A leitura dos matches (com a trava de leitura da etapa 11) vive em

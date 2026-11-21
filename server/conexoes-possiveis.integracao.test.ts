@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, inArray, or } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -20,6 +20,7 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 const { getDb } = await import("./db");
 const { users, userProfiles, matches, conexoesParticipantes, conexoesRegistradas } = await import("../drizzle/schema");
 const { appRouter } = await import("./routers");
+const { apagarPelaChave } = await import("./test/apagar-pela-chave");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const PREFIXO = `teste-u3-${crypto.randomUUID()}`;
@@ -71,12 +72,15 @@ async function limpar() {
     .where(inArray(conexoesParticipantes.userId, contaIds));
   if (participacoes.length) {
     const conexaoIds = participacoes.map(p => p.conexaoId);
-    await db.delete(conexoesParticipantes).where(inArray(conexoesParticipantes.conexaoId, conexaoIds));
-    await db.delete(conexoesRegistradas).where(inArray(conexoesRegistradas.id, conexaoIds));
+    await apagarPelaChave(db, conexoesParticipantes, inArray(conexoesParticipantes.conexaoId, conexaoIds));
+    await apagarPelaChave(db, conexoesRegistradas, inArray(conexoesRegistradas.id, conexaoIds));
   }
-  await db.delete(matches).where(or(inArray(matches.userId, contaIds), inArray(matches.matchedUserId, contaIds)));
-  await db.delete(userProfiles).where(inArray(userProfiles.userId, contaIds));
-  await db.delete(users).where(inArray(users.id, contaIds));
+  // Só as linhas de `matches` destas contas, pela chave (server/test/apagar-pela-chave.ts):
+  // a linha de outra dona que aponte para elas é da rodada dela, e apagá-la mudava
+  // a contagem de quem roda o motor ao mesmo tempo (matching-duplicacao.integracao.test.ts).
+  await apagarPelaChave(db, matches, inArray(matches.userId, contaIds));
+  await apagarPelaChave(db, userProfiles, inArray(userProfiles.userId, contaIds));
+  await apagarPelaChave(db, users, inArray(users.id, contaIds));
 }
 
 describe.skipIf(!temBanco)("U3 — conexões possíveis (integração)", () => {

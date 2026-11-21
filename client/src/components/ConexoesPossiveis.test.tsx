@@ -56,4 +56,26 @@ describe("ConexoesPossiveis (U3)", () => {
     expect(screen.getByText(/Salve o perfil para concluir a mudança/)).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
+
+  // Etapa 13 (revisão do pacote do match, 20/11): a Bronze que aceitou o termo e
+  // cujas conexões esperam o outro lado aceitar via o vazio errado.
+  it("zero possíveis com conexões esperando o termo do outro lado: a causa é a rede, não o perfil", () => {
+    renderizar({ consulta: consulta({ data: { total: 0, listaLiberada: false } }), ocultas: 3 });
+    expect(screen.getByRole("heading", { name: "Suas conexões estão a caminho" })).toBeInTheDocument();
+    expect(screen.getByText(/esses membros ainda não autorizaram/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Ainda não há conexões possíveis para você" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/quanto mais completo ele estiver/)).not.toBeInTheDocument();
+  });
+
+  it("zero possíveis e nenhuma esperando: diz que não há, e convida a completar o perfil", () => {
+    renderizar({ consulta: consulta({ data: { total: 0, listaLiberada: false } }), ocultas: 0 });
+    expect(screen.getByRole("heading", { name: "Ainda não há conexões possíveis para você" })).toBeInTheDocument();
+    expect(screen.getByText(/quanto mais completo ele estiver/)).toBeInTheDocument();
+  });
+
+  it("com conexões possíveis, o número vale mesmo havendo outras esperando o termo", () => {
+    renderizar({ ocultas: 2 });
+    expect(screen.getByRole("heading", { name: "Há 4 conexões possíveis para você" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Suas conexões estão a caminho" })).not.toBeInTheDocument();
+  });
 });

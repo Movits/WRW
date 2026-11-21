@@ -64,8 +64,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import Profile from "./Profile";
 
-const VERSAO_AO_ABRIR = `v1:2-${"a".repeat(16)}:1-${"b".repeat(16)}:0-${"c".repeat(16)}`;
-const VERSAO_RELIDA = `v1:3-${"d".repeat(16)}:1-${"b".repeat(16)}:0-${"c".repeat(16)}`;
+const VERSAO_AO_ABRIR = `v2:2-${"a".repeat(16)}:1-${"b".repeat(16)}:0-${"c".repeat(16)}:${"e".repeat(16)}`;
+const VERSAO_RELIDA = `v2:3-${"d".repeat(16)}:1-${"b".repeat(16)}:0-${"c".repeat(16)}:${"e".repeat(16)}`;
 const perfil = (whatIHave: string[]) => ({ displayName: "Ana", country: "BR", whatIHave, whatINeed: [], whatINeedDetails: [] });
 const salvar = () => fireEvent.click(screen.getAllByRole("button", { name: /Salvar/ })[0]);
 const conflito = { message: MENSAGEM_PERFIL_MUDOU_NO_MEIO, data: { code: "CONFLICT", httpStatus: 409, path: "profile.update" } };

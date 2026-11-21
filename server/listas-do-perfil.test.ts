@@ -62,8 +62,41 @@ describe("versaoDasListas e oQueEntrouDepois", () => {
   });
 
   it("versão fora do formato não confere com nada (null)", () => {
-    expect(oQueEntrouDepois("v1", PERFIL)).toBeNull();
-    expect(oQueEntrouDepois(versaoDasListas(PERFIL).replace("v1", "v2"), PERFIL)).toBeNull();
+    expect(oQueEntrouDepois("v2", PERFIL)).toBeNull();
+    expect(oQueEntrouDepois(versaoDasListas(PERFIL).replace("v2", "v3"), PERFIL)).toBeNull();
+    // A versão de antes, só das listas, não vale mais: sem o resumo dos campos.
+    expect(oQueEntrouDepois(versaoDasListas(PERFIL).replace(/^v2/, "v1").replace(/:[0-9a-f]{16}$/, ""), PERFIL)).toBeNull();
+  });
+});
+
+/**
+ * Revisão do pacote do match (20/11): a versão protegia só as três listas, e o
+ * salvar de uma aba aberta antes regravava a bio que a outra aba tinha reescrito.
+ * O Perfil manda todos os campos dele ao salvar: o que mudou no banco desde que
+ * a edição abriu seria perdido.
+ */
+describe("os outros campos da edição entram na versão", () => {
+  const COMPLETO = { ...PERFIL, bio: "Bio da edição aberta", city: "Lisboa", company: "Vinícola", interestSectors: ["agribusiness"] };
+
+  it("a bio, a cidade, a empresa ou os setores mudaram no banco: null (CONFLICT), mesmo com as listas iguais", () => {
+    const versao = versaoDasListas(COMPLETO);
+    expect(oQueEntrouDepois(versao, { ...COMPLETO, bio: "Bio reescrita na outra aba" })).toBeNull();
+    expect(oQueEntrouDepois(versao, { ...COMPLETO, city: "Porto" })).toBeNull();
+    expect(oQueEntrouDepois(versao, { ...COMPLETO, company: null })).toBeNull();
+    expect(oQueEntrouDepois(versao, { ...COMPLETO, interestSectors: ["agribusiness", "retail"] })).toBeNull();
+  });
+
+  it("os campos iguais e o item que a reunião acrescentou no fim: entra, como antes", () => {
+    expect(oQueEntrouDepois(versaoDasListas(COMPLETO), { ...COMPLETO, whatIHave: [...COMPLETO.whatIHave, "Café"] }))
+      .toEqual({ ...nada, whatIHave: ["Café"] });
+  });
+
+  it("campo ausente e campo nulo são o mesmo (a linha antiga sem a coluna preenchida)", () => {
+    expect(oQueEntrouDepois(versaoDasListas({ ...COMPLETO, gender: null }), COMPLETO)).toEqual(nada);
+  });
+
+  it("o que não é campo da edição (a completude, a última análise) não mexe na versão", () => {
+    expect(versaoDasListas({ ...COMPLETO, profileCompleteness: 80, lastAiAnalysisAt: new Date() } as never)).toBe(versaoDasListas(COMPLETO));
   });
 });
 

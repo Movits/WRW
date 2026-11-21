@@ -4,10 +4,10 @@ import { hasValidConsent, usersComConsentimento } from "./consent";
 import { insightParaExibir } from "../vocabulario-da-conexao";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 
-// Lê a janela inteira (50, o teto de `list`) e só depois corta no limite
-// pedido: a linha bloqueada pelo portão fica no banco com a nota velha e alta,
-// e com LIMIT antes do filtro ela ocupava a vaga de um match legítimo, que
-// sumia da tela (revisão adversarial de 12/09).
+// Quantas conexões a leitura entrega no máximo: o teto de `list` e o número da
+// Bronze. As travas vêm ANTES deste corte: a linha bloqueada pelo portão fica
+// no banco com a nota velha e alta, e com o corte antes do filtro ela ocupava a
+// vaga de uma conexão legítima, que sumia da tela (revisão adversarial de 12/09).
 const JANELA = 50;
 
 /**
@@ -21,6 +21,16 @@ const JANELA = 50;
  * motor privado aplica: server/CLAUDE.md) vale para os dois de uma vez. Duas
  * cópias destas travas já divergiram uma vez (a auditoria da etapa 8 achou a
  * trava de consentimento numa função que nenhum router chamava).
+ *
+ * As linhas da dona vêm em páginas de JANELA, na ordem do motor (nota, e na
+ * mesma nota o id menor), e a leitura segue para a página seguinte até juntar
+ * JANELA visíveis ou acabar as linhas. Era UMA leitura de 50, e as travas vinham
+ * depois: o motor não regrava nem apaga o par que o portão passou a bloquear (ou
+ * cujo outro lado revogou o termo), para a dispensa da dona sobreviver, então a
+ * linha velha fica com a nota alta para sempre. Com 50 dessas no topo, as
+ * válidas da 51ª em diante sumiam da lista e do número, e "Buscar" não resolvia
+ * (achado 1 da revisão do pacote do match, 20/11: o motor guarda até 100 por
+ * rodada, mais as que a dona já tem).
  */
 async function sugestoesVisiveis(userId: number) {
   // Etapa 11 na LEITURA, no caminho que o Dashboard chama de verdade:
@@ -30,20 +40,31 @@ async function sugestoesVisiveis(userId: number) {
   // agora aqui, colada nos procedimentos vivos.
   if (!(await hasValidConsent(userId, "termo_smart_match"))) return [];
   const { getMatchesForUser } = await import("../db");
-  const lista = await getMatchesForUser(userId, JANELA);
-  const ids = lista.map(m => m.matchedUserId).filter((id): id is number => id !== null);
-  const comTermo = await usersComConsentimento(ids, "termo_smart_match");
-  // Regra da demanda expressa (12/09/2026), também na LEITURA: a linha
-  // gravada antes da regra (ou antes de o perfil mudar) não volta à tela
-  // como recomendação — serviço casado por presunção some na hora, como
-  // o cruzamento some quando o termo é revogado, sem esperar "Reanalisar".
-  // Só os ids COM termo chegam ao portão: ele lê o perfil estratégico da
-  // outra usuária para decidir, e cruzar o dado de quem revogou é o que a
-  // etapa 11 proíbe — quem não tem termo já saiu da lista de qualquer modo.
   const { matchesBloqueadosPelaDemandaExpressa } = await import("../matching");
-  const autorizados = ids.filter(id => comTermo.has(id));
-  const bloqueados = await matchesBloqueadosPelaDemandaExpressa(userId, autorizados);
-  return lista.filter(m => m.matchedUserId !== null && comTermo.has(m.matchedUserId) && !bloqueados.has(m.matchedUserId));
+  const visiveis: Awaited<ReturnType<typeof getMatchesForUser>> = [];
+  // A mesma linha não entra duas vezes: uma rodada do motor que regrave notas
+  // entre uma página e outra pode empurrar uma linha para a página seguinte.
+  const jaLidas = new Set<number>();
+  for (let pulo = 0; visiveis.length < JANELA; pulo += JANELA) {
+    const lidas = await getMatchesForUser(userId, JANELA, pulo);
+    const pagina = lidas.filter(m => !jaLidas.has(m.matchId));
+    for (const m of pagina) jaLidas.add(m.matchId);
+    const ids = pagina.map(m => m.matchedUserId).filter((id): id is number => id !== null);
+    const comTermo = ids.length ? await usersComConsentimento(ids, "termo_smart_match") : new Set<number>();
+    // Regra da demanda expressa (12/09/2026), também na LEITURA: a linha
+    // gravada antes da regra (ou antes de o perfil mudar) não volta à tela
+    // como recomendação — serviço casado por presunção some na hora, como
+    // o cruzamento some quando o termo é revogado, sem esperar "Reanalisar".
+    // Só os ids COM termo chegam ao portão: ele lê o perfil estratégico da
+    // outra usuária para decidir, e cruzar o dado de quem revogou é o que a
+    // etapa 11 proíbe — quem não tem termo já saiu da lista de qualquer modo.
+    const autorizados = ids.filter(id => comTermo.has(id));
+    const bloqueados = await matchesBloqueadosPelaDemandaExpressa(userId, autorizados);
+    visiveis.push(...pagina.filter(m => m.matchedUserId !== null && comTermo.has(m.matchedUserId) && !bloqueados.has(m.matchedUserId)));
+    // A página incompleta é a última.
+    if (lidas.length < JANELA) break;
+  }
+  return visiveis.slice(0, JANELA);
 }
 
 // ============================================================
@@ -55,9 +76,11 @@ export const profileMatchesRouter = router({
     .query(async ({ ctx, input }) => {
       // U3: a Bronze vê só QUANTAS são (`conexoesPossiveis`), nunca a lista. É
       // regra de consulta, não de tela: a resposta sai vazia antes de ler o
-      // banco. Vazia, e não 403, de propósito: o exame de produção prova que
-      // esta rota degrada com 200 (a conta QA revogada cai em Bronze), e a tela
-      // de antes, aberta durante o deploy, mostra o vazio em vez de um erro.
+      // banco. Vazia, e não 403, de propósito: a tela de antes, aberta durante
+      // o deploy, mostra o vazio em vez de um erro. Esta saída vem ANTES da
+      // trava do termo: o exame de produção prova a degradação sem termo com a
+      // presidente QA, que vê a lista, e não com a conta S, que chega Bronze ao
+      // bloco do termo (scripts/checar-producao.mjs, blocoConsentimentoFecho).
       if (!veAsConexoesSugeridas(ctx.user.role)) return [];
       const visiveis = await sugestoesVisiveis(ctx.user.id);
       return visiveis

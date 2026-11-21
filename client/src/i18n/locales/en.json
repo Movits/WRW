@@ -508,6 +508,7 @@
     "topMatches": "Suggested Connections (80%+)",
     "interestSent": "Interest sent! A distributor checks compatibility before forwarding it. They will only see your name if they express interest too.",
     "interestError": "Could not send interest. Please try again.",
+    "interestNeedsSilver": "Complete your profile to see the suggested connections and express interest in them.",
     "connectionAccepted": "New connection! You can both see each other's name now.",
     "connectionDeclined": "Request declined.",
     "newMatches_one": "✨ {{count}} new suggested connection!",
@@ -2640,6 +2641,7 @@
       "discardConfirmButton": "Discard {{codigo}}",
       "discardConfirmCancel": "Cancel",
       "reasonPlatformMatch": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded: {{pontuacao}}% compatibility.",
+      "reasonPlatformMatchLocked": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded. The compatibility appears when your profile reaches Silver Member.",
       "reasonNoAuthorization": "The other side withdrew their authorisation, so the details of this connection are no longer shown."
     },
     "global": {

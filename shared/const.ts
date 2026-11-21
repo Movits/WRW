@@ -149,11 +149,20 @@ export const MENSAGEM_RESUMO_CHEIO = "Este resumo já chegou ao máximo de itens
 /**
  * O salvar do Meu Perfil achou "O que tenho" ou "O que preciso" mudado de um
  * jeito que não dá para somar ao que a tela manda (outra aba salvou, um item
- * saiu), ou a soma passaria de um teto (server/listas-do-perfil.ts). Nada foi
+ * saiu), outro campo da edição mudado no banco (a bio que outra aba reescreveu),
+ * ou a soma passaria de um teto (server/listas-do-perfil.ts). Nada foi
  * gravado. A tela traduz pela tabela de client/src/lib/mensagem-de-erro.ts
  * (chave profile.changedElsewhere).
  */
 export const MENSAGEM_PERFIL_MUDOU_NO_MEIO = "Seu perfil foi alterado em outra tela enquanto você editava. Nada foi salvo, para não apagar essa alteração: recarregue a página e edite de novo.";
+
+/**
+ * U3: a Bronze vê só quantas conexões são possíveis, e demonstrar interesse por
+ * uma delas espera o cadastro completo (server/routers/connections.ts). Chega à
+ * tela quando a conta caiu para Bronze com o cartão ainda aberto; a tela traduz
+ * pela tabela de client/src/lib/mensagem-de-erro.ts (chave dashboard.interestNeedsSilver).
+ */
+export const MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO = "Complete seu perfil para ver as conexões sugeridas e demonstrar interesse por elas.";
 
 /** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
 export const NOME_DO_FALANTE_MAX = 60;

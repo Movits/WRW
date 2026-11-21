@@ -8,10 +8,8 @@ import { ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { exigirTextoSemContato } from "../bloqueio-de-contato";
 import { users } from "../../drizzle/schema";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
-
-/** U3: a Bronze vê só quantas conexões são possíveis; agir sobre uma delas espera o cadastro completo. */
-export const MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO =
-  "Complete seu perfil para ver as conexões sugeridas e demonstrar interesse por elas.";
+// U3: a frase mora em shared/const.ts para a tela a traduzir (client/src/lib/mensagem-de-erro.ts).
+import { MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO } from "@shared/const";
 
 // ============================================================
 // CONEXÕES ENTRE USUÁRIOS

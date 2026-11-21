@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { apagarPelaChave } from "./test/apagar-pela-chave";
+import { terminaComALinhaPresa, type Transacao } from "./test/linha-presa";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -243,5 +244,23 @@ describe.skipIf(!temBanco)("Lembretes no sino (integração)", () => {
     await excluirConta(await db(), { id: conta, openId: EXCLUIDA, email: null }, { apagarArquivo: async () => undefined });
     expect(await lembreteDe(id)).toBeUndefined();
     expect(await (await db()).select().from(platformNotifications).where(eq(platformNotifications.userId, conta))).toEqual([]);
+  });
+
+  // Revisão do pacote do match (20/11): o DELETE pela conta, pelo tipo e pelo
+  // endereço travava o intervalo da conta no índice e esperava pelo aviso que
+  // outra transação acabava de criar nela, a forma do deadlock que o aviso de
+  // pronta já tinha tirado (avisarReuniaoPronta).
+  it("apagar os avisos de um endereço vai pela chave: não espera pelo aviso que outra transação acabou de criar na mesma conta", async () => {
+    const conta = await contaDe(DONA);
+    const endereco = "/reunioes/reuniao-que-sai";
+    await (await db()).insert(platformNotifications).values([
+      { userId: conta, type: "reuniao_pronta", title: "Pronta", actionUrl: endereco, isRead: false },
+      { userId: conta, type: "lembrete", title: "Lembrete", actionUrl: endereco, isRead: false },
+    ]);
+    const outroAviso = (tx: Transacao) => tx.insert(platformNotifications).values({ userId: conta, type: "system", title: "Outro aviso", actionUrl: "/outro", isRead: false });
+    const apagar = async () => (await db()).transaction(tx => laco.apagarAvisosDoEndereco(tx, DONA, endereco));
+
+    expect(await terminaComALinhaPresa(await db(), outroAviso, apagar)).toBe(true);
+    expect(await avisosDe(DONA, endereco)).toEqual([]);
   });
 });

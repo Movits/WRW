@@ -508,6 +508,7 @@
     "topMatches": "おすすめのつながり (80%+)",
     "interestSent": "関心を送信しました。配信担当者が相性を確認してから相手に届けます。相手も関心を示した場合にのみ、あなたの名前が表示されます。",
     "interestError": "興味を送信できませんでした。もう一度お試しください。",
+    "interestNeedsSilver": "おすすめのつながりを見て興味を伝えるには、プロフィールを充実させてください。",
     "connectionAccepted": "新しいつながり！お互いの名前が表示されます。",
     "connectionDeclined": "リクエストが拒否されました。",
     "newMatches_one": "✨ 新しいおすすめのつながりが{{count}}件見つかりました！",
@@ -2640,6 +2641,7 @@
       "discardConfirmButton": "{{codigo}} を破棄",
       "discardConfirmCancel": "キャンセル",
       "reasonPlatformMatch": "接続が記録された時点で Smart Match の規約に同意していた二人のメンバーの間で、プロフィール・エンジンが提案しました：適合度 {{pontuacao}}%。",
+      "reasonPlatformMatchLocked": "接続が記録された時点で Smart Match の規約に同意していた二人のメンバーの間で、プロフィール・エンジンが提案しました。シルバーメンバーになると適合度が表示されます。",
       "reasonNoAuthorization": "相手が承認を取り消したため、この接続の詳細は表示されなくなりました。"
     },
     "global": {

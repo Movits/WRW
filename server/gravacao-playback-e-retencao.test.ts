@@ -599,15 +599,20 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(sequencia.slice(-2)).toEqual(["update", "delete"]);
   });
 
-  it("os avisos da reunião no sino (H15) saem com ela: só os do gravador, da conta da dona, pelo link da reunião, antes de soltar a agenda", async () => {
+  it("os avisos da reunião no sino (H15) saem com ela: só os do gravador, da conta da dona, pelo link da reunião, pela chave, antes de soltar a agenda", async () => {
     tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.platformNotifications, [{ id: 41 }]);
     await servico.deletePrivateMeeting("dona-1", "reuniao-1");
     expect(leituras.find(operacao => operacao.tabela === schema.users)?.params).toEqual(["dona-1"]);
-    const avisos = delecoes.filter(operacao => operacao.tabela === schema.platformNotifications);
-    expect(avisos.map(predicadoDe)).toEqual([{
+    // Achados numa leitura sem trava e apagados pela chave: o DELETE pela conta
+    // travava o intervalo dela no índice e o vão até a vizinha (revisão do
+    // pacote do match, 20/11; server/lembretes.ts, apagarAvisosDoEndereco).
+    expect(leituras.filter(operacao => operacao.tabela === schema.platformNotifications).map(predicadoDe)).toEqual([{
       sql: "(`platform_notifications`.`userId` = ? and `platform_notifications`.`type` in (?, ?) and `platform_notifications`.`actionUrl` = ?)",
       params: [7, "lembrete", "reuniao_pronta", "/meetings/reuniao-1"],
     }]);
+    const avisos = delecoes.filter(operacao => operacao.tabela === schema.platformNotifications);
+    expect(avisos.map(predicadoDe)).toEqual([{ sql: "`platform_notifications`.`id` = ?", params: [41] }]);
     // Os avisos, o ponteiro da agenda e, por último, a reunião.
     expect(sequencia.slice(-3)).toEqual(["delete", "update", "delete"]);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
@@ -618,6 +623,7 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     // (SIGTERM) ou o banco que cai no meio dele corta a exclusão. Aqui o banco
     // cai na primeira escrita depois do bucket, a da linha do áudio que saiu.
     tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.platformNotifications, [{ id: 41 }]);
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     const queda = quedaDoBanco();
     deleteQueFalha = ordem => (delecoes[ordem].tabela === schema.meetingRecordings ? queda : null);

@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import i18n from "@/i18n";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO } from "@shared/const";
 import Dashboard from "./Dashboard";
 
 /**
@@ -22,19 +24,31 @@ const duble = vi.hoisted(() => {
   const mutacoes: Record<string, (...args: unknown[]) => unknown> = {};
   /** As consultas relidas por `refetch()`, que no React Query passa por cima do `enabled: false`. */
   const relidas: string[] = [];
+  /** O `enabled` com que a tela montou cada consulta (o dublê devolve a resposta de qualquer jeito). */
+  const ligadas: Record<string, boolean> = {};
+  /** As chamadas a `trpc.useUtils()`, como "auth.me.invalidate". */
+  const utilidades: string[] = [];
   const ignorar = (prop: string | symbol) => typeof prop === "symbol" || prop === "then" || prop === "$$typeof";
   const procedimento = (caminho: string) => ({
-    useQuery: (_input: unknown, opcoes?: { select?: (dados: never) => unknown }) => {
+    useQuery: (_input: unknown, opcoes?: { select?: (dados: never) => unknown; enabled?: boolean }) => {
+      ligadas[caminho] = opcoes?.enabled !== false;
       const parcial = respostas[caminho] ?? {};
       const resultado = { data: undefined as unknown, isLoading: false, isPending: false, isError: false, error: null as unknown, refetch: () => { relidas.push(caminho); }, ...parcial };
       if (opcoes?.select && resultado.data !== undefined) resultado.data = opcoes.select(resultado.data as never);
       return resultado;
     },
-    // Mutação com resposta registrada pelo teste chama o `onSuccess` da tela, como o React Query.
-    useMutation: (opcoes?: { onSuccess?: (dados: unknown, variaveis: unknown) => void }) => ({
+    // Mutação com resposta registrada pelo teste chama o `onSuccess` da tela, como
+    // o React Query; a que lança chama o `onError`.
+    useMutation: (opcoes?: { onSuccess?: (dados: unknown, variaveis: unknown) => void; onError?: (erro: unknown, variaveis: unknown) => void }) => ({
       mutate: (variaveis: unknown) => {
         if (!(caminho in mutacoes)) return;
-        const dados = mutacoes[caminho](variaveis);
+        let dados: unknown;
+        try {
+          dados = mutacoes[caminho](variaveis);
+        } catch (erro) {
+          opcoes?.onError?.(erro, variaveis);
+          return;
+        }
         opcoes?.onSuccess?.(dados, variaveis);
       },
       mutateAsync: async () => undefined, isPending: false, isError: false, error: null, data: undefined,
@@ -42,7 +56,9 @@ const duble = vi.hoisted(() => {
   });
   const utils = new Proxy({}, {
     get: (_, r) => ignorar(r) ? undefined : new Proxy({}, {
-      get: (_, p) => ignorar(p) ? undefined : new Proxy({}, { get: (_, m) => ignorar(m) ? undefined : async () => undefined }),
+      get: (_, p) => ignorar(p) ? undefined : new Proxy({}, {
+        get: (_, m) => ignorar(m) ? undefined : async () => { utilidades.push(`${String(r)}.${String(p)}.${String(m)}`); },
+      }),
     }),
   });
   const trpc = new Proxy({}, {
@@ -52,7 +68,7 @@ const duble = vi.hoisted(() => {
       return new Proxy({}, { get: (_, proc) => ignorar(proc) ? undefined : procedimento(`${String(router)}.${String(proc)}`) });
     },
   });
-  return { respostas, mutacoes, relidas, trpc };
+  return { respostas, mutacoes, relidas, ligadas, utilidades, trpc };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
@@ -84,7 +100,11 @@ function logada(role: string) {
 beforeEach(() => {
   for (const chave of Object.keys(duble.respostas)) delete duble.respostas[chave];
   for (const chave of Object.keys(duble.mutacoes)) delete duble.mutacoes[chave];
+  for (const chave of Object.keys(duble.ligadas)) delete duble.ligadas[chave];
   duble.relidas.length = 0;
+  duble.utilidades.length = 0;
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
   logada("bronze");
   duble.respostas["profile.get"] = { data: { profile: PERFIL_BRONZE } };
   duble.respostas["consent.status"] = { data: { accepted: true, document: null } };
@@ -140,15 +160,56 @@ describe("U3 — a Bronze vê quantas conexões são possíveis, e não quem", (
   });
 
   it("'Completar perfil' leva ao Perfil, e 'Buscar' roda o motor de novo", () => {
-    const regenerar = vi.fn();
+    const regenerar = vi.fn(() => ({ count: 12 }));
     duble.mutacoes["matches.regenerate"] = regenerar;
     render(<Dashboard />);
 
     fireEvent.click(screen.getByRole("button", { name: "Buscar novas conexões sugeridas" }));
     expect(regenerar).toHaveBeenCalledTimes(1);
+    // Para a Bronze, o que vale é o número do cartão, relido; as linhas que a
+    // rodada gravou (`count`) não viram "12 novas conexões", e a lista não é lida.
+    expect(duble.relidas).toContain("matches.conexoesPossiveis");
+    expect(duble.relidas).not.toContain("matches.list");
+    expect(toast.success).toHaveBeenCalledWith("Análise concluída. O número de conexões possíveis está atualizado.");
 
     fireEvent.click(screen.getByRole("button", { name: "Completar perfil" }));
     expect(window.location.pathname).toBe("/profile");
+  });
+
+  it("'Buscar' que falha diz que falhou: o número não fica igual em silêncio, como se não houvesse nada novo", () => {
+    duble.mutacoes["matches.regenerate"] = () => {
+      throw Object.assign(new Error(MENSAGEM_BANCO_INDISPONIVEL), { data: { code: "INTERNAL_SERVER_ERROR" } });
+    };
+    render(<Dashboard />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Buscar novas conexões sugeridas" }));
+    expect(toast.error).toHaveBeenCalledWith(MENSAGEM_BANCO_INDISPONIVEL);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(duble.relidas).not.toContain("matches.conexoesPossiveis");
+  });
+
+  // Etapa 13 (revisão do pacote do match, 20/11): as contas novas nascem Bronze, e
+  // a primeira a aceitar o termo tem as conexões esperando o outro lado aceitar.
+  it("zero possíveis porque o outro lado ainda não aceitou o termo: 'Suas conexões estão a caminho', e não o convite a completar o perfil", () => {
+    duble.respostas["matches.conexoesPossiveis"] = { data: { total: 0, listaLiberada: false } };
+    duble.respostas["matches.redeAguardando"] = { data: { ocultas: 3 } };
+    render(<Dashboard />);
+
+    expect(duble.ligadas["matches.redeAguardando"]).toBe(true);
+    expect(screen.getByRole("heading", { name: "Suas conexões estão a caminho" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Ainda não há conexões possíveis para você" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/quanto mais completo ele estiver/)).not.toBeInTheDocument();
+  });
+
+  it("promovida em outra aba (o número já diz que a lista está liberada): a tela relê o nível, em vez de ficar presa na visão da Bronze", () => {
+    duble.respostas["matches.conexoesPossiveis"] = { data: { total: 3, listaLiberada: true } };
+    render(<Dashboard />);
+    expect(duble.utilidades).toContain("auth.me.invalidate");
+  });
+
+  it("Bronze com a lista trancada no servidor também: o nível não é relido à toa", () => {
+    render(<Dashboard />);
+    expect(duble.utilidades).not.toContain("auth.me.invalidate");
   });
 
   it("uma só possível: o singular", () => {
@@ -196,6 +257,21 @@ describe("U3 — a Prata, a Ouro, a presidente e a admin veem a lista", () => {
     expect(screen.queryByRole("heading", { name: /conexões possíveis/ })).not.toBeInTheDocument();
     await waitFor(() => expect(within(indicador("Conexões sugeridas")).getByText("1")).toBeInTheDocument(), ESPERA);
     expect(screen.queryByText("🔒")).not.toBeInTheDocument();
+  });
+
+  // A conta caiu para Bronze (Ouro revogado, nível mudado pela admin) com o cartão
+  // ainda na tela: o servidor recusa com a frase dele, em português, e a tela a
+  // diz no idioma de quem lê (revisão do pacote do match, 20/11).
+  it("o interesse recusado pela U3 (FORBIDDEN) sai no idioma da tela", async () => {
+    logada("gold");
+    duble.mutacoes["connections.send"] = () => {
+      throw Object.assign(new Error(MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO), { data: { code: "FORBIDDEN" } });
+    };
+    await i18n.changeLanguage("en");
+    render(<Dashboard />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Express Interest" }));
+    expect(toast.error).toHaveBeenCalledWith("Complete your profile to see the suggested connections and express interest in them.");
   });
 });
 

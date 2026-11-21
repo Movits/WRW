@@ -508,6 +508,7 @@
     "topMatches": "推荐连接 (80%+)",
     "interestSent": "已表达兴趣！分发人会先核实契合度再转交。只有当对方也表达兴趣时，才会看到你的姓名。",
     "interestError": "无法发送兴趣。请重试。",
+    "interestNeedsSilver": "完善您的资料，即可查看推荐的人脉并表达兴趣。",
     "connectionAccepted": "新连接！你们现在都能看到对方的姓名。",
     "connectionDeclined": "请求已拒绝。",
     "newMatches_one": "✨ 找到 {{count}} 个新的推荐连接！",
@@ -2640,6 +2641,7 @@
       "discardConfirmButton": "丢弃 {{codigo}}",
       "discardConfirmCancel": "取消",
       "reasonPlatformMatch": "由资料匹配引擎在两位会员之间建议；记录该连接时，双方均已接受 Smart Match 条款：匹配度 {{pontuacao}}%。",
+      "reasonPlatformMatchLocked": "由资料匹配引擎在两位会员之间建议；记录该连接时，双方均已接受 Smart Match 条款。您的资料达到银牌会员后，即可看到匹配度。",
       "reasonNoAuthorization": "对方已撤回授权，因此该连接的详情不再显示。"
     },
     "global": {

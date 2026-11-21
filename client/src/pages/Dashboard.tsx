@@ -20,6 +20,7 @@ import { BrandMark } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { CartaoDeProximasAcoes } from "@/components/ProximasAcoes";
 import { ConexoesPossiveis } from "@/components/ConexoesPossiveis";
+import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import {
   DropdownMenu,
@@ -985,8 +986,11 @@ export default function Dashboard() {
   // publicação, sem nada convidando a autorizar.
   const consentQuery = trpc.consent.status.useQuery({ type: "termo_smart_match" }, { enabled: isAuthenticated });
   // Etapa 13 (prontidão): separa "nenhum perfil compatível" de "a rede ainda
-  // está autorizando o termo" — a primeira aceitante via o vazio errado.
-  const redeQuery = trpc.matches.redeAguardando.useQuery(undefined, { enabled: isAuthenticated && listaLiberada });
+  // está autorizando o termo" — a primeira aceitante via o vazio errado. Vale
+  // também para a Bronze (U3): com zero conexões possíveis porque o outro lado
+  // ainda não aceitou o termo, a causa é a rede, não o perfil dela, e as contas
+  // novas nascem Bronze. A resposta é só a contagem, sem dado pessoal.
+  const redeQuery = trpc.matches.redeAguardando.useQuery(undefined, { enabled: isAuthenticated });
   const statsQuery = trpc.matches.list.useQuery({ limit: 50 }, { enabled: isAuthenticated && listaLiberada, select: (data) => ({
     total: data.length,
     highScore: data.filter(m => m.overallScore >= 80).length,
@@ -1078,7 +1082,9 @@ export default function Dashboard() {
       toast.success(data?.revelou ? t("dashboard.connectionAccepted") : t("dashboard.interestSent"));
       connectionsQuery.refetch(); matchesQuery.refetch();
     },
-    onError: (err) => toast.error(err.message || t("dashboard.interestError")),
+    // As frases conhecidas do servidor saem no idioma da tela: entre elas, a da
+    // conta que caiu para Bronze com o cartão ainda aberto (U3, FORBIDDEN).
+    onError: (err) => toast.error(err.message ? traduzirMensagemDoServidor(err.message, t) : t("dashboard.interestError")),
   });
   const respondMutation = trpc.connections.respond.useMutation({
     // `matchesQuery` também: o nome do cartão vem do servidor, e sem este refetch
@@ -1103,7 +1109,22 @@ export default function Dashboard() {
       toast.success(data.count > 0 ? t("dashboard.newMatches", { count: data.count }) : t("dashboard.analysisDone"));
       matchesQuery.refetch();
     },
+    // Falhou não é "nada de novo": o número do cartão e a lista ficariam iguais,
+    // sem nada dizendo que a análise não rodou (o banco fora do ar, por exemplo).
+    onError: (erro) => toast.error(mensagemDeErroParaTela(erro, t)),
   });
+
+  // U3: o nível que decide a tela vem de auth.me, que não se relê no foco. A
+  // conta promovida em outra aba (salvou o Perfil) ou por uma admin ficava presa
+  // à visão da Bronze até recarregar. O número das conexões possíveis, relido no
+  // foco, já diz que a lista está liberada: aí a tela relê o nível.
+  const utils = trpc.useUtils();
+  const listaLiberadaNoServidor = possiveisQuery.data?.listaLiberada === true;
+  useEffect(() => {
+    if (listaLiberadaNoServidor && !listaLiberada) void utils.auth.me.invalidate();
+    // `utils` fica fora das dependências: o que decide é o nível de cada lado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listaLiberadaNoServidor, listaLiberada]);
 
   // Reteste v4 (item 6.4): "N novas conexões sugeridas esperando pela sua
   // atenção" nunca baixava — `userSeen` nasce false e nada marcava a linha como
@@ -1429,7 +1450,7 @@ export default function Dashboard() {
               ) : !listaLiberada ? (
                 // U3: a Bronze vê quantas conexões são possíveis e o que falta
                 // no perfil para a lista se liberar (a régua da Prata).
-                <ConexoesPossiveis consulta={possiveisQuery} role={user?.role} perfil={profile}
+                <ConexoesPossiveis consulta={possiveisQuery} ocultas={redeQuery.data?.ocultas ?? 0} role={user?.role} perfil={profile}
                   aoBuscar={() => regenerateMutation.mutate()} buscando={regenerateMutation.isPending} />
               ) : matches.length === 0 && (redeQuery.data?.ocultas ?? 0) > 0 ? (
                 // Há matches, mas o outro lado ainda não autorizou o termo: a

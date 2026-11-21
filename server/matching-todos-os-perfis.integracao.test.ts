@@ -87,13 +87,19 @@ describe.skipIf(!temBanco)("Motor de perfis — a rodada compara com todos os pe
     expect(guardadas.map(linha => linha.matchedUserId)).not.toContain(INATIVA);
   }, 60_000);
 
-  it("a ordem guardada não muda entre rodadas", async () => {
+  // Roda as duas rodadas ele mesmo: lia a primeira do teste de cima, e sozinho
+  // (`-t`, ou com a ordem embaralhada) comparava as 5 linhas com nada. A ORDEM da
+  // rodada está provada no teste unitário (matching-todos-os-perfis.test.ts);
+  // aqui, as notas e o conjunto guardados.
+  it("as notas guardadas não mudam entre rodadas", async () => {
+    await generateMatchesForUser(DONA);
     const primeira = await guardadasDaDona();
     await generateMatchesForUser(DONA);
     const segunda = await guardadasDaDona();
 
+    expect(primeira).toHaveLength(QUE_CASAM);
     expect(segunda).toEqual(primeira);
-    // Notas diferentes de verdade: a ordem não é só a do id.
+    // Notas diferentes de verdade: a comparação não é só a dos ids.
     expect(new Set(primeira.map(linha => linha.overallScore)).size).toBeGreaterThan(1);
   }, 60_000);
 });
