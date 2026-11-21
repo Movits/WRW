@@ -30,7 +30,8 @@ const duble = vi.hoisted(() => ({
     reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
     networkInteligente: { pendencias: { reset: vi.fn() } },
     auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-    client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
+    client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
   },
 }));
 
@@ -65,6 +66,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.mutacao(),
       traduzirResumo: duble.mutacao(),
       perguntar: duble.mutacao(),
+      perguntarDuranteAGravacao: duble.mutacao(),
       rascunharEmailDeRetorno: duble.mutacao(),
       ligarLinkAberto: duble.mutacao(),
       desligarLinkAberto: duble.mutacao(),

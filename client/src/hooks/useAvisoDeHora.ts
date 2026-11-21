@@ -52,7 +52,9 @@ export function useAvisoDeHora(opcoes: OpcoesDoAvisoDeHora): AvisoDeHora {
   useEffect(() => {
     const anterior = estadoAnterior.current;
     estadoAnterior.current = estado;
-    if (estado !== "gravando" && estado !== "pausado") {
+    // Sem microfone (G17), a gravação continua em curso, como na pausa: as horas
+    // já avisadas valem, e o aviso aberto segue esperando o OK.
+    if (estado !== "gravando" && estado !== "pausado" && estado !== "semMicrofone") {
       // Parada, ou fechando o arquivo: nada a confirmar, e a próxima gravação
       // conta as horas do zero.
       horasAvisadas.current = 0;

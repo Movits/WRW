@@ -37,7 +37,7 @@ vi.mock("@/lib/trpc", async () => {
   });
   return {
     trpc: {
-      meetings: { perguntar: mutacao("perguntar") },
+      meetings: { perguntar: mutacao("perguntar"), perguntarDuranteAGravacao: mutacao("perguntarDuranteAGravacao") },
       // A página do link aberto pede pelo token, num router público à parte.
       reuniaoAberta: { perguntar: mutacao("perguntarPeloLink") },
     },
@@ -292,5 +292,33 @@ describe("Pergunte ao documento (H12)", () => {
   it("o trecho do item do resumo também fala do documento", () => {
     render(<Trecho texto="a feira será em março" documento />);
     expect(screen.getByText("Trecho do documento")).toBeInTheDocument();
+  });
+});
+
+describe("Pergunte durante a gravação (G15a)", () => {
+  it("pergunta pela rota da gravação, com os textos dela, e nunca pela pergunta de sempre", () => {
+    duble.respostas.perguntarDuranteAGravacao = respondida("O estande fica pronto em março.", { trecho: "O estande fica pronto em março.", inicioSegundos: 12 });
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+    expect(screen.getByText(/A IA lê só o texto das partes já transcritas/)).toBeInTheDocument();
+    perguntarAgora("Quando fica pronto o estande?");
+    expect(duble.chamadas.perguntarDuranteAGravacao).toEqual([{ meetingId: ID, idioma: "pt-BR", pergunta: "Quando fica pronto o estande?" }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+    expect(screen.getByText("O estande fica pronto em março.", { selector: "p" })).toBeInTheDocument();
+    // Sem player na gravação: o tempo do trecho é só informação.
+    expect(screen.getByText("00:12")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("o texto até agora que não responde, e a recusa de quando nada foi transcrito ainda, falam da gravação em curso", () => {
+    duble.respostas.perguntarDuranteAGravacao = { respondida: false };
+    const { unmount } = render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByText("O texto transcrito até agora não responde a esta pergunta.")).toBeInTheDocument();
+    unmount();
+    duble.respostas.perguntarDuranteAGravacao = erroDoServidor("PRECONDITION_FAILED", "Esta reunião ainda não tem transcrição pronta para a IA ler.");
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByRole("alert")).toHaveTextContent("Ainda não há texto transcrito para a IA ler. Espere a primeira parte ficar pronta.");
   });
 });

@@ -19,7 +19,10 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * pelo id da reunião, e quem abriu o link, pelo token dele. As vozes chegam
  * como rótulo ({F2}) e viram o nome que a dona deu (ou "Falante 2"), também no
  * link, que recebe os nomes só quando foi ligado com a confirmação que fala
- * deles (H3b). Os nomes só trocam o rótulo na tela: nunca vão à IA. O trecho,
+ * deles (H3b). Os nomes só trocam o rótulo na tela: nunca vão à IA. Com
+ * `duranteAGravacao` (G15a), a dona pergunta sobre o que já foi dito numa
+ * reunião que ainda grava: a IA lê o texto das partes prontas, e os textos da
+ * caixa dizem isso. O trecho,
  * o tempo, o aviso de conferir e as frases de erro da IA servem também ao
  * resumo guardado (components/ResumoGuardado.tsx).
  */
@@ -37,6 +40,8 @@ type FonteDaReuniao =
       linkDoTempo?: (segundo: number) => string;
       /** A reunião nasceu de um documento (H12): os textos falam do documento, e não do que foi dito. */
       documento?: boolean;
+      /** G15a: a reunião ainda grava, e a IA lê só as partes já transcritas. */
+      duranteAGravacao?: boolean;
     }
   | {
       token: string;
@@ -46,6 +51,7 @@ type FonteDaReuniao =
       aoIrPara?: (segundo: number) => void;
       linkDoTempo?: (segundo: number) => string;
       documento?: boolean;
+      duranteAGravacao?: undefined;
     };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
@@ -57,10 +63,11 @@ function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): Id
 // O código tRPC decide a frase: as mensagens do servidor vêm em português.
 // Banco fora do ar chega como INTERNAL_SERVER_ERROR com a frase conhecida, que
 // mensagemDeErroParaTela traduz.
-export function mensagemDoErroDaIA(t: TranslateFn, erro: unknown, padrao: string, peloLink: boolean) {
+export function mensagemDoErroDaIA(t: TranslateFn, erro: unknown, padrao: string, peloLink: boolean, duranteAGravacao = false) {
   switch ((erro as { data?: { code?: string } } | null)?.data?.code) {
     case "SERVICE_UNAVAILABLE": return t("meetings.ai.unavailable");
-    case "PRECONDITION_FAILED": return t("meetings.ai.needsTranscript");
+    // Durante a gravação (G15a), é que nenhuma parte foi transcrita ainda.
+    case "PRECONDITION_FAILED": return duranteAGravacao ? t("meetings.live.needsTranscript") : t("meetings.ai.needsTranscript");
     // Só a pergunta recusa assim: a reunião passa do que a IA lê de uma vez.
     case "PAYLOAD_TOO_LARGE": return t("meetings.ai.tooLong");
     // Teto de pedidos à IA: a mesma frase do assistente de texto, já nos 10 idiomas.
@@ -133,11 +140,14 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
   const [perguntaFeita, setPerguntaFeita] = useState("");
   const perguntarDaDona = trpc.meetings.perguntar.useMutation();
   const perguntarPeloLink = trpc.reuniaoAberta.perguntar.useMutation();
+  const perguntarNaGravacao = trpc.meetings.perguntarDuranteAGravacao.useMutation();
   const peloLink = fonte.token !== undefined;
+  // G15a: a reunião ainda grava (só a dona): a IA lê as partes já transcritas.
+  const duranteAGravacao = !peloLink && !!fonte.duranteAGravacao;
   // O documento (H12) não tem transcrição nem "o que foi dito": os textos falam
   // dele (conferência de tela de 20/11/2026).
   const documento = !!fonte.documento;
-  const perguntar = peloLink ? perguntarPeloLink : perguntarDaDona;
+  const perguntar = peloLink ? perguntarPeloLink : duranteAGravacao ? perguntarNaGravacao : perguntarDaDona;
   const resposta = perguntar.isPending ? undefined : perguntar.data;
   const citacoes = resposta?.respondida ? citacoesDaResposta(resposta) : [];
   const podePerguntar = pergunta.trim().length >= 2 && !perguntar.isPending;
@@ -153,12 +163,13 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
     setPerguntaFeita(texto);
     const idioma = idiomaDaTela(i18n);
     if (fonte.token !== undefined) perguntarPeloLink.mutate({ token: fonte.token, idioma, pergunta: texto });
+    else if (duranteAGravacao) perguntarNaGravacao.mutate({ meetingId: fonte.meetingId, idioma, pergunta: texto });
     else perguntarDaDona.mutate({ meetingId: fonte.meetingId, idioma, pergunta: texto });
   }
 
   return <section aria-labelledby="pergunte-a-reuniao" className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-    <h2 id="pergunte-a-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><MessageCircleQuestion size={16} className="text-amber-300"/>{documento ? t("meetings.document.askTitle") : t("meetings.ai.askTitle")}</h2>
-    <p className="mt-1 text-sm text-white/55">{documento ? t("meetings.document.askIntro") : t("meetings.ai.askIntro")}</p>
+    <h2 id="pergunte-a-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><MessageCircleQuestion size={16} className="text-amber-300"/>{documento ? t("meetings.document.askTitle") : duranteAGravacao ? t("meetings.live.askTitle") : t("meetings.ai.askTitle")}</h2>
+    <p className="mt-1 text-sm text-white/55">{documento ? t("meetings.document.askIntro") : duranteAGravacao ? t("meetings.live.askIntro") : t("meetings.ai.askIntro")}</p>
     <form onSubmit={enviar} className="mt-4 flex flex-col gap-2 sm:flex-row">
       <input aria-label={documento ? t("meetings.document.askLabel") : t("meetings.ai.askLabel")} value={pergunta} onChange={evento => setPergunta(evento.target.value)} maxLength={500}
         placeholder={t("meetings.ai.askPlaceholder")}
@@ -169,7 +180,7 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
       </button>
     </form>
     {perguntar.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{documento ? t("meetings.document.asking") : t("meetings.ai.asking")}</p>}
-    {perguntar.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, perguntar.error, t("meetings.ai.askError"), peloLink)}</p>}
+    {perguntar.isError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoErroDaIA(t, perguntar.error, t("meetings.ai.askError"), peloLink, duranteAGravacao)}</p>}
     {resposta && <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/10 p-4">
       {perguntaFeita && <p dir="auto" className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>
@@ -188,7 +199,7 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
         <AvisoDeConferir>{peloLink
           ? (documento ? t("meetings.document.openLinkReviewNotice") : t("meetings.openLink.reviewNotice"))
           : (documento ? t("meetings.document.aiReviewNotice") : t("meetings.ai.reviewNotice"))}</AvisoDeConferir>
-      </> : <p className="text-sm text-white/60">{documento ? t("meetings.document.notAnswered") : t("meetings.ai.notAnswered")}</p>}
+      </> : <p className="text-sm text-white/60">{documento ? t("meetings.document.notAnswered") : duranteAGravacao ? t("meetings.live.notAnswered") : t("meetings.ai.notAnswered")}</p>}
     </div>}
   </section>;
 }

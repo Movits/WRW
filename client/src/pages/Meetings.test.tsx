@@ -41,9 +41,11 @@ const duble = vi.hoisted(() => {
       return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false, data: m.data };
     },
   });
+  const transcricaoDaGravacao = vi.fn();
   return {
     mutacoes,
     registrar,
+    transcricaoDaGravacao,
     list: vi.fn(),
     get: vi.fn(),
     pendencias: vi.fn(),
@@ -57,6 +59,10 @@ const duble = vi.hoisted(() => {
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
+      // G15a: a transcrição durante a gravação. Função comum, que lê o dublê do
+      // teste: o mockReset do projeto client zera o vi.fn a cada teste, e sem
+      // resposta combinada vale uma reunião sem nenhuma parte pronta.
+      client: { meetings: { transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } } } },
     },
   };
 });
@@ -103,6 +109,7 @@ vi.mock("@/lib/trpc", () => ({
       editarItemDoResumo: duble.registrar("editarItemDoResumo"),
       acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
       perguntar: duble.registrar("perguntar"),
+      perguntarDuranteAGravacao: duble.registrar("perguntarDuranteAGravacao"),
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
@@ -1130,6 +1137,52 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     } finally {
       await i18n.changeLanguage("pt-BR");
     }
+  });
+});
+
+describe("Detalhe da reunião — durante a gravação e ouvir só uma voz (G15a e D2)", () => {
+  const SEGMENTOS = [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ];
+
+  it("G15a: a reunião em partes ainda chegando mostra, na aba Transcrição, o texto das partes prontas, com o Pergunte da gravação", async () => {
+    duble.transcricaoDaGravacao.mockResolvedValue({
+      status: "uploading", emPartes: true, agora: Date.now(), nomes: {},
+      partes: [{ seq: 0, estado: "transcrita", inicioSegundos: 0, duracaoSegundos: 600, chegouEm: Date.now() - 60_000, prontaEm: Date.now(), atrasoSegundos: 45 }],
+      falas: [{ seq: 0, segmentos: [{ inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." }] }],
+    });
+    abrirDetalhe({ status: "uploading", audioPipeline: "slices", expectedSlices: 2 } as never, { andamento: { recebidas: 1, transcritas: 1, esperadas: 2 } } as never);
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(await screen.findByText("Vamos fechar o contrato.")).toBeInTheDocument();
+    expect(duble.transcricaoDaGravacao).toHaveBeenCalledWith({ meetingId: REUNIAO.id, desde: 0 });
+    expect(screen.getByText(/texto pronto 45 s depois de a parte chegar/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+    expect(screen.queryByText("A transcrição ainda não está disponível.")).not.toBeInTheDocument();
+  });
+
+  it("G15a: a reunião do envio único sem transcrição segue dizendo que a transcrição não está pronta, sem consultar as partes", () => {
+    abrirDetalhe({ status: "processing" }, {});
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(duble.transcricaoDaGravacao).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Transcrição até agora" })).not.toBeInTheDocument();
+    expect(screen.getByText("A transcrição ainda não está disponível.")).toBeInTheDocument();
+  });
+
+  it("D2: ouvir só uma voz pela transcrição: a barra diz qual e toca a fala dela; Ouvir todas as vozes volta", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Vamos fechar o contrato. O frete fica para sexta.", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir só a voz de Falante 2" }));
+    // A fala da voz 2 está na parte 2 (de 619,75 s): o player vai até ela.
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(within(barra).getByText("Ouvindo só: Falante 2")).toBeInTheDocument();
+    // A lista mostra só as falas da voz escolhida.
+    expect(within(document.querySelector("ol")!).queryByText("Vamos fechar o contrato.")).not.toBeInTheDocument();
+    fireEvent.click(within(barra).getByRole("button", { name: "Ouvir todas as vozes" }));
+    expect(within(barra).queryByText(/Ouvindo só/)).not.toBeInTheDocument();
+    expect(within(document.querySelector("ol")!).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
   });
 });
 

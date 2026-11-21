@@ -106,6 +106,9 @@ export default function ReuniaoAberta() {
   const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined, rotulosDoMapa);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
+  // D2: a voz que o player toca sozinha (nula: todas), como no detalhe da dona.
+  // Só troca o que toca e o que a lista mostra: os dados são os que o link já recebe.
+  const [soAVoz, setSoAVoz] = useState<string | null>(null);
   // As abas, como no app de referência da cliente (H4c): o resumo abre
   // primeiro, e a transcrição e o mapa mental (H10) ficam nas outras. O player
   // é um só, na barra do rodapé, fora das abas: trocar de aba não corta o
@@ -169,6 +172,8 @@ export default function ReuniaoAberta() {
   const idDoVideo = data.videoDoYoutube ?? null;
   const linkDoTempo = idDoVideo ? (segundo: number) => linkDoYoutubeNoSegundo(idDoVideo, segundo) : undefined;
   const falas = segmentosValidos(transcricao?.segmentos);
+  // O nome da voz que toca sozinha (D2): o do `vozes` (H3b) ou "Falante n".
+  const rotuloDaVoz = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
   const textoNaTela = idiomaDaTraducao === idiomaDoOriginal ? transcricao?.texto : textoTraduzido;
   // O idioma do texto que está na tela, para o leitor de tela e a hifenização;
@@ -231,7 +236,8 @@ export default function ReuniaoAberta() {
               </button>
             </div>}
             {mostraFalas
-              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/></div>
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
+                soAVoz={soAVoz} aoOuvirSoAVoz={gravacao && partes.length ? voz => player.current?.ouvirSoAVoz(voz) : undefined}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
@@ -245,6 +251,7 @@ export default function ReuniaoAberta() {
     </div>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
+      falas={falas} soAVoz={soAVoz} rotuloDaVoz={soAVoz ? rotuloDaVoz(soAVoz) : undefined} aoMudarSoAVoz={setSoAVoz}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>}
   </Moldura>;
 }

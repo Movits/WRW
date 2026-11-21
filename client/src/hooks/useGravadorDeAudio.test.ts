@@ -2,7 +2,8 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import {
-  ATRASO_MAXIMO_MS, ESPERA_PELA_PAUSA_MS, PAUSA_MAXIMA_MS, PREPARO_DO_DETECTOR_MS, useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador,
+  ATRASO_MAXIMO_MS, ESPERA_PELA_PAUSA_MS, ESPERA_PELO_MICROFONE_MAXIMA_MS, PARTE_MINIMA_DA_QUEDA_MS, PAUSA_MAXIMA_MS, PREPARO_DO_DETECTOR_MS, TENTATIVA_DO_MICROFONE_MS,
+  useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador,
 } from "./useGravadorDeAudio";
 
 /** O MediaRecorder do navegador, que grava só os formatos da lista. */
@@ -1333,5 +1334,355 @@ describe("useGravadorDeAudio — pausa (G10)", () => {
     act(() => result.current.continuar());
     act(() => result.current.continuar());
     expect(result.current.estado).toBe("gravando");
+  });
+});
+
+/**
+ * O microfone que cai (G17; HN-81 do HiNoter). A trilha falsa tem o
+ * readyState e o "ended" do navegador: `cair()` é o fone Bluetooth que
+ * desligou (a trilha acaba e avisa). O stop() que o hook chama não avisa,
+ * como no navegador.
+ */
+type TrilhaQueCai = {
+  readyState: "live" | "ended";
+  stop: ReturnType<typeof vi.fn>;
+  ouvintes: Set<() => void>;
+  addEventListener: (tipo: string, ouvinte: () => void) => void;
+  removeEventListener: (tipo: string, ouvinte: () => void) => void;
+  cair: () => void;
+};
+function trilhaQueCai(): TrilhaQueCai {
+  const nova: TrilhaQueCai = {
+    readyState: "live",
+    stop: vi.fn(() => { nova.readyState = "ended"; }),
+    ouvintes: new Set(),
+    addEventListener: (tipo, ouvinte) => { if (tipo === "ended") nova.ouvintes.add(ouvinte); },
+    removeEventListener: (tipo, ouvinte) => { if (tipo === "ended") nova.ouvintes.delete(ouvinte); },
+    cair: () => {
+      nova.readyState = "ended";
+      for (const ouvinte of Array.from(nova.ouvintes)) ouvinte();
+    },
+  };
+  return nova;
+}
+const fluxoDa = (trilhaDoFluxo: TrilhaQueCai) => ({ getTracks: () => [trilhaDoFluxo], getAudioTracks: () => [trilhaDoFluxo] });
+const naoAchou = () => new DOMException("sem microfone", "NotFoundError");
+const negado = () => new DOMException("negado", "NotAllowedError");
+/** Os pedidos de microfone e as respostas do navegador são promessas: deixa todas andarem. */
+async function andarAsPromessas() {
+  await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+}
+
+describe("useGravadorDeAudio — o microfone que cai (G17)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Uma gravação em partes no microfone 1, e o 2 para quando o 1 cair. */
+  async function gravandoEmPartes(opcoes: Partial<OpcoesDoGravador> = {}) {
+    navegadorQueGrava(["audio/mp4"]);
+    const primeira = trilhaQueCai();
+    const segunda = trilhaQueCai();
+    const fluxo1 = fluxoDa(primeira);
+    const fluxo2 = fluxoDa(segunda);
+    getUserMedia.mockImplementationOnce(async () => fluxo1).mockImplementation(async () => fluxo2);
+    const aoFecharParte = vi.fn();
+    const aoCairOMicrofone = vi.fn();
+    const aoVoltarOMicrofone = vi.fn();
+    const aoDesistirDoMicrofone = vi.fn();
+    const montado = montar({ limiteSegundos: 7200, fatiaSegundos: 600, aoFecharParte, aoCairOMicrofone, aoVoltarOMicrofone, aoDesistirDoMicrofone, ...opcoes });
+    await act(async () => { await montado.result.current.comecar(); });
+    return { ...montado, primeira, segunda, fluxo1, fluxo2, aoFecharParte, aoCairOMicrofone, aoVoltarOMicrofone, aoDesistirDoMicrofone };
+  }
+
+  it("a trilha que cai: a parte fecha sem ser a última, a gravação espera outro microfone com o relógio parado e segue numa parte nova quando ele abre", async () => {
+    const g = await gravandoEmPartes();
+    getUserMedia.mockImplementationOnce(async () => { throw naoAchou(); });
+    act(() => { vi.advanceTimersByTime(100_000); });
+    expect(g.result.current.segundos).toBe(100);
+    act(() => g.primeira.cair());
+    expect(g.result.current.estado).toBe("semMicrofone");
+    expect(g.aoCairOMicrofone).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: 100_000 });
+    // O microfone que caiu é solto; nada foi dado como terminado.
+    expect(g.primeira.stop).toHaveBeenCalled();
+    expect(g.aoTerminar).not.toHaveBeenCalled();
+    // O pedido na hora não acha microfone: o tempo sem microfone não anda no relógio.
+    await andarAsPromessas();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    act(() => { vi.advanceTimersByTime(TENTATIVA_DO_MICROFONE_MS - 1); });
+    expect(g.result.current.estado).toBe("semMicrofone");
+    expect(g.result.current.segundos).toBe(100);
+    // Um pedido a cada TENTATIVA_DO_MICROFONE_MS; o que abre segue a gravação.
+    act(() => { vi.advanceTimersByTime(1); });
+    await andarAsPromessas();
+    expect(getUserMedia).toHaveBeenCalledTimes(3);
+    expect(g.result.current.estado).toBe("gravando");
+    expect(g.aoVoltarOMicrofone).toHaveBeenCalledTimes(1);
+    expect(gravadores).toHaveLength(2);
+    expect(gravadores[1].fluxo).toBe(g.fluxo2);
+    act(() => { vi.advanceTimersByTime(50_000); });
+    expect(g.result.current.segundos).toBe(150);
+    act(() => g.result.current.parar());
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.duracaoMs])).toEqual([[0, false, 100_000], [1, true, 50_000]]);
+    expect(g.aoTerminar).toHaveBeenCalledTimes(1);
+    expect(g.segunda.stop).toHaveBeenCalled();
+    expect(g.result.current.estado).toBe("parado");
+  });
+
+  it("o navegador que para o gravador sozinho antes do \"ended\" da trilha: é a queda, e não o fim da gravação", async () => {
+    const g = await gravandoEmPartes();
+    act(() => { vi.advanceTimersByTime(40_000); });
+    act(() => {
+      g.primeira.readyState = "ended";
+      gravadores[0].state = "inactive";
+      gravadores[0].terminar();
+      g.primeira.cair();
+    });
+    expect(g.aoFecharParte).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: 40_000 });
+    expect(g.aoTerminar).not.toHaveBeenCalled();
+    expect(g.aoCairOMicrofone).toHaveBeenCalledTimes(1);
+    await andarAsPromessas();
+    expect(g.result.current.estado).toBe("gravando");
+    expect(gravadores[1].fluxo).toBe(g.fluxo2);
+  });
+
+  it("o navegador que não avisa o fim da trilha: o relógio vê a trilha morta, e a gravação espera outro microfone", async () => {
+    const g = await gravandoEmPartes();
+    getUserMedia.mockImplementation(async () => { throw naoAchou(); });
+    act(() => { vi.advanceTimersByTime(10_000); });
+    act(() => {
+      g.primeira.readyState = "ended";
+      vi.advanceTimersByTime(500);
+    });
+    expect(g.result.current.estado).toBe("semMicrofone");
+    expect(g.aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false });
+  });
+
+  it("sem microfone na lista do navegador, nem pede; a troca de aparelho (devicechange) pede, e a gravação segue", async () => {
+    const ouvintes = new Set<() => void>();
+    let aparelhos: Array<{ kind: string }> = [];
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia,
+        enumerateDevices: vi.fn(async () => aparelhos),
+        addEventListener: (tipo: string, ouvinte: () => void) => { if (tipo === "devicechange") ouvintes.add(ouvinte); },
+        removeEventListener: (tipo: string, ouvinte: () => void) => { if (tipo === "devicechange") ouvintes.delete(ouvinte); },
+      },
+    });
+    const g = await gravandoEmPartes();
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    act(() => { vi.advanceTimersByTime(3 * TENTATIVA_DO_MICROFONE_MS); });
+    await andarAsPromessas();
+    // Só o pedido do começo da gravação: sem microfone na lista, o hook não pediu.
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(g.result.current.estado).toBe("semMicrofone");
+    expect(ouvintes.size).toBe(1);
+    aparelhos = [{ kind: "audioinput" }];
+    act(() => { for (const ouvinte of Array.from(ouvintes)) ouvinte(); });
+    await andarAsPromessas();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(g.result.current.estado).toBe("gravando");
+    // Gravando de novo, a troca de aparelho não é mais ouvida.
+    expect(ouvintes.size).toBe(0);
+  });
+
+  it("a parte que caiu com menos de PARTE_MINIMA_DA_QUEDA_MS não sai, e a posição dela vai para a parte do microfone que voltou", async () => {
+    const g = await gravandoEmPartes();
+    act(() => { vi.advanceTimersByTime(PARTE_MINIMA_DA_QUEDA_MS - 500); });
+    act(() => g.primeira.cair());
+    expect(g.result.current.estado).toBe("semMicrofone");
+    expect(g.aoCairOMicrofone).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte).not.toHaveBeenCalled();
+    await andarAsPromessas();
+    expect(g.result.current.estado).toBe("gravando");
+    // A parte nova grava no microfone que voltou.
+    expect(gravadores).toHaveLength(2);
+    expect(gravadores[1].fluxo).toBe(g.fluxo2);
+    act(() => { vi.advanceTimersByTime(20_000); });
+    act(() => g.result.current.parar());
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, true]]);
+  });
+
+  it("o microfone que volta antes de a parte que caiu fechar o arquivo espera por ela, e as partes saem na ordem", async () => {
+    navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+    const primeira = trilhaQueCai();
+    const segunda = trilhaQueCai();
+    getUserMedia.mockImplementationOnce(async () => fluxoDa(primeira)).mockImplementation(async () => fluxoDa(segunda));
+    const aoFecharParte = vi.fn();
+    const { result } = montar({ limiteSegundos: 7200, fatiaSegundos: 600, aoFecharParte });
+    await act(async () => { await result.current.comecar(); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+    act(() => primeira.cair());
+    await andarAsPromessas();
+    // O microfone 2 já chegou, mas a parte 0 ainda não entregou o fim: a gravação espera.
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(gravadores).toHaveLength(1);
+    expect(result.current.estado).toBe("semMicrofone");
+    act(() => gravadores[0].terminar());
+    expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false]]);
+    expect(gravadores).toHaveLength(2);
+    expect(result.current.estado).toBe("gravando");
+    act(() => { vi.advanceTimersByTime(5_000); });
+    act(() => result.current.parar());
+    act(() => gravadores[1].terminar());
+    expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+  });
+
+  it("Encerrar sem microfone: a última parte sai vazia, na posição seguinte, e o microfone que chegar depois é solto", async () => {
+    const g = await gravandoEmPartes();
+    const pedidos = microfoneQueDemora();
+    act(() => { vi.advanceTimersByTime(60_000); });
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    expect(pedidos).toHaveLength(1);
+    act(() => g.result.current.parar());
+    expect(g.result.current.estado).toBe("parado");
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.blob.size > 0])).toEqual([[0, false, true], [1, true, false]]);
+    expect(g.aoTerminar).toHaveBeenCalledTimes(1);
+    const atrasado = trilhaQueCai();
+    await act(async () => { pedidos[0](fluxoDa(atrasado)); });
+    await andarAsPromessas();
+    expect(atrasado.stop).toHaveBeenCalled();
+    expect(gravadores).toHaveLength(1);
+  });
+
+  it("Encerrar com a parte que caiu ainda fechando o arquivo: o fim espera por ela, e as duas saem na ordem", async () => {
+    navegadorQueGrava(["audio/mp4"], { fimAtrasado: true });
+    const primeira = trilhaQueCai();
+    getUserMedia.mockImplementationOnce(async () => fluxoDa(primeira)).mockImplementation(async () => { throw naoAchou(); });
+    const aoFecharParte = vi.fn();
+    const { result, aoTerminar } = montar({ limiteSegundos: 7200, fatiaSegundos: 600, aoFecharParte });
+    await act(async () => { await result.current.comecar(); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+    act(() => primeira.cair());
+    act(() => result.current.parar());
+    expect(result.current.estado).toBe("finalizando");
+    expect(aoFecharParte).not.toHaveBeenCalled();
+    act(() => gravadores[0].terminar());
+    expect(aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+    expect(result.current.estado).toBe("parado");
+  });
+
+  it("na pausa, a queda fecha a parte e a gravação segue pausada; o Continuar pede o microfone já no toque e segue numa parte nova", async () => {
+    const g = await gravandoEmPartes();
+    act(() => { vi.advanceTimersByTime(20_000); });
+    act(() => g.result.current.pausar());
+    act(() => { vi.advanceTimersByTime(10_000); });
+    act(() => g.primeira.cair());
+    expect(g.result.current.estado).toBe("pausado");
+    expect(g.aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: 20_000 });
+    await andarAsPromessas();
+    // Pausada, nada pede microfone sozinho: quem decide continuar é a dona.
+    act(() => { vi.advanceTimersByTime(3 * TENTATIVA_DO_MICROFONE_MS); });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    act(() => g.result.current.continuar());
+    // O pedido sai dentro do toque, antes de qualquer espera.
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    await andarAsPromessas();
+    expect(g.result.current.estado).toBe("gravando");
+    expect(g.result.current.segundos).toBe(20);
+    act(() => { vi.advanceTimersByTime(5_000); });
+    act(() => g.result.current.parar());
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.duracaoMs])).toEqual([[0, false, 20_000], [1, true, 5_000]]);
+  });
+
+  it("Continuar em partes com a trilha morta e sem aviso (o iPhone bloqueado na pausa): a parte fecha e o microfone abre de novo, em vez de encerrar", async () => {
+    const g = await gravandoEmPartes();
+    act(() => { vi.advanceTimersByTime(15_000); });
+    act(() => g.result.current.pausar());
+    g.primeira.readyState = "ended";
+    act(() => g.result.current.continuar());
+    expect(g.aoFecharParte.mock.calls[0][0]).toMatchObject({ seq: 0, ultima: false, duracaoMs: 15_000 });
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    await andarAsPromessas();
+    expect(g.result.current.estado).toBe("gravando");
+    expect(g.aoTerminar).not.toHaveBeenCalled();
+  });
+
+  it("o microfone recusado na espera (permissão): não pede mais sozinho, e o Tentar de novo da tela pede", async () => {
+    const g = await gravandoEmPartes();
+    getUserMedia.mockImplementationOnce(async () => { throw negado(); });
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    expect(g.result.current.microfoneBloqueado).toBe(true);
+    act(() => { vi.advanceTimersByTime(5 * TENTATIVA_DO_MICROFONE_MS); });
+    await andarAsPromessas();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    act(() => g.result.current.tentarOMicrofone());
+    expect(getUserMedia).toHaveBeenCalledTimes(3);
+    await andarAsPromessas();
+    expect(g.result.current.estado).toBe("gravando");
+    expect(g.result.current.microfoneBloqueado).toBe(false);
+  });
+
+  it("sem microfone além da espera mais longa: encerra, a última parte sai vazia e a tela é avisada", async () => {
+    const g = await gravandoEmPartes();
+    getUserMedia.mockImplementation(async () => { throw naoAchou(); });
+    act(() => { vi.advanceTimersByTime(12_000); });
+    act(() => g.primeira.cair());
+    for (let andado = 0; andado < ESPERA_PELO_MICROFONE_MAXIMA_MS; andado += 10 * 60_000) {
+      act(() => { vi.advanceTimersByTime(10 * 60_000); });
+      await andarAsPromessas();
+    }
+    act(() => { vi.advanceTimersByTime(TENTATIVA_DO_MICROFONE_MS); });
+    expect(g.result.current.estado).toBe("parado");
+    expect(g.aoDesistirDoMicrofone).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima, parte.blob.size > 0])).toEqual([[0, false, true], [1, true, false]]);
+  });
+
+  it("descartar sem microfone: nada mais sai, e o microfone que chegar depois é solto", async () => {
+    const g = await gravandoEmPartes();
+    const pedidos = microfoneQueDemora();
+    act(() => { vi.advanceTimersByTime(30_000); });
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    act(() => g.result.current.descartar());
+    expect(g.result.current.estado).toBe("parado");
+    const atrasado = trilhaQueCai();
+    await act(async () => { pedidos[0](fluxoDa(atrasado)); });
+    await andarAsPromessas();
+    expect(atrasado.stop).toHaveBeenCalled();
+    expect(g.aoFecharParte).toHaveBeenCalledTimes(1);
+    expect(g.aoTerminar).not.toHaveBeenCalled();
+  });
+
+  it("com entregarAoSair, desmontar sem microfone entrega a última parte vazia e avisa", async () => {
+    const aoEntregarAoSair = vi.fn();
+    const g = await gravandoEmPartes({ entregarAoSair: true, aoEntregarAoSair });
+    getUserMedia.mockImplementation(async () => { throw naoAchou(); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    g.unmount();
+    expect(aoEntregarAoSair).toHaveBeenCalledTimes(1);
+    expect(g.aoFecharParte.mock.calls.map(([parte]) => [parte.seq, parte.ultima])).toEqual([[0, false], [1, true]]);
+  });
+
+  it("fora das partes (o ditado, a voz), a queda segue encerrando e entregando o que foi gravado, como antes", async () => {
+    const primeira = trilhaQueCai();
+    getUserMedia.mockImplementationOnce(async () => fluxoDa(primeira));
+    const aoCairOMicrofone = vi.fn();
+    const { result, aoTerminar } = montar({ limiteSegundos: 600, aoCairOMicrofone });
+    await act(async () => { await result.current.comecar(); });
+    act(() => { vi.advanceTimersByTime(8_000); });
+    act(() => {
+      primeira.readyState = "ended";
+      gravadores[0].state = "inactive";
+      gravadores[0].terminar();
+      primeira.cair();
+    });
+    expect(result.current.estado).toBe("parado");
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+    expect(aoCairOMicrofone).not.toHaveBeenCalled();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 });
