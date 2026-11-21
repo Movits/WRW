@@ -356,6 +356,30 @@ se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áu
 a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
 `processing_error` (`shared/documento-da-reuniao.ts`), que a tela traduz.
 
+## Organizar as reuniões: detalhes, busca e junção (H7c, H7b e H17)
+
+- **Detalhes** (`server/detalhes-da-reuniao.ts`): etiquetas e "Onde foi" (colunas de
+  `meetings`), contato e contexto. A posse do contato (da dona) e do contexto (dela ou do
+  catálogo) é conferida em `meetings.create`, `iniciarGravacao`, `iniciarDocumento` e
+  `atualizarDetalhes`, com o código traduzido (`shared/detalhes-da-reuniao.ts`). O `updated_at`
+  (a ficha de quem processa a reunião) só muda com o título, e nunca em 'processing'. Excluir um
+  contexto (`deleteContext`) anula `meetings.context_id` das reuniões da dona, na mesma
+  transação. O link aberto não leva nada disto.
+- **Busca** (`server/busca-de-reunioes.ts`): LIKE parametrizado com `ESCAPE '!'` na
+  transcrição e nos itens não ignorados, a dona nas duas tabelas, o trecho cortado no SQL
+  (SUBSTRING/LOCATE), até 30 resultados e teto de 120 a cada 10 min. A etiqueta do filtro
+  vale pela chave da tela (`chaveDaEtiqueta`, sem caixa), e não pela grafia exata.
+- **Junção** (`server/juntar-reunioes.ts`): uma transação, sem bucket, move as LINHAS das
+  partes para a primeira reunião (posição, início, falas e rótulos deslocados; a gravação do
+  envio único vira parte 'received', e dali em diante tudo é transcrito de novo), apaga o
+  que a IA gerou das outras e do alvo, desliga o link aberto (com a senha) e grava
+  `MEETINGS_JOINED`, com a hora e a versão do aviso de gravação de cada reunião; a fila
+  monta. A primeira parte retranscrita de cada reunião leva a marca de outra conversa
+  (`MARCA_DE_OUTRA_REUNIAO`): a fila a transcreve sem o contexto da anterior e com os
+  rótulos depois dos já usados, para vozes e nomes não passarem de uma reunião à outra.
+  Por isso a montagem passa `zerarNomes: false` a `gravarResultadoDaReuniao`, e quem
+  transcreve de novo zera os nomes antes (o reprocesso das partes, na tomada).
+
 ## Testes do servidor
 
 - Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os

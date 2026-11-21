@@ -7,7 +7,7 @@ import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
 import { iniciarDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
-import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -30,7 +30,8 @@ import {
   translatePrivateMeetingTranscript,
   nomearFalante,
 } from "../meeting-service";
-import { perguntarAReuniao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
 import {
   desligarLinkAberto,
@@ -44,6 +45,7 @@ import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { depoisDeMexerNoItem, prepararAcaoDoItem } from "../acoes-na-google";
+import { decidirTituloSugerido } from "../decidir-titulo-sugerido";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
@@ -64,6 +66,14 @@ import {
 import { balcaoDoAudio, ffmpegDisponivel, prepararAudioDaReuniao } from "../baixar-audio-da-reuniao";
 import { TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE, VERSOES_DO_AVISO_DO_YOUTUBE } from "@shared/youtube";
 import { pedirResumoDoVideo, RecusaDoVideo, refazerResumoDoVideo, type ContaQuePede } from "../youtube";
+import { atualizarDetalhesDaReuniao, conferirContatoEContexto } from "../detalhes-da-reuniao";
+import { ETIQUETA_MAX, ETIQUETAS_POR_REUNIAO_MAX, ONDE_FOI_MAX } from "@shared/detalhes-da-reuniao";
+import { buscarNasReunioes } from "../busca-de-reunioes";
+import {
+  BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENSAGEM_BUSCAS_DEMAIS, ORIGENS_DO_FILTRO, PERIODOS_DO_FILTRO, TERMO_DA_BUSCA_MAX, TERMO_DA_BUSCA_MIN,
+} from "@shared/busca-de-reunioes";
+import { juntarReunioes, RecusaDaJuncao } from "../juntar-reunioes";
+import { JANELA_DA_JUNCAO_MS, JUNCOES_POR_JANELA, RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX } from "@shared/juntar-reunioes";
 
 // Os e-mails que a tela manda ao resumo por e-mail (H22): o zod só barra o
 // tamanho; quem conta, valida e recusa com a frase traduzível é o serviço
@@ -177,6 +187,17 @@ export const tetoDasSenhasDoLink = criarTeto(
 // a tela traduz.
 export const tetoDoAudio = criarTeto(AUDIOS_POR_JANELA, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO.demais);
 
+// A busca entre as reuniões (H7b) lê as transcrições da dona a cada pedido:
+// teto próprio por dona, de 120 buscas a cada 10 minutos, em memória como os
+// outros. A tela só pergunta a partir de 3 letras, e espera a dona parar de
+// digitar. A recusa sai como código (MENSAGEM_BUSCAS_DEMAIS), que a tela traduz.
+export const tetoDaBusca = criarTeto(BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENSAGEM_BUSCAS_DEMAIS);
+
+// Juntar reuniões (H17) refaz a extração e o resumo pela IA (e transcreve de
+// novo o que veio do envio único): teto próprio por dona, de 3 junções a cada
+// 10 minutos. Só conta a junção que entrou; a recusa devolve a vaga.
+export const tetoDaJuncao = criarTeto(JUNCOES_POR_JANELA, JANELA_DA_JUNCAO_MS, RECUSAS_DA_JUNCAO.demais);
+
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
   const vagas = reprocessosPorDona.get(openId);
@@ -232,11 +253,12 @@ export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise
 
 // O idioma falado na reunião, normalizado pela função única ('pt' e 'pt-PT'
 // viram 'pt-BR', 'en-US' vira 'en'). A tela antiga, ainda aberta depois do
-// deploy, manda 'pt'; sem idioma vale o padrão. Fora dos 10, recusa: o código
-// é gravado e decide o original da tradução.
+// deploy, manda 'pt'; sem idioma vale o padrão. G16: vale todo idioma que a IA
+// transcreve (os 10 da tela e os outros) e "auto" ("Detectar sozinho"); fora
+// disso, recusa: o código é gravado e decide o original da tradução.
 export const idiomaDaReuniaoNaEntrada = z.string().max(12).optional().transform((valor, ctx) => {
   if (valor === undefined) return IDIOMA_DA_REUNIAO_PADRAO;
-  const idioma = idiomaDaReuniao(valor);
+  const idioma = escolhaDoIdioma(valor);
   if (!idioma) {
     ctx.addIssue({ code: "custom", message: "Idioma da reunião não suportado." });
     return z.NEVER;
@@ -267,6 +289,9 @@ export const meetingsRouter = router({
 
   create: protectedProcedure.input(createMeetingInput).mutation(async ({ ctx, input }) => {
     const db = await exigirDb();
+    // O contato e o contexto têm de ser da dona (o contexto: dela ou do
+    // catálogo), antes de gravar o ponteiro (H7c).
+    await conferirContatoEContexto(ctx.user.openId, input, db);
     const timestamp = Date.now();
     const id = crypto.randomUUID();
     await db.insert(meetings).values({
@@ -291,10 +316,13 @@ export const meetingsRouter = router({
   // quantas partes houve. A tela que grava em partes é a G9.
   iniciarGravacao: protectedProcedure.input(createMeetingInput.extend({
     origem: z.enum(["gravacao", "arquivo", "aba"]).default("gravacao"),
-  })).mutation(({ ctx, input }) => iniciarReuniaoEmPartes(ctx.user.openId, {
-    title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
-    origem: input.origem, contactId: input.contactId, contextId: input.contextId,
-  })),
+  })).mutation(async ({ ctx, input }) => {
+    await conferirContatoEContexto(ctx.user.openId, input);
+    return iniciarReuniaoEmPartes(ctx.user.openId, {
+      title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
+      origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+    });
+  }),
 
   // A reunião que nasce de um documento (H12 e H12b): um PDF, ou as fotos de um
   // texto, que a tela junta num PDF. Nasce em 'uploading', com o consentimento
@@ -308,8 +336,9 @@ export const meetingsRouter = router({
   iniciarDocumento: protectedProcedure.input(createMeetingInput.omit({ consentNoticeVersion: true }).extend({
     consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_DOCUMENTO),
     origem: z.enum(ORIGENS_DE_DOCUMENTO),
-  })).mutation(({ ctx, input }) => {
+  })).mutation(async ({ ctx, input }) => {
     tetoDosDocumentos.conferir(ctx.user.openId);
+    await conferirContatoEContexto(ctx.user.openId, input);
     return iniciarDocumento(ctx.user.openId, {
       title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion,
       origem: input.origem, contactId: input.contactId, contextId: input.contextId,
@@ -441,6 +470,13 @@ export const meetingsRouter = router({
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
 
+  // O título que a IA sugeriu com o resumo: "Usar este título" (usar) troca o
+  // título da reunião pela sugestão; "Manter o atual" só registra a decisão.
+  // Sem IA, então sem teto. CONFLICT: a sugestão já não espera a dona.
+  decidirTituloSugerido: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), usar: z.boolean() }))
+    .mutation(({ ctx, input }) => decidirTituloSugerido(ctx.user.openId, input.meetingId, input.usar)),
+
   // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
   // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
   pedirResumo: protectedProcedure
@@ -547,6 +583,34 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
+        segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
+    }),
+
+  // G15a: a transcrição durante a gravação, só para a dona. A tela do gravador
+  // (e o detalhe da reunião em andamento) pergunta de tempos em tempos e recebe
+  // o andamento de cada parte e o texto das partes prontas que ainda não tem
+  // (`desde`). Sem IA: o texto é o que a fila já transcreveu. Reunião de outra
+  // dona, ou excluída, é NOT_FOUND.
+  transcricaoDaGravacao: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), desde: z.number().int().min(0).max(PARTES_NO_MAXIMO).default(0) }))
+    .query(async ({ ctx, input }) => {
+      const dados = await transcricaoDuranteAGravacao(ctx.user.openId, input.meetingId, input.desde);
+      if (!dados) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+      return dados;
+    }),
+
+  // G15a: perguntar à IA sobre o que já foi dito, com a reunião ainda gravando
+  // (server/reuniao-com-ia.ts, perguntarDuranteAGravacao). O mesmo teto e as
+  // mesmas recusas traduzidas da pergunta de sempre; nada é gravado.
+  perguntarDuranteAGravacao: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      pergunta: z.string().trim().min(2).max(TAMANHO_MAXIMO_DA_PERGUNTA),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => perguntarDuranteAGravacao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
         segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
     }),
 
@@ -925,6 +989,75 @@ export const meetingsRouter = router({
       if (!nomes) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
       return { nomes };
     }),
+  // H7c: os detalhes da reunião (o título, as etiquetas, o "Onde foi", o
+  // contato e o contexto). Campo ausente não muda; nulo (ou lista vazia) tira.
+  // A posse do contato e do contexto é conferida antes de gravar; a reunião de
+  // outra conta é NOT_FOUND. O link aberto não leva nada disto
+  // (server/detalhes-da-reuniao.ts).
+  atualizarDetalhes: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      titulo: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX).optional(),
+      // O servidor normaliza (espaços, repetidas, o corte em ETIQUETA_MAX); aqui só o teto do pedido.
+      etiquetas: z.array(z.string().max(ETIQUETA_MAX * 2)).max(ETIQUETAS_POR_REUNIAO_MAX * 2).nullable().optional(),
+      ondeFoi: z.string().max(ONDE_FOI_MAX * 2).nullable().optional(),
+      contactId: z.number().int().positive().nullable().optional(),
+      contextId: z.string().uuid().nullable().optional(),
+    }))
+    .mutation(({ ctx, input }) => {
+      const { meetingId, ...campos } = input;
+      return atualizarDetalhesDaReuniao(ctx.user.openId, meetingId, campos);
+    }),
+
+  // H7b: a busca entre as reuniões da dona, na transcrição e nos itens do
+  // resumo que não foram ignorados, com os filtros da tela
+  // (server/busca-de-reunioes.ts). Até 30 resultados, com o teto de 120 buscas
+  // a cada 10 minutos (tetoDaBusca). Consulta, e não mutação: a tela a pede a
+  // cada termo; a vaga é gasta por pedido que passa da validação.
+  buscar: protectedProcedure
+    .input(z.object({
+      termo: z.string().trim().min(TERMO_DA_BUSCA_MIN).max(TERMO_DA_BUSCA_MAX),
+      etiqueta: z.string().max(ETIQUETA_MAX * 2).nullish(),
+      origem: z.enum(ORIGENS_DO_FILTRO).nullish(),
+      periodo: z.enum(PERIODOS_DO_FILTRO).nullish(),
+      contactId: z.number().int().positive().nullish(),
+      contextId: z.string().uuid().nullish(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaBusca.reservar(ctx.user.openId);
+      const { termo, ...filtros } = input;
+      try {
+        return await buscarNasReunioes(ctx.user.openId, termo, filtros);
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H17: juntar duas ou mais reuniões numa só, na ordem dada (a primeira
+  // fica). Responde quando a transação termina, com a reunião que fica em
+  // 'uploading'; a fila monta a transcrição e refaz o resumo em segundo plano
+  // (server/juntar-reunioes.ts). Recusas como código que a tela traduz:
+  // NOT_FOUND (outra conta, ou não existe), CONFLICT (alguma não está pronta),
+  // PRECONDITION_FAILED (documento ou YouTube, áudio vencido, longa demais),
+  // BAD_REQUEST (repetida) e TOO_MANY_REQUESTS (o teto de junções).
+  juntar: protectedProcedure
+    .input(z.object({ meetingIds: z.array(z.string().uuid()).min(2).max(REUNIOES_POR_JUNCAO_MAX) }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaJuncao.reservar(ctx.user.openId);
+      try {
+        return await juntarReunioes(ctx.user.openId, input.meetingIds, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+      } catch (erro) {
+        soltarVaga();
+        if (erro instanceof RecusaDaJuncao) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+        throw erro;
+      }
+    }),
+
   delete: protectedProcedure.input(z.object({ meetingId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const deleted = await deletePrivateMeeting(ctx.user.openId, input.meetingId);
     if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });

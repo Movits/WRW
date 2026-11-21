@@ -119,14 +119,13 @@ const fakeDb = {
       if (falhasNaLeitura.has(tabela)) return consultaQueFalha(falhasNaLeitura.get(tabela));
       return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
     };
+    // A varredura junta a reunião (LEFT JOIN) para pular a que está em
+    // 'processing', e a lista junta o contato e o contexto para os nomes (H7c);
+    // o fake não executa o JOIN nem o predicado: devolve as linhas da tabela e
+    // guarda o WHERE renderizado, como nas outras leituras. O JOIN encadeia.
+    const comJuncao = (tabela: unknown): Record<string, unknown> => ({ where: ondeDe(tabela), leftJoin: () => comJuncao(tabela) });
     return {
-      from: (tabela: unknown) => ({
-        where: ondeDe(tabela),
-        // A varredura junta a reunião (LEFT JOIN) para pular a que está em
-        // 'processing'; o fake não executa o JOIN nem o predicado: devolve as
-        // linhas da tabela e guarda o WHERE renderizado, como nas outras leituras.
-        leftJoin: () => ({ where: ondeDe(tabela) }),
-      }),
+      from: (tabela: unknown) => comJuncao(tabela),
     };
   },
   delete: (tabela: unknown) => ({
@@ -334,7 +333,14 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     // documento, e no vídeo do YouTube (H13) vem a URL dele, para a marca da
     // lista e o bloco do vídeo no lugar da gravação. São só da dona.
     "origem", "sourceUrl",
+    // Os detalhes (H7c): as etiquetas e o "Onde foi", só da dona.
+    "etiquetas", "ondeFoi",
   ];
+  // A lista leva também o nome do contato e o do contexto (a busca na tela, H7b),
+  // e o detalhe, o contato e o contexto com o nome (o painel dos detalhes, H7c),
+  // lidos só da rede da dona.
+  const SO_NA_LISTA = ["contatoNome", "contextoNome"];
+  const SO_NO_DETALHE = ["contato", "contexto"];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),
     ...REUNIAO,
@@ -354,7 +360,7 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista).toHaveLength(1);
     for (const coluna of CONTROLE_DA_FILA) expect(lista[0]).not.toHaveProperty(coluna);
     expect(JSON.stringify(lista)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(lista[0]).sort()).toEqual([...NA_TELA].sort());
+    expect(Object.keys(lista[0]).sort()).toEqual([...NA_TELA, ...SO_NA_LISTA].sort());
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
@@ -368,7 +374,7 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
       expect(dados?.meeting).not.toHaveProperty(coluna);
     }
     expect(JSON.stringify(dados)).not.toContain("hash-da-senha");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio"].sort());
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, ...SO_NO_DETALHE, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio"].sort());
     expect(dados?.meeting).toMatchObject({
       id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false, linkComSenha: true, linkComAudio: false,
     });

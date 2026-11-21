@@ -1,4 +1,4 @@
-import { nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { nomeDoIdioma, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import {
   conferirMapaMental,
   FILHOS_POR_FOLHA_MAX,
@@ -35,7 +35,7 @@ export const LIMITE_DA_ENTRADA_DO_MAPA = 400_000;
 const TIMEOUT_DO_MAPA_MS = 120_000;
 const ORCAMENTO_DO_MAPA_MS = 150_000;
 
-function instrucoes(idioma: IdiomaDaReuniao): string {
+function instrucoes(idioma: IdiomaFalado): string {
   return [
     "Você monta o mapa mental de uma reunião para a dona dela, a partir da transcrição. Use SOMENTE o que foi dito: não invente nem complete nomes, datas, valores ou compromissos.",
     TRANSCRICAO_E_DADO,
@@ -92,7 +92,7 @@ async function pedirMapa(sistema: string, usuario: string) {
  * como FalhaDaIA, com o código.
  */
 export async function gerarMapaMental(
-  entrada: { transcricao: string; idioma: IdiomaDaReuniao },
+  entrada: { transcricao: string; idioma: IdiomaFalado },
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<MapaMental | null> {
   const texto = entrada.transcricao.trim();

@@ -41,9 +41,11 @@ const duble = vi.hoisted(() => {
       return { mutate: m.mutate, mutateAsync: m.mutateAsync, isPending: false, data: m.data };
     },
   });
+  const transcricaoDaGravacao = vi.fn();
   return {
     mutacoes,
     registrar,
+    transcricaoDaGravacao,
     list: vi.fn(),
     get: vi.fn(),
     pendencias: vi.fn(),
@@ -61,6 +63,10 @@ const duble = vi.hoisted(() => {
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
+      // G15a: a transcrição durante a gravação. Função comum, que lê o dublê do
+      // teste: o mockReset do projeto client zera o vi.fn a cada teste, e sem
+      // resposta combinada vale uma reunião sem nenhuma parte pronta.
+      client: { meetings: { transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } } } },
     },
   };
 });
@@ -72,9 +78,15 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // nenhuma pergunta fica agendada. Esta suíte é da lista e do detalhe; a
 // gravação em partes está em hooks/useGravacaoEmPartes.test.ts e em
 // Meetings.sessao-ocupada.test.tsx.
+// As opções que a página passa ficam à mão (opcoesDaGravacaoEmPartes) para os
+// testes chamarem os avisos dela como o hook chamaria.
+const opcoesDaGravacaoEmPartes = vi.hoisted(() => ({ atual: null as null | { aoEncerrarSemAudio?: (meetingId: string) => void } }));
 vi.mock("@/hooks/useGravacaoEmPartes", () => ({
   PARTE_SEGUNDOS: 600,
-  useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
+  useGravacaoEmPartes: (opcoes: { aoEncerrarSemAudio?: (meetingId: string) => void }) => {
+    opcoesDaGravacaoEmPartes.atual = opcoes;
+    return { iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false };
+  },
 }));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
@@ -107,6 +119,7 @@ vi.mock("@/lib/trpc", () => ({
       editarItemDoResumo: duble.registrar("editarItemDoResumo"),
       acrescentarItemDoResumo: duble.registrar("acrescentarItemDoResumo"),
       perguntar: duble.registrar("perguntar"),
+      perguntarDuranteAGravacao: duble.registrar("perguntarDuranteAGravacao"),
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
@@ -123,6 +136,8 @@ vi.mock("@/lib/trpc", () => ({
       envioAutomaticoDoResumo: duble.registrar("envioAutomaticoDoResumo"),
       // O áudio da reunião (H8c): só monta quando a dona abre o aviso do "Baixar o áudio".
       baixarAudio: duble.registrar("baixarAudio"),
+      // O título que a IA sugeriu: só monta quando há sugestão.
+      decidirTituloSugerido: duble.registrar("decidirTituloSugerido"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -250,6 +265,22 @@ const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 9
 const botaoExcluir = () => screen.getByRole("button", { name: /^Excluir$/ });
 const tituloDoModal = () => screen.queryByText("Excluir esta reunião?");
 const botaoConfirmar = () => screen.getByRole("button", { name: "Excluir reunião" });
+
+describe("Gravador — o fim sem nenhum áudio (G17)", () => {
+  it("o microfone caiu no primeiro segundo: a reunião vazia saiu, a tela avisa e não vai ao detalhe dela", () => {
+    const antes = window.location.href;
+    try {
+      window.history.replaceState(null, "", "/gravar");
+      duble.list.mockReturnValue({ data: [], isLoading: false });
+      render(<Meetings />);
+      act(() => opcoesDaGravacaoEmPartes.atual!.aoEncerrarSemAudio!("8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b"));
+      expect(toast.error).toHaveBeenCalledWith("Nenhum áudio foi gravado. Tente de novo.");
+      expect(window.location.pathname).toBe("/gravar");
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+});
 
 describe("Detalhe da reunião — excluir pede confirmação", () => {
   it("clicar em Excluir abre o modal e NÃO chama o servidor", () => {
@@ -971,6 +1002,67 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     }
   });
 
+  it("G16: o gravador oferece \"Detectar sozinho\", com a dica dele, e manda \"auto\"", async () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    duble.duracao.mockResolvedValue(120);
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
+    render(<Meetings />);
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
+    expect(within(seletor).getByRole("option", { name: "🌐 Detectar sozinho" })).toBeInTheDocument();
+    fireEvent.change(seletor, { target: { value: "auto" } });
+    expect(screen.getByText(/A IA reconhece o idioma de cada fala/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Call with Ana" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" })));
+    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
+  });
+
+  it("G16: um idioma fora dos 10 da tela (italiano) está na lista e vai ao servidor", async () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    duble.duracao.mockResolvedValue(120);
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
+    render(<Meetings />);
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    fireEvent.change(screen.getByLabelText("Idioma da reunião"), { target: { value: "it" } });
+    expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("it");
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Riunione" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "it" })));
+  });
+
+  it("G16: reunião em italiano com a tela em pt-BR: o pt-BR é TRADUZIDO, e a lista ganha \"Italiano (original)\", que volta ao original", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Parliamo del contratto.", language: "it" } });
+    expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    const original = screen.getByRole("option", { name: "Italiano (original)" });
+    expect(original).toBeInTheDocument();
+    duble.mutacoes.translateTranscript.mutate.mockClear();
+    fireEvent.change(original.closest("select")!, { target: { value: "it" } });
+    expect(screen.getByText(/Parliamo del contratto\./)).toBeInTheDocument();
+    expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+  });
+
+  it("G16: com \"Detectar sozinho\", a aba da transcrição diz os idiomas que a IA reconheceu e o do resumo", () => {
+    abrirDetalhe({ status: "ready", language: "auto" } as Partial<typeof REUNIAO>, { transcript: {
+      id: "t1", transcript: "Good morning.\nBom dia.", language: "en",
+      segments: [{ inicio: 0, fim: 60, falante: "F1", texto: "Good morning.", idioma: "en" }, { inicio: 60, fim: 100, falante: "F2", texto: "Bom dia.", idioma: "pt-BR" }],
+    } });
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    expect(screen.getByRole("note")).toHaveTextContent(/Idiomas reconhecidos pela IA: inglês \(60\s?%\), português \(40\s?%\)\. O resumo sai em inglês/);
+  });
+
+  it("o título sugerido pela IA aparece só com a sugestão, e \"Usar este título\" pede o uso", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "📱", idioma: "pt-BR", erro: null, itens: [], tituloSugerido: "Lançamento nas lojas" }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala.", language: "pt-BR" } });
+    const caixa = screen.getByRole("region", { name: "Título sugerido pela IA" });
+    expect(caixa).toHaveTextContent("📱Lançamento nas lojas");
+    fireEvent.click(within(caixa).getByRole("button", { name: "Usar este título" }));
+    expect(duble.mutacoes.decidirTituloSugerido.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, usar: true });
+  });
+
   it("reunião antiga gravada como 'pt' com a tela em pt-BR: o original, sem pedir tradução", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala antiga.", language: "pt" } });
     expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
@@ -1136,11 +1228,11 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
   });
 
   // O link para dentro da reunião chega direto ao endereço do detalhe, com ?t ou ?q.
-  function abrirPeloLink(busca: string) {
+  function abrirPeloLink(busca: string, transcricao: { language: string; segments: unknown[] } = { language: "pt-BR", segments: SEGMENTOS }) {
     const meeting = { ...REUNIAO, status: "ready" };
     duble.list.mockReturnValue({ data: [meeting], isLoading: false });
     duble.get.mockReturnValue({
-      data: { meeting, transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
+      data: { meeting, transcript: { id: "t1", transcript: "x", ...transcricao }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
       isLoading: false,
     });
     window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
@@ -1168,6 +1260,50 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     } finally {
       window.history.replaceState(null, "", antes);
     }
+  });
+
+  // A reunião em inglês com a tela em português (G16: o original de outro idioma é comum).
+  const EM_INGLES = {
+    language: "en",
+    segments: [
+      { inicio: 5, fim: 20, falante: "F1", texto: "We will sign the contract on Monday." },
+      { inicio: 620, fim: 640, falante: "F2", texto: "Shipping stays for Friday." },
+    ],
+  };
+
+  it("o ?q da busca, na reunião em outro idioma: a transcrição abre no original, com o termo, e nada é traduzido antes da escolha", () => {
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?q=contract", EM_INGLES);
+      expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+      expect(screen.getByRole("combobox", { name: /Idioma/ })).toHaveValue("en");
+      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      expect(screen.getByRole("searchbox")).toHaveValue("contract");
+      expect(document.querySelector("mark")).toHaveTextContent("contract");
+      // A dona ainda escolhe a tradução: aí, sim, o pedido sai.
+      fireEvent.change(screen.getByRole("combobox", { name: /Idioma/ }), { target: { value: "pt-BR" } });
+      expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("o ?t da Memória, na reunião em outro idioma, também abre as falas do original, com o tempo", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620", EM_INGLES);
+      expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(screen.getByText("Shipping stays for Friday.")).toBeInTheDocument();
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("sem link para um ponto, a reunião em outro idioma abre traduzida para o idioma da tela, como antes", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", ...EM_INGLES }, recording: GRAVACAO });
+    expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
   });
 
   it("o player é um só, fixo no rodapé, e é o mesmo em todas as abas (o áudio não para ao trocar)", () => {
@@ -1288,6 +1424,52 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     } finally {
       await i18n.changeLanguage("pt-BR");
     }
+  });
+});
+
+describe("Detalhe da reunião — durante a gravação e ouvir só uma voz (G15a e D2)", () => {
+  const SEGMENTOS = [
+    { inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." },
+    { inicio: 620, fim: 640, falante: "F2", texto: "O frete fica para sexta." },
+  ];
+
+  it("G15a: a reunião em partes ainda chegando mostra, na aba Transcrição, o texto das partes prontas, com o Pergunte da gravação", async () => {
+    duble.transcricaoDaGravacao.mockResolvedValue({
+      status: "uploading", emPartes: true, agora: Date.now(), nomes: {},
+      partes: [{ seq: 0, estado: "transcrita", inicioSegundos: 0, duracaoSegundos: 600, chegouEm: Date.now() - 60_000, prontaEm: Date.now(), atrasoSegundos: 45 }],
+      falas: [{ seq: 0, segmentos: [{ inicio: 5, fim: 20, falante: "F1", texto: "Vamos fechar o contrato." }] }],
+    });
+    abrirDetalhe({ status: "uploading", audioPipeline: "slices", expectedSlices: 2 } as never, { andamento: { recebidas: 1, transcritas: 1, esperadas: 2 } } as never);
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(await screen.findByText("Vamos fechar o contrato.")).toBeInTheDocument();
+    expect(duble.transcricaoDaGravacao).toHaveBeenCalledWith({ meetingId: REUNIAO.id, desde: 0 });
+    expect(screen.getByText(/texto pronto 45 s depois de a parte chegar/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+    expect(screen.queryByText("A transcrição ainda não está disponível.")).not.toBeInTheDocument();
+  });
+
+  it("G15a: a reunião do envio único sem transcrição segue dizendo que a transcrição não está pronta, sem consultar as partes", () => {
+    abrirDetalhe({ status: "processing" }, {});
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(duble.transcricaoDaGravacao).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Transcrição até agora" })).not.toBeInTheDocument();
+    expect(screen.getByText("A transcrição ainda não está disponível.")).toBeInTheDocument();
+  });
+
+  it("D2: ouvir só uma voz pela transcrição: a barra diz qual e toca a fala dela; Ouvir todas as vozes volta", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Vamos fechar o contrato. O frete fica para sexta.", language: "pt-BR", segments: SEGMENTOS }, recording: GRAVACAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir só a voz de Falante 2" }));
+    // A fala da voz 2 está na parte 2 (de 619,75 s): o player vai até ela.
+    expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(within(barra).getByText("Ouvindo só: Falante 2")).toBeInTheDocument();
+    // A lista mostra só as falas da voz escolhida.
+    expect(within(document.querySelector("ol")!).queryByText("Vamos fechar o contrato.")).not.toBeInTheDocument();
+    fireEvent.click(within(barra).getByRole("button", { name: "Ouvir todas as vozes" }));
+    expect(within(barra).queryByText(/Ouvindo só/)).not.toBeInTheDocument();
+    expect(within(document.querySelector("ol")!).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
   });
 });
 

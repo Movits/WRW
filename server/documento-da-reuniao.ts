@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { and, eq } from "drizzle-orm";
 import { meetingDocuments, meetings } from "../drizzle/schema";
 import { LIMITE_PROCESSAMENTO_MS } from "@shared/const";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, nomeDoIdioma, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import {
   DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehReuniaoDeDocumento, falhaDoDocumentoSeRepete,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento, type OrigemDeDocumento, type PaginaDoDocumento,
@@ -133,10 +133,34 @@ export const ESQUEMA_DA_LEITURA = {
   required: ["paginas"],
 } as const;
 
-/** O pedido da leitura. O idioma é o que a dona escolheu; a IA não traduz. */
+// "Detectar sozinho" (G16): a leitura devolve também o código do idioma em que
+// está a maior parte do documento, DEPOIS das páginas (o texto antes do nome
+// do idioma, como na fatia).
+const ESQUEMA_DA_LEITURA_COM_IDIOMA = {
+  type: "OBJECT",
+  properties: {
+    paginas: ESQUEMA_DA_LEITURA.properties.paginas,
+    idioma: { type: "STRING", description: 'O código do idioma em que está escrita a maior parte do documento, como "pt", "en", "es", "it" ou "zh".' },
+  },
+  required: ["paginas", "idioma"],
+  propertyOrdering: ["paginas", "idioma"],
+} as const;
+
+/** O esquema da leitura para a escolha do idioma: com o `idioma` só em "Detectar sozinho" (G16). */
+export function esquemaDaLeitura(idioma: string | null | undefined) {
+  return escolhaDoIdioma(idioma) === IDIOMA_AUTOMATICO ? ESQUEMA_DA_LEITURA_COM_IDIOMA : ESQUEMA_DA_LEITURA;
+}
+
+/**
+ * O pedido da leitura. O idioma é o que a dona escolheu (G16: um dos que a IA
+ * transcreve), ou "Detectar sozinho", que pede o código do idioma do
+ * documento; a IA não traduz.
+ */
 export function promptDaLeitura(idioma: string | null | undefined): string {
-  const conhecido = idiomaDaReuniao(idioma);
-  const instrucaoDoIdioma = conhecido ? ` O idioma predominante esperado é ${nomeDoIdioma(conhecido)}; mantenha cada trecho no idioma em que está escrito.` : "";
+  const escolha = escolhaDoIdioma(idioma);
+  const instrucaoDoIdioma = escolha === IDIOMA_AUTOMATICO
+    ? ' O idioma não foi informado: reconheça-o pelo texto e mantenha cada trecho no idioma em que está escrito. Em "idioma", devolva o código do idioma em que está escrita a maior parte do documento ("pt", "en", "es"...).'
+    : escolha ? ` O idioma predominante esperado é ${nomeDoIdioma(escolha)}; mantenha cada trecho no idioma em que está escrito.` : "";
   return "Este arquivo é um documento em PDF: pode ser digital, escaneado ou fotos de páginas de um texto, uma foto por página. "
     + "Transcreva integralmente o texto de cada página, na ordem em que aparece, sem resumir, sem traduzir e sem comentar. "
     + "Preserve nomes próprios, empresas, números, datas, telefones, e-mails e endereços exatamente como estão escritos, e mantenha as quebras de parágrafo. "
@@ -209,13 +233,36 @@ export function textoDasPaginas(paginas: readonly PaginaDoDocumento[]): string {
 
 /** A leitura do PDF pela IA: as páginas, ou a falha com o código dela. */
 export async function lerDocumentoComAIA(bytes: Buffer, idioma: string | null | undefined): Promise<PaginaDoDocumento[]> {
+  return (await lerDocumentoEOIdioma(bytes, idioma)).paginas;
+}
+
+/**
+ * O código do idioma que a leitura de "Detectar sozinho" (G16) devolveu, ou
+ * null (não veio, ou não é um idioma que a IA transcreve). A resposta já passou
+ * por paginasDaResposta: o JSON é válido.
+ */
+export function idiomaDaLeitura(texto: string): IdiomaFalado | null {
+  try {
+    const idioma = (JSON.parse(texto) as { idioma?: unknown } | null)?.idioma;
+    return idiomaFalado(typeof idioma === "string" ? idioma : null);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A leitura e, com "Detectar sozinho" (G16), o idioma que a IA reconheceu no
+ * documento (`idiomaDetectado`; null com o idioma escolhido ou quando ele não
+ * veio). Os erros são os de lerDocumentoComAIA.
+ */
+export async function lerDocumentoEOIdioma(bytes: Buffer, idioma: string | null | undefined): Promise<{ paginas: PaginaDoDocumento[]; idiomaDetectado: IdiomaFalado | null }> {
   let texto: string;
   try {
     ({ texto } = await gerarComArquivoNoGemini({
       bytes,
       mimeType: "application/pdf",
       prompt: promptDaLeitura(idioma),
-      esquemaJson: ESQUEMA_DA_LEITURA,
+      esquemaJson: esquemaDaLeitura(idioma),
       tetoInlineBytes: DOCUMENTO_BYTES_MAX,
       saidaMaxima: SAIDA_MAXIMA_DA_LEITURA,
       timeoutMs: TIMEOUT_DA_LEITURA_MS,
@@ -227,7 +274,7 @@ export async function lerDocumentoComAIA(bytes: Buffer, idioma: string | null | 
   }
   const paginas = paginasDaResposta(texto);
   if (!textoDasPaginas(paginas)) throw new FalhaDoDocumento("DOCUMENTO_SEM_TEXTO", "A IA não achou texto no documento.");
-  return paginas;
+  return { paginas, idiomaDetectado: escolhaDoIdioma(idioma) === IDIOMA_AUTOMATICO ? idiomaDaLeitura(texto) : null };
 }
 
 /**
@@ -457,7 +504,7 @@ export async function processarDocumento(db: Banco, execucao: {
   const { ownerId, meetingId } = execucao;
   let ficha = execucao.ficha;
   try {
-    const paginas = await lerDocumentoComAIA(execucao.bytes, execucao.idioma);
+    const { paginas, idiomaDetectado } = await lerDocumentoEOIdioma(execucao.bytes, execucao.idioma);
     ficha = await renovarFicha(db, meetingId, ownerId, ficha);
     const texto = textoDasPaginas(paginas);
     let extraction: Awaited<ReturnType<typeof extrairDadosDaReuniao>>;
@@ -471,7 +518,9 @@ export async function processarDocumento(db: Banco, execucao: {
       limparAntes: execucao.limparAntes,
       durationSeconds: 0,
       contarMinutos: false,
-      transcription: { text: texto, segments: paginas, language: idiomaDaReuniao(execucao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO },
+      // O idioma escolhido (G16: um dos que a IA transcreve) ou, com "Detectar
+      // sozinho", o que a leitura reconheceu; sem nenhum, o padrão.
+      transcription: { text: texto, segments: paginas, language: idiomaDetectado ?? idiomaFalado(execucao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO },
       extraction,
     });
   } catch (erro) {

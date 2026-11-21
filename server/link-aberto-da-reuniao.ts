@@ -115,6 +115,13 @@ function quemPediu(prova: ProvaDaDona) {
 const FREIO_DO_LINK_ZERADO = { sharePasswordFailures: 0, sharePasswordFailedAt: null, sharePasswordLockedUntil: null };
 
 /**
+ * O link desligado: sem token, sem senha e com o freio zerado. O desligar da
+ * dona e a junção de reuniões (H17, server/juntar-reunioes.ts) gravam isto; o
+ * link novo sai com o que a dona escolher na hora de ligar.
+ */
+export const LINK_DESLIGADO = { shareToken: null, sharePasswordHash: null, ...FREIO_DO_LINK_ZERADO };
+
+/**
  * O link de antes da H23, sem senha e com o áudio: liga e devolve só o token
  * (ligarLinkAbertoComOpcoes, abaixo, faz o trabalho). É o que a tela manda
  * quando não escolhe nada, a aba aberta antes do deploy.
@@ -289,7 +296,7 @@ function linhaDaConfirmacao(prova: ProvaDoLinkLigado, meetingId: string, link: {
 export async function desligarLinkAberto(ownerId: string, meetingId: string): Promise<void> {
   const db = await exigirDb();
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
-  await db.update(meetings).set({ shareToken: null, sharePasswordHash: null, ...FREIO_DO_LINK_ZERADO }).where(daDona);
+  await db.update(meetings).set(LINK_DESLIGADO).where(daDona);
   const [reuniao] = await db.select({ id: meetings.id }).from(meetings).where(daDona).limit(1);
   if (!reuniao) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
 }

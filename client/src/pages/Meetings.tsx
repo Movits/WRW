@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, MonitorPlay, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3, Files, FileText, Link2, Loader2, Mic, MicOff, Network, Pause, Play, Plus, RefreshCw, ScanText, Square, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
@@ -29,6 +29,8 @@ import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPl
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
+import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
+import { TranscricaoDuranteAGravacao } from "@/components/TranscricaoDuranteAGravacao";
 import { ID_DO_AVISO_DO_DESCARTE_PENDENTE } from "@/components/RetomadaDosDescartes";
 import { ID_DO_AVISO_DA_PARTE_RECUSADA } from "@/components/RetomadaDasPartes";
 import {
@@ -38,7 +40,7 @@ import {
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
 import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
-import { gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
+import { ESPERA_PELO_MICROFONE_MAXIMA_MS, gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
@@ -50,10 +52,15 @@ import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, idiomaFalado as codigoDoIdiomaFalado, type EscolhaDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { DicaDoIdiomaDaReuniao, IdiomasDetectados, OpcaoDoIdiomaOriginal, SeletorDoIdiomaDaReuniao } from "@/components/SeletorDoIdiomaDaReuniao";
+import { TituloSugerido } from "@/components/TituloSugerido";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { erroDoYoutubeSeRepete, idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
 import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
+import { ListaDeReunioes } from "@/components/ListaDeReunioes";
+import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
+import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
 
@@ -85,6 +92,11 @@ const ID_DO_AVISO_SEM_COPIA = "gravacao-sem-copia-no-aparelho";
 const ID_DO_AVISO_ENCERRADA_AO_SAIR = "gravacao-encerrada-ao-sair";
 /** O do arquivo em partes que subiu inteiro e cujo fim ficou para a retomada (H9a): o envio seguinte o fecha. */
 const ID_DO_AVISO_FIM_PENDENTE = "importacao-com-fim-pendente";
+/**
+ * O do microfone que caiu e voltou, ou que não voltou a tempo (G17): um id só,
+ * para o aviso novo trocar o anterior. A gravação seguinte o fecha.
+ */
+const ID_DO_AVISO_DO_MICROFONE = "gravacao-microfone";
 
 /**
  * O modo do gravador, pela busca da URL do /gravar (G13b). A gravação em partes
@@ -271,13 +283,16 @@ export default function Meetings() {
   const [consent, setConsent] = useState(false);
   // O idioma falado na reunião: a IA transcreve nele, e ele é o original da
   // tradução. Começa no idioma da tela de quem grava.
-  const [idiomaFalado, setIdiomaFalado] = useState<IdiomaDaReuniao>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
+  const [idiomaFalado, setIdiomaFalado] = useState<EscolhaDoIdioma>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   // O Iniciar em curso (G13b, ver startRecording): o ref vale já no clique, e o
   // estado trava o botão e o formulário na tela.
   const iniciandoAgora = useRef(false);
   const [iniciando, setIniciando] = useState(false);
+  // G15a: a reunião em partes da gravação em curso, para a tela mostrar o
+  // texto das partes que a fila já transcreveu (e perguntar sobre ele).
+  const [reuniaoDaGravacao, setReuniaoDaGravacao] = useState<string | null>(null);
   const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: TipoDeAudioGravado; durationSeconds: number } | null>(null);
   const audioInput = useRef<HTMLInputElement | null>(null);
   // true só enquanto ESTA instância está montada, visível e no gravador. O
@@ -310,6 +325,14 @@ export default function Meetings() {
       setTitle("");
       setConsent(false);
       if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
+    },
+    // Nenhum áudio chegou a ser gravado (o microfone caiu no primeiro segundo):
+    // a reunião vazia saiu, e a tela fica no gravador, com o aviso, em vez de
+    // abrir o detalhe de uma reunião que não existe (G17).
+    aoEncerrarSemAudio: () => {
+      emPartesSemAgenda.current = null;
+      void utils.meetings.list.invalidate();
+      toast.error(t("assistenteTexto.audioVazio"));
     },
     aoFalhar: () => {
       emPartesSemAgenda.current = null;
@@ -354,6 +377,13 @@ export default function Meetings() {
     // reabriria a sessão ocupada (o navegador perguntaria na ida ao login).
     entregarAoSair: emPartes ? () => Boolean(utils.auth.me.getData()) : false,
     aoEntregarAoSair: () => toast.info(t("meetings.recordingEndedOnLeave"), { id: ID_DO_AVISO_ENCERRADA_AO_SAIR, duration: Infinity, closeButton: true }),
+    // G17: o microfone caiu (o cartão do gravador avisa e oferece o Tentar de
+    // novo), voltou (a gravação seguiu numa parte nova) ou não voltou a tempo
+    // (a gravação encerrou e o que foi gravado segue). O aviso de que ele
+    // voltou some sozinho; o de que não voltou fica até ser fechado.
+    aoCairOMicrofone: () => toast.dismiss(ID_DO_AVISO_DO_MICROFONE),
+    aoVoltarOMicrofone: () => toast.success(t("meetings.micLost.back"), { id: ID_DO_AVISO_DO_MICROFONE }),
+    aoDesistirDoMicrofone: () => toast.info(t("meetings.micLost.gaveUp", { minutos: ESPERA_PELO_MICROFONE_MAXIMA_MS / 60_000 }), { id: ID_DO_AVISO_DO_MICROFONE, duration: Infinity, closeButton: true }),
     bitsPorSegundo: 64_000,
     // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
     // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
@@ -389,7 +419,10 @@ export default function Meetings() {
   });
   // Em gravação: gravando ou pausada (G10). A tela fica travada nos dois.
   const pausado = gravador.estado === "pausado";
-  const recording = gravador.estado === "gravando" || pausado;
+  // G17: sem microfone, a gravação segue em curso (a tela fica no gravador,
+  // travada, como gravando), só sem gravar até um microfone voltar.
+  const semMicrofone = gravador.estado === "semMicrofone";
+  const recording = gravador.estado === "gravando" || pausado || semMicrofone;
   // G10: a tela acesa enquanto grava (no celular, a tela que apaga bloqueia o
   // aparelho, e no iPhone o bloqueio corta o microfone). E enquanto o arquivo em
   // partes é lido e enviado (H9a): o aparelho bloqueado suspende a página, e o
@@ -512,6 +545,9 @@ export default function Meetings() {
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
     setMicrophoneIssue(null);
+    // A transcrição durante a gravação (G15a) é da gravação nova: a da anterior
+    // não aparece nem por um instante.
+    setReuniaoDaGravacao(null);
     agendaDaGravacao.current = agendaNaTela.current;
     agendadaNoInicio.current = agendada;
     emPartesSemAgenda.current = null;
@@ -536,6 +572,7 @@ export default function Meetings() {
         toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
         toast.dismiss(ID_DO_AVISO_ENCERRADA_AO_SAIR);
         toast.dismiss(ID_DO_AVISO_FIM_PENDENTE);
+        toast.dismiss(ID_DO_AVISO_DO_MICROFONE);
         try {
           reuniao = await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
         } catch (error) {
@@ -560,6 +597,7 @@ export default function Meetings() {
       // de carregar enquanto o servidor criava a reunião. Sem nenhuma, a faixa
       // que carregar depois liga esta gravação (aoCarregar, abaixo).
       else if (reuniao) {
+        setReuniaoDaGravacao(reuniao);
         const agendaId = agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current);
         if (agendaId) {
           agendaDaGravacao.current = agendaId;
@@ -583,6 +621,7 @@ export default function Meetings() {
   async function discardRecording() {
     emPartesSemAgenda.current = null;
     gravador.descartar();
+    setReuniaoDaGravacao(null);
     // Os avisos da parte recusada e da cópia que faltou falavam desta gravação,
     // que deixou de existir.
     toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
@@ -810,6 +849,7 @@ export default function Meetings() {
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
       idioma={idiomaFalado} setIdioma={setIdiomaFalado} emPartes={emPartes}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
+      semMicrofone={semMicrofone} microfoneBloqueado={gravador.microfoneBloqueado} onRetryMicrophone={gravador.tentarOMicrofone}
       starting={iniciando}
       importacao={importacao.andamento} onCancelImport={importacao.cancelar}
       microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
@@ -817,6 +857,8 @@ export default function Meetings() {
       onDiscardRecording={emPartes ? discardRecording : undefined}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
       validarTitulo={avisoDoTitulo}
+      // G15a: o texto das partes prontas durante a gravação, com o Pergunte.
+      transcricaoAoVivo={emPartes && reuniaoDaGravacao ? <TranscricaoDuranteAGravacao key={reuniaoDaGravacao} meetingId={reuniaoDaGravacao} gravando comPergunta/> : null}
       // O documento (H12) enviado: a IA lê em segundo plano, e quem continua no
       // gravador vai ao detalhe, como no fim do envio do áudio.
       onDocumentSent={meetingId => {
@@ -843,7 +885,7 @@ export default function Meetings() {
   ) : screen === "detail" && reuniaoAberta ? (
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
     // Excluir sai com replace: o voltar não reabre a reunião que deixou de existir.
-    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} />
+    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} etiquetasSugeridas={etiquetasDaDona(meetings ?? [], i18n.language)} />
   ) : (
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
@@ -856,7 +898,7 @@ export default function Meetings() {
           </div>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <div className="grid gap-3">{meetings.map(meeting => <button key={meeting.id} onClick={() => navigate(rotaDaReuniao(meeting.id))} className="text-left rounded-2xl border border-white/10 bg-white/[0.035] hover:bg-white/[0.07] p-5 transition-colors"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><h2 dir="auto" className="text-base font-semibold break-words">{ehReuniaoDeDocumento(meeting.origem) && <ScanText size={15} aria-label={t("meetings.document.listBadge")} className="inline me-2 text-amber-300"/>}{meeting.title}</h2><p className="text-xs text-white/45 mt-1">{new Date(meeting.createdAt).toLocaleString(i18n.language)}{meeting.origem === "youtube" && <span className="ms-2 inline-flex items-center gap-1 text-[#efcba8]/80"><MonitorPlay size={12} aria-hidden/>{t("meetings.youtube.listBadge")}</span>}</p></div><span className={`shrink-0 border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehReuniaoDeDocumento(meeting.origem))}</span></div></button>)}</div>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <ListaDeReunioes reunioes={meetings} rotuloDoStatus={reuniao => statusLabel(t, reuniao.status, ehReuniaoDeDocumento(reuniao.origem))} classeDoStatus={statusClass} aoAbrir={destino => navigate(destino)}/>}
       </div>
     </main>
   );
@@ -873,7 +915,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: IdiomaDaReuniao; setIdioma: (value: IdiomaDaReuniao) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode }) {
   const { t } = useTranslation();
   // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
   // fotos de um texto, com o aviso e a autorização do documento. O título e o
@@ -909,10 +951,9 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       <div className="mt-7 space-y-5">
         <div><label className="text-sm text-white/70">{t("meetings.titleLabel")}</label><input disabled={locked} value={props.title} onChange={e => props.setTitle(e.target.value)} maxLength={TITULO_DA_REUNIAO_MAX} placeholder={t("meetings.titlePlaceholder")} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-amber-300"/>{props.daAgenda}</div>
         <div><label htmlFor="idioma-da-reuniao" className="text-sm text-white/70">{t("meetings.meetingLanguageLabel")}</label>
-          <select id="idioma-da-reuniao" disabled={locked} value={props.idioma} onChange={e => props.setIdioma(idiomaDaReuniao(e.target.value) ?? IDIOMA_DA_REUNIAO_PADRAO)} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300">
-            {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}
-          </select>
-          <p className="text-xs text-white/40 mt-2">{t("meetings.meetingLanguageHint")}</p></div>
+          {/* G16: "Detectar sozinho", os 10 da tela e os outros idiomas que a IA transcreve. */}
+          <SeletorDoIdiomaDaReuniao id="idioma-da-reuniao" desligado={locked} valor={props.idioma} aoMudar={props.setIdioma} className="mt-2 w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 text-white outline-none focus:border-amber-300"/>
+          <DicaDoIdiomaDaReuniao valor={props.idioma} className="text-xs text-white/40 mt-2"/></div>
         {/* O aviso de privacidade também aqui: o login, o Dashboard e o link
             /gravar chegam ao gravador direto, sem passar pela lista, que era o
             único lugar com ele antes de gravar. No documento, o aviso e a
@@ -925,11 +966,11 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {noDocumento ? <div className="mt-7"><DocumentoParaResumir titulo={props.title} idioma={props.idioma} validarTitulo={props.validarTitulo}
         aoMudarOcupado={setDocumentoOcupado} aoVoltar={() => setModo("gravacao")}
         aoEnviar={meetingId => { setModo("gravacao"); props.onDocumentSent(meetingId); }}/></div> : <>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
+      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused || props.semMicrofone ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : props.semMicrofone ? <MicOff className="text-red-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : props.semMicrofone ? <p role="status" className="text-sm text-red-200 mt-2">{t("meetings.micLost.status")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept={props.emPartes ? ACEITOS_EM_PARTES : ACEITOS_NO_ENVIO_UNICO} className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin me-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
+      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin me-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.semMicrofone ? <AvisoSemMicrofone bloqueado={!!props.microfoneBloqueado} aoTentarDeNovo={() => props.onRetryMicrophone?.()}/> : props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
           o teto do arquivo enviado, que vai em partes até 12 h em todos os
           formatos (H9a, H9b e H9c). */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}
           {/* H12 e H12b: um PDF ou as fotos de um texto, resumidos como uma reunião. */}
@@ -939,6 +980,8 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
           "Iniciar gravação". Na revisão do áudio ela sai. */}
+      {/* G15a: o texto das partes que a fila já transcreveu, enquanto grava. */}
+      {props.recording && props.transcricaoAoVivo}
       {!props.capturedAudio && <DicaDeInstalacao oculta={locked}/>}
     </div>
   </main>;
@@ -977,7 +1020,7 @@ function DescartarGravacao({ aberta, aoAbrirOuFechar, aoDescartar }: { aberta: b
   );
 }
 
-function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; onBack: () => void; aoExcluir: () => void }) {
+function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { meetingId: string; onBack: () => void; aoExcluir: () => void; etiquetasSugeridas?: string[] }) {
   const utils = trpc.useUtils();
   const { t, i18n } = useTranslation();
   // Em processamento (inclusive um reprocessamento em segundo plano), o detalhe
@@ -1062,7 +1105,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
   useEffect(() => {
     if (itemPedido) setTab("summary");
-    else if (pedeTranscricao) setTab("transcript");
+    else if (pedeTranscricao) {
+      setTab("transcript");
+      // O link para um ponto da transcrição volta ao idioma original (abaixo).
+      setIdiomaEscolhido(null);
+    }
   }, [busca]);
   // O ?t do link leva o player ao ponto quando a parte que cobre o segundo
   // existe. Na reunião que ainda está chegando (gravando, enviando ou
@@ -1082,11 +1129,26 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     player.current.irPara(segundoPedido);
   }, [busca, partesDoDado.length, cobreOPedido, aindaChegando]);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
+  // D2: a voz que o player toca sozinha (nula: todas). A transcrição a escolhe
+  // e mostra só as falas dela; a barra do player diz qual é, em qualquer aba.
+  const [soAVoz, setSoAVoz] = useState<string | null>(null);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
   // lista, mandando a tradução para pt-BR com a tela em inglês.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
   const initialLanguage = LANGUAGES.some(language => language.code === idiomaAtual) ? idiomaAtual : "pt-BR";
-  const [translationLanguage, setTranslationLanguage] = useState(initialLanguage);
+  // O idioma em que a reunião foi transcrita é o original: escolhê-lo mostra a
+  // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
+  // G16: o original pode ser um idioma fora dos 10 da tela (o italiano, o
+  // coreano), que a lista de tradução ganha como opção à parte.
+  const idiomaOriginal = codigoDoIdiomaFalado(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // A tradução abre no idioma da tela, até a dona escolher outro. O link para
+  // um ponto da transcrição (?q da busca entre as reuniões, ?t da Memória e dos
+  // combinados) abre no ORIGINAL: o termo buscado e as falas com o tempo só
+  // existem nele, e a tradução no idioma da tela mostraria o texto corrido, sem
+  // o termo. Com o original, nenhum pedido de tradução sai antes da escolha.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
+  const translationLanguage = idiomaEscolhido ?? (pedeTranscricao && data?.transcript ? idiomaOriginal : initialLanguage);
+  const setTranslationLanguage = setIdiomaEscolhido;
   // O "Ver original" some com o aviso de tradução e deixa o foco aqui (T25).
   const seletorDaTraducao = useRef<HTMLSelectElement>(null);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
@@ -1183,9 +1245,6 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // Em processamento, a transcrição na tela é da tentativa anterior e está para
   // ser trocada: traduzir agora gastaria IA com um texto que vai sumir.
   const processandoAgora = data?.meeting.status === "processing";
-  // O idioma em que a reunião foi transcrita é o original: escolhê-lo mostra a
-  // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
-  const idiomaOriginal = idiomaDaReuniao(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   useEffect(() => {
     if (!data?.transcript || translationLanguage === idiomaOriginal || processandoAgora) { traducaoLonga.parar(); setTranslatedText(null); return; }
     // A tradução anterior sai antes do pedido novo: se ele falhar (cota, prazo),
@@ -1238,6 +1297,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
   const mostraFalas = falas.length > 0 && translationLanguage === idiomaOriginal;
+  // Os nomes que a dona deu às vozes, e o nome na tela da voz que toca sozinha (D2).
+  const nomesDasVozes = nomesDosFalantes(meeting.speakerNames);
+  const rotuloDaVoz = (falante: string) => nomesDasVozes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
   // A tela mostra a tradução da IA, ou espera a da reunião longa (T25): o aviso
   // diz que é tradução e leva ao original. A tradução que falhou deixa o
@@ -1318,6 +1380,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    {/* O título que a IA sugeriu com o resumo: só sugestão; a dona usa ou mantém o dela. */}
+    {meeting.status === "ready" && resumoGuardado.data?.tituloSugerido && <TituloSugerido meetingId={meetingId} emoji={emojiDoResumo} sugestao={resumoGuardado.data.tituloSugerido}/>}
+    {/* Os detalhes (H7c): etiquetas, "Onde foi", contato e contexto, em qualquer estado da reunião. Só a dona: o link aberto não os tem. */}
+    <DetalhesDaReuniao meetingId={meetingId} etiquetasSugeridas={etiquetasSugeridas}
+      detalhes={{ titulo: meeting.title, etiquetas: meeting.etiquetas, ondeFoi: meeting.ondeFoi, contato: meeting.contato, contexto: meeting.contexto }}/>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
       linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}
@@ -1431,11 +1498,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {tab === "transcript" && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="text-base font-semibold mb-4">{ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab")}</h2>
       {transcript ? <>
+        {/* G16: o que a IA reconheceu, com "Detectar sozinho". */}
+        <IdiomasDetectados escolha={meeting.language} idiomaDaTranscricao={transcript.language} segmentos={transcript.segments}/>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select ref={seletorDaTraducao} value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+              <OpcaoDoIdiomaOriginal idioma={idiomaOriginal}/>
               {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}{language.code === idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
@@ -1453,6 +1523,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             ? <>
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
               <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
+                soAVoz={soAVoz} aoOuvirSoAVoz={partesParaOuvir.length ? voz => player.current?.ouvirSoAVoz(voz) : undefined}
                 nomes={nomesDosFalantes(meeting.speakerNames)} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
@@ -1469,7 +1540,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
                 : <span key={i}>{s.texto}</span>)}</p>
             : <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{displayTranscript || transcript.transcript}</p>}
         </>}
-      </> : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
+      </> : meeting.audioPipeline === "slices" && aindaChegando && !ehDocumento
+        // G15a: a reunião em partes ainda em andamento (gravando em outra tela,
+        // recebendo as últimas partes ou montando a transcrição): o texto das
+        // partes que a fila já transcreveu, com o Pergunte sobre ele.
+        ? <TranscricaoDuranteAGravacao meetingId={meetingId} comPergunta/>
+        : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
     </section>}
     {/* As páginas do arquivo guardado (H12b), só para a dona e só na reunião de documento. */}
     {tab === "pages" && ehDocumento && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
@@ -1522,6 +1598,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         usuária não tem o que reportar. */}
     <BarraDoPlayer ref={definirPlayer} partes={partesParaOuvir}
       aviso={falhaNoAudio ? t("meetings.audioLoadError") : null}
+      falas={falas} soAVoz={soAVoz} rotuloDaVoz={soAVoz ? rotuloDaVoz(soAVoz) : undefined} aoMudarSoAVoz={setSoAVoz}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
   </main>;
 }

@@ -62,11 +62,18 @@ describe.skipIf(!temBanco)("Idioma da reunião e versão do aviso (integração)
     expect((await criada(semIdioma.id)).language).toBe("pt-BR");
   });
 
-  it("idioma fora dos 10 e versão de aviso desconhecida são recusados, sem gravar nada", async () => {
+  it("G16: \"Detectar sozinho\" e um idioma fora dos 10 da tela que a IA transcreve (italiano) são gravados", async () => {
+    const automatico = await caller().meetings.create({ title: "Reunião de idioma livre", consentGranted: true, language: "auto" });
+    expect((await criada(automatico.id)).language).toBe("auto");
+    const italiano = await caller().meetings.create({ title: "Riunione", consentGranted: true, language: "it-IT" });
+    expect((await criada(italiano.id)).language).toBe("it");
+  });
+
+  it("idioma que a IA não transcreve e versão de aviso desconhecida são recusados, sem gravar nada", async () => {
     const db = (await getDb())!;
     const antes = (await db.select({ id: meetings.id }).from(meetings).where(eq(meetings.ownerId, DONA))).length;
     for (const entrada of [
-      { title: "Reunião em italiano", consentGranted: true as const, language: "it" },
+      { title: "Reunião em klingon", consentGranted: true as const, language: "xx" },
       { title: "Reunião com aviso inventado", consentGranted: true as const, consentNoticeVersion: "2099-01-01" as never },
     ]) {
       const erro = await caller().meetings.create(entrada).then(() => null, e => e);

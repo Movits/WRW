@@ -51,6 +51,8 @@ const PROMPT_DE_ANTES = [
   "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). Quando quem falou ou quem ficou responsável é uma das vozes, escreva sempre o rótulo dela, exatamente assim, entre chaves (\"{F2} ficou de enviar a proposta\"), mesmo que o nome tenha sido dito na reunião: a tela troca o rótulo pelo nome. Em \"responsavel\", porém, o rótulo só serve para a voz que fala no trecho ou responde a ele: quem só é nomeado ali por outra voz vai pelo nome, do jeito que foi dito (se {F1} diz \"a Bia manda a planilha\" e a Bia não fala ali, o responsável é \"Bia\"). Use um nome também para quem não fala na reunião (alguém apenas citado), do jeito que foi dito. Nunca invente um nome para uma voz.",
   "Em cada item, \"trecho\" é uma cópia LITERAL de 5 a 30 palavras seguidas da transcrição, no idioma original dela (nunca traduzido), que sustenta o item. O trecho é só a fala, sem o rótulo de quem fala, e não emenda com reticências (\"[...]\") partes distantes da reunião.",
   "- emoji: um único emoji que represente o assunto principal da reunião.",
+  // O título sugerido pela IA (Pacote 5a): vale para todos os modelos, como o emoji.
+  "- titulo: um título curto para a reunião, de até 80 caracteres, no mesmo idioma do resto, que diga o assunto principal, como o título de uma nota. Sem emoji, sem data, sem aspas e sem nomes de pessoas ou rótulos de voz. Sem um assunto claro, null.",
   "- acoes: todos os próximos passos concretos combinados, até 7 (com mais, os 7 mais importantes), cada um uma frase curta no imperativo (\"Enviar a proposta revisada\"). \"responsavel\" e \"prazo\" só se foram ditos; se não, null.",
   "- foco: um parágrafo de 2 a 4 frases sobre o foco do trabalho na reunião. Sem foco claro, texto e trecho vazios.",
   "- tarefas: um item por assunto tratado, na ordem da reunião: \"assunto\" curto (até 6 palavras) e \"texto\" com 2 a 4 frases sobre o que foi combinado, quem ficou responsável e os prazos ditos.",
@@ -97,7 +99,7 @@ describe("os modelos do resumo", () => {
     expect(sistema).toContain(INSTRUCOES_DOS_MODELOS[modelo].contexto);
     // As mesmas seções, uma linha cada, na mesma ordem.
     const secoes = (texto: string) => texto.split("\n").filter(linha => /^- [a-z]+: /.test(linha)).map(linha => linha.slice(2, linha.indexOf(":")));
-    expect(secoes(sistema)).toEqual(["emoji", "acoes", "foco", "tarefas", "decisoes", "bloqueios", "questoes", "confianca"]);
+    expect(secoes(sistema)).toEqual(["emoji", "titulo", "acoes", "foco", "tarefas", "decisoes", "bloqueios", "questoes", "confianca"]);
     expect(secoes(sistema)).toEqual(secoes(geral.messages[0].content));
     // As regras de todos: dado não é instrução, o idioma, as vozes e o trecho literal.
     for (const regra of [

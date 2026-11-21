@@ -9,7 +9,7 @@ import { FotoIlegivel, fotosParaPdf } from "@/lib/pdf-de-fotos";
 import { mensagemDaRecusaDoDocumento, mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { DOCUMENTO_BYTES_MAX, ehRecusaDoDocumento, FOTOS_POR_DOCUMENTO_MAX, type OrigemDeDocumento } from "@shared/documento-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
-import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import type { EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
 
 /**
  * O resumo de um documento, no gravador (H12 e H12b do desenho do gravador):
@@ -39,7 +39,7 @@ type Foto = { id: string; arquivo: File; url: string };
  * A reunião de um envio que não terminou aceito. `incerta`: a rede caiu, e o
  * servidor pode ter ficado com o documento; essa reunião nunca sai sozinha.
  */
-type ReuniaoPendente = { id: string; titulo: string; idioma: IdiomaDaReuniao; origem: OrigemDeDocumento; incerta: boolean };
+type ReuniaoPendente = { id: string; titulo: string; idioma: EscolhaDoIdioma; origem: OrigemDeDocumento; incerta: boolean };
 
 const MB = 1_000_000;
 
@@ -72,7 +72,7 @@ async function pareceUmPdf(arquivo: Blob) {
 
 export function DocumentoParaResumir(props: {
   titulo: string;
-  idioma: IdiomaDaReuniao;
+  idioma: EscolhaDoIdioma;
   /** O aviso do título (vazio, curto ou longo), ou null quando ele serve. */
   validarTitulo: () => string | null;
   /** Ocupado enquanto prepara e envia: o gravador trava o título e o idioma. */

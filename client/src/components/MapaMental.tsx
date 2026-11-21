@@ -4,12 +4,12 @@ import { useTranslation } from "react-i18next";
 import { ChevronsDownUp, ChevronsUpDown, Loader2, Minus, Network, Plus, Sparkles } from "lucide-react";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
-import { LANGUAGES } from "@/i18n";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { AvisoDeConferir, mensagemDoErroDaIA } from "@/components/ReuniaoComIA";
 import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
-import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { escritoDaDireitaParaAEsquerda, idiomaFalado } from "@shared/idioma-da-reuniao";
+import { rotuloDoIdioma } from "@/lib/idiomas-na-tela";
 import { rotulosDoMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { ramoDasConexoes, useConexoesDaReuniao, type RamoDasConexoes } from "@/components/ConexoesDaReuniao";
 
@@ -212,7 +212,8 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
   </section>;
 }
 
-const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
+// G16: o idioma fora dos 10 da tela vai pelo nome no idioma de quem lê.
+const nomeNaTela = (codigo: string | null, tela: string) => rotuloDoIdioma(codigo, tela);
 
 /**
  * O estado da tradução dos rótulos (H11), como a aba Resumo o mostra: em curso,
@@ -220,12 +221,12 @@ const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.co
  * deixa o mapa no original e oferece "Tentar de novo".
  */
 function EstadoDaTraducao({ traducao, peloLink }: { traducao: TraducaoDoMapa; peloLink: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (traducao.estado === "traduzindo") {
     return <p role="status" className="text-xs text-amber-100/70"><Loader2 size={13} className="me-1.5 inline animate-spin"/>{t("meetings.mindMap.translating")}</p>;
   }
   if (traducao.estado === "pronta") {
-    return <p className="text-xs text-white/45">{t("meetings.mindMap.translationNotice", { idioma: nomeNaTela(traducao.idiomaOriginal) })}</p>;
+    return <p className="text-xs text-white/45">{t("meetings.mindMap.translationNotice", { idioma: nomeNaTela(traducao.idiomaOriginal, i18n.resolvedLanguage ?? i18n.language) })}</p>;
   }
   if (traducao.estado !== "erro") return null;
   return <div role="alert" className="flex flex-wrap items-center gap-3 text-xs text-amber-200/80">
@@ -262,11 +263,14 @@ function telaLarga() {
   return typeof window === "undefined" || typeof window.matchMedia !== "function" || window.matchMedia(TELA_DA_ARVORE).matches;
 }
 
-/** A direção do mapa: a do idioma em que ele foi escrito; sem idioma, a da página. */
+/**
+ * A direção do mapa: a do idioma em que ele foi escrito; sem idioma, a da
+ * página. G16: qualquer idioma que a IA transcreve (o hebraico e o persa
+ * também vão da direita para a esquerda).
+ */
 function direcaoDoMapa(idioma: string | null): "ltr" | "rtl" | undefined {
-  const codigo = idiomaDaReuniao(idioma);
-  if (!codigo) return undefined;
-  return LANGUAGES.find(lingua => lingua.code === codigo)?.dir === "rtl" ? "rtl" : "ltr";
+  if (!idiomaFalado(idioma)) return undefined;
+  return escritoDaDireitaParaAEsquerda(idioma) ? "rtl" : "ltr";
 }
 
 export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra }: {
@@ -291,7 +295,7 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra }:
   const alternar = (i: number) => setMudados(atual => ({ ...atual, [i]: !(atual[i] ?? padrao) }));
   const todos = (valor: boolean) => setMudados(Object.fromEntries(ramos.map((_, i) => [i, valor] as const)));
   const temFolhas = ramos.some(ramo => ramo.folhas.length > 0);
-  const codigo = idiomaDaReuniao(idioma);
+  const codigo = idiomaFalado(idioma);
 
   return <div>
     {temFolhas && <div className="mb-3 flex flex-wrap gap-2">

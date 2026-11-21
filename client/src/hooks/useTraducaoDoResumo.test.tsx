@@ -98,6 +98,18 @@ describe("useTraducaoDoResumo — para a dona", () => {
     expect(result.current.traduzirRotulo("__proto__")).toBe("__proto__");
   });
 
+  it("G16: o resumo num idioma fora dos 10 da tela (italiano) é traduzido para quem lê em pt-BR, e escolher o original para de traduzir", () => {
+    const { result } = renderHook(() => useTraducaoDoResumo({ meetingId: REUNIAO }, resumoDaDona(undefined, "it")));
+    expect(result.current.idiomaOriginal).toBe("it");
+    expect(result.current.estado).toBe("traduzindo");
+    expect(ultimoPedido(duble.daDona)[0]).toEqual({ meetingId: REUNIAO, idioma: "pt-BR" });
+    duble.daDona.mutate.mockClear();
+    act(() => result.current.escolher("it"));
+    expect(result.current.estado).toBe("original");
+    expect(result.current.idioma).toBe("it");
+    expect(duble.daDona.mutate).not.toHaveBeenCalled();
+  });
+
   it("'traduzindo': pergunta de novo a cada 5 s, até a tradução chegar", async () => {
     await telaEm("es");
     vi.useFakeTimers();

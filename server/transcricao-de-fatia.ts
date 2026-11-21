@@ -1,4 +1,4 @@
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, nomeDoIdioma, type EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
 import { gerarComAudioNoGemini } from "./gemini";
 
 /**
@@ -14,6 +14,17 @@ import { gerarComAudioNoGemini } from "./gemini";
  * em JSON. A fatia leva adiante as vozes já identificadas e as últimas falas da
  * fatia anterior, para o mesmo `F<n>` continuar sendo a mesma pessoa.
  *
+ * Com "Detectar sozinho" (G16, IDIOMA_AUTOMATICO), o prompt não diz o idioma, e
+ * cada fala volta com o código do idioma em que foi dita (`idioma`, opcional
+ * no contrato): a reunião pode mudar de idioma no meio, e cada parte reconhece
+ * o seu. A montagem fica com o idioma que mais aparece (idiomaPredominante, em
+ * shared/idioma-da-reuniao.ts), que é o do resumo. Com o idioma escolhido, o
+ * prompt e o esquema são os de sempre: nada muda nas reuniões que já têm
+ * idioma. O "sem traduzir" já estava no prompt e vale nos dois casos; a
+ * investigação do inglês no T25 (21/11/2026) mostrou que ele segura a frase
+ * inteira em outro idioma, mas não o inglês no meio de uma frase em português,
+ * e que pedir o idioma no esquema não piora a transcrição.
+ *
  * O modelo escreve o tempo DENTRO da fatia como texto "MM:SS" (o formato em que
  * o Gemini marca tempo de áudio), e o servidor o converte em segundos. Pedido
  * como número de segundos ("de 0 a 600"), ele escrevia os minutos e os segundos
@@ -27,10 +38,42 @@ import { gerarComAudioNoGemini } from "./gemini";
  * cortada (MAX_TOKENS) é erro, nunca transcrição pela metade gravada como se
  * fosse a inteira.
  */
-export type Segmento = { inicio: number; fim: number; falante: string; texto: string; lacuna?: true };
+export type Segmento = { inicio: number; fim: number; falante: string; texto: string; lacuna?: true; idioma?: string };
 
 /** O que a fatia anterior passa adiante. */
 export type ContextoDaFatiaAnterior = { falantes: string[]; ultimasFalas: Segmento[] };
+
+/**
+ * A marca que a junção que retranscreve (H17, server/juntar-reunioes.ts) põe
+ * no `result` da primeira parte que ela manda transcrever de cada reunião
+ * juntada: ali começa OUTRA conversa, com outras pessoas. A fila
+ * (server/fila-de-transcricao.ts) transcreve essa parte sem o contexto da
+ * anterior ("este trecho continua o anterior; use os mesmos rótulos" faria a
+ * IA dar às vozes novas os rótulos, e os nomes, de quem falou na outra
+ * reunião) e desloca os rótulos dela para depois dos já usados: a mesma
+ * pessoa pode ganhar dois rótulos, mas duas pessoas nunca se fundem num só. A
+ * marca fica no result também depois de transcrita.
+ */
+export const MARCA_DE_OUTRA_REUNIAO = "inicioDeOutraReuniao";
+
+export function ehInicioDeOutraReuniao(result: unknown): boolean {
+  return !!result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>)[MARCA_DE_OUTRA_REUNIAO] === true;
+}
+
+/** O número do rótulo da voz ("F3" é 3); o que não é rótulo vale 0. */
+export function numeroDoRotulo(falante: unknown): number {
+  const casou = typeof falante === "string" ? /^F([1-9]\d*)$/.exec(falante) : null;
+  return casou ? Number(casou[1]) : 0;
+}
+
+/** As falas com os rótulos das vozes deslocados em `deslocamento` (F1 vira F4 com 3); a lacuna e o que não é rótulo ficam. */
+export function deslocarRotulosDasFalas(segmentos: Segmento[], deslocamento: number): Segmento[] {
+  if (!deslocamento) return segmentos;
+  return segmentos.map(segmento => {
+    const numero = numeroDoRotulo(segmento.falante);
+    return numero && !segmento.lacuna ? { ...segmento, falante: `F${numero + deslocamento}` } : segmento;
+  });
+}
 
 export const DURACAO_DA_FATIA_SEGUNDOS = 600;
 // As últimas falas que vão no prompt da fatia seguinte, e o teto de letras delas.
@@ -81,6 +124,50 @@ const ESQUEMA_DA_RESPOSTA = {
   required: ["segmentos"],
 } as const;
 
+/** O código do idioma de cada fala, só com "Detectar sozinho" (G16). */
+export const PROPRIEDADE_DO_IDIOMA = { type: "STRING", description: 'O código do idioma em que a fala foi dita, como "pt", "en", "es", "it" ou "zh".' } as const;
+
+/**
+ * O esquema com "Detectar sozinho" (G16): cada fala ganha o `idioma`, DEPOIS do
+ * texto, para o modelo transcrever o que ouviu antes de dar nome ao idioma (o
+ * rótulo escrito antes poderia puxar o texto para ele).
+ */
+const ESQUEMA_DA_RESPOSTA_COM_IDIOMA = {
+  type: "OBJECT",
+  properties: {
+    segmentos: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { ...ESQUEMA_DA_RESPOSTA.properties.segmentos.items.properties, idioma: PROPRIEDADE_DO_IDIOMA },
+        required: [...ESQUEMA_DA_RESPOSTA.properties.segmentos.items.required, "idioma"],
+        propertyOrdering: [...ESQUEMA_DA_RESPOSTA.properties.segmentos.items.propertyOrdering, "idioma"],
+      },
+    },
+  },
+  required: ["segmentos"],
+} as const;
+
+/** O esquema da resposta para a escolha do idioma: com o `idioma` de cada fala só em "Detectar sozinho". */
+export function esquemaDaFatia(idioma: EscolhaDoIdioma) {
+  return idioma === IDIOMA_AUTOMATICO ? ESQUEMA_DA_RESPOSTA_COM_IDIOMA : ESQUEMA_DA_RESPOSTA;
+}
+
+/**
+ * A linha do idioma no prompt (a fatia e o vídeo do YouTube): o idioma
+ * escolhido, ou, em "Detectar sozinho", o pedido de reconhecer o idioma de cada
+ * fala, que pode mudar no meio. Nos dois, cada fala fica no idioma em que foi
+ * dita.
+ */
+export function linhaDoIdioma(idioma: EscolhaDoIdioma): string {
+  return idioma === IDIOMA_AUTOMATICO
+    ? "O idioma não foi informado: reconheça-o pela fala. A conversa pode ter mais de um idioma e mudar de idioma no meio; transcreva cada fala no idioma em que foi dita, sem traduzir."
+    : `O idioma predominante esperado é ${nomeDoIdioma(idioma)}; transcreva cada fala no idioma em que foi dita, sem traduzir.`;
+}
+
+/** A regra do campo `idioma` de cada fala, só em "Detectar sozinho". */
+export const REGRA_DO_IDIOMA_DA_FALA = '"idioma" é o código do idioma em que a fala foi dita ("pt", "en", "es", "it", "zh"...). Na fala que mistura idiomas, o da maior parte dela; na marca entre colchetes, o da fala em volta.';
+
 /** Segundos como o modelo os escreve: "MM:SS" ou, com horas, "H:MM:SS". */
 export function tempoEmTexto(segundos: number, comHoras = segundos >= 3600): string {
   const total = Math.max(0, Math.round(segundos));
@@ -90,7 +177,7 @@ export function tempoEmTexto(segundos: number, comHoras = segundos >= 3600): str
   return comHoras || horas ? `${horas}:${minutosESegundos}` : minutosESegundos;
 }
 
-export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
+export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
   // As partes têm até 12 min (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS); o "H:MM:SS"
   // só vale para a bancada, que aceita parte de qualquer tamanho.
   const comHoras = input.duracaoSegundos >= 3600;
@@ -104,7 +191,7 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
     : '"MM:SS" (minutos e segundos, cada um com dois dígitos: "00:07", "01:05", "09:58")';
   const linhas = [
     "Transcreva integralmente a fala deste trecho de áudio de uma reunião.",
-    `O idioma predominante esperado é ${nomeDoIdioma(input.idioma)}; transcreva cada fala no idioma em que foi dita, sem traduzir.`,
+    linhaDoIdioma(input.idioma),
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
     `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${tamanhoDoTrecho} de áudio: transcreva até o fim dele.`,
@@ -112,8 +199,10 @@ export function promptDaFatia(input: { idioma: IdiomaDaReuniao; duracaoSegundos:
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
     "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
   ];
+  let proximaRegra = 6;
+  if (input.idioma === IDIOMA_AUTOMATICO) linhas.push(`${proximaRegra++}) ${REGRA_DO_IDIOMA_DA_FALA}`);
   if (input.anterior && (input.anterior.falantes.length || input.anterior.ultimasFalas.length)) {
-    linhas.push(`6) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
+    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
     // Sem o tempo: o da fala anterior é absoluto (passa dos 600 s), e a regra 2
     // pede o tempo DENTRO do trecho; um exemplo com [10:23] ensinaria o modelo
     // a devolver tempos que o teto da parte achataria.
@@ -239,16 +328,18 @@ function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoS
   const itens = (bruto as { segmentos?: unknown })?.segmentos;
   if (!Array.isArray(itens)) throw new Error("A transcrição da parte veio sem a lista de falas.");
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
-  const falas: Array<{ inicio: TempoLido | null; fim: TempoLido | null; falante: unknown; texto: string }> = [];
+  const falas: Array<{ inicio: TempoLido | null; fim: TempoLido | null; falante: unknown; texto: string; idioma: string | null }> = [];
   let foraDoFormato = 0;
   for (const item of itens) {
-    const { inicio, fim, falante, texto } = (item ?? {}) as Record<string, unknown>;
+    const { inicio, fim, falante, texto, idioma } = (item ?? {}) as Record<string, unknown>;
     if (typeof texto !== "string") {
       foraDoFormato++;
       continue;
     }
     if (!texto.trim()) continue;
-    falas.push({ inicio: lerTempo(inicio), fim: lerTempo(fim), falante, texto: texto.trim() });
+    // O idioma da fala ("Detectar sozinho", G16) só fica se é um que a IA
+    // transcreve; outro valor some, sem derrubar a fala.
+    falas.push({ inicio: lerTempo(inicio), fim: lerTempo(fim), falante, texto: texto.trim(), idioma: idiomaFalado(typeof idioma === "string" ? idioma : null) });
   }
   // Tudo fora do formato não é silêncio: a parte ficaria transcrita sem fala, e
   // a montagem não abriria lacuna. Passageiro, como o JSON inválido.
@@ -282,6 +373,7 @@ function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoS
       fim: arredondar(inicioSegundos + ate),
       falante: rotulo,
       texto: fala.texto,
+      ...(fala.idioma ? { idioma: fala.idioma } : {}),
     });
   }
   // Avisos para quem acompanha a bancada e o log (só contagens, nunca a fala):
@@ -326,13 +418,15 @@ export async function transcreverFatia(input: {
   anterior?: ContextoDaFatiaAnterior;
   // A última tentativa da parte na fila (e a bancada, que tenta uma vez só).
   ultimaTentativa: boolean;
-}): Promise<{ segmentos: Segmento[]; idioma: IdiomaDaReuniao; modelo: string; tempos?: TemposDaParte }> {
-  const idioma = idiomaDaReuniao(input.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+}): Promise<{ segmentos: Segmento[]; idioma: EscolhaDoIdioma; modelo: string; tempos?: TemposDaParte }> {
+  // A escolha da reunião: um idioma falado (G16: os 10 da tela e os outros que
+  // a IA transcreve) ou "Detectar sozinho". Sem escolha que valha, o padrão.
+  const idioma = escolhaDoIdioma(input.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   const { texto, modelo } = await gerarComAudioNoGemini({
     audio: input.audio,
     mimeType: input.mimeType,
     prompt: promptDaFatia({ idioma, duracaoSegundos: input.duracaoSegundos, anterior: input.anterior }),
-    esquemaJson: ESQUEMA_DA_RESPOSTA,
+    esquemaJson: esquemaDaFatia(idioma),
   });
   let bruto: unknown;
   try {

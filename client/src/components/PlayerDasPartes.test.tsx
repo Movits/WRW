@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import {
-  CHAVE_DA_VELOCIDADE, PlayerDasPartes, destinoDoPulo, fimDaReuniao, localizar,
+  CHAVE_DA_VELOCIDADE, CHAVE_DOS_SILENCIOS, CONFERENCIA_DOS_TRECHOS_MS, PlayerDasPartes, destinoDoPulo, fimDaReuniao, localizar,
   type ControleDoPlayer, type ParteDoPlayer,
 } from "./PlayerDasPartes";
 
@@ -613,5 +613,135 @@ describe("PlayerDasPartes — uma gravação só para quem ouve (D1b)", () => {
     const rotulos = Array.from(document.querySelectorAll("[aria-label], [aria-valuetext]"))
       .map(e => `${e.getAttribute("aria-label") ?? ""} ${e.getAttribute("aria-valuetext") ?? ""}`).join(" ");
     expect(`${document.body.textContent} ${rotulos}`).not.toMatch(/meetings\./);
+  });
+});
+
+/**
+ * D2 (HN-26 e HN-79 do HiNoter): ouvir só uma voz e pular os silêncios. As
+ * falas vêm com os tempos em segundos; o player toca só os trechos de
+ * lib/trechos-para-tocar.ts (com as margens de 0,25 s antes e 0,75 s depois).
+ */
+const FALAS_D2 = [
+  { inicio: 10, fim: 20, falante: "F1", texto: "Bom dia." },
+  { inicio: 30, fim: 40, falante: "F2", texto: "Oi, tudo bem?" },
+  { inicio: 700, fim: 710, falante: "F1", texto: "Voltando ao contrato." },
+];
+
+/** O player com a voz escolhida guardada como a página guarda (o estado é dela). */
+function PlayerComVoz({ controle, aoMudar }: { controle: React.RefObject<ControleDoPlayer | null>; aoMudar?: (voz: string | null) => void }) {
+  const [voz, setVoz] = useState<string | null>(null);
+  return <PlayerDasPartes ref={controle} partes={PARTES} falas={FALAS_D2} soAVoz={voz} aoMudarSoAVoz={nova => { aoMudar?.(nova); setVoz(nova); }}/>;
+}
+
+describe("PlayerDasPartes — ouvir só uma voz e pular os silêncios (D2)", () => {
+  afterEach(() => { localStorage.removeItem(CHAVE_DOS_SILENCIOS); });
+
+  it("pular os silêncios: o botão liga e desliga e fica guardado; tocando, o player salta o intervalo sem fala", () => {
+    render(<PlayerDasPartes partes={PARTES} falas={FALAS_D2}/>);
+    const pular = botao("Pular os silêncios");
+    expect(pular).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(pular);
+    expect(pular).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem(CHAVE_DOS_SILENCIOS)).toBe("1");
+    // Do começo (silêncio até 9,75 s), o Tocar já vai à primeira fala.
+    fireEvent.click(botao("Tocar"));
+    expect(audio().currentTime).toBe(9.75);
+    expect(tocou()).toHaveBeenCalled();
+    // Entre as falas (20,75 a 29,75 s), o timeupdate salta à seguinte.
+    audio().currentTime = 25;
+    fireEvent.timeUpdate(audio());
+    expect(audio().currentTime).toBe(29.75);
+    // Desligado, o silêncio toca.
+    fireEvent.click(pular);
+    expect(localStorage.getItem(CHAVE_DOS_SILENCIOS)).toBe("0");
+    audio().currentTime = 45;
+    fireEvent.timeUpdate(audio());
+    expect(audio().currentTime).toBe(45);
+  });
+
+  it("a conferência não espera o timeupdate (a cada 250 ms no navegador): a cada 100 ms o player confere e salta", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval"] });
+    try {
+      localStorage.setItem(CHAVE_DOS_SILENCIOS, "1");
+      render(<PlayerDasPartes partes={PARTES} falas={FALAS_D2}/>);
+      expect(botao("Pular os silêncios")).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(botao("Tocar"));
+      audio().currentTime = 22;
+      act(() => { vi.advanceTimersByTime(CONFERENCIA_DOS_TRECHOS_MS); });
+      expect(audio().currentTime).toBe(29.75);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("depois da última fala, o player para ali; o Tocar seguinte recomeça da primeira", () => {
+    localStorage.setItem(CHAVE_DOS_SILENCIOS, "1");
+    const controle = createRef<ControleDoPlayer>();
+    render(<PlayerDasPartes ref={controle} partes={PARTES} falas={FALAS_D2}/>);
+    act(() => controle.current!.irPara(705));
+    fireEvent.loadedMetadata(audio());
+    expect(audio().currentTime).toBe(105);
+    pausou().mockClear();
+    audio().currentTime = 115;
+    fireEvent.timeUpdate(audio());
+    expect(pausou()).toHaveBeenCalled();
+    expect(botao("Tocar")).toBeInTheDocument();
+    fireEvent.click(botao("Tocar"));
+    expect(audio().getAttribute("src")).toBe("/a/0.m4a");
+    fireEvent.loadedMetadata(audio());
+    expect(audio().currentTime).toBe(9.75);
+  });
+
+  it("ouvir só uma voz: o controle avisa a página e toca a próxima fala dessa voz a partir de onde o player está", () => {
+    const controle = createRef<ControleDoPlayer>();
+    const aoMudar = vi.fn();
+    render(<PlayerComVoz controle={controle} aoMudar={aoMudar}/>);
+    act(() => controle.current!.ouvirSoAVoz("F2"));
+    expect(aoMudar).toHaveBeenCalledWith("F2");
+    expect(audio().currentTime).toBe(29.75);
+    expect(tocou()).toHaveBeenCalled();
+    // Depois da única fala da voz, para.
+    pausou().mockClear();
+    audio().currentTime = 41;
+    fireEvent.timeUpdate(audio());
+    expect(pausou()).toHaveBeenCalled();
+    // A partir de 25 s, a próxima fala da F1 está na parte 2 (700 s).
+    act(() => controle.current!.irPara(25));
+    act(() => controle.current!.ouvirSoAVoz("F1"));
+    expect(audio().getAttribute("src")).toBe("/a/1.m4a");
+    fireEvent.loadedMetadata(audio());
+    expect(audio().currentTime).toBe(99.75);
+  });
+
+  it("os 15 s, ouvindo só uma voz, contam só as falas dela: voltar da segunda fala cai na primeira, e não na fala de outra pessoa", () => {
+    const controle = createRef<ControleDoPlayer>();
+    render(<PlayerComVoz controle={controle}/>);
+    act(() => controle.current!.irPara(705));
+    fireEvent.loadedMetadata(audio());
+    act(() => controle.current!.ouvirSoAVoz("F1"));
+    fireEvent.click(botao("Retroceder 15 segundos"));
+    expect(audio().getAttribute("src")).toBe("/a/0.m4a");
+    fireEvent.loadedMetadata(audio());
+    // 5,25 s dentro da segunda fala (de 699,75): voltar 15 anda 5,25 nela e 9,75 na primeira (de 9,75 a 20,75).
+    expect(audio().currentTime).toBeCloseTo(11, 5);
+  });
+
+  it("o ▶ de um trecho de outra voz, com só uma voz ligada, volta a tocar todas, no ponto pedido", () => {
+    const controle = createRef<ControleDoPlayer>();
+    const aoMudar = vi.fn();
+    render(<PlayerComVoz controle={controle} aoMudar={aoMudar}/>);
+    act(() => controle.current!.ouvirSoAVoz("F2"));
+    aoMudar.mockClear();
+    act(() => controle.current!.irPara(15));
+    expect(aoMudar).toHaveBeenCalledWith(null);
+    expect(audio().currentTime).toBe(15);
+    audio().currentTime = 16;
+    fireEvent.timeUpdate(audio());
+    expect(audio().currentTime).toBe(16);
+  });
+
+  it("sem as falas (a transcrição antiga, sem vozes), não há o botão de pular os silêncios", () => {
+    render(<PlayerDasPartes partes={PARTES}/>);
+    expect(screen.queryByRole("button", { name: "Pular os silêncios" })).not.toBeInTheDocument();
   });
 });

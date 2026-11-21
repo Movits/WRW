@@ -50,7 +50,8 @@ const duble = vi.hoisted(() => {
       // A gravação em partes, o padrão desde a G13b: ao montar, a página retoma
       // o que ficou no aparelho, e para isso lê a conta e fala com o servidor.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
+      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
     },
     // O envio de cada parte da gravação em partes (a rota binária, fora do tRPC).
     enviarParte: vi.fn(),
@@ -99,6 +100,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      perguntarDuranteAGravacao: duble.registrar("perguntarDuranteAGravacao"),
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),

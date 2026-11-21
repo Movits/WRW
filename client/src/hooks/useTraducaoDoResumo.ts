@@ -5,7 +5,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, idiomaFalado, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 
 /**
  * A tradução do resumo guardado (H11) para quem lê: começa no idioma da tela,
@@ -48,12 +48,13 @@ type Pronta = Extract<Resposta, { estado: "pronta" }>;
 export type EstadoDaTraducaoDoResumo = "inativa" | "original" | "traduzindo" | "pronta" | "erro";
 
 export type TraducaoDoResumoNaTela = {
-  idioma: IdiomaDaReuniao;
+  /** O idioma escolhido: um dos 10 da tela, ou o original (G16: pode ser outro idioma que a IA transcreve). */
+  idioma: IdiomaFalado;
   /** O idioma em que o resumo foi escrito; null sem resumo pronto. */
-  idiomaOriginal: IdiomaDaReuniao | null;
+  idiomaOriginal: IdiomaFalado | null;
   estado: EstadoDaTraducaoDoResumo;
   erro: unknown;
-  escolher: (idioma: IdiomaDaReuniao) => void;
+  escolher: (idioma: IdiomaFalado) => void;
   tentarDeNovo: () => void;
   /** O resumo com os textos no idioma escolhido, com a tradução pronta; senão, o mesmo resumo. */
   aplicar: <T extends Resumo>(resumo: T | undefined) => T | undefined;
@@ -94,12 +95,14 @@ export function useTraducaoDoResumo(alvo: Alvo, resumo: Resumo | undefined, rotu
   // O idioma RESOLVIDO da tela: o pedido pode ser regional ("en-US").
   const idiomaDaTela = idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // null: acompanha o idioma da tela.
-  const [escolhido, setEscolhido] = useState<IdiomaDaReuniao | null>(null);
+  const [escolhido, setEscolhido] = useState<IdiomaFalado | null>(null);
   const idioma = escolhido ?? idiomaDaTela;
 
   const pronto = resumoNaTela(resumo);
-  // Como o servidor: o resumo sem idioma gravado conta como o padrão.
-  const idiomaOriginal = pronto ? idiomaDaReuniao(pronto.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO : null;
+  // Como o servidor: o resumo sem idioma gravado conta como o padrão. G16: o
+  // resumo pode estar num idioma fora dos 10 da tela (o italiano), e quem lê
+  // em português recebe a tradução, como de qualquer outro idioma.
+  const idiomaOriginal = pronto ? idiomaFalado(pronto.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO : null;
   // Há o que traduzir: um item à vista ou um rótulo do mapa pronto.
   const ativa = !!pronto && (pronto.itens.length > 0 || (rotulosDoMapa?.length ?? 0) > 0);
   const precisa = ativa && idioma !== idiomaOriginal;
@@ -155,8 +158,12 @@ export function useTraducaoDoResumo(alvo: Alvo, resumo: Resumo | undefined, rotu
       novaTentativa.parar();
       setErro(falha);
     };
-    if (alvo.token !== undefined) doLink.mutate({ token: alvo.token, idioma }, { onSuccess: aoResponder, onError: aoFalhar });
-    else daDona.mutate({ meetingId: alvo.meetingId, idioma }, { onSuccess: aoResponder, onError: aoFalhar });
+    // Só se traduz para um dos 10 da tela: o outro idioma da lista é o original,
+    // que não chega aqui (precisa é falso).
+    const destino = idiomaDaReuniao(idioma);
+    if (!destino) return;
+    if (alvo.token !== undefined) doLink.mutate({ token: alvo.token, idioma: destino }, { onSuccess: aoResponder, onError: aoFalhar });
+    else daDona.mutate({ meetingId: alvo.meetingId, idioma: destino }, { onSuccess: aoResponder, onError: aoFalhar });
   };
 
   useEffect(() => {

@@ -54,7 +54,8 @@ const duble = vi.hoisted(() => {
       networkInteligente: { pendencias: { reset: vi.fn() } },
       // A gravação em partes (G9; o padrão do /gravar desde a G13b) chama o servidor por aqui.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() } } },
+      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
     },
     enviarParte: vi.fn(),
     // A cópia no aparelho (G9): o teste da cópia que falta (G13b) a faz falhar,
@@ -105,6 +106,7 @@ vi.mock("@/lib/trpc", () => ({
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       traduzirResumo: duble.registrar("traduzirResumo"),
       perguntar: duble.registrar("perguntar"),
+      perguntarDuranteAGravacao: duble.registrar("perguntarDuranteAGravacao"),
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
     },
     reuniaoAberta: { pedirResumo: duble.registrar("pedirResumoPeloLink"), perguntar: duble.registrar("perguntarPeloLink"), traduzirResumo: duble.registrar("traduzirResumoPeloLink") },
@@ -516,6 +518,111 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
     expect(iniciarGravacao.mutate).not.toHaveBeenCalled();
     expect(duble.enviarParte).not.toHaveBeenCalled();
   });
+
+  // G17: o fone Bluetooth que cai no meio da gravação. A trilha falsa tem o
+  // readyState e o "ended" do navegador. O relógio de parede é falso só para a
+  // parte que caiu ter duração (a de menos de 1 s não sai); o setTimeout fica
+  // real, para o waitFor.
+  it("G17: o microfone que cai: o cartão avisa, a gravação espera sem encerrar e segue sozinha quando outro microfone abre; a parte que caiu sobe como as outras", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["Date"] });
+    try {
+      const ouvintes = new Set<() => void>();
+      const trilha = {
+        readyState: "live", stop: vi.fn(),
+        addEventListener: (tipo: string, ouvinte: () => void) => { if (tipo === "ended") ouvintes.add(ouvinte); },
+        removeEventListener: (tipo: string, ouvinte: () => void) => { ouvintes.delete(ouvinte); },
+      };
+      const outra = { readyState: "live", stop: vi.fn() };
+      let liberarOutro: (fluxo: unknown) => void = () => {};
+      const getUserMedia = vi.fn()
+        .mockResolvedValueOnce({ getTracks: () => [trilha], getAudioTracks: () => [trilha] })
+        .mockImplementationOnce(() => new Promise(resolver => { liberarOutro = resolver; }));
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+      abrirEmPartes();
+      preencher();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+      await screen.findByRole("button", { name: /Encerrar gravação/ });
+      vi.setSystemTime(Date.now() + 60_000);
+      await act(async () => {
+        trilha.readyState = "ended";
+        for (const ouvinte of Array.from(ouvintes)) ouvinte();
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("O microfone desconectou");
+      expect(screen.getByText("Sem microfone: esperando")).toBeInTheDocument();
+      // Nada a pausar sem microfone; o Encerrar e o Descartar continuam.
+      expect(screen.queryByRole("button", { name: "Pausar" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Descartar gravação/ })).toBeInTheDocument();
+      await waitFor(() => expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String)));
+      expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
+      expect(getUserMedia).toHaveBeenCalledTimes(2);
+      // Outro microfone (o do aparelho) abre: a gravação segue, e a tela avisa.
+      await act(async () => { liberarOutro({ getTracks: () => [outra], getAudioTracks: () => [outra] }); });
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Pausar" })).toBeInTheDocument();
+      expect(toast.success).toHaveBeenCalledWith("O microfone voltou: a gravação seguiu.", expect.objectContaining({ id: "gravacao-microfone" }));
+      vi.setSystemTime(Date.now() + 30_000);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+      await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 2 }));
+      expect(outra.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+    // A tela inteira, com o envio das partes: na máquina carregada (outros
+    // agentes rodando testes ao mesmo tempo), passava dos 5 s do padrão.
+  }, 20_000);
+
+  it("G17: sem microfone, o Tentar de novo do cartão pede o microfone na hora", async () => {
+    const ouvintes = new Set<() => void>();
+    const trilha = {
+      readyState: "live", stop: vi.fn(),
+      addEventListener: (tipo: string, ouvinte: () => void) => { if (tipo === "ended") ouvintes.add(ouvinte); },
+      removeEventListener: (tipo: string, ouvinte: () => void) => { ouvintes.delete(ouvinte); },
+    };
+    const getUserMedia = vi.fn()
+      .mockResolvedValueOnce({ getTracks: () => [trilha], getAudioTracks: () => [trilha] })
+      .mockRejectedValue(new DOMException("negado", "NotAllowedError"));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    abrirEmPartes();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    await screen.findByRole("button", { name: /Encerrar gravação/ });
+    await act(async () => {
+      trilha.readyState = "ended";
+      for (const ouvinte of Array.from(ouvintes)) ouvinte();
+    });
+    // O navegador recusou o microfone na volta: o cartão diz como liberar.
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Libere o microfone para este site"));
+    const pedidos = getUserMedia.mock.calls.length;
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" })); });
+    expect(getUserMedia.mock.calls.length).toBe(pedidos + 1);
+  }, 20_000);
+
+  it("G15a: durante a gravação, o texto das partes que a fila já transcreveu aparece no gravador, com o atraso e o Pergunte sobre o que já foi dito", async () => {
+    const consulta = duble.utils.client.meetings.transcricaoDaGravacao;
+    const original = consulta.query;
+    const pedidos: unknown[] = [];
+    consulta.query = async (entrada: unknown) => {
+      pedidos.push(entrada);
+      return {
+        status: "recording", emPartes: true, agora: Date.now(), nomes: {},
+        partes: [{ seq: 0, estado: "transcrita", inicioSegundos: 0, duracaoSegundos: 600, chegouEm: Date.now() - 90_000, prontaEm: Date.now(), atrasoSegundos: 90 }],
+        falas: [{ seq: 0, segmentos: [{ inicio: 4, fim: 9, falante: "F1", texto: "Bom dia, Bia, vamos falar da feira." }] }],
+      };
+    };
+    try {
+      abrirEmPartes();
+      preencher();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+      expect(await screen.findByText("Bom dia, Bia, vamos falar da feira.")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Transcrição até agora" })).toBeInTheDocument();
+      expect(screen.getByText(/texto pronto 1 min 30 s depois de a parte chegar/)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+      expect(pedidos).toEqual([{ meetingId: VINICOLA, desde: 0 }]);
+    } finally {
+      consulta.query = original;
+    }
+  }, 20_000);
 });
 
 describe("Reuniões — gravação longa no celular (G10)", () => {

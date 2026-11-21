@@ -236,6 +236,30 @@ describe("o pedido ao Gemini: o vídeo por fileUri, só a primeira hora", () => 
   });
 });
 
+describe("G16: \"Detectar sozinho\" e os outros idiomas no vídeo", () => {
+  it("em \"Detectar sozinho\", o prompt não diz o idioma, o esquema pede o código de cada fala depois do texto, e cada fala volta com ele", async () => {
+    responder(comSegmentos([
+      { inicio: "00:01", fim: "00:30", falante: "F1", texto: "Welcome to the channel.", idioma: "en" },
+      { inicio: "00:31", fim: "00:40", falante: "F1", texto: "Hoje falamos de exportação.", idioma: "pt" },
+    ]));
+    const resultado = await youtube.transcreverVideoDoYoutube({ url: CANONICA, idioma: "auto" });
+    const texto = pedidos[0].corpo.contents[0].parts[1].text as string;
+    expect(texto).toContain("O idioma não foi informado");
+    expect(texto).not.toContain("predominante esperado");
+    expect(texto).toContain('8) "idioma" é o código do idioma');
+    const item = pedidos[0].corpo.generationConfig.responseSchema.properties.segmentos.items;
+    expect(item.propertyOrdering).toEqual(["inicio", "fim", "falante", "texto", "idioma"]);
+    expect(resultado.segmentos.map(segmento => segmento.idioma)).toEqual(["en", "pt-BR"]);
+  });
+
+  it("com o idioma escolhido, o esquema não pede o idioma de cada fala; um idioma fora dos 10 vai pelo nome em português", async () => {
+    responder(comSegmentos([{ inicio: "00:01", fim: "00:02", falante: "F1", texto: "Ciao." }]));
+    await youtube.transcreverVideoDoYoutube({ url: CANONICA, idioma: "it" });
+    expect(pedidos[0].corpo.contents[0].parts[1].text).toContain("O idioma predominante esperado é italiano;");
+    expect(pedidos[0].corpo.generationConfig.responseSchema.properties.segmentos.items.properties).not.toHaveProperty("idioma");
+  });
+});
+
 describe("os tempos da resposta", () => {
   it("lê os tempos em texto \"MM:SS\" como segundos desde o começo do vídeo, em ordem", async () => {
     responder(comSegmentos([

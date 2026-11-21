@@ -52,11 +52,13 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     // A tradução do resumo relê o resumo quando o servidor diz que ele mudou.
     useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } }),
-    // O "Pergunte à reunião" de verdade pede as duas mutações de pergunta a
-    // cada render; a tradução do resumo da dona nunca é chamada aqui.
+    // O "Pergunte à reunião" de verdade pede as três mutações de pergunta a
+    // cada render (a da dona, a da gravação em curso, G15a, e a do link); a
+    // tradução do resumo da dona nunca é chamada aqui.
     meetings: {
       traduzirResumo: { useMutation: () => duble.traduzirResumoDaDona },
       perguntar: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+      perguntarDuranteAGravacao: { useMutation: () => ({ data: undefined, mutate: vi.fn(), isPending: false, isError: false, error: null }) },
     },
     reuniaoAberta: {
       ver: {
@@ -330,6 +332,17 @@ describe("Reunião aberta pelo link", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "en" } });
     expect(duble.traduzir.mutate).not.toHaveBeenCalled();
     expect(screen.getByText("We agreed on Friday.")).toBeInTheDocument();
+  });
+
+  it("G16: reunião em italiano pelo link, com a tela em pt-BR: traduz, e a lista ganha \"Italiano (original)\", que volta ao original", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "Abbiamo concordato venerdì.", idioma: "it" } }));
+    abrirNaTranscricao();
+    expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "pt-BR" }, expect.anything());
+    expect(screen.getByRole("option", { name: "Italiano (original)" })).toBeInTheDocument();
+    duble.traduzir.mutate.mockClear();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "it" } });
+    expect(duble.traduzir.mutate).not.toHaveBeenCalled();
+    expect(screen.getByText("Abbiamo concordato venerdì.")).toBeInTheDocument();
   });
 
   it("reunião longa: 'em andamento' mostra o aviso e pergunta de novo em 5 s (G8)", async () => {
@@ -655,6 +668,21 @@ describe("Reunião aberta pelo link — os nomes das vozes (H3b)", () => {
     expect(tempoDeFala).toHaveTextContent("Ana");
     expect(tempoDeFala).toHaveTextContent("Falante 2");
     expect(screen.queryByTitle("Dar nome a esta voz")).not.toBeInTheDocument();
+  });
+
+  // D2 no link: ouvir só uma voz com o nome que o link já recebeu (H3b); só
+  // troca o que toca e o que a lista mostra, sem pedir nada novo ao servidor.
+  it("ouvir só uma voz pelo link: o botão usa o nome que o link recebeu, e a barra diz qual voz toca", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    duble.ver.mockReturnValue(pronta({ ...COM_FALAS, vozes: { F1: "Ana" } }));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir só a voz de Ana" }));
+    const barra = screen.getByRole("region", { name: "Gravação" });
+    expect(within(barra).getByText("Ouvindo só: Ana")).toBeInTheDocument();
+    expect(within(document.querySelector("ol")!).queryByText("Tchau.")).not.toBeInTheDocument();
+    fireEvent.click(within(barra).getByRole("button", { name: "Ouvir todas as vozes" }));
+    expect(within(document.querySelector("ol")!).getByText("Tchau.")).toBeInTheDocument();
   });
 
   it("link ligado com a confirmação antiga: o servidor manda vozes vazio, e toda voz é 'Falante n'", () => {

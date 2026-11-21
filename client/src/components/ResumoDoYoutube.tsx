@@ -4,11 +4,11 @@ import { useLocation } from "wouter";
 import { CircleAlert, Loader2, MonitorPlay, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { LANGUAGES } from "@/i18n";
 import { fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
+import { DicaDoIdiomaDaReuniao, SeletorDoIdiomaDaReuniao } from "@/components/SeletorDoIdiomaDaReuniao";
 import { rotaDaReuniao } from "@shared/rotas";
 import {
   idDoVideoDoYoutube, SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE, VERSAO_VIGENTE_DO_AVISO_DO_YOUTUBE,
@@ -32,7 +32,7 @@ export function ResumoDoYoutube() {
   const [aberto, setAberto] = useState(false);
   const [titulo, setTitulo] = useState("");
   const [link, setLink] = useState("");
-  const [idioma, setIdioma] = useState<IdiomaDaReuniao>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
+  const [idioma, setIdioma] = useState<EscolhaDoIdioma>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
   const [consentimento, setConsentimento] = useState(false);
   // Os avisos dos campos só aparecem depois da primeira tentativa de enviar.
   const [tentou, setTentou] = useState(false);
@@ -115,10 +115,9 @@ export function ResumoDoYoutube() {
           </div>
           <div>
             <label htmlFor={ids.idioma} className="text-sm text-white/70">{t("meetings.youtube.languageLabel")}</label>
-            <select id={ids.idioma} value={idioma} disabled={pedir.isPending}
-              onChange={evento => setIdioma(idiomaDaReuniao(evento.target.value) ?? IDIOMA_DA_REUNIAO_PADRAO)} className={campo}>
-              {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}</option>)}
-            </select>
+            {/* G16: "Detectar sozinho", os 10 da tela e os outros idiomas que a IA transcreve. */}
+            <SeletorDoIdiomaDaReuniao id={ids.idioma} valor={idioma} desligado={pedir.isPending} aoMudar={setIdioma} className={campo}/>
+            {idioma === IDIOMA_AUTOMATICO && <DicaDoIdiomaDaReuniao valor={idioma} className="mt-1.5 text-xs text-white/40"/>}
           </div>
           <p id={ids.aviso} className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80">
             <CircleAlert size={16} className="me-2 inline" aria-hidden/>{t("meetings.youtube.notice", { minutos: SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX / 60, n: VIDEOS_DO_YOUTUBE_POR_DIA })}

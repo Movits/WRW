@@ -1112,6 +1112,15 @@ export const meetings = mysqlTable("meetings", {
   // Fica em texto, não em hash, porque a dona copia o link de novo depois; quem
   // lê esta tabela já lê a transcrição (server/link-aberto-da-reuniao.ts).
   shareToken: varchar("share_token", { length: 64 }),
+  // Os detalhes da reunião (H7c do plano do gravador): as etiquetas que a dona
+  // dá à reunião (["Clientes", "Mentoria"]; o vocabulário da tela é
+  // "etiqueta") e "Onde foi" (o lugar ou o canal, em texto livre). Nulos: sem
+  // etiqueta e sem lugar. Só a dona os lê (a lista e o detalhe escolhem as
+  // colunas, em server/meeting-service.ts); o link aberto não os leva. A
+  // normalização (tamanho, quantidade, repetidas) mora em
+  // shared/detalhes-da-reuniao.ts.
+  etiquetas: jsonCompat("etiquetas").$type<string[]>(),
+  ondeFoi: varchar("onde_foi", { length: 120 }),
   // A senha de 6 dígitos do link aberto (H23), que a dona liga, troca e tira.
   // Só o hash (scrypt com sal, server/senha-do-link-aberto.ts): a senha em
   // texto sai uma vez, para a dona, na hora de criar ou trocar. Nulo: o link
@@ -1136,6 +1145,10 @@ export const meetings = mysqlTable("meetings", {
   pipelineStatusIdx: index("meetings_pipeline_status_idx").on(table.audioPipeline, table.status),
   // O link aberto acha a reunião pelo token; o MySQL aceita vários nulos.
   shareTokenUnique: uniqueIndex("meetings_share_token_unique").on(table.shareToken),
+  // Excluir um contexto anula o ponteiro das reuniões da dona que estavam nele
+  // (deleteContext, em server/db.ts), e o filtro por contexto acha as reuniões
+  // dele, sem varrer as reuniões da dona.
+  ownerContextIdx: index("meetings_owner_context_idx").on(table.ownerId, table.contextId),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
@@ -1339,6 +1352,15 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   language: varchar("language", { length: 12 }),
   // O emoji do título, como no app de referência da cliente. Nulo: sem emoji.
   emoji: varchar("emoji", { length: 16 }),
+  // O título sugerido pela IA, escrito com o resumo, como no app de referência
+  // da cliente ("📱 Preparação e validação do aplicativo": o emoji acima e a
+  // data da reunião ficam fora do texto). É só sugestão: o título da reunião
+  // muda quando a dona toca em "Usar este título", e nunca sozinho. Nulo: a IA
+  // não sugeriu (ou o resumo é de antes da sugestão).
+  suggestedTitle: varchar("suggested_title", { length: 200 }),
+  // pending: a dona ainda não decidiu; confirmed: usou; ignored: manteve o
+  // dela. Enum só no TypeScript, como o status do resumo.
+  suggestedTitleStatus: varchar("suggested_title_status", { length: 12, enum: ["pending", "confirmed", "ignored"] }),
   // O id do modelo de IA que escreveu o resumo.
   model: varchar("model", { length: 80 }),
   // Sobe a cada resumo que a fila grava, e só aí: editar ou acrescentar um item

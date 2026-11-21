@@ -37,7 +37,7 @@ vi.mock("@/lib/trpc", async () => {
   });
   return {
     trpc: {
-      meetings: { perguntar: mutacao("perguntar") },
+      meetings: { perguntar: mutacao("perguntar"), perguntarDuranteAGravacao: mutacao("perguntarDuranteAGravacao") },
       // A página do link aberto pede pelo token, num router público à parte.
       reuniaoAberta: { perguntar: mutacao("perguntarPeloLink") },
     },
@@ -304,5 +304,70 @@ describe("Pergunte ao documento (H12)", () => {
   it("o trecho do item do resumo também fala do documento", () => {
     render(<Trecho texto="a feira será em março" documento />);
     expect(screen.getByText("Trecho do documento")).toBeInTheDocument();
+  });
+});
+
+describe("Pergunte durante a gravação (G15a)", () => {
+  it("pergunta pela rota da gravação, com os textos dela, e nunca pela pergunta de sempre", () => {
+    duble.respostas.perguntarDuranteAGravacao = respondida("O estande fica pronto em março.", { trecho: "O estande fica pronto em março.", inicioSegundos: 12 });
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+    expect(screen.getByText(/A IA lê só o texto das partes já transcritas/)).toBeInTheDocument();
+    perguntarAgora("Quando fica pronto o estande?");
+    expect(duble.chamadas.perguntarDuranteAGravacao).toEqual([{ meetingId: ID, idioma: "pt-BR", pergunta: "Quando fica pronto o estande?" }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+    expect(screen.getByText("O estande fica pronto em março.", { selector: "p" })).toBeInTheDocument();
+    // Sem player na gravação: o tempo do trecho é só informação.
+    expect(screen.getByText("00:12")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("o texto até agora que não responde, e a recusa de quando nada foi transcrito ainda, falam da gravação em curso", () => {
+    duble.respostas.perguntarDuranteAGravacao = { respondida: false };
+    const { unmount } = render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByText("O texto transcrito até agora não responde a esta pergunta.")).toBeInTheDocument();
+    unmount();
+    duble.respostas.perguntarDuranteAGravacao = erroDoServidor("PRECONDITION_FAILED", "Esta reunião ainda não tem transcrição pronta para a IA ler.");
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByRole("alert")).toHaveTextContent("Ainda não há texto transcrito para a IA ler. Espere a primeira parte ficar pronta.");
+  });
+});
+
+describe("H6b: as sugestões prontas do Pergunte", () => {
+  it("as cinco sugestões ficam num grupo com nome: decisões-chave, ações, revisão, e-mail e conceitos", () => {
+    render(<PergunteAReuniao meetingId={ID} />);
+    const grupo = screen.getByRole("group", { name: "Sugestões" });
+    expect(within(grupo).getAllByRole("button").map(botao => botao.textContent)).toEqual([
+      "Decisões-chave", "Ações e responsáveis", "Revisão rápida", "Rascunho de e-mail", "Conceitos citados",
+    ]);
+  });
+
+  it("a sugestão manda a pergunta dela, no idioma da tela, pelo mesmo procedimento da digitada, e mostra a pergunta feita", () => {
+    duble.respostas.perguntar = respondida("Decidiram não renovar com a transportadora.", semTempo("Decidimos não renovar o contrato com a transportadora."));
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "Decisões-chave" }));
+    expect(duble.chamadas.perguntar).toEqual([{ meetingId: ID, idioma: "pt-BR", pergunta: "Quais foram as decisões-chave?" }]);
+    expect(screen.getByText("Quais foram as decisões-chave?")).toBeInTheDocument();
+    expect(screen.getByText("Decidiram não renovar com a transportadora.")).toBeInTheDocument();
+    // O campo fica como estava: a sugestão não apaga o que a dona digitava.
+    expect(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" })).toHaveValue("");
+  });
+
+  it("pelo link aberto, a sugestão vai pelo token", () => {
+    duble.respostas.perguntarPeloLink = { respondida: false };
+    render(<PergunteAReuniao token="token-do-link" />);
+    fireEvent.click(screen.getByRole("button", { name: "Rascunho de e-mail" }));
+    expect(duble.chamadas.perguntarPeloLink).toEqual([{ token: "token-do-link", idioma: "pt-BR", pergunta: "Escreva um rascunho curto de e-mail de retorno com o que foi combinado." }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+  });
+
+  it("com a tela em árabe, a sugestão e a pergunta vão em árabe", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.respostas.perguntar = { respondida: false };
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "القرارات الرئيسية" }));
+    expect(duble.chamadas.perguntar).toEqual([{ meetingId: ID, idioma: "ar", pergunta: "ما القرارات الرئيسية التي اتُّخذت؟" }]);
   });
 });

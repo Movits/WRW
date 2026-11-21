@@ -1,5 +1,5 @@
 import { ENV } from "./_core/env";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -165,22 +165,60 @@ export async function embedManyWithGemini(texts: string[], taskType: "RETRIEVAL_
 
 type RespostaGeracao = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
 
+// "Detectar sozinho" (G16) no envio único: a resposta vem em JSON, com a
+// transcrição e o código do idioma que mais aparece na fala.
+const ESQUEMA_DA_TRANSCRICAO_COM_IDIOMA = {
+  type: "OBJECT",
+  properties: {
+    transcricao: { type: "STRING" },
+    idioma: { type: "STRING", description: 'O código do idioma em que a maior parte da fala foi dita, como "pt", "en", "es", "it" ou "zh".' },
+  },
+  required: ["transcricao", "idioma"],
+  propertyOrdering: ["transcricao", "idioma"],
+} as const;
+
+const INSTRUCAO_DO_IDIOMA_AUTOMATICO = " O idioma não foi informado: reconheça-o pela fala. A conversa pode ter mais de um idioma e mudar de idioma no meio; transcreva cada fala no idioma em que foi dita, sem traduzir.";
+
+/** A resposta de "Detectar sozinho" (o JSON do ESQUEMA_DA_TRANSCRICAO_COM_IDIOMA): o texto e o idioma (o padrão, se ele não veio ou não é da lista). */
+export function transcricaoComIdioma(resposta: string): { text: string; language: string } {
+  let lida: { transcricao?: unknown; idioma?: unknown } | null;
+  try {
+    lida = JSON.parse(resposta) as typeof lida;
+  } catch (erro) {
+    throw new Error("O Gemini não retornou uma transcrição válida.", { cause: erro });
+  }
+  const text = typeof lida?.transcricao === "string" ? lida.transcricao.trim() : "";
+  if (!text) throw new Error("O Gemini não retornou uma transcrição válida.");
+  return { text, language: idiomaFalado(typeof lida?.idioma === "string" ? lida.idioma : null) ?? IDIOMA_DA_REUNIAO_PADRAO };
+}
+
 /**
  * `language` é o código que veio da tela ou do banco ('pt', 'pt-BR', 'en-US'...).
  * O prompt leva o NOME do idioma (nomeDoIdioma), e a resposta devolve o código
- * normalizado, que é o que se grava. Sem idioma, ou com um fora da lista, o
- * prompt não pede idioma e o código devolvido é o padrão (pt-BR).
+ * normalizado, que é o que se grava. Sem idioma, ou com um que a IA não
+ * transcreve, o prompt não pede idioma e o código devolvido é o padrão (pt-BR).
+ * Os idiomas falados (G16) são os 10 da tela e os outros que a IA transcreve.
+ *
+ * Com "Detectar sozinho" (G16, 'auto'), o prompt não diz o idioma e pede cada
+ * fala no idioma em que foi dita; a resposta vem em JSON, com o código do
+ * idioma que mais aparece, que é o que se grava (transcricaoComIdioma).
  */
 export async function transcribeWithGemini(input: { audio: Buffer; mimeType: string; language?: string }) {
-  const idioma = idiomaDaReuniao(input.language);
-  const languageInstruction = idioma ? ` O idioma predominante esperado é ${nomeDoIdioma(idioma)}.` : "";
+  const automatico = escolhaDoIdioma(input.language) === IDIOMA_AUTOMATICO;
+  const idioma = automatico ? null : idiomaFalado(input.language);
+  const languageInstruction = automatico ? INSTRUCAO_DO_IDIOMA_AUTOMATICO : idioma ? ` O idioma predominante esperado é ${nomeDoIdioma(idioma)}.` : "";
+  const pedido = automatico
+    ? 'Transcreva integralmente a fala deste áudio de reunião. Preserve nomes próprios, empresas, números, telefones e e-mails. Em "transcricao", somente a transcrição em texto, sem resumo e sem comentários; em "idioma", o código do idioma que mais aparece na fala.'
+    : "Transcreva integralmente a fala deste áudio de reunião. Preserve nomes próprios, empresas, números, telefones e e-mails. Retorne somente a transcrição em texto, sem resumo e sem comentários.";
   const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
   const corpo = {
     contents: [{ parts: [
-      { text: `Transcreva integralmente a fala deste áudio de reunião. Preserve nomes próprios, empresas, números, telefones e e-mails. Retorne somente a transcrição em texto, sem resumo e sem comentários.${languageInstruction}` },
+      { text: `${pedido}${languageInstruction}` },
       { inline_data: { mime_type: geminiMimeType, data: input.audio.toString("base64") } },
     ] }],
-    generationConfig: { temperature: 0 },
+    generationConfig: automatico
+      ? { temperature: 0, responseMimeType: "application/json", responseSchema: ESQUEMA_DA_TRANSCRICAO_COM_IDIOMA }
+      : { temperature: 0 },
   };
 
   const modelo = modeloDeAudio();
@@ -208,6 +246,7 @@ export async function transcribeWithGemini(input: { audio: Buffer; mimeType: str
 
   const text = payload.candidates?.flatMap(candidate => candidate.content?.parts ?? []).map(part => part.text ?? "").join("\n").trim();
   if (!text) throw new Error("O Gemini não retornou uma transcrição válida.");
+  if (automatico) return { ...transcricaoComIdioma(text), segments: [] as Array<unknown> };
   return { text, language: idioma ?? IDIOMA_DA_REUNIAO_PADRAO, segments: [] as Array<unknown> };
 }
 

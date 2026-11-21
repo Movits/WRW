@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nomesDosFalantes } from "@shared/const";
-import { vozesNoTexto } from "@shared/vozes-no-texto";
+import { partesComVozes, vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
  * A troca dos rótulos de voz do resumo guardado (H4): a IA escreve "{F2}", o
@@ -42,6 +42,40 @@ describe("vozesNoTexto", () => {
     expect(vozesNoTexto("Fechar o contrato até sexta", { F1: "Ana" }, falante)).toBe("Fechar o contrato até sexta");
     const pedidos: number[] = [];
     vozesNoTexto("{F7} e {F3}", {}, n => { pedidos.push(n); return "?"; });
+    expect(pedidos).toEqual([7, 3]);
+  });
+});
+
+/**
+ * A mesma troca em pedaços, para a tela isolar a direção de cada voz (<bdi>):
+ * o rótulo em árabe no começo de um item em inglês não vira a direção dele.
+ */
+describe("partesComVozes", () => {
+  const rotuloArabe = (n: number) => `المتحدث ${n}`;
+
+  it("cada voz vem separada do texto, com o nome dado ou o rótulo traduzido", () => {
+    expect(partesComVozes("{F2} evaluated two locations with {F1}.", { F1: "Ana" }, rotuloArabe)).toEqual([
+      { texto: "المتحدث 2", voz: true },
+      { texto: " evaluated two locations with ", voz: false },
+      { texto: "Ana", voz: true },
+      { texto: ".", voz: false },
+    ]);
+  });
+
+  it("juntos, os pedaços dão o mesmo texto de vozesNoTexto, também com vozes coladas e rótulos que não trocam", () => {
+    const casos = ["{F1}{F2} combinaram", "Fechar o contrato até sexta", "F1 disse, {F0}, {F100}, {f1} e {F12}", "", "{F3}"];
+    for (const texto of casos) {
+      const nomes = { F1: "  Ana  ", F2: "   " };
+      expect(partesComVozes(texto, nomes, falante).map(parte => parte.texto).join("")).toBe(vozesNoTexto(texto, nomes, falante));
+    }
+    expect(partesComVozes("{F1}{F2} combinaram", {}, falante).filter(parte => parte.voz)).toHaveLength(2);
+    expect(partesComVozes("", {}, falante)).toEqual([]);
+  });
+
+  it("um nome com padrões de substituição ($&, $1) entra como está, e o rótulo recebe o número da voz", () => {
+    expect(partesComVozes("{F1} pagou", { F1: "Ana $& $1" }, falante)).toEqual([{ texto: "Ana $& $1", voz: true }, { texto: " pagou", voz: false }]);
+    const pedidos: number[] = [];
+    partesComVozes("{F7} e {F3}", {}, n => { pedidos.push(n); return "?"; });
     expect(pedidos).toEqual([7, 3]);
   });
 });

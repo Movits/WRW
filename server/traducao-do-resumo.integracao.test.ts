@@ -181,6 +181,16 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(pedirJsonAIA).not.toHaveBeenCalled();
   });
 
+  it("G16: o resumo escrito num idioma fora dos 10 da tela (italiano) é traduzido para o pt-BR, e a IA sabe de que idioma", async () => {
+    const pronta = await reuniaoComResumo();
+    await (await db()).update(meetingSummaries).set({ language: "it" }).where(eq(meetingSummaries.id, pronta.resumoId));
+    pedirJsonAIA.mockImplementation(paraIngles);
+    const resposta = await traducao.traduzirResumoDaDona(DONA, pronta.meetingId, "pt-BR");
+    expect(resposta.estado === "traduzindo" || resposta.estado === "pronta").toBe(true);
+    await vi.waitFor(() => expect(pedirJsonAIA).toHaveBeenCalled());
+    expect(String(pedirJsonAIA.mock.calls[0][0].sistema)).toContain("escritas em italiano");
+  });
+
   it("a dona edita um item pelo caminho de verdade (H4f): só ele vai à IA, sem o resto do resumo nem o mapa, e a vaga sai uma vez", async () => {
     const { meetingId, ids } = await reuniaoComResumo();
     const MAPA = { ramos: [{ rotulo: "Transportadora", folhas: [{ rotulo: "Contrato", filhos: [] }] }, { rotulo: "Lojas", folhas: [] }] };

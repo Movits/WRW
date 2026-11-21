@@ -14,7 +14,8 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/const";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { OpcaoDoIdiomaOriginal } from "@/components/SeletorDoIdiomaDaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
@@ -123,6 +124,9 @@ export default function ReuniaoAberta() {
   const traducaoDoResumo = useTraducaoDoResumo({ token }, temTextoParaResumir ? resumoGuardado.data : undefined, rotulosDoMapa);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   const player = useRef<ControleDoPlayer | null>(null);
+  // D2: a voz que o player toca sozinha (nula: todas), como no detalhe da dona.
+  // Só troca o que toca e o que a lista mostra: os dados são os que o link já recebe.
+  const [soAVoz, setSoAVoz] = useState<string | null>(null);
   // As abas, como no app de referência da cliente (H4c): o resumo abre
   // primeiro, e a transcrição e o mapa mental (H10) ficam nas outras. O player
   // é um só, na barra do rodapé, fora das abas: trocar de aba não corta o
@@ -140,8 +144,9 @@ export default function ReuniaoAberta() {
   // "em andamento"; a página pergunta de novo a cada 5 s, sem gastar vaga do teto.
   const traducaoLonga = useNovaTentativa(`${token}|${idiomaDaTraducao}`);
   const temTranscricao = !!data?.transcricao;
-  // Reunião antiga guarda 'pt'.
-  const idiomaDoOriginal = idiomaDaReuniao(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // Reunião antiga guarda 'pt'. G16: o original pode ser um idioma fora dos 10
+  // da tela, que a lista de tradução ganha como opção à parte.
+  const idiomaDoOriginal = idiomaFalado(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O callback do próprio mutate só dispara para o ÚLTIMO pedido: a tradução
   // de um idioma trocado no meio do caminho não sobrescreve a do atual.
   const pedirTraducao = () => traduzir.mutate(
@@ -217,6 +222,8 @@ export default function ReuniaoAberta() {
   const idDoVideo = data.videoDoYoutube ?? null;
   const linkDoTempo = idDoVideo ? (segundo: number) => linkDoYoutubeNoSegundo(idDoVideo, segundo) : undefined;
   const falas = segmentosValidos(transcricao?.segmentos);
+  // O nome da voz que toca sozinha (D2): o do `vozes` (H3b) ou "Falante n".
+  const rotuloDaVoz = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
   const textoNaTela = idiomaDaTraducao === idiomaDoOriginal ? transcricao?.texto : textoTraduzido;
   // O idioma do texto que está na tela, para o leitor de tela e a hifenização;
@@ -267,6 +274,7 @@ export default function ReuniaoAberta() {
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.openLinkTranslateSubtext") : t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select ref={seletorDaTraducao} value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+              <OpcaoDoIdiomaOriginal idioma={idiomaDoOriginal}/>
               {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === idiomaDoOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
@@ -284,7 +292,8 @@ export default function ReuniaoAberta() {
               </button>
             </div>}
             {mostraFalas
-              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/></div>
+              ? <div lang={idiomaNaTela}><TranscricaoPorFalante segmentos={falas} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
+                soAVoz={soAVoz} aoOuvirSoAVoz={gravacao && partes.length ? voz => player.current?.ouvirSoAVoz(voz) : undefined}/></div>
               : <p dir="auto" lang={idiomaNaTela} className="whitespace-pre-wrap leading-7 text-white/75">{textoNaTela || transcricao.texto}</p>}
           </>}
       </> : <p className="text-white/45">{ehDocumento ? t("meetings.document.textUnavailable") : t("meetings.transcriptUnavailable")}</p>}
@@ -298,6 +307,7 @@ export default function ReuniaoAberta() {
     </div>}
     {gravacao && <BarraDoPlayer ref={player} partes={partes}
       aviso={falhaNoAudio ? t("meetings.openLink.audioLoadError") : null}
+      falas={falas} soAVoz={soAVoz} rotuloDaVoz={soAVoz ? rotuloDaVoz(soAVoz) : undefined} aoMudarSoAVoz={setSoAVoz}
       // O áudio que não carrega pode ser a entrada vencida (a rota responde 404
       // sem ela): a releitura da reunião traz a tela da senha, se for isso.
       aoFalhar={() => { setFalhaNoAudio(true); pedirASenhaDeNovo(); }} aoCarregar={() => setFalhaNoAudio(false)}/>}
