@@ -111,6 +111,13 @@ export type FimDoArquivo = "declarado" | "pendente" | "recusado" | "descartada";
 export function useGravacaoEmPartes(opcoes: {
   ativo: boolean;
   aoEncerrar: (meetingId: string) => void;
+  /**
+   * O fim sem nenhuma parte com áudio (G17: o microfone caiu antes de 1 s de
+   * gravação, e a parte curta demais saiu): a reunião vazia foi excluída
+   * (declararFim), e não há detalhe para abrir. Sem isto, a tela ia ao
+   * detalhe de uma reunião que não existe mais.
+   */
+  aoEncerrarSemAudio?: (meetingId: string) => void;
   aoFalhar: (erro: unknown) => void;
   /** O servidor recusou uma parte de vez: o código da recusa, que a tela traduz. */
   aoRecusarParte?: (codigo: string | undefined) => void;
@@ -242,7 +249,8 @@ export function useGravacaoEmPartes(opcoes: {
       throw erro;
     }
     if (descartadas.current.has(id)) return "descartada";
-    atuais.current.aoEncerrar(id);
+    if (total <= 0) atuais.current.aoEncerrarSemAudio?.(id);
+    else atuais.current.aoEncerrar(id);
     return "declarado";
   }, [encerrar]);
 

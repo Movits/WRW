@@ -326,6 +326,14 @@ export default function Meetings() {
       setConsent(false);
       if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
     },
+    // Nenhum áudio chegou a ser gravado (o microfone caiu no primeiro segundo):
+    // a reunião vazia saiu, e a tela fica no gravador, com o aviso, em vez de
+    // abrir o detalhe de uma reunião que não existe (G17).
+    aoEncerrarSemAudio: () => {
+      emPartesSemAgenda.current = null;
+      void utils.meetings.list.invalidate();
+      toast.error(t("assistenteTexto.audioVazio"));
+    },
     aoFalhar: () => {
       emPartesSemAgenda.current = null;
       toast.error(t("meetings.sendRecordingError"));

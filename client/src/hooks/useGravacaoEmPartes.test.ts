@@ -154,12 +154,15 @@ describe("useGravacaoEmPartes (G9)", () => {
     expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 1 });
   });
 
-  it("nenhuma parte com áudio: a reunião vazia é excluída, não encerrada", async () => {
+  it("nenhuma parte com áudio: a reunião vazia é excluída, não encerrada, e a tela não vai ao detalhe dela", async () => {
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const aoEncerrarSemAudio = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoEncerrarSemAudio, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    // G17: o microfone caiu no primeiro segundo, e a última parte (a primeira) saiu vazia.
     act(() => result.current.receberParte({ ...parte(0, true), blob: new Blob([]) }));
-    await waitFor(() => expect(aoEncerrar).toHaveBeenCalled());
+    await waitFor(() => expect(aoEncerrarSemAudio).toHaveBeenCalledWith("r-1"));
+    expect(aoEncerrar).not.toHaveBeenCalled();
     expect(d.encerrar).not.toHaveBeenCalled();
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
   });

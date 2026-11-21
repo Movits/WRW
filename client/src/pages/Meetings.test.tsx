@@ -78,9 +78,15 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // nenhuma pergunta fica agendada. Esta suíte é da lista e do detalhe; a
 // gravação em partes está em hooks/useGravacaoEmPartes.test.ts e em
 // Meetings.sessao-ocupada.test.tsx.
+// As opções que a página passa ficam à mão (opcoesDaGravacaoEmPartes) para os
+// testes chamarem os avisos dela como o hook chamaria.
+const opcoesDaGravacaoEmPartes = vi.hoisted(() => ({ atual: null as null | { aoEncerrarSemAudio?: (meetingId: string) => void } }));
 vi.mock("@/hooks/useGravacaoEmPartes", () => ({
   PARTE_SEGUNDOS: 600,
-  useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
+  useGravacaoEmPartes: (opcoes: { aoEncerrarSemAudio?: (meetingId: string) => void }) => {
+    opcoesDaGravacaoEmPartes.atual = opcoes;
+    return { iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false };
+  },
 }));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
@@ -259,6 +265,22 @@ const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 9
 const botaoExcluir = () => screen.getByRole("button", { name: /^Excluir$/ });
 const tituloDoModal = () => screen.queryByText("Excluir esta reunião?");
 const botaoConfirmar = () => screen.getByRole("button", { name: "Excluir reunião" });
+
+describe("Gravador — o fim sem nenhum áudio (G17)", () => {
+  it("o microfone caiu no primeiro segundo: a reunião vazia saiu, a tela avisa e não vai ao detalhe dela", () => {
+    const antes = window.location.href;
+    try {
+      window.history.replaceState(null, "", "/gravar");
+      duble.list.mockReturnValue({ data: [], isLoading: false });
+      render(<Meetings />);
+      act(() => opcoesDaGravacaoEmPartes.atual!.aoEncerrarSemAudio!("8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b"));
+      expect(toast.error).toHaveBeenCalledWith("Nenhum áudio foi gravado. Tente de novo.");
+      expect(window.location.pathname).toBe("/gravar");
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+});
 
 describe("Detalhe da reunião — excluir pede confirmação", () => {
   it("clicar em Excluir abre o modal e NÃO chama o servidor", () => {
