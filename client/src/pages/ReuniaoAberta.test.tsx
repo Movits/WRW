@@ -484,6 +484,19 @@ describe("Reunião aberta pelo link — o aviso de tradução automática (T25)"
     expect(duble.traduzir.reset).toHaveBeenCalled();
   });
 
+  it("'Ver original' some com o aviso e deixa o foco no seletor do idioma, que mostra o original, em vez de largá-lo no <body>", () => {
+    duble.ver.mockReturnValue(pronta(EM_INGLES));
+    abrirNaTranscricao();
+    const { onSuccess } = duble.traduzir.mutate.mock.calls[0][1] as { onSuccess: (r: { text: string }) => void };
+    act(() => onSuccess({ text: "Vamos assinar na sexta. Me mande a minuta." }));
+    const verOriginal = screen.getByRole("button", { name: "Ver original" });
+    verOriginal.focus();
+    fireEvent.click(verOriginal);
+    expect(verOriginal).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.getByRole("combobox")).toHaveFocus();
+  });
+
   it("tela no idioma da reunião: as falas, sem o aviso e sem pedir tradução", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "Combinamos a entrega na sexta.", idioma: "pt-BR", segmentos: [
       { inicio: 5, fim: 12, falante: "F1", texto: "Combinamos a entrega na sexta." },

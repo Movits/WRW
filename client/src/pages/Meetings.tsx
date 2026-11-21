@@ -1036,6 +1036,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
   const initialLanguage = LANGUAGES.some(language => language.code === idiomaAtual) ? idiomaAtual : "pt-BR";
   const [translationLanguage, setTranslationLanguage] = useState(initialLanguage);
+  // O "Ver original" some com o aviso de tradução e deixa o foco aqui (T25).
+  const seletorDaTraducao = useRef<HTMLSelectElement>(null);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   // Reunião longa: o servidor traduz em segundo plano e responde "em andamento";
   // a tela pergunta de novo a cada 5 s até a tradução chegar.
@@ -1349,12 +1351,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
-            <select value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+            <select ref={seletorDaTraducao} value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}{language.code === idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
         </div>
-        {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)}/>}
+        {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)} focoDepois={seletorDaTraducao}/>}
         {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>

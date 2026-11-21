@@ -1952,7 +1952,7 @@
       "androidOtherBrowser": "Pour installer WRW comme une app, ouvrez cette page dans Chrome."
     },
     "meetingLanguageLabel": "Langue de la réunion",
-    "meetingLanguageHint": "La langue principale de la conversation. Ce qui est dit dans une autre langue est transcrit dans cette langue ; la traduction se trouve dans l'onglet Transcription.",
+    "meetingLanguageHint": "La langue principale de la conversation. Ce qui est dit dans une autre langue est transcrit dans la langue dans laquelle il a été dit ; la traduction se trouve dans l'onglet Transcription.",
     "originalLanguageSuffix": "(original)",
     "translatingLongStatus": "La réunion est longue : la traduction prend quelques minutes. Vous pouvez laisser cet écran ouvert ; le texte apparaît quand il est prêt.",
     "autoTranslationNotice": "Traduction automatique en {{idioma}}.",
