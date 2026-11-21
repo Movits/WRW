@@ -45,6 +45,7 @@ const duble = vi.hoisted(() => {
     excluirPeloCliente: vi.fn(),
     paginas: vi.fn(),
     mapa: vi.fn(),
+    painelDoEmail: vi.fn(),
     utils: {
       meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
       auth: { me: { invalidate: vi.fn() } },
@@ -93,7 +94,16 @@ vi.mock("@/lib/trpc", () => ({
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+      // A senha e o áudio do link ligado (H23), que o painel do Compartilhar monta.
+      novaSenhaDoLink: duble.registrar("novaSenhaDoLink"),
+      tirarSenhaDoLink: duble.registrar("tirarSenhaDoLink"),
+      mudarAudioDoLink: duble.registrar("mudarAudioDoLink"),
       exportar: duble.registrar("exportar"),
+      // O resumo por e-mail (H22): o painel só pede ao servidor quando a dona o abre.
+      resumoPorEmail: { useQuery: (...args: unknown[]) => duble.painelDoEmail(...args) },
+      mandarResumoPorEmail: duble.registrar("mandarResumoPorEmail"),
+      mandarResumoPorEmailDeNovo: duble.registrar("mandarResumoPorEmailDeNovo"),
+      envioAutomaticoDoResumo: duble.registrar("envioAutomaticoDoResumo"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -158,6 +168,8 @@ beforeEach(() => {
   duble.candidatos.mockReturnValue({ data: [], isError: false, error: null, refetch: vi.fn() });
   duble.buscaNaRede.mockReturnValue({ data: undefined, isError: false, error: null, refetch: vi.fn() });
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
+  duble.painelDoEmail.mockReset();
+  duble.painelDoEmail.mockReturnValue({ data: undefined, isPending: true, isLoading: true, isError: false, error: null, refetch: vi.fn() });
   // O detalhe aberto depois do envio, antes de o teste dizer o que ele mostra.
   duble.get.mockReturnValue({ data: undefined, isLoading: true });
   window.history.replaceState(null, "", "/meetings");
@@ -260,6 +272,30 @@ describe("O detalhe da reunião de documento", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: frase }));
     fireEvent.click(screen.getByRole("button", { name: "Criar link" }));
     expect(duble.mutacoes.ligarLinkAberto.mutate).toHaveBeenCalledWith(expect.objectContaining({ meetingId: ID, autorizacaoDasPessoas: true, textoExibido: frase, idioma: "pt-BR" }));
+  });
+
+  // A junção do Pacote 4c com o 4d: o detalhe montava o resumo por e-mail (H22)
+  // sem dizer que a reunião é de documento, e o painel pedia a caixa da gravação
+  // (a frase que vai para a prova) e prometia a gravação na prévia.
+  it("o resumo por e-mail: a caixa e a prova são a frase do documento, e a prévia não fala de gravação", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, modelo: "geral", versaoAnterior: false, itens: [] }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
+    duble.painelDoEmail.mockReturnValue({
+      data: { idioma: "pt-BR", linkLigado: false, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+      isPending: false, isError: false, error: null,
+    });
+    abrirDetalhe();
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+    expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Proposta da feira”, feito na WRW.")).toBeInTheDocument();
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(painel.textContent).not.toMatch(/gravaç|gravad|gravou|todas as pessoas que falaram/i);
+    const frase = "Confirmo que posso compartilhar este documento e autorizo que quem receber o link leia o texto lido dele e o resumo, sem o arquivo.";
+    fireEvent.click(within(painel).getByRole("checkbox", { name: /Para mim/ }));
+    fireEvent.click(within(painel).getByRole("checkbox", { name: frase }));
+    fireEvent.click(within(painel).getByRole("button", { name: "Mandar o resumo" }));
+    expect(duble.mutacoes.mandarResumoPorEmail.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      meetingId: ID, paraMim: true, autorizacao: expect.objectContaining({ textoExibido: frase, idioma: "pt-BR" }),
+    }));
   });
 
   it("a aba do texto mostra o documento página a página, com a página sem texto", () => {

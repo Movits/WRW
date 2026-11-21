@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import i18n from "./i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
+import { CHAMADAS_POR_LOTE_NO_NAVEGADOR } from "@shared/lote-do-trpc";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import "./i18n"; // must be imported before App
@@ -62,6 +63,8 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // O servidor recusa o lote grande demais (shared/lote-do-trpc.ts): o navegador corta antes.
+      maxItems: CHAMADAS_POR_LOTE_NO_NAVEGADOR,
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

@@ -33,6 +33,8 @@ const duble = vi.hoisted(() => ({
   resumoGuardado: vi.fn(),
   opcoesDoResumo: null as OpcoesDoResumo | null,
   traduzir: { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false },
+  // A senha do link (H23): a tela da senha manda os 6 dígitos por aqui.
+  entrar: { mutate: vi.fn(), isPending: false },
   // A tradução do resumo guardado (H11): a página pede pelo link; a mutação da dona nunca é chamada aqui.
   traduzirResumo: { mutate: vi.fn() },
   traduzirResumoDaDona: { mutate: vi.fn() },
@@ -66,6 +68,7 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
       traduzir: { useMutation: () => duble.traduzir },
+      entrar: { useMutation: () => duble.entrar },
       traduzirResumo: { useMutation: () => duble.traduzirResumo },
       resumoGuardado: {
         useQuery: (entrada: unknown, opcoes: OpcoesDoResumo) => {
@@ -110,14 +113,16 @@ vi.mock("@/components/ResumoGuardado", () => ({
 // "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
 type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos, ...resto }: {
-    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void; documento?: boolean;
-  }) => (duble.propsDoMapa = { token, meetingId, titulo, ...resto }) && (
-    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
+  MapaMentalDaReuniao: (props: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void; aoPedirSenha?: () => void; documento?: boolean;
+  }) => {
+    duble.propsDoMapa = props;
+    const { token, meetingId, titulo, emoji, traducao, aoMudarRotulos } = props;
+    return <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
       <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
       {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
-    </div>
-  ),
+    </div>;
+  },
 }));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
@@ -152,10 +157,12 @@ beforeEach(() => {
   duble.opcoesDoResumo = null;
   duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, itens: [] }, isError: false, error: null, refetch: vi.fn() });
   duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false };
+  duble.entrar = { mutate: vi.fn(), isPending: false };
   duble.traduzirResumo = { mutate: vi.fn() };
   duble.traduzirResumoDaDona = { mutate: vi.fn() };
   duble.propsDaPergunta = null;
   duble.propsDoResumo = null;
+  duble.propsDoMapa = null;
   duble.perguntaDeVerdade = false;
   duble.respostaDaPergunta = undefined;
 });
@@ -743,6 +750,125 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
   });
 });
 
+/**
+ * O link com senha e o link sem o áudio (H23): a página mostra só a tela da
+ * senha até quem recebeu o link acertar os 6 dígitos, e o link sem o áudio não
+ * tem player. A tela da senha em si está em components/SenhaDoLinkAberto.test.tsx.
+ */
+describe("o link com senha e o link sem o áudio (H23)", () => {
+  it("com senha: só a tela da senha, sem o título nem nada da reunião, e sem tentar de novo sozinha", () => {
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED"));
+    const { container } = abrir();
+    expect(screen.getByRole("heading", { name: "Reunião protegida por senha" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Senha de 6 dígitos" })).toBeInTheDocument();
+    expect(screen.queryByText("REUNIÃO COMPARTILHADA")).not.toBeInTheDocument();
+    expect(screen.queryByText("frase do servidor")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("resumo")).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "UNAUTHORIZED" } })).toBe(false);
+    expect(duble.opcoesDaConsulta!.refetchOnReconnect({ state: { error: { data: { code: "UNAUTHORIZED" } } } })).toBe(false);
+    expect(duble.opcoesDoResumo!.retry(0, { data: { code: "UNAUTHORIZED" } })).toBe(false);
+  });
+
+  it("a senha certa relê a reunião pelo mesmo token", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED", refetch));
+    abrir();
+    fireEvent.change(screen.getByRole("textbox", { name: "Senha de 6 dígitos" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir a reunião" }));
+    expect(duble.entrar.mutate).toHaveBeenCalledWith({ token: TOKEN, senha: "482913" }, expect.anything());
+    expect(refetch).not.toHaveBeenCalled();
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a entrada vence com a página aberta: o resumo recusa com UNAUTHORIZED, e a página relê a reunião (que traz a tela da senha)", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    duble.resumoGuardado.mockReturnValue({ data: undefined, isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch: vi.fn() });
+    abrir();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a entrada vence com a pergunta, o mapa ou o áudio na tela: cada um relê a reunião, que traz a tela da senha", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    const { container } = abrir();
+    act(() => (duble.propsDaPergunta!.aoPedirSenha as () => void)());
+    expect(refetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    act(() => (duble.propsDoMapa!.aoPedirSenha as () => void)());
+    expect(refetch).toHaveBeenCalledTimes(2);
+    // Sem a entrada, a rota do áudio responde 404: o áudio que não carrega relê também.
+    fireEvent.error(container.querySelector("audio")!);
+    expect(refetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("a tradução da transcrição recusou com a entrada vencida: com a senha de novo, ela é pedida outra vez (e não só limpa)", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.ver.mockReturnValue({ ...pronta(), isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch: vi.fn() });
+    duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: true, error: { data: { code: "UNAUTHORIZED" } } } as typeof duble.traduzir;
+    abrir();
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByRole("textbox", { name: "6-digit password" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open the meeting" }));
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(2);
+    expect(duble.traduzir.mutate.mock.calls[1][0]).toEqual({ token: TOKEN, language: "en" });
+  });
+
+  it("a tradução do resumo recusa com a entrada vencida: a página relê a reunião; com a senha de novo, a tradução é pedida outra vez", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: null, idioma: "pt-BR", itens: [{ section: "decision", subject: null, text: "Renovar o contrato", assignee: null, due: null, excerpt: "vamos renovar", startSeconds: 9, status: "confirmed" }] }, isError: false, error: null, refetch: vi.fn() });
+    abrir();
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(1);
+    const [, { onError }] = duble.traduzirResumo.mutate.mock.calls[0] as [unknown, { onError: (erro: unknown) => void }];
+    // A releitura da reunião já vem com a tela da senha.
+    duble.ver.mockReturnValue({ ...pronta(), isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch });
+    act(() => onError({ data: { code: "UNAUTHORIZED" } }));
+    expect(refetch).toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "6-digit password" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open the meeting" }));
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("a tela da senha em árabe: a página da direita para a esquerda, o campo da esquerda para a direita", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.ver.mockReturnValue(emErro("UNAUTHORIZED"));
+    abrir();
+    expect(document.documentElement.dir).toBe("rtl");
+    expect(screen.getByRole("heading", { name: "اجتماع محمي بكلمة مرور" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "كلمة مرور من 6 أرقام" })).toHaveAttribute("dir", "ltr");
+  });
+
+  it("sem o áudio: a página diz que o áudio não veio no link, sem player e sem a barra do rodapé", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: false, gravacaoSaindo: false, audioIncluido: false }));
+    const { container } = abrir();
+    expect(screen.getByText("Quem compartilhou esta reunião não incluiu o áudio neste link.")).toBeInTheDocument();
+    expect(screen.getByText(/Leia a transcrição ou peça à IA um resumo/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ouça a gravação/)).not.toBeInTheDocument();
+    // E não os avisos da gravação que não existe ou venceu: o áudio existe, só não veio pelo link.
+    expect(screen.queryByText(/Nenhum áudio guardado|passou dos 30 dias/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    // Sem áudio, nada leva o player a um ponto: o resumo e a pergunta não recebem o "ir para".
+    expect(duble.propsDoResumo?.aoIrPara).toBeUndefined();
+    expect(duble.propsDaPergunta?.aoIrPara).toBeUndefined();
+  });
+
+  it("a resposta de um servidor de antes da H23 (sem audioIncluido) segue como antes: com a gravação", () => {
+    duble.ver.mockReturnValue(pronta());
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
+    expect(screen.queryByText(/não incluiu o áudio/)).not.toBeInTheDocument();
+  });
+});
+
 // A reunião que nasceu de um documento (H12 e H12b): o link mostra o texto lido
 // e o resumo, como mostra a transcrição de uma reunião de áudio, sem player,
 // sem a seção da gravação e sem o arquivo, que o servidor nem manda
@@ -892,5 +1018,35 @@ describe("Reunião aberta pelo link — o vídeo do YouTube (H13)", () => {
     expect(ladosFisicos).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.transcriptTab") }));
     expect(screen.getByRole("link", { name: "المشاهدة على YouTube من 12:05 (يُفتح في علامة تبويب جديدة)" })).toHaveAttribute("href", noYoutube(725));
+  });
+});
+
+// A junção do Pacote 4c (documento e vídeo do YouTube) com o 4d (o link sem o
+// áudio, H23): o documento e o vídeo não têm gravação, então a frase deles vale
+// com ou sem o áudio no link, e o aviso do áudio que ficou de fora não aparece.
+describe("Reunião aberta pelo link — o documento e o vídeo com o áudio fora do link (4c com a H23)", () => {
+  it("documento: a frase do documento, sem a frase nem o aviso do link sem o áudio", () => {
+    duble.ver.mockReturnValue(pronta({
+      titulo: "Proposta da feira", criadaEm: 1_700_000_000_000, documento: true, audioIncluido: false,
+      transcricao: { texto: "Proposta de exportação de café.", idioma: "pt-BR", segmentos: [] },
+      gravacao: null, gravacaoExpirada: false, gravacaoSaindo: false,
+    }));
+    abrir();
+    expect(screen.getByText(i18n.t("meetings.document.openLinkIntro"))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.introWithoutAudio"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.audioNotIncluded"))).not.toBeInTheDocument();
+  });
+
+  it("vídeo do YouTube: a frase do vídeo e o link para ele, sem a frase nem o aviso do link sem o áudio", () => {
+    duble.ver.mockReturnValue(pronta({
+      titulo: "Painel de exportação", criadaEm: 1_700_000_000_000, audioIncluido: false, videoDoYoutube: "dQw4w9WgXcQ",
+      transcricao: { texto: "Bem-vindas ao painel.", idioma: "pt-BR", segmentos: [] },
+      gravacao: null, gravacaoExpirada: false, gravacaoSaindo: false, vozes: {},
+    }));
+    abrir();
+    expect(screen.getByText(i18n.t("meetings.youtube.linkIntro"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Abrir o vídeo no YouTube/ })).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.introWithoutAudio"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.audioNotIncluded"))).not.toBeInTheDocument();
   });
 });

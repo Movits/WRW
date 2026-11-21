@@ -70,6 +70,10 @@ vi.mock("@/lib/trpc", () => ({
       rascunharEmailDeRetorno: duble.mutacao(),
       ligarLinkAberto: duble.mutacao(),
       desligarLinkAberto: duble.mutacao(),
+      // A senha e o áudio do link ligado (H23).
+      novaSenhaDoLink: duble.mutacao(),
+      tirarSenhaDoLink: duble.mutacao(),
+      mudarAudioDoLink: duble.mutacao(),
     },
     reuniaoAberta: { pedirResumo: duble.mutacao(), perguntar: duble.mutacao(), traduzirResumo: duble.mutacao() },
     // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.

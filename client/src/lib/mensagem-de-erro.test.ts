@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, it } from "vitest";
-import i18n from "@/i18n";
+import i18n, { CODIGOS } from "@/i18n";
+import {
+  MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
+  MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
+  MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA,
+  MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO,
+  MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR,
+  MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
+} from "@shared/resumo-por-email";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
 import { mensagemDaRecusaDaParte, mensagemDaRecusaDoAudio, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
@@ -145,6 +159,44 @@ describe("mensagemDeErroParaTela — as recusas do e-mail de retorno no idioma d
   });
 });
 
+// As recusas do resumo por e-mail (H22, server/resumo-por-email.ts): a frase do
+// servidor em português, traduzida pela mesma tabela, nos 10 idiomas.
+describe("mensagemDeErroParaTela — as recusas do resumo por e-mail no idioma da tela", () => {
+  const recusa = (mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: "PRECONDITION_FAILED", httpStatus: 412 } } });
+  const CASOS: Array<[string, string]> = [
+    [MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO, "resumoPorEmail.erros.semResumo"],
+    [MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA, "resumoPorEmail.erros.semDestinataria"],
+    [MENSAGEM_RESUMO_POR_EMAIL_DEMAIS, "resumoPorEmail.erros.demais"],
+    [MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA, "resumoPorEmail.erros.foraDaAgenda"],
+    [MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO, "resumoPorEmail.erros.emailInvalido"],
+    [MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA, "resumoPorEmail.erros.semEmailDaDona"],
+    [MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO, "resumoPorEmail.erros.linkDesligado"],
+    [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO, "resumoPorEmail.erros.tetoDaReuniao"],
+    [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA, "resumoPorEmail.erros.tetoDaDona"],
+    [MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU, "resumoPorEmail.erros.naoSaiu"],
+    [MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR, "resumoPorEmail.erros.nadaAReenviar"],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("'%s': em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("'%s': nos outros 9 idiomas sai traduzida, nunca a frase em português", async (mensagem, chave) => {
+    for (const idioma of CODIGOS.filter(codigo => codigo !== "pt-BR")) {
+      await i18n.changeLanguage(idioma);
+      const traduzida = mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c));
+      expect(traduzida, `${idioma}: ${chave}`).toBe(i18n.t(chave));
+      expect(traduzida, `${idioma}: ${chave}`).not.toBe(mensagem);
+    }
+  });
+});
+
 /**
  * A parte da gravação em partes que o servidor recusou de vez (G13b): a rota
  * das partes responde só o código, e a tela avisa a dona no idioma dela. Todo
@@ -232,6 +284,25 @@ describe("mensagemDeErroParaTela — as recusas das próximas ações no idioma 
   it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+describe("mensagemDeErroParaTela — o link com senha no idioma da tela (H23)", () => {
+  const recusa = TRPCClientError.from({ error: { code: -32001, message: MENSAGEM_SENHA_DO_LINK_PEDIDA, data: { code: "UNAUTHORIZED", httpStatus: 401 } } });
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("em português é a frase do servidor; nos outros 9 idiomas sai traduzida, nunca a frase em português", async () => {
+    expect(i18n.t("meetings.openLink.password.required")).toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    expect(mensagemDeErroParaTela(recusa, c => i18n.t(c))).toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    for (const idioma of CODIGOS.filter(codigo => codigo !== "pt-BR")) {
+      await i18n.changeLanguage(idioma);
+      const traduzida = mensagemDeErroParaTela(recusa, c => i18n.t(c));
+      expect(traduzida, idioma).toBe(i18n.t("meetings.openLink.password.required"));
+      expect(traduzida, idioma).not.toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    }
   });
 });
 

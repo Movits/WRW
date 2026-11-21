@@ -33,7 +33,14 @@ import {
 import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
-import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
+import {
+  desligarLinkAberto,
+  LinkAbertoRecusado,
+  ligarLinkAbertoComOpcoes,
+  mudarAudioDoLink,
+  novaSenhaDoLink,
+  tirarSenhaDoLink,
+} from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
@@ -50,6 +57,8 @@ import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
 import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
 import { exportarReuniao } from "../exportar-reuniao";
+import { EMAIL_DO_PARTICIPANTE_MAX, PARTICIPANTES_DA_AGENDADA_MAX } from "@shared/agenda";
+import { definirEnvioAutomaticoDoResumo, mandarResumoPorEmail, mandarResumoPorEmailDeNovo, painelDoResumoPorEmail } from "../resumo-por-email";
 import {
   AUDIOS_POR_JANELA, FORMATOS_DO_AUDIO, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO, ROTA_DO_AUDIO_BAIXADO, VALIDADE_DO_ENDERECO_DO_AUDIO_MS,
   nomeDoArquivoDoAudio, tamanhoEstimadoDoAudio,
@@ -65,6 +74,11 @@ import {
 } from "@shared/busca-de-reunioes";
 import { juntarReunioes, RecusaDaJuncao } from "../juntar-reunioes";
 import { JANELA_DA_JUNCAO_MS, JUNCOES_POR_JANELA, RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX } from "@shared/juntar-reunioes";
+
+// Os e-mails que a tela manda ao resumo por e-mail (H22): o zod só barra o
+// tamanho; quem conta, valida e recusa com a frase traduzível é o serviço
+// (server/resumo-por-email.ts).
+const emailsDoPedido = z.array(z.string().trim().max(EMAIL_DO_PARTICIPANTE_MAX)).max(PARTICIPANTES_DA_AGENDADA_MAX);
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -154,6 +168,17 @@ export const tetoDaTraducaoDoResumo = criarTeto(
 // ar, auditoria que não entrou) devolvem a vaga.
 export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
 
+// Cada senha nova do link aberto (H23) é um scrypt e uma linha de auditoria:
+// teto próprio por dona, em memória como os outros, de 20 a cada 10 minutos,
+// somando a senha nova e o ligar com senha. Só conta a senha que saiu: a
+// recusa (outra conta, link desligado), a falha e o ligar do link que já
+// estava ligado devolvem a vaga.
+export const SENHAS_DO_LINK_POR_JANELA = 20;
+export const tetoDasSenhasDoLink = criarTeto(
+  SENHAS_DO_LINK_POR_JANELA,
+  10 * 60_000,
+  "Muitas senhas novas em sequência. Aguarde alguns minutos e tente de novo.",
+);
 // Baixar o áudio (H8c) converte a reunião inteira com o ffmpeg, na instância de
 // 1 CPU: teto próprio por dona, de 10 áudios a cada hora, em memória como os
 // outros. Só conta o áudio preparado: a recusa (outra conta, ainda gravando,
@@ -685,6 +710,11 @@ export const meetingsRouter = router({
   // consentimento da gravação foi para um áudio privado. Essa palavra vai para
   // a auditoria na mesma transação que liga o link (ligarLinkAberto). Ligar o
   // que já está ligado devolve o mesmo link.
+  //
+  // Desde a H23, a dona escolhe ao ligar se o link pede a senha de 6 dígitos
+  // e se leva o áudio. A senha volta em texto só nesta resposta (e na de
+  // novaSenhaDoLink): o banco guarda o hash. A aba aberta antes do deploy não
+  // manda as escolhas, e o link sai como antes, sem senha e com o áudio.
   ligarLinkAberto: protectedProcedure
     .input(z.object({
       meetingId: z.string().uuid(),
@@ -697,17 +727,68 @@ export const meetingsRouter = router({
       // só com ela o link mostra os nomes. A aba aberta antes do deploy não
       // manda nada, e o serviço grava 1: a frase dela não falava dos nomes.
       versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      comSenha: z.boolean().optional(),
+      incluirAudio: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
-        userId: ctx.user.id,
-        ipAddress: ipDaCliente(ctx.req),
-        userAgent: ctx.req.headers["user-agent"],
-        idioma: input.idioma,
-        textoExibido: input.textoExibido,
-        versaoDaAutorizacao: input.versaoDaAutorizacao,
+      // Ligar com senha é um scrypt, como a senha nova: gasta uma vaga do
+      // mesmo teto, antes do serviço. A vaga volta na recusa, na falha e
+      // quando nenhuma senha saiu (o link já estava ligado).
+      const soltarVaga = input.comSenha === true ? tetoDasSenhasDoLink.reservar(ctx.user.openId) : () => {};
+      try {
+        const ligado = await comRecusaTraduzida(() => ligarLinkAbertoComOpcoes(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+          idioma: input.idioma,
+          textoExibido: input.textoExibido,
+          versaoDaAutorizacao: input.versaoDaAutorizacao,
+        }, { comSenha: input.comSenha, incluirAudio: input.incluirAudio }));
+        if (ligado.senha === null) soltarVaga();
+        return ligado;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // Uma senha nova para o link ligado (H23): liga a senha no link que não
+  // tinha, ou troca a que havia, e a anterior deixa de valer na hora. A
+  // auditoria vai na mesma transação.
+  novaSenhaDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDasSenhasDoLink.reservar(ctx.user.openId);
+      try {
+        const senha = await comRecusaTraduzida(() => novaSenhaDoLink(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+        }));
+        return { senha };
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // Tira a senha do link ligado (H23): quem tem o endereço volta a abrir sem ela.
+  tirarSenhaDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => tirarSenhaDoLink(ctx.user.openId, input.meetingId, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
       }));
-      return { token };
+      return { success: true };
+    }),
+
+  // Se o link ligado leva o áudio e o player (H23). A regra vale na consulta do
+  // link (server/link-aberto-da-reuniao.ts), não só na tela.
+  mudarAudioDoLink: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), incluirAudio: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => mudarAudioDoLink(ctx.user.openId, input.meetingId, input.incluirAudio, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+      }));
+      return { success: true };
     }),
 
   desligarLinkAberto: protectedProcedure
@@ -720,6 +801,64 @@ export const meetingsRouter = router({
       });
       return { success: true };
     }),
+
+  // H22: o resumo por e-mail (server/resumo-por-email.ts). Com um toque, a
+  // WRW manda o link aberto da reunião à própria dona, às participantes da
+  // agenda que ela escolher e a e-mails que ela digitar, com texto fixo no
+  // idioma da reunião. O link desligado só liga com a mesma confirmação do
+  // "Compartilhar por link", que vai para a auditoria junto com o envio. Tetos
+  // por envio, por reunião e por dona; a Resend fora do ar deixa o pedido
+  // guardado para o "Tentar de novo". Só a dona: reunião de outra conta é
+  // "não encontrada".
+  resumoPorEmail: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => painelDoResumoPorEmail(ctx.user.openId, input.meetingId)),
+
+  mandarResumoPorEmail: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      paraMim: z.boolean(),
+      participantes: emailsDoPedido,
+      outros: emailsDoPedido,
+      // Só quando o link está desligado: a palavra da dona, como em ligarLinkAberto.
+      autorizacao: z.object({
+        autorizacaoDasPessoas: z.literal(true),
+        idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+        textoExibido: z.string().trim().min(1).max(1000),
+        versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      }).optional(),
+    }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => mandarResumoPorEmail(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      {
+        paraMim: input.paraMim,
+        participantes: input.participantes,
+        outros: input.outros,
+        autorizacao: input.autorizacao
+          ? { idioma: input.autorizacao.idioma, textoExibido: input.autorizacao.textoExibido, versaoDaAutorizacao: input.autorizacao.versaoDaAutorizacao }
+          : undefined,
+      },
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    ))),
+
+  mandarResumoPorEmailDeNovo: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => mandarResumoPorEmailDeNovo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
+
+  // O envio automático no fim da reunião (H22), desligado por padrão: vale
+  // para a conta, e não para uma reunião.
+  envioAutomaticoDoResumo: protectedProcedure
+    .input(z.object({ ligado: z.boolean() }))
+    .mutation(({ ctx, input }) => definirEnvioAutomaticoDoResumo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.ligado,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
 
   decideEntity: protectedProcedure
     .input(z.object({ entityId: z.string().uuid(), status: z.enum(["confirmed", "ignored"]) }))
