@@ -148,6 +148,16 @@ describe("ListaDeReunioes — busca e filtros (H7b)", () => {
     expect(screen.queryByText("Buscas recentes")).not.toBeInTheDocument();
   });
 
+  it("o Enter que confirma a composição do teclado (japonês, chinês) não vira busca recente pela metade", () => {
+    abrir();
+    fireEvent.change(campo(), { target: { value: "かいぎ" } });
+    fireEvent.keyDown(campo(), { key: "Enter", isComposing: true });
+    expect(window.localStorage.getItem("mmm.buscasDeReunioes.dona-1")).toBeNull();
+    // O Enter de depois, fora da composição, guarda o termo inteiro.
+    fireEvent.keyDown(campo(), { key: "Enter" });
+    expect(JSON.parse(window.localStorage.getItem("mmm.buscasDeReunioes.dona-1") ?? "[]")).toEqual(["かいぎ"]);
+  });
+
   it("as recentes são da conta: as de outra conta não aparecem, e sem a conta não há recentes", () => {
     window.localStorage.setItem("mmm.buscasDeReunioes.outra", JSON.stringify(["segredo da outra"]));
     abrir("dona-1");

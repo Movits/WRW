@@ -68,3 +68,20 @@ describe("useAuth — sair da conta solta a sessão ocupada", () => {
     expect(fecharAba()).toBe(false);
   });
 });
+
+describe("useAuth — sair da conta apaga as buscas recentes do aparelho (H7b)", () => {
+  it("as buscas entre as reuniões de todas as contas deste navegador saem com o Sair, também sem resposta do servidor", async () => {
+    window.localStorage.setItem("mmm.buscasDeReunioes.dona-1", JSON.stringify(["contrato"]));
+    window.localStorage.setItem("mmm.buscasDeReunioes.outra-conta", JSON.stringify(["frete"]));
+    window.localStorage.setItem("outra.chave.do.app", "fica");
+    duble.sairNoServidor.mockRejectedValueOnce(new Error("Failed to fetch"));
+
+    const { result } = renderHook(() => useAuth());
+    await act(async () => { await expect(result.current.logout()).rejects.toThrow("Failed to fetch"); });
+
+    // Computador compartilhado: o termo buscado não fica para a próxima pessoa.
+    expect(Object.keys(window.localStorage).filter(chave => chave.startsWith("mmm.buscasDeReunioes."))).toEqual([]);
+    expect(window.localStorage.getItem("outra.chave.do.app")).toBe("fica");
+    window.localStorage.removeItem("outra.chave.do.app");
+  });
+});

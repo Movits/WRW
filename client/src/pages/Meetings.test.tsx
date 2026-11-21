@@ -1107,11 +1107,11 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
   });
 
   // O link para dentro da reunião chega direto ao endereço do detalhe, com ?t ou ?q.
-  function abrirPeloLink(busca: string) {
+  function abrirPeloLink(busca: string, transcricao: { language: string; segments: unknown[] } = { language: "pt-BR", segments: SEGMENTOS }) {
     const meeting = { ...REUNIAO, status: "ready" };
     duble.list.mockReturnValue({ data: [meeting], isLoading: false });
     duble.get.mockReturnValue({
-      data: { meeting, transcript: { id: "t1", transcript: "x", language: "pt-BR", segments: SEGMENTOS }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
+      data: { meeting, transcript: { id: "t1", transcript: "x", ...transcricao }, entities: [], suggestions: [], recording: GRAVACAO, recordingExpired: false },
       isLoading: false,
     });
     window.history.replaceState(null, "", `/meetings/${REUNIAO.id}${busca}`);
@@ -1139,6 +1139,50 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     } finally {
       window.history.replaceState(null, "", antes);
     }
+  });
+
+  // A reunião em inglês com a tela em português (G16: o original de outro idioma é comum).
+  const EM_INGLES = {
+    language: "en",
+    segments: [
+      { inicio: 5, fim: 20, falante: "F1", texto: "We will sign the contract on Monday." },
+      { inicio: 620, fim: 640, falante: "F2", texto: "Shipping stays for Friday." },
+    ],
+  };
+
+  it("o ?q da busca, na reunião em outro idioma: a transcrição abre no original, com o termo, e nada é traduzido antes da escolha", () => {
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?q=contract", EM_INGLES);
+      expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+      expect(screen.getByRole("combobox", { name: /Idioma/ })).toHaveValue("en");
+      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      expect(screen.getByRole("searchbox")).toHaveValue("contract");
+      expect(document.querySelector("mark")).toHaveTextContent("contract");
+      // A dona ainda escolhe a tradução: aí, sim, o pedido sai.
+      fireEvent.change(screen.getByRole("combobox", { name: /Idioma/ }), { target: { value: "pt-BR" } });
+      expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("o ?t da Memória, na reunião em outro idioma, também abre as falas do original, com o tempo", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const antes = window.location.href;
+    try {
+      abrirPeloLink("?t=620", EM_INGLES);
+      expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+      expect(screen.getByText("Tempo de fala")).toBeInTheDocument();
+      expect(screen.getByText("Shipping stays for Friday.")).toBeInTheDocument();
+    } finally {
+      window.history.replaceState(null, "", antes);
+    }
+  });
+
+  it("sem link para um ponto, a reunião em outro idioma abre traduzida para o idioma da tela, como antes", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "x", ...EM_INGLES }, recording: GRAVACAO });
+    expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
   });
 
   it("o player é um só, fixo no rodapé, e é o mesmo em todas as abas (o áudio não para ao trocar)", () => {

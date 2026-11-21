@@ -38,8 +38,8 @@ async function db() { return (await getDb())!; }
 
 async function reuniao(ownerId: string, opcoes: {
   titulo?: string; transcricao?: string; status?: "ready" | "deleted"; origem?: "gravacao" | "pdf" | "youtube" | null;
-  etiquetas?: string[] | null; criadaEm?: number; itens?: Array<{ texto: string; status?: "pending" | "confirmed" | "ignored"; assunto?: string }>;
-  speakerNames?: Record<string, string> | null; contextId?: string | null;
+  etiquetas?: string[] | null; criadaEm?: number; itens?: Array<{ texto: string; status?: "pending" | "confirmed" | "ignored"; assunto?: string; responsavel?: string }>;
+  speakerNames?: Record<string, string> | null; contextId?: string | null; contactId?: number | null;
 }) {
   const banco = await db();
   const id = crypto.randomUUID();
@@ -47,7 +47,7 @@ async function reuniao(ownerId: string, opcoes: {
   await banco.insert(meetings).values({
     id, ownerId, title: opcoes.titulo ?? "Reunião", status: opcoes.status ?? "ready", consentGranted: true, language: "pt-BR",
     origem: opcoes.origem === undefined ? "gravacao" : opcoes.origem, etiquetas: opcoes.etiquetas ?? null,
-    speakerNames: opcoes.speakerNames ?? null, contextId: opcoes.contextId ?? null, createdAt: criadaEm, updatedAt: criadaEm,
+    speakerNames: opcoes.speakerNames ?? null, contextId: opcoes.contextId ?? null, contactId: opcoes.contactId ?? null, createdAt: criadaEm, updatedAt: criadaEm,
   });
   if (opcoes.transcricao !== undefined) {
     await banco.insert(meetingTranscripts).values({ id: crypto.randomUUID(), meetingId: id, ownerId, transcript: opcoes.transcricao, language: "pt-BR", createdAt: criadaEm, updatedAt: criadaEm });
@@ -61,7 +61,7 @@ async function reuniao(ownerId: string, opcoes: {
       ids.push(itemId);
       await banco.insert(meetingSummaryItems).values({
         id: itemId, summaryId: resumo, meetingId: id, ownerId, section: "action", position: posicao, subject: item.assunto ?? null,
-        text: item.texto, excerpt: "trecho", startSeconds: 42, status: item.status ?? "pending", createdAt: criadaEm, updatedAt: criadaEm,
+        assignee: item.responsavel ?? null, text: item.texto, excerpt: "trecho", startSeconds: 42, status: item.status ?? "pending", createdAt: criadaEm, updatedAt: criadaEm,
       } as typeof meetingSummaryItems.$inferInsert);
     }
   }
@@ -141,6 +141,34 @@ describe.skipIf(!temBanco)("Busca entre as reuniões (integração)", () => {
     expect(await ids({ origem: "audio" })).toEqual([comEtiqueta.id, antiga.id, envioUnico.id].sort());
     expect(await ids({ periodo: "30d" })).toEqual([comEtiqueta.id, documento.id, envioUnico.id].sort());
     expect(await ids({ contextId: contexto })).toEqual([comEtiqueta.id]);
+  });
+
+  it("a etiqueta compara pela chave, como na tela: \"Clientes\" acha também a etiquetada \"clientes\", na transcrição e nos itens", async () => {
+    const maiuscula = await reuniao(DONA, { transcricao: "contrato da feira", etiquetas: ["Clientes"], itens: [{ texto: "revisar o contrato" }] });
+    const minuscula = await reuniao(DONA, { transcricao: "contrato do café", etiquetas: ["Mentoria", "clientes"], itens: [{ texto: "assinar o contrato" }] });
+    // A chave não ignora o acento (chaveDaEtiqueta): "Clientês" é outra etiqueta.
+    await reuniao(DONA, { transcricao: "contrato com acento", etiquetas: ["Clientês"] });
+    await reuniao(DONA, { transcricao: "contrato sem etiqueta" });
+    // A etiqueta igual de outra conta não entra.
+    await reuniao(OUTRA, { transcricao: "contrato alheio", etiquetas: ["clientes"] });
+    const { resultados } = await buscarNasReunioes(DONA, "contrato", { etiqueta: "Clientes" });
+    expect(new Set(resultados.map(r => r.meetingId))).toEqual(new Set([maiuscula.id, minuscula.id]));
+    expect(resultados.filter(r => r.tipo === "item").map(r => r.meetingId).sort()).toEqual([maiuscula.id, minuscula.id].sort());
+    expect((await buscarNasReunioes(DONA, "contrato", { etiqueta: "  CLIENTES " })).resultados).toHaveLength(resultados.length);
+  });
+
+  it("a etiqueta que nenhuma reunião da dona tem não acha nada", async () => {
+    await reuniao(DONA, { transcricao: "contrato da feira", etiquetas: ["Clientes"] });
+    expect(await buscarNasReunioes(DONA, "contrato", { etiqueta: "Fornecedores" })).toEqual({ resultados: [], maisResultados: false });
+  });
+
+  it("o filtro do contato, e o termo que só aparece no responsável do item", async () => {
+    const doContato = await reuniao(DONA, { transcricao: "contrato com a Carla", contactId: 987_654 });
+    await reuniao(DONA, { transcricao: "contrato com outra pessoa", contactId: 123_456 });
+    await reuniao(DONA, { transcricao: "contrato sem contato" });
+    expect((await buscarNasReunioes(DONA, "contrato", { contactId: 987_654 })).resultados.map(r => r.meetingId)).toEqual([doContato.id]);
+    const { id, itens: [itemId] } = await reuniao(DONA, { itens: [{ texto: "mandar a planilha", responsavel: "Joana Prado" }] });
+    expect((await buscarNasReunioes(DONA, "Joana")).resultados).toEqual([expect.objectContaining({ tipo: "item", meetingId: id, itemId })]);
   });
 
   it("até 30 resultados, das mais novas para as mais velhas, e diz quando havia mais", async () => {

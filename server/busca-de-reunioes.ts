@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { meetings, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { nomesDosFalantes } from "@shared/const";
+import { chaveDaEtiqueta, etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import {
   inicioDoPeriodo, padraoDoLike, RESULTADOS_DA_BUSCA_MAX, TRECHO_ANTES, TRECHO_TAMANHO,
   type FiltrosDaBusca,
@@ -35,12 +36,28 @@ export type ResultadoDaBusca =
     itemId: string; secao: string; assunto: string | null; inicioSegundos: number | null;
   };
 
+type Banco = Awaited<ReturnType<typeof exigirDb>>;
+
+/**
+ * As reuniões da dona com a etiqueta do filtro, pela mesma régua da tela
+ * (passaNosFiltros, em shared/busca-de-reunioes.ts): a chave sem caixa e sem
+ * espaços sobrando (chaveDaEtiqueta), e não a grafia exata. O JSON_CONTAINS
+ * comparava o texto byte a byte, e a reunião etiquetada "clientes" sumia do
+ * conteúdo com o filtro "Clientes", embora a lista da tela a mostrasse. A
+ * colação do banco também não serve: ela ignora o acento, e a chave não.
+ */
+async function reunioesComAEtiqueta(db: Banco, ownerId: string, etiqueta: string): Promise<string[]> {
+  const chave = chaveDaEtiqueta(etiqueta);
+  const linhas = await db.select({ id: meetings.id, etiquetas: meetings.etiquetas }).from(meetings)
+    .where(and(eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"), isNotNull(meetings.etiquetas)));
+  return linhas.filter(linha => etiquetasDaReuniao(linha.etiquetas).some(daReuniao => chaveDaEtiqueta(daReuniao) === chave)).map(linha => linha.id);
+}
+
 /** Os filtros da reunião no SQL: a dona, sem as excluídas, e os da tela. */
-function condicoesDaReuniao(ownerId: string, filtros: FiltrosDaBusca, agora: number): SQL[] {
+function condicoesDaReuniao(ownerId: string, filtros: FiltrosDaBusca, agora: number, comAEtiqueta: string[] | null): SQL[] {
   const condicoes: SQL[] = [eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")];
-  // A etiqueta como guardada (a tela oferece as da própria dona); JSON_CONTAINS
-  // recebe o texto como documento JSON, parametrizado.
-  if (filtros.etiqueta) condicoes.push(sql`JSON_CONTAINS(${meetings.etiquetas}, ${JSON.stringify(filtros.etiqueta)})`);
+  // A etiqueta: as reuniões dela, já achadas pela chave (reunioesComAEtiqueta).
+  if (comAEtiqueta) condicoes.push(inArray(meetings.id, comAEtiqueta));
   if (filtros.origem === "documento") condicoes.push(inArray(meetings.origem, ["pdf", "foto"]));
   else if (filtros.origem === "youtube") condicoes.push(eq(meetings.origem, "youtube"));
   else if (filtros.origem === "audio") condicoes.push(or(isNull(meetings.origem), inArray(meetings.origem, ["gravacao", "arquivo", "aba"]))!);
@@ -60,7 +77,10 @@ export async function buscarNasReunioes(ownerId: string, termoBruto: string, fil
   const termo = termoBruto.trim();
   const padrao = padraoDoLike(termo);
   const db = await exigirDb();
-  const daReuniao = condicoesDaReuniao(ownerId, filtros, agora);
+  const comAEtiqueta = filtros.etiqueta ? await reunioesComAEtiqueta(db, ownerId, filtros.etiqueta) : null;
+  // Nenhuma reunião da dona tem a etiqueta: não há onde buscar.
+  if (comAEtiqueta && !comAEtiqueta.length) return { resultados: [] as ResultadoDaBusca[], maisResultados: false };
+  const daReuniao = condicoesDaReuniao(ownerId, filtros, agora, comAEtiqueta);
   const limite = RESULTADOS_DA_BUSCA_MAX + 1;
 
   const naTranscricao = await db.select({

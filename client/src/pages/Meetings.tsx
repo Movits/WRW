@@ -1096,7 +1096,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const definirPlayer = useCallback((controle: ControleDoPlayer | null) => { player.current = controle; }, []);
   useEffect(() => {
     if (itemPedido) setTab("summary");
-    else if (pedeTranscricao) setTab("transcript");
+    else if (pedeTranscricao) {
+      setTab("transcript");
+      // O link para um ponto da transcrição volta ao idioma original (abaixo).
+      setIdiomaEscolhido(null);
+    }
   }, [busca]);
   // O ?t do link leva o player ao ponto quando a parte que cobre o segundo
   // existe. Na reunião que ainda está chegando (gravando, enviando ou
@@ -1123,7 +1127,19 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   // lista, mandando a tradução para pt-BR com a tela em inglês.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
   const initialLanguage = LANGUAGES.some(language => language.code === idiomaAtual) ? idiomaAtual : "pt-BR";
-  const [translationLanguage, setTranslationLanguage] = useState(initialLanguage);
+  // O idioma em que a reunião foi transcrita é o original: escolhê-lo mostra a
+  // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
+  // G16: o original pode ser um idioma fora dos 10 da tela (o italiano, o
+  // coreano), que a lista de tradução ganha como opção à parte.
+  const idiomaOriginal = codigoDoIdiomaFalado(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // A tradução abre no idioma da tela, até a dona escolher outro. O link para
+  // um ponto da transcrição (?q da busca entre as reuniões, ?t da Memória e dos
+  // combinados) abre no ORIGINAL: o termo buscado e as falas com o tempo só
+  // existem nele, e a tradução no idioma da tela mostraria o texto corrido, sem
+  // o termo. Com o original, nenhum pedido de tradução sai antes da escolha.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
+  const translationLanguage = idiomaEscolhido ?? (pedeTranscricao && data?.transcript ? idiomaOriginal : initialLanguage);
+  const setTranslationLanguage = setIdiomaEscolhido;
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   // Reunião longa: o servidor traduz em segundo plano e responde "em andamento";
   // a tela pergunta de novo a cada 5 s até a tradução chegar.
@@ -1218,11 +1234,6 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   // Em processamento, a transcrição na tela é da tentativa anterior e está para
   // ser trocada: traduzir agora gastaria IA com um texto que vai sumir.
   const processandoAgora = data?.meeting.status === "processing";
-  // O idioma em que a reunião foi transcrita é o original: escolhê-lo mostra a
-  // transcrição como está, e os outros pedem tradução. Reunião antiga guarda 'pt'.
-  // G16: o original pode ser um idioma fora dos 10 da tela (o italiano, o
-  // coreano), que a lista de tradução ganha como opção à parte.
-  const idiomaOriginal = codigoDoIdiomaFalado(data?.transcript?.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   useEffect(() => {
     if (!data?.transcript || translationLanguage === idiomaOriginal || processandoAgora) { traducaoLonga.parar(); setTranslatedText(null); return; }
     // A tradução anterior sai antes do pedido novo: se ele falhar (cota, prazo),
