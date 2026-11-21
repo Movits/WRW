@@ -137,6 +137,19 @@ export function ehCodigoDeErroDoYoutube(valor: unknown): valor is CodigoDeErroDo
 }
 
 /**
+ * As falhas que se repetem com o mesmo vídeo: a mesma hora vai ao mesmo
+ * modelo, com temperatura 0 e o mesmo teto de saída, e a IA para de novo em
+ * MAX_TOKENS (fala demais) ou não acha fala outra vez. Cada "Tentar de novo"
+ * pagaria outra leitura e gastaria uma vaga do dia para falhar igual: a tela
+ * não mostra o botão, e o servidor recusa. A frase da causa já diz o que fazer.
+ */
+export const ERROS_DO_YOUTUBE_QUE_SE_REPETEM: readonly CodigoDeErroDoYoutube[] = ["YOUTUBE_LONGO_DEMAIS", "YOUTUBE_SEM_FALA"];
+
+export function erroDoYoutubeSeRepete(codigo: string | null | undefined): codigo is CodigoDeErroDoYoutube {
+  return ehCodigoDeErroDoYoutube(codigo) && ERROS_DO_YOUTUBE_QUE_SE_REPETEM.includes(codigo);
+}
+
+/**
  * A versão do aviso do YouTube (meetings.youtube.notice e consentLabel, nos 10
  * idiomas) que a dona aceitou. Vai em `meetings.consent_notice_version`, como
  * a do aviso de gravação (shared/aviso-de-gravacao.ts), e na auditoria do

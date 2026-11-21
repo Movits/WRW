@@ -25,6 +25,7 @@ const autenticar = vi.fn();
 const receber = vi.fn();
 const ler = vi.fn();
 let teto = criarTeto(DOCUMENTOS_POR_HORA, 60 * 60_000, "teto");
+let reservas = 0;
 let servidor: Server;
 let base = "";
 let porta = 0;
@@ -33,7 +34,7 @@ const CAMINHO = `/api/reunioes/${REUNIAO}/documento`;
 
 beforeAll(async () => {
   const app = express();
-  registrarRotaDoDocumento(app, { autenticar, receber, ler, teto: { reservar: chave => teto.reservar(chave) } });
+  registrarRotaDoDocumento(app, { autenticar, receber, ler, teto: { reservar: chave => { reservas++; return teto.reservar(chave); } } });
   app.use(tratarCorpoGrandeDasPartes);
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
@@ -76,6 +77,48 @@ function pedidoQueNaoTermina(declarado: number): Promise<{ status: number; corpo
     pedido.write(PDF);
     setTimeout(() => rejeitar(new Error("a rota esperou o corpo para responder")), 3000).unref();
   });
+}
+
+/** Espera o servidor fechar a resposta do próximo pedido que chegar (a conexão caiu, ou a resposta saiu). */
+function fechamentoDoProximoPedido(): Promise<void> {
+  return new Promise(fechou => servidor.once("request", (_req, res) => res.once("close", () => fechou())));
+}
+
+/**
+ * A dona manda o PDF inteiro e derruba a conexão com o recebimento ainda em
+ * curso (o PDF subindo ao bucket, a transação): o celular que perde a rede, a
+ * aba fechada, ou de propósito. O recebimento só termina, aceito, DEPOIS de o
+ * servidor ver a conexão fechada.
+ */
+async function envioQueCaiNoRecebimento(soltarORecebimento: Array<() => void>) {
+  const fechou = fechamentoDoProximoPedido();
+  const antes = receber.mock.calls.length;
+  const pedido = http.request({
+    host: "127.0.0.1", port: porta, path: CAMINHO, method: "POST",
+    headers: { "Content-Type": "application/pdf", "Content-Length": String(PDF.length) },
+  });
+  pedido.on("error", () => {});
+  pedido.end(PDF);
+  await vi.waitFor(() => expect(receber).toHaveBeenCalledTimes(antes + 1));
+  pedido.destroy();
+  await fechou;
+  soltarORecebimento.shift()!();
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+/** A dona começa a mandar o PDF e a conexão cai no meio do corpo: nada chega ao recebimento. */
+async function envioQueCaiNoMeioDoCorpo() {
+  const fechou = fechamentoDoProximoPedido();
+  const antes = reservas;
+  const pedido = http.request({
+    host: "127.0.0.1", port: porta, path: CAMINHO, method: "POST",
+    headers: { "Content-Type": "application/pdf", "Content-Length": "100000" },
+  });
+  pedido.on("error", () => {});
+  pedido.write(PDF);
+  await vi.waitFor(() => expect(reservas).toBe(antes + 1));
+  pedido.destroy();
+  await fechou;
 }
 
 describe("POST /api/reunioes/{id}/documento", () => {
@@ -175,6 +218,39 @@ describe("POST /api/reunioes/{id}/documento", () => {
       expect((await enviar(PDF)).status).toBe(200);
       for (let i = 0; i < DOCUMENTOS_POR_HORA; i++) expect((await enviar(PDF)).status).toBe(202);
       expect((await enviar(PDF)).status).toBe(429);
+    });
+
+    it("a conexão que cai depois de o corpo chegar não devolve a vaga: o documento que o recebimento aceita depois conta, e o 11º da hora é 429", async () => {
+      const soltar: Array<() => void> = [];
+      receber.mockImplementation(() => new Promise(aceitar => { soltar.push(() => aceitar({ repetido: false, trabalho: Promise.resolve() })); }));
+      for (let i = 0; i < DOCUMENTOS_POR_HORA; i++) await envioQueCaiNoRecebimento(soltar);
+      expect(await pedidoQueNaoTermina(1000)).toEqual({ status: 429, corpo: { codigo: "MUITOS_PEDIDOS" } });
+      expect(receber).toHaveBeenCalledTimes(DOCUMENTOS_POR_HORA);
+    });
+
+    it("a queda depois do corpo e o reenvio do mesmo arquivo pela tela (repetido): o documento gasta uma vaga, nem zero nem duas", async () => {
+      const soltar: Array<() => void> = [];
+      receber.mockImplementationOnce(() => new Promise(aceitar => { soltar.push(() => aceitar({ repetido: false, trabalho: Promise.resolve() })); }));
+      await envioQueCaiNoRecebimento(soltar);
+      receber.mockResolvedValueOnce({ repetido: true, trabalho: null });
+      expect((await enviar(PDF)).status).toBe(200);
+      receber.mockResolvedValue({ repetido: false, trabalho: Promise.resolve() });
+      for (let i = 1; i < DOCUMENTOS_POR_HORA; i++) expect((await enviar(PDF)).status).toBe(202);
+      expect(await pedidoQueNaoTermina(1000)).toEqual({ status: 429, corpo: { codigo: "MUITOS_PEDIDOS" } });
+    });
+
+    it("…e a recusa que chega depois da queda ainda devolve a vaga", async () => {
+      const soltar: Array<() => void> = [];
+      receber.mockImplementation(() => new Promise((_aceitar, recusar) => { soltar.push(() => recusar(new RecusaDoDocumento("FORA_DO_ESTADO", "x"))); }));
+      await envioQueCaiNoRecebimento(soltar);
+      receber.mockResolvedValue({ repetido: false, trabalho: Promise.resolve() });
+      for (let i = 0; i < DOCUMENTOS_POR_HORA; i++) expect((await enviar(PDF)).status).toBe(202);
+    });
+
+    it("a conexão que cai no meio do envio do corpo devolve a vaga: nada foi recebido", async () => {
+      for (let i = 0; i < DOCUMENTOS_POR_HORA; i++) await envioQueCaiNoMeioDoCorpo();
+      expect(receber).not.toHaveBeenCalled();
+      for (let i = 0; i < DOCUMENTOS_POR_HORA; i++) expect((await enviar(PDF)).status).toBe(202);
     });
 
     it("o teto é por dona", async () => {

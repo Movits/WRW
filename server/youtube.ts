@@ -3,12 +3,12 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { auditLogs, meetings, users } from "../drizzle/schema";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import {
-  idDoVideoDoYoutube, SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, urlCanonicaDoYoutube, VIDEOS_DO_YOUTUBE_POR_DIA,
+  erroDoYoutubeSeRepete, idDoVideoDoYoutube, SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, urlCanonicaDoYoutube, VIDEOS_DO_YOUTUBE_POR_DIA,
   type CodigoDeErroDoYoutube, type VersaoDoAvisoDoYoutube,
 } from "@shared/youtube";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
-import { geminiPost, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, raciocinioBaixo } from "./gemini";
+import { geminiPost, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, prazoEsgotadoNoGemini, raciocinioBaixo } from "./gemini";
 import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 import {
   extrairDadosDaReuniao, gravarResultadoDaReuniao, MENSAGEM_REPROCESSO_EM_CONFLITO, MENSAGEM_REUNIAO_NAO_ENCONTRADA,
@@ -186,11 +186,14 @@ const RECUSA_PELO_TAMANHO = /token count|maximum number of tokens|exceeds the ma
  * malformado, sem dizer qual dos dois: a recusa que não é da configuração nem
  * do tamanho é dada como vídeo indisponível, que é a causa provável aqui (o
  * pedido é sempre o mesmo). Cortada em MAX_TOKENS é fala demais para uma
- * resposta; parada por outro motivo (SAFETY, RECITATION...) é recusa da IA.
+ * resposta; parada por outro motivo (SAFETY, RECITATION...) é recusa da IA. O
+ * prazo esgotado do lado do Gemini (504, DEADLINE_EXCEEDED) chega como recusa,
+ * mas é a IA que não deu conta a tempo: vem antes do ramo da recusa.
  */
 export function codigoDaFalhaDoVideo(erro: unknown): CodigoDeErroDoYoutube {
   if (erro instanceof ErroDoVideoDoYoutube) return erro.codigo;
   if (erro instanceof GeminiRespostaCortadaError) return erro.motivo === "MAX_TOKENS" ? "YOUTUBE_LONGO_DEMAIS" : "YOUTUBE_IA_RECUSOU";
+  if (prazoEsgotadoNoGemini(erro)) return "YOUTUBE_IA_INDISPONIVEL";
   if (erro instanceof GeminiRecusouChamadaError) {
     if (erro.status === 401 || RECUSA_DA_CONFIGURACAO.test(erro.detalhe)) return "YOUTUBE_IA_RECUSOU";
     if (erro.status === 413 || RECUSA_PELO_TAMANHO.test(erro.detalhe)) return "YOUTUBE_LONGO_DEMAIS";
@@ -388,6 +391,9 @@ export async function pedirResumoDoVideo(
  * auditoria. A tomada ('failed' → 'processing', com a ficha nova) vai na mesma
  * transação, com a linha travada: dois cliques não tomam a reunião duas vezes.
  * O que a tentativa anterior deixou sai depois de a IA dar certo (limparAntes).
+ * A falha que se repete com o mesmo vídeo (erroDoYoutubeSeRepete: fala demais,
+ * nenhuma fala) é recusada com o código dela, que a tela traduz, antes do teto:
+ * não gasta vaga nem vai à IA.
  */
 export async function refazerResumoDoVideo(conta: ContaQuePede, meetingId: string): Promise<{ trabalho: Promise<void> }> {
   const db = await exigirDb();
@@ -397,11 +403,13 @@ export async function refazerResumoDoVideo(conta: ContaQuePede, meetingId: strin
     const [reuniao] = await tx.select({
       status: meetings.status, origem: meetings.origem, sourceUrl: meetings.sourceUrl, consentGranted: meetings.consentGranted,
       consentNoticeVersion: meetings.consentNoticeVersion, language: meetings.language, updatedAt: meetings.updatedAt,
+      processingError: meetings.processingError,
     }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao || reuniao.status === "deleted") throw new RecusaDoVideo("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     const id = reuniao.origem === "youtube" ? idDoVideoDoYoutube(reuniao.sourceUrl) : null;
     if (!id || !reuniao.consentGranted) throw new RecusaDoVideo("PRECONDITION_FAILED", MENSAGEM_REUNIAO_NAO_E_DO_YOUTUBE);
     if (reuniao.status !== "failed") throw new RecusaDoVideo("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
+    if (erroDoYoutubeSeRepete(reuniao.processingError)) throw new RecusaDoVideo("PRECONDITION_FAILED", reuniao.processingError);
     await conferirOTeto(tx, conta.userId);
     // Estritamente maior que o updated_at lido, como a ficha do reprocesso.
     const ficha = Math.max(Date.now(), Number(reuniao.updatedAt) + 1);

@@ -1773,6 +1773,7 @@
       "listBadge": "Documento",
       "readingStatus": "Lendo o documento e preparando o resumo…",
       "uploadIncomplete": "O documento não chegou ao servidor. Exclua esta reunião e envie o arquivo de novo.",
+      "leftoverMeeting": "A reunião criada para este envio não pôde ser excluída e ficou na lista de reuniões. Exclua-a por lá.",
       "textTab": "Texto do documento",
       "pagesTab": "Páginas",
       "fileHeading": "Arquivo",

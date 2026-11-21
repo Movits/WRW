@@ -1773,6 +1773,7 @@
       "listBadge": "文档",
       "readingStatus": "正在读取文档并准备摘要…",
       "uploadIncomplete": "文档未送达服务器。请删除此会议并重新发送文件。",
+      "leftoverMeeting": "为本次发送创建的会议未能删除，仍在会议列表中。请在列表中将其删除。",
       "textTab": "文档文字",
       "pagesTab": "页面",
       "fileHeading": "文件",

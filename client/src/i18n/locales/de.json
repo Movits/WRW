@@ -1773,6 +1773,7 @@
       "listBadge": "Dokument",
       "readingStatus": "Das Dokument wird gelesen und die Zusammenfassung vorbereitet…",
       "uploadIncomplete": "Das Dokument ist nicht beim Server angekommen. Löschen Sie dieses Meeting und senden Sie die Datei erneut.",
+      "leftoverMeeting": "Das für diesen Upload erstellte Meeting konnte nicht gelöscht werden und steht noch in der Meeting-Liste. Löschen Sie es dort.",
       "textTab": "Text des Dokuments",
       "pagesTab": "Seiten",
       "fileHeading": "Datei",

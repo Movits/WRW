@@ -11,7 +11,7 @@ import { causaDaFalhaDoDocumento, mensagemDaRecusaDaParte, traduzirMensagemDoSer
 import { DocumentoParaResumir } from "@/components/DocumentoParaResumir";
 import { PaginasDoDocumento } from "@/components/PaginasDoDocumento";
 import { TextoDoDocumento } from "@/components/TextoDoDocumento";
-import { ehReuniaoDeDocumento, paginasDoDocumento } from "@shared/documento-da-reuniao";
+import { ehReuniaoDeDocumento, falhaDoDocumentoSeRepete, paginasDoDocumento } from "@shared/documento-da-reuniao";
 import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 import { VincularAContato } from "@/components/VincularAContato";
 import { ConexoesGeradasPelaReuniao } from "@/components/ConexoesDaReuniao";
@@ -48,7 +48,7 @@ import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } 
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
-import { idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
+import { erroDoYoutubeSeRepete, idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
 import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
@@ -1245,8 +1245,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {meeting.status === "failed" && ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* O documento (H12) se reprocessa pelo arquivo guardado, com a mesma
-          margem do reprocesso do áudio: perto de vencer, o servidor recusa. */}
-      {documento && !documentoAusente && documento.expiresAt - Date.now() > margemDoReprocesso(null) ? (
+          margem do reprocesso do áudio: perto de vencer, o servidor recusa. A
+          falha que se repete com o mesmo arquivo (o texto que não cabe numa
+          resposta) não tem botão: o motivo já diz o que fazer, e o servidor
+          também recusa. */}
+      {falhaDoDocumentoSeRepete(meeting.processingError) ? null : documento && !documentoAusente && documento.expiresAt - Date.now() > margemDoReprocesso(null) ? (
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-red-100/75">{t("meetings.document.reprocessHint", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })}</p>
           <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
@@ -1261,14 +1264,16 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {meeting.status === "failed" && idDoVideo && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* O vídeo não fica guardado aqui: tentar de novo lê o vídeo outra vez
-          pela URL, e gasta uma vaga do teto de vídeos por dia. */}
-      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          pela URL, e gasta uma vaga do teto de vídeos por dia. A falha que se
+          repete com o mesmo vídeo (fala demais, nenhuma fala) não tem botão: o
+          motivo já diz o que fazer, e o servidor também recusa. */}
+      {!erroDoYoutubeSeRepete(meeting.processingError) && <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-red-100/75">{t("meetings.youtube.retryHint", { n: VIDEOS_DO_YOUTUBE_POR_DIA })}</p>
         <button type="button" onClick={() => refazerVideo.mutate({ meetingId })} disabled={refazerVideo.isPending}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
           <RefreshCw size={15} className={refazerVideo.isPending ? "animate-spin" : ""}/> {t("meetings.youtube.retryButton")}
         </button>
-      </div>
+      </div>}
     </div>}
     {meeting.status === "failed" && !ehDocumento && !idDoVideo && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>

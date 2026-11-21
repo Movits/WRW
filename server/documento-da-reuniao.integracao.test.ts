@@ -47,9 +47,12 @@ vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("
 
 const { getDb } = await import("./db");
 const { consumoDeMinutos, meetingDocuments, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
-const { iniciarDocumento, lerDocumentoGuardado, receberDocumento, RecusaDoDocumento } = await import("./documento-da-reuniao");
-const { deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas, MEETING_AUDIO_TTL_MS } = await import("./meeting-service");
-const { GeminiRespostaCortadaError } = await import("./gemini");
+const { iniciarDocumento, lerDocumentoGuardado, processarDocumento, receberDocumento, RecusaDoDocumento } = await import("./documento-da-reuniao");
+const {
+  deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas, marcarReunioesInterrompidas, MEETING_AUDIO_TTL_MS,
+  ReprocessamentoRecusado,
+} = await import("./meeting-service");
+const { GeminiIndisponivelError, GeminiRespostaCortadaError } = await import("./gemini");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const fila = await import("./fila-do-resumo");
 const { resumoGuardadoDaDona } = await import("./resumo-guardado");
@@ -217,9 +220,9 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
   });
 
   it("a falha grava o código (nunca frase), e o reprocesso relê o PDF guardado", async () => {
-    gerarComArquivoNoGemini.mockRejectedValueOnce(new GeminiRespostaCortadaError("MAX_TOKENS"));
+    gerarComArquivoNoGemini.mockRejectedValueOnce(new GeminiIndisponivelError(503));
     const id = await documentoPronto();
-    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" });
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "IA_INDISPONIVEL" });
 
     const documento = await documentoDe(id);
     storageGetBytes.mockResolvedValueOnce(pdf("o mesmo"));
@@ -230,6 +233,69 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     // Reprocessar não grava arquivo novo nem renova os 30 dias.
     expect(storagePut).toHaveBeenCalledTimes(1);
     expect((await documentoDe(id)).expiresAt).toBe(documento.expiresAt);
+  });
+
+  it("o documento longo demais para uma resposta não se reprocessa: a mesma leitura pararia de novo no mesmo ponto", async () => {
+    gerarComArquivoNoGemini.mockRejectedValueOnce(new GeminiRespostaCortadaError("MAX_TOKENS"));
+    const id = await documentoPronto();
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" });
+    const recusa = await iniciarReprocessamento(DONA, id).catch(erro => erro);
+    expect(recusa).toBeInstanceOf(ReprocessamentoRecusado);
+    expect(recusa).toMatchObject({ codigo: "PRECONDITION_FAILED", message: "DOCUMENTO_LONGO_DEMAIS" });
+    // Nada foi tomado, lido do bucket nem mandado à IA.
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" });
+    expect(storageGetBytes).not.toHaveBeenCalled();
+    expect(gerarComArquivoNoGemini).toHaveBeenCalledTimes(1);
+  });
+
+  describe("a ficha e a varredura de interrompidas (a real, com o corte logo depois da ficha antiga, para não alcançar reunião de outro arquivo de teste)", () => {
+    // A tomada aconteceu há muito tempo: a leitura "levou" mais que o prazo da varredura.
+    const FICHA_ANTIGA = 1_000;
+    const varrer = () => marcarReunioesInterrompidas(Date.now() - 2 * FICHA_ANTIGA);
+    async function reuniaoEmLeitura() {
+      const id = crypto.randomUUID();
+      await (await db()).insert(meetings).values({
+        id, ownerId: DONA, title: "Documento lento", status: "processing", consentGranted: true,
+        consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem: "pdf", audioPipeline: "single", language: "pt-BR",
+        createdAt: Date.now(), updatedAt: FICHA_ANTIGA,
+      });
+      return id;
+    }
+    const execucao = (id: string) => ({ ownerId: DONA, meetingId: id, ficha: FICHA_ANTIGA, bytes: pdf("lento"), idioma: "pt-BR", limparAntes: false });
+
+    it("lido o documento, a ficha se renova: a varredura que passa no meio da extração não toma a reunião, e ela fica pronta", async () => {
+      const id = await reuniaoEmLeitura();
+      let soltarExtracao!: () => void;
+      const extracaoComecou = new Promise<void>(comecou => {
+        extrairDadosDaReuniao.mockImplementationOnce(() => {
+          comecou();
+          return new Promise(resolver => { soltarExtracao = () => resolver(SEM_EXTRACAO); });
+        });
+      });
+      const trabalho = processarDocumento(await db(), execucao(id));
+      await extracaoComecou;
+      expect((await varrer()).marcadas).toBe(0);
+      soltarExtracao();
+      await trabalho;
+      expect(await reuniaoDe(id)).toMatchObject({ status: "ready", processingError: null });
+      const [transcricao] = await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id));
+      expect(transcricao.segments).toEqual(PAGINAS);
+    });
+
+    it("a varredura que passa no meio da leitura toma a reunião: o trabalho velho sai sem extrair nem escrever, e o log diz que o resultado foi descartado", async () => {
+      const id = await reuniaoEmLeitura();
+      let soltarLeitura!: () => void;
+      gerarComArquivoNoGemini.mockImplementationOnce(() => new Promise(resolver => { soltarLeitura = () => resolver(leituraDa(PAGINAS)); }));
+      const trabalho = processarDocumento(await db(), execucao(id));
+      await vi.waitFor(() => expect(gerarComArquivoNoGemini).toHaveBeenCalledTimes(1));
+      expect((await varrer()).marcadas).toBe(1);
+      soltarLeitura();
+      await trabalho;
+      expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: "ERRO_INTERROMPIDO" });
+      expect(extrairDadosDaReuniao).not.toHaveBeenCalled();
+      expect(await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id))).toEqual([]);
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("[Documento] outra execução tomou a reunião"));
+    });
   });
 
   it("sem texto em página nenhuma é DOCUMENTO_SEM_TEXTO; o PDF que sumiu do bucket no reprocesso é DOCUMENTO_AUSENTE", async () => {

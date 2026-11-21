@@ -333,7 +333,8 @@ export const meetingsRouter = router({
   // O "Tentar de novo" da reunião do YouTube com falha: lê o vídeo outra vez
   // pela URL guardada e gasta uma vaga do mesmo teto. NOT_FOUND, CONFLICT (não
   // está com falha, ou alguém chegou antes), PRECONDITION_FAILED (não é do
-  // YouTube) e TOO_MANY_REQUESTS (o teto).
+  // YouTube, ou a falha se repete com o mesmo vídeo: a mensagem é o código
+  // dela) e TOO_MANY_REQUESTS (o teto).
   refazerVideoDoYoutube: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(({ ctx, input }) => comRecusaDoVideo(async () => {
@@ -346,7 +347,8 @@ export const meetingsRouter = router({
   // Devolve assim que a reunião é tomada ('processing'); o resultado aparece em
   // meetings.get e meetings.list. Recusas saem com o código que a tela traduz:
   // NOT_FOUND, CONFLICT (não está com falha, ou alguém chegou antes),
-  // PRECONDITION_FAILED (sem áudio guardado utilizável) e TOO_MANY_REQUESTS.
+  // PRECONDITION_FAILED (sem áudio ou documento guardado utilizável, ou o
+  // documento que falha igual com o mesmo arquivo) e TOO_MANY_REQUESTS.
   reprocess: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {

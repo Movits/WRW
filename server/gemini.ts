@@ -54,6 +54,19 @@ export class GeminiRecusouChamadaError extends GeminiIndisponivelError {
 const pareceCotaEsgotada = (detalhe: string) =>
   /exceeded your current quota|free_tier_requests|RESOURCE_EXHAUSTED/i.test(detalhe);
 
+/**
+ * O Gemini desistiu dentro do prazo dele: HTTP 504, DEADLINE_EXCEEDED ("Deadline
+ * expired before operation could complete."), que a documentação de erros da
+ * Google dá para a entrada grande demais para o tempo da chamada. Como não é
+ * 429, 500 nem 503, o geminiPost o devolve como GeminiRecusouChamadaError, mas
+ * ele não é recusa do pedido nem do conteúdo: quem escolhe o código do erro
+ * para a tela o trata como IA indisponível, ANTES do ramo da recusa (sem isso,
+ * o vídeo público de 1 h virava "vídeo privado", e o PDF longo, "a IA recusou").
+ */
+export function prazoEsgotadoNoGemini(erro: unknown): boolean {
+  return erro instanceof GeminiRecusouChamadaError && (erro.status === 504 || /DEADLINE_EXCEEDED|Deadline expired/i.test(erro.detalhe));
+}
+
 function getGeminiKey() {
   // Mesma cadeia de fallback do resto do app (LLM_API_KEY > chaves legadas >
   // GOOGLE_API_KEY). Ler só GOOGLE_API_KEY quebrava embeddings e transcrição em
@@ -287,6 +300,12 @@ export class GeminiSemTextoError extends Error {
  * - O raciocínio vai sempre no nível baixo (raciocinioBaixo), dentro do teto de
  *   saída; os prazos e o teto de saída vêm de quem chama, e o padrão é o da
  *   parte do áudio.
+ * - `reservaSoAteMs`: a reserva só é tentada se o modelo principal desistiu
+ *   antes desse tempo, contado do começo da chamada. Sem ele, a reserva vem
+ *   sempre que o principal está lotado. Quem trabalha contra a varredura de
+ *   interrompidas (o documento, em server/documento-da-reuniao.ts) o passa,
+ *   como o vídeo do YouTube faz com RESERVA_SO_ATE_MS: a reserva que começa
+ *   tarde passaria do prazo.
  */
 export async function gerarComArquivoNoGemini(input: {
   bytes: Buffer;
@@ -297,6 +316,7 @@ export async function gerarComArquivoNoGemini(input: {
   saidaMaxima?: number;
   timeoutMs?: number;
   orcamentoMs?: number;
+  reservaSoAteMs?: number;
 }): Promise<{ texto: string; modelo: string }> {
   const teto = Math.min(input.tetoInlineBytes, TETO_INLINE_DO_GEMINI_BYTES);
   if (!input.bytes.length || input.bytes.length > teto) throw new ArquivoForaDoTetoDoGeminiError(input.bytes.length, teto);
@@ -314,6 +334,7 @@ export async function gerarComArquivoNoGemini(input: {
     },
   });
   const opcoes = { timeoutMs: input.timeoutMs ?? TIMEOUT_DA_PARTE_MS, orcamentoMs: input.orcamentoMs ?? ORCAMENTO_DA_PARTE_MS };
+  const inicio = Date.now();
   let modelo = modeloDeAudio();
   let payload: RespostaComFim;
   try {
@@ -322,6 +343,10 @@ export async function gerarComArquivoNoGemini(input: {
     if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
     const reserva = modeloDeAudioReserva();
     if (reserva === modelo) throw erro;
+    if (input.reservaSoAteMs !== undefined && Date.now() - inicio >= input.reservaSoAteMs) {
+      console.warn(`[Gemini] ${modelo} indisponível depois de ${Math.round((Date.now() - inicio) / 1000)} s; tarde demais para a reserva ${reserva}`);
+      throw erro;
+    }
     console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
     try {
       payload = await geminiPost<RespostaComFim>(`/models/${reserva}:generateContent`, corpo(reserva), 1, opcoes);

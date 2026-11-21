@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CODIGOS_DE_ERRO_DO_YOUTUBE, ehCodigoDeErroDoYoutube, idDoVideoDaReuniao, idDoVideoDoYoutube, linkDoYoutubeNoSegundo,
+  CODIGOS_DE_ERRO_DO_YOUTUBE, ehCodigoDeErroDoYoutube, erroDoYoutubeSeRepete, idDoVideoDaReuniao, idDoVideoDoYoutube, linkDoYoutubeNoSegundo,
   SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE, urlCanonicaDoYoutube,
 } from "@shared/youtube";
 
@@ -312,6 +312,12 @@ describe("as falhas viram códigos que a tela traduz", () => {
     expect(await codigoDe(youtube.transcreverVideoDoYoutube({ url: CANONICA, idioma: "pt-BR" }))).toBe("YOUTUBE_IA_RECUSOU");
   });
 
+  it("o prazo esgotado do lado do Gemini (504 DEADLINE_EXCEEDED) é a IA que não deu conta a tempo, nunca 'vídeo privado'", async () => {
+    responder({ status: 504, corpo: { error: { code: 504, message: "Deadline expired before operation could complete.", status: "DEADLINE_EXCEEDED" } } });
+    expect(await codigoDe(youtube.transcreverVideoDoYoutube({ url: CANONICA, idioma: "pt-BR" }))).toBe("YOUTUBE_IA_INDISPONIVEL");
+    expect(pedidos).toHaveLength(1);
+  });
+
   it("o vídeo que passa do que a IA lê de uma vez: YOUTUBE_LONGO_DEMAIS", async () => {
     responder(recusa(400, "The input token count (1210000) exceeds the maximum number of tokens allowed (1048576)."));
     expect(await codigoDe(youtube.transcreverVideoDoYoutube({ url: CANONICA, idioma: "pt-BR" }))).toBe("YOUTUBE_LONGO_DEMAIS");
@@ -363,6 +369,15 @@ describe("as falhas viram códigos que a tela traduz", () => {
   });
 });
 
+describe("erroDoYoutubeSeRepete", () => {
+  it("só fala demais e nenhuma fala se repetem com o mesmo vídeo; o resto pode dar certo numa leitura nova", () => {
+    expect(erroDoYoutubeSeRepete("YOUTUBE_LONGO_DEMAIS")).toBe(true);
+    expect(erroDoYoutubeSeRepete("YOUTUBE_SEM_FALA")).toBe(true);
+    const outros = CODIGOS_DE_ERRO_DO_YOUTUBE.filter(codigo => codigo !== "YOUTUBE_LONGO_DEMAIS" && codigo !== "YOUTUBE_SEM_FALA");
+    for (const codigo of [...outros, "ERRO_INTERROMPIDO", null, undefined]) expect(erroDoYoutubeSeRepete(codigo)).toBe(false);
+  });
+});
+
 describe("codigoDaFalhaDoVideo", () => {
   it("dá o código de cada erro, e YOUTUBE_FALHOU para o que não conhece", () => {
     expect(youtube.codigoDaFalhaDoVideo(new youtube.ErroDoVideoDoYoutube("YOUTUBE_SEM_FALA"))).toBe("YOUTUBE_SEM_FALA");
@@ -372,6 +387,9 @@ describe("codigoDaFalhaDoVideo", () => {
     expect(youtube.codigoDaFalhaDoVideo(new GeminiRecusouChamadaError(401, ""))).toBe("YOUTUBE_IA_RECUSOU");
     expect(youtube.codigoDaFalhaDoVideo(new GeminiRecusouChamadaError(404, "models/gemini-9 is not found for API version v1beta"))).toBe("YOUTUBE_IA_RECUSOU");
     expect(youtube.codigoDaFalhaDoVideo(new GeminiRecusouChamadaError(413, ""))).toBe("YOUTUBE_LONGO_DEMAIS");
+    // O 504 do Gemini chega como recusa (não é 429, 500 nem 503), mas é prazo esgotado: vem antes do ramo da recusa.
+    expect(youtube.codigoDaFalhaDoVideo(new GeminiRecusouChamadaError(504, '{"error":{"code":504,"message":"Deadline expired before operation could complete.","status":"DEADLINE_EXCEEDED"}}'))).toBe("YOUTUBE_IA_INDISPONIVEL");
+    expect(youtube.codigoDaFalhaDoVideo(new GeminiRecusouChamadaError(400, '{"error":{"status":"DEADLINE_EXCEEDED"}}'))).toBe("YOUTUBE_IA_INDISPONIVEL");
     expect(youtube.codigoDaFalhaDoVideo(new GeminiCotaEsgotadaError())).toBe("YOUTUBE_IA_INDISPONIVEL");
     expect(youtube.codigoDaFalhaDoVideo(new GeminiIndisponivelError(504))).toBe("YOUTUBE_IA_INDISPONIVEL");
     expect(youtube.codigoDaFalhaDoVideo(new Error("O serviço de IA não conseguiu extrair os dados da transcrição."))).toBe("YOUTUBE_FALHOU");

@@ -1627,10 +1627,21 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
   });
 
   it.each([
-    ["YOUTUBE_VIDEO_PRIVADO", "A IA não conseguiu abrir este vídeo. Só vídeos públicos funcionam: confira se ele não é privado, não listado, removido ou restrito por idade ou região."],
     ["YOUTUBE_SEM_FALA", "A IA não encontrou fala neste vídeo: só música, silêncio ou ruído."],
     ["YOUTUBE_LONGO_DEMAIS", "Este vídeo tem fala demais para a IA transcrever de uma vez. Tente um vídeo mais curto."],
+  ])("com falha %s, que se repete com o mesmo vídeo: o motivo traduzido, e nenhum Tentar de novo (pagaria outra leitura para falhar igual)", (codigo, frase) => {
+    abrirDetalhe({ status: "failed", processingError: codigo, ...VIDEO });
+    expect(screen.getByText(frase)).toBeInTheDocument();
+    expect(screen.queryByText(codigo)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tentar de novo/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tentar de novo lê o vídeo outra vez/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["YOUTUBE_VIDEO_PRIVADO", "A IA não conseguiu abrir este vídeo. Só vídeos públicos funcionam: confira se ele não é privado, não listado, removido ou restrito por idade ou região."],
     ["YOUTUBE_IA_INDISPONIVEL", "O serviço de IA está ocupado agora. Tente de novo em alguns minutos."],
+    ["YOUTUBE_FALHOU", "Não foi possível resumir este vídeo. Tente de novo."],
     // A varredura de interrompidas (um deploy no meio) vale também para o vídeo.
     ["ERRO_INTERROMPIDO", "O processamento foi interrompido antes de terminar (o servidor reiniciou no meio)."],
   ])("com falha %s: o motivo traduzido, nunca o código cru, e o Tentar de novo do vídeo no lugar do Reprocessar", (codigo, frase) => {

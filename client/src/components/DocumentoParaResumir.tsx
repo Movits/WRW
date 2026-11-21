@@ -6,8 +6,8 @@ import { trpc } from "@/lib/trpc";
 import { ocupar } from "@/lib/sessao-ocupada";
 import { enviarDocumento } from "@/lib/envio-do-documento";
 import { FotoIlegivel, fotosParaPdf } from "@/lib/pdf-de-fotos";
-import { mensagemDaRecusaDoDocumento, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
-import { DOCUMENTO_BYTES_MAX, FOTOS_POR_DOCUMENTO_MAX, type OrigemDeDocumento } from "@shared/documento-da-reuniao";
+import { mensagemDaRecusaDoDocumento, mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
+import { DOCUMENTO_BYTES_MAX, ehRecusaDoDocumento, FOTOS_POR_DOCUMENTO_MAX, type OrigemDeDocumento } from "@shared/documento-da-reuniao";
 import { VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 
@@ -21,14 +21,28 @@ import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
  *
  * O envio: a reunião nasce (meetings.iniciarDocumento), o PDF vai cru pela rota
  * binária (lib/envio-do-documento.ts) e a tela vai ao detalhe, onde a leitura
- * em segundo plano aparece como "lendo o documento". Recusado o arquivo, a
- * reunião que nasceu para ele é excluída, para não ficar "recebendo" na lista;
- * só a queda de rede no meio a deixa, porque o servidor pode ter recebido.
+ * em segundo plano aparece como "lendo o documento". Recusado o arquivo de vez
+ * (as recusas de shared/documento-da-reuniao.ts), a reunião que nasceu para ele
+ * é excluída, para não ficar "recebendo" na lista; se a exclusão também falha,
+ * a tela avisa que ela ficou lá. O desfecho passageiro (o teto da hora, o
+ * bucket ou o banco fora, a sessão vencida, a rede que caiu) não exclui nada: a
+ * reunião fica guardada, e o próximo Enviar manda o arquivo a ELA, sem criar
+ * outra (o servidor aceita o reenvio enquanto ela espera o documento, e
+ * reconhece o mesmo arquivo que já chegou).
  */
 
 type Foto = { id: string; arquivo: File; url: string };
 
+/**
+ * A reunião de um envio que não terminou aceito. `incerta`: a rede caiu, e o
+ * servidor pode ter ficado com o documento; essa reunião nunca sai sozinha.
+ */
+type ReuniaoPendente = { id: string; titulo: string; idioma: IdiomaDaReuniao; origem: OrigemDeDocumento; incerta: boolean };
+
 const MB = 1_000_000;
+
+/** O código tRPC do erro (data.code): só o erro que o servidor devolveu tem um. */
+const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: unknown } } | null)?.data?.code;
 
 /** Começa por "%PDF-" nos primeiros 1024 bytes, como o servidor confere. */
 async function pareceUmPdf(arquivo: Blob) {
@@ -63,6 +77,7 @@ export function DocumentoParaResumir(props: {
   const entradaDoPdf = useRef<HTMLInputElement | null>(null);
   const entradaDaCamera = useRef<HTMLInputElement | null>(null);
   const entradaDasFotos = useRef<HTMLInputElement | null>(null);
+  const reuniaoPendente = useRef<ReuniaoPendente | null>(null);
   const ocupado = fase !== "parada";
 
   // As miniaturas são URLs do próprio aparelho: saem da memória ao tirar a foto e ao sair da tela.
@@ -97,6 +112,21 @@ export function DocumentoParaResumir(props: {
 
   const temArquivo = origem === "pdf" ? pdf !== null : fotos.length > 0;
 
+  /**
+   * Exclui a reunião que nasceu para um envio que não vai mais acontecer. Se a
+   * exclusão falha (o banco fora, a sessão vencida), a reunião fica na lista, e
+   * a tela diz isso; a que já saiu (excluída em outra aba) não pede aviso.
+   */
+  function excluirReuniao(id: string) {
+    void utils.client.meetings.delete.mutate({ meetingId: id })
+      .catch(falha => {
+        if (codigoDoErro(falha) === "NOT_FOUND") return;
+        console.warn("[Documento] a reunião do envio recusado não foi excluída:", falha instanceof Error ? falha.message : falha);
+        toast.warning(t("meetings.document.leftoverMeeting"));
+      })
+      .finally(() => { void utils.meetings.list.invalidate(); });
+  }
+
   async function enviar() {
     setErro(null);
     const avisoDoTitulo = props.validarTitulo();
@@ -118,15 +148,29 @@ export function DocumentoParaResumir(props: {
         if (arquivo.size > DOCUMENTO_BYTES_MAX) return setErro(t("meetings.document.photosTooLarge", { mb: DOCUMENTO_BYTES_MAX / MB }));
       }
       setFase("enviando");
-      const { id } = await iniciarDocumento.mutateAsync({
-        title: props.titulo.trim(), language: props.idioma, consentGranted: true,
-        consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem,
-      });
+      const titulo = props.titulo.trim();
+      const pendente = reuniaoPendente.current;
+      let id: string;
+      if (pendente && pendente.titulo === titulo && pendente.idioma === props.idioma && pendente.origem === origem) {
+        // O envio anterior não terminou aceito: o arquivo vai à mesma reunião.
+        id = pendente.id;
+      } else {
+        // Mudou o título, o idioma ou a origem: a reunião de antes não serve
+        // mais. Sai, se o servidor certamente não ficou com o documento; a da
+        // rede que caiu fica, e a lista diz como ela está.
+        reuniaoPendente.current = null;
+        if (pendente && !pendente.incerta) excluirReuniao(pendente.id);
+        ({ id } = await iniciarDocumento.mutateAsync({
+          title: titulo, language: props.idioma, consentGranted: true,
+          consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem,
+        }));
+      }
       // A queda de rede ganha uma segunda tentativa: o mesmo arquivo de novo é
       // reconhecido pelo servidor e não duplica nada.
       let resultado = await enviarDocumento(id, arquivo);
       if (resultado.tipo === "recusado" && resultado.codigo === "REDE") resultado = await enviarDocumento(id, arquivo);
       if (resultado.tipo === "recebido") {
+        reuniaoPendente.current = null;
         void utils.meetings.list.invalidate();
         for (const foto of fotos) URL.revokeObjectURL(foto.url);
         setFotos([]);
@@ -136,17 +180,28 @@ export function DocumentoParaResumir(props: {
         props.aoEnviar(id);
         return;
       }
-      if (resultado.codigo === "REDE") {
-        // O servidor pode ter recebido: a reunião fica, e a lista diz como ela está.
+      if (ehRecusaDoDocumento(resultado.codigo)) {
+        // Recusa de vez: a reunião que nasceu para este arquivo sai, sem esperar.
+        reuniaoPendente.current = null;
+        excluirReuniao(id);
+        return setErro(mensagemDaRecusaDoDocumento(resultado.codigo, t));
+      }
+      // Passageira: a reunião fica para o próximo Enviar.
+      const rede = resultado.codigo === "REDE";
+      reuniaoPendente.current = { id, titulo, idioma: props.idioma, origem, incerta: rede || (pendente?.id === id && pendente.incerta) };
+      if (rede) {
+        // O servidor pode ter recebido: a lista diz como a reunião está.
         void utils.meetings.list.invalidate();
         return setErro(t("meetings.document.errorConnection"));
       }
-      // Recusa: a reunião que nasceu para este arquivo sai, sem esperar.
-      void utils.client.meetings.delete.mutate({ meetingId: id }).catch(() => {}).finally(() => { void utils.meetings.list.invalidate(); });
       setErro(mensagemDaRecusaDoDocumento(resultado.codigo, t));
     } catch (falha) {
+      // A mensagem do servidor (com data.code) sai traduzida; o erro que não
+      // passou por ele (a rede fora no tRPC, a memória do aparelho ao montar o
+      // PDF das fotos) traz texto técnico, em inglês, e vira a frase da tela.
       if (falha instanceof FotoIlegivel) setErro(t("meetings.document.photoUnreadable", { numero: falha.posicao + 1 }));
-      else setErro((falha instanceof Error && traduzirMensagemDoServidor(falha.message, t)) || t("meetings.document.errorTryAgain"));
+      else if (typeof codigoDoErro(falha) === "string") setErro(mensagemDeErroParaTela(falha, t));
+      else setErro(t("meetings.document.errorTryAgain"));
     } finally {
       setFase("parada");
       props.aoMudarOcupado(false);

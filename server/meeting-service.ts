@@ -1303,7 +1303,7 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   // topo faria um ciclo.
   if (ehReuniaoDeDocumento(meeting.origem)) {
     const { iniciarReprocessamentoDoDocumento } = await import("./documento-da-reuniao");
-    return iniciarReprocessamentoDoDocumento(db, { id: meetingId, ownerId, updatedAt: meeting.updatedAt, language: meeting.language });
+    return iniciarReprocessamentoDoDocumento(db, { id: meetingId, ownerId, updatedAt: meeting.updatedAt, language: meeting.language, processingError: meeting.processingError });
   }
   if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId, meeting.expectedSlices);
 

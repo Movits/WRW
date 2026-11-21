@@ -4,14 +4,14 @@ import { meetingDocuments, meetings } from "../drizzle/schema";
 import { LIMITE_PROCESSAMENTO_MS } from "@shared/const";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import {
-  DOCUMENTO_BYTES_MAX, ehReuniaoDeDocumento, paginasDoDocumento,
+  DOCUMENTO_BYTES_MAX, ehReuniaoDeDocumento, falhaDoDocumentoSeRepete,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento, type OrigemDeDocumento, type PaginaDoDocumento,
 } from "@shared/documento-da-reuniao";
 import { descreverErroDeBanco, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import {
   ArquivoForaDoTetoDoGeminiError, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError,
-  GeminiSemTextoError, gerarComArquivoNoGemini,
+  GeminiSemTextoError, gerarComArquivoNoGemini, prazoEsgotadoNoGemini,
 } from "./gemini";
 import {
   extrairDadosDaReuniao, gravarResultadoDaReuniao, MEETING_AUDIO_TTL_MS, MENSAGEM_REPROCESSO_EM_CONFLITO,
@@ -76,16 +76,31 @@ class DocumentoRepetido extends Error {}
 
 export const MENSAGEM_SEM_DOCUMENTO_PARA_REPROCESSAR = "Não há documento guardado desta reunião para reprocessar.";
 
-/**
- * A leitura em segundo plano não tem o proxy do Render na frente: até 6 min por
- * chamada (um documento longo escreve dezenas de milhares de tokens) e 7 com as
- * retentativas, mais o modelo reserva. Cabe, na maioria dos casos, nos 15 min
- * da varredura de interrompidas (LIMITE_PROCESSAMENTO_MS).
- */
-const TIMEOUT_DA_LEITURA_MS = 6 * 60_000;
-const ORCAMENTO_DA_LEITURA_MS = 7 * 60_000;
 /** O teto de saída do Flash: ~250 mil caracteres, umas 80 páginas de texto corrido. */
 export const SAIDA_MAXIMA_DA_LEITURA = 65_536;
+
+/**
+ * Os prazos da leitura, no desenho do vídeo do YouTube (server/youtube.ts). A
+ * leitura roda em segundo plano, sem o proxy do Render na frente, e tem de
+ * terminar antes de a varredura de interrompidas dar a reunião como falha
+ * (LIMITE_PROCESSAMENTO_MS, 15 min contados da ficha): passado disso, o texto
+ * lido e pago seria descartado.
+ *
+ * - Cada chamada tem até 10 min: escrever os 65 mil tokens de SAIDA_MAXIMA_DA_LEITURA
+ *   pede ~110 tokens por segundo, sustentados (com 6 min, pedia ~180, e o
+ *   documento mais longo que o teto aceita estourava o prazo em toda tentativa).
+ * - A nova tentativa no mesmo modelo só sai se a falha veio cedo (orçamento de
+ *   2 min), e a reserva só se o principal desistiu em menos de 2 min.
+ *
+ * O pior caso é uma falha passageira aos 2 min, as esperas de 2 e 5 s e a
+ * chamada seguinte estourando o prazo: ~12 min (PIOR_CASO_DA_LEITURA_MS), com
+ * margem para o arquivo que o reprocesso lê do bucket. Lido o documento, a
+ * ficha se renova (renovarFicha), e a extração e a gravação ganham outros 15 min.
+ */
+const TIMEOUT_DA_LEITURA_MS = 10 * 60_000;
+const ORCAMENTO_DA_LEITURA_MS = 2 * 60_000;
+const RESERVA_DA_LEITURA_SO_ATE_MS = 2 * 60_000;
+export const PIOR_CASO_DA_LEITURA_MS = ORCAMENTO_DA_LEITURA_MS + 7_000 + TIMEOUT_DA_LEITURA_MS;
 
 // O responseSchema do Gemini, com os tipos em maiúsculas e a ordem do contrato
 // (como em server/transcricao-de-fatia.ts).
@@ -126,9 +141,25 @@ export function pareceUmPdf(bytes: Buffer): boolean {
   return bytes.subarray(0, 1024).indexOf("%PDF-") !== -1;
 }
 
+/** O número da página: inteiro, a partir de 0, também escrito como texto ("3"); null fora disso. */
+function numeroDaPagina(valor: unknown): number | null {
+  const numero = typeof valor === "string" && /^\s*\d{1,6}\s*$/.test(valor) ? Number(valor) : valor;
+  return typeof numero === "number" && Number.isInteger(numero) && numero >= 0 ? numero : null;
+}
+
 /**
- * As páginas que a IA devolveu, conferidas: só as do formato, na ordem, sem
- * número repetido e com o texto aparado. Resposta fora do formato é falha.
+ * As páginas que a IA devolveu, na ordem e com o texto aparado. O que o modelo
+ * erra sem perder texto é consertado, e nada sai em silêncio:
+ * - a numeração que começa em 0 (o modelo contou do zero) sobe 1 em todas;
+ * - o número repetido (a mesma página em duas entradas, a foto tirada duas
+ *   vezes, a numeração impressa no papel, "Página 1 de 1" em cada folha)
+ *   junta os textos, na ordem em que vieram;
+ * - o número escrito como texto ("3") vale como número;
+ * - o item fora do formato (sem número de página ou sem texto) fica de fora,
+ *   com um aviso no log que diz quantos (nunca o texto).
+ * JSON inválido, resposta sem a lista e lista em que nenhuma página se salva
+ * são falha (DOCUMENTO_FALHOU): o documento podia ter texto, a resposta é que
+ * veio errada. A lista vazia é o documento sem texto (lerDocumentoComAIA).
  */
 export function paginasDaResposta(texto: string): PaginaDoDocumento[] {
   let bruto: unknown;
@@ -139,12 +170,26 @@ export function paginasDaResposta(texto: string): PaginaDoDocumento[] {
   }
   const lista = (bruto as { paginas?: unknown } | null)?.paginas;
   if (!Array.isArray(lista)) throw new FalhaDoDocumento("DOCUMENTO_FALHOU", "A leitura do documento veio sem as páginas.");
-  const aparadas = lista.map(item => {
-    if (!item || typeof item !== "object") return item;
-    const { pagina, texto } = item as Record<string, unknown>;
-    return { pagina, texto: typeof texto === "string" ? texto.trim() : texto };
-  });
-  return paginasDoDocumento(aparadas);
+  const lidas: PaginaDoDocumento[] = [];
+  for (const item of lista) {
+    const { pagina, texto: textoDaPagina } = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const numero = numeroDaPagina(pagina);
+    if (numero !== null && typeof textoDaPagina === "string") lidas.push({ pagina: numero, texto: textoDaPagina.trim() });
+  }
+  if (lista.length && !lidas.length) throw new FalhaDoDocumento("DOCUMENTO_FALHOU", "Nenhuma página da leitura veio no formato.");
+  const foraDoFormato = lista.length - lidas.length;
+  if (foraDoFormato) console.warn(`[Documento] ${foraDoFormato} de ${lista.length} páginas da leitura vieram fora do formato (sem número de página ou sem texto) e ficaram de fora`);
+  const contouDoZero = lidas.some(lida => lida.pagina === 0);
+  if (contouDoZero) console.warn("[Documento] a leitura numerou as páginas a partir de 0; todas subiram 1");
+  const textosPorPagina = new Map<number, string[]>();
+  for (const lida of lidas) {
+    const numero = contouDoZero ? lida.pagina + 1 : lida.pagina;
+    textosPorPagina.set(numero, [...(textosPorPagina.get(numero) ?? []), lida.texto]);
+  }
+  const repetidas = lidas.length - textosPorPagina.size;
+  if (repetidas) console.warn(`[Documento] ${repetidas} páginas da leitura repetiram o número de outra; os textos foram juntados, na ordem`);
+  return Array.from(textosPorPagina, ([pagina, textos]) => ({ pagina, texto: textos.filter(Boolean).join("\n\n") }))
+    .sort((a, b) => a.pagina - b.pagina);
 }
 
 /** O texto corrido da "transcrição": as páginas com texto, separadas por uma linha em branco. */
@@ -165,6 +210,7 @@ export async function lerDocumentoComAIA(bytes: Buffer, idioma: string | null | 
       saidaMaxima: SAIDA_MAXIMA_DA_LEITURA,
       timeoutMs: TIMEOUT_DA_LEITURA_MS,
       orcamentoMs: ORCAMENTO_DA_LEITURA_MS,
+      reservaSoAteMs: RESERVA_DA_LEITURA_SO_ATE_MS,
     }));
   } catch (erro) {
     throw new FalhaDoDocumento(codigoDaFalhaDaIA(erro), "A IA não leu o documento.", { cause: erro });
@@ -174,10 +220,15 @@ export async function lerDocumentoComAIA(bytes: Buffer, idioma: string | null | 
   return paginas;
 }
 
-/** O código da falha de uma chamada à IA. */
+/**
+ * O código da falha de uma chamada à IA. A ordem decide: GeminiRecusouChamadaError
+ * e GeminiCotaEsgotadaError são subclasses de GeminiIndisponivelError, e o prazo
+ * esgotado do Gemini (504) chega como recusa sem ser uma.
+ */
 function codigoDaFalhaDaIA(erro: unknown): CodigoDaFalhaDoDocumento {
   if (erro instanceof GeminiRespostaCortadaError) return erro.motivo === "MAX_TOKENS" ? "DOCUMENTO_LONGO_DEMAIS" : "DOCUMENTO_RECUSADO";
   if (erro instanceof GeminiSemTextoError) return "DOCUMENTO_SEM_TEXTO";
+  if (prazoEsgotadoNoGemini(erro)) return "IA_INDISPONIVEL";
   if (erro instanceof GeminiRecusouChamadaError) return "DOCUMENTO_RECUSADO";
   if (erro instanceof GeminiIndisponivelError) return "IA_INDISPONIVEL";
   if (erro instanceof ArquivoForaDoTetoDoGeminiError) return "DOCUMENTO_RECUSADO";
@@ -327,19 +378,62 @@ export async function receberDocumento(entrada: { ownerId: string; meetingId: st
 }
 
 /**
+ * Renova a ficha depois da leitura, que pode levar até PIOR_CASO_DA_LEITURA_MS:
+ * a extração e a gravação ganham os 15 min inteiros antes da varredura de
+ * interrompidas, como renovarFicha em server/youtube.ts. Zero linhas: a reunião
+ * foi excluída, ou outra execução a tomou (a varredura, um reprocesso depois
+ * dela). Nada desta execução foi gravado ainda, então não há o que limpar.
+ */
+async function renovarFicha(db: Banco, meetingId: string, ownerId: string, ficha: number): Promise<number> {
+  const nova = Math.max(Date.now(), ficha + 1);
+  const renovada = await db.update(meetings).set({ updatedAt: nova }).where(and(
+    eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
+  ));
+  if (linhasAlcancadas(renovada)) return nova;
+  const [agora] = await db.select({ status: meetings.status }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  if (!agora || agora.status === "deleted") throw new ReuniaoExcluidaDuranteProcessamento();
+  throw new ReuniaoTomadaPorOutraExecucao();
+}
+
+/**
+ * A cadeia de causas de uma falha, para o log: o nome de cada elo, com o código,
+ * o status HTTP e o motivo do fim quando há. Nunca as mensagens: a do JSON.parse
+ * traz um trecho do texto lido, e a do driver, os parâmetros do SQL.
+ */
+export function nomesDaCadeia(erro: unknown): string {
+  const nomes: string[] = [];
+  const vistos = new Set<unknown>();
+  let atual: unknown = erro;
+  while (atual && typeof atual === "object" && !vistos.has(atual) && nomes.length < 8) {
+    vistos.add(atual);
+    const elo = atual as { name?: unknown; codigo?: unknown; status?: unknown; motivo?: unknown; code?: unknown; cause?: unknown };
+    const classe = (atual as object).constructor?.name;
+    const nome = classe && classe !== "Object" ? classe : typeof elo.name === "string" ? elo.name : "Error";
+    const extras = [elo.codigo, elo.status, elo.motivo, elo.code].filter(valor => typeof valor === "string" || typeof valor === "number");
+    nomes.push(extras.length ? `${nome}(${extras.join(", ")})` : nome);
+    atual = elo.cause;
+  }
+  return nomes.length ? nomes.join(" <- ") : typeof erro;
+}
+
+/**
  * A leitura e o resto do caminho, em segundo plano: a IA lê as páginas, o texto
  * corrido vira a transcrição (as páginas vão em `segments`, para a tela navegar
  * por elas), e gravarResultadoDaReuniao faz a extração, as sugestões pendentes
- * e o pedido do resumo guardado, tudo arbitrado pela ficha. Documento não conta
- * minutos de reunião. Falha marca a reunião com o código, só se ela ainda for
- * desta execução; excluída ou tomada por outra, sai sem escrever.
+ * e o pedido do resumo guardado, tudo arbitrado pela ficha, que se renova
+ * depois da leitura. Documento não conta minutos de reunião. Falha marca a
+ * reunião com o código, só se ela ainda for desta execução, e vai ao log com a
+ * cadeia de causas; excluída ou tomada por outra, sai sem escrever.
  */
 export async function processarDocumento(db: Banco, execucao: {
   ownerId: string; meetingId: string; ficha: number; bytes: Buffer; idioma: string; limparAntes: boolean;
 }): Promise<void> {
-  const { ownerId, meetingId, ficha } = execucao;
+  const { ownerId, meetingId } = execucao;
+  let ficha = execucao.ficha;
   try {
     const paginas = await lerDocumentoComAIA(execucao.bytes, execucao.idioma);
+    ficha = await renovarFicha(db, meetingId, ownerId, ficha);
     const texto = textoDasPaginas(paginas);
     let extraction: Awaited<ReturnType<typeof extrairDadosDaReuniao>>;
     try {
@@ -356,10 +450,15 @@ export async function processarDocumento(db: Banco, execucao: {
       extraction,
     });
   } catch (erro) {
-    if (erro instanceof ReuniaoExcluidaDuranteProcessamento || erro instanceof ReuniaoTomadaPorOutraExecucao) return;
-    if (!(erro instanceof FalhaDoDocumento)) console.error("[Documento] a leitura falhou:", erro instanceof Error ? erro.message : erro);
+    if (erro instanceof ReuniaoExcluidaDuranteProcessamento) return;
+    if (erro instanceof ReuniaoTomadaPorOutraExecucao) {
+      console.warn("[Documento] outra execução tomou a reunião no meio da leitura (a varredura de interrompidas ou um reprocesso); o resultado desta foi descartado");
+      return;
+    }
+    const codigo = codigoDaFalha(erro);
+    console.error(`[Documento] a leitura falhou (${codigo}):`, nomesDaCadeia(erro));
     try {
-      await db.update(meetings).set({ status: "failed", processingError: codigoDaFalha(erro), updatedAt: Date.now() })
+      await db.update(meetings).set({ status: "failed", processingError: codigo, updatedAt: Date.now() })
         .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha)));
     } catch (erroAoMarcar) {
       // Banco fora justo agora: a reunião fica 'processing', e a varredura de
@@ -417,10 +516,16 @@ function chaveReprocessavel(documento: { storageKey: string; sizeBytes: number; 
  * iniciarReprocessamento, em meeting-service.ts, que chama este): lê o PDF
  * guardado e refaz a leitura, sem gravar arquivo nem renovar os 30 dias. Toma a
  * reunião ('failed' → 'processing', com a ficha) e devolve logo; o trabalho
- * nunca rejeita.
+ * nunca rejeita. A falha que se repete com o mesmo arquivo
+ * (falhaDoDocumentoSeRepete: o texto que não cabe numa resposta) é recusada
+ * antes de tudo, com o código dela: reprocessar pagaria outra leitura para
+ * falhar igual.
  */
-export async function iniciarReprocessamentoDoDocumento(db: Banco, reuniao: { id: string; ownerId: string; updatedAt: number; language: string }): Promise<{ trabalho: Promise<void> }> {
+export async function iniciarReprocessamentoDoDocumento(db: Banco, reuniao: {
+  id: string; ownerId: string; updatedAt: number; language: string; processingError: string | null;
+}): Promise<{ trabalho: Promise<void> }> {
   const { id: meetingId, ownerId } = reuniao;
+  if (falhaDoDocumentoSeRepete(reuniao.processingError)) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", reuniao.processingError);
   const [documento] = await db.select({ storageKey: meetingDocuments.storageKey, sizeBytes: meetingDocuments.sizeBytes, expiresAt: meetingDocuments.expiresAt })
     .from(meetingDocuments).where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId))).limit(1);
   const chave = chaveReprocessavel(documento, ownerId, meetingId);

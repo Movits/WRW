@@ -35,12 +35,13 @@ vi.mock("@/lib/pdf-de-fotos", async original => ({
   fotosParaPdf: (...args: unknown[]) => duble.fotosParaPdf(...args),
 }));
 vi.mock("@/lib/sessao-ocupada", () => ({ ocupar: (...args: unknown[]) => duble.ocupar(...args) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 const { toast } = await import("sonner");
 const { FotoIlegivel } = await import("@/lib/pdf-de-fotos");
 
 const REUNIAO = "0b6f2c1e-1111-4222-8333-944445555666";
+const OUTRA_REUNIAO = "1c7a3d2f-2222-4333-8444-a55556666777";
 const pdf = (nome = "proposta.pdf", conteudo = "%PDF-1.7\n% proposta\n%%EOF\n", tipo = "application/pdf") => new File([conteudo], nome, { type: tipo });
 const foto = (nome: string) => new File([new Uint8Array([0xff, 0xd8, 0xff])], nome, { type: "image/jpeg" });
 
@@ -64,6 +65,7 @@ beforeEach(() => {
   duble.ocupar.mockReturnValue(duble.liberar);
   duble.fotosParaPdf.mockImplementation(async (fotos: File[]) => new Blob([`%PDF-1.4 ${fotos.length} fotos`], { type: "application/pdf" }));
   vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
   // O jsdom não cria URLs de arquivo: as miniaturas recebem uma de mentira.
   urls = 0;
   Object.assign(URL, { createObjectURL: vi.fn(() => `blob:foto-${++urls}`), revokeObjectURL: vi.fn() });
@@ -149,9 +151,12 @@ describe("DocumentoParaResumir: o PDF", () => {
 
   it.each([
     ["GRANDE_DEMAIS", 413, "O PDF passa de 15 MB. Envie um arquivo menor ou divida o documento em partes."],
-    ["MUITOS_PEDIDOS", 429, "Você já enviou 10 documentos na última hora. Espere um pouco para enviar outro."],
     ["FORMATO", 415, "Este arquivo não é um PDF."],
-  ])("o servidor recusou (%s): a frase no idioma da tela, e a reunião que nasceu para o arquivo sai", async (codigo, status, frase) => {
+    ["VAZIO", 400, "O arquivo chegou vazio. Escolha-o de novo."],
+    ["SEM_REUNIAO", 404, "Este envio não pôde ser concluído. Envie o documento de novo."],
+    ["FORA_DO_ESTADO", 409, "Este envio não pôde ser concluído. Envie o documento de novo."],
+    ["CONTEUDO_DIFERENTE", 409, "Este envio não pôde ser concluído. Envie o documento de novo."],
+  ])("o servidor recusou de vez (%s): a frase no idioma da tela, e a reunião que nasceu para o arquivo sai", async (codigo, status, frase) => {
     duble.enviar.mockResolvedValue({ tipo: "recusado", status, codigo });
     render(<DocumentoParaResumir {...props}/>);
     escolherPdf(pdf());
@@ -162,6 +167,99 @@ describe("DocumentoParaResumir: o PDF", () => {
     expect(props.aoEnviar).not.toHaveBeenCalled();
     // O arquivo continua escolhido, para enviar de novo.
     expect(screen.getByText(/proposta\.pdf/)).toBeInTheDocument();
+    // O envio seguinte nasce numa reunião nova.
+    duble.iniciar.mockResolvedValue({ id: OUTRA_REUNIAO });
+    duble.enviar.mockResolvedValue({ tipo: "recebido", repetido: false });
+    enviar();
+    await waitFor(() => expect(props.aoEnviar).toHaveBeenCalledWith(OUTRA_REUNIAO));
+    expect(duble.iniciar).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["MUITOS_PEDIDOS", 429, "Você já enviou 10 documentos na última hora. Espere um pouco para enviar outro."],
+    ["TENTE_DE_NOVO", 503, "Não foi possível enviar o documento agora. Tente de novo."],
+    ["BANCO_INDISPONIVEL", 503, "Banco de dados indisponível; tente de novo em instantes"],
+    ["ERRO", 500, "Não foi possível enviar o documento agora. Tente de novo."],
+    ["SEM_SESSAO", 401, "Sua sessão terminou. Entre de novo para enviar o documento."],
+  ])("o servidor recusou de passagem (%s): a reunião fica, e o próximo Enviar manda o arquivo a ELA, sem criar outra", async (codigo, status, frase) => {
+    duble.enviar.mockResolvedValueOnce({ tipo: "recusado", status, codigo });
+    render(<DocumentoParaResumir {...props}/>);
+    const arquivo = pdf();
+    escolherPdf(arquivo);
+    autorizar();
+    enviar();
+    expect(await screen.findByRole("alert")).toHaveTextContent(frase);
+    expect(duble.excluir).not.toHaveBeenCalled();
+
+    duble.enviar.mockResolvedValueOnce({ tipo: "recebido", repetido: false });
+    enviar();
+    await waitFor(() => expect(props.aoEnviar).toHaveBeenCalledWith(REUNIAO));
+    expect(duble.iniciar).toHaveBeenCalledTimes(1);
+    expect(duble.enviar.mock.calls).toEqual([[REUNIAO, arquivo], [REUNIAO, arquivo]]);
+    expect(duble.excluir).not.toHaveBeenCalled();
+  });
+
+  it("a recusa de passagem e, antes do reenvio, a dona muda o título: a reunião de antes sai, e o arquivo vai a uma nova com o título novo", async () => {
+    duble.enviar.mockResolvedValueOnce({ tipo: "recusado", status: 503, codigo: "TENTE_DE_NOVO" });
+    const { rerender } = render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    await screen.findByRole("alert");
+    duble.iniciar.mockResolvedValue({ id: OUTRA_REUNIAO });
+    rerender(<DocumentoParaResumir {...props} titulo="Proposta revista"/>);
+    enviar();
+    await waitFor(() => expect(props.aoEnviar).toHaveBeenCalledWith(OUTRA_REUNIAO));
+    expect(duble.excluir).toHaveBeenCalledWith({ meetingId: REUNIAO });
+    expect(duble.iniciar).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Proposta revista" }));
+  });
+
+  it("a recusa de vez com a exclusão da reunião falhando: o aviso de que ela ficou na lista, nunca o silêncio", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    duble.enviar.mockResolvedValue({ tipo: "recusado", status: 415, codigo: "FORMATO" });
+    duble.excluir.mockRejectedValue(Object.assign(new Error("Banco de dados indisponível; tente de novo em instantes"), { data: { code: "INTERNAL_SERVER_ERROR" } }));
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Este arquivo não é um PDF.");
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith("A reunião criada para este envio não pôde ser excluída e ficou na lista de reuniões. Exclua-a por lá."));
+    expect(console.warn).toHaveBeenCalledWith("[Documento] a reunião do envio recusado não foi excluída:", "Banco de dados indisponível; tente de novo em instantes");
+    expect(duble.invalidarLista).toHaveBeenCalled();
+  });
+
+  it("a reunião que já saiu (excluída em outra aba): a exclusão responde NOT_FOUND, e não há o que avisar", async () => {
+    duble.enviar.mockResolvedValue({ tipo: "recusado", status: 404, codigo: "SEM_REUNIAO" });
+    duble.excluir.mockRejectedValue(Object.assign(new Error("Reunião não encontrada."), { data: { code: "NOT_FOUND" } }));
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    await screen.findByRole("alert");
+    await waitFor(() => expect(duble.invalidarLista).toHaveBeenCalled());
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("a rede caiu ao criar a reunião: a frase da tela, nunca o texto técnico do navegador", async () => {
+    // O TRPCClientError da rede fora não tem data.code: a mensagem é do navegador, em inglês.
+    duble.iniciar.mockRejectedValue(Object.assign(new Error("Failed to fetch"), { name: "TRPCClientError" }));
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    enviar();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível enviar o documento agora. Tente de novo.");
+    expect(screen.queryByText(/Failed to fetch/)).not.toBeInTheDocument();
+  });
+
+  it("a recusa do servidor ao criar a reunião sai traduzida no idioma da tela", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.iniciar.mockRejectedValue(Object.assign(new Error("Banco de dados indisponível; tente de novo em instantes"), { data: { code: "INTERNAL_SERVER_ERROR" } }));
+    render(<DocumentoParaResumir {...props}/>);
+    escolherPdf(pdf());
+    autorizar();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.document.sendButton") }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("errors.databaseUnavailable"));
+    expect(screen.queryByText(/Banco de dados/)).not.toBeInTheDocument();
   });
 
   it("a rede caiu: tenta uma vez de novo (o servidor reconhece o mesmo arquivo) e, caindo de novo, não exclui a reunião", async () => {
@@ -247,6 +345,18 @@ describe("DocumentoParaResumir: as fotos de um texto", () => {
     autorizar();
     enviar();
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível abrir a foto 2. Tire de novo ou escolha uma imagem em JPEG ou PNG.");
+    expect(duble.iniciar).not.toHaveBeenCalled();
+  });
+
+  it("o aparelho sem memória para montar o PDF das fotos: a frase da tela, nunca o texto técnico do erro", async () => {
+    duble.fotosParaPdf.mockRejectedValue(new RangeError("Array buffer allocation failed"));
+    render(<DocumentoParaResumir {...props}/>);
+    abrirFotos();
+    fireEvent.change(screen.getByTestId("entrada-das-fotos"), { target: { files: [foto("a.jpg")] } });
+    autorizar();
+    enviar();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível enviar o documento agora. Tente de novo.");
+    expect(screen.queryByText(/Array buffer/)).not.toBeInTheDocument();
     expect(duble.iniciar).not.toHaveBeenCalled();
   });
 

@@ -294,12 +294,21 @@ describe("O detalhe da reunião de documento", () => {
   });
 
   it("falhou com um código: a causa no idioma da tela e o reprocesso pelo arquivo guardado", () => {
-    abrirDetalhe({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" }, { transcript: null, documento: { ...DOCUMENTO, expiresAt: Date.now() + 10 * DIA } });
-    expect(screen.getByText("O documento é longo demais para uma leitura só. Divida o arquivo em partes menores e envie cada uma.")).toBeInTheDocument();
-    expect(screen.queryByText("DOCUMENTO_LONGO_DEMAIS")).not.toBeInTheDocument();
+    abrirDetalhe({ status: "failed", processingError: "IA_INDISPONIVEL" }, { transcript: null, documento: { ...DOCUMENTO, expiresAt: Date.now() + 10 * DIA } });
+    expect(screen.getByText("A IA está sobrecarregada agora. Tente reprocessar daqui a alguns minutos.")).toBeInTheDocument();
+    expect(screen.queryByText("IA_INDISPONIVEL")).not.toBeInTheDocument();
     expect(screen.getByText(/O arquivo deste documento continua guardado até/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Reprocessar/ }));
     expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: ID });
+  });
+
+  it("longo demais para uma leitura só: a causa diz o que fazer, e não há Reprocessar (o mesmo arquivo pararia de novo no mesmo ponto)", () => {
+    abrirDetalhe({ status: "failed", processingError: "DOCUMENTO_LONGO_DEMAIS" }, { transcript: null, documento: { ...DOCUMENTO, expiresAt: Date.now() + 10 * DIA } });
+    expect(screen.getByText("O documento é longo demais para uma leitura só. Divida o arquivo em partes menores e envie cada uma.")).toBeInTheDocument();
+    expect(screen.queryByText("DOCUMENTO_LONGO_DEMAIS")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/O arquivo deste documento continua guardado até/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Não dá mais para reprocessar/)).not.toBeInTheDocument();
   });
 
   it.each([

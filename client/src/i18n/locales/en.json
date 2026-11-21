@@ -1773,6 +1773,7 @@
       "listBadge": "Document",
       "readingStatus": "Reading the document and preparing the summary…",
       "uploadIncomplete": "The document didn't reach the server. Delete this meeting and send the file again.",
+      "leftoverMeeting": "The meeting created for this upload couldn't be deleted and is still in the meetings list. Delete it from there.",
       "textTab": "Document text",
       "pagesTab": "Pages",
       "fileHeading": "File",

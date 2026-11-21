@@ -1773,6 +1773,7 @@
       "listBadge": "Document",
       "readingStatus": "Lecture du document et préparation du résumé…",
       "uploadIncomplete": "Le document n'est pas arrivé au serveur. Supprimez cette réunion et renvoyez le fichier.",
+      "leftoverMeeting": "La réunion créée pour cet envoi n'a pas pu être supprimée et reste dans la liste des réunions. Supprimez-la depuis la liste.",
       "textTab": "Texte du document",
       "pagesTab": "Pages",
       "fileHeading": "Fichier",

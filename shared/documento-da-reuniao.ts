@@ -49,9 +49,17 @@ export function ehReuniaoDeDocumento(origem: string | null | undefined): origem 
  * Os códigos da recusa do ENVIO do documento (a rota binária,
  * server/_core/rota-do-documento.ts, responde só o código, em JSON). A tela os
  * traduz (client/src/lib/mensagem-de-erro.ts), e o Record de lá é por este tipo:
- * código novo aqui não compila lá sem o aviso dele.
+ * código novo aqui não compila lá sem o aviso dele. Toda recusa é definitiva:
+ * reenviar o mesmo arquivo à mesma reunião não muda a resposta, e a tela exclui
+ * a reunião que nasceu para ele (os desfechos passageiros, como o teto, o
+ * bucket ou o banco fora, não são recusa: a tela reenvia à mesma reunião).
  */
-export type CodigoDaRecusaDoDocumento = "SEM_REUNIAO" | "FORA_DO_ESTADO" | "CONTEUDO_DIFERENTE" | "GRANDE_DEMAIS" | "VAZIO" | "FORMATO";
+export const CODIGOS_DA_RECUSA_DO_DOCUMENTO = ["SEM_REUNIAO", "FORA_DO_ESTADO", "CONTEUDO_DIFERENTE", "GRANDE_DEMAIS", "VAZIO", "FORMATO"] as const;
+export type CodigoDaRecusaDoDocumento = (typeof CODIGOS_DA_RECUSA_DO_DOCUMENTO)[number];
+
+export function ehRecusaDoDocumento(valor: unknown): valor is CodigoDaRecusaDoDocumento {
+  return typeof valor === "string" && (CODIGOS_DA_RECUSA_DO_DOCUMENTO as readonly string[]).includes(valor);
+}
 
 /**
  * Os códigos que a leitura do documento grava em `meetings.processing_error`
@@ -76,6 +84,19 @@ export type CodigoDaFalhaDoDocumento = (typeof CODIGOS_DA_FALHA_DO_DOCUMENTO)[nu
 
 export function ehCodigoDaFalhaDoDocumento(valor: unknown): valor is CodigoDaFalhaDoDocumento {
   return typeof valor === "string" && (CODIGOS_DA_FALHA_DO_DOCUMENTO as readonly string[]).includes(valor);
+}
+
+/**
+ * As falhas que se repetem com o mesmo arquivo: a leitura vai ao mesmo modelo,
+ * com temperatura 0 e o mesmo teto de saída, e para de novo no mesmo ponto
+ * (MAX_TOKENS). Reprocessar pagaria outra leitura para falhar igual: a tela não
+ * mostra o botão, e o servidor recusa o reprocesso. A frase da causa já diz o
+ * que fazer (dividir o arquivo e enviar cada parte).
+ */
+export const FALHAS_DO_DOCUMENTO_QUE_SE_REPETEM: readonly CodigoDaFalhaDoDocumento[] = ["DOCUMENTO_LONGO_DEMAIS"];
+
+export function falhaDoDocumentoSeRepete(codigo: string | null | undefined): codigo is CodigoDaFalhaDoDocumento {
+  return ehCodigoDaFalhaDoDocumento(codigo) && FALHAS_DO_DOCUMENTO_QUE_SE_REPETEM.includes(codigo);
 }
 
 /**

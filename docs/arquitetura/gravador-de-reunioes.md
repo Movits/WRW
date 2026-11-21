@@ -439,6 +439,9 @@ Tamanho: P é pequena, M é média e G é grande.
     Pergunte);
   - teto de 5 vídeos por dona a cada 24 h, contado na auditoria do pedido
     (`MEETING_YOUTUBE_REQUESTED`), que vale também para o "Tentar de novo";
+  - as falhas que se repetem com o mesmo vídeo (fala demais para uma resposta e nenhuma
+    fala) não têm "Tentar de novo", e o servidor o recusa nelas sem gastar vaga; o mesmo
+    vale para o "Reprocessar" do PDF longo demais (H12);
   - o aviso do YouTube tem versão própria, gravada em `consent_notice_version`
     (`docs/termos/aviso-de-gravacao-rascunho.md`);
   - na tela não há player, porque a CSP proíbe frames de outros sites: o ▶ de cada fala,

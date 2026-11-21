@@ -273,6 +273,22 @@ describe.skipIf(!temBanco)("Vídeo do YouTube no banco (integração)", () => {
     expect(await pedidosDe(outra)).toHaveLength(0);
   });
 
+  it.each([
+    ["YOUTUBE_LONGO_DEMAIS", { candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: '{"segmentos":[' }] } }] }],
+    ["YOUTUBE_SEM_FALA", resposta([{ inicio: "00:00", fim: "03:00", falante: "F1", texto: "[música]" }])],
+  ])("a falha que se repete com o mesmo vídeo (%s) não se refaz: a recusa sai com o código, sem gastar vaga nem ir à IA", async (codigo, respostaDoGemini) => {
+    const dona = await novaDona();
+    geminiPost.mockResolvedValueOnce(respostaDoGemini);
+    const { id, trabalho } = await pedir(dona);
+    await trabalho;
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: codigo });
+
+    expect(await recusaDe(youtube.refazerResumoDoVideo(dona, id))).toMatchObject({ codigoTrpc: "PRECONDITION_FAILED", message: codigo });
+    expect(await reuniaoDe(id)).toMatchObject({ status: "failed", processingError: codigo });
+    expect(await pedidosDe(dona)).toHaveLength(1);
+    expect(geminiPost).toHaveBeenCalledTimes(1);
+  });
+
   it("vídeo sem fala: a reunião falha com YOUTUBE_SEM_FALA, sem transcrição", async () => {
     const dona = await novaDona();
     geminiPost.mockResolvedValueOnce(resposta([{ inicio: "00:00", fim: "03:00", falante: "F1", texto: "[música]" }]));

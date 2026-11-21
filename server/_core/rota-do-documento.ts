@@ -20,7 +20,11 @@ import { sdk } from "./sdk";
  * 2. o Content-Length acima do teto é recusado sem ler o corpo (413);
  * 3. o teto de DOCUMENTOS_POR_HORA (10) por dona também vem antes do corpo
  *    (429). A vaga só fica gasta quando o documento é aceito para a leitura: a
- *    recusa, a falha e o reenvio do mesmo arquivo a devolvem;
+ *    recusa, a falha e o reenvio do mesmo arquivo a devolvem, e a conexão que
+ *    cai ANTES de o corpo chegar inteiro também. Chegado o corpo, quem decide
+ *    é o desfecho do recebimento, nunca a conexão: a que cai durante o
+ *    recebimento (o PDF subindo ao bucket, a transação) não devolve a vaga de
+ *    um documento que acaba aceito e lido pela IA;
  * 4. só então o corpo (express.raw, até 15 MB) e a conferência dele
  *    (receberDocumento: começa por "%PDF-", a reunião espera documento).
  *
@@ -120,26 +124,37 @@ export function registrarRotaDoDocumento(
         if (!(erro instanceof TRPCError) || erro.code !== "TOO_MANY_REQUESTS") throw erro;
         return res.status(429).json({ codigo: "MUITOS_PEDIDOS" });
       }
-      // A vaga volta em todo desfecho que não seja o documento aceito, inclusive
+      // Antes de o corpo chegar ao último passo, a vaga volta com a conexão:
       // o corpo que passa do teto no meio da leitura (o tratador de erro
-      // responde) e a conexão que cai antes da resposta.
-      res.on("close", () => { if (!res.locals.documentoAceito) liberarVaga(); });
+      // responde) e a conexão que cai durante o envio. Daí em diante, só o
+      // desfecho do recebimento a devolve (ver o último passo).
+      res.on("close", () => { if (!res.locals.corpoNoRecebimento) liberarVaga(); });
+      res.locals.liberarVaga = liberarVaga;
       res.locals.usuaria = usuaria;
       next();
     },
     express.raw({ type: () => true, limit: DOCUMENTO_BYTES_MAX }),
     async (req: Request, res: Response) => {
       const usuaria = res.locals.usuaria as Usuaria;
+      const liberarVaga = res.locals.liberarVaga as () => void;
       const meetingId = String(req.params.meetingId);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      // O corpo chegou: a conexão que cair agora já não decide a vaga. O
+      // recebimento segue mesmo sem ninguém esperando a resposta (o PDF sobe, a
+      // reunião é tomada e a IA lê), e a vaga só volta nos desfechos sem aceite
+      // abaixo. `liberarVaga` tira a marca uma vez só.
+      res.locals.corpoNoRecebimento = true;
       try {
         const resultado = await deps.receber({ ownerId: usuaria.openId, meetingId, bytes });
-        if (resultado.repetido) return res.status(200).json({ codigo: "RECEBIDO", repetido: true });
-        res.locals.documentoAceito = true;
+        if (resultado.repetido) {
+          liberarVaga();
+          return res.status(200).json({ codigo: "RECEBIDO", repetido: true });
+        }
         // `trabalho` nunca rejeita: receberDocumento termina todo erro em log.
         void resultado.trabalho;
         return res.status(202).json({ codigo: "RECEBIDO", repetido: false });
       } catch (erro) {
+        liberarVaga();
         if (erro instanceof RecusaDoDocumento) return res.status(STATUS_DA_RECUSA[erro.codigo]).json({ codigo: erro.codigo });
         if (erro instanceof FalhaPassageiraDoDocumento) return res.status(503).json({ codigo: "TENTE_DE_NOVO" });
         if (ehErroDeBancoIndisponivel(erro)) return res.status(503).json({ codigo: "BANCO_INDISPONIVEL" });
