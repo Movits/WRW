@@ -613,8 +613,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       if (siteAntes === undefined) delete process.env.FRONTEND_URL;
       else process.env.FRONTEND_URL = siteAntes;
       await banco.update(users).set({ email: null, resumoPorEmailAutomatico: false }).where(eq(users.openId, DONA));
-      await banco.delete(resumoPorEmail).where(eq(resumoPorEmail.ownerId, DONA));
-      await banco.delete(auditLogs).where(eq(auditLogs.userId, conta.id));
+      await apagarPelaChave(banco, resumoPorEmail, eq(resumoPorEmail.ownerId, DONA));
+      await apagarPelaChave(banco, auditLogs, eq(auditLogs.userId, conta.id));
     }
   });
 

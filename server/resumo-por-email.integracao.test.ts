@@ -20,6 +20,7 @@ vi.mock("./storage", async original => ({
 }));
 
 import { getDb } from "./db";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { agendaReunioes, auditLogs, meetings, meetingSummaries, resumoPorEmail, users } from "../drizzle/schema";
 import {
   EMAILS_DIGITADOS_POR_ENVIO_MAX,
@@ -190,14 +191,14 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
     const db = await getDb();
     if (!db) return;
     if (criados.openIds.length) {
-      await db.delete(resumoPorEmail).where(inArray(resumoPorEmail.ownerId, criados.openIds));
-      await db.delete(agendaReunioes).where(inArray(agendaReunioes.ownerId, criados.openIds));
-      await db.delete(meetingSummaries).where(inArray(meetingSummaries.ownerId, criados.openIds));
-      await db.delete(meetings).where(inArray(meetings.ownerId, criados.openIds));
+      await apagarPelaChave(db, resumoPorEmail, inArray(resumoPorEmail.ownerId, criados.openIds));
+      await apagarPelaChave(db, agendaReunioes, inArray(agendaReunioes.ownerId, criados.openIds));
+      await apagarPelaChave(db, meetingSummaries, inArray(meetingSummaries.ownerId, criados.openIds));
+      await apagarPelaChave(db, meetings, inArray(meetings.ownerId, criados.openIds));
       await db.delete(users).where(inArray(users.openId, criados.openIds));
     }
-    if (criados.userIds.length) await db.delete(auditLogs).where(inArray(auditLogs.userId, criados.userIds));
-    if (criados.meetingIds.length) await db.delete(auditLogs).where(inArray(auditLogs.resourceId, criados.meetingIds));
+    if (criados.userIds.length) await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, criados.userIds));
+    if (criados.meetingIds.length) await apagarPelaChave(db, auditLogs, inArray(auditLogs.resourceId, criados.meetingIds));
   });
 
   describe("quem recebe", () => {

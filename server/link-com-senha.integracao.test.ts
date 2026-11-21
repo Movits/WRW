@@ -19,6 +19,7 @@ vi.mock("./senha-do-link-aberto", async original => {
 });
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./db";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import {
   ACAO_AUDIO_DO_LINK,
@@ -149,12 +150,12 @@ describe.skipIf(!temBanco)("Link aberto com senha e sem o áudio (H23) no banco 
     if (servidor) await new Promise(fim => servidor.close(fim));
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingRecordings, eq(meetingRecordings.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
-    await db.delete(auditLogs).where(inArray(auditLogs.userId, [PROVA.userId, PROVA_DA_OUTRA.userId]));
-    await db.delete(auditLogs).where(and(isNull(auditLogs.userId), inArray(auditLogs.resourceId, REUNIOES)));
+    await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, [PROVA.userId, PROVA_DA_OUTRA.userId]));
+    await apagarPelaChave(db, auditLogs, and(isNull(auditLogs.userId), inArray(auditLogs.resourceId, REUNIOES)));
   });
 
   beforeEach(async () => {
