@@ -9,6 +9,7 @@ import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -175,6 +176,9 @@ export default function ReuniaoAberta() {
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
   // tela em árabe continua da esquerda para a direita.
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
+  // Como no detalhe da dona (T25): a tradução na tela, ou a espera pela da
+  // reunião longa, ganha o aviso com o caminho para o original.
+  const traducaoNaTela = !!transcricao && idiomaDaTraducao !== idiomaDoOriginal && (!!textoTraduzido || traducaoLonga.aguardando);
   return <Moldura comPlayer={!!gravacao && partes.length > 0}>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
@@ -219,6 +223,7 @@ export default function ReuniaoAberta() {
             </select>
           </label>
         </div>
+        {traducaoNaTela && <AvisoDeTraducao idioma={idiomaDaTraducao} aoVerOriginal={() => setIdiomaDaTraducao(idiomaDoOriginal)}/>}
         {traducaoLonga.aguardando
           ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
           : traduzir.isPending

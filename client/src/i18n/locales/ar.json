@@ -1952,9 +1952,11 @@
       "androidOtherBrowser": "لتثبيت WRW كتطبيق، افتح هذه الصفحة في Chrome."
     },
     "meetingLanguageLabel": "لغة الاجتماع",
-    "meetingLanguageHint": "اللغة المنطوقة. يُفرّغ الذكاء الاصطناعي النص بهذه اللغة، ويمكن ترجمة النص لاحقًا.",
+    "meetingLanguageHint": "اللغة الرئيسية للمحادثة. ما يُقال بلغة أخرى يُفرَّغ باللغة التي قيل بها، والترجمة في علامة تبويب النص المكتوب.",
     "originalLanguageSuffix": "(الأصل)",
     "translatingLongStatus": "الاجتماع طويل: تستغرق الترجمة بضع دقائق. يمكنكِ ترك هذه الشاشة مفتوحة، وسيظهر النص عندما يصبح جاهزًا.",
+    "autoTranslationNotice": "ترجمة آلية إلى {{idioma}}.",
+    "seeOriginal": "عرض الأصل",
     "statusUploading": "جارٍ استلام الصوت",
     "speakerLabel": "المتحدث {{n}}",
     "gapLabel": "مقطع لم يُستلم",

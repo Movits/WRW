@@ -1952,9 +1952,11 @@
       "androidOtherBrowser": "WRWをアプリとしてインストールするには、このページをChromeで開いてください。"
     },
     "meetingLanguageLabel": "会議の言語",
-    "meetingLanguageHint": "話されている言語です。AI はこの言語で文字起こしし、文字起こしは後で翻訳できます。",
+    "meetingLanguageHint": "会話の主な言語です。ほかの言語での発言は、話された言語のまま文字起こしされます。翻訳は「文字起こし」タブにあります。",
     "originalLanguageSuffix": "（原文）",
     "translatingLongStatus": "会議が長いため、翻訳には数分かかります。この画面は開いたままで大丈夫です。準備ができると本文が表示されます。",
+    "autoTranslationNotice": "{{idioma}}への自動翻訳です。",
+    "seeOriginal": "原文を表示",
     "statusUploading": "音声を受信中",
     "speakerLabel": "話者 {{n}}",
     "gapLabel": "受信できなかった部分",

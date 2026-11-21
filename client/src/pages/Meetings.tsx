@@ -25,6 +25,7 @@ import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { ID_DO_AVISO_DO_DESCARTE_PENDENTE } from "@/components/RetomadaDosDescartes";
 import { ID_DO_AVISO_DA_PARTE_RECUSADA } from "@/components/RetomadaDasPartes";
@@ -1185,6 +1186,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   const falas = segmentosValidos(transcript?.segments);
   const mostraFalas = falas.length > 0 && translationLanguage === idiomaOriginal;
   const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
+  // A tela mostra a tradução da IA, ou espera a da reunião longa (T25): o aviso
+  // diz que é tradução e leva ao original. A tradução que falhou deixa o
+  // original em texto corrido, sem aviso; o "Traduzindo" curto já diz o que é.
+  const traducaoNaTela = !!transcript && translationLanguage !== idiomaOriginal && (!!translatedText || traducaoLonga.aguardando);
   // Destaques valem só para o texto original: os valores extraídos pela IA não
   // batem com o texto traduzido.
   const segmentos = transcript && translationLanguage === idiomaOriginal
@@ -1349,6 +1354,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             </select>
           </label>
         </div>
+        {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)}/>}
         {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
