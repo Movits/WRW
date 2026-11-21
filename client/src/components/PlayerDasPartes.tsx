@@ -1,18 +1,31 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
-import { mmss } from "./TranscricaoPorFalante";
+import { ChevronsRight, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
+import { dentroDosTrechos, destinoDoPuloNosTrechos, pontoParaTocar, trechosParaTocar } from "@/lib/trechos-para-tocar";
+import { mmss, type SegmentoDaTela } from "./TranscricaoPorFalante";
 
 /** Uma parte do áudio, no contrato `recording.partes` do servidor. */
 export type ParteDoPlayer = { seq: number; url: string; mimeType: string; inicioSegundos: number; duracaoSegundos: number };
 
-/** O que a transcrição usa para pular ao segundo de uma fala. */
-export type ControleDoPlayer = { irPara: (segundo: number) => void };
+/**
+ * O que a transcrição usa para pular ao segundo de uma fala, e o "ouvir só
+ * esta voz" (D2): `ouvirSoAVoz(voz)` toca só as falas dessa voz, a partir da
+ * próxima fala dela; `ouvirSoAVoz(null)` volta a tocar todas, sem sair do lugar.
+ */
+export type ControleDoPlayer = { irPara: (segundo: number) => void; ouvirSoAVoz: (voz: string | null) => void };
 
 /** As velocidades do botão, na ordem em que um toque passa de uma para a outra. */
 export const VELOCIDADES = [1, 1.25, 1.5, 1.75, 2] as const;
 /** Onde o navegador de quem ouve guarda a velocidade escolhida. */
 export const CHAVE_DA_VELOCIDADE = "wrw:velocidade-do-player";
+/** Onde o navegador de quem ouve guarda o "pular os silêncios" (D2). */
+export const CHAVE_DOS_SILENCIOS = "wrw:pular-silencios";
+/**
+ * De quanto em quanto tempo, tocando só uma voz ou sem os silêncios, o player
+ * confere se saiu do trecho (D2). O timeupdate do navegador chega a cada 250
+ * ms: sozinho, deixaria ouvir um quarto de segundo da fala de outra pessoa.
+ */
+export const CONFERENCIA_DOS_TRECHOS_MS = 100;
 /** Quanto os botões de voltar e de avançar pulam. */
 const PULO_SEGUNDOS = 15;
 
@@ -95,6 +108,24 @@ function guardarVelocidade(velocidade: number) {
   }
 }
 
+/** O "pular os silêncios" guardado neste navegador (D2); desligado por padrão. */
+function silenciosGuardados(): boolean {
+  try {
+    return localStorage.getItem(CHAVE_DOS_SILENCIOS) === "1";
+  } catch {
+    // Navegador em modo privado ou com armazenamento bloqueado: começa desligado.
+    return false;
+  }
+}
+
+function guardarSilencios(pular: boolean) {
+  try {
+    localStorage.setItem(CHAVE_DOS_SILENCIOS, pular ? "1" : "0");
+  } catch {
+    // Sem armazenamento: a escolha vale só nesta visita.
+  }
+}
+
 /** "1,5" em pt-BR e "1.5" em inglês, sempre com algarismos latinos, como os tempos da barra. */
 function formatarVelocidade(velocidade: number, idioma: string) {
   try {
@@ -140,9 +171,27 @@ function IconeDoPulo({ para }: { para: "tras" | "frente" }) {
  *
  * Sem onError o player falha MUDO (sessão vencida, limite de requisições,
  * storage fora do ar): `aoFalhar` deixa a tela explicar.
+ *
+ * Com as falas da transcrição (`falas`), o player sabe ouvir só uma voz e
+ * pular os silêncios (D2; HN-26 e HN-79 do HiNoter): toca só os trechos de
+ * lib/trechos-para-tocar.ts, salta de um ao seguinte e para depois do último.
+ * A voz escolhida é da página (`soAVoz`), porque a transcrição a mostra e a
+ * escolhe; o "pular os silêncios" é daqui, guardado no navegador de quem ouve,
+ * como a velocidade.
  */
-export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPlayer[]; aoFalhar?: () => void; aoCarregar?: () => void; className?: string }>(
-  function PlayerDasPartes({ partes, aoFalhar, aoCarregar, className = "w-full" }, ref) {
+export const PlayerDasPartes = forwardRef<ControleDoPlayer, {
+  partes: ParteDoPlayer[];
+  aoFalhar?: () => void;
+  aoCarregar?: () => void;
+  className?: string;
+  /** As falas com voz e tempo (a transcrição em partes): sem elas, nem a voz nem os silêncios se aplicam. */
+  falas?: readonly SegmentoDaTela[];
+  /** A voz que toca sozinha (D2); nula, todas. */
+  soAVoz?: string | null;
+  /** A voz escolhida mudou: pelo `ouvirSoAVoz` do controle ou pelo "▶" de um trecho de outra voz. */
+  aoMudarSoAVoz?: (voz: string | null) => void;
+}>(
+  function PlayerDasPartes({ partes, aoFalhar, aoCarregar, className = "w-full", falas, soAVoz = null, aoMudarSoAVoz }, ref) {
     const { t, i18n } = useTranslation();
     const audio = useRef<HTMLAudioElement | null>(null);
     const deslizante = useRef<HTMLInputElement | null>(null);
@@ -188,6 +237,14 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
     // do tempo no foco, no play, na pausa e no pulo.
     const [focado, setFocado] = useState(false);
     const [anunciado, setAnunciado] = useState(0);
+    // D2: pular os silêncios (guardado neste navegador) e os trechos que tocam:
+    // os da voz escolhida ou, sem voz, os de todas as falas sem os silêncios.
+    // Nulo: toca tudo.
+    const [pularSilencios, setPularSilencios] = useState(silenciosGuardados);
+    const temFalas = !!falas?.length;
+    const trechos = useMemo(() => (temFalas ? trechosParaTocar(falas!, { voz: soAVoz, pularSilencios }) : null), [falas, temFalas, soAVoz, pularSilencios]);
+    // A posição de agora, para o `ouvirSoAVoz` do controle achar a próxima fala da voz.
+    const posicaoAgora = useRef(0);
 
     const indice = indiceDaParte(partes, seqAtual);
     const atual: ParteDoPlayer | undefined = partes[indice];
@@ -227,7 +284,25 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
       setSeqAtual(partes[alvo].seq);
     }
 
-    useImperativeHandle(ref, () => ({ irPara: (segundo: number) => irPara(segundo, true) }), [partes, indice]);
+    useImperativeHandle(ref, () => ({
+      irPara: (segundo: number) => {
+        // O "▶" de um trecho de outra voz (no resumo, numa resposta) com "só
+        // esta voz" ligado: quem pediu aquele ponto quer ouvi-lo, e o player
+        // volta a tocar todas as vozes. Sem isto, ele saltaria para a próxima
+        // fala da voz escolhida, longe do ponto pedido.
+        if (soAVoz && trechos && !dentroDosTrechos(trechos, segundo)) aoMudarSoAVoz?.(null);
+        irPara(segundo, true);
+      },
+      ouvirSoAVoz: (voz: string | null) => {
+        aoMudarSoAVoz?.(voz);
+        if (!voz) return;
+        const daVoz = temFalas ? trechosParaTocar(falas!, { voz }) : null;
+        if (!daVoz) return;
+        // A próxima fala da voz a partir de onde o player está; depois da
+        // última, a primeira.
+        irPara(pontoParaTocar(daVoz, posicaoAgora.current) ?? daVoz[0].inicio, true);
+      },
+    }), [partes, indice, soAVoz, trechos, falas, temFalas, aoMudarSoAVoz]);
 
     // Trocou de parte para seguir tocando: o play() sai logo com o src novo. O
     // Safari do iPhone não carrega o áudio sem ele (ignora o preload), e o
@@ -265,6 +340,38 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
       elemento.playbackRate = velocidade;
     }, [velocidade, temPartes]);
 
+    // D2: tocando só os trechos (uma voz, ou sem os silêncios), a posição é
+    // conferida a cada CONFERENCIA_DOS_TRECHOS_MS, além de cada timeupdate. A
+    // conferência é a do render mais recente: o relógio não recomeça a cada
+    // render, e os trechos e a parte que toca são os de agora.
+    const conferirAgora = useRef<() => void>(() => {});
+    useEffect(() => { conferirAgora.current = conferirTrecho; });
+    const comTrechos = !!trechos?.length;
+    useEffect(() => {
+      if (!tocando || !comTrechos) return;
+      const relogio = window.setInterval(() => conferirAgora.current(), CONFERENCIA_DOS_TRECHOS_MS);
+      return () => window.clearInterval(relogio);
+    }, [tocando, comTrechos]);
+
+    /**
+     * Fora de um trecho, salta ao começo do seguinte; depois do último, para
+     * ali, e o Tocar seguinte recomeça do primeiro. Com a troca de parte em
+     * curso, espera: o <audio> ainda está no começo da parte nova.
+     */
+    function conferirTrecho() {
+      const elemento = audio.current;
+      if (!trechos?.length || !elemento || !atual || !tocando || pendente.current) return;
+      const agora = atual.inicioSegundos + elemento.currentTime;
+      const ponto = pontoParaTocar(trechos, agora);
+      if (ponto === null) {
+        terminou.current = true;
+        setTocando(false);
+        elemento.pause();
+        return;
+      }
+      if (ponto > agora) irPara(ponto, true);
+    }
+
     function confirmar(segundo: number) {
       setArrastando(null);
       irPara(segundo, tocando);
@@ -297,6 +404,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
     const fimDeclarado = fimDaReuniao(partes);
     const total = duracaoLida?.seq === atual.seq ? Math.max(fimDeclarado, atual.inicioSegundos + duracaoLida.segundos) : fimDeclarado;
     const posicao = Math.min(total, atual.inicioSegundos + noTrecho);
+    posicaoAgora.current = posicao;
     const naTela = arrastando ?? posicao;
     const congelado = focado && tocando && arrastando === null;
     const noTextoDoDeslizante = congelado ? Math.min(total, anunciado) : naTela;
@@ -312,7 +420,15 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
         elemento.pause();
         return;
       }
-      if (terminou.current) {
+      if (trechos?.length) {
+        // D2: fora dos trechos, o Tocar vai ao começo do seguinte; parado no
+        // fim, ou depois do último trecho, recomeça do primeiro.
+        const ponto = terminou.current ? null : pontoParaTocar(trechos, posicao);
+        if (ponto === null || ponto > posicao) {
+          irPara(ponto ?? trechos[0].inicio, true);
+          return;
+        }
+      } else if (terminou.current) {
         const seguinte = partes[indice + 1];
         irPara(seguinte ? seguinte.inicioSegundos : 0, true);
         return;
@@ -328,6 +444,15 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
       setVelocidade(proxima);
       guardarVelocidade(proxima);
     }
+
+    function alternarSilencios() {
+      const proximo = !pularSilencios;
+      setPularSilencios(proximo);
+      guardarSilencios(proximo);
+    }
+
+    // Os 15 s contam só o áudio que existe e, tocando só os trechos (D2), só o que toca.
+    const pulo = (delta: number) => (trechos?.length ? destinoDoPuloNosTrechos(trechos, posicao, delta) : destinoDoPulo(partes, posicao, delta));
 
     return (
       <div className={className}>
@@ -357,6 +482,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
           onTimeUpdate={() => {
             // Com a troca de parte pendente, o <audio> volta a 0 antes de ir ao ponto pedido.
             if (!pendente.current && audio.current) setNoTrecho(audio.current.currentTime);
+            conferirTrecho();
           }}
           onError={() => {
             falhou.current = atual.seq;
@@ -417,7 +543,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
             cima e os botões embaixo; de sm para cima, tudo numa linha só. */}
         <div dir="ltr" className="flex flex-wrap items-center gap-x-2 sm:flex-nowrap sm:gap-x-3">
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => irPara(destinoDoPulo(partes, posicao, -PULO_SEGUNDOS), tocando)}
+            <button type="button" onClick={() => irPara(pulo(-PULO_SEGUNDOS), tocando)}
               aria-label={t("meetings.player.rewind", { segundos: PULO_SEGUNDOS })} className={BOTAO}>
               <IconeDoPulo para="tras"/>
             </button>
@@ -425,7 +551,7 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-300 text-[#1a120c] transition-colors hover:bg-amber-200 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#16130f]">
               {tocando ? <Pause size={20} fill="currentColor" aria-hidden/> : <Play size={20} fill="currentColor" className="translate-x-px" aria-hidden/>}
             </button>
-            <button type="button" onClick={() => irPara(destinoDoPulo(partes, posicao, PULO_SEGUNDOS), tocando)}
+            <button type="button" onClick={() => irPara(pulo(PULO_SEGUNDOS), tocando)}
               aria-label={t("meetings.player.forward", { segundos: PULO_SEGUNDOS })} className={BOTAO}>
               <IconeDoPulo para="frente"/>
             </button>
@@ -477,10 +603,18 @@ export const PlayerDasPartes = forwardRef<ControleDoPlayer, { partes: ParteDoPla
             />
             <span aria-hidden className="shrink-0 text-xs tabular-nums text-white/50">{totalNaTela}</span>
           </div>
-          <button type="button" onClick={trocarVelocidade} aria-label={t("meetings.player.speed", { velocidade: velocidadeNaTela })}
-            className="ms-auto inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-2 text-sm font-semibold tabular-nums text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-300 sm:ms-0">
-            {velocidadeNaTela}
-          </button>
+          <div className="ms-auto flex shrink-0 items-center gap-1 sm:ms-0">
+            {/* D2: pular os silêncios, só com as falas da transcrição (são elas que dizem onde há silêncio). */}
+            {temFalas && <button type="button" onClick={alternarSilencios} aria-pressed={pularSilencios}
+              aria-label={t("meetings.playback.skipSilence")} title={t("meetings.playback.skipSilence")}
+              className={`${BOTAO} ${pularSilencios ? "bg-amber-300/20 text-amber-200" : ""}`}>
+              <ChevronsRight size={22} strokeWidth={1.75} aria-hidden/>
+            </button>}
+            <button type="button" onClick={trocarVelocidade} aria-label={t("meetings.player.speed", { velocidade: velocidadeNaTela })}
+              className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-2 text-sm font-semibold tabular-nums text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-300">
+              {velocidadeNaTela}
+            </button>
+          </div>
         </div>
       </div>
     );

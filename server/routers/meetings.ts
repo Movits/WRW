@@ -30,7 +30,8 @@ import {
   translatePrivateMeetingTranscript,
   nomearFalante,
 } from "../meeting-service";
-import { perguntarAReuniao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
 import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
@@ -522,6 +523,34 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarAReuniao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
+        segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
+    }),
+
+  // G15a: a transcrição durante a gravação, só para a dona. A tela do gravador
+  // (e o detalhe da reunião em andamento) pergunta de tempos em tempos e recebe
+  // o andamento de cada parte e o texto das partes prontas que ainda não tem
+  // (`desde`). Sem IA: o texto é o que a fila já transcreveu. Reunião de outra
+  // dona, ou excluída, é NOT_FOUND.
+  transcricaoDaGravacao: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), desde: z.number().int().min(0).max(PARTES_NO_MAXIMO).default(0) }))
+    .query(async ({ ctx, input }) => {
+      const dados = await transcricaoDuranteAGravacao(ctx.user.openId, input.meetingId, input.desde);
+      if (!dados) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+      return dados;
+    }),
+
+  // G15a: perguntar à IA sobre o que já foi dito, com a reunião ainda gravando
+  // (server/reuniao-com-ia.ts, perguntarDuranteAGravacao). O mesmo teto e as
+  // mesmas recusas traduzidas da pergunta de sempre; nada é gravado.
+  perguntarDuranteAGravacao: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      pergunta: z.string().trim().min(2).max(TAMANHO_MAXIMO_DA_PERGUNTA),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => perguntarDuranteAGravacao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
         segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
     }),
 

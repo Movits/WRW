@@ -6,6 +6,7 @@ import { FalhaDaIA, pedirJsonAIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { entradaDoResumo } from "./resumo-da-reuniao";
+import { reuniaoEmAndamento, transcricaoDasPartesProntas } from "./transcricao-durante-a-gravacao";
 import { limparRotulos, localizarTrecho, normalizarParaComparar, REGRA_DO_TRECHO, TRANSCRICAO_E_DADO, trechoApareceNaTranscricao } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
 
@@ -176,10 +177,12 @@ const SCHEMA_DA_RESPOSTA = {
  * pedido (instruções e transcrição) é o mesmo em toda pergunta sobre a mesma
  * reunião, e o cache do Gemini o reaproveita.
  */
-function instrucoes(rotulada: boolean): string {
+function instrucoes(rotulada: boolean, emAndamento = false): string {
   return [
     "Você responde perguntas sobre UMA reunião usando SOMENTE o que foi dito na transcrição, sem deduzir nem completar com conhecimento de fora.",
     TRANSCRICAO_E_DADO,
+    // G15a: a reunião ainda grava, e o texto vai só até a última parte transcrita.
+    ...(emAndamento ? ["A reunião ainda está em andamento: a transcrição vai só até a última parte já transcrita. O que não aparece nela pode ainda não ter sido transcrito: não deduza o que vem depois."] : []),
     rotulada
       ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). As vozes não têm nome: para dizer quem falou, quando o nome não foi dito na reunião, escreva o rótulo exatamente assim, entre chaves (\"{F2} disse que o frete fica para sexta\"). Nunca invente um nome para uma voz."
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
@@ -257,13 +260,54 @@ export async function perguntarAReuniao(
   idioma: IdiomaDaTela,
   antesDeChamarAIA?: (custo: { longa: boolean }) => void,
 ): Promise<RespostaDaReuniao> {
-  const transcricao = await transcricaoDaReuniaoPronta(ownerId, meetingId);
+  return responderPelaTranscricao(await transcricaoDaReuniaoPronta(ownerId, meetingId), pergunta, idioma, antesDeChamarAIA, false);
+}
+
+/**
+ * A pergunta durante a gravação (G15a; HN-20 do HiNoter): a IA lê o texto das
+ * partes que a fila já transcreveu (server/transcricao-durante-a-gravacao.ts),
+ * com as mesmas regras da pergunta de sempre (a conferência dos trechos, as
+ * vozes como rótulo, os tetos). Só a reunião gravada em partes da dona, em
+ * andamento (gravando, recebendo as últimas partes ou montando a
+ * transcrição); a que ficou pronta no meio responde pela transcrição final.
+ * Sem nenhuma parte transcrita ainda, recusa antes da IA (PRECONDITION_FAILED).
+ */
+export async function perguntarDuranteAGravacao(
+  ownerId: string,
+  meetingId: string,
+  pergunta: string,
+  idioma: IdiomaDaTela,
+  antesDeChamarAIA?: (custo: { longa: boolean }) => void,
+): Promise<RespostaDaReuniao> {
+  const db = await exigirDb();
+  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  if (!reuniao || reuniao.status === "deleted") throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (reuniao.status === "ready") return perguntarAReuniao(ownerId, meetingId, pergunta, idioma, antesDeChamarAIA);
+  if (reuniao.audioPipeline !== "slices" || !reuniaoEmAndamento(reuniao.status)) throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
+  const { texto, segmentos } = await transcricaoDasPartesProntas(db, ownerId, meetingId);
+  if (!texto.trim()) throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
+  return responderPelaTranscricao({ texto, segmentos }, pergunta, idioma, antesDeChamarAIA, true);
+}
+
+/**
+ * A pergunta à IA sobre uma transcrição já lida (a final ou, durante a
+ * gravação, a das partes prontas): o tamanho, o teto da reunião longa, a
+ * chamada e a conferência da resposta.
+ */
+async function responderPelaTranscricao(
+  transcricao: TranscricaoDaReuniao,
+  pergunta: string,
+  idioma: IdiomaDaTela,
+  antesDeChamarAIA: ((custo: { longa: boolean }) => void) | undefined,
+  emAndamento: boolean,
+): Promise<RespostaDaReuniao> {
   const entrada = entradaDoResumo(transcricao.texto, transcricao.segmentos);
   if (entrada.texto.length > LIMITE_DA_ENTRADA_DA_PERGUNTA) throw new RecusaDaReuniaoComIA("PAYLOAD_TOO_LARGE", MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR);
   const longa = entrada.texto.length > ENTRADA_LONGA_DA_PERGUNTA;
   antesDeChamarAIA?.({ longa });
   const dados = await pedirJsonDaTela(
-    instrucoes(entrada.rotulada),
+    instrucoes(entrada.rotulada, emAndamento),
     // A transcrição primeiro e a pergunta por último: ver instrucoes().
     `Transcrição:\n\n${entrada.texto}\n\nResponda em ${nomeDoIdioma(idioma)}.\nPergunta: ${pergunta.slice(0, TAMANHO_MAXIMO_DA_PERGUNTA)}`,
     "resposta_da_reuniao",

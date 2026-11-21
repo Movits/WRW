@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BarraDoPlayer } from "./BarraDoPlayer";
 import type { ControleDoPlayer } from "./PlayerDasPartes";
@@ -48,5 +48,18 @@ describe("BarraDoPlayer", () => {
     act(() => controle.current!.irPara(30));
     expect(audio.getAttribute("src")).toBe("/a/0.m4a");
     expect(tocar).toHaveBeenCalledTimes(1);
+  });
+
+  // D2: ouvindo só uma voz, a barra diz qual, em qualquer aba, e volta a todas num toque.
+  it("ouvindo só uma voz, a barra diz qual e o Ouvir todas as vozes avisa a página", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const aoMudar = vi.fn();
+    const falas = [{ inicio: 1, fim: 5, falante: "F2", texto: "Oi." }];
+    const { rerender } = render(<BarraDoPlayer partes={PARTES} falas={falas} soAVoz={null} aoMudarSoAVoz={aoMudar}/>);
+    expect(screen.queryByText(/Ouvindo só/)).not.toBeInTheDocument();
+    rerender(<BarraDoPlayer partes={PARTES} falas={falas} soAVoz="F2" rotuloDaVoz="Bruno" aoMudarSoAVoz={aoMudar}/>);
+    expect(screen.getByText("Ouvindo só: Bruno")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir todas as vozes" }));
+    expect(aoMudar).toHaveBeenCalledWith(null);
   });
 });

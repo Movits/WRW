@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { mmss, segmentosValidos, tempoDeFala, TranscricaoPorFalante, type SegmentoDaTela } from "./TranscricaoPorFalante";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHAVE_DAS_VOZES_NA_TRANSCRICAO, CHAVE_DOS_HORARIOS_NA_TRANSCRICAO, mmss, segmentosValidos, tempoDeFala, TranscricaoPorFalante, type SegmentoDaTela } from "./TranscricaoPorFalante";
 
 const FALAS: SegmentoDaTela[] = [
   { inicio: 0, fim: 60, falante: "F1", texto: "Bom dia, vamos falar do contrato." },
@@ -132,5 +132,82 @@ describe("TranscricaoPorFalante — nomes das vozes (H3)", () => {
     fireEvent.click(screen.getAllByTitle("Dar nome a esta voz")[0]);
     expect(screen.getByRole("textbox", { name: "Nome do falante 1" })).not.toHaveAccessibleDescription();
     expect(screen.queryByText(/quem tem o link/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * D2 (HN-26 do HiNoter): mostrar ou esconder as vozes e os horários (guardado
+ * no navegador de quem lê) e ouvir só uma voz, que filtra a lista e pede ao
+ * player para tocar só as falas dela.
+ */
+describe("TranscricaoPorFalante — vozes, horários e ouvir só uma voz (D2)", () => {
+  afterEach(() => {
+    localStorage.removeItem(CHAVE_DAS_VOZES_NA_TRANSCRICAO);
+    localStorage.removeItem(CHAVE_DOS_HORARIOS_NA_TRANSCRICAO);
+  });
+  const lista = () => document.querySelector("ol")!;
+
+  it("esconder as vozes tira o rótulo de cada fala; esconder os horários tira o tempo, também do trecho que não chegou; a escolha fica guardada", () => {
+    const { unmount } = render(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={vi.fn()} />);
+    const vozes = screen.getByRole("button", { name: "Vozes" });
+    const horarios = screen.getByRole("button", { name: "Horários" });
+    expect(vozes).toHaveAttribute("aria-pressed", "true");
+    expect(horarios).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(vozes);
+    expect(vozes).toHaveAttribute("aria-pressed", "false");
+    expect(within(lista()).queryByText("Falante 1")).not.toBeInTheDocument();
+    expect(localStorage.getItem(CHAVE_DAS_VOZES_NA_TRANSCRICAO)).toBe("0");
+    fireEvent.click(horarios);
+    expect(screen.queryByRole("button", { name: "Ouvir a partir de 20:00" })).not.toBeInTheDocument();
+    expect(within(lista()).getByText("trecho não recebido")).toBeInTheDocument();
+    expect(within(lista()).queryByText(/10:00–20:00/)).not.toBeInTheDocument();
+    // O texto das falas continua.
+    expect(within(lista()).getByText("O frete fica para sexta.")).toBeInTheDocument();
+    unmount();
+    render(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Vozes" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Horários" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Vozes" }));
+    expect(within(lista()).getAllByText("Falante 1")).toHaveLength(2);
+  });
+
+  it("o armazenamento que lança não quebra a transcrição: mostra tudo, e a escolha vale na visita", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("bloqueado"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("bloqueado"); });
+    try {
+      render(<TranscricaoPorFalante segmentos={FALAS} />);
+      expect(within(lista()).getAllByText("Falante 1")).toHaveLength(2);
+      fireEvent.click(screen.getByRole("button", { name: "Vozes" }));
+      expect(within(lista()).queryByText("Falante 1")).not.toBeInTheDocument();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("ouvir só esta voz: o botão de cada voz pede ao player; escolhida, a lista mostra só as falas dela, e tocar de novo volta a todas", () => {
+    const aoOuvirSoAVoz = vi.fn();
+    const { rerender } = render(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={vi.fn()} aoOuvirSoAVoz={aoOuvirSoAVoz} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir só a voz de Falante 2" }));
+    expect(aoOuvirSoAVoz).toHaveBeenCalledWith("F2");
+    rerender(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={vi.fn()} soAVoz="F2" aoOuvirSoAVoz={aoOuvirSoAVoz} />);
+    expect(screen.getByRole("button", { name: "Ouvir só a voz de Falante 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(lista().querySelectorAll(":scope > li")).toHaveLength(1);
+    expect(within(lista()).getByText("O frete fica para sexta.")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Ouvindo e mostrando só as falas de Falante 2.");
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir só a voz de Falante 2" }));
+    expect(aoOuvirSoAVoz).toHaveBeenLastCalledWith(null);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir todas as vozes" }));
+    expect(aoOuvirSoAVoz).toHaveBeenLastCalledWith(null);
+  });
+
+  it("com o nome dado à voz (H3), o botão e o aviso usam o nome", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} nomes={{ F1: "Ana" }} soAVoz="F1" aoOuvirSoAVoz={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Ouvir só a voz de Ana" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("Ouvindo e mostrando só as falas de Ana.");
+  });
+
+  it("sem player (a gravação venceu), não há o botão de ouvir só uma voz", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} />);
+    expect(screen.queryByRole("button", { name: /Ouvir só a voz/ })).not.toBeInTheDocument();
   });
 });
