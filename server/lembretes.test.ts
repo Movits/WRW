@@ -321,19 +321,31 @@ describe("esquecer e apagar os avisos", () => {
 
 describe("o aviso de reunião pronta", () => {
   it("da reunião pronta da dona: tira o aviso anterior dela e grava o novo, com o título e como o resumo terminou", async () => {
-    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê de exportação ☕", contaId: 7 }] : undefined;
+    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê de exportação ☕", contaId: 7 }]
+      : operacao.tabela === schema.platformNotifications ? [{ id: 41 }] : undefined;
     expect(await lembretes.avisarReuniaoPronta(db, DONA, REUNIAO, "pronto")).toBe(true);
     const [leitura] = de("select", schema.meetings);
     expect(leitura.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ?)");
     expect(leitura.params).toEqual([REUNIAO, DONA, "ready"]);
+    // O anterior é achado numa leitura sem trava e sai pela chave: o DELETE
+    // pela conta travava o intervalo dela no índice e o vão até a vizinha.
+    const [achado] = de("select", schema.platformNotifications);
+    expect(achado.params).toEqual([7, "reuniao_pronta", `/meetings/${REUNIAO}`]);
     const [anterior] = de("delete", schema.platformNotifications);
-    expect(anterior.params).toEqual([7, "reuniao_pronta", `/meetings/${REUNIAO}`]);
+    expect(anterior.sql).toBe("`platform_notifications`.`id` = ?");
+    expect(anterior.params).toEqual([41]);
     const [aviso] = de("insert", schema.platformNotifications);
     expect(aviso.linhas?.[0]).toEqual({
       userId: 7, type: "reuniao_pronta", title: "Comitê de exportação ☕", body: null,
       actionUrl: `/meetings/${REUNIAO}`, parametros: { titulo: "Comitê de exportação ☕", resumo: "pronto" }, isRead: false,
     });
-    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "delete", "insert"]);
+    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "select", "delete", "insert"]);
+  });
+
+  it("sem aviso anterior da reunião, só grava o novo: nenhum DELETE", async () => {
+    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê", contaId: 7 }] : undefined;
+    expect(await lembretes.avisarReuniaoPronta(db, DONA, REUNIAO, "pronto")).toBe(true);
+    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "select", "insert"]);
   });
 
   it("o resumo que falhou de vez também avisa: a transcrição está lá", async () => {

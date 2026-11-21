@@ -847,6 +847,7 @@
     "saveProfile": "保存档案",
     "editProfile": "编辑档案",
     "updated": "档案更新成功！",
+    "changedElsewhere": "你编辑期间，你的档案在另一个页面中被修改了。为了不抹掉那次修改，本次没有保存任何内容：请刷新页面后重新编辑。",
     "badgeGold": "黄金",
     "badgeSilver": "银牌",
     "badgeBronze": "铜牌",

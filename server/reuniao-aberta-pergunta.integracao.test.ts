@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 import { eq } from "drizzle-orm";
@@ -72,10 +73,10 @@ describe.skipIf(!temBanco)("A pergunta pelo link aberto, no banco (integração)
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(eq(users.openId, DONA));
-    await db.delete(auditLogs).where(eq(auditLogs.userId, PROVA.userId));
+    await apagarPelaChave(db, auditLogs, eq(auditLogs.userId, PROVA.userId));
   });
 
   it("a pergunta sobre reunião longa gasta duas vagas do teto da reunião, e longa é a entrada rotulada que vai à IA, não o texto corrido", async () => {

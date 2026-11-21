@@ -21,6 +21,8 @@ import {
 import { esquemaDasDemandas, esquemaDoWhatINeed, prepararOQuePreciso } from "../o-que-preciso";
 import { cortarSemPartirEmoji, LIMITE_DA_BIO_GRAVADA, LIMITE_DA_BIO_NO_CADASTRO } from "../../shared/apresentacao";
 import { LIMITE_DO_QUE_TENHO } from "../../shared/reuniao-no-match";
+import { MENSAGEM_PERFIL_MUDOU_NO_MEIO } from "../../shared/const";
+import { FORMATO_DA_VERSAO_DAS_LISTAS, PerfilMudouNoMeio, versaoDasListas } from "../listas-do-perfil";
 
 // ============================================================
 // PERFIL DO USUÁRIO
@@ -104,7 +106,10 @@ const esquemaDoWhatIHave = z.array(z.string().max(500)).max(LIMITE_DO_QUE_TENHO)
 export const profileRouter = router({
   get: protectedProcedure.query(async ({ ctx }) => {
     const profile = await getUserProfile(ctx.user.id);
-    return { user: toPublicUser(ctx.user), profile };
+    // A versão de "O que tenho" e "O que preciso" que a tela carregou: o Perfil
+    // a devolve ao salvar, e o que uma reunião acrescentou depois não se perde
+    // (server/listas-do-perfil.ts).
+    return { user: toPublicUser(ctx.user), profile, versaoDasListas: versaoDasListas(profile) };
   }),
 
  update: protectedProcedure
@@ -139,14 +144,19 @@ export const profileRouter = router({
       whatINeed: esquemaDoWhatINeed.optional(),
       // "O que preciso" detalhado (shared/o-que-preciso.ts); validado em prepararOQuePreciso.
       whatINeedDetails: esquemaDasDemandas.optional(),
+      // A versão das listas que a tela carregou (profile.get). Com ela, o que
+      // entrou depois (o item que uma reunião confirmou com o Perfil aberto)
+      // não se perde; sem ela (o Perfil antigo em cache no deploy), grava como antes.
+      versaoDasListas: z.string().regex(FORMATO_DA_VERSAO_DAS_LISTAS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       conferirCadastroEmpresarial(input.personType, input.companyCnpj);
       // Demanda começada e inválida é recusada antes de gravar qualquer coisa.
       const oQuePreciso = prepararOQuePreciso(input.whatINeed, input.whatINeedDetails);
       // `position` é coluna de users, não de user_profiles — mandá-la ao
-      // upsert derrubava o UPDATE inteiro com "Unknown column".
-      const { position: _position, whatINeed: _whatINeed, whatINeedDetails: _whatINeedDetails, ...semOQuePreciso } = input;
+      // upsert derrubava o UPDATE inteiro com "Unknown column". A versão das
+      // listas também não é coluna.
+      const { position: _position, whatINeed: _whatINeed, whatINeedDetails: _whatINeedDetails, versaoDasListas: versaoCarregada, ...semOQuePreciso } = input;
       const updateData = { ...semOQuePreciso, ...oQuePreciso };
       // A leitura cai em currentRole/currentCompany quando jobTitle/company está
       // vazio (perfil-consolidado.ts). Sem anular a coluna antiga do par que
@@ -161,7 +171,14 @@ export const profileRouter = router({
       const businessData = updateData.personType === "individual"
         ? { ...updateData, ...legado, companySize: null, companyCnpj: null }
         : { ...updateData, ...legado, companyCnpj: updateData.companyCnpj ? normalizarCadastroEmpresarial(updateData.companyCnpj) || undefined : undefined };
-      await upsertUserProfile(ctx.user.id, businessData);
+      try {
+        await upsertUserProfile(ctx.user.id, businessData, versaoCarregada);
+      } catch (erro) {
+        // As listas mudaram enquanto a edição estava aberta, de um jeito que não
+        // dá para somar: nada foi gravado, e a tela pede para recarregar.
+        if (erro instanceof PerfilMudouNoMeio) throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_PERFIL_MUDOU_NO_MEIO });
+        throw erro;
+      }
       // Atualizar company/position na tabela users também
       const db = await exigirDb();
       if (input.company !== undefined || input.position !== undefined) {

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { meetingAudioSlices, meetingTranscriptTranslations, meetingTranscripts, meetings } from "../drizzle/schema";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 /**
  * Prova da migração 0014 contra um banco real DE TESTE. No CI é o MariaDB criado
@@ -56,10 +57,10 @@ const parte = (seq: number) => ({
 });
 
 async function limpar(db: Banco) {
-  await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-  await db.delete(meetingTranscriptTranslations).where(eq(meetingTranscriptTranslations.ownerId, DONA));
-  await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-  await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+  await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+  await apagarPelaChave(db, meetingTranscriptTranslations, eq(meetingTranscriptTranslations.ownerId, DONA));
+  await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+  await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
 }
 
 describe.skipIf(!temBanco)("Reunião longa no banco: MEDIUMTEXT, estado 'uploading' e parte única (integração)", () => {

@@ -847,6 +847,7 @@
     "saveProfile": "プロフィールを保存",
     "editProfile": "プロフィールを編集",
     "updated": "プロフィールを更新しました！",
+    "changedElsewhere": "編集中に、別の画面でプロフィールが変更されました。その変更を消さないよう、何も保存していません。ページを再読み込みして、もう一度編集してください。",
     "badgeGold": "ゴールド",
     "badgeSilver": "シルバー",
     "badgeBronze": "ブロンズ",
