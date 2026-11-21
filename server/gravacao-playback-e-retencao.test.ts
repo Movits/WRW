@@ -284,6 +284,10 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "audioPipeline", "expectedSlices",
     // Os nomes das vozes (H3): a lista e o detalhe são só da dona.
     "speakerNames",
+    // De onde a reunião veio: a de documento (H12) troca o player pelo texto do
+    // documento, e no vídeo do YouTube (H13) vem a URL dele, para a marca da
+    // lista e o bloco do vídeo no lugar da gravação. São só da dona.
+    "origem", "sourceUrl",
   ];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),

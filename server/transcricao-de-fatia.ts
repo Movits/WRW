@@ -51,8 +51,9 @@ const FALANTE_VALIDO = /^F([1-9]\d?)$/;
 const TEMPO_EM_TEXTO = /^(?:(\d{1,2}):)?(\d{1,3}):(\d{1,2})(?:[.,](\d+))?$/;
 const NUMERO_EM_TEXTO = /^\d+(?:[.,]\d+)?$/;
 // O mesmo formato no esquema, sem atalhos de regex, para o decodificador do
-// Gemini: "07:05", "7:05" ou "1:02:05".
-const PADRAO_DO_TEMPO = "^([0-9]+:)?[0-5]?[0-9]:[0-5][0-9]$";
+// Gemini: "07:05", "7:05" ou "1:02:05". O vídeo do YouTube (server/youtube.ts)
+// pede os tempos no mesmo formato.
+export const PADRAO_DO_TEMPO = "^([0-9]+:)?[0-5]?[0-9]:[0-5][0-9]$";
 const DESCRICAO_DO_TEMPO = 'Tempo dentro deste trecho, contado do começo dele, como texto "MM:SS" (a partir de uma hora, "H:MM:SS").';
 
 // O responseSchema do Gemini (subconjunto do OpenAPI), com os tipos em

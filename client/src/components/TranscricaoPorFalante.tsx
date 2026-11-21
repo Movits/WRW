@@ -1,7 +1,8 @@
 import { NOME_DO_FALANTE_MAX } from "@shared/const";
+import { textoTemFala } from "@shared/fala-na-transcricao";
 import { useId, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Search } from "lucide-react";
+import { Play, Search } from "lucide-react";
 
 /** O segmento do contrato do desenho: tempo absoluto em segundos, falante F1, F2... */
 export type SegmentoDaTela = { inicio: number; fim: number; falante: string; texto: string; lacuna?: boolean };
@@ -22,11 +23,16 @@ export function segmentosValidos(bruto: unknown): SegmentoDaTela[] {
     && typeof (s as SegmentoDaTela).texto === "string" && typeof (s as SegmentoDaTela).falante === "string");
 }
 
-/** Quanto tempo cada voz falou, da que mais falou para a que menos falou. */
+/**
+ * Quanto tempo cada voz falou, da que mais falou para a que menos falou. O
+ * trecho que é só marca entre colchetes ([música], [ruído], [inaudível]) não é
+ * fala (textoTemFala): a vinheta de um vídeo do YouTube não vira uma voz que
+ * não existe, nem entra na conta das outras.
+ */
 export function tempoDeFala(segmentos: SegmentoDaTela[]) {
   const porFalante = new Map<string, number>();
   for (const s of segmentos) {
-    if (s.lacuna || !s.falante) continue;
+    if (s.lacuna || !s.falante || !textoTemFala(s.texto)) continue;
     porFalante.set(s.falante, (porFalante.get(s.falante) ?? 0) + Math.max(0, s.fim - s.inicio));
   }
   const total = Array.from(porFalante.values()).reduce((a, b) => a + b, 0);
@@ -58,9 +64,14 @@ function comDestaque(texto: string, termo: string) {
  * começou (clicar pula o player para ali), a busca com destaque e o tempo de
  * fala de cada voz. O trecho que não chegou aparece como tal.
  */
-export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", nomes = {}, aoNomear, nomeNoLink }: {
+export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoInicial = "", nomes = {}, aoNomear, nomeNoLink }: {
   segmentos: SegmentoDaTela[];
   aoIrPara?: (segundo: number) => void;
+  /**
+   * A reunião que veio de um vídeo do YouTube (H13) não tem player: o tempo de
+   * cada fala vira um link para o vídeo naquele segundo, numa aba nova.
+   */
+  linkDoTempo?: (segundo: number) => string;
   termoInicial?: string;
   /** H3: os nomes que a dona deu às vozes ({ F1: "Ana" }). */
   nomes?: Readonly<Record<string, string>>;
@@ -124,12 +135,12 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", 
                       {dicaDoLink && <p id={idDaDicaDoLink} className="text-xs text-amber-100/70">{dicaDoLink}</p>}
                     </div>
                   : aoNomear
-                    ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="w-24 shrink-0 truncate text-left underline decoration-dotted underline-offset-4 hover:text-white">{rotulo(v.falante)}</button>
+                    ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="w-24 shrink-0 truncate text-start underline decoration-dotted underline-offset-4 hover:text-white">{rotulo(v.falante)}</button>
                     : <span className="w-24 shrink-0 truncate">{rotulo(v.falante)}</span>}
                 <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
                   <span className="block h-full rounded-full bg-amber-300/70" style={{ width: `${Math.round(v.fracao * 100)}%` }} />
                 </span>
-                <span className="w-24 shrink-0 text-right tabular-nums text-white/55">{mmss(v.segundos)} · {Math.round(v.fracao * 100)}%</span>
+                <span className="w-24 shrink-0 text-end tabular-nums text-white/55">{mmss(v.segundos)} · {Math.round(v.fracao * 100)}%</span>
               </li>
             ))}
           </ul>
@@ -154,17 +165,30 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, termoInicial = "", 
           </li>
         ) : (
           <li key={`${s.inicio}-${i}`} className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => aoIrPara?.(s.inicio)}
-              disabled={!aoIrPara}
-              aria-label={t("meetings.playFrom", { tempo: mmss(s.inicio) })}
-              className="h-fit shrink-0 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10 disabled:text-white/40"
-            >
-              {mmss(s.inicio)}
-            </button>
+            {linkDoTempo ? (
+              <a
+                href={linkDoTempo(s.inicio)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("meetings.youtube.watchFrom", { tempo: mmss(s.inicio) })}
+                className="inline-flex h-fit shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10"
+              >
+                <Play size={11} aria-hidden />{mmss(s.inicio)}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => aoIrPara?.(s.inicio)}
+                disabled={!aoIrPara}
+                aria-label={t("meetings.playFrom", { tempo: mmss(s.inicio) })}
+                className="h-fit shrink-0 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10 disabled:text-white/40"
+              >
+                {mmss(s.inicio)}
+              </button>
+            )}
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-white/55">{rotulo(s.falante)}</p>
+              {/* A marca sem fala ([música]) não tem voz: sem o rótulo, como no tempo de fala. */}
+              {textoTemFala(s.texto) && <p className="text-xs font-semibold text-white/55">{rotulo(s.falante)}</p>}
               <p dir="auto" className="leading-7 text-white/80">{comDestaque(s.texto, busca)}</p>
             </div>
           </li>

@@ -58,7 +58,7 @@ function mensagemDoErro(t: TranslateFn, erro: unknown) {
   }
 }
 
-export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false }: {
+export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false, documento = false, youtube = false }: {
   meetingId: string;
   titulo: string;
   token: string | null;
@@ -66,8 +66,26 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   linkMostraNomes?: boolean;
   /** A dona já deu nome a alguma voz desta reunião. */
   temNomes?: boolean;
+  /**
+   * A reunião nasceu de um documento (H12 e H12b): não há gravação nem vozes, e
+   * o link mostra o texto lido e o resumo, nunca o arquivo. A apresentação e a
+   * confirmação dizem isso, e a prova guarda a frase do documento.
+   */
+  documento?: boolean;
+  /**
+   * A reunião veio de um vídeo do YouTube (H13): não há gravação, e o link
+   * mostra a transcrição e o resumo, com os nomes que a dona der às vozes; o
+   * vídeo fica no YouTube. A apresentação e a confirmação dizem isso, e a prova
+   * guarda a frase do vídeo (conferência de tela de 20/11/2026: a caixa e a
+   * prova falavam da gravação, que não existe).
+   */
+  youtube?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const apresentacao = documento ? t("meetings.document.shareIntro") : youtube ? t("meetings.youtube.shareIntro") : t("meetings.share.intro");
+  const autorizacao = documento ? t("meetings.document.shareAuthorization") : youtube ? t("meetings.youtube.shareAuthorization") : t("meetings.share.authorization");
+  // Sem gravação, ninguém fica "ouvindo até terminar" depois de o link desligar.
+  const perguntaDeDesligar = documento || youtube ? t("meetings.share.turnOffConfirmNoRecording") : t("meetings.share.turnOffConfirm");
   const utils = trpc.useUtils();
   const campo = useRef<HTMLInputElement>(null);
   const botaoCompartilhar = useRef<HTMLButtonElement>(null);
@@ -119,7 +137,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 id="compartilhar-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><Share2 size={16} className="text-amber-300"/>{t("meetings.share.title")}</h2>
-          <p className="mt-1 text-sm text-white/55">{t("meetings.share.intro")}</p>
+          <p className="mt-1 text-sm text-white/55">{apresentacao}</p>
           {/* O link mostra também o resumo (H4) como a dona o deixar, com o que ela escrever (H4f), e o mapa mental (H10). */}
           <p className="mt-1 text-sm text-white/55">{t("meetings.share.summaryNotice")}</p>
         </div>
@@ -132,7 +150,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
         <label className="flex items-start gap-3 text-sm text-white/75">
           {/* Só monta depois de "Compartilhar": o foco vem para cá, e não para o <body>. */}
           <input type="checkbox" autoFocus checked={autorizou} onChange={evento => setAutorizou(evento.target.checked)} className="mt-1 h-4 w-4 accent-amber-400"/>
-          <span>{t("meetings.share.authorization")}</span>
+          <span>{autorizacao}</span>
         </label>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!autorizou || ligar.isPending} onClick={() => ligar.mutate({
@@ -141,7 +159,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
             // A prova guarda a frase que a dona viu, o idioma dela e a versão
             // da caixa: a 2 fala dos nomes das vozes, e só com ela o link os mostra.
             idioma: idiomaDaTela(i18n),
-            textoExibido: t("meetings.share.authorization"),
+            textoExibido: autorizacao,
             versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES,
           })}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-50">
@@ -194,7 +212,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
     </div>
     <div className="mt-4 border-t border-white/10 pt-3">
       {confirmarDesligar ? <div className="space-y-2">
-        <p id="confirmar-desligar-link" className="text-sm text-amber-100/85">{t("meetings.share.turnOffConfirm")}</p>
+        <p id="confirmar-desligar-link" className="text-sm text-amber-100/85">{perguntaDeDesligar}</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => desligar.mutate({ meetingId })} disabled={desligar.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-50">
