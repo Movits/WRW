@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -26,6 +27,8 @@ const servico = await import("./resumo-guardado");
 const acoes = await import("./proximas-acoes");
 const { FalhaDaIA } = await import("./ia-em-json");
 const { deletePrivateMeeting, gravarResultadoDaReuniao } = await import("./meeting-service");
+const { avisarReuniaoPronta } = await import("./lembretes");
+const { terminaComALinhaPresa: comALinhaPresa } = await import("./test/linha-presa");
 const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
@@ -67,6 +70,20 @@ const itensDe = async (meetingId: string) => (await db()).select().from(meetingS
 const vaga = vi.fn();
 const pedir = (meetingId: string) => servico.pedirResumoDaDona(DONA, meetingId, vaga);
 
+type Transacao = import("./test/linha-presa").Transacao;
+/** O trabalho terminou com a linha de `segurar` presa por outra transação (server/test/linha-presa.ts)? */
+const terminaComALinhaPresa = async (segurar: (tx: Transacao) => Promise<unknown>, trabalho: () => Promise<unknown>) =>
+  comALinhaPresa(await db(), segurar, trabalho);
+
+/**
+ * O resumo pendente de outra reunião, sem reserva e longe de esgotar: entra no
+ * intervalo de qualquer índice que a varredura use — o da dona e o de
+ * (estado, locked_until) —, mas não é linha que a fila deva mexer.
+ */
+const outroResumoPendente = (tx: Transacao) => tx.insert(meetingSummaries).values({
+  id: crypto.randomUUID(), meetingId: crypto.randomUUID(), ownerId: DONA, status: "pending", createdAt: AGORA(), updatedAt: AGORA(),
+});
+
 /** Os avisos de reunião pronta (H15) da conta da dona. */
 async function avisosDaDona(meetingId?: string) {
   const banco = await db();
@@ -79,16 +96,16 @@ async function limpar() {
   const banco = await db();
   // A fila avisa no sino quando o resumo fica pronto ou falha de vez (H15).
   const contas = await banco.select({ id: users.id }).from(users).where(inArray(users.openId, [DONA, OUTRA]));
-  if (contas.length) await banco.delete(platformNotifications).where(inArray(platformNotifications.userId, contas.map(conta => conta.id)));
+  if (contas.length) await apagarPelaChave(banco, platformNotifications, inArray(platformNotifications.userId, contas.map(conta => conta.id)));
   for (const dona of [DONA, OUTRA]) {
     // Confirmar uma ação no resumo cria a próxima ação dela (H5a).
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
     // gravarResultadoDaReuniao (o disparo automático) conta os minutos da reunião.
-    await banco.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, dona));
+    await apagarPelaChave(banco, consumoDeMinutos, eq(consumoDeMinutos.ownerId, dona));
   }
 }
 
@@ -279,7 +296,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
   it("a transcrição sumiu depois do pedido: falha de vez, com o código", async () => {
     const id = await reuniaoPronta();
     await pedir(id);
-    await (await db()).delete(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id));
+    await apagarPelaChave((await db()), meetingTranscripts, eq(meetingTranscripts.meetingId, id));
     await rodar();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", lastError: "SEM_TRANSCRICAO" });
     expect(gerarResumoDaReuniao).not.toHaveBeenCalled();
@@ -415,6 +432,45 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     expect(devolvidas).toBe(1);
     expect(await itensDe(id)).toEqual([]);
     expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", attempts: 0, lockToken: null, lockedUntil: null });
+  });
+
+  // Os três abaixo provam que a fila trava só pela chave das linhas dela. Os
+  // arquivos de integração rodam em paralelo no mesmo banco, e os UPDATEs por
+  // intervalo do índice travavam resumos e avisos de outras donas: o CI de
+  // 18/11 pegou deadlocks deles com a reserva, a gravação do resumo e o pedido.
+  it("a desistência dos esgotados vai pela chave: não espera pelo resumo pendente que outra transação acabou de criar", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    await (await db()).update(meetingSummaries).set({ attempts: fila.TENTATIVAS_DO_RESUMO }).where(eq(meetingSummaries.meetingId, id));
+    expect(await terminaComALinhaPresa(outroResumoPendente, rodar)).toBe(true);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS" });
+    expect(gerarResumoDaReuniao).not.toHaveBeenCalled();
+  });
+
+  it("o desligamento devolve a reserva pela chave: não espera pelo resumo pendente que outra transação acabou de criar", async () => {
+    const id = await reuniaoPronta();
+    await pedir(id);
+    let terminou: boolean | undefined;
+    let devolvidas = -1;
+    gerarResumoDaReuniao.mockImplementation(async () => {
+      terminou = await terminaComALinhaPresa(outroResumoPendente, async () => { devolvidas = (await fila.pararFilaDoResumo()).resumos; });
+      return RESUMO;
+    });
+    await rodar();
+    expect(terminou).toBe(true);
+    expect(devolvidas).toBe(1);
+    expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", attempts: 0, lockToken: null, lockedUntil: null });
+  });
+
+  it("o aviso de pronta tira o anterior pela chave: não espera pelo aviso que outra transação acabou de criar na mesma conta", async () => {
+    const id = await reuniaoPronta();
+    const [conta] = await (await db()).select({ id: users.id }).from(users).where(eq(users.openId, DONA));
+    const outroAviso = (tx: Transacao) => tx.insert(platformNotifications).values({ userId: conta.id, type: "system", title: "Outro aviso", actionUrl: "/outro", isRead: false });
+    const avisar = async () => (await db()).transaction(tx => avisarReuniaoPronta(tx, DONA, id, "pronto"));
+    expect(await terminaComALinhaPresa(outroAviso, avisar)).toBe(true);
+    // O de antes sai também pela chave: um aviso por reunião.
+    expect(await terminaComALinhaPresa(outroAviso, avisar)).toBe(true);
+    expect(await avisosDaDona(id)).toHaveLength(1);
   });
 
   it("decidir, confirmar todos e marcar a ação feita; só ação tem caixa", async () => {

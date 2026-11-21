@@ -52,12 +52,16 @@
  *  caractere é uma unidade e dois caracteres distintos valem uma palavra.
  *
  * Limite conhecido: sem dicionário nem IA, um texto inventado mas plausível
- * passa. Isso é aceito: a regra é determinística e explicável à membra, e hoje
- * Prata não abre nenhum recurso que Bronze não tenha (é qualificação, não
- * permissão). Um admin continua podendo corrigir o nível à mão.
+ * passa. Isso é aceito: a regra é determinística e explicável à membra. Até a
+ * U3 a Prata não abria recurso nenhum; desde ela (19/11/2026) abre só a LISTA
+ * das conexões sugeridas pelo motor de perfis e o interesse por elas
+ * (`veAsConexoesSugeridas`, abaixo). A lista é anônima: o nome só aparece com o
+ * interesse dos dois lados.
+ * Quem passar pela régua com texto inventado vê cartões sem nome, o que toda
+ * Bronze via antes da U3. Um admin continua podendo corrigir o nível à mão.
  *
- * Fica em `shared/` para o servidor (que promove) e a tela de Perfil (que
- * mostra o que falta) usarem a MESMA régua.
+ * Fica em `shared/` para o servidor (que promove e trava a lista) e as telas
+ * (o Perfil e o Painel, que mostram o que falta) usarem a MESMA régua.
  */
 
 import { CHAVE_OUTRA_NECESSIDADE } from "./o-que-busca";
@@ -282,6 +286,26 @@ export function itensComConteudo(valor: unknown): string[] {
 function outraNecessidadeComConteudo(p: PerfilParaQualificar): boolean {
   const marcada = Array.isArray(p.seekingTypes) && p.seekingTypes.includes(CHAVE_OUTRA_NECESSIDADE);
   return marcada && itensComConteudo(p.seekingOtherNeed).length > 0;
+}
+
+/**
+ * U3, "matches possíveis" (promessa à Dra. Glenda na reunião de 11/11/2026):
+ * a lista das conexões sugeridas pelo motor de perfis se libera com o cadastro
+ * completo, e o cadastro completo é esta régua — o nível Prata. A Bronze vê só
+ * QUANTAS conexões são possíveis (`matches.conexoesPossiveis`), nunca quem.
+ *
+ * Lê o NÍVEL, e não o perfil: quem decide a Prata é a promoção ao gravar o
+ * perfil (`server/nivel-do-perfil.ts`, no Perfil, no cadastro e na reunião
+ * "Sou eu"). Ouro, presidente e admin não são degraus desta régua, mas veem a
+ * lista como sempre viram ("Ouro = Presidente = administradora"). O
+ * Distribuidor do Smart Match é um poder, não um nível: a Bronze com o poder
+ * continua vendo só o número. Lista fechada de propósito: nível desconhecido
+ * ou ausente não vê a lista.
+ */
+const NIVEIS_QUE_VEEM_AS_CONEXOES_SUGERIDAS: readonly string[] = ["silver", "gold", "president", "admin"];
+
+export function veAsConexoesSugeridas(nivel: string | null | undefined): boolean {
+  return typeof nivel === "string" && NIVEIS_QUE_VEEM_AS_CONEXOES_SUGERIDAS.includes(nivel);
 }
 
 /** Avalia o perfil pela régua de Prata. Perfil ausente = tudo pendente. */

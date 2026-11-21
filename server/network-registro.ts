@@ -459,6 +459,22 @@ export async function listarConexoesDaSolicitante(quem: Solicitante, opcoes: { c
   });
 }
 
+/** Uma conexão como vai a quem pergunta: na conexão entre membras, a nota e o motivo podem vir trancados. */
+export type ConexaoParaQuemPergunta = Omit<ConexaoVisivel, "pontuacao" | "motivo"> & { pontuacao: number | null; motivo: string | null };
+
+/**
+ * U3, "matches possíveis" (reunião de 11/11/2026): quem ainda não vê a lista das conexões sugeridas pelo motor de
+ * perfis (a Bronze, `veAsConexoesSugeridas`) vê só QUANTAS são, e não a nota delas — o Painel tranca a compatibilidade
+ * média e as acima de 80%, e matches.list sai vazio. O registro traz as MESMAS conexões, como PLATFORM_MATCH (a rodada
+ * do motor as registra), com a nota em `pontuacao` e repetida no `motivo` ("compatibilidade de 87%"): sem esta
+ * trava, a Bronze recalculava as duas notas do Painel pelo registro. Regra de consulta: as duas saem nulas daqui, e
+ * o cartão continua (a etapa, a comissão, o descarte), sem a nota. As outras origens são da rede da própria dona e
+ * passam como vieram.
+ */
+export function trancarANotaEntreMembras(conexoes: ConexaoVisivel[]): ConexaoParaQuemPergunta[] {
+  return conexoes.map(conexao => (conexao.origem === "PLATFORM_MATCH" ? { ...conexao, pontuacao: null, motivo: null } : conexao));
+}
+
 /** A etapa seguinte que a participante pode registrar; descartar vale antes do fechamento. */
 const PROXIMA_ETAPA: Partial<Record<EtapaDaConexao, EtapaDaConexao>> = {
   identificada: "apresentacao",

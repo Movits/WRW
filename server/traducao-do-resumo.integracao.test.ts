@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -73,10 +74,10 @@ const traducoesDe = async (meetingId: string) => (await db()).select().from(meet
 async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(meetingSummaryTranslations).where(eq(meetingSummaryTranslations.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryTranslations, eq(meetingSummaryTranslations.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
   }
 }
 
@@ -226,7 +227,7 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const banco = await db();
 
     // A fila refaz o resumo: itens novos e a versão sobe.
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.summaryId, resumoId));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.summaryId, resumoId));
     const novo = crypto.randomUUID();
     await banco.insert(meetingSummaryItems).values({
       id: novo, summaryId: resumoId, meetingId, ownerId: DONA, section: "decision", position: 0, text: "Renovar com outra transportadora",
