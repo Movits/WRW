@@ -1077,8 +1077,16 @@ export const meetings = mysqlTable("meetings", {
   // De onde a reunião veio. Varchar com o enum só no TypeScript: valor novo não
   // pede migração. Nula no envio único, que recebe tanto a gravação do
   // microfone quanto um arquivo escolhido sem dizer qual dos dois: a coluna é
-  // preenchida por quem cria a reunião sabendo de onde ela vem.
-  origem: varchar("origem", { length: 16, enum: ["gravacao", "arquivo", "aba", "pdf", "youtube"] }),
+  // preenchida por quem cria a reunião sabendo de onde ela vem. 'pdf' e 'foto'
+  // (H12 e H12b) são as reuniões que nasceram de um documento, e não de áudio:
+  // o arquivo fica em meeting_documents, e o texto lido vira a transcrição.
+  origem: varchar("origem", { length: 16, enum: ["gravacao", "arquivo", "aba", "pdf", "youtube", "foto"] }),
+  // De onde veio a reunião que não é gravação: na origem 'youtube' (H13), a URL
+  // canônica do vídeo (https://www.youtube.com/watch?v=ID, montada pelo id em
+  // shared/youtube.ts, sem os parâmetros do link colado). O servidor nunca a
+  // busca: ela vai ao Gemini, que lê o vídeo. Nula nas outras origens (o PDF e
+  // as fotos da H12 e da H12b guardam o arquivo em meeting_documents).
+  sourceUrl: varchar("source_url", { length: 512 }),
   // A versão do aviso de gravação que a dona aceitou (o nome vem da spec da
   // etapa 5). Nula nas reuniões anteriores ao aviso versionado.
   consentNoticeVersion: varchar("consent_notice_version", { length: 32 }),
@@ -1200,6 +1208,37 @@ export const meetingAudioSlices = mysqlTable("meeting_audio_slices", {
   ownerMeetingIdx: index("meeting_audio_slices_owner_meeting_idx").on(table.ownerId, table.meetingId),
   // A faxina acha o áudio vencido.
   expiresIdx: index("meeting_audio_slices_expires_idx").on(table.expiresAt),
+}));
+
+// O arquivo da reunião que nasceu de um documento (H12 e H12b do desenho do
+// gravador, origem 'pdf' ou 'foto'): sempre um PDF, porque as fotos de um texto
+// viram um PDF no aparelho, uma página por foto. Uma linha por reunião. O texto
+// que a IA lê dele vira a transcrição (meeting_transcripts), e o arquivo segue
+// a regra do áudio: 30 dias contados do envio (MEETING_AUDIO_TTL_MS), a
+// varredura e a leitura vencida o tiram do bucket com todas as versões, e a
+// exclusão da reunião e a da conta também. A linha é o ponteiro para o objeto:
+// só sai depois dele, e fica (vencida) quando o bucket recusa. Nomes em inglês,
+// como as irmãs meeting_*.
+export const meetingDocuments = mysqlTable("meeting_documents", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // A chave é montada pelo servidor (meetings/<openId>/<reunião>/...), e é ela
+  // que prova a posse na exclusão da conta. A url é o caminho do proxy
+  // autenticado (/manus-storage/...), nunca o endereço do bucket.
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  storageUrl: varchar("storage_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  // Do conteúdo recebido: o reenvio do mesmo arquivo é reconhecido.
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Um documento por reunião: o segundo envio ao mesmo tempo não duplica.
+  meetingUnique: uniqueIndex("meeting_documents_meeting_unique").on(table.meetingId),
+  // A exclusão da conta acha os documentos pela dona; a varredura, pelo prazo.
+  ownerExpiresIdx: index("meeting_documents_owner_expires_idx").on(table.ownerId, table.expiresAt),
 }));
 
 export const meetingTranscripts = mysqlTable("meeting_transcripts", {

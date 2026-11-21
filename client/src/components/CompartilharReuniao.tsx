@@ -92,7 +92,7 @@ async function copiarOuSelecionar(texto: string, campo: HTMLInputElement | HTMLT
 
 type Confirmacao = "desligar" | "trocarSenha" | "tirarSenha";
 
-export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false, comSenha = false, comAudio = true }: {
+export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes = false, temNomes = false, comSenha = false, comAudio = true, documento = false, youtube = false }: {
   meetingId: string;
   titulo: string;
   token: string | null;
@@ -104,8 +104,26 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   comSenha?: boolean;
   /** O link ligado leva o áudio e o player (meeting.linkComAudio, H23). */
   comAudio?: boolean;
+  /**
+   * A reunião nasceu de um documento (H12 e H12b): não há gravação nem vozes, e
+   * o link mostra o texto lido e o resumo, nunca o arquivo. A apresentação e a
+   * confirmação dizem isso, e a prova guarda a frase do documento.
+   */
+  documento?: boolean;
+  /**
+   * A reunião veio de um vídeo do YouTube (H13): não há gravação, e o link
+   * mostra a transcrição e o resumo, com os nomes que a dona der às vozes; o
+   * vídeo fica no YouTube. A apresentação e a confirmação dizem isso, e a prova
+   * guarda a frase do vídeo (conferência de tela de 20/11/2026: a caixa e a
+   * prova falavam da gravação, que não existe).
+   */
+  youtube?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const apresentacao = documento ? t("meetings.document.shareIntro") : youtube ? t("meetings.youtube.shareIntro") : t("meetings.share.intro");
+  const autorizacao = documento ? t("meetings.document.shareAuthorization") : youtube ? t("meetings.youtube.shareAuthorization") : t("meetings.share.authorization");
+  // Sem gravação, ninguém fica "ouvindo até terminar" depois de o link desligar.
+  const perguntaDeDesligar = documento || youtube ? t("meetings.share.turnOffConfirmNoRecording") : t("meetings.share.turnOffConfirm");
   const utils = trpc.useUtils();
   const idDoTextoPronto = useId();
   const campo = useRef<HTMLInputElement>(null);
@@ -235,7 +253,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 id="compartilhar-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><Share2 size={16} className="text-amber-300"/>{t("meetings.share.title")}</h2>
-          <p className="mt-1 text-sm text-white/55">{t("meetings.share.intro")}</p>
+          <p className="mt-1 text-sm text-white/55">{apresentacao}</p>
           {/* O link mostra também o resumo (H4) como a dona o deixar, com o que ela escrever (H4f), e o mapa mental (H10). */}
           <p className="mt-1 text-sm text-white/55">{t("meetings.share.summaryNotice")}</p>
         </div>
@@ -248,7 +266,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
         <label className="flex items-start gap-3 text-sm text-white/75">
           {/* Só monta depois de "Compartilhar": o foco vem para cá, e não para o <body>. */}
           <input type="checkbox" autoFocus checked={autorizou} onChange={evento => setAutorizou(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-          <span>{t("meetings.share.authorization")}</span>
+          <span>{autorizacao}</span>
         </label>
         {/* As escolhas do link (H23): a senha de 6 dígitos e o áudio. */}
         <label className="flex items-start gap-3 text-sm text-white/75">
@@ -266,7 +284,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
             // A prova guarda a frase que a dona viu, o idioma dela e a versão
             // da caixa: a 2 fala dos nomes das vozes, e só com ela o link os mostra.
             idioma: idiomaDaTela(i18n),
-            textoExibido: t("meetings.share.authorization"),
+            textoExibido: autorizacao,
             versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES,
             comSenha: protegerComSenha,
             incluirAudio,
@@ -291,7 +309,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   // A pergunta de confirmação, para desligar o link e para trocar ou tirar a
   // senha: o "Manter", a saída segura, recebe o foco, e a pergunta vai junto no anúncio.
   const perguntas: Record<Confirmacao, { pergunta: string; sim: string; fazer: () => void; perigosa: boolean }> = {
-    desligar: { pergunta: t("meetings.share.turnOffConfirm"), sim: t("meetings.share.turnOffYes"), fazer: () => desligar.mutate({ meetingId }), perigosa: true },
+    desligar: { pergunta: perguntaDeDesligar, sim: t("meetings.share.turnOffYes"), fazer: () => desligar.mutate({ meetingId }), perigosa: true },
     trocarSenha: { pergunta: t("meetings.share.changePasswordConfirm"), sim: t("meetings.share.changePasswordYes"), fazer: () => { trocandoSenha.current = true; novaSenha.mutate({ meetingId }); }, perigosa: false },
     tirarSenha: { pergunta: t("meetings.share.removePasswordConfirm"), sim: t("meetings.share.removePasswordYes"), fazer: () => tirarSenha.mutate({ meetingId }), perigosa: true },
   };

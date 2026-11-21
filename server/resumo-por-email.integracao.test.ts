@@ -53,7 +53,7 @@ import {
 } from "./resumo-por-email";
 
 /**
- * O resumo por e-mail (H22) contra um banco real DE TESTE (migração 0022), com
+ * O resumo por e-mail (H22) contra um banco real DE TESTE (migração 0023), com
  * a Resend dublada. No CI é o MariaDB criado do zero; sem DATABASE_URL_TESTES
  * o arquivo se pula (server/test/setup-banco.ts). O que só o banco prova:
  *

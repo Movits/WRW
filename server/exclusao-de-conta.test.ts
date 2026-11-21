@@ -57,7 +57,7 @@ import {
 import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
 import { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import {
-  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingRecordings,
+  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingDocuments, meetingRecordings,
   meetings, opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
   strategicGroups, users, googleAgendaConexoes,
 } from "../drizzle/schema";
@@ -107,8 +107,10 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 71: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
     // 72: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
     // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
-    // 74: o resumo por e-mail (H22) somou resumo_por_email.owner_id.
-    expect(PARES).toHaveLength(74);
+    // 75: os 73 de antes, mais o documento da reunião (H12, meeting_documents.owner_id)
+    // e o resumo por e-mail (H22, resumo_por_email.owner_id).
+    expect(PARES).toHaveLength(75);
+    expect(PARES).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "proximas_acoes", coluna: "owner_id" });
@@ -835,5 +837,56 @@ describe("C) cada passo gera um DELETE parametrizado com a coluna certa", () => 
     expect(texto).toContain("`id` = ?");
     expect(texto).toContain("`openId` = ?");
     expect(params).toEqual([7, "open-7"]);
+  });
+});
+
+// ═══ B8) o PDF da reunião de documento (H12) segue a regra do áudio ═══════════
+// O arquivo da reunião que nasceu de um PDF ou de fotos de um texto fica 30
+// dias no bucket, como o áudio, e sai com a conta: com todas as versões e, se o
+// bucket recusar, a linha fica como ponteiro vencido para a varredura.
+describe("B8) o PDF da reunião de documento sai com a conta, e o que o bucket recusou fica só como ponteiro", () => {
+  const DOCUMENTO = "meetings/open-7/reuniao-3/documento-abcd1234.pdf";
+  const delecaoDosDocumentos = () => delecoes.filter(d => d.tabela === meetingDocuments);
+  const atualizacoesDosDocumentos = () => atualizacoes.filter(a => a.tabela === meetingDocuments);
+  beforeEach(() => {
+    linhasPorTabela.set(meetingDocuments, [{ id: "documento-1", chave: DOCUMENTO }]);
+  });
+
+  it("a chave do PDF prova a posse e vai ao bucket com TODAS as versões (apagador padrão)", async () => {
+    await excluirConta(fakeDb, CONTA);
+    expect(bucketDublado.apagarTodasAsVersoes.mock.calls.map(([chave]) => chave)).toContain(DOCUMENTO);
+    expect(bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave)).not.toContain(DOCUMENTO);
+  });
+
+  it("sem falha, a linha sai pela dona e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(DOCUMENTO);
+    expect(atualizacoesDosDocumentos()).toEqual([]);
+    expect(renderizar(delecaoDosDocumentos()[0].condicao)).toEqual({ sql: "`meeting_documents`.`owner_id` = ?", params: ["open-7"] });
+  });
+
+  it("o bucket recusou o PDF: o DELETE o deixa de fora, e ele vence na hora como ponteiro", async () => {
+    bucketFalha.add(DOCUMENTO);
+    const antes = Date.now();
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([DOCUMENTO]);
+    expect(renderizar(delecaoDosDocumentos()[0].condicao)).toEqual({
+      sql: "(`meeting_documents`.`owner_id` = ? and `meeting_documents`.`id` not in (?))",
+      params: ["open-7", "documento-1"],
+    });
+    const [ponteiro] = atualizacoesDosDocumentos();
+    expect(Object.keys(ponteiro.valores)).toEqual(["expiresAt"]);
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(renderizar(ponteiro.condicao)).toEqual({
+      sql: "(`meeting_documents`.`owner_id` = ? and `meeting_documents`.`id` in (?))",
+      params: ["open-7", "documento-1"],
+    });
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_documents (ponteiro, UPDATE)");
+  });
+
+  it("a chave de outra dona não prova a posse e não vai ao bucket", async () => {
+    linhasPorTabela.set(meetingDocuments, [{ id: "documento-2", chave: "meetings/open-OUTRA/r/documento-0000.pdf" }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
   });
 });

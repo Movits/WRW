@@ -90,6 +90,9 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
+      // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
+      resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
+      refazerVideoDoYoutube: duble.registrar("refazerVideoDoYoutube"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
       // N5: as conexões que nasceram da reunião e o "Vincular a um contato".
       conexoes: { useQuery: (...args: unknown[]) => duble.conexoes(...args) },
@@ -214,6 +217,8 @@ const REUNIAO = {
   status: "ready", processingError: null as string | null, createdAt: Date.UTC(2026, 8, 4, 12), updatedAt: Date.UTC(2026, 8, 4, 12),
   // Como no servidor (COLUNAS_DA_REUNIAO_NA_TELA): envio único, sem partes.
   audioPipeline: "single" as "single" | "slices", expectedSlices: null as number | null,
+  // De onde a reunião veio; no vídeo do YouTube (H13), a URL canônica dele.
+  origem: null as string | null, sourceUrl: null as string | null,
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
@@ -1582,5 +1587,187 @@ describe("Detalhe da reunião — a pessoa da reunião na N5", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" } });
     fireEvent.click(screen.getByRole("button", { name: "↻ Tentar novamente" }));
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Reuniões — o vídeo do YouTube (H13)", () => {
+  // A reunião que veio de um vídeo: sem áudio nem player (a CSP não deixa
+  // embutir o YouTube); o "▶" abre o vídeo no segundo, numa aba nova, e o
+  // "Tentar de novo" lê o vídeo outra vez pela URL guardada.
+  const ID_DO_VIDEO = "dQw4w9WgXcQ";
+  const VIDEO = { origem: "youtube", sourceUrl: `https://www.youtube.com/watch?v=${ID_DO_VIDEO}` };
+  const noYoutube = (segundos: number) => `${VIDEO.sourceUrl}&t=${segundos}s`;
+  const SEGMENTOS = [
+    { inicio: 7, fim: 12, falante: "F1", texto: "Bem-vindas ao painel sobre exportação." },
+    { inicio: 725, fim: 751, falante: "F2", texto: "Obrigada pelo convite." },
+  ];
+  const TRANSCRICAO = { id: "t1", transcript: "Bem-vindas ao painel sobre exportação.\nObrigada pelo convite.", language: "pt-BR", segments: SEGMENTOS };
+  const refazer = () => duble.mutacoes.refazerVideoDoYoutube;
+
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    duble.utils.meetings.get.setData.mockClear();
+    duble.utils.meetings.get.invalidate.mockClear();
+    duble.utils.meetings.list.invalidate.mockClear();
+  });
+
+  it("a lista marca a reunião que veio do YouTube, e o topo oferece resumir um vídeo ao lado da reunião nova", () => {
+    duble.list.mockReturnValue({ data: [{ ...REUNIAO, ...VIDEO }, { ...REUNIAO, id: "outra", title: "Reunião gravada" }], isLoading: false });
+    render(<Meetings />);
+    expect(screen.getByRole("button", { name: /Resumir vídeo do YouTube/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: /Reunião com a vinícola/ })).getByText("Vídeo do YouTube")).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: /Reunião gravada/ })).queryByText("Vídeo do YouTube")).not.toBeInTheDocument();
+  });
+
+  it("pronta: o vídeo no lugar da gravação, com o link para o YouTube, e nenhum player", () => {
+    abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+    expect(screen.getByRole("heading", { name: "Vídeo do YouTube" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Abrir o vídeo no YouTube/ })).toHaveAttribute("href", VIDEO.sourceUrl);
+    expect(screen.queryByRole("heading", { name: "Gravação" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Nenhum áudio guardado para esta reunião.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Gravação" })).not.toBeInTheDocument();
+    expect(document.querySelector("audio, video, iframe")).toBeNull();
+  });
+
+  // Conferência de tela de 20/11/2026 (captura 14c): o painel de compartilhar da
+  // reunião do YouTube falava da gravação, e a prova guardava a frase do áudio.
+  it("compartilhar: o painel e a caixa falam do vídeo, e a prova guarda a frase do vídeo, nunca a da gravação", () => {
+    abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+    expect(screen.getByText(/lê a transcrição e pede à IA o resumo e respostas sobre o vídeo/)).toBeInTheDocument();
+    expect(screen.queryByText(/ouve a gravação/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compartilhar" }));
+    const frase = "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.";
+    fireEvent.click(screen.getByRole("checkbox", { name: frase }));
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligarLinkAberto.mutate).toHaveBeenCalledWith(expect.objectContaining({ textoExibido: frase, versaoDaAutorizacao: 2 }));
+  });
+
+  it("a transcrição: o ▶ de cada fala abre o vídeo no YouTube no segundo dela, numa aba nova", () => {
+    abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    const link = screen.getByRole("link", { name: "Ver no YouTube a partir de 12:05 (abre em nova aba)" });
+    expect(link).toHaveAttribute("href", noYoutube(725));
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "Ver no YouTube a partir de 00:07 (abre em nova aba)" })).toHaveAttribute("href", noYoutube(7));
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("o resumo guardado: o ▶ do item abre o vídeo no segundo da fala de onde ele saiu", () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, itens: [
+        { id: "a0000000-0000-4000-8000-000000000009", section: "decision", position: 0, subject: null, text: "Abrir o mercado do Chile.", assignee: null, due: null, excerpt: "obrigada pelo convite", startSeconds: 725, status: "pending", done: false, origin: "ai", editedAt: null },
+      ] },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+    expect(screen.getByRole("link", { name: "Ver no YouTube a partir de 12:05 (abre em nova aba)" })).toHaveAttribute("href", noYoutube(725));
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("em processamento: a faixa diz que a IA está lendo o vídeo", () => {
+    abrirDetalhe({ status: "processing", ...VIDEO });
+    expect(screen.getByText(/A IA está lendo o vídeo e transcrevendo as falas/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["YOUTUBE_SEM_FALA", "A IA não encontrou fala neste vídeo: só música, silêncio ou ruído."],
+    ["YOUTUBE_LONGO_DEMAIS", "Este vídeo tem fala demais para a IA transcrever de uma vez. Tente um vídeo mais curto."],
+  ])("com falha %s, que se repete com o mesmo vídeo: o motivo traduzido, e nenhum Tentar de novo (pagaria outra leitura para falhar igual)", (codigo, frase) => {
+    abrirDetalhe({ status: "failed", processingError: codigo, ...VIDEO });
+    expect(screen.getByText(frase)).toBeInTheDocument();
+    expect(screen.queryByText(codigo)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tentar de novo/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tentar de novo lê o vídeo outra vez/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["YOUTUBE_VIDEO_PRIVADO", "A IA não conseguiu abrir este vídeo. Só vídeos públicos funcionam: confira se ele não é privado, não listado, removido ou restrito por idade ou região."],
+    ["YOUTUBE_IA_INDISPONIVEL", "O serviço de IA está ocupado agora. Tente de novo em alguns minutos."],
+    ["YOUTUBE_FALHOU", "Não foi possível resumir este vídeo. Tente de novo."],
+    // A varredura de interrompidas (um deploy no meio) vale também para o vídeo.
+    ["ERRO_INTERROMPIDO", "O processamento foi interrompido antes de terminar (o servidor reiniciou no meio)."],
+  ])("com falha %s: o motivo traduzido, nunca o código cru, e o Tentar de novo do vídeo no lugar do Reprocessar", (codigo, frase) => {
+    abrirDetalhe({ status: "failed", processingError: codigo, ...VIDEO });
+    expect(screen.getByText(frase)).toBeInTheDocument();
+    expect(screen.queryByText(codigo)).not.toBeInTheDocument();
+    expect(screen.getByText("Tentar de novo lê o vídeo outra vez e conta no limite de 5 vídeos a cada 24 horas.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Tentar de novo/ }));
+    expect(refazer().mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    expect(duble.mutacoes.reprocess.mutate).not.toHaveBeenCalled();
+  });
+
+  it("…e em inglês o motivo aparece em inglês", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    try {
+      abrirDetalhe({ status: "failed", processingError: "YOUTUBE_SEM_FALA", ...VIDEO });
+      expect(screen.getByText("The AI found no speech in this video: only music, silence or noise.")).toBeInTheDocument();
+    } finally {
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
+  });
+
+  it("Tentar de novo aceito: a tela vira 'processing' na hora; recusado, o toast traduz a recusa; e a tela relê a reunião e a lista", () => {
+    abrirDetalhe({ status: "failed", processingError: "YOUTUBE_FALHOU", ...VIDEO });
+    const { opcoes } = refazer();
+    act(() => opcoes.onSuccess?.({ status: "processing" }, { meetingId: REUNIAO.id }));
+    expect(toast.success).toHaveBeenCalledWith("A IA vai ler o vídeo de novo.");
+    const [chave, atualizar] = duble.utils.meetings.get.setData.mock.calls.at(-1)! as [unknown, (anterior: unknown) => unknown];
+    expect(chave).toEqual({ meetingId: REUNIAO.id });
+    expect(atualizar({ meeting: { ...REUNIAO, ...VIDEO, status: "failed", processingError: "YOUTUBE_FALHOU" } }))
+      .toMatchObject({ meeting: { status: "processing", processingError: null, origem: "youtube" } });
+
+    act(() => opcoes.onError?.({ message: "YOUTUBE_TETO_DIARIO", data: { code: "TOO_MANY_REQUESTS" } }, { meetingId: REUNIAO.id }));
+    expect(toast.error).toHaveBeenCalledWith("Você já mandou 5 vídeos à IA nas últimas 24 horas, o limite de um dia. Tente de novo mais tarde.");
+    act(() => opcoes.onError?.({ message: "Esta reunião não está com falha.", data: { code: "CONFLICT" } }, { meetingId: REUNIAO.id }));
+    expect(toast.error).toHaveBeenLastCalledWith("Esta reunião não está com falha ou já está sendo processada.");
+
+    act(() => opcoes.onSettled?.());
+    expect(duble.utils.meetings.get.invalidate).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
+  });
+
+  it("a reunião gravada continua com a gravação e o caminho de sempre, sem nada do vídeo", () => {
+    abrirDetalhe({ status: "failed", processingError: "ERRO_INTERROMPIDO" }, { recording: GRAVACAO });
+    expect(screen.queryByText(/Tentar de novo lê o vídeo/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Vídeo do YouTube" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Gravação" })).toBeInTheDocument();
+  });
+
+  // Classe de lado físico (esquerda/direita), que não espelha em árabe.
+  const LADO_FISICO = /^(?:[a-z0-9-]+:)*-?(?:left|right|ml|mr|pl|pr|border-l|border-r|rounded-l|rounded-r|text-left|text-right)(?:-|$)/;
+  const ladosFisicos = (raiz: Element) => [raiz, ...raiz.querySelectorAll("*")].flatMap(elemento => [...elemento.classList].filter(classe => LADO_FISICO.test(classe)));
+
+  // O jsdom não mede layout: o teste fixa as classes que fazem o que é novo
+  // caber numa tela de 375 px e espelhar em árabe.
+  it.each(["pt-BR", "ar"])("em %s, a 375 px: a caixa da falha e o bloco do vídeo empilham no celular, os dois botões do topo também, e só há lados lógicos", async idioma => {
+    await act(async () => { await i18n.changeLanguage(idioma); });
+    try {
+      abrirDetalhe({ status: "failed", processingError: "YOUTUBE_VIDEO_PRIVADO", ...VIDEO });
+      expect(document.documentElement.dir).toBe(idioma === "ar" ? "rtl" : "ltr");
+      expect(screen.getByText(i18n.t("meetings.youtube.errors.privateVideo"))).toBeInTheDocument();
+      // A caixa da falha: o texto e o botão um em cima do outro no celular.
+      const botao = screen.getByRole("button", { name: new RegExp(i18n.t("meetings.youtube.retryButton")) });
+      expect(botao.parentElement).toHaveClass("flex-col", "sm:flex-row");
+      expect(botao).toHaveClass("shrink-0");
+      expect(ladosFisicos(botao.parentElement!.parentElement!)).toEqual([]);
+      // O bloco do vídeo, no lugar da gravação.
+      const video = screen.getByRole("link", { name: new RegExp(i18n.t("meetings.youtube.openOnYoutube")) }).closest("section")!;
+      expect(ladosFisicos(video)).toEqual([]);
+
+      // Na lista: os dois botões do topo empilham no celular, e a marca do vídeo fica no início da linha.
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("meetings.allMeetings")) }));
+      const resumir = screen.getByRole("button", { name: new RegExp(i18n.t("meetings.youtube.openButton")) });
+      expect(resumir.parentElement).toHaveClass("flex-col-reverse", "sm:flex-row");
+      expect(ladosFisicos(resumir.parentElement!)).toEqual([]);
+      const marca = within(screen.getByRole("button", { name: /Reunião com a vinícola/ })).getByText(i18n.t("meetings.youtube.listBadge"));
+      expect(marca).toHaveClass("ms-2");
+      expect(ladosFisicos(marca)).toEqual([]);
+    } finally {
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
   });
 });

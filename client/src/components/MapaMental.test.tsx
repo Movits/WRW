@@ -122,6 +122,17 @@ describe("Mapa mental — a árvore", () => {
     expect(within(arvore()).getByText("Contrato não será renovado")).toBeVisible();
   });
 
+  // Conferência de tela de 20/11/2026 (captura 06a): no mapa do documento (H12),
+  // o aviso mandava conferir "na transcrição", que o documento não tem.
+  it.each([
+    ["da dona", () => { duble.daDona.mockReturnValue(pronto()); return render(<MapaMentalDaReuniao meetingId={REUNIAO} titulo={TITULO} documento/>); }],
+    ["pelo link", () => { duble.doLink.mockReturnValue(pronto()); return render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} documento/>); }],
+  ])("o mapa de um documento (%s): o aviso fala do texto do documento, nunca da transcrição", (_caso, montar) => {
+    montar();
+    expect(screen.getByText("Montado pela IA a partir do texto do documento. Confira no texto antes de usar.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição/);
+  });
+
   it("o ramo abre e fecha ao toque; recolhido, mostra quantas folhas guarda, sem mudar o nome do botão", () => {
     daDona(pronto());
     const exportacao = ramo("Exportação de café");

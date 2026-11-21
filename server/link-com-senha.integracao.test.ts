@@ -45,7 +45,7 @@ import { appRouter } from "./routers";
 
 /**
  * O link aberto com senha e sem o áudio (H23, HN-57 do HiNoter) contra um
- * banco real DE TESTE (migração 0022). No CI é o MariaDB criado do zero por
+ * banco real DE TESTE (migração 0023). No CI é o MariaDB criado do zero por
  * scripts/criar-banco.mjs; sem DATABASE_URL_TESTES o teste se pula
  * (server/test/setup-banco.ts troca a DATABASE_URL por ela). O que só o banco
  * de verdade prova:

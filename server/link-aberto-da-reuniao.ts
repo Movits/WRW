@@ -3,7 +3,9 @@ import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
+import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
+import { idDoVideoDaReuniao } from "@shared/youtube";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
@@ -384,6 +386,8 @@ async function reuniaoDoLink(token: string) {
     audioPipeline: meetings.audioPipeline,
     sharePasswordHash: meetings.sharePasswordHash,
     shareAudio: meetings.shareAudio,
+    origem: meetings.origem,
+    sourceUrl: meetings.sourceUrl,
     contaAtiva: users.isActive,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
@@ -400,6 +404,13 @@ async function reuniaoDoLink(token: string) {
   return {
     id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
     comAudio: reuniao.shareAudio === true,
+    // A reunião que nasceu de um documento (H12): o link mostra o texto e o
+    // resumo, como a transcrição de sempre, e NUNCA o arquivo, que é só da dona.
+    documento: ehReuniaoDeDocumento(reuniao.origem),
+    // A reunião que veio de um vídeo do YouTube (H13): só o id do vídeo, que é
+    // o que o "▶" precisa para abrir o vídeo no segundo da fala. O vídeo é
+    // público (o Gemini só lê vídeo público), e a URL guardada não sai inteira.
+    videoDoYoutube: idDoVideoDaReuniao(reuniao),
   };
 }
 
@@ -462,14 +473,18 @@ export async function verReuniaoPeloLink(token: string) {
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
-  // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras).
-  const { recording, recordingExpired, recordingDeletionPending } = reuniao.comAudio
-    ? await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, { createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes })
-    : { recording: null, recordingExpired: false, recordingDeletionPending: false };
+  // Só reunião pronta tem link aberto (reuniaoDoLink recusa as outras). A de
+  // documento não tem áudio, e o PDF dela não sai pelo link: nem consulta. O
+  // link sem o áudio (H23) também não lê a gravação.
+  const { recording, recordingExpired, recordingDeletionPending } = reuniao.documento || !reuniao.comAudio
+    ? { recording: null, recordingExpired: false, recordingDeletionPending: false }
+    : await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, { createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes });
   const vozes = await vozesDoLink(db, reuniao);
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
+    // A página troca "Transcrição" por "Texto do documento" e não fala de áudio.
+    documento: reuniao.documento,
     // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
     // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
     transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,
@@ -491,6 +506,10 @@ export async function verReuniaoPeloLink(token: string) {
     // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
     // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
     vozes,
+    // O vídeo do YouTube de onde a reunião veio (H13), ou null: a página não
+    // tem player (a CSP não deixa embutir o YouTube), e o "▶" de cada fala abre
+    // o vídeo no segundo dela, numa aba nova.
+    videoDoYoutube: reuniao.videoDoYoutube,
   };
 }
 

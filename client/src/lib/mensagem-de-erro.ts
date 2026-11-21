@@ -27,6 +27,10 @@ import {
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
 } from "@shared/resumo-por-email";
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
+import {
+  DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehCodigoDaFalhaDoDocumento,
+  type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento,
+} from "@shared/documento-da-reuniao";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -153,4 +157,61 @@ export function mensagemDaRecusaDaParte(codigo: string | undefined, t: (chave: s
     ? AVISO_POR_RECUSA_DA_PARTE[codigo as CodigoDaRecusaDaParte]
     : null;
   return aviso ? aviso(t) : t("meetings.partRejected");
+}
+
+/**
+ * Os códigos da rota do documento da reunião (H12 e H12b,
+ * server/_core/rota-do-documento.ts): os da recusa do envio (o tipo de
+ * shared/documento-da-reuniao.ts), os da porta da rota (sessão, teto, banco) e
+ * o REDE da tela, quando o pedido nem chegou. Como nas partes, o servidor
+ * manda só o código, e a frase sai no idioma da tela; código novo do tipo
+ * compartilhado não compila aqui sem o aviso dele.
+ */
+type CodigoDoEnvioDoDocumento = CodigoDaRecusaDoDocumento
+  | "SEM_SESSAO" | "CADASTRO_INCOMPLETO" | "MUITOS_PEDIDOS" | "TENTE_DE_NOVO" | "BANCO_INDISPONIVEL" | "ERRO" | "REDE";
+
+type Traduzir = (chave: string, opcoes?: Record<string, unknown>) => string;
+
+const AVISO_POR_RECUSA_DO_DOCUMENTO: Record<CodigoDoEnvioDoDocumento, (t: Traduzir) => string> = {
+  SEM_SESSAO: t => t("meetings.document.errorSession"),
+  CADASTRO_INCOMPLETO: t => t("meetings.document.errorSession"),
+  // A reunião foi excluída no meio, ou já recebeu outro documento.
+  SEM_REUNIAO: t => t("meetings.document.errorMeetingGone"),
+  FORA_DO_ESTADO: t => t("meetings.document.errorMeetingGone"),
+  CONTEUDO_DIFERENTE: t => t("meetings.document.errorMeetingGone"),
+  GRANDE_DEMAIS: t => t("meetings.document.errorTooLarge", { mb: DOCUMENTO_BYTES_MAX / 1_000_000 }),
+  VAZIO: t => t("meetings.document.errorEmpty"),
+  FORMATO: t => t("meetings.document.errorNotPdf"),
+  MUITOS_PEDIDOS: t => t("meetings.document.errorTooMany", { quantidade: DOCUMENTOS_POR_HORA }),
+  BANCO_INDISPONIVEL: t => t("errors.databaseUnavailable"),
+  TENTE_DE_NOVO: t => t("meetings.document.errorTryAgain"),
+  ERRO: t => t("meetings.document.errorTryAgain"),
+  REDE: t => t("meetings.document.errorTryAgain"),
+};
+
+export function mensagemDaRecusaDoDocumento(codigo: string | undefined, t: Traduzir): string {
+  const aviso = codigo && Object.prototype.hasOwnProperty.call(AVISO_POR_RECUSA_DO_DOCUMENTO, codigo)
+    ? AVISO_POR_RECUSA_DO_DOCUMENTO[codigo as CodigoDoEnvioDoDocumento]
+    : null;
+  return aviso ? aviso(t) : t("meetings.document.errorTryAgain");
+}
+
+/**
+ * A causa gravada em `processing_error` quando a leitura do documento falha em
+ * segundo plano (CODIGOS_DA_FALHA_DO_DOCUMENTO): o servidor grava o código, e
+ * a tela diz o que fazer no idioma de quem lê. null para o que não é código
+ * do documento (a tela segue com as outras causas conhecidas).
+ */
+const CAUSA_POR_FALHA_DO_DOCUMENTO: Record<CodigoDaFalhaDoDocumento, (t: Traduzir) => string> = {
+  DOCUMENTO_SEM_TEXTO: t => t("meetings.document.failedNoText"),
+  DOCUMENTO_LONGO_DEMAIS: t => t("meetings.document.failedTooLong"),
+  DOCUMENTO_RECUSADO: t => t("meetings.document.failedRefused"),
+  DOCUMENTO_ILEGIVEL: t => t("meetings.document.failedCorrupted"),
+  IA_INDISPONIVEL: t => t("meetings.document.failedAiUnavailable"),
+  DOCUMENTO_AUSENTE: t => t("meetings.document.failedMissing"),
+  DOCUMENTO_FALHOU: t => t("meetings.document.failedGeneric"),
+};
+
+export function causaDaFalhaDoDocumento(codigo: string | null | undefined, t: Traduzir): string | null {
+  return ehCodigoDaFalhaDoDocumento(codigo) ? CAUSA_POR_FALHA_DO_DOCUMENTO[codigo](t) : null;
 }

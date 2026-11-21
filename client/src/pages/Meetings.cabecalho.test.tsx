@@ -53,6 +53,9 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
       reprocess: duble.mutacao(),
+      // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
+      resumirVideoDoYoutube: duble.mutacao(),
+      refazerVideoDoYoutube: duble.mutacao(),
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
       // N5: a linha "Conexões geradas por esta reunião" (sem conexões, não aparece).
       conexoes: { useQuery: () => ({ data: undefined }) },

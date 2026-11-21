@@ -56,6 +56,10 @@ export const PLANO_DE_LIMPEZA = [
   // sair depois dele.
   { tabela: "meeting_audio_slices", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_recordings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O PDF da reunião de documento (H12). O exame não envia documento, então as
+  // contas QA não têm linha nem objeto no bucket; se passar a enviar, vale o
+  // mesmo aviso das partes acima: a linha só sai depois do objeto.
+  { tabela: "meeting_documents", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
   // marcar sai com o resto.
   { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },

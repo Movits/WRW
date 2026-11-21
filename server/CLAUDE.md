@@ -29,7 +29,12 @@ A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
 cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por
 `server/agendados-autenticacao.test.ts`. A linha da parte é gravada antes do upload, com a
-chave exata do objeto (`storagePut(..., { chaveExata: true })`).
+chave exata do objeto (`storagePut(..., { chaveExata: true })`). O documento da reunião
+(H12 e H12b: o PDF, ou as fotos de um texto juntas num PDF no aparelho) chega do mesmo
+jeito, por `POST /api/reunioes/{meetingId}/documento` (`_core/rota-do-documento.ts`, até
+15 MB, 10 por hora por dona, autenticada antes de ler o corpo), e o `GET` do mesmo endereço
+devolve o PDF guardado só à dona; os arquivos do leitor de PDF da tela saem por
+`/pdfjs/<versão>/` (`_core/arquivos-do-leitor-de-pdf.ts`).
 
 ## tRPC, procedures e papéis
 
@@ -335,6 +340,10 @@ responde na hora e segue em segundo plano (a tela consulta a cada 5 s); o trabal
 rejeita, porque rejeição solta derruba o processo. Os derivados da tentativa anterior só
 saem depois de a IA dar certo, e decidir sobre sugestão ou entidade com a reunião em
 `processing` dá CONFLICT. Teto brando de 3 reprocessos aceitos por dona a cada 10 min.
+A reunião que nasceu de um documento (origem `pdf` ou `foto`, `server/documento-da-reuniao.ts`)
+se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áudio: 30 dias,
+a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
+`processing_error` (`shared/documento-da-reuniao.ts`), que a tela traduz.
 
 ## Testes do servidor
 
