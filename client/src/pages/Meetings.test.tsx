@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import i18n from "@/i18n";
+import i18n, { LANGUAGES } from "@/i18n";
 import Meetings from "./Meetings";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
@@ -937,6 +937,23 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     }
   });
 
+  it("a dica do idioma não promete transcrever tudo nele: quem fala outro idioma sai no idioma em que falou (T25)", () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    render(<Meetings />);
+    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
+    expect(screen.getByText("O idioma principal da conversa. Quem falar em outro idioma é transcrito no idioma em que falou; a tradução fica na aba Transcrição.")).toBeInTheDocument();
+    expect(screen.queryByText(/A IA transcreve neste idioma/)).not.toBeInTheDocument();
+  });
+
+  it("nos 10 idiomas, a dica cita a aba Transcrição pelo nome que ela tem na tela; em alemão e francês, o outro idioma sai no idioma em que foi dito, não 'nesta língua' (T25)", () => {
+    for (const { code } of LANGUAGES) {
+      const traduzir = i18n.getFixedT(code);
+      expect(traduzir("meetings.meetingLanguageHint"), code).toContain(traduzir("meetings.transcriptTab"));
+    }
+    expect(i18n.getFixedT("de")("meetings.meetingLanguageHint")).toContain("wird in der Sprache transkribiert, in der es gesagt wurde");
+    expect(i18n.getFixedT("fr")("meetings.meetingLanguageHint")).toContain("est transcrit dans la langue dans laquelle il a été dit");
+  });
+
   it("reunião em inglês com a tela em pt-BR: o original é o inglês, e o pt-BR é TRADUZIDO", () => {
     abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Long talk.", language: "en" } });
     expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
@@ -1015,6 +1032,88 @@ describe("Tradução de reunião longa em segundo plano (G8)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * T25 (teste do Lucas, 20/11): o "Idioma de destino" começa no idioma do site,
+ * e a reunião em inglês aberta com o site em português aparecia traduzida, em
+ * texto corrido, sem nada que dissesse que era tradução. O inglês "sumia".
+ */
+describe("Detalhe da reunião — o aviso de tradução automática (T25)", () => {
+  const FALAS_EM_INGLES = [
+    { inicio: 5, fim: 12, falante: "F1", texto: "We will sign the contract on Friday." },
+    { inicio: 13, fim: 20, falante: "F2", texto: "Great, send me the draft." },
+  ];
+  const EM_INGLES = { id: "t1", transcript: "We will sign the contract on Friday. Great, send me the draft.", language: "en", segments: FALAS_EM_INGLES };
+  type PedidoDeTraducao = [unknown, { onSuccess: (resultado: unknown) => void; onError: (erro: unknown) => void }];
+  const pedidos = () => duble.mutacoes.translateTranscript.mutate.mock.calls as PedidoDeTraducao[];
+
+  it("reunião em inglês aberta com a tela em pt-BR: a tradução vem com o aviso, e 'Ver original' volta às falas com falante e horário", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: EM_INGLES });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(pedidos()).toHaveLength(1);
+    act(() => { pedidos()[0][1].onSuccess({ language: "pt-BR", text: "Vamos assinar o contrato na sexta. Ótimo, me mande a minuta.", cached: false }); });
+    expect(screen.getByText("Vamos assinar o contrato na sexta. Ótimo, me mande a minuta.")).toBeInTheDocument();
+    expect(screen.getByText("Tradução automática para o português.")).toBeInTheDocument();
+    expect(screen.queryByText("Falante 1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ver original" }));
+    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Falante 1")).toBeInTheDocument();
+    expect(within(falas).getByText("We will sign the contract on Friday.")).toBeInTheDocument();
+    expect(within(falas).getByRole("button", { name: "Ouvir a partir de 00:13" })).toBeInTheDocument();
+    // O original já estava aqui: nada é pedido de novo.
+    expect(pedidos()).toHaveLength(1);
+  });
+
+  it("'Ver original' some com o aviso e deixa o foco no seletor do idioma, que mostra o original, em vez de largá-lo no <body>", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: EM_INGLES });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    act(() => { pedidos()[0][1].onSuccess({ language: "pt-BR", text: "Vamos assinar o contrato na sexta. Ótimo, me mande a minuta.", cached: false }); });
+    const verOriginal = screen.getByRole("button", { name: "Ver original" });
+    verOriginal.focus();
+    fireEvent.click(verOriginal);
+    expect(verOriginal).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.getByRole("combobox")).toHaveFocus();
+  });
+
+  it("tela no idioma da reunião: as falas, sem o aviso e sem pedir tradução", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Vamos assinar na sexta.", language: "pt-BR", segments: [{ inicio: 5, fim: 12, falante: "F1", texto: "Vamos assinar na sexta." }] } });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+    expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ver original" })).not.toBeInTheDocument();
+  });
+
+  it("na espera da tradução da reunião longa, o aviso já leva ao original, e a pergunta agendada não sai", async () => {
+    vi.useFakeTimers();
+    try {
+      abrirDetalhe({ status: "ready" }, { transcript: EM_INGLES });
+      fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+      act(() => { pedidos()[0][1].onSuccess({ language: "pt-BR", text: null, cached: false, emAndamento: true }); });
+      expect(screen.getByText(/A reunião é longa/)).toBeInTheDocument();
+      expect(screen.getByText("Tradução automática para o português.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Ver original" }));
+      expect(screen.queryByText(/A reunião é longa/)).not.toBeInTheDocument();
+      expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(pedidos()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a tradução que falhou deixa o original na tela, sem dizer que é tradução", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: EM_INGLES });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    act(() => { pedidos()[0][1].onError(new Error("cota")); });
+    expect(screen.getByText(EM_INGLES.transcript)).toBeInTheDocument();
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
   });
 });
 

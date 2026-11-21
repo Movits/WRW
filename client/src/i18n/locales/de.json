@@ -2034,9 +2034,11 @@
       "androidOtherBrowser": "Um WRW als App zu installieren, öffnen Sie diese Seite in Chrome."
     },
     "meetingLanguageLabel": "Sprache des Meetings",
-    "meetingLanguageHint": "Die gesprochene Sprache. Die KI transkribiert in dieser Sprache, und das Transkript kann später übersetzt werden.",
+    "meetingLanguageHint": "Die Hauptsprache des Gesprächs. Was in einer anderen Sprache gesagt wird, wird in der Sprache transkribiert, in der es gesagt wurde; die Übersetzung finden Sie im Tab Transkription.",
     "originalLanguageSuffix": "(Original)",
     "translatingLongStatus": "Das Meeting ist lang: Die Übersetzung dauert einige Minuten. Sie können diese Ansicht geöffnet lassen; der Text erscheint, sobald er fertig ist.",
+    "autoTranslationNotice": "Automatisch übersetzt. Zielsprache: {{idioma}}.",
+    "seeOriginal": "Original anzeigen",
     "statusUploading": "Audio wird empfangen",
     "speakerLabel": "Sprecher·in {{n}}",
     "gapLabel": "Abschnitt nicht empfangen",

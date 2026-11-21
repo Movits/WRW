@@ -2034,9 +2034,11 @@
       "androidOtherBrowser": "如需将 WRW 安装为 App，请在 Chrome 中打开此页面。"
     },
     "meetingLanguageLabel": "会议语言",
-    "meetingLanguageHint": "会议中使用的语言。AI 将用此语言转写，转写稿之后可以翻译。",
+    "meetingLanguageHint": "对话的主要语言。用其他语言说的话会按所说的语言转写；翻译在转录内容标签页中。",
     "originalLanguageSuffix": "（原文）",
     "translatingLongStatus": "会议较长：翻译需要几分钟。您可以让此页面保持打开，译文完成后会显示。",
+    "autoTranslationNotice": "已自动翻译为{{idioma}}。",
+    "seeOriginal": "查看原文",
     "statusUploading": "正在接收音频",
     "speakerLabel": "发言人 {{n}}",
     "gapLabel": "未收到的片段",
