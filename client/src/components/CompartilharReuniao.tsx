@@ -29,7 +29,9 @@ import { rotaDaReuniaoAberta } from "@shared/rotas";
  * protectWithPassword, includeAudio, activeIntroWithPassword, passwordOn,
  * passwordOff, passwordOnce, passwordHint, messageWithPassword, audioOffHint e
  * as perguntas de trocar e tirar a senha) esperam a revisão da Cris, nos 10
- * idiomas.
+ * idiomas. A reunião sem gravação, a de documento (H12) e a de vídeo do
+ * YouTube (H13), não tem áudio a levar: a escolha do áudio não aparece, e o
+ * link sai sem ele. A senha vale para as três.
  *
  * WhatsApp e e-mail abrem o app da própria dona com a mensagem pronta, e ela
  * escolhe para quem mandar: a WRW não envia nada em nome dela.
@@ -124,6 +126,9 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   const autorizacao = documento ? t("meetings.document.shareAuthorization") : youtube ? t("meetings.youtube.shareAuthorization") : t("meetings.share.authorization");
   // Sem gravação, ninguém fica "ouvindo até terminar" depois de o link desligar.
   const perguntaDeDesligar = documento || youtube ? t("meetings.share.turnOffConfirmNoRecording") : t("meetings.share.turnOffConfirm");
+  // Sem gravação, o link não tem áudio a levar: a escolha do áudio (H23) não
+  // aparece, nem ao ligar nem com o link ligado, e o link sai sem o áudio.
+  const temGravacao = !documento && !youtube;
   const utils = trpc.useUtils();
   const idDoTextoPronto = useId();
   const campo = useRef<HTMLInputElement>(null);
@@ -273,10 +278,10 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
           <input type="checkbox" checked={protegerComSenha} onChange={evento => setProtegerComSenha(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
           <span>{t("meetings.share.protectWithPassword")}</span>
         </label>
-        <label className="flex items-start gap-3 text-sm text-white/75">
+        {temGravacao && <label className="flex items-start gap-3 text-sm text-white/75">
           <input type="checkbox" checked={incluirAudio} onChange={evento => setIncluirAudio(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
           <span>{t("meetings.share.includeAudio")}</span>
-        </label>
+        </label>}
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!autorizou || ligar.isPending} onClick={() => ligar.mutate({
             meetingId,
@@ -287,7 +292,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
             textoExibido: autorizacao,
             versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES,
             comSenha: protegerComSenha,
-            incluirAudio,
+            incluirAudio: temGravacao && incluirAudio,
           })}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-50">
             {ligar.isPending ? <Loader2 size={15} className="animate-spin"/> : <Link2 size={15}/>} {t("meetings.share.createButton")}
@@ -400,12 +405,12 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
       </div>
       {comSenha && !senhaNova && <p className="text-xs text-white/50">{t("meetings.share.passwordHint")}</p>}
       {(confirmar === "trocarSenha" || confirmar === "tirarSenha") && caixaDeConfirmacao}
-      <label className="flex items-start gap-3 text-sm text-white/75">
+      {temGravacao && <label className="flex items-start gap-3 text-sm text-white/75">
         <input type="checkbox" checked={comAudio} disabled={mudarAudio.isPending} onChange={evento => mudarAudio.mutate({ meetingId, incluirAudio: evento.target.checked })}
           className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
         <span>{t("meetings.share.includeAudio")}</span>
-      </label>
-      {!comAudio && <p className="text-xs text-white/50">{t("meetings.share.audioOffHint")}</p>}
+      </label>}
+      {temGravacao && !comAudio && <p className="text-xs text-white/50">{t("meetings.share.audioOffHint")}</p>}
     </div>
 
     <div className="mt-4 border-t border-white/10 pt-3">

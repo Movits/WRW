@@ -380,9 +380,10 @@ describe("a reunião do YouTube: o painel e a prova falam do vídeo, nunca de gr
       idioma: "pt-BR",
       textoExibido: "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.",
       versaoDaAutorizacao: 2,
-      // As escolhas do link (H23), como vieram marcadas.
+      // As escolhas do link (H23): a senha, como veio marcada; o vídeo não tem
+      // gravação, e o link sai sem o áudio.
       comSenha: true,
-      incluirAudio: true,
+      incluirAudio: false,
     });
   });
 
@@ -417,6 +418,54 @@ describe("a reunião do YouTube: o painel e a prova falam do vídeo, nunca de gr
   it("a reunião gravada continua com o painel e a caixa da gravação", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
     expect(screen.getByText(/Quem receber o link ouve a gravação/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * A junção do Pacote 4c com o 4d: o documento (H12) e o vídeo do YouTube (H13)
+ * não têm gravação, e o "Incluir o áudio da reunião no link" (H23) não tem o
+ * que levar. O painel não oferece a escolha, nem ao ligar nem com o link
+ * ligado, e o link sai sem o áudio. A senha vale para todos.
+ */
+describe("sem gravação (o documento e o vídeo), o painel não oferece o áudio do link (H23)", () => {
+  const SEM_GRAVACAO = [
+    ["do vídeo do YouTube", { youtube: true }],
+    ["do documento", { documento: true }],
+  ] as const;
+
+  it.each(SEM_GRAVACAO)("ao ligar o link %s: a autorização e a senha, sem a escolha do áudio, e o link sai sem ele", (_caso, origem) => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null} {...origem}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getByRole("checkbox", { name: /senha de 6 dígitos/ })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: /Incluir o áudio/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Confirmo que posso compartilhar/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith(expect.objectContaining({ comSenha: true, incluirAudio: false }));
+  });
+
+  it.each(SEM_GRAVACAO)("com o link %s ligado: pôr, trocar e tirar a senha, sem a escolha do áudio nem o aviso dele", (_caso, origem) => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comAudio={false} {...origem}/>);
+    expect(screen.getByRole("button", { name: "Pôr senha" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sem o áudio e sem o player/)).not.toBeInTheDocument();
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha {...origem}/>);
+    expect(screen.getByRole("button", { name: "Trocar a senha" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tirar a senha" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("a reunião gravada continua com a escolha do áudio, ao ligar e com o link ligado", () => {
+    const { unmount } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    expect(screen.getByRole("checkbox", { name: /Incluir o áudio/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: /autorizaram/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith(expect.objectContaining({ incluirAudio: true }));
+    unmount();
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comAudio={false}/>);
+    expect(screen.getByRole("checkbox", { name: /Incluir o áudio/ })).not.toBeChecked();
+    expect(screen.getByText(/sem o áudio e sem o player/)).toBeInTheDocument();
   });
 });
 
