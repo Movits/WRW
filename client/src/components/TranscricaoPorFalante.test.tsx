@@ -158,7 +158,9 @@ describe("TranscricaoPorFalante — vozes, horários e ouvir só uma voz (D2)", 
     expect(within(lista()).queryByText("Falante 1")).not.toBeInTheDocument();
     expect(localStorage.getItem(CHAVE_DAS_VOZES_NA_TRANSCRICAO)).toBe("0");
     fireEvent.click(horarios);
-    expect(screen.queryByRole("button", { name: "Ouvir a partir de 20:00" })).not.toBeInTheDocument();
+    // O horário sai da fala; o ▶ dela fica, só com o ícone (o tempo vai no nome).
+    expect(screen.getByRole("button", { name: "Ouvir a partir de 20:00" }).textContent).toBe("");
+    expect(within(lista()).queryByText("20:00")).not.toBeInTheDocument();
     expect(within(lista()).getByText("trecho não recebido")).toBeInTheDocument();
     expect(within(lista()).queryByText(/10:00–20:00/)).not.toBeInTheDocument();
     // O texto das falas continua.
@@ -169,6 +171,49 @@ describe("TranscricaoPorFalante — vozes, horários e ouvir só uma voz (D2)", 
     expect(screen.getByRole("button", { name: "Horários" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Vozes" }));
     expect(within(lista()).getAllByText("Falante 1")).toHaveLength(2);
+  });
+
+  it("com os horários escondidos, cada fala continua com o ▶ que leva o player ao trecho, só com o ícone; no YouTube, o link para o vídeo; sem player, nada", () => {
+    localStorage.setItem(CHAVE_DOS_HORARIOS_NA_TRANSCRICAO, "0");
+    const aoIrPara = vi.fn();
+    const { unmount } = render(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={aoIrPara} />);
+    expect(screen.getByRole("button", { name: "Horários" })).toHaveAttribute("aria-pressed", "false");
+    // Um ▶ por fala (a lacuna não tem), sem o horário escrito.
+    const tocar = screen.getAllByRole("button", { name: /^Ouvir a partir de / });
+    expect(tocar.map(botao => botao.getAttribute("aria-label"))).toEqual(["Ouvir a partir de 00:00", "Ouvir a partir de 01:00", "Ouvir a partir de 20:00"]);
+    for (const botao of tocar) expect(botao.textContent).toBe("");
+    fireEvent.click(tocar[2]);
+    expect(aoIrPara).toHaveBeenCalledWith(1200);
+    unmount();
+
+    const { unmount: fecharYoutube } = render(<TranscricaoPorFalante segmentos={FALAS} linkDoTempo={segundo => `https://www.youtube.com/watch?v=abcdefghijk&t=${segundo}s`} />);
+    const assistir = screen.getByRole("link", { name: "Ver no YouTube a partir de 20:00 (abre em nova aba)" });
+    expect(assistir).toHaveAttribute("href", "https://www.youtube.com/watch?v=abcdefghijk&t=1200s");
+    expect(assistir.textContent).toBe("");
+    fecharYoutube();
+
+    // Sem player (a gravação venceu), não há para onde ir: nenhum botão.
+    render(<TranscricaoPorFalante segmentos={FALAS} />);
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("no celular (abaixo de sm), a barra do tempo de fala vai para uma linha só dela, embaixo do nome; a partir de sm, volta ao meio da linha", () => {
+    // Com o botão de ouvir só esta voz na linha, o nome, o tempo e o botão deixavam a barra com 16 px a 375 px.
+    render(<TranscricaoPorFalante segmentos={FALAS} aoIrPara={vi.fn()} aoOuvirSoAVoz={vi.fn()} aoNomear={vi.fn()} />);
+    for (const nome of ["Falante 1", "Falante 2"]) {
+      const linha = screen.getByRole("button", { name: `Ouvir só a voz de ${nome}` }).closest("li")!;
+      expect(linha).toHaveClass("flex-wrap", "sm:flex-nowrap");
+      const barra = linha.querySelector("[data-barra-do-tempo-de-fala]");
+      expect(barra).toHaveClass("order-last", "basis-full", "sm:order-none", "sm:flex-1");
+      // O nome fica com o resto da primeira linha no celular, e com a coluna de sempre a partir de sm.
+      expect(within(linha).getByRole("button", { name: `Dar nome a esta voz: ${nome}` })).toHaveClass("flex-1", "sm:w-24", "sm:flex-none");
+    }
+    // O campo do nome, aberto, fica com a primeira linha inteira no celular: ao lado do tempo, o campo e o
+    // Salvar passavam por cima dele.
+    fireEvent.click(screen.getByRole("button", { name: "Dar nome a esta voz: Falante 2" }));
+    const campo = screen.getByRole("textbox", { name: "Nome do falante 2" });
+    expect(campo.closest("form")!.parentElement).toHaveClass("basis-full", "sm:flex-initial");
+    expect(campo.closest("li")!.querySelector("[data-barra-do-tempo-de-fala]")).toHaveClass("order-last", "basis-full");
   });
 
   it("o armazenamento que lança não quebra a transcrição: mostra tudo, e a escolha vale na visita", () => {

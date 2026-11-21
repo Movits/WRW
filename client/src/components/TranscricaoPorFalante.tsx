@@ -155,9 +155,13 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
           <p className="text-xs font-semibold text-white/60">{t("meetings.speakingTime")}</p>
           <ul className="mt-2 space-y-1.5">
             {vozes.map(v => (
-              <li key={v.falante} className="flex items-center gap-3 text-sm text-white/75">
+              // No celular (abaixo de sm), a barra vai para uma linha só dela, embaixo do nome: na
+              // linha do nome, do tempo e do botão de ouvir só esta voz, ela ficava com 16 px a 375 px.
+              // O campo do nome, aberto, também fica com a primeira linha inteira (não cabe ao lado do
+              // tempo). A partir de sm, tudo numa linha, com a barra no meio.
+              <li key={v.falante} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-white/75 sm:flex-nowrap">
                 {editando === v.falante
-                  ? <div className="flex flex-col gap-1">
+                  ? <div className="flex basis-full flex-col gap-1 sm:flex-initial">
                       <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void salvarNome(v.falante); }} onKeyDown={e => { if (e.key === "Escape") setEditando(null); }}>
                         <input autoFocus value={rascunho} onChange={e => setRascunho(e.target.value)} maxLength={NOME_DO_FALANTE_MAX} aria-label={t("meetings.speakerNameLabel", { n: numeroDoFalante(v.falante) })} aria-describedby={dicaDoLink ? idDaDicaDoLink : undefined} placeholder={t("meetings.speakerNamePlaceholder")} className="w-36 rounded-lg bg-white/5 border border-white/15 px-2 py-1 text-sm outline-none focus:border-amber-300"/>
                         <button type="submit" disabled={salvando} className="text-xs font-semibold text-amber-200 disabled:opacity-50">{t("meetings.saveSpeakerName")}</button>
@@ -167,9 +171,9 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
                       {dicaDoLink && <p id={idDaDicaDoLink} className="text-xs text-amber-100/70">{dicaDoLink}</p>}
                     </div>
                   : aoNomear
-                    ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="w-24 shrink-0 truncate text-start underline decoration-dotted underline-offset-4 hover:text-white">{rotulo(v.falante)}</button>
-                    : <span className="w-24 shrink-0 truncate">{rotulo(v.falante)}</span>}
-                <span className="h-2 min-w-4 flex-1 overflow-hidden rounded-full bg-white/10">
+                    ? <button type="button" onClick={() => { setEditando(v.falante); setRascunho(nomes[v.falante] ?? ""); }} title={t("meetings.renameSpeaker")} aria-label={`${t("meetings.renameSpeaker")}: ${rotulo(v.falante)}`} className="min-w-0 flex-1 truncate text-start underline decoration-dotted underline-offset-4 hover:text-white sm:w-24 sm:flex-none">{rotulo(v.falante)}</button>
+                    : <span className="min-w-0 flex-1 truncate sm:w-24 sm:flex-none">{rotulo(v.falante)}</span>}
+                <span data-barra-do-tempo-de-fala className="order-last h-2 basis-full overflow-hidden rounded-full bg-white/10 sm:order-none sm:min-w-4 sm:flex-1">
                   <span className="block h-full rounded-full bg-amber-300/70" style={{ width: `${Math.round(v.fracao * 100)}%` }} />
                 </span>
                 <span className="w-24 shrink-0 text-end tabular-nums text-white/55">{mmss(v.segundos)} · {Math.round(v.fracao * 100)}%</span>
@@ -220,17 +224,33 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
           </li>
         ) : (
           <li key={`${s.inicio}-${i}`} className="flex gap-3">
-            {!comHorarios ? null : linkDoTempo ? (
+            {/* D2: com os horários escondidos, o ▶ de cada fala continua, só com o ícone (o tempo vai no
+                nome e na dica): é ele que leva o player, ou o vídeo do YouTube, até o trecho. Sem player
+                nem vídeo, não há para onde ir, e nada aparece. */}
+            {linkDoTempo ? (
               <a
                 href={linkDoTempo(s.inicio)}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={t("meetings.youtube.watchFrom", { tempo: mmss(s.inicio) })}
-                className="inline-flex h-fit shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10"
+                title={comHorarios ? undefined : t("meetings.youtube.watchFrom", { tempo: mmss(s.inicio) })}
+                className={comHorarios
+                  ? "inline-flex h-fit shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-amber-300 hover:bg-amber-300/10"
+                  : "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-amber-300 hover:bg-amber-300/10"}
               >
-                <Play size={11} aria-hidden />{mmss(s.inicio)}
+                <Play size={comHorarios ? 11 : 13} aria-hidden />{comHorarios && mmss(s.inicio)}
               </a>
-            ) : (
+            ) : !comHorarios ? (aoIrPara ? (
+              <button
+                type="button"
+                onClick={() => aoIrPara(s.inicio)}
+                aria-label={t("meetings.playFrom", { tempo: mmss(s.inicio) })}
+                title={t("meetings.playFrom", { tempo: mmss(s.inicio) })}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-amber-300 hover:bg-amber-300/10"
+              >
+                <Play size={13} aria-hidden />
+              </button>
+            ) : null) : (
               <button
                 type="button"
                 onClick={() => aoIrPara?.(s.inicio)}

@@ -37,12 +37,12 @@ const erroDoServidor = (code: string, message: string) => TRPCClientError.from({
 
 const aoJuntar = vi.fn();
 const aoFechar = vi.fn();
-function abrir() {
+function abrir(reunioes: Array<typeof A & { audioPipeline?: string | null }> = [A, B, C]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const client = trpc.createClient({ links: [linkFalso() as never] });
   return render(<trpc.Provider client={client} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
-      <JuntarReunioes reunioes={[A, B, C]} aoFechar={aoFechar} aoJuntar={aoJuntar}/>
+      <JuntarReunioes reunioes={reunioes} aoFechar={aoFechar} aoJuntar={aoJuntar}/>
     </QueryClientProvider>
   </trpc.Provider>);
 }
@@ -96,6 +96,23 @@ describe("JuntarReunioes", () => {
       cleanup();
     }
     expect(aoJuntar).not.toHaveBeenCalled();
+  });
+
+  it("o aviso de transcrever de novo só aparece quando alguma escolhida foi gravada num arquivo só (a regra do servidor)", () => {
+    const avisoDeArquivoUnico = () => within(screen.getByRole("dialog")).queryByText(/gravadas num arquivo só/);
+    // Todas em partes: a junção não transcreve nada de novo (MEETINGS_JOINED com retranscreve:false), e o aviso não aparece.
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "slices" }, { ...C, audioPipeline: "slices" }]);
+    expect(avisoDeArquivoUnico()).not.toBeInTheDocument();
+    // Os outros avisos continuam.
+    expect(within(screen.getByRole("dialog")).getByText(/O link aberto destas reuniões é desligado/)).toBeInTheDocument();
+    cleanup();
+    // Uma de arquivo único entre as escolhidas: o aviso aparece.
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "single" }]);
+    expect(avisoDeArquivoUnico()).toBeInTheDocument();
+    cleanup();
+    // Sem saber como o áudio chegou, avisa.
+    abrir([A, { ...B, audioPipeline: "slices" }]);
+    expect(avisoDeArquivoUnico()).toBeInTheDocument();
   });
 
   it("Cancelar fecha sem pedir nada", () => {

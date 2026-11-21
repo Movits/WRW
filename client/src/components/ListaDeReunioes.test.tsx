@@ -118,8 +118,9 @@ describe("ListaDeReunioes — busca e filtros (H7b)", () => {
     await waitFor(() => expect(within(noConteudo).getByText("Na transcrição")).toBeInTheDocument());
     expect(rede.chamadas.filter(c => c.path === "meetings.buscar")).toEqual([{ path: "meetings.buscar", input: expect.objectContaining({ termo: "proposta" }) }]);
     // O token da voz vira o nome que a dona deu.
-    expect(within(noConteudo).getByText(/Ana manda a/)).toBeInTheDocument();
-    fireEvent.click(within(noConteudo).getByText(/Ana manda a/).closest("button")!);
+    const itemDoResumo = within(noConteudo).getByRole("button", { name: /Ana manda a proposta/ });
+    expect(within(itemDoResumo).getByText("Ana")).toBeInTheDocument();
+    fireEvent.click(itemDoResumo);
     expect(aoAbrir).toHaveBeenCalledWith(`/meetings/${REUNIOES[0].id}?item=i1i1i1i1-0000-4000-8000-000000000001`);
     fireEvent.click(within(noConteudo).getByText("Na transcrição").closest("button")!);
     expect(aoAbrir).toHaveBeenLastCalledWith(`/meetings/${REUNIOES[1].id}?q=proposta`);
@@ -170,6 +171,56 @@ describe("ListaDeReunioes — busca e filtros (H7b)", () => {
     abrir();
     expect(screen.getByRole("searchbox", { name: "البحث في الاجتماعات" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "دمج الاجتماعات" })).toBeInTheDocument();
+  });
+
+  it("o campo tem um 'x' só, o do app, fora do rótulo: o nome do campo continua só 'Buscar nas reuniões', e limpar devolve o foco ao campo", () => {
+    abrir();
+    fireEvent.change(campo(), { target: { value: "carla" } });
+    const limpar = screen.getByRole("button", { name: "Limpar a busca" });
+    expect(screen.getByRole("searchbox")).toHaveAccessibleName("Buscar nas reuniões");
+    expect(limpar.closest("label")).toBeNull();
+    // O 'x' nativo do Chrome no input type=search fica escondido; o do app é o único.
+    expect(screen.getByRole("searchbox").className).toContain("[&::-webkit-search-cancel-button]:hidden");
+    fireEvent.click(limpar);
+    expect(campo()).toHaveValue("");
+    expect(campo()).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Limpar a busca" })).not.toBeInTheDocument();
+  });
+
+  it("o cartão mostra o contato e o contexto da reunião: a achada por eles diz por que apareceu", () => {
+    abrir();
+    fireEvent.change(campo(), { target: { value: "carla" } });
+    const comContato = screen.getByRole("button", { name: /Reunião com a importadora/ });
+    expect(within(comContato).getByText("Carla Mendes")).toBeInTheDocument();
+    expect(within(comContato).getByLabelText("Contato")).toBeInTheDocument();
+    fireEvent.change(campo(), { target: { value: "milao" } });
+    const comContexto = screen.getByRole("button", { name: /Mentoria de exportação/ });
+    expect(within(comContexto).getByText("Feira de Milão")).toBeInTheDocument();
+    expect(within(comContexto).getByLabelText("Contexto")).toBeInTheDocument();
+    // A reunião sem contato nem contexto não ganha rótulo vazio.
+    fireEvent.change(campo(), { target: { value: "" } });
+    const semNada = screen.getByRole("button", { name: /Contrato em PDF/ });
+    expect(within(semNada).queryByLabelText("Contato")).not.toBeInTheDocument();
+    expect(within(semNada).queryByLabelText("Contexto")).not.toBeInTheDocument();
+  });
+
+  it("em árabe, a voz no trecho do resumo fica isolada (<bdi>): o item em inglês não vira da direita para a esquerda, e o termo continua destacado", async () => {
+    rede.respostas["meetings.buscar"] = {
+      resultados: [
+        { tipo: "item", meetingId: REUNIOES[1].id, titulo: "Spring Networking Fair Planning", criadaEm: AGORA, trecho: "{F2} evaluated two locations for the fair.", nomes: {}, itemId: "i1i1i1i1-0000-4000-8000-000000000002", secao: "decision", assunto: null, inicioSegundos: null },
+      ],
+      maisResultados: false,
+    };
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    abrir();
+    fireEvent.change(screen.getByRole("searchbox", { name: "البحث في الاجتماعات" }), { target: { value: "locations" } });
+    const voz = await screen.findByText("المتحدث 2");
+    expect(voz.tagName).toBe("BDI");
+    // O trecho decide a direção pelo resto do texto: o dir="auto" pula o que está no <bdi>.
+    const trecho = voz.parentElement!;
+    expect(trecho).toHaveAttribute("dir", "auto");
+    expect(trecho).toHaveTextContent("المتحدث 2 evaluated two locations for the fair.");
+    expect(within(trecho).getByText("locations").tagName).toBe("MARK");
   });
 });
 

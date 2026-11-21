@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { History, Loader2, MapPin, Merge, MonitorPlay, ScanText, Search, SlidersHorizontal, Tag, X } from "lucide-react";
+import { History, Loader2, MapPin, Merge, Milestone, MonitorPlay, ScanText, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { JuntarReunioes } from "@/components/JuntarReunioes";
@@ -13,7 +13,7 @@ import {
   type FiltrosDaBusca, type OrigemDoFiltro, type PeriodoDoFiltro,
 } from "@shared/busca-de-reunioes";
 import { podeJuntar } from "@shared/juntar-reunioes";
-import { vozesNoTexto } from "@shared/vozes-no-texto";
+import { partesComVozes, type ParteDoTextoComVozes } from "@shared/vozes-no-texto";
 
 /**
  * A lista das reuniões da dona com a busca, os filtros e as buscas recentes
@@ -34,6 +34,8 @@ export type ReuniaoDaLista = {
   contextId?: string | null;
   contatoNome?: string | null;
   contextoNome?: string | null;
+  /** Como o áudio chegou (envio único ou partes): a confirmação da junção avisa a retranscrição só quando vale. */
+  audioPipeline?: string | null;
 };
 
 const ESPERA_ATE_BUSCAR_MS = 400;
@@ -48,13 +50,36 @@ function useTermoParado(termo: string) {
   return parado;
 }
 
-/** O trecho com o termo destacado (sem caixa); o resto, texto puro. */
-function TrechoDestacado({ texto, termo }: { texto: string; termo: string }) {
-  const limpo = texto.replace(/\s+/g, " ").trim();
+/**
+ * O trecho com o termo destacado (sem caixa); o resto, texto puro. Cada voz
+ * (o nome dado ou o rótulo traduzido, de partesComVozes) vai num <bdi>: o
+ * dir="auto" de quem mostra o trecho decide a direção pelo resto do texto. Sem
+ * isso, o rótulo em árabe no começo de um item em inglês viraria o parágrafo da
+ * direita para a esquerda, com o ponto final do lado errado.
+ */
+function TrechoDestacado({ partes, termo }: { partes: ParteDoTextoComVozes[]; termo: string }) {
+  const inteiro = partes.map(parte => parte.texto).join("");
   const procurado = termo.trim();
-  const posicao = procurado ? limpo.toLocaleLowerCase().indexOf(procurado.toLocaleLowerCase()) : -1;
-  if (posicao < 0) return <>{limpo}</>;
-  return <>{limpo.slice(0, posicao)}<mark className="rounded bg-amber-300/25 px-0.5 text-amber-100">{limpo.slice(posicao, posicao + procurado.length)}</mark>{limpo.slice(posicao + procurado.length)}</>;
+  const inicioDoTermo = procurado ? inteiro.toLocaleLowerCase().indexOf(procurado.toLocaleLowerCase()) : -1;
+  const fimDoTermo = inicioDoTermo < 0 ? -1 : inicioDoTermo + procurado.length;
+  let deslocamento = 0;
+  return <>{partes.map((parte, indice) => {
+    const inicio = deslocamento;
+    deslocamento += parte.texto.length;
+    // O pedaço do termo que cai nesta parte (o termo pode começar numa voz e seguir no texto).
+    const de = Math.max(inicioDoTermo, inicio) - inicio;
+    const ate = Math.min(fimDoTermo, deslocamento) - inicio;
+    const conteudo = ate > de && de >= 0
+      ? <>{parte.texto.slice(0, de)}<mark className="rounded bg-amber-300/25 px-0.5 text-amber-100">{parte.texto.slice(de, ate)}</mark>{parte.texto.slice(ate)}</>
+      : parte.texto;
+    return parte.voz ? <bdi key={indice}>{conteudo}</bdi> : <Fragment key={indice}>{conteudo}</Fragment>;
+  })}</>;
+}
+
+/** O trecho do resultado em pedaços: o item do resumo com as vozes à parte; a transcrição, inteira. */
+function partesDoTrecho(texto: string, vozes: Readonly<Record<string, string>> | null, rotuloDaVoz: (numero: number) => string): ParteDoTextoComVozes[] {
+  const limpo = texto.replace(/\s+/g, " ").trim();
+  return vozes ? partesComVozes(limpo, vozes, rotuloDaVoz) : [{ texto: limpo, voz: false }];
 }
 
 function ResultadosDoServidor({ termo, filtros, aoAbrir }: { termo: string; filtros: FiltrosDaBusca; aoAbrir: (destino: string) => void }) {
@@ -81,7 +106,7 @@ function ResultadosDoServidor({ termo, filtros, aoAbrir }: { termo: string; filt
       <ul className="space-y-2">
         {busca.data.resultados.map(resultado => {
           const destino = resultado.tipo === "item" ? rotaDaReuniao(resultado.meetingId, { item: resultado.itemId }) : rotaDaReuniao(resultado.meetingId, { q: termo });
-          const trecho = resultado.tipo === "item" ? vozesNoTexto(resultado.trecho, resultado.nomes, numero => t("meetings.speakerLabel", { n: numero })) : resultado.trecho;
+          const trecho = partesDoTrecho(resultado.trecho, resultado.tipo === "item" ? resultado.nomes : null, numero => t("meetings.speakerLabel", { n: numero }));
           return (
             <li key={resultado.tipo === "item" ? `item-${resultado.itemId}` : `transcricao-${resultado.meetingId}`}>
               <button type="button" onClick={() => aoAbrir(destino)}
@@ -93,7 +118,7 @@ function ResultadosDoServidor({ termo, filtros, aoAbrir }: { termo: string; filt
                 <span className="mt-1 block text-[11px] font-semibold uppercase tracking-wide text-amber-300/80">
                   {resultado.tipo === "item" ? t("meetings.search.summaryHit") : t("meetings.search.transcriptHit")}
                 </span>
-                <span dir="auto" className="mt-1 block break-words text-sm text-white/70"><TrechoDestacado texto={trecho} termo={termo} /></span>
+                <span dir="auto" className="mt-1 block break-words text-sm text-white/70"><TrechoDestacado partes={trecho} termo={termo} /></span>
               </button>
             </li>
           );
@@ -180,22 +205,26 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="relative min-w-0 flex-1">
-          <label className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 focus-within:border-amber-300/50">
-            <Search size={16} aria-hidden="true" className="shrink-0 text-white/40" />
-            <span className="sr-only">{t("meetings.search.label")}</span>
-            <input ref={campo} type="search" value={termo} maxLength={TERMO_DA_BUSCA_MAX} placeholder={t("meetings.search.placeholder")}
-              onChange={evento => setTermo(evento.target.value)}
-              onFocus={() => setMostraRecentes(true)}
-              onBlur={() => setTimeout(() => setMostraRecentes(false), 150)}
-              onKeyDown={evento => {
-                // O Enter que confirma a composição do teclado (japonês, chinês) não é uma busca.
-                if (evento.nativeEvent.isComposing) return;
-                if (evento.key === "Enter" && termo.trim()) { lembrar(termo); setMostraRecentes(false); }
-              }}
-              className="w-full min-w-0 bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-white/35" />
+          {/* O "x" de limpar é o do app, fora do <label> (dentro, o nome dele entrava no nome do
+              campo); o "x" nativo do input type=search fica escondido, para não aparecerem dois. */}
+          <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 focus-within:border-amber-300/50">
+            <label className="flex min-w-0 flex-1 items-center gap-2">
+              <Search size={16} aria-hidden="true" className="shrink-0 text-white/40" />
+              <span className="sr-only">{t("meetings.search.label")}</span>
+              <input ref={campo} type="search" value={termo} maxLength={TERMO_DA_BUSCA_MAX} placeholder={t("meetings.search.placeholder")}
+                onChange={evento => setTermo(evento.target.value)}
+                onFocus={() => setMostraRecentes(true)}
+                onBlur={() => setTimeout(() => setMostraRecentes(false), 150)}
+                onKeyDown={evento => {
+                  // O Enter que confirma a composição do teclado (japonês, chinês) não é uma busca.
+                  if (evento.nativeEvent.isComposing) return;
+                  if (evento.key === "Enter" && termo.trim()) { lembrar(termo); setMostraRecentes(false); }
+                }}
+                className="w-full min-w-0 bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-white/35 [&::-webkit-search-cancel-button]:hidden" />
+            </label>
             {termo && <button type="button" aria-label={t("meetings.search.clear")} onClick={() => { setTermo(""); campo.current?.focus(); }}
-              className="shrink-0 rounded-md p-1 text-white/50 hover:text-white"><X size={15} /></button>}
-          </label>
+              className="shrink-0 rounded-md p-1 text-white/50 hover:text-white"><X size={15} aria-hidden="true" /></button>}
+          </div>
           {mostraRecentes && !termo.trim() && recentes.length > 0 && (
             <div className="absolute inset-x-0 top-full z-20 mt-1 rounded-xl border border-white/15 bg-[#211e1b] p-3 shadow-xl">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs text-white/50">
@@ -274,6 +303,9 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
                     {new Date(reuniao.createdAt).toLocaleString(i18n.language)}
                     {reuniao.origem === "youtube" && <span className="ms-2 inline-flex items-center gap-1 text-[#efcba8]/80"><MonitorPlay size={12} aria-hidden="true" />{t("meetings.youtube.listBadge")}</span>}
                     {reuniao.ondeFoi && <span dir="auto" className="ms-2 inline-flex items-center gap-1 text-white/55"><MapPin size={12} aria-label={t("meetings.details.placeLabel")} />{reuniao.ondeFoi}</span>}
+                    {/* O contato e o contexto (H7c): a reunião achada por eles na busca diz por que apareceu. */}
+                    {reuniao.contatoNome && <span dir="auto" className="ms-2 inline-flex max-w-full items-center gap-1 break-words text-white/55"><UserRound size={12} aria-label={t("meetings.details.contactLabel")} className="shrink-0" />{reuniao.contatoNome}</span>}
+                    {reuniao.contextoNome && <span dir="auto" className="ms-2 inline-flex max-w-full items-center gap-1 break-words text-white/55"><Milestone size={12} aria-label={t("meetings.details.contextLabel")} className="shrink-0" />{reuniao.contextoNome}</span>}
                   </p>
                   {etiquetasDaLinha.length > 0 && (
                     <ul aria-label={t("meetings.details.tagsLabel")} className="mt-2 flex flex-wrap gap-1.5">

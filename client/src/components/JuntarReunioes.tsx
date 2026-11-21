@@ -13,7 +13,16 @@ import { ordemCronologica, RECUSAS_DA_JUNCAO, type CodigoDaRecusaDaJuncao } from
  * tudo de novo (server/juntar-reunioes.ts); a recusa sai pelo código, no
  * idioma da tela.
  */
-type ReuniaoParaJuntar = { id: string; title: string; createdAt: number };
+type ReuniaoParaJuntar = { id: string; title: string; createdAt: number; audioPipeline?: string | null };
+
+/**
+ * A junção transcreve de novo quando alguma escolhida foi gravada num arquivo
+ * só (audio_pipeline 'single'): é a regra do servidor (planejarJuncao). Só
+ * então o aviso disso aparece; sem saber como o áudio chegou, avisa.
+ */
+export function juncaoTranscreveDeNovo(reunioes: readonly { audioPipeline?: string | null }[]): boolean {
+  return reunioes.some(reuniao => reuniao.audioPipeline !== "slices");
+}
 
 /**
  * O aviso de cada recusa do servidor. O Record é pelo tipo compartilhado:
@@ -92,7 +101,7 @@ export function JuntarReunioes({ reunioes, aoFechar, aoJuntar }: {
           <li>{t("meetings.join.warningSummary")}</li>
           <li>{t("meetings.join.warningLink")}</li>
           <li>{t("meetings.join.warningAudio")}</li>
-          <li>{t("meetings.join.warningOld")}</li>
+          {juncaoTranscreveDeNovo(ordem) && <li>{t("meetings.join.warningOld")}</li>}
         </ul>
         <div className="mt-6 flex gap-3">
           <button type="button" onClick={aoFechar} disabled={juntar.isPending} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/5 disabled:opacity-50">{t("meetings.join.cancel")}</button>
