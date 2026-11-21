@@ -1,5 +1,7 @@
 import { corteCancelado, crc32Ogg, LeitorEmJanela, limitesDoCorte, MontagemDaParte, recusa, u32le, type CorteDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
 import { amostrasOpus, escreverGranulo, etiquetasVazias, paginar } from "./paginas-do-ogg";
+import { nivelDoOpus } from "./nivel-dos-quadros";
+import { bitsPorMs, cortarNasPausas, partesDoCorte, SEM_PAUSAS } from "./pausas-do-corte";
 
 /**
  * O corte do Ogg (H9b do plano do gravador): o áudio do WhatsApp (.ogg/.opus,
@@ -47,8 +49,20 @@ function codecDe(pacote: Uint8Array): { codec: Codec } | { semSuporte: string } 
   return null;
 }
 
-/** Corta o Ogg Opus ou Vorbis em partes de até 600 s e 14 MB (ver o comentário do módulo). */
+/**
+ * Corta o Ogg Opus ou Vorbis em partes de até 600 s e 14 MB (ver o comentário
+ * do módulo), cada uma fechando numa pausa da fala quando há uma perto do teto
+ * (lib/pausas-do-corte.ts). A parte só começa numa página que abre pacote, e a
+ * pausa se mede pacote a pacote: no Opus, pela marca de voz
+ * (lib/nivel-dos-quadros.ts); no Vorbis, pelo tamanho, com a duração da unidade
+ * dividida entre os pacotes (só o silêncio digital vira pausa).
+ */
 export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
+  return cortarNasPausas(o => cortarOggUmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+async function cortarOggUmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
+  const pausas = opcoes.pausas ?? SEM_PAUSAS;
   const limites = limitesDoCorte(opcoes);
   if (opcoes.sinal?.aborted) throw corteCancelado();
   const janela = new LeitorEmJanela(ler, tamanho, opcoes);
@@ -167,8 +181,12 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   const quantasDoCabecalho = primeira.quantas + resto.quantas;
 
   // ─── As páginas de áudio ──────────────────────────────────────────────────
-  /** Uma página de áudio: as amostras Opus dos pacotes que terminam nela e quantos pacotes terminam nela. */
-  type DeAudio = { inicio: number; cabecalho: number; corpo: number; tipo: number; granulo: number; copia: Uint8Array; amostras: number; pacotes: number };
+  /**
+   * Uma página de áudio: as amostras Opus dos pacotes que terminam nela, quantos
+   * terminam nela e, para achar a pausa, [amostras, bytes, primeiros bytes] de
+   * cada pacote Opus e o tamanho de cada pacote Vorbis.
+   */
+  type DeAudio = { inicio: number; cabecalho: number; corpo: number; tipo: number; granulo: number; copia: Uint8Array; amostras: number; pacotes: number; pacotesOpus: Array<[number, number, number[]]>; pacotesVorbis: number[] };
   type EmMontagem = { montagem: MontagemDaParte; base: number; seq: number; amostras: number; bytes: number };
   const amostrasPorParte = limites.segundosPorParte * taxa;
   const amostrasNoTotal = limites.segundosNoTotal * taxa;
@@ -178,8 +196,10 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   let granuloAnterior = 0;
   let primeiraUnidade = true;
   let amostrasNoArquivo = 0;
-  // O pacote Opus aberto entre páginas: o TOC, o byte seguinte e o tamanho até aqui.
-  let aberto: { toc: number; segundo: number; tamanho: number } | null = null;
+  // O pacote Opus aberto entre páginas: o TOC, o byte seguinte, o tamanho até aqui e os 5 primeiros bytes (a marca de voz).
+  let aberto: { toc: number; segundo: number; tamanho: number; inicio: number[] } | null = null;
+  // O tamanho do pacote Vorbis aberto entre páginas (só na leitura que acha as pausas).
+  let vorbisAberto = 0;
 
   const emitir = (p: DeAudio, alvo: EmMontagem, fimDoFluxo: boolean) => {
     const h = p.copia.slice(0, p.cabecalho);
@@ -215,7 +235,7 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
     const amostras = codec === "opus" ? amostrasOpusDaUnidade : Math.max(0, ultimoGranulo - granuloAnterior);
     const bytes = unidade.reduce((s, p) => s + p.copia.length, 0);
     if (amostrasNoArquivo + amostras > amostrasNoTotal) return "LONGO_DEMAIS";
-    if (parte && (parte.amostras + amostras > amostrasPorParte || parte.bytes + bytes > limites.bytesPorParte)) {
+    if (parte && (parte.amostras + amostras > amostrasPorParte || parte.bytes + bytes > limites.bytesPorParte || pausas.antes((parte.amostras / taxa) * 1000, parte.bytes))) {
       emitir(pendente!, parte, true);
       fechar(parte);
       if (partes.length >= limites.partesNoMaximo) return "MUITAS_PARTES";
@@ -233,6 +253,15 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
     parte.bytes += bytes;
     amostrasNoArquivo += amostras;
     granuloAnterior = ultimoGranulo;
+    // A pausa: pacote a pacote (no Vorbis, com a duração da unidade dividida entre eles).
+    const pacotesOpus = codec === "opus" && pausas.ouvindo ? unidade.flatMap(p => p.pacotesOpus) : [];
+    if (pacotesOpus.length) pausas.depoisEmPedacos(bytes, pacotesOpus.map(([amostrasDoPacote, tamanhoDoPacote, inicioDoPacote]) => [(amostrasDoPacote / taxa) * 1000, nivelDoOpus(inicioDoPacote, tamanhoDoPacote, (amostrasDoPacote / taxa) * 1000)] as const));
+    else if (codec === "vorbis" && pausas.ouvindo && unidade.some(p => p.pacotesVorbis.length)) {
+      // O Vorbis não diz a duração de cada pacote sem o setup inteiro: a unidade se divide igual entre eles.
+      const tamanhos = unidade.flatMap(p => p.pacotesVorbis);
+      const ms = ((amostras / taxa) * 1000) / tamanhos.length;
+      pausas.depoisEmPedacos(bytes, tamanhos.map(tamanhoDoPacote => [ms, bitsPorMs(tamanhoDoPacote, ms)] as const));
+    } else pausas.depois((amostras / taxa) * 1000, bytes, bitsPorMs(bytes, (amostras / taxa) * 1000));
     return null;
   };
 
@@ -256,18 +285,33 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
       if (motivo) return recusa(motivo, "ogg");
       unidade = [];
     }
-    // As amostras dos pacotes Opus que terminam nesta página.
+    // As amostras dos pacotes Opus que terminam nesta página (e as de cada um, com o tamanho).
     let amostras = 0;
+    const pacotesOpus: Array<[number, number, number[]]> = [];
+    const pacotesVorbis: number[] = [];
+    if (codec === "vorbis" && pausas.ouvindo) {
+      if (!continua) vorbisAberto = 0;
+      for (const laco of pagina.lacos) {
+        vorbisAberto += laco;
+        if (laco < 255) {
+          pacotesVorbis.push(vorbisAberto);
+          vorbisAberto = 0;
+        }
+      }
+    }
     if (codec === "opus") {
       if (!continua) aberto = null;
       let p = pagina.cabecalho;
       for (const laco of pagina.lacos) {
-        if (!aberto) aberto = { toc: laco > 0 ? pagina.bytes[p] : 0, segundo: laco > 1 ? pagina.bytes[p + 1] : -1, tamanho: 0 };
+        if (!aberto) aberto = { toc: laco > 0 ? pagina.bytes[p] : 0, segundo: laco > 1 ? pagina.bytes[p + 1] : -1, tamanho: 0, inicio: [] };
         else if (aberto.segundo < 0 && laco > 0) aberto.segundo = pagina.bytes[p];
+        if (pausas.ouvindo) for (let k = 0; k < laco && aberto.inicio.length < 5; k++) aberto.inicio.push(pagina.bytes[p + k]);
         aberto.tamanho += laco;
         p += laco;
         if (laco < 255) {
-          amostras += amostrasOpus(aberto.toc, aberto.segundo, aberto.tamanho);
+          const amostrasDoPacote = amostrasOpus(aberto.toc, aberto.segundo, aberto.tamanho);
+          amostras += amostrasDoPacote;
+          pacotesOpus.push([amostrasDoPacote, aberto.tamanho, aberto.inicio]);
           aberto = null;
         }
       }
@@ -275,7 +319,7 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
     bytesDeAudio += pagina.bytes.length;
     // Cada laço menor que 255 fecha um pacote.
     const pacotes = pagina.lacos.reduce((s, laco) => s + (laco < 255 ? 1 : 0), 0);
-    unidade.push({ inicio: pagina.inicio, cabecalho: pagina.cabecalho, corpo: pagina.corpo, tipo: pagina.tipo, granulo: pagina.granulo, copia: pagina.bytes.slice(), amostras, pacotes });
+    unidade.push({ inicio: pagina.inicio, cabecalho: pagina.cabecalho, corpo: pagina.corpo, tipo: pagina.tipo, granulo: pagina.granulo, copia: pagina.bytes.slice(), amostras, pacotes, pacotesOpus, pacotesVorbis });
     if (pagina.tipo & 4) {
       fimDoFluxo = true;
       break;

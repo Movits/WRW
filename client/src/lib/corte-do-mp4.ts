@@ -3,6 +3,8 @@ import {
   ascii, corteCancelado, LeitorEmJanela, limitesDoCorte, MontagemDaParte, recusa,
   type CodigoDaRecusaDoCorte, type CorteDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada,
 } from "./corte-comum";
+import { nivelDoAac } from "./nivel-dos-quadros";
+import { cortarNasPausas, partesDoCorte, SEM_PAUSAS, type PausasDoCorte } from "./pausas-do-corte";
 
 /**
  * O corte do MP4, do M4A e do MOV (H9c do plano do gravador): o M4A do
@@ -265,6 +267,8 @@ const tamanhoDoMoof = (n: number, constante: boolean) => 88 + (constante ? 4 : 0
 export class PartesEmFmp4 {
   readonly partes: ParteCortada[] = [];
   private readonly limites: ReturnType<typeof limitesDoCorte>;
+  /** A pausa da fala (lib/pausas-do-corte.ts): a parte fecha nela quando há uma perto do teto. */
+  private readonly pausas: PausasDoCorte;
   /** O tamanho do começo de cada parte (ftyp e moov), que não muda de uma parte para outra. */
   private readonly bytesDoInicio: number;
   private posicoes: number[] = [];
@@ -276,6 +280,7 @@ export class PartesEmFmp4 {
 
   constructor(private readonly faixa: FaixaAac, opcoes: OpcoesDoCorte) {
     this.limites = limitesDoCorte(opcoes);
+    this.pausas = opcoes.pausas ?? SEM_PAUSAS;
     this.bytesDoInicio = inicioDoFmp4(faixa, 0).length;
   }
 
@@ -288,14 +293,18 @@ export class PartesEmFmp4 {
     return quadros * this.faixa.config.quadro > segundos * this.faixa.config.taxa;
   }
 
-  /** Um quadro AAC: começo e tamanho no arquivo e a duração na escala da faixa. */
-  adicionar(posicao: number, tamanho: number, duracao: number): CodigoDaRecusaDoCorte | null {
+  /**
+   * Um quadro AAC: começo e tamanho no arquivo, a duração na escala da faixa e,
+   * na leitura que acha as pausas, o nível dele (lib/nivel-dos-quadros.ts).
+   */
+  adicionar(posicao: number, tamanho: number, duracao: number, nivel = 0): CodigoDaRecusaDoCorte | null {
     if (this.passa(this.quadrosNoTotal + 1, this.limites.segundosNoTotal)) return "LONGO_DEMAIS";
     const n = this.tamanhos.length;
     if (n) {
       const constante = this.constante && duracao === this.duracoes[0];
       const bytes = this.bytesDoInicio + tamanhoDoMoof(n + 1, constante) + 8 + this.bytesDoMdat + tamanho;
-      if (this.passa(n + 1, this.limites.segundosPorParte) || bytes > this.limites.bytesPorParte) {
+      if (this.passa(n + 1, this.limites.segundosPorParte) || bytes > this.limites.bytesPorParte
+        || this.pausas.antes((n * this.faixa.config.quadro * 1000) / this.faixa.config.taxa, this.bytesDoInicio + tamanhoDoMoof(n, this.constante) + 8 + this.bytesDoMdat)) {
         this.fechar();
         if (this.partes.length >= this.limites.partesNoMaximo) return "MUITAS_PARTES";
       }
@@ -306,6 +315,8 @@ export class PartesEmFmp4 {
     this.duracoes.push(duracao);
     this.bytesDoMdat += tamanho;
     this.quadrosNoTotal++;
+    // Os bytes com os 8 do quadro no trun (o tamanho e, se variam, a duração).
+    this.pausas.depois((this.faixa.config.quadro * 1000) / this.faixa.config.taxa, tamanho + 8, nivel);
     return null;
   }
 
@@ -508,9 +519,51 @@ function quadrosDoFragmento(
   return null;
 }
 
-/** Corta o MP4, o M4A ou o MOV em partes de até 600 s e 14 MB (ver o comentário do módulo). */
+/**
+ * Corta o MP4, o M4A ou o MOV em partes de até 600 s e 14 MB (ver o comentário
+ * do módulo), cada uma fechando numa pausa da fala quando há uma perto do teto
+ * (lib/pausas-do-corte.ts). O nível de cada quadro AAC vem dos primeiros
+ * bytes dele (o global_gain, lib/nivel-dos-quadros.ts): a tabela do moov só diz
+ * onde os quadros estão, e a leitura que acha as pausas os lê no fim, trecho
+ * contíguo a trecho contíguo (só o áudio, mesmo no vídeo do Zoom).
+ */
 export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
+  return cortarNasPausas(o => cortarMp4UmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+/** Até quanto o trecho de quadros contíguos lido de uma vez se estende. */
+const TRECHO_DOS_QUADROS = 4 * 1024 * 1024;
+
+/**
+ * Lê os quadros anotados, trecho contíguo a trecho contíguo (o bloco de vídeo
+ * entre dois blocos de áudio quebra o trecho: o vídeo nunca é lido), e dá à
+ * leitura das pausas o nível de cada um, na ordem em que entraram.
+ */
+async function ouvirOsQuadros(ler: LerBytes, anotados: { posicoes: number[]; tamanhos: number[] }, pausas: PausasDoCorte, msPorQuadro: number, sinal?: AbortSignal) {
+  const { posicoes, tamanhos } = anotados;
+  for (let i = 0; i < posicoes.length;) {
+    if (sinal?.aborted) throw corteCancelado();
+    const inicio = posicoes[i];
+    let fim = inicio + tamanhos[i];
+    let j = i + 1;
+    while (j < posicoes.length && posicoes[j] === fim && posicoes[j] + tamanhos[j] - inicio <= TRECHO_DOS_QUADROS) {
+      fim = posicoes[j] + tamanhos[j];
+      j++;
+    }
+    const bytes = await ler(inicio, fim);
+    if (bytes.length !== fim - inicio) throw new Error("Leitura incompleta do arquivo.");
+    const byte = (p: number) => (p >= inicio && p < fim ? bytes[p - inicio] : -1);
+    for (let k = i; k < j; k++) pausas.depois(msPorQuadro, tamanhos[k] + 8, nivelDoAac(byte, posicoes[k], posicoes[k] + tamanhos[k]));
+    i = j;
+  }
+}
+
+async function cortarMp4UmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
   if (opcoes.sinal?.aborted) throw corteCancelado();
+  const pausas = opcoes.pausas ?? SEM_PAUSAS;
+  // Na leitura que acha as pausas, os quadros só se anotam (posição e tamanho) e o nível deles se lê no fim
+  // (ouvirOsQuadros): o escritor fica sem a leitura das pausas, que conta as unidades na mesma ordem.
+  const anotados = pausas.ouvindo ? { posicoes: [] as number[], tamanhos: [] as number[] } : null;
   const janela = new LeitorEmJanela(ler, tamanho, opcoes, BLOCO_DO_TOPO);
   let ftyp: Uint8Array | null = null;
   let escolhida: Escolhida | null = null;
@@ -520,6 +573,10 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   let quadros = 0;
   const contar = (posicao: number, tamanhoDoQuadro: number, duracao: number) => {
     quadros++;
+    if (anotados) {
+      anotados.posicoes.push(posicao);
+      anotados.tamanhos.push(tamanhoDoQuadro);
+    }
     return partes!.adicionar(posicao, tamanhoDoQuadro, duracao);
   };
 
@@ -563,7 +620,7 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
       const escolha = escolherFaixa(iso.moov);
       if (!("trak" in escolha)) return recusa(escolha.codigo, "mp4", escolha.detalhe);
       escolhida = escolha;
-      partes = new PartesEmFmp4(escolha.faixa, opcoes);
+      partes = new PartesEmFmp4(escolha.faixa, anotados ? { ...opcoes, pausas: SEM_PAUSAS } : opcoes);
       // Os padrões de TODAS as faixas: o fim dos dados do traf do vídeo é a base do traf do áudio que vem depois dele.
       for (const trex of iso.moov.mvex?.trexs ?? []) {
         if (!padroes.has(trex.track_id)) padroes.set(trex.track_id, { duracao: trex.default_sample_duration ?? 0, tamanho: trex.default_sample_size ?? 0 });
@@ -589,5 +646,6 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   partes.fechar();
   if (!quadros || !partes.partes.length) return recusa("DANIFICADO", "mp4");
   if (partes.partes.length > limitesDoCorte(opcoes).partesNoMaximo) return recusa("MUITAS_PARTES", "mp4");
+  if (anotados) await ouvirOsQuadros(ler, anotados, pausas, (escolhida.faixa.config.quadro * 1000) / escolhida.faixa.config.taxa, opcoes.sinal);
   return { ok: true, formato: "mp4", mimeType: "audio/mp4", partes: partes.partes, duracaoMs: partes.duracaoMs };
 }

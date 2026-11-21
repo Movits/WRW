@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import Meetings from "./Meetings";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
 
 /**
  * Etapa 3 — a tela de Reuniões (reverificação de 04/09), em duas frentes.
@@ -420,6 +421,23 @@ describe("Detalhe da reunião — a falha é explicada no idioma da dona", () =>
     abrirDetalhe({ status: "failed", processingError: null });
     expect(screen.getByText(/O processamento não foi concluído/)).toBeInTheDocument();
   });
+
+  // Conferência de tela do pacote 4b: as frases que a fila da gravação em partes
+  // grava em processing_error saíam em português na tela em árabe (captura 32).
+  it.each([
+    [MENSAGEM_PARTES_SEM_TRANSCRICAO, "تعذّر تفريغ صوت هذا الاجتماع نصيًا."],
+    [MENSAGEM_FALHA_DA_MONTAGEM, "تعذّرت معالجة هذا الاجتماع. حاول مرة أخرى لاحقًا."],
+    [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, "توقف التسجيل قبل إرسال الصوت."],
+  ])("a frase da fila \"%s\" sai no idioma da dona (árabe), e não em português", async (frase, emArabe) => {
+    await i18n.changeLanguage("ar");
+    try {
+      abrirDetalhe({ status: "failed", audioPipeline: "slices", processingError: frase });
+      expect(screen.getByText(emArabe)).toBeInTheDocument();
+      expect(screen.queryByText(frase)).not.toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
+  });
 });
 
 const DIA = 24 * 60 * 60 * 1000;
@@ -477,6 +495,30 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
   it("…e a de uma parte só, com os mesmos 20 min, ainda oferece o botão: a margem cresce com as partes", () => {
     abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 1 }, { recording: gravacaoEmPartes(1, Date.now() + 20 * 60 * 1000) });
     expect(botaoReprocessar()).toBeInTheDocument();
+  });
+
+  // Conferência de tela do pacote 4b (capturas 36 e 32): na reunião em partes que
+  // falhou inteira na IA, nada toca (`recording` nulo), mas o áudio está no bucket,
+  // a seção Gravação o oferece para baixar e o servidor o reprocessa
+  // (reprocessarEmPartes). A caixa vermelha decidia pela gravação que toca e
+  // mandava a dona apagar a reunião.
+  it("a reunião em partes que falhou inteira na IA, com o áudio guardado: a caixa oferece o Reprocessar, e não manda apagar a reunião", () => {
+    const meeting = abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3, processingError: MENSAGEM_PARTES_SEM_TRANSCRICAO },
+      { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 20 * DIA } });
+    expect(screen.queryByText(/não está guardado, então não há o que reprocessar/)).not.toBeInTheDocument();
+    expect(screen.getByText(/continua guardado até .*substitui a transcrição/)).toBeInTheDocument();
+    // A seção Gravação, logo abaixo, diz o mesmo: o áudio está guardado.
+    expect(screen.getByText(/O áudio desta reunião está guardado, mas não toca aqui/)).toBeInTheDocument();
+    fireEvent.click(botaoReprocessar()!);
+    expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
+  });
+
+  it("…e com esse áudio perto de vencer: sem o botão, e o texto não diz que o áudio não está guardado", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3 },
+      { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 10 * 60 * 1000 } });
+    expect(botaoReprocessar()).not.toBeInTheDocument();
+    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
+    expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
   });
 
   it.each(["ready", "processing"])("reunião %s não oferece reprocessar", status => {
@@ -1067,6 +1109,22 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     expect(screen.getByText(/Recebendo o áudio: 2 de 3/)).toBeInTheDocument();
     expect(screen.getByText("Transcrevendo: 1 de 3")).toBeInTheDocument();
     expect(screen.getAllByText("Recebendo o áudio").length).toBeGreaterThan(0);
+  });
+
+  // Conferência de tela do pacote 4b: em árabe o ícone girando ficava colado ao
+  // texto ("جارٍ استلام الصوت"), porque a margem era a da direita (mr-2) também
+  // na escrita da direita para a esquerda. A margem lógica (me-2) acompanha o ícone.
+  it("em árabe, o ícone girando do andamento tem a margem do lado do texto (me-2, e não mr-2)", async () => {
+    await i18n.changeLanguage("ar");
+    try {
+      abrirDetalhe({ status: "uploading", audioPipeline: "slices", expectedSlices: 3 } as never, { andamento: { recebidas: 2, transcritas: 1, esperadas: 3 } } as never);
+      const caixa = screen.getByText(/جارٍ استلام الصوت: 2 من 3/).closest("[role=status]")!;
+      const icone = caixa.querySelector("svg.animate-spin")!;
+      expect(icone).toHaveClass("me-2");
+      expect(icone).not.toHaveClass("mr-2");
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
   });
 });
 

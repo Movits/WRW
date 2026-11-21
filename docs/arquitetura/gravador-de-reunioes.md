@@ -438,7 +438,14 @@ Tamanho: P é pequena, M é média e G é grande.
   o OGG (Opus e Vorbis), o WebM e o MKV (o Opus vira Ogg Opus; o AAC, MP4 fragmentado), o
   FLAC e o AAC em ADTS (H9b), sem recodificar (`client/src/lib/corte-do-arquivo.ts`). O
   arquivo curto de um formato que o corte reconhece mas não lê (ALAC, AC-3, o Vorbis no
-  WebM) segue no envio único de hoje; o maior recebe o aviso com o nome do formato.
+  WebM) segue no envio único de hoje; o maior recebe o aviso com o nome do formato. Cada
+  parte fecha na última pausa da fala antes do teto, até 20 s antes dele, como a gravação
+  ao vivo (`client/src/lib/pausas-do-corte.ts`): o WAV mede o volume das amostras na
+  janela antes do teto; os comprimidos são lidos duas vezes, a primeira para achar as
+  pausas pelo global_gain (MP3, AAC), pela marca de voz (Opus em modo SILK) ou pelos bits
+  por amostra (FLAC). Sem pausa na janela, o corte cai no teto. O Vorbis e o Opus em modo
+  CELT só acham a pausa em silêncio digital (conferência de tela do pacote 4b: a fala que
+  atravessava a emenda do WAV, cortado a cada 14 MB, sumia da transcrição).
 - **G14:** tirar o envio único em base64. Só entra quando houver uma semana de logs sem
   `submitRecording`, nenhum cliente fora do repositório que ainda use esse envio, e o
   H9b pronto ou o aval da cliente.

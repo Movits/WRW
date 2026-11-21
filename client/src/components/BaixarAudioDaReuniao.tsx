@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, FileAudio, Loader2 } from "lucide-react";
+import { Check, Download, FileAudio, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { mensagemDaRecusaDoAudio } from "@/lib/mensagem-de-erro";
 import { abertoNaCascaDasLojas, ambienteAtual } from "@/lib/instalacao-do-app";
@@ -104,7 +104,9 @@ function DialogoDoAudio({ meetingId, duracaoSegundos, nomeSugerido, aoFechar }: 
   }
 
   const ocupado = preparar.isPending;
-  const tamanho = tamanhoNaTela(preparado?.tamanhoEstimadoBytes ?? tamanhoEstimadoDoAudio(duracaoSegundos), i18n.language);
+  // Preparando, ou com o endereço na mão, o formato não muda: ele é o do arquivo.
+  const travado = ocupado || comLink;
+  const tamanho =tamanhoNaTela(preparado?.tamanhoEstimadoBytes ?? tamanhoEstimadoDoAudio(duracaoSegundos), i18n.language);
   const rotulo: Record<FormatoDoAudio, string> = {
     mp3: t("meetings.audioDownload.formatMp3"),
     m4a: t("meetings.audioDownload.formatM4a"),
@@ -119,20 +121,28 @@ function DialogoDoAudio({ meetingId, duracaoSegundos, nomeSugerido, aoFechar }: 
       </h3>
       <p id={idDoAviso} className="text-sm leading-6 text-white/70">{t("meetings.audioDownload.notice")}</p>
 
-      <fieldset disabled={ocupado || comLink} className="mt-4">
+      <fieldset disabled={travado} className="mt-4">
         <legend className="mb-2 text-sm font-semibold text-white/85">{t("meetings.audioDownload.formatLabel")}</legend>
         <div className="space-y-2">
-          {FORMATOS_DO_AUDIO.map(opcao => <label key={opcao} className="flex cursor-pointer items-start gap-2 text-sm text-white/75">
-            <input type="radio" name={nomeDoGrupo} value={opcao} checked={formato === opcao} onChange={() => setFormato(opcao)} className="mt-1 accent-amber-300"/>
-            <span>{rotulo[opcao]}</span>
-          </label>)}
+          {/* Travado (preparando, ou com o arquivo pronto), o navegador pinta os dois rádios do mesmo cinza:
+              o formato do arquivo fica em destaque, com a marca, e o outro se apaga. */}
+          {FORMATOS_DO_AUDIO.map(opcao => {
+            const escolhido = formato === opcao;
+            const cor = !travado ? "cursor-pointer text-white/75" : escolhido ? "font-semibold text-amber-100" : "text-white/40";
+            return <label key={opcao} data-escolhido={travado && escolhido ? "" : undefined} className={`flex items-start gap-2 text-sm ${cor}`}>
+              <input type="radio" name={nomeDoGrupo} value={opcao} checked={escolhido} onChange={() => setFormato(opcao)} className="mt-1 accent-amber-300"/>
+              <span>{rotulo[opcao]}</span>
+              {travado && escolhido && <Check size={15} className="mt-0.5 shrink-0 text-amber-300" aria-hidden="true"/>}
+            </label>;
+          })}
         </div>
       </fieldset>
       <p className="mt-3 text-sm text-amber-100/85">{t("meetings.audioDownload.size", { tamanho })}</p>
 
       {comLink ? <>
         <p role="status" className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">
-          {iniciado ? t("meetings.audioDownload.started") : t("meetings.audioDownload.ready", { minutos: Math.max(1, Math.round(preparado.validadeMs / 60_000)) })}
+          {/* `count`, e não um número solto: o árabe muda a palavra com o número (دقيقتين, os 2 min do endereço; 3 a 10 دقائق). */}
+          {iniciado ? t("meetings.audioDownload.started") : t("meetings.audioDownload.ready", { count: Math.max(1, Math.round(preparado.validadeMs / 60_000)) })}
         </p>
         {noAppInstalado && <p className="mt-2 text-xs text-white/55">{t("meetings.audioDownload.installedAppHint")}</p>}
         <div className="mt-5 flex flex-wrap gap-3">

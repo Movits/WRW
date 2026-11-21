@@ -4,6 +4,8 @@ import {
 } from "./corte-comum";
 import { lerConfigAac, PartesEmFmp4, type FaixaAac } from "./corte-do-mp4";
 import { PartesEmOggOpus } from "./paginas-do-ogg";
+import { nivelDoAac } from "./nivel-dos-quadros";
+import { cortarNasPausas, partesDoCorte } from "./pausas-do-corte";
 
 /**
  * O corte do WebM e do Matroska (H9b do plano do gravador): o áudio que o
@@ -183,6 +185,12 @@ function quadrosDoBloco(j: LeitorEmJanela, p: number, fim: number): Array<[numbe
 
 /** Corta o WebM ou o Matroska (Opus ou AAC) em partes de até 600 s e 14 MB (ver o comentário do módulo). */
 export async function cortarWebm(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
+  // Cada parte fecha numa pausa da fala quando há uma perto do teto (lib/pausas-do-corte.ts):
+  // os escritores (Ogg Opus e MP4) recebem a pausa nas opções e a medem pacote a pacote.
+  return cortarNasPausas(o => cortarWebmUmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+async function cortarWebmUmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
   if (opcoes.sinal?.aborted) throw corteCancelado();
   const janela = new LeitorEmJanela(ler, tamanho, opcoes);
 
@@ -228,7 +236,9 @@ export async function cortarWebm(ler: LerBytes, tamanho: number, opcoes: OpcoesD
     const escolhida = estado.escolhida;
     if (!escolhida) return null;
     if ("opus" in escolhida) return escolhida.opus.adicionar(inicio, janela.trecho(inicio, fim));
-    return fim > inicio ? escolhida.aac.adicionar(inicio, fim - inicio, escolhida.quadro) : null;
+    // O nível do quadro AAC (o global_gain, lib/nivel-dos-quadros.ts) só na leitura que acha as pausas.
+    const nivel = opcoes.pausas?.ouvindo ? nivelDoAac(i => janela.b(i), inicio, fim) : undefined;
+    return fim > inicio ? escolhida.aac.adicionar(inicio, fim - inicio, escolhida.quadro, nivel) : null;
   };
 
   const lerFaixas = async (elem: Elemento): Promise<Faixa[] | CorteDoArquivo> => {

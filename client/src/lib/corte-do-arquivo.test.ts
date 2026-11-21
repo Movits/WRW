@@ -112,7 +112,12 @@ describe("atenderPedidoDeCorte (o que o Worker faz)", () => {
     const bytes = oggOpus({ pacotes: 300 }).bytes;
     const respostas: Array<[RespostaDoCorte, ArrayBuffer[] | undefined]> = [];
     await atenderPedidoDeCorte({ arquivo: new Blob([bytes], { type: "audio/ogg" }) }, (r, t) => respostas.push([r, t]));
-    expect(respostas[0][0]).toEqual({ tipo: "lendo", lidos: bytes.length, total: bytes.length });
+    // O corte lê o arquivo duas vezes para fechar as partes nas pausas da fala
+    // (lib/pausas-do-corte.ts): a primeira leitura conta até a metade, e o
+    // andamento termina no arquivo inteiro, mesmo sem a segunda.
+    const lendo = respostas.map(([r]) => r).filter(r => r.tipo === "lendo");
+    expect(lendo[0]).toEqual({ tipo: "lendo", lidos: Math.floor(bytes.length / 2), total: bytes.length });
+    expect(lendo.at(-1)).toEqual({ tipo: "lendo", lidos: bytes.length, total: bytes.length });
     const [final, transferir] = respostas.at(-1)!;
     expect(final.tipo).toBe("pronto");
     if (final.tipo !== "pronto" || !final.corte.ok) throw new Error("sem corte");

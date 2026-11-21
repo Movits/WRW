@@ -887,7 +887,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept={props.emPartes ? ACEITOS_EM_PARTES : ACEITOS_NO_ENVIO_UNICO} className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin mr-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
+      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin me-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
           o teto do arquivo enviado, que vai em partes até 12 h em todos os
           formatos (H9a, H9b e H9c). */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}</div>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
@@ -1193,6 +1193,15 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     ? <BaixarAudioDaReuniao meetingId={meetingId} duracaoSegundos={audioParaBaixar.duracaoSegundos}
         nomeSugerido={nomeDoArquivo({ titulo: meeting.title, criadaEm: meeting.createdAt })}/>
     : null;
+  // O áudio que o reprocesso relê é o guardado no bucket, e não só o que toca:
+  // as partes que falharam na IA não tocam no player, mas o servidor as
+  // reprocessa (reprocessarEmPartes, pela mesma regra do "Baixar o áudio",
+  // server/audio-guardado-das-partes.ts). Pela gravação que toca, a reunião que
+  // falhou inteira dizia que não havia áudio guardado e mandava a dona apagar
+  // a reunião, logo acima da seção que oferecia baixar esse mesmo áudio. O
+  // servidor manda o `audioParaBaixar` sempre que há o que tocar; a gravação
+  // fica só de reserva.
+  const audioGuardado: { expiresAt: number } | null = audioParaBaixar ?? recording;
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
@@ -1240,23 +1249,23 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
           reprocesso inteiro, que cresce com as partes da gravação: perto de
           vencer, o reprocesso seguraria o áudio além dos 30 dias, e o servidor
           recusa o pedido com a mesma conta (margemDoReprocesso). */}
-      {recording && !audioGuardadoAusente && recording.expiresAt - Date.now() > margemDoReprocesso(meeting.expectedSlices) ? (
+      {audioGuardado && !audioGuardadoAusente && audioGuardado.expiresAt - Date.now() > margemDoReprocesso(meeting.expectedSlices) ? (
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-red-100/75">{t("meetings.reprocessHint", { date: new Date(recording.expiresAt).toLocaleDateString(i18n.language) })}</p>
+          <p className="text-sm text-red-100/75">{t("meetings.reprocessHint", { date: new Date(audioGuardado.expiresAt).toLocaleDateString(i18n.language) })}</p>
           <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
             <RefreshCw size={15} className={reprocessar.isPending ? "animate-spin" : ""}/> {t("meetings.reprocessButton")}
           </button>
         </div>
       ) : (
-        <p className="mt-2 text-sm text-red-100/75">{recording ? t("meetings.reprocessUnavailable") : t("meetings.reprocessNoAudio")}</p>
+        <p className="mt-2 text-sm text-red-100/75">{audioGuardado ? t("meetings.reprocessUnavailable") : t("meetings.reprocessNoAudio")}</p>
       )}
     </div>}
-    {andamento && (meeting.status === "recording" || meeting.status === "uploading") && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>
+    {andamento && (meeting.status === "recording" || meeting.status === "uploading") && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin me-2" size={16}/>
       {andamento.esperadas ? t("meetings.progressUploading", { recebidas: andamento.recebidas, esperadas: andamento.esperadas }) : t("meetings.progressRecording")}
       {andamento.recebidas > 0 && <span className="block mt-1 text-sm text-amber-100/75">{t("meetings.progressTranscribing", { transcritas: andamento.transcritas, total: andamento.esperadas ?? andamento.recebidas })}</span>}
     </div>}
-    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
+    {emProcessamento && <div role="status" className="mb-6 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-amber-100"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.transcribingStatus")}</div>}
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 mb-6">{([ ["summary", t("meetings.summaryTab"), FileText], ["transcript", t("meetings.transcriptTab"), Clock3], ["mindmap", t("meetings.mindMapTab"), Network], ["contacts", t("meetings.contactsTab", { count: suggestions.length }), Users] ] as const).map(([id,label,Icon]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${tab === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icon size={16}/>{label}</button>)}</div>
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
@@ -1304,7 +1313,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
             </select>
           </label>
         </div>
-        {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingStatus")}</div> : <>
+        {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
             {tiposPresentes.map(tipo => <span key={tipo} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${TIPOS_DE_ENTIDADE[tipo].classes}`}>{t(TIPOS_DE_ENTIDADE[tipo].chave)}</span>)}
@@ -1342,7 +1351,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
           nunca "FALTANDO" nos cartões, que afirmaria que a IA não achou nada. */}
       {suggestions.length > 0 && !pendenciasDaReuniao.data && (pendenciasDaReuniao.isError
         ? <ErroDeConsulta erro={pendenciasDaReuniao.error} aoTentarDeNovo={() => void pendenciasDaReuniao.refetch()} />
-        : <p className="text-sm text-white/45"><Loader2 className="inline animate-spin mr-2" size={14}/>{t("networkPanel.loading")}</p>)}
+        : <p className="text-sm text-white/45"><Loader2 className="inline animate-spin me-2" size={14}/>{t("networkPanel.loading")}</p>)}
       {suggestions.length ? <>
         {participantes.map(cartaoDaSugestao)}
         {/* Quem só foi citada na conversa (achado 7 da bancada de 16/11): à parte e

@@ -1,5 +1,6 @@
 import { fimSemEtiquetas } from "./corte-do-mp3";
 import { ascii, corteCancelado, crc16Flac, crc8Flac, LeitorEmJanela, limitesDoCorte, MontagemDaParte, recusa, u16be, type CorteDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
+import { cortarNasPausas, partesDoCorte, SEM_PAUSAS } from "./pausas-do-corte";
 
 /**
  * O corte do FLAC (H9b do plano do gravador). O FLAC não recodifica: cada
@@ -133,8 +134,20 @@ function subquadroValido(j: LeitorEmJanela, p: number) {
   return s >= 0 && !(s & 0x80) && (tipo <= 1 || (tipo >= 8 && tipo <= 12) || tipo >= 32);
 }
 
-/** Corta o FLAC em partes de até 600 s e 14 MB (ver o comentário do módulo). */
+/**
+ * Corta o FLAC em partes de até 600 s e 14 MB (ver o comentário do módulo),
+ * cada uma fechando numa pausa da fala quando há uma perto do teto
+ * (lib/pausas-do-corte.ts). O FLAC não perde nada: os bits por amostra de
+ * cada quadro crescem com o logaritmo do volume (a fala a −20 dBFS gasta uns
+ * 12 por amostra, o ruído da sala a −60, uns 6), e 2 elevado a eles vira a
+ * escala de amplitude em que a pausa se mede, como no WAV.
+ */
 export async function cortarFlac(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
+  return cortarNasPausas(o => cortarFlacUmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+async function cortarFlacUmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
+  const pausas = opcoes.pausas ?? SEM_PAUSAS;
   const limites = limitesDoCorte(opcoes);
   if (opcoes.sinal?.aborted) throw corteCancelado();
   const janela = new LeitorEmJanela(ler, tamanho, opcoes);
@@ -239,7 +252,8 @@ export async function cortarFlac(ler: LerBytes, tamanho: number, opcoes: OpcoesD
       if (segundosNoTotal + segundos > limites.segundosNoTotal) return recusa("LONGO_DEMAIS", "flac");
       const numero = (p: EmMontagem) => escreverNumeroFlac(atual!.variavel ? p.amostras : p.quadros);
       const tamanhoNovo = (p: EmMontagem | null) => 4 + (p ? numero(p).length : 1) + atual!.extras.length + 1 + (fimDoMiolo - inicioDoMiolo) + 2;
-      if (parte && (parte.segundos + segundos > limites.segundosPorParte || parte.montagem.bytes + tamanhoNovo(parte) > limites.bytesPorParte)) {
+      if (parte && (parte.segundos + segundos > limites.segundosPorParte || parte.montagem.bytes + tamanhoNovo(parte) > limites.bytesPorParte
+        || pausas.antes(parte.segundos * 1000, parte.montagem.bytes))) {
         fecharParte(parte);
         if (partes.length >= limites.partesNoMaximo) return recusa("MUITAS_PARTES", "flac");
         parte = null;
@@ -258,6 +272,9 @@ export async function cortarFlac(ler: LerBytes, tamanho: number, opcoes: OpcoesD
       parte.amostras += atual.bloco;
       parte.segundos += segundos;
       segundosNoTotal += segundos;
+      // Os bytes, com o número do quadro no maior tamanho (7): a renumeração pode crescê-lo.
+      const miolo = fimDoMiolo - inicioDoMiolo;
+      pausas.depois(segundos * 1000, 4 + 7 + atual.extras.length + 1 + miolo + 2, pausas.ouvindo ? 2 ** ((8 * miolo) / (atual.bloco * atual.canais)) : 0);
     }
     atual = seguinte;
   }

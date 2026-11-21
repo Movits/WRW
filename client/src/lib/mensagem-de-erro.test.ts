@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
@@ -277,5 +277,30 @@ describe("mensagemDaRecusaDoAudio — o código do servidor vira o aviso no idio
     expect(mensagemDaRecusaDoAudio(recusa("BAD_REQUEST", "toString"), t)).toBe("[meetings.audioDownload.error]");
     expect(mensagemDaRecusaDoAudio(new TRPCClientError("Failed to fetch", { cause: new TypeError("Failed to fetch") }), t)).toBe("[meetings.audioDownload.error]");
     expect(mensagemDaRecusaDoAudio(null, t)).toBe("[meetings.audioDownload.error]");
+  });
+});
+
+// Conferência de tela do pacote 4b: as frases que a fila da gravação em partes
+// grava em processing_error (server/fila-de-transcricao.ts) saíam em português
+// na caixa vermelha da reunião que falhou, em qualquer idioma (captura 32).
+describe("traduzirMensagemDoServidor — as falhas da fila da gravação em partes no idioma da tela", () => {
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_PARTES_SEM_TRANSCRICAO, "meetings.processingFailedNoTranscript", "This meeting's audio couldn't be transcribed."],
+    [MENSAGEM_FALHA_DA_MONTAGEM, "meetings.processingFailedRetryLater", "This meeting couldn't be processed. Try again later."],
+    [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, "meetings.processingFailedNoAudioSent", "The recording was interrupted before the audio was sent."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
   });
 });

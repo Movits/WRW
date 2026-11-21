@@ -2,6 +2,8 @@ import {
   ascii, crc32Ogg, limitesDoCorte, MontagemDaParte, u32le,
   type CodigoDaRecusaDoCorte, type OpcoesDoCorte, type ParteCortada,
 } from "./corte-comum";
+import { nivelDoOpus } from "./nivel-dos-quadros";
+import { SEM_PAUSAS, type PausasDoCorte } from "./pausas-do-corte";
 
 /**
  * As páginas do Ogg que os cortes escrevem (H9b do plano do gravador): as de
@@ -98,6 +100,8 @@ type PacoteNaPagina = { posicao: number; tamanho: number };
 export class PartesEmOggOpus {
   readonly partes: ParteCortada[] = [];
   private readonly limites: ReturnType<typeof limitesDoCorte>;
+  /** A pausa da fala (lib/pausas-do-corte.ts): a parte fecha nela quando há uma perto do teto. */
+  private readonly pausas: PausasDoCorte;
   private readonly cabecalho: Uint8Array<ArrayBuffer>;
   private readonly paginasDoCabecalho: number;
   private montagem: MontagemDaParte | null = null;
@@ -114,6 +118,7 @@ export class PartesEmOggOpus {
 
   constructor(opusHead: Uint8Array, opcoes: OpcoesDoCorte) {
     this.limites = limitesDoCorte(opcoes);
+    this.pausas = opcoes.pausas ?? SEM_PAUSAS;
     const primeira = paginar([opusHead], SERIAL, 0, true);
     const etiquetas = paginar([etiquetasVazias("opus")], SERIAL, primeira.quantas, false);
     this.cabecalho = Uint8Array.from([...Array.from(primeira.bytes), ...Array.from(etiquetas.bytes)]);
@@ -138,7 +143,8 @@ export class PartesEmOggOpus {
     const abreOutra = this.lacos.length + lacos > 255 || this.usados + tamanho > this.corpo.length;
     const acrescimo = (abreOutra || !this.pacotes.length ? 27 : 0) + lacos + tamanho;
     if (this.montagem && this.pacotesDaParte > 0
-      && (this.amostrasDaParte + amostras > this.limites.segundosPorParte * 48000 || this.bytesDaParte + this.bytesDaPaginaAberta + acrescimo > this.limites.bytesPorParte)) {
+      && (this.amostrasDaParte + amostras > this.limites.segundosPorParte * 48000 || this.bytesDaParte + this.bytesDaPaginaAberta + acrescimo > this.limites.bytesPorParte
+        || this.pausas.antes(this.amostrasDaParte / 48, this.bytesDaParte + this.bytesDaPaginaAberta))) {
       this.fechar();
       if (this.partes.length >= this.limites.partesNoMaximo) return "MUITAS_PARTES";
     }
@@ -167,6 +173,9 @@ export class PartesEmOggOpus {
     this.pacotesDaParte++;
     this.amostrasDaParte += amostras;
     this.amostrasNoTotal += amostras;
+    // Os bytes como se o pacote abrisse uma página (o teto do que ele pode somar à parte).
+    // O nível: a marca de voz do SILK, ou o tamanho no CELT (lib/nivel-dos-quadros.ts).
+    this.pausas.depois(amostras / 48, 27 + lacos + tamanho, this.pausas.ouvindo ? nivelDoOpus(bytes, tamanho, amostras / 48) : 0);
     return null;
   }
 

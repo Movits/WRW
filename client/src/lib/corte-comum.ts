@@ -1,4 +1,5 @@
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PARTES_POR_REUNIAO_MAX } from "@shared/const";
+import type { PausasDoCorte } from "./pausas-do-corte";
 
 /**
  * O que os cortes da importação em partes têm em comum (H9a, H9b e H9c do
@@ -36,6 +37,11 @@ export type OpcoesDoCorte = {
   /** A leitura andou: quantos bytes do arquivo já foram lidos, de quantos. */
   aoLer?: (lidos: number, total: number) => void;
   sinal?: AbortSignal;
+  /**
+   * Interno: a leitura das pausas da fala (lib/pausas-do-corte.ts), que o
+   * próprio corte passa às duas leituras que faz. Quem chama o corte não passa.
+   */
+  pausas?: PausasDoCorte;
 };
 
 export function limitesDoCorte(opcoes: OpcoesDoCorte) {

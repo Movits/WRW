@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import { PARTE_BYTES_MAX } from "./corte-comum";
-import { cortarWav } from "./corte-do-wav";
+import { cortarWav, volumeDoPcm } from "./corte-do-wav";
+import { SEM_PAUSAS } from "./pausas-do-corte";
 import { ascii, juntar, leitorDe, u16le, u32le, wav, type OpcoesDoWav } from "@/test/audio-sintetico";
 import { mesmosBytes, montar, partesDe } from "@/test/conferir-partes";
 import { MPEG1_128K, quadros, type FormatoDoQuadro } from "@/test/mp3-sintetico";
@@ -121,6 +122,9 @@ describe("cortarWav", () => {
     // O andamento conta sobre o arquivo inteiro, e não sobre o data.
     expect(Math.max(...lidos)).toBeLessThanOrEqual(arquivo.length);
     expect(Math.max(...lidos)).toBeGreaterThan(mpeg.length);
+    // E nunca volta: o corte do MP3 lê o "data" duas vezes (lib/pausas-do-corte.ts),
+    // a primeira contando até a metade, depois de os cabeçalhos já terem sido lidos.
+    expect(lidos).toEqual([...lidos].sort((a, b) => a - b));
   });
 
   it("o MP3 dentro do WAV que não tem quadros: DANIFICADO, e não 'usa MP3'", async () => {
@@ -141,5 +145,95 @@ describe("cortarWav", () => {
     expect(await cortarWav(leitorDe(semData), semData.length)).toEqual({ ok: false, codigo: "DANIFICADO", formato: "wav" });
     const outro = Uint8Array.from("RIFF\0\0\0\0AVI LIST", c => c.charCodeAt(0));
     expect(await cortarWav(leitorDe(outro), outro.length)).toEqual({ ok: false, codigo: "DANIFICADO", formato: "wav" });
+  });
+});
+
+/**
+ * Conferência de tela do pacote 4b: o corte de 14 MB caía onde estivesse (a
+ * cada 2:46 no WAV mono de 44,1 kHz), e a frase que atravessava a emenda sumia
+ * da transcrição. Agora a parte fecha no meio da última pausa da fala antes do
+ * teto, até um quarto da parte antes dele. A "fala" aqui é sintética: um tom de
+ * 300 Hz com sopro, por 1,3 s a cada 1,8 s; a pausa, ruído de sala a −60 dBFS.
+ */
+describe("cortarWav: a emenda na pausa da fala", () => {
+  const TAXA = 16000;
+  /** O ruído pseudoaleatório e repetível, de −1 a 1. */
+  const ruido = (() => { let x = 7; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return ((x >>> 0) / 4294967296) * 2 - 1; }; })();
+  /** A amostra em `t` segundos: a voz nos primeiros 1,3 s de cada 1,8 s; a pausa no resto. */
+  const fala = (t: number) => (t % 1.8 < 1.3 ? 0.3 * Math.sin(2 * Math.PI * 300 * t) + 0.02 * ruido() : 0.001 * ruido());
+  /** O WAV de PCM de 16 bits, mono, com `segundos` da função `sinal`. */
+  function wavDe(segundos: number, sinal: (t: number) => number) {
+    const n = Math.round(segundos * TAXA);
+    const dados = new Uint8Array(n * 2);
+    const vista = new DataView(dados.buffer);
+    for (let i = 0; i < n; i++) vista.setInt16(i * 2, Math.max(-32768, Math.min(32767, Math.round(sinal(i / TAXA) * 32767))), true);
+    const fmt = [...u16le(1), ...u16le(1), ...u32le(TAXA), ...u32le(TAXA * 2), ...u16le(2), ...u16le(16)];
+    const miolo = juntar(ascii("WAVE"), ascii("fmt "), u32le(fmt.length), fmt, ascii("data"), u32le(dados.length), dados);
+    return { bytes: juntar(ascii("RIFF"), u32le(miolo.length), miolo), dados };
+  }
+  /** Onde cada emenda cai, em ms do arquivo. */
+  const emendas = (corte: Awaited<ReturnType<typeof cortarWav>>) => {
+    const duracoes = partesDe(corte).map(p => p.duracaoMs);
+    return duracoes.slice(0, -1).map((_, i) => duracoes.slice(0, i + 1).reduce((s, d) => s + d, 0));
+  };
+
+  it("a parte fecha no meio da última pausa antes do teto, e não no meio da fala", async () => {
+    const { bytes, dados } = wavDe(14, fala);
+    const corte = await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4 });
+    // O teto (4 s, 7,34 s e 10,94 s) cai na fala; as pausas de 3,1 a 3,6 s, 6,7 a 7,2 s e 10,3 a 10,8 s estão na janela.
+    expect(emendas(corte)).toEqual([3340, 6940, 10540]);
+    // Nada some nem se repete: os dados das partes juntos são os do arquivo.
+    const juntas = juntar(...partesDe(corte).map(parte => montar(bytes, parte).subarray(44)));
+    expect(mesmosBytes(juntas, dados)).toBe(true);
+    // O corte de sempre (sem procurar a pausa) emendava no meio da fala: era o defeito.
+    const deAntes = await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4, pausas: SEM_PAUSAS });
+    expect(emendas(deAntes)).toEqual([4000, 8000, 12000]);
+  });
+
+  it("sem pausa na janela (a fala corrida, um tom contínuo), corta no teto, como antes", async () => {
+    const { bytes } = wavDe(10, t => 0.3 * Math.sin(2 * Math.PI * 300 * t));
+    expect(emendas(await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4 }))).toEqual([4000, 8000]);
+  });
+
+  it("a pausa longe do teto (antes da janela de um quarto da parte) não encurta a parte", async () => {
+    // Uma pausa só, de 1,8 a 2,3 s: com partes de 4 s, a janela é de 3 a 4 s.
+    const { bytes } = wavDe(10, t => (t >= 1.8 && t < 2.3 ? 0.001 * ruido() : 0.3 * Math.sin(2 * Math.PI * 300 * t)));
+    expect(emendas(await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4 }))).toEqual([4000, 8000]);
+  });
+
+  it("se as pausas passarem do teto de partes da reunião, o corte fica no teto, como antes", async () => {
+    // 12 s em partes de 4 s: três no teto, quatro nas pausas.
+    const { bytes } = wavDe(12, fala);
+    expect(emendas(await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4 }))).toEqual([3340, 6940, 10540]);
+    const corte = await cortarWav(leitorDe(bytes), bytes.length, { segundosPorParte: 4, partesNoMaximo: 3 });
+    expect(emendas(corte)).toEqual([4000, 8000]);
+  });
+});
+
+describe("volumeDoPcm", () => {
+  const seno = (n: number) => Array.from({ length: n }, (_, i) => Math.sin((2 * Math.PI * i) / 32));
+  it("o RMS do seno de amplitude cheia é ~0,707 nos formatos do WAV", () => {
+    const amostras = seno(3200);
+    const pcm16 = new Uint8Array(amostras.length * 2);
+    const pcm24 = new Uint8Array(amostras.length * 3);
+    const f32 = new Uint8Array(amostras.length * 4);
+    const pcm8 = new Uint8Array(amostras.length);
+    amostras.forEach((v, i) => {
+      new DataView(pcm16.buffer).setInt16(i * 2, Math.round(v * 32767), true);
+      const v24 = Math.round(v * 8388607);
+      pcm24.set([v24 & 0xff, (v24 >> 8) & 0xff, (v24 >> 16) & 0xff], i * 3);
+      new DataView(f32.buffer).setFloat32(i * 4, v, true);
+      pcm8[i] = Math.round(v * 127) + 128;
+    });
+    for (const [bytes, formato, tamanho] of [[pcm16, 1, 2], [pcm24, 1, 3], [f32, 3, 4], [pcm8, 1, 1]] as const) {
+      expect(volumeDoPcm(bytes, formato, tamanho)).toBeCloseTo(Math.SQRT1_2, 2);
+    }
+  });
+
+  it("o silêncio do A-law (0xd5) e do µ-law (0xff) é ~0, e o pico, ~1", () => {
+    expect(volumeDoPcm(new Uint8Array(100).fill(0xd5), 6, 1)).toBeLessThan(0.001);
+    expect(volumeDoPcm(new Uint8Array(100).fill(0xff), 7, 1)).toBeLessThan(0.001);
+    expect(volumeDoPcm(new Uint8Array(100).fill(0x2a), 6, 1)).toBeGreaterThan(0.95);
+    expect(volumeDoPcm(new Uint8Array(100).fill(0x80), 7, 1)).toBeGreaterThan(0.95);
   });
 });

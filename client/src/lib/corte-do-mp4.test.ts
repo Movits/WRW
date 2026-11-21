@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import { PARTE_BYTES_MAX } from "./corte-comum";
 import { cortarMp4, lerConfigAac } from "./corte-do-mp4";
+import { SEM_PAUSAS } from "./pausas-do-corte";
 import { ascAacLc, juntar, leitorDe, mp4, type OpcoesDoMp4 } from "@/test/audio-sintetico";
 import { acharCaixa, caixasMp4, fragmentoMp4, mesmosPacotes, montar, partesDe } from "@/test/conferir-partes";
 
@@ -76,12 +77,31 @@ describe("cortarMp4: os formatos do MP4", () => {
   it("o MP4 com vídeo não lê o vídeo: só os cabeçalhos das caixas (em blocos de 64 kB), o ftyp e o moov", async () => {
     const arquivo = mp4({ quadros: 2000, video: true, moovNoFim: true });
     const ler = vi.fn(leitorDe(arquivo.bytes));
-    const corte = await cortarMp4(ler, arquivo.bytes.length);
+    // O corte de sempre (sem procurar a pausa): o começo, o ftyp, o cabeçalho do moov e o moov; o mdat de ~800 kB é pulado.
+    const corte = await cortarMp4(ler, arquivo.bytes.length, { pausas: SEM_PAUSAS });
     expect(corte.ok).toBe(true);
-    // O começo (o ftyp e o cabeçalho do mdat), o ftyp, o cabeçalho do moov e o moov: o mdat de ~800 kB é pulado.
     expect(ler.mock.calls.length).toBeLessThanOrEqual(4);
     const lidos = ler.mock.calls.reduce((soma, [inicio, fim]) => soma + (fim - inicio), 0);
     expect(lidos).toBeLessThan(arquivo.bytes.length / 4);
+  });
+
+  // Conferência de tela do pacote 4b: para fechar a parte na pausa da fala, a
+  // leitura que acha as pausas lê os quadros de áudio (o global_gain de cada
+  // um, lib/nivel-dos-quadros.ts), bloco a bloco. O vídeo entre eles, nunca.
+  it("procurando a pausa, lê os quadros de áudio, bloco a bloco, e nunca o vídeo entre eles", async () => {
+    const arquivo = mp4({ quadros: 2000, video: true, moovNoFim: true });
+    const ler = vi.fn(leitorDe(arquivo.bytes));
+    const corte = await cortarMp4(ler, arquivo.bytes.length);
+    expect(corte.ok).toBe(true);
+    // Cada bloco de vídeo (3.000 bytes) vem logo antes do bloco de áudio.
+    const videos = arquivo.offsetsDoAudio.map(inicio => [inicio - 3000, inicio] as const);
+    const leuVideo = ler.mock.calls.filter(([inicio, fim]) => videos.some(([de, ate]) => inicio < ate && fim > de));
+    // Só o começo do arquivo, lido em blocos de 64 kB, encosta no primeiro bloco de vídeo.
+    expect(leuVideo.every(([inicio]) => inicio === 0)).toBe(true);
+    const doAudio = arquivo.quadros.reduce((soma, q) => soma + q.length, 0);
+    const lidos = ler.mock.calls.filter(([inicio]) => inicio > 0).reduce((soma, [inicio, fim]) => soma + (fim - inicio), 0);
+    // Fora o áudio, só os cabeçalhos das caixas e o moov, nas duas leituras.
+    expect(lidos).toBeLessThanOrEqual(doAudio + 4 * 64 * 1024);
   });
 
   it("a parte fecha antes dos 14 MB, contando o começo, o moof e o cabeçalho do mdat", async () => {

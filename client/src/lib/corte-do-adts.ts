@@ -1,5 +1,7 @@
 import { fimSemEtiquetas } from "./corte-do-mp3";
 import { corteCancelado, LeitorEmJanela, limitesDoCorte, MontagemDaParte, recusa, type CorteDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
+import { nivelDoAac } from "./nivel-dos-quadros";
+import { cortarNasPausas, partesDoCorte, SEM_PAUSAS } from "./pausas-do-corte";
 
 /**
  * O corte do AAC em ADTS (H9b do plano do gravador): o .aac que gravadores e
@@ -62,8 +64,18 @@ function confirmado(j: LeitorEmJanela, p: number, q: Quadro, fimDoAudio: number)
   return true;
 }
 
-/** Corta o AAC em ADTS em partes de até 600 s e 14 MB (ver o comentário do módulo). */
+/**
+ * Corta o AAC em ADTS em partes de até 600 s e 14 MB (ver o comentário do
+ * módulo), cada uma fechando numa pausa da fala quando há uma perto do teto
+ * (lib/pausas-do-corte.ts), medida pelo passo do quantizador de cada quadro
+ * (o global_gain, lib/nivel-dos-quadros.ts).
+ */
 export async function cortarAdts(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
+  return cortarNasPausas(o => cortarAdtsUmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+async function cortarAdtsUmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
+  const pausas = opcoes.pausas ?? SEM_PAUSAS;
   const limites = limitesDoCorte(opcoes);
   const tiquesPorParte = limites.segundosPorParte * TIQUES_POR_SEGUNDO;
   const tiquesNoTotal = limites.segundosNoTotal * TIQUES_POR_SEGUNDO;
@@ -93,7 +105,8 @@ export async function cortarAdts(ler: LerBytes, tamanho: number, opcoes: OpcoesD
       if (q && pos + q.tamanho <= fimDoAudio && ((anterior && anterior.fluxo === q.fluxo) || confirmado(janela, pos, q, fimDoAudio))) {
         anterior = q;
         if (tiques + q.tiques > tiquesNoTotal) return recusa("LONGO_DEMAIS", "aac");
-        if (atual && (atual.tiques + q.tiques > tiquesPorParte || atual.montagem.bytes + q.tamanho > limites.bytesPorParte)) {
+        if (atual && (atual.tiques + q.tiques > tiquesPorParte || atual.montagem.bytes + q.tamanho > limites.bytesPorParte
+          || pausas.antes(atual.tiques / TIQUES_POR_MS, atual.montagem.bytes))) {
           partes.push(atual.montagem.fechar(Math.round(atual.tiques / TIQUES_POR_MS)));
           if (partes.length >= limites.partesNoMaximo) return recusa("MUITAS_PARTES", "aac");
           atual = null;
@@ -103,6 +116,8 @@ export async function cortarAdts(ler: LerBytes, tamanho: number, opcoes: OpcoesD
         atual.tiques += q.tiques;
         tiques += q.tiques;
         bytesDeAudio += q.tamanho;
+        // O bloco AAC começa depois do cabeçalho de 7 bytes (9 com o CRC, o bit de proteção em 0).
+        pausas.depois(q.tiques / TIQUES_POR_MS, q.tamanho, pausas.ouvindo ? nivelDoAac(i => janela.b(i), pos + ((janela.b(pos + 1) & 1) ? 7 : 9), pos + q.tamanho) : 0);
         pos += q.tamanho;
         continue;
       }

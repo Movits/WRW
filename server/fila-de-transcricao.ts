@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
@@ -289,7 +290,7 @@ async function encerrarAbandonadas(db: Banco, agora: number, escopo: Escopo) {
     }).from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, r.id));
     if (partes?.ultimaParte !== null && partes?.ultimaParte !== undefined && Number(partes.ultimaParte) > corte) continue;
     if (partes?.maiorSeq === null || partes?.maiorSeq === undefined) {
-      await db.update(meetings).set({ status: "failed", processingError: "A gravação foi interrompida antes de enviar o áudio.", updatedAt: agora })
+      await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, updatedAt: agora })
         .where(and(eq(meetings.id, r.id), eq(meetings.status, "recording")));
       continue;
     }
@@ -305,13 +306,11 @@ async function encerrarAbandonadas(db: Banco, agora: number, escopo: Escopo) {
 async function retomarMontagensPresas(db: Banco, agora: number, escopo: Escopo) {
   const presas = and(eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), lt(meetings.lockedUntil, agora), daDona(meetings.ownerId, escopo));
   // Esgotadas as tentativas (o processo caiu em todas), vira falha; senão, volta.
-  await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_DA_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
+  await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
     .where(and(presas, sql`${meetings.attempts} >= ${TENTATIVAS_POR_REUNIAO}`));
   await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null })
     .where(and(presas, lt(meetings.attempts, TENTATIVAS_POR_REUNIAO)));
 }
-
-const MENSAGEM_DA_FALHA_DA_MONTAGEM = "Não foi possível processar esta reunião. Tente de novo mais tarde.";
 
 /**
  * Reuniões encerradas cujas partes estão todas resolvidas: transcritas ou com
@@ -366,7 +365,8 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
       segmentos: ((p.result as { segmentos?: Segmento[] } | null)?.segmentos ?? []),
     }));
     const { segmentos, texto } = montarTranscricao(transcritas, Math.max(reuniao.esperadas ?? 0, ...partes.map(p => p.seq + 1)));
-    if (!texto.trim()) throw new Error("Não foi possível transcrever o áudio desta reunião.");
+    // A frase é compartilhada (shared/const.ts): a tela a mostra no idioma da dona.
+    if (!texto.trim()) throw new Error(MENSAGEM_PARTES_SEM_TRANSCRICAO);
     const [r] = await db.select({ idioma: meetings.language }).from(meetings).where(eq(meetings.id, reuniao.id)).limit(1);
     // A extração lê as falas com o rótulo da voz ("{F1}: fala"), a mesma
     // entrada do resumo: sem ele, a IA não via quem fala e chutava a presença

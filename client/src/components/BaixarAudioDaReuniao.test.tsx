@@ -240,6 +240,46 @@ describe("Baixar o áudio — preparar e salvar", () => {
     await within(dialogo()).findByRole("link", { name: "Salvar o arquivo" });
   });
 
+  // Conferência de tela do pacote 4b: com o arquivo preparado, os dois rádios
+  // ficavam do mesmo cinza (o fieldset travado), e não se via o formato do
+  // arquivo. O escolhido fica em destaque, com a marca; o outro se apaga.
+  it("com o arquivo preparado, o formato escolhido fica em destaque e o outro se apaga; antes de preparar, os dois estão iguais", async () => {
+    abrir();
+    fireEvent.click(botaoDaPagina());
+    const rotuloDe = (nome: RegExp) => within(dialogo()).getByRole("radio", { name: nome }).closest("label")!;
+    expect(rotuloDe(/^MP3/)).not.toHaveAttribute("data-escolhido");
+    expect(rotuloDe(/^MP3/).className).toBe(rotuloDe(/^M4A/).className);
+    fireEvent.click(within(dialogo()).getByRole("radio", { name: /^M4A/ }));
+    preparar();
+    await within(dialogo()).findByRole("link", { name: "Salvar o arquivo" });
+    expect(rotuloDe(/^M4A/)).toHaveAttribute("data-escolhido");
+    expect(rotuloDe(/^M4A/)).toHaveClass("font-semibold", "text-amber-100");
+    expect(rotuloDe(/^M4A/).querySelector("svg")).not.toBeNull();
+    expect(rotuloDe(/^MP3/)).not.toHaveAttribute("data-escolhido");
+    expect(rotuloDe(/^MP3/)).toHaveClass("text-white/40");
+    expect(rotuloDe(/^MP3/).querySelector("svg")).toBeNull();
+  });
+
+  // Conferência de tela do pacote 4b: o árabe dizia "خلال 2 دقيقة"; com 2 o
+  // substantivo vai ao dual (دقيقتين), e de 3 a 10, ao plural (دقائق).
+  it.each([
+    // O endereço vale 2 min (VALIDADE_DO_ENDERECO_DO_AUDIO_MS): o caso da captura.
+    [VALIDADE_DO_ENDERECO_DO_AUDIO_MS, "خلال دقيقتين.", "خلال 2 دقيقة"],
+    [1 * 60_000, "خلال دقيقة واحدة.", "خلال 1 دقيقة"],
+    [5 * 60_000, "خلال 5 دقائق.", "خلال 5 دقيقة"],
+    [15 * 60_000, "خلال 15 دقيقة.", "خلال 15 دقائق"],
+  ])("em árabe, o prazo de %i ms concorda com o número", async (validadeMs, certo, errado) => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    rede.resposta = { ...PREPARADO, validadeMs };
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "تنزيل الصوت" }));
+    const aviso = screen.getByRole("dialog", { name: "تنزيل صوت الاجتماع" });
+    fireEvent.click(within(aviso).getByRole("button", { name: "تجهيز الملف" }));
+    await within(aviso).findByRole("link", { name: "حفظ الملف" });
+    expect(aviso).toHaveTextContent(certo);
+    expect(aviso).not.toHaveTextContent(errado);
+  });
+
   it("Fechar descarta o endereço: o próximo áudio é pedido de novo", async () => {
     abrir();
     fireEvent.click(botaoDaPagina());

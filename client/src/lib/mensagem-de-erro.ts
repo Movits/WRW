@@ -2,7 +2,10 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_FALHA_DA_MONTAGEM,
+  MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_PARTES_SEM_TRANSCRICAO,
   MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
@@ -73,6 +76,11 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
   [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
   [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
+  // As falhas que a fila da gravação em partes grava em processing_error
+  // (server/fila-de-transcricao.ts), que a caixa vermelha do detalhe mostra.
+  [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO]: "meetings.processingFailedNoAudioSent",
+  [MENSAGEM_FALHA_DA_MONTAGEM]: "meetings.processingFailedRetryLater",
+  [MENSAGEM_PARTES_SEM_TRANSCRICAO]: "meetings.processingFailedNoTranscript",
 };
 
 /**
