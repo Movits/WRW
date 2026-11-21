@@ -97,7 +97,7 @@ describe("o que vai à IA", () => {
   });
 
   it("transcrição vazia não chama a IA", async () => {
-    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, modelo: null, itens: [], recebidos: 0 });
+    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, titulo: null, modelo: null, itens: [], recebidos: 0 });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 });
@@ -189,6 +189,33 @@ describe("a conferência de cada item", () => {
     invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [acao(1), acao(1), ...[2, 3, 4, 5, 6, 7, 8, 9].map(acao)] }));
     const { itens } = await gerarResumoDaReuniao(ENTRADA);
     expect(itens.map(i => i.text)).toEqual(["Ação 1", "Ação 2", "Ação 3", "Ação 4", "Ação 5", "Ação 6", "Ação 7"]);
+  });
+
+  it("título sugerido: o prompt o pede no idioma, sem emoji, data nem nomes, e o esquema strict exige o campo (null quando não há assunto)", async () => {
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "Preparação e validação do aplicativo" }));
+    const resumo = await gerarResumoDaReuniao(ENTRADA);
+    expect(resumo.titulo).toBe("Preparação e validação do aplicativo");
+    const [sistema] = pedido().messages;
+    expect(sistema.content).toContain("- titulo: um título curto para a reunião, de até 80 caracteres, no mesmo idioma do resto");
+    expect(sistema.content).toContain("Sem emoji, sem data, sem aspas e sem nomes de pessoas ou rótulos de voz.");
+    const esquema = (pedido() as unknown as { response_format: { json_schema: { schema: { required: string[]; properties: Record<string, unknown> } } } }).response_format.json_schema.schema;
+    expect(esquema.required).toContain("titulo");
+    expect(esquema.properties.titulo).toMatchObject({ type: ["string", "null"], maxLength: 80 });
+  });
+
+  it("título sugerido vem conferido: sai o emoji do começo e as aspas; com rótulo de voz ou vazio, null", async () => {
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "📱 “Lançamento do app nas lojas.”" }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBe("Lançamento do app nas lojas");
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "Combinados de {F2} e da Carla" }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBeNull();
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: null }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBeNull();
+  });
+
+  it("G16: o resumo de uma reunião num idioma fora dos 10 da tela é escrito nele", async () => {
+    invokeLLM.mockResolvedValue(resposta(VAZIO));
+    await gerarResumoDaReuniao({ ...ENTRADA, idioma: "it" });
+    expect(pedido().messages[0].content).toContain("Escreva todo o texto em italiano.");
   });
 
   it("emoji que não é um emoji sai", async () => {

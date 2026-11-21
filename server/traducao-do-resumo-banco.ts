@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations } from "../drizzle/schema";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import { conferirMapaMental, rotulosDoMapaMental } from "@shared/mapa-mental";
 import { exigirDb } from "./db";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
@@ -31,7 +31,7 @@ export type LeituraParaTraduzir =
       estado: "pronto";
       resumoId: string;
       versao: number;
-      idiomaOriginal: IdiomaDaReuniao;
+      idiomaOriginal: IdiomaFalado;
       itens: ItemParaTraduzir[];
       rotulosDoMapa: string[];
       // O conteúdo guardado para este idioma, só se saiu deste resumo e desta versão.
@@ -94,7 +94,8 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
   // traduzir agora gastaria IA com um texto que vai sumir.
   const naTela = linha.status === "ready" && linha.resumoId ? versaoNaTela(linha.statusDoResumo, linha.versao) : null;
   if (!naTela || !linha.resumoId || linha.versao === null) return { estado: "sem_resumo" };
-  const idiomaOriginal = idiomaDaReuniao(linha.idiomaDoResumo) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O idioma em que o resumo foi escrito: qualquer um que a IA transcreve (G16).
+  const idiomaOriginal = idiomaFalado(linha.idiomaDoResumo) ?? IDIOMA_DA_REUNIAO_PADRAO;
   if (idiomaOriginal === idioma) return { estado: "original" };
 
   const itens = await db.select({

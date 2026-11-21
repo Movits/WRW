@@ -13,7 +13,8 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_ERRO_DE_CONSULTA } from "@shared/const";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { OpcaoDoIdiomaOriginal } from "@/components/SeletorDoIdiomaDaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
@@ -124,8 +125,9 @@ export default function ReuniaoAberta() {
   // "em andamento"; a página pergunta de novo a cada 5 s, sem gastar vaga do teto.
   const traducaoLonga = useNovaTentativa(`${token}|${idiomaDaTraducao}`);
   const temTranscricao = !!data?.transcricao;
-  // Reunião antiga guarda 'pt'.
-  const idiomaDoOriginal = idiomaDaReuniao(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // Reunião antiga guarda 'pt'. G16: o original pode ser um idioma fora dos 10
+  // da tela, que a lista de tradução ganha como opção à parte.
+  const idiomaDoOriginal = idiomaFalado(data?.transcricao?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O callback do próprio mutate só dispara para o ÚLTIMO pedido: a tradução
   // de um idioma trocado no meio do caminho não sobrescreve a do atual.
   const pedirTraducao = () => traduzir.mutate(
@@ -220,6 +222,7 @@ export default function ReuniaoAberta() {
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.openLinkTranslateSubtext") : t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+              <OpcaoDoIdiomaOriginal idioma={idiomaDoOriginal}/>
               {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === idiomaDoOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>

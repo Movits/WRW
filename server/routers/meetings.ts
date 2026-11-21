@@ -7,7 +7,7 @@ import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
 import { iniciarDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
-import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -38,6 +38,7 @@ import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { depoisDeMexerNoItem, prepararAcaoDoItem } from "../acoes-na-google";
+import { decidirTituloSugerido } from "../decidir-titulo-sugerido";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
@@ -227,11 +228,12 @@ export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise
 
 // O idioma falado na reunião, normalizado pela função única ('pt' e 'pt-PT'
 // viram 'pt-BR', 'en-US' vira 'en'). A tela antiga, ainda aberta depois do
-// deploy, manda 'pt'; sem idioma vale o padrão. Fora dos 10, recusa: o código
-// é gravado e decide o original da tradução.
+// deploy, manda 'pt'; sem idioma vale o padrão. G16: vale todo idioma que a IA
+// transcreve (os 10 da tela e os outros) e "auto" ("Detectar sozinho"); fora
+// disso, recusa: o código é gravado e decide o original da tradução.
 export const idiomaDaReuniaoNaEntrada = z.string().max(12).optional().transform((valor, ctx) => {
   if (valor === undefined) return IDIOMA_DA_REUNIAO_PADRAO;
-  const idioma = idiomaDaReuniao(valor);
+  const idioma = escolhaDoIdioma(valor);
   if (!idioma) {
     ctx.addIssue({ code: "custom", message: "Idioma da reunião não suportado." });
     return z.NEVER;
@@ -442,6 +444,13 @@ export const meetingsRouter = router({
   resumoGuardado: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
+
+  // O título que a IA sugeriu com o resumo: "Usar este título" (usar) troca o
+  // título da reunião pela sugestão; "Manter o atual" só registra a decisão.
+  // Sem IA, então sem teto. CONFLICT: a sugestão já não espera a dona.
+  decidirTituloSugerido: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid(), usar: z.boolean() }))
+    .mutation(({ ctx, input }) => decidirTituloSugerido(ctx.user.openId, input.meetingId, input.usar)),
 
   // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
   // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).

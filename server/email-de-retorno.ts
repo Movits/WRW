@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems } from "../drizzle/schema";
-import { idiomaDaReuniao, nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { idiomaFalado, nomeDoIdioma, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import {
   MARCA_DO_DESTINATARIO,
   MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO,
@@ -76,7 +76,7 @@ const TOM: Record<TomDoEmail, string> = {
 };
 
 /** As instruções do rascunho. Exportada para os testes conferirem o que vai à IA. */
-export function instrucoesDoEmail(pedido: PedidoDoRascunho, idiomaDosItens: IdiomaDaReuniao | null): string {
+export function instrucoesDoEmail(pedido: PedidoDoRascunho, idiomaDosItens: IdiomaFalado | null): string {
   const idioma = nomeDoIdioma(pedido.idioma);
   const voz = pedido.vozDoDestinatario;
   return [
@@ -196,7 +196,7 @@ export async function rascunharEmailDeRetorno(ownerId: string, meetingId: string
   if (pedido.vozDoDestinatario) vozes.add(pedido.vozDoDestinatario);
   try {
     const resposta = await pedirJsonAIA({
-      sistema: instrucoesDoEmail(pedido, idiomaDaReuniao(resumo.language)),
+      sistema: instrucoesDoEmail(pedido, idiomaFalado(resumo.language)),
       usuario: entradaDoEmail(itens),
       nome: "email_de_retorno",
       schema: SCHEMA_DO_EMAIL,

@@ -301,6 +301,14 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 
+  it("G16: reunião num idioma fora dos 10 da tela (italiano): pedir pt-BR TRADUZ, em vez de devolver o italiano como se fosse português", async () => {
+    banco.transcricao = ["tr-1", "reuniao-1", "dona-1", "Parliamo del contratto.", null, "it", 120, 1000, 1000];
+    invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "Falemos do contrato." } }] });
+    await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt-BR"))
+      .resolves.toEqual({ language: "pt-BR", text: "Falemos do contrato.", cached: false });
+    expect(invokeLLM).toHaveBeenCalledTimes(1);
+  });
+
   it("reunião antiga gravada como 'pt': pedir pt-BR devolve o original, sem IA", async () => {
     banco.transcricao = ["tr-1", "reuniao-1", "dona-1", "Fala antiga.", null, "pt", 120, 1000, 1000];
     await expect(translatePrivateMeetingTranscript("dona-1", "reuniao-1", "pt-BR"))

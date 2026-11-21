@@ -128,6 +128,23 @@ function citacoesDaResposta(resposta: { citacoes?: readonly Citacao[] | null; tr
   return resposta.trecho ? [{ trecho: resposta.trecho, inicioSegundos: null }] : [];
 }
 
+/**
+ * As sugestões prontas do Pergunte (H6b, como no app de referência da
+ * cliente): decisões-chave, ações, revisão, rascunho de e-mail e conceitos.
+ * Cada uma é uma pergunta comum, escrita no idioma da tela, que vai ao mesmo
+ * procedimento e gasta a mesma vaga do teto que a pergunta digitada; a
+ * resposta segue a regra de sempre (só o que foi dito, com os trechos que a
+ * sustentam). Servem à dona e ao link aberto.
+ */
+type SugestaoDoPergunte = { id: string; rotulo: (t: TranslateFn) => string; pergunta: (t: TranslateFn) => string };
+export const SUGESTOES_DO_PERGUNTE: readonly SugestaoDoPergunte[] = [
+  { id: "decisoes", rotulo: t => t("meetings.ai.suggestions.decisionsLabel"), pergunta: t => t("meetings.ai.suggestions.decisionsQuestion") },
+  { id: "acoes", rotulo: t => t("meetings.ai.suggestions.actionsLabel"), pergunta: t => t("meetings.ai.suggestions.actionsQuestion") },
+  { id: "revisao", rotulo: t => t("meetings.ai.suggestions.reviewLabel"), pergunta: t => t("meetings.ai.suggestions.reviewQuestion") },
+  { id: "email", rotulo: t => t("meetings.ai.suggestions.emailLabel"), pergunta: t => t("meetings.ai.suggestions.emailQuestion") },
+  { id: "conceitos", rotulo: t => t("meetings.ai.suggestions.conceptsLabel"), pergunta: t => t("meetings.ai.suggestions.conceptsQuestion") },
+];
+
 /** A caixa do aviso de conferir o que a IA escreveu; quem chama escolhe a frase, que muda com quem lê. */
 export function AvisoDeConferir({ children }: { children: ReactNode }) {
   return <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs text-amber-100/80"><CircleAlert size={14} className="mr-1.5 inline"/>{children}</p>;
@@ -156,10 +173,7 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
   const idDasCitacoes = useId();
 
-  function enviar(evento: FormEvent) {
-    evento.preventDefault();
-    if (!podePerguntar) return;
-    const texto = pergunta.trim();
+  function perguntarTexto(texto: string) {
     setPerguntaFeita(texto);
     const idioma = idiomaDaTela(i18n);
     if (fonte.token !== undefined) perguntarPeloLink.mutate({ token: fonte.token, idioma, pergunta: texto });
@@ -167,9 +181,27 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
     else perguntarDaDona.mutate({ meetingId: fonte.meetingId, idioma, pergunta: texto });
   }
 
+  function enviar(evento: FormEvent) {
+    evento.preventDefault();
+    if (!podePerguntar) return;
+    perguntarTexto(pergunta.trim());
+  }
+
+  // A sugestão vai como a pergunta digitada; o campo fica como estava.
+  function perguntarSugestao(sugestao: SugestaoDoPergunte) {
+    if (perguntar.isPending) return;
+    perguntarTexto(sugestao.pergunta(t));
+  }
+
   return <section aria-labelledby="pergunte-a-reuniao" className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
     <h2 id="pergunte-a-reuniao" className="inline-flex items-center gap-2 text-base font-semibold"><MessageCircleQuestion size={16} className="text-amber-300"/>{documento ? t("meetings.document.askTitle") : duranteAGravacao ? t("meetings.live.askTitle") : t("meetings.ai.askTitle")}</h2>
     <p className="mt-1 text-sm text-white/55">{documento ? t("meetings.document.askIntro") : duranteAGravacao ? t("meetings.live.askIntro") : t("meetings.ai.askIntro")}</p>
+    {/* H6b: as sugestões prontas, como no app de referência da cliente. */}
+    <div role="group" aria-label={t("meetings.ai.suggestions.label")} className="mt-3 flex flex-wrap items-center gap-2">
+      <span aria-hidden="true" className="text-xs text-white/40">{t("meetings.ai.suggestions.label")}</span>
+      {SUGESTOES_DO_PERGUNTE.map(sugestao => <button key={sugestao.id} type="button" disabled={perguntar.isPending} onClick={() => perguntarSugestao(sugestao)}
+        className="rounded-full border border-amber-300/30 px-3 py-1 text-xs text-amber-100 hover:bg-amber-300/10 disabled:opacity-50">{sugestao.rotulo(t)}</button>)}
+    </div>
     <form onSubmit={enviar} className="mt-4 flex flex-col gap-2 sm:flex-row">
       <input aria-label={documento ? t("meetings.document.askLabel") : t("meetings.ai.askLabel")} value={pergunta} onChange={evento => setPergunta(evento.target.value)} maxLength={500}
         placeholder={t("meetings.ai.askPlaceholder")}

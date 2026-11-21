@@ -1,5 +1,6 @@
-import { nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { nomeDoIdioma, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import { TITULO_SUGERIDO_MAX, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import type { meetingSummaryItems } from "../drizzle/schema";
 import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
@@ -36,8 +37,12 @@ export type ItemDoResumo = {
   confidence: number;
 };
 
-/** Os itens que ficaram e quantos a IA devolveu: a fila sabe quando a conferência tirou tudo. */
-export type ResumoGerado = { emoji: string | null; modelo: string | null; itens: ItemDoResumo[]; recebidos: number };
+/**
+ * Os itens que ficaram e quantos a IA devolveu: a fila sabe quando a
+ * conferência tirou tudo. `titulo` é o título que a IA sugere para a reunião
+ * (já conferido por tituloSugeridoValido), que espera a dona.
+ */
+export type ResumoGerado = { emoji: string | null; titulo: string | null; modelo: string | null; itens: ItemDoResumo[]; recebidos: number };
 
 /**
  * Um item que a dona já confirmou (ou marcou como feito) e que fica no resumo
@@ -141,7 +146,7 @@ export function entradaDoResumo(transcricao: string, segmentos: readonly Segment
  * As instruções do resumo. O modelo (H4d) muda só a frase de contexto e o que
  * vai em cada seção (server/modelos-de-resumo.ts); o resto vale para todos.
  */
-function instrucoes(idioma: IdiomaDaReuniao, rotulada: boolean, modelo: ModeloDeResumo, comItensQueFicam: boolean): string {
+function instrucoes(idioma: IdiomaFalado, rotulada: boolean, modelo: ModeloDeResumo, comItensQueFicam: boolean): string {
   const doModelo = INSTRUCOES_DOS_MODELOS[modelo];
   return [
     "Você escreve as notas de uma reunião para a dona dela, a partir da transcrição. Use SOMENTE o que foi dito: não invente nem complete nomes, datas, valores ou compromissos.",
@@ -153,6 +158,7 @@ function instrucoes(idioma: IdiomaDaReuniao, rotulada: boolean, modelo: ModeloDe
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
     `Em cada item, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala, e não emenda com reticências ("[...]") partes distantes da reunião.`,
     "- emoji: um único emoji que represente o assunto principal da reunião.",
+    `- titulo: um título curto para a reunião, de até ${TITULO_SUGERIDO_MAX} caracteres, no mesmo idioma do resto, que diga o assunto principal, como o título de uma nota. Sem emoji, sem data, sem aspas e sem nomes de pessoas ou rótulos de voz. Sem um assunto claro, null.`,
     `- acoes: ${doModelo.acoes}`,
     `- foco: ${doModelo.foco}`,
     `- tarefas: ${doModelo.tarefas}`,
@@ -198,6 +204,7 @@ const SCHEMA_DO_RESUMO_GUARDADO = {
   type: "object",
   properties: {
     emoji: TALVEZ(16),
+    titulo: TALVEZ(TITULO_SUGERIDO_MAX),
     acoes: lista({ texto: TEXTO(160), responsavel: TALVEZ(120), prazo: TALVEZ(120) }),
     foco: item({ texto: TEXTO(900) }),
     tarefas: lista({ assunto: TEXTO(80), texto: TEXTO(700), responsavel: TALVEZ(120), prazo: TALVEZ(120) }),
@@ -205,7 +212,7 @@ const SCHEMA_DO_RESUMO_GUARDADO = {
     bloqueios: lista({ texto: TEXTO(300) }),
     questoes: lista({ texto: TEXTO(300) }),
   },
-  required: ["emoji", "acoes", "foco", "tarefas", "decisoes", "bloqueios", "questoes"],
+  required: ["emoji", "titulo", "acoes", "foco", "tarefas", "decisoes", "bloqueios", "questoes"],
   additionalProperties: false,
 };
 
@@ -468,14 +475,14 @@ export async function gerarResumoDaReuniao(
   entrada: {
     transcricao: string;
     segmentos: readonly Segmento[];
-    idioma: IdiomaDaReuniao;
+    idioma: IdiomaFalado;
     modelo?: ModeloDeResumo;
     itensQueFicam?: readonly ItemQueFicaNoResumo[];
   },
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<ResumoGerado> {
   const { texto: paraAIA, rotulada, vozes } = entradaDoResumo(entrada.transcricao, entrada.segmentos);
-  if (!paraAIA) return { emoji: null, modelo: null, itens: [], recebidos: 0 };
+  if (!paraAIA) return { emoji: null, titulo: null, modelo: null, itens: [], recebidos: 0 };
   const limite = opcoes.limiteDaEntrada ?? LIMITE_DA_ENTRADA_DO_RESUMO;
   const queFicam = blocoDosItensQueFicam(entrada.itensQueFicam ?? []);
   const sistema = instrucoes(entrada.idioma, rotulada, entrada.modelo ?? MODELO_DE_RESUMO_PADRAO, queFicam !== "");
@@ -504,5 +511,5 @@ export async function gerarResumoDaReuniao(
   const recebidos = SECOES.reduce((soma, { campo }) => soma + itensDe(resposta.dados[campo]).filter(item => texto(item.texto, 900)).length, 0);
   // Só números no log: o conteúdo é a fala das pessoas.
   if (recebidos > itens.length) console.warn(`[Resumo] a conferência tirou ${recebidos - itens.length} de ${recebidos} itens`);
-  return { emoji: emojiValido(resposta.dados.emoji), modelo: resposta.modelo, itens, recebidos };
+  return { emoji: emojiValido(resposta.dados.emoji), titulo: tituloSugeridoValido(resposta.dados.titulo), modelo: resposta.modelo, itens, recebidos };
 }

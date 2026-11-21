@@ -23,7 +23,8 @@ vi.mock("./meeting-service", async original => ({
 }));
 
 const {
-  codigoDaFalha, FalhaDoDocumento, lerDocumentoComAIA, nomesDaCadeia, paginasDaResposta, PIOR_CASO_DA_LEITURA_MS, processarDocumento,
+  codigoDaFalha, FalhaDoDocumento, idiomaDaLeitura, lerDocumentoComAIA, lerDocumentoEOIdioma, nomesDaCadeia, paginasDaResposta, PIOR_CASO_DA_LEITURA_MS,
+  processarDocumento, promptDaLeitura,
 } = await import("./documento-da-reuniao");
 const {
   ArquivoForaDoTetoDoGeminiError, GeminiCotaEsgotadaError, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError,
@@ -287,6 +288,56 @@ describe("processarDocumento", () => {
     expect(gravarResultadoDaReuniao).not.toHaveBeenCalled();
     expect(gravacoes.filter(valores => "status" in valores)).toEqual([]);
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("[Documento] outra execução tomou a reunião"));
+  });
+});
+
+describe("G16: o idioma do documento", () => {
+  it("com o idioma escolhido, o pedido e o esquema são os de sempre; um idioma fora dos 10 vai pelo nome em português", async () => {
+    expect(promptDaLeitura("pt-BR")).toContain("O idioma predominante esperado é português do Brasil; mantenha cada trecho no idioma em que está escrito.");
+    expect(promptDaLeitura("ko")).toContain("O idioma predominante esperado é coreano;");
+    expect(promptDaLeitura("xx")).not.toContain("idioma");
+    gerarComArquivoNoGemini.mockResolvedValue(leituraDa({ paginas: [{ pagina: 1, texto: "Proposta." }] }));
+    expect(await lerDocumentoEOIdioma(PDF, "pt-BR")).toEqual({ paginas: [{ pagina: 1, texto: "Proposta." }], idiomaDetectado: null });
+    const esquema = gerarComArquivoNoGemini.mock.calls[0][0].esquemaJson;
+    expect(esquema.required).toEqual(["paginas"]);
+    expect(esquema.properties).not.toHaveProperty("idioma");
+  });
+
+  it("em \"Detectar sozinho\", o pedido não diz o idioma, o esquema pede o código DEPOIS das páginas, e a leitura devolve o que a IA reconheceu", async () => {
+    const pedido = promptDaLeitura("auto");
+    expect(pedido).not.toContain("predominante esperado");
+    expect(pedido).toContain("O idioma não foi informado: reconheça-o pelo texto");
+    gerarComArquivoNoGemini.mockResolvedValue(leituraDa({ paginas: [{ pagina: 1, texto: "Contratto di fornitura." }], idioma: "it-IT" }));
+    expect(await lerDocumentoEOIdioma(PDF, "auto")).toEqual({ paginas: [{ pagina: 1, texto: "Contratto di fornitura." }], idiomaDetectado: "it" });
+    const esquema = gerarComArquivoNoGemini.mock.calls[0][0].esquemaJson;
+    expect(esquema.required).toEqual(["paginas", "idioma"]);
+    expect(esquema.propertyOrdering).toEqual(["paginas", "idioma"]);
+    // A leitura de sempre continua só com as páginas.
+    expect(await lerDocumentoComAIA(PDF, "auto")).toEqual([{ pagina: 1, texto: "Contratto di fornitura." }]);
+  });
+
+  it("idiomaDaLeitura: o código da lista, ou null quando não veio ou não é idioma", () => {
+    expect(idiomaDaLeitura(JSON.stringify({ paginas: [], idioma: "EN" }))).toBe("en");
+    expect(idiomaDaLeitura(JSON.stringify({ paginas: [], idioma: "klingon" }))).toBeNull();
+    expect(idiomaDaLeitura(JSON.stringify({ paginas: [] }))).toBeNull();
+    expect(idiomaDaLeitura("não é json")).toBeNull();
+  });
+
+  it("processarDocumento grava o idioma que a leitura reconheceu em \"Detectar sozinho\", o escolhido nos outros casos, e o padrão sem nenhum", async () => {
+    const casos: Array<[string, unknown, string]> = [
+      ["auto", { paginas: [{ pagina: 1, texto: "Contratto." }], idioma: "it" }, "it"],
+      ["auto", { paginas: [{ pagina: 1, texto: "Contrato." }] }, "pt-BR"],
+      ["ko", { paginas: [{ pagina: 1, texto: "계약서" }], idioma: "en" }, "ko"],
+      ["es", { paginas: [{ pagina: 1, texto: "Contrato." }] }, "es"],
+    ];
+    for (const [idioma, resposta, gravado] of casos) {
+      gerarComArquivoNoGemini.mockReset();
+      gravarResultadoDaReuniao.mockClear();
+      gerarComArquivoNoGemini.mockResolvedValue(leituraDa(resposta));
+      const { banco } = bancoFalso();
+      await processarDocumento(banco, { ...execucao(Date.now()), idioma });
+      expect(gravarResultadoDaReuniao.mock.calls[0][1].transcription.language, idioma).toBe(gravado);
+    }
   });
 });
 
