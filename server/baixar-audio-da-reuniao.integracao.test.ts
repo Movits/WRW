@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetings, users } from "../drizzle/schema";
 import { prepararAudioDaReuniao } from "./baixar-audio-da-reuniao";
 import { ACAO_AUDIO_BAIXADO, RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
@@ -93,11 +94,14 @@ describe.skipIf(!temBanco)("Baixar o áudio da reunião no banco (integração)"
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-    await db.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    // Pela chave, uma linha por vez (server/test/apagar-pela-chave.ts): o DELETE
+    // pela dona varre a tabela quando ela tem a maior parte das linhas, e trava
+    // o INSERT de várias linhas de outro arquivo (ER_LOCK_DEADLOCK).
+    await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+    await apagarPelaChave(db, meetingRecordings, eq(meetingRecordings.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
-    await db.delete(auditLogs).where(eq(auditLogs.userId, CONTA));
+    await apagarPelaChave(db, auditLogs, eq(auditLogs.userId, CONTA));
   });
 
   it("as partes com o áudio guardado saem na ordem de seq, no tempo do player, com as chaves da própria reunião; uma linha de auditoria", async () => {
