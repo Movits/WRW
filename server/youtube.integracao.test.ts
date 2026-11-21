@@ -254,6 +254,28 @@ describe.skipIf(!temBanco)("Vídeo do YouTube no banco (integração)", () => {
     expect(await recusaDe(youtube.refazerResumoDoVideo(dona, id))).toMatchObject({ codigoTrpc: "CONFLICT" });
   });
 
+  it("G16: com \"Detectar sozinho\", a transcrição grava o idioma que mais aparece nas falas (e a reunião segue em \"auto\"), também no \"Tentar de novo\"", async () => {
+    const dona = await novaDona();
+    // 40 s em inglês e 9 s em português: o idioma da transcrição é o inglês, e não o "auto".
+    const FALAS_COM_IDIOMA = [
+      { inicio: "00:00", fim: "00:40", falante: "F1", texto: "Welcome to the export panel.", idioma: "en" },
+      { inicio: "00:40", fim: "00:49", falante: "F2", texto: "Obrigada pelo convite.", idioma: "pt" },
+    ];
+    geminiPost.mockResolvedValueOnce(resposta(FALAS_COM_IDIOMA));
+    const { id, trabalho } = await youtube.pedirResumoDoVideo(dona, { titulo: "Painel", url: `https://youtu.be/${ID}`, idioma: "auto", versaoDoAviso: AVISO });
+    await trabalho;
+    expect(await reuniaoDe(id)).toMatchObject({ status: "ready", language: "auto" });
+    expect(await transcricaoDe(id)).toMatchObject({ language: "en" });
+
+    // O "Tentar de novo" passa pelo mesmo caminho.
+    await (await db()).update(meetings).set({ status: "failed", processingError: "YOUTUBE_FALHOU" }).where(eq(meetings.id, id));
+    geminiPost.mockResolvedValueOnce(resposta(FALAS_COM_IDIOMA));
+    const { trabalho: deNovo } = await youtube.refazerResumoDoVideo(dona, id);
+    await deNovo;
+    expect(await reuniaoDe(id)).toMatchObject({ status: "ready", language: "auto" });
+    expect(await transcricaoDe(id)).toMatchObject({ language: "en" });
+  });
+
   it("o \"Tentar de novo\" só vale para a reunião do YouTube da própria dona, e a recusa não gasta vaga", async () => {
     const dona = await novaDona();
     const outra = await novaDona();

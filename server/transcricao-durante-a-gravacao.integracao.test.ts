@@ -156,6 +156,28 @@ describe.skipIf(!temBanco)("A transcrição durante a gravação, no banco (inte
     expect(usuario).toContain("{F2}: O estande fica pronto em março.");
   });
 
+  it("a parte do meio que falhou: a pergunta lê as partes de antes e de depois, com a lacuna no lugar dela, sem erro", async () => {
+    const { id } = await iniciar();
+    await parte(id, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: FALAS_0 } });
+    await parte(id, 1, { status: "failed", lastError: "IA_RECUSOU" });
+    await parte(id, 2, { status: "transcribed", offsetMs: 1_200_000, result: { segmentos: [{ inicio: 1205, fim: 1212, falante: "F1", texto: "Fechamos o patrocínio da feira." }] } });
+    duble.invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta: "O patrocínio foi fechado.", citacoes: [{ trecho: "Fechamos o patrocínio da feira." }] }));
+    const resposta = await rota().meetings.perguntarDuranteAGravacao({ meetingId: id, idioma: "pt-BR", pergunta: "E o patrocínio?" });
+    expect(resposta).toMatchObject({ respondida: true, citacoes: [{ trecho: "Fechamos o patrocínio da feira.", inicioSegundos: 1205 }] });
+    const [{ messages }] = duble.invokeLLM.mock.calls[0] as [{ messages: Array<{ role: string; content: string }> }];
+    const usuario = messages.find(m => m.role === "user")!.content;
+    expect(usuario).toContain("{F2}: O estande fica pronto em março.");
+    expect(usuario).toContain("{F1}: Fechamos o patrocínio da feira.");
+  });
+
+  it("a reunião no meio da exclusão ('deleted') não mostra nada: nula aqui e NOT_FOUND pela rota", async () => {
+    const { id } = await iniciar();
+    await parte(id, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: FALAS_0 } });
+    await (await getDb())!.update(meetings).set({ status: "deleted" }).where(eq(meetings.id, id));
+    expect(await transcricaoDuranteAGravacao(DONA, id, 0)).toBeNull();
+    await expect(rota().meetings.transcricaoDaGravacao({ meetingId: id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("a pergunta durante a gravação sem nenhuma parte transcrita é recusada antes da IA (PRECONDITION_FAILED)", async () => {
     const { id } = await iniciar();
     await parte(id, 0, { status: "received" });

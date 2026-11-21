@@ -1686,3 +1686,23 @@ describe("useGravadorDeAudio — o microfone que cai (G17)", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("G17: o fluxo de fora (a aba, a reunião online) nunca abre o microfone", () => {
+  it("Continuar com a trilha da aba encerrada na pausa (sem o fim do gravador): encerra e entrega, sem pedir o microfone", async () => {
+    navegadorQueGrava(["audio/mp4"]);
+    const trilhaDaAba = trilhaQueCai();
+    const fluxoDaAba = fluxoDa(trilhaDaAba) as unknown as MediaStream;
+    const { result, aoTerminar } = montar({ limiteSegundos: 7200, fatiaSegundos: 600 });
+    await act(async () => { expect(await result.current.comecar(fluxoDaAba)).toBe(true); });
+    act(() => result.current.pausar());
+    // A trilha da aba acaba na pausa, e o navegador não para o gravador.
+    trilhaDaAba.readyState = "ended";
+    (gravadores[0] as unknown as { stream: unknown }).stream = fluxoDaAba;
+    act(() => result.current.continuar());
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    // Sem a guarda, o Continuar abriria o microfone e gravaria a sala no lugar da aba.
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(result.current.estado).toBe("parado");
+    expect(aoTerminar).toHaveBeenCalledTimes(1);
+  });
+});
