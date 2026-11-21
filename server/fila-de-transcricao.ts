@@ -196,23 +196,38 @@ async function ultimaChegada(db: Banco, meetingId: string): Promise<number> {
  * Parte 'received' sem tentativa sobrando e sem reserva viva (o processo caiu
  * nas três, sem SIGTERM): ninguém mais a reservaria, e as seguintes esperariam
  * para sempre. Vira 'failed' (lacuna na montagem).
+ *
+ * As varreduras desta fila travam só pela chave: as linhas saem de uma leitura
+ * sem trava, e cada uma muda num UPDATE pelo id que repete as condições (a que
+ * mudou no meio não casa mais e fica). O UPDATE pela condição travava o
+ * intervalo inteiro do índice que ele percorre, com o vão até a linha
+ * seguinte, que é de outra reunião ou de outra dona; quem inseria ou movia uma
+ * linha ali se travava com ele (deadlock no laço dos testes de integração, que
+ * rodam em paralelo no mesmo banco).
  */
 async function desistirDasEsgotadas(db: Banco, agora: number, escopo: Escopo) {
   // A parte cuja linha nasceu e cujo objeto nunca subiu (o bucket recusou e a
   // aba fechou): passada a espera, é lacuna, como a que nem chegou.
-  await db.update(meetingAudioSlices).set({ status: "failed", lastError: "NAO_RECEBIDA", updatedAt: agora })
-    .where(and(
-      eq(meetingAudioSlices.status, "uploading"),
-      lt(meetingAudioSlices.createdAt, agora - ESPERA_PELA_PARTE_QUE_FALTA_MS),
-      daDona(meetingAudioSlices.ownerId, escopo),
-    ));
-  await db.update(meetingAudioSlices).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(and(
-      eq(meetingAudioSlices.status, "received"),
-      sql`${meetingAudioSlices.attempts} >= ${TENTATIVAS_POR_PARTE}`,
-      or(isNull(meetingAudioSlices.lockedUntil), lt(meetingAudioSlices.lockedUntil, agora)),
-      daDona(meetingAudioSlices.ownerId, escopo),
-    ));
+  const naoRecebida = (id?: string) => and(
+    id ? eq(meetingAudioSlices.id, id) : undefined,
+    eq(meetingAudioSlices.status, "uploading"),
+    lt(meetingAudioSlices.createdAt, agora - ESPERA_PELA_PARTE_QUE_FALTA_MS),
+    daDona(meetingAudioSlices.ownerId, escopo),
+  );
+  for (const { id } of await db.select({ id: meetingAudioSlices.id }).from(meetingAudioSlices).where(naoRecebida())) {
+    await db.update(meetingAudioSlices).set({ status: "failed", lastError: "NAO_RECEBIDA", updatedAt: agora }).where(naoRecebida(id));
+  }
+  const esgotada = (id?: string) => and(
+    id ? eq(meetingAudioSlices.id, id) : undefined,
+    eq(meetingAudioSlices.status, "received"),
+    sql`${meetingAudioSlices.attempts} >= ${TENTATIVAS_POR_PARTE}`,
+    or(isNull(meetingAudioSlices.lockedUntil), lt(meetingAudioSlices.lockedUntil, agora)),
+    daDona(meetingAudioSlices.ownerId, escopo),
+  );
+  for (const { id } of await db.select({ id: meetingAudioSlices.id }).from(meetingAudioSlices).where(esgotada())) {
+    await db.update(meetingAudioSlices).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
+      .where(esgotada(id));
+  }
 }
 
 /** O que a parte anterior passa adiante: onde a reunião está e quem já falou. */
@@ -304,12 +319,22 @@ async function encerrarAbandonadas(db: Banco, agora: number, escopo: Escopo) {
  * reserva venceu): volta a 'uploading', e a próxima rodada a retoma.
  */
 async function retomarMontagensPresas(db: Banco, agora: number, escopo: Escopo) {
-  const presas = and(eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), lt(meetings.lockedUntil, agora), daDona(meetings.ownerId, escopo));
-  // Esgotadas as tentativas (o processo caiu em todas), vira falha; senão, volta.
-  await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(and(presas, sql`${meetings.attempts} >= ${TENTATIVAS_POR_REUNIAO}`));
-  await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null })
-    .where(and(presas, lt(meetings.attempts, TENTATIVAS_POR_REUNIAO)));
+  // Pela chave, como as varreduras das partes (desistirDasEsgotadas): a leitura
+  // não trava, e cada UPDATE pelo id repete as condições.
+  const presa = (id?: string) => and(
+    id ? eq(meetings.id, id) : undefined,
+    eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), lt(meetings.lockedUntil, agora), daDona(meetings.ownerId, escopo),
+  );
+  for (const { id, attempts } of await db.select({ id: meetings.id, attempts: meetings.attempts }).from(meetings).where(presa())) {
+    // Esgotadas as tentativas (o processo caiu em todas), vira falha; senão, volta.
+    if (attempts >= TENTATIVAS_POR_REUNIAO) {
+      await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
+        .where(and(presa(id), sql`${meetings.attempts} >= ${TENTATIVAS_POR_REUNIAO}`));
+    } else {
+      await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null })
+        .where(and(presa(id), lt(meetings.attempts, TENTATIVAS_POR_REUNIAO)));
+    }
+  }
 }
 
 /**
@@ -484,12 +509,31 @@ export async function pararFila(): Promise<{ partes: number; reunioes: number }>
   // A tentativa devolvida não conta: a parte não falhou, o processo é que saiu.
   const tokens = Array.from(tokensVivos);
   if (!tokens.length) return { partes: 0, reunioes: 0 };
-  const partes = await db.update(meetingAudioSlices).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingAudioSlices.attempts} - 1, 0)` })
-    .where(and(inArray(meetingAudioSlices.lockToken, tokens), eq(meetingAudioSlices.status, "received")));
-  const reunioes = await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetings.attempts} - 1, 0)` })
-    .where(and(inArray(meetings.lockToken, tokens), eq(meetings.status, "processing"), eq(meetings.audioPipeline, "slices")));
+  // Cada reserva volta pela chave da linha, com o token no WHERE. O UPDATE por
+  // `lock_token IN (...)` não tem índice para a coluna: varria as partes em
+  // 'received' e as reuniões em montagem de todas as donas, travando cada uma,
+  // e se travava com quem as movia no índice. As linhas saem de uma leitura
+  // sem trava pelo índice do estado.
+  const parteNaFila = (token: string, id?: string) => and(id ? eq(meetingAudioSlices.id, id) : undefined, eq(meetingAudioSlices.status, "received"), eq(meetingAudioSlices.lockToken, token));
+  const emMontagem = (token: string, id?: string) => and(id ? eq(meetings.id, id) : undefined, eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), eq(meetings.lockToken, token));
+  let partes = 0;
+  const reservasDePartes = await db.select({ id: meetingAudioSlices.id, token: meetingAudioSlices.lockToken }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.status, "received"), inArray(meetingAudioSlices.lockToken, tokens)));
+  for (const { id, token } of reservasDePartes) {
+    if (!token) continue;
+    partes += linhas(await db.update(meetingAudioSlices).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingAudioSlices.attempts} - 1, 0)` })
+      .where(parteNaFila(token, id)));
+  }
+  let reunioes = 0;
+  const reservasDeReunioes = await db.select({ id: meetings.id, token: meetings.lockToken }).from(meetings)
+    .where(and(eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), inArray(meetings.lockToken, tokens)));
+  for (const { id, token } of reservasDeReunioes) {
+    if (!token) continue;
+    reunioes += linhas(await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetings.attempts} - 1, 0)` })
+      .where(emMontagem(token, id)));
+  }
   tokensVivos.clear();
-  return { partes: linhas(partes), reunioes: linhas(reunioes) };
+  return { partes, reunioes };
 }
 
 /** Só para os testes: a fila volta a aceitar rodadas. */

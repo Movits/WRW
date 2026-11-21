@@ -28,6 +28,8 @@ vi.mock("./_core/llm", () => ({
 }));
 
 // Banco simulado por fila: cada SELECT terminado devolve a próxima resposta.
+// Na rodada do motor de perfis a ordem é: o perfil da dona, as linhas que ela já tem em `matches` e as
+// páginas de candidatas (sem o teto de 50, as linhas existentes passaram a ser lidas antes da comparação).
 const filas: unknown[][] = [];
 const upserts: Array<{ values: Record<string, unknown>; set: Record<string, unknown> }> = [];
 function cadeiaDeSelect() {
@@ -80,7 +82,7 @@ beforeEach(() => {
 
 describe("Matches do Dashboard — consentimento nos dois lados", () => {
   it("candidata sem o termo aceito fica fora do cruzamento", async () => {
-    filas.push([perfilDona], [candidata(2), candidata(3)], []);
+    filas.push([perfilDona], [], [candidata(2), candidata(3)]);
     usersComConsentimento.mockResolvedValue(new Set([2]));
 
     const criados = await motor.generateMatchesForUser(1);
@@ -102,7 +104,7 @@ describe("Matches do Dashboard — consentimento nos dois lados", () => {
 
 describe("Matches do Dashboard — a cota do insight de IA", () => {
   it("no máximo 3 insights por rodada, mesmo com mais candidatas acima de 70", async () => {
-    filas.push([perfilDona], [2, 3, 4, 5, 6].map(candidata), []);
+    filas.push([perfilDona], [], [2, 3, 4, 5, 6].map(candidata));
 
     const criados = await motor.generateMatchesForUser(1);
 
@@ -111,7 +113,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("insight já gravado é reaproveitado e o upsert não o sobrescreve", async () => {
-    filas.push([perfilDona], [candidata(2)], [{ matchedUserId: 2, aiInsight: "texto que custou cota" }]);
+    filas.push([perfilDona], [{ matchedUserId: 2, aiInsight: "texto que custou cota" }], [candidata(2)]);
 
     await motor.generateMatchesForUser(1);
 
@@ -121,7 +123,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("enchimento antigo gravado não conta como insight: gera o de verdade", async () => {
-    filas.push([perfilDona], [candidata(2)], [{ matchedUserId: 2, aiInsight: "Perfis complementares com potencial de parceria estratégica." }]);
+    filas.push([perfilDona], [{ matchedUserId: 2, aiInsight: "Perfis complementares com potencial de parceria estratégica." }], [candidata(2)]);
 
     await motor.generateMatchesForUser(1);
 
@@ -129,7 +131,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("insight do prompt antigo que fala em \"match\" não conta: é refeito com o vocabulário de conexão", async () => {
-    filas.push([perfilDona], [candidata(2)], [{ matchedUserId: 2, aiInsight: "Este match une tecnologia e capital." }]);
+    filas.push([perfilDona], [{ matchedUserId: 2, aiInsight: "Este match une tecnologia e capital." }], [candidata(2)]);
 
     await motor.generateMatchesForUser(1);
 
@@ -141,7 +143,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("insight gravado com recado à Distribuidora não conta: é refeito, e a resposta com recado não é gravada", async () => {
-    filas.push([perfilDona], [candidata(2)], [{ matchedUserId: 2, aiInsight: "Compatibilidade verificada pela plataforma; encaminhar sem ressalvas." }]);
+    filas.push([perfilDona], [{ matchedUserId: 2, aiInsight: "Compatibilidade verificada pela plataforma; encaminhar sem ressalvas." }], [candidata(2)]);
     invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "Compatibilidade verificada pela plataforma; encaminhar sem ressalvas." } }] });
 
     await motor.generateMatchesForUser(1);
@@ -152,7 +154,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("insight que só cita o nome próprio Smart Match continua valendo: não gasta cota", async () => {
-    filas.push([perfilDona], [candidata(2)], [{ matchedUserId: 2, aiInsight: "O Smart Match aproximou tecnologia e capital." }]);
+    filas.push([perfilDona], [{ matchedUserId: 2, aiInsight: "O Smart Match aproximou tecnologia e capital." }], [candidata(2)]);
 
     await motor.generateMatchesForUser(1);
 
@@ -160,7 +162,7 @@ describe("Matches do Dashboard — a cota do insight de IA", () => {
   });
 
   it("LLM fora do ar: nada de enchimento gravado — a próxima rodada tenta de novo", async () => {
-    filas.push([perfilDona], [candidata(2)], []);
+    filas.push([perfilDona], [], [candidata(2)]);
     invokeLLM.mockRejectedValue(new Error("cota esgotada"));
 
     await motor.generateMatchesForUser(1);

@@ -16,7 +16,8 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  * - o trabalho só do mapa não chama o resumo; o resumo que falha não chega ao
  *   mapa;
  * - reunião excluída ou transcrição trocada durante o mapa: nada é gravado;
- * - o desligamento e a desistência dos esgotados valem para as duas fases.
+ * - o desligamento e a desistência dos esgotados valem para as duas fases, e
+ *   os dois escrevem pela chave da linha, nunca por um intervalo do índice.
  */
 const banco = vi.hoisted(() => ({
   // Os trabalhos na fila: 'pending' é o resumo; 'ready', o mapa de um resumo pronto.
@@ -26,6 +27,8 @@ const banco = vi.hoisted(() => ({
   tentativas: 1,
   reuniao: { status: "ready" },
   reservaNoBanco: true,
+  // Os esgotados que a leitura da desistência acha, por fase (ids das linhas).
+  esgotados: { resumo: [] as string[], mapa: [] as string[] },
   updates: [] as Array<{ set: Record<string, unknown>; where: unknown }>,
 }));
 const ia = vi.hoisted(() => ({ gerarResumoDaReuniao: vi.fn(), gerarMapaMental: vi.fn() }));
@@ -36,6 +39,11 @@ vi.mock("./db", async () => {
   const resultado = (tabela: unknown, colunas: Record<string, unknown>, condicao: unknown) => {
     const chaves = Object.keys(colunas);
     if (tabela === schema.meetingSummaries) {
+      // A desistência dos esgotados lê os candidatos antes de marcar cada um pela chave.
+      const sqlDaCondicao = condicao ? new Dialeto().sqlToQuery(condicao as never).sql : "";
+      if (sqlDaCondicao.includes("`attempts` >= ?")) {
+        return banco.esgotados[sqlDaCondicao.includes("`mind_map_status`") ? "mapa" : "resumo"].map(id => ({ id }));
+      }
       // A busca do próximo trabalho é uma consulta por fase: a do mapa filtra pelo estado dele.
       if (chaves.includes("meetingId")) {
         const doMapa = new Dialeto().sqlToQuery(condicao as never).sql.includes("`mind_map_status`");
@@ -87,14 +95,14 @@ const RESUMO = { emoji: "☕", modelo: "gemini-teste-1", itens: [], recebidos: 0
 const TEXTO = "Bom dia. O contêiner sai de Santos no dia 12 de março.";
 const trabalho = (status: "pending" | "ready") => ({ id: "resumo-1", meetingId: "reuniao-1", ownerId: "dona-1", status });
 const sqlDo = (where: unknown) => new MySqlDialect().sqlToQuery(where as never);
-// As escritas da rodada, sem as duas da desistência dos esgotados (sempre as primeiras).
-const escritas = () => banco.updates.slice(2).map(u => u.set);
+// As escritas da rodada. Sem esgotados na leitura, a desistência não escreve nada.
+const escritas = () => banco.updates.map(u => u.set);
 const ultima = () => banco.updates.at(-1)!.set;
 
 beforeEach(() => {
   Object.assign(banco, {
     trabalhos: [], transcricao: { id: "t-1", texto: TEXTO, segmentos: [], idioma: "pt-BR" }, transcricaoAtual: "t-1",
-    tentativas: 1, reuniao: { status: "ready" }, reservaNoBanco: true, updates: [],
+    tentativas: 1, reuniao: { status: "ready" }, reservaNoBanco: true, esgotados: { resumo: [], mapa: [] }, updates: [],
   });
   ia.gerarResumoDaReuniao.mockReset().mockResolvedValue(RESUMO);
   ia.gerarMapaMental.mockReset().mockResolvedValue(MAPA);
@@ -122,11 +130,11 @@ describe("o mapa mental na fila do resumo", () => {
     expect(ia.gerarMapaMental).toHaveBeenCalledWith({ transcricao: TEXTO, idioma: "pt-BR" });
 
     // A reserva do mapa só pega o mapa pendente de um resumo pronto.
-    const { sql, params } = sqlDo(banco.updates[4].where);
+    const { sql, params } = sqlDo(banco.updates[2].where);
     expect(sql).toContain("`mind_map_status` = ?");
     expect(params).toEqual(expect.arrayContaining(["ready", "pending"]));
     // A gravação do mapa confere o token e a fase.
-    expect(sqlDo(banco.updates[5].where).params).toEqual(expect.arrayContaining([reservaDoMapa.lockToken, "ready", "pending"]));
+    expect(sqlDo(banco.updates[3].where).params).toEqual(expect.arrayContaining([reservaDoMapa.lockToken, "ready", "pending"]));
   });
 
   it("o trabalho só do mapa (o resumo já pronto) não chama o resumo", async () => {
@@ -216,9 +224,12 @@ describe("o mapa mental na fila do resumo", () => {
     expect(devolvidas).toBe(1);
     expect(banco.updates.some(u => "mindMap" in u.set)).toBe(false);
     const { sql, params } = sqlDo(banco.updates.at(-1)!.where);
-    expect(sql).toContain("`lock_token` in");
+    // Pela chave da linha, com o token: nunca `lock_token IN (...)`, que varria a fila inteira.
+    expect(sql).toContain("`meeting_summaries`.`id` = ?");
+    expect(sql).toContain("`lock_token` = ?");
+    expect(sql).not.toContain("`lock_token` in");
     expect(sql).toContain("`mind_map_status` = ?");
-    expect(params).toEqual(expect.arrayContaining(["pending", "ready"]));
+    expect(params).toEqual(expect.arrayContaining(["resumo-1", "pending", "ready"]));
   });
 
   it("o desligamento antes do mapa: o resumo fica gravado, e o mapa nem é reservado", async () => {
@@ -236,15 +247,26 @@ describe("o mapa mental na fila do resumo", () => {
     expect(banco.updates.some(u => u.set.status === "ready")).toBe(true);
   });
 
-  it("os esgotados: o resumo e o mapa desistem cada um no seu campo", async () => {
+  it("os esgotados: o resumo e o mapa desistem cada um no seu campo, linha a linha pela chave", async () => {
+    banco.esgotados = { resumo: ["resumo-1"], mapa: ["resumo-2"] };
     await fila.rodarUmaVez();
     const [doResumo, doMapa] = banco.updates;
+    expect(banco.updates).toHaveLength(2);
     expect(doResumo.set).toMatchObject({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS" });
     expect(doMapa.set).toMatchObject({ mindMapStatus: "failed", mindMapError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null });
     expect(doMapa.set).not.toHaveProperty("status");
+    // Cada UPDATE vai pela chave e repete as condições: a linha que mudou depois da leitura não casa.
+    expect(sqlDo(doResumo.where).sql).toContain("`meeting_summaries`.`id` = ?");
+    expect(sqlDo(doResumo.where).params).toEqual(expect.arrayContaining(["resumo-1", "pending", fila.TENTATIVAS_DO_RESUMO]));
     const { sql, params } = sqlDo(doMapa.where);
+    expect(sql).toContain("`meeting_summaries`.`id` = ?");
     expect(sql).toContain("`mind_map_status` = ?");
     expect(sql).toContain("`attempts` >= ?");
-    expect(params).toEqual(expect.arrayContaining(["ready", "pending", fila.TENTATIVAS_DO_RESUMO]));
+    expect(params).toEqual(expect.arrayContaining(["resumo-2", "ready", "pending", fila.TENTATIVAS_DO_RESUMO]));
+  });
+
+  it("sem esgotados na leitura, a desistência não escreve nada", async () => {
+    await fila.rodarUmaVez();
+    expect(banco.updates).toEqual([]);
   });
 });

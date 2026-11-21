@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -27,6 +28,10 @@ const { appRouter } = await import("./routers");
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-acoes-google-${crypto.randomUUID()}`;
+// A conta Google de cada execução é única: os arquivos de integração rodam em paralelo no
+// mesmo banco, e "outra conta da WRW usa esta conta Google?" (outraContaUsa) via a dos outros.
+const SUFIXO_DA_CONTA_GOOGLE = crypto.randomUUID();
+const contaGoogle = (nome: string) => `${nome}-${SUFIXO_DA_CONTA_GOOGLE}`;
 const OUTRA = `teste-acoes-google-outra-${crypto.randomUUID()}`;
 const PROVA = { ipAddress: "203.0.113.9", userAgent: "Navegador de teste" };
 const HORA = 60 * 60_000;
@@ -66,7 +71,7 @@ async function linhaDaAcao(id: string) {
   return linha;
 }
 
-async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
+async function conectar(sub = contaGoogle("sub-da-dona"), refreshToken = "refresh-da-dona") {
   // Grava a conexão de verdade; o token de acesso dela fica em memória, e a Google só é chamada para os eventos.
   await conexaoGoogle.gravarConexaoGoogle(idDaDona, {
     refreshToken, sub, email: "dona@exemplo.com",
@@ -77,7 +82,7 @@ async function conectar(sub = "sub-da-dona", refreshToken = "refresh-da-dona") {
 
 async function desconectarNoBanco() {
   conexaoGoogle.esquecerAcesso(idDaDona);
-  await (await getDb())!.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, idDaDona));
+  await apagarPelaChave((await getDb())!, googleAgendaConexoes, eq(googleAgendaConexoes.userId, idDaDona));
 }
 
 /** Uma reunião pronta da dona com o resumo pronto e uma ação confirmada; devolve o item. */
@@ -105,12 +110,12 @@ async function itemConfirmado() {
 async function limpar() {
   const banco = (await getDb())!;
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
-    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
-    await banco.delete(privateContacts).where(eq(privateContacts.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, lembretes, eq(lembretes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, privateContacts, eq(privateContacts.ownerId, dona));
   }
 }
 
@@ -126,8 +131,8 @@ describe.skipIf(!temBanco)("Próximas ações na Google Agenda (integração)", 
     if (!db) return;
     await limpar();
     if (idDaDona) {
-      await db.delete(googleAgendaConexoes).where(eq(googleAgendaConexoes.userId, idDaDona));
-      await db.delete(auditLogs).where(inArray(auditLogs.userId, [idDaDona]));
+      await apagarPelaChave(db, googleAgendaConexoes, eq(googleAgendaConexoes.userId, idDaDona));
+      await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, [idDaDona]));
     }
     await db.delete(users).where(eq(users.openId, DONA));
   });

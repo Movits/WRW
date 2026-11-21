@@ -74,12 +74,34 @@ const QUEBRA_SEM_ESPACO = new RegExp(`(${CLASSE_SEM_ESPACO})`, "u");
 const EH_SEM_ESPACO = new RegExp(`^${CLASSE_SEM_ESPACO}$`, "u");
 
 /**
+ * A negação contraída do inglês vira "not" antes da comparação: "don't" →
+ * "do not", "doesn't" → "does not", "won't" → "will not", "can't" → "can
+ * not". Sem isso, "We don't need a distributor" virava as unidades "don" e
+ * "t", que nenhuma lista de negação conhece, e a necessidade negada passava
+ * como declarada (revisão de 17/11). Só o apóstrofo conta: "T-shirts" segue
+ * "t" e "shirts". A mesma troca vale para a fonte, o trecho e o texto do
+ * item, então o trecho "don't need a distributor" continua sendo achado.
+ */
+const NEGACAO_CONTRAIDA_IRREGULAR: Array<[RegExp, string]> = [
+  [/\bwon['’‘ʼ`´]t\b/gi, "will not"],
+  [/\bcan['’‘ʼ`´]t\b/gi, "can not"],
+  [/\bshan['’‘ʼ`´]t\b/gi, "shall not"],
+];
+const NEGACAO_CONTRAIDA = /n['’‘ʼ`´]t\b/gi;
+function semNegacaoContraida(texto: string): string {
+  let saida = texto;
+  for (const [forma, troca] of NEGACAO_CONTRAIDA_IRREGULAR) saida = saida.replace(forma, troca);
+  return saida.replace(NEGACAO_CONTRAIDA, " not");
+}
+
+/**
  * As unidades de comparação: minúsculas, sem acento e sem pontuação, na
  * tokenização do analisador de termos (shared/direcao-do-termo.ts), que
- * entende qualquer escrita; em escrita sem espaço, cada caractere.
+ * entende qualquer escrita; em escrita sem espaço, cada caractere. A negação
+ * contraída do inglês chega aberta (`semNegacaoContraida`).
  */
 function unidades(texto: string): string[] {
-  return tokensDoTermo(texto).flatMap(palavra => palavra.split(QUEBRA_SEM_ESPACO)).filter(Boolean);
+  return tokensDoTermo(semNegacaoContraida(texto)).flatMap(palavra => palavra.split(QUEBRA_SEM_ESPACO)).filter(Boolean);
 }
 
 /** As unidades separadas por um espaço: a comparação não tropeça em "Distribuição," × "distribuicao". */
@@ -112,12 +134,62 @@ const ehConteudo = (unidade: string) =>
  * curta; logo antes dele, também "sem" ("estamos sem distribuidor") — dentro,
  * "sem" costuma ser qualidade ("produtos sem glúten"). "Não só" e "não
  * apenas" não negam.
+ *
+ * A lista curta tem o inglês escrito sem apóstrofo ("dont", "doesnt"; com
+ * apóstrofo ele já chega como "not", ver `semNegacaoContraida`) e as palavras
+ * de negação do espanhol que o português não tem ("jamás", "ningún",
+ * "tampoco"). O "no" do espanhol fica de fora: em português ele é "em + o"
+ * ("distribuidor no Chile"), e só nega diante de verbo (`noQueNega`).
  */
-const NEGACOES_NO_TRECHO = new Set(["nao", "nunca", "jamais", "nem", "nenhum", "nenhuma", "not", "never"]);
-const NEGACOES_ANTES_DO_TRECHO = new Set(["nao", "nunca", "jamais", "nem", "nenhum", "nenhuma", "not", "never", "sem", "without"]);
+const NEGACOES_SEM_APOSTROFO = [
+  "dont", "doesnt", "didnt", "wont", "wouldnt", "cant", "cannot", "couldnt", "shouldnt",
+  "isnt", "arent", "wasnt", "werent", "havent", "hasnt", "hadnt", "neednt", "mustnt",
+];
+const NEGACOES_CURTAS = [
+  "nao", "nunca", "jamais", "nem", "nenhum", "nenhuma", "not", "never", ...NEGACOES_SEM_APOSTROFO,
+  "jamas", "ningun", "ninguno", "ninguna", "tampoco",
+];
+const NEGACOES_NO_TRECHO = new Set(NEGACOES_CURTAS);
+const NEGACOES_ANTES_DO_TRECHO = new Set([...NEGACOES_CURTAS, "sem", "without"]);
 const RESSALVAS_DA_NEGACAO = new Set(["so", "apenas", "somente", "only", "just"]);
-const negaEm = (lista: readonly string[], k: number, negacoes: ReadonlySet<string>) =>
-  negacoes.has(lista[k]) && !RESSALVAS_DA_NEGACAO.has(lista[k + 1]);
+
+/**
+ * O "no" que nega (revisão de 17/11): o do espanhol diante de verbo ("no
+ * necesitamos", "no tenemos", "no hay", "no buscamos", com um pronome átono no
+ * meio: "no lo necesitamos", "no nos hace falta", e "no es necesario") e o do
+ * inglês diante de "need" ("we have no need") e de "longer" ("we no longer
+ * need"). O "no" do português é "em + o" e nunca vem antes de verbo: diante
+ * de qualquer outra palavra ele segue não negando ("distribuidor no Chile",
+ * "no Brasil precisamos de..."). O verbo tem de estar na mesma oração: em
+ * "¿Necesitan un contador? No. Necesitamos un distribuidor", o "No." é a
+ * resposta, e não a negação do que vem depois.
+ */
+const VERBO_QUE_O_NO_NEGA = /^(necesit|need)/;
+const VERBOS_QUE_O_NO_NEGA = new Set([
+  "precisamos", "precisan",
+  "tengo", "tenemos", "tiene", "tienen", "tenia", "teniamos", "tenian",
+  "hay", "habia", "habra",
+  "busco", "buscamos", "buscan", "buscaba", "buscabamos", "buscando",
+  "quiero", "queremos", "quiere", "quieren", "queria", "queriamos",
+  "requiero", "requerimos", "requiere", "requieren",
+  "hace", "hacen", "interesa", "interesan",
+  "contamos", "cuento", "cuenta", "cuentan",
+  "estamos", "estoy", "vamos", "voy",
+]);
+const PRONOMES_ATONOS_DO_ESPANHOL = new Set(["lo", "la", "los", "las", "le", "les", "nos", "me", "te", "se"]);
+function noQueNega(lista: readonly string[], k: number, oracao?: readonly number[]): boolean {
+  if (lista[k] !== "no") return false;
+  const naOracao = (j: number) => !oracao || oracao[j] === oracao[k];
+  if (lista[k + 1] === "longer") return naOracao(k + 1);
+  const j = PRONOMES_ATONOS_DO_ESPANHOL.has(lista[k + 1]) ? k + 2 : k + 1;
+  if (!naOracao(j)) return false;
+  const verbo = lista[j] ?? "";
+  if (verbo === "es" || verbo === "son") return /^necesari/.test(lista[j + 1] ?? "");
+  return VERBO_QUE_O_NO_NEGA.test(verbo) || VERBOS_QUE_O_NO_NEGA.has(verbo);
+}
+
+const negaEm = (lista: readonly string[], k: number, negacoes: ReadonlySet<string>, oracao?: readonly number[]) =>
+  (negacoes.has(lista[k]) || noQueNega(lista, k, oracao)) && !RESSALVAS_DA_NEGACAO.has(lista[k + 1]);
 /** Quantas unidades antes do trecho, na mesma oração, a negação alcança ("não tem um distribuidor"). */
 const ALCANCE_DA_NEGACAO = 3;
 /** Quantas unidades em volta do trecho ainda o sustentam ("distribuição de medicamentos | em todo o Brasil"). */
@@ -166,7 +238,7 @@ const VERBOS_DA_DECLARACAO = new Set([
   "have", "need", "want", "offer", "sell", "own",
 ]);
 function negacaoRestringeUmNome(lista: readonly string[], oracao: readonly number[], k: number): boolean {
-  if (!negaEm(lista, k, NEGACOES_NO_TRECHO) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
+  if (!negaEm(lista, k, NEGACOES_NO_TRECHO, oracao) || lista[k] === "nem" || VERBOS_DA_DECLARACAO.has(lista[k + 1])) return false;
   return [k - 1, k - 2].some(j => j >= 2 && RELATIVOS.has(lista[j]) && oracao[j - 2] === oracao[k]
     && DETERMINANTES.has(lista[j - 2]) && ehConteudo(lista[j - 1]) && !NAO_SAO_NOME.has(lista[j - 1]));
 }
@@ -189,7 +261,7 @@ function leituraDoTrecho(lista: readonly string[], oracao: readonly number[], in
     else if (negacaoRestringeUmNome(lista, oracao, k)) {
       restricao = oracao[k];
       restringe = true;
-    } else if (negaEm(lista, k, NEGACOES_NO_TRECHO)) return "desmente";
+    } else if (negaEm(lista, k, NEGACOES_NO_TRECHO, oracao)) return "desmente";
   }
   return restringe ? "restringe" : "afirma";
 }
@@ -225,7 +297,7 @@ function alcanceDaNegacao(
   lista: readonly string[],
   oracao: readonly number[],
   faixa: { de: number; ate: number } = { de: 0, ate: lista.length },
-  ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO),
+  ehMarca: (k: number) => boolean = k => negaEm(lista, k, NEGACOES_ANTES_DO_TRECHO, oracao),
 ): AlcanceDaNegacao {
   const alcance: AlcanceDaNegacao = { negada: [], marca: [], complemento: [], complementoDe: [], abertaPor: [] };
   // A asserção evita que o tsc estreite `aberta` para null no laço. `cadeia` é
@@ -311,7 +383,7 @@ function pedacosDoTrecho(trecho: string): string[][] {
  * antes, na mesma oração: em "Não precisamos de um investidor que não entenda
  * do setor", o primeiro "não" desmente a declaração, e o segundo só
  * restringiria o nome. A mesma régua serve a apoioDoTrecho e a
- * necessidadeHipotetica.
+ * leituraDaNecessidade.
  */
 function ocorrenciaDesmentida(lida: ReturnType<typeof fonteLida>, inicio: number, fim: number): boolean {
   const leitura = leituraDoTrecho(lida.daFonte, lida.oracao, inicio, fim);
@@ -346,7 +418,7 @@ function apoioDoTrecho(trecho: unknown, fonte: string): PalavraDoApoio[] | null 
       achou = true;
       const de = Math.max(0, inicio - JANELA_DO_TRECHO);
       const ate = Math.min(daFonte.length, fim + JANELA_DO_TRECHO);
-      const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO));
+      const doTrecho = alcanceDaNegacao(daFonte, oracao, { de, ate }, k => k >= inicio && k < fim && negaEm(daFonte, k, NEGACOES_ANTES_DO_TRECHO, oracao));
       for (let k = de; k < ate; k += 1) {
         const complementoDoTrecho = doTrecho.complemento[k - de];
         apoio.push({
@@ -396,13 +468,21 @@ export function trechoEstaNaFonte(trecho: string | null | undefined, fonte: stri
  *   precisar", o falado "a gente ia precisar"); ou um "talvez" fica logo antes
  *   do item ("precisamos de um distribuidor e talvez de um contador");
  * - declarada: o verbo sem nada disso e sem negação ("não precisamos");
- * - neutra: nenhum verbo rege o item ("conheci um distribuidor no Chile"), o
- *   verbo é negado, ou é de busca e vem com modal ("podemos buscar", que
- *   também é oferta).
+ * - negada: o verbo que rege o item é negado ("não precisamos mesmo de um
+ *   distribuidor no Chile", "we don't really need an accountant", "no
+ *   necesitamos todavía un contador"). Ela contava como neutra e passava
+ *   (achado da N5, 17/11): a negação longe do item (mais de
+ *   ALCANCE_DA_NEGACAO unidades antes dele) não desmente o trecho, e só o
+ *   verbo a liga ao item;
+ * - neutra: nenhum verbo rege o item ("conheci um distribuidor no Chile"), ou
+ *   o verbo é de busca e vem com modal ("podemos buscar", que também é
+ *   oferta).
  * A necessidade é hipotética quando alguma ocorrência é hipotética e nenhuma é
  * declarada: a fonte que também declara a necessidade a sustenta, e a menção
- * neutra não (a hipotética que reaparece em outra frase segue hipotética). A
- * ocorrência que a fonte desmente não conta.
+ * neutra não (a hipotética que reaparece em outra frase segue hipotética). É
+ * negada quando alguma ocorrência é negada e nenhuma é declarada nem
+ * hipotética. A ocorrência que a fonte desmente não conta. O portão derruba a
+ * hipotética e a negada (`necessidadeNaoDeclarada`).
  *
  * A lista é curta e do lado conservador: "may" fica de fora (o mês de maio,
  * "In May we need"), e "eventualmente" também, porque com o verbo no presente
@@ -473,10 +553,26 @@ const AUXILIARES_DO_CONDICIONAL = new Map<string, RegExp>([
   ["ia", PRECISAR_NO_INFINITIVO], ["iam", PRECISAR_NO_INFINITIVO], ["iamos", PRECISAR_NO_INFINITIVO],
 ]);
 
-type ClasseDaOcorrencia = "declarada" | "hipotetica" | "neutra";
+type ClasseDaOcorrencia = "declarada" | "hipotetica" | "negada" | "neutra";
 
 export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: string): boolean {
-  if (typeof trecho !== "string") return false;
+  return leituraDaNecessidade(texto, trecho, fonte) === "hipotetica";
+}
+
+/**
+ * A necessidade que a fonte não DECLARA: a hipotética e a negada ("não
+ * precisamos mesmo de um distribuidor no Chile", "we don't really need an
+ * accountant"). É a pergunta do portão (`filtrarPelaFonte`), só para O QUE
+ * PRECISO.
+ */
+export function necessidadeNaoDeclarada(texto: unknown, trecho: unknown, fonte: string): boolean {
+  const leitura = leituraDaNecessidade(texto, trecho, fonte);
+  return leitura === "hipotetica" || leitura === "negada";
+}
+
+/** A classe que vence entre as ocorrências do trecho: declarada, senão hipotética, senão negada, senão neutra. */
+function leituraDaNecessidade(texto: unknown, trecho: unknown, fonte: string): ClasseDaOcorrencia {
+  if (typeof trecho !== "string") return "neutra";
   const lida = fonteLida(fonte);
   const { daFonte, oracao } = lida;
   const ehVerbo = (unidade: string) => VERBO_DE_NECESSIDADE.test(unidade) || VERBO_DE_BUSCA.test(unidade);
@@ -517,7 +613,7 @@ export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: st
       // "Precise buscar": a busca é complemento da necessidade, que é quem rege.
       const rege = VERBO_DE_NECESSIDADE.test(daFonte[v]) ? v
         : [v - 1, v - 2].find(u => u >= 0 && oracao[u] === daOracao && VERBO_DE_NECESSIDADE.test(daFonte[u])) ?? v;
-      if (negado(rege)) return "neutra";
+      if (negado(rege)) return "negada";
       if (!hipoteticoEm(rege)) return "declarada";
       return VERBO_DE_NECESSIDADE.test(daFonte[rege]) ? "hipotetica" : "neutra";
     }
@@ -546,20 +642,23 @@ export function necessidadeHipotetica(texto: unknown, trecho: unknown, fonte: st
     const regioes: Array<[number, number]> = [[inicio, fim], [fim, fim + JANELA_DO_TRECHO], [inicio - JANELA_DO_TRECHO, inicio]];
     const ancoras = regioes.map(([de, ate]) => gruposDoItem(de, ate)).find(grupos => grupos.length > 0) ?? [];
     const classes = ancoras.length ? ancoras.map(a => classeEm(a, oracao[a])) : [classeEm(fim, oracao[fim - 1])];
-    return classes.includes("declarada") ? "declarada" : classes.includes("hipotetica") ? "hipotetica" : "neutra";
+    return classes.includes("declarada") ? "declarada" : classes.includes("hipotetica") ? "hipotetica"
+      : classes.includes("negada") ? "negada" : "neutra";
   };
   let hipotetica = false;
+  let negada = false;
   for (const pedaco of pedacosDoTrecho(trecho)) {
     for (let inicio = 0; inicio + pedaco.length <= daFonte.length; inicio += 1) {
       if (!pedaco.every((unidade, k) => daFonte[inicio + k] === unidade)) continue;
       const fim = inicio + pedaco.length;
       if (ocorrenciaDesmentida(lida, inicio, fim)) continue;
       const classe = classeDaOcorrencia(inicio, fim);
-      if (classe === "declarada") return false;
+      if (classe === "declarada") return "declarada";
       if (classe === "hipotetica") hipotetica = true;
+      if (classe === "negada") negada = true;
     }
   }
-  return hipotetica;
+  return hipotetica ? "hipotetica" : negada ? "negada" : "neutra";
 }
 
 /**
@@ -772,8 +871,8 @@ export function filtrarPelaFonte(proposta: PerfilProposto, fonte: string, identi
   const itens = (lista: unknown, campo: "tenho" | "preciso"): ItemProposto[] => (Array.isArray(lista) ? lista : [])
     .filter((item): item is ItemProposto => Boolean(item) && typeof item.texto === "string" && item.texto.trim().length >= 2)
     .filter(item => textoSustentadoPeloTrecho(item.texto, item.trecho, fonte))
-    // "Poderíamos precisar de contador" não é necessidade declarada (N5).
-    .filter(item => campo !== "preciso" || !necessidadeHipotetica(item.texto, item.trecho, fonte))
+    // "Poderíamos precisar de contador" não é necessidade declarada (N5), nem "não precisamos mesmo de contador".
+    .filter(item => campo !== "preciso" || !necessidadeNaoDeclarada(item.texto, item.trecho, fonte))
     .filter(item => !itemIdentificaOContato(item.texto, quem))
     .map(item => ({
       texto: item.texto.trim().slice(0, LIMITES_DO_CAMPO.tenho),

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import * as jose from "jose";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -243,16 +244,16 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
     const ids = contas.map(conta => conta.id);
     const emails = contas.map(conta => conta.email!.toLowerCase());
     if (ids.length) {
-      await banco.delete(chavesDeAcesso).where(inArray(chavesDeAcesso.userId, ids));
-      await banco.delete(desafiosDeChaveDeAcesso).where(inArray(desafiosDeChaveDeAcesso.userId, ids));
-      await banco.delete(sessions).where(inArray(sessions.userId, ids));
-      await banco.delete(auditLogs).where(inArray(auditLogs.userId, ids));
-      await banco.delete(passwordResetTokens).where(inArray(passwordResetTokens.userId, ids));
-      await banco.delete(loginAttempts).where(inArray(loginAttempts.identifier, emails));
+      await apagarPelaChave(banco, chavesDeAcesso, inArray(chavesDeAcesso.userId, ids));
+      await apagarPelaChave(banco, desafiosDeChaveDeAcesso, inArray(desafiosDeChaveDeAcesso.userId, ids));
+      await apagarPelaChave(banco, sessions, inArray(sessions.userId, ids));
+      await apagarPelaChave(banco, auditLogs, inArray(auditLogs.userId, ids));
+      await apagarPelaChave(banco, passwordResetTokens, inArray(passwordResetTokens.userId, ids));
+      await apagarPelaChave(banco, loginAttempts, inArray(loginAttempts.identifier, emails));
       await banco.delete(users).where(inArray(users.id, ids));
     }
     if (desafiosDeEntrada.length) {
-      await banco.delete(desafiosDeChaveDeAcesso).where(inArray(desafiosDeChaveDeAcesso.desafio, desafiosDeEntrada));
+      await apagarPelaChave(banco, desafiosDeChaveDeAcesso, inArray(desafiosDeChaveDeAcesso.desafio, desafiosDeEntrada));
     }
   });
 

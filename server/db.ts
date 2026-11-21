@@ -28,6 +28,7 @@ import { normalizar } from "@shared/direcao-do-termo";
 import { BancoIndisponivel } from "./banco-indisponivel";
 import { condicaoDeStatusNasListas } from "./oportunidade-acesso";
 import { consolidarPerfil } from "./perfil-consolidado";
+import { CAMPOS_DA_EDICAO_DO_PERFIL, mesclarOQueEntrouDepois, oQueEntrouDepois, PerfilMudouNoMeio, type ListasRecebidas } from "./listas-do-perfil";
 import { avaliarQualificacaoDoPerfil } from "@shared/qualificacao-do-perfil";
 import { contextoParaOferecer } from "./contexto-oferecido";
 import { nomeDoTipoDeContexto } from "./nome-do-tipo-de-contexto";
@@ -162,13 +163,47 @@ export function computeProfileCompleteness(profile: Record<string, unknown> | nu
   return Math.round((filled / CAMPOS_DA_COMPLETUDE_DO_PERFIL.length) * 100);
 }
 
-export async function upsertUserProfile(userId: number, data: Record<string, unknown>) {
+/** As colunas dos outros campos da edição do Perfil (server/listas-do-perfil.ts), para a conferência da versão. */
+const COLUNAS_DA_EDICAO_DO_PERFIL = Object.fromEntries(CAMPOS_DA_EDICAO_DO_PERFIL.map(campo => [campo, userProfiles[campo]])) as {
+  [Campo in (typeof CAMPOS_DA_EDICAO_DO_PERFIL)[number]]: (typeof userProfiles)[Campo];
+};
+
+/**
+ * Grava o perfil. Com `versaoDasListas` (o Meu Perfil, que devolve "O que
+ * tenho", "O que preciso" e os outros campos dele inteiros), a escrita confere
+ * antes, com a linha travada, que as listas e os outros campos gravados são os
+ * que a tela carregou, e acrescenta o que entrou depois no fim das listas
+ * (server/listas-do-perfil.ts). Lança PerfilMudouNoMeio, sem gravar nada,
+ * quando uma lista mudou de outro jeito ou outro campo mudou no banco.
+ * Sem a versão (o Perfil antigo em cache, o cadastro), grava como sempre.
+ */
+export async function upsertUserProfile(userId: number, data: Record<string, unknown>, versaoDasListas?: string) {
   const db = await exigirDb();
-  const existing = await getUserProfile(userId);
-  if (existing) {
-    await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+  if (versaoDasListas !== undefined) {
+    await db.transaction(async tx => {
+      // FOR UPDATE, como a confirmação que a reunião leva ao perfil (confirmarItemDaDona):
+      // a conferência e a escrita não deixam um item entrar no meio. Os outros campos da
+      // edição vêm junto, consolidados como o profile.get os leu (cargo e empresa).
+      const [gravadas] = await tx.select({
+        whatIHave: userProfiles.whatIHave, whatINeed: userProfiles.whatINeed, whatINeedDetails: userProfiles.whatINeedDetails,
+        ...COLUNAS_DA_EDICAO_DO_PERFIL,
+      }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1).for("update");
+      const entrou = oQueEntrouDepois(versaoDasListas, gravadas && consolidarPerfil(gravadas));
+      const listas = entrou && mesclarOQueEntrouDepois(data as ListasRecebidas, entrou);
+      if (!listas) throw new PerfilMudouNoMeio();
+      if (gravadas) {
+        await tx.update(userProfiles).set({ ...data, ...listas, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+      } else {
+        await tx.insert(userProfiles).values({ userId, ...data, ...listas } as any);
+      }
+    });
   } else {
-    await db.insert(userProfiles).values({ userId, ...data } as any);
+    const existing = await getUserProfile(userId);
+    if (existing) {
+      await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+    } else {
+      await db.insert(userProfiles).values({ userId, ...data } as any);
+    }
   }
   const atual = await getUserProfile(userId);
   const completeness = computeProfileCompleteness(atual as Record<string, unknown> | null);
@@ -791,7 +826,17 @@ function comSouDestinatariaBooleana<T extends { souDestinataria: unknown }>(linh
   return linhas.map(linha => ({ ...linha, souDestinataria: Boolean(linha.souDestinataria) }));
 }
 
-export async function getMatchesForUser(userId: number, limit = 20) {
+/**
+ * As conexões sugeridas que a dona não dispensou, na ordem do motor de perfis
+ * (server/matching.ts, `ordemDasMelhores`): a nota mais alta primeiro e, na
+ * mesma nota, a outra usuária de id menor. Com o desempate a ordem é estável e as
+ * páginas (`pulo`) se emendam sem empate solto entre elas: o par (dona, outra) é
+ * único em `matches`. Uma rodada do motor que regrave notas no meio da leitura
+ * ainda mexe na ordem; quem lê em páginas descarta a linha repetida. As travas da
+ * leitura (o termo e o portão da demanda expressa) ficam com quem chama
+ * (routers/profileMatches.ts).
+ */
+export async function getMatchesForUser(userId: number, limit = 20, pulo = 0) {
   const db = await exigirDb();
   const linhas = await db.select({
     matchId: matches.id,
@@ -841,8 +886,9 @@ export async function getMatchesForUser(userId: number, limit = 20) {
       pedidoVisivelPara(userId),
     ))
     .where(and(eq(matches.userId, userId), eq(matches.userDismissed, false)))
-    .orderBy(desc(matches.overallScore))
-    .limit(limit);
+    .orderBy(desc(matches.overallScore), asc(matches.matchedUserId))
+    .limit(limit)
+    .offset(pulo);
   return comSouDestinatariaBooleana(linhas);
   // A13 (histórico): a `bio` era texto livre da OUTRA usuária chegando a esta, e
   // saía daqui mascarada contra telefone/e-mail. Ela deixou de ser lida — proteção

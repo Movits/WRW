@@ -19,6 +19,9 @@ import { GlobalMenu } from "@/components/AppHeader";
 import { BrandMark } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { CartaoDeProximasAcoes } from "@/components/ProximasAcoes";
+import { ConexoesPossiveis } from "@/components/ConexoesPossiveis";
+import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -972,15 +975,23 @@ export default function Dashboard() {
   const [tabVisible, setTabVisible] = useState(true);
 
   const profileQuery = trpc.profile.get.useQuery(undefined, { enabled: isAuthenticated });
-  const matchesQuery = trpc.matches.list.useQuery({ limit: 20 }, { enabled: isAuthenticated });
+  // U3: a Bronze vê QUANTAS conexões são possíveis, e a lista se libera com o
+  // cadastro completo (Prata). O servidor nem manda a lista a ela (matches.list
+  // sai vazio); aqui as consultas da lista nem saem, e sai a do número.
+  const listaLiberada = veAsConexoesSugeridas(user?.role);
+  const matchesQuery = trpc.matches.list.useQuery({ limit: 20 }, { enabled: isAuthenticated && listaLiberada });
+  const possiveisQuery = trpc.matches.conexoesPossiveis.useQuery(undefined, { enabled: isAuthenticated && !listaLiberada });
   // Etapa 11: com termo publicado e não aceito, matches.list devolve [] de
   // propósito — sem isto o Dashboard esvaziaria em silêncio no dia da
   // publicação, sem nada convidando a autorizar.
   const consentQuery = trpc.consent.status.useQuery({ type: "termo_smart_match" }, { enabled: isAuthenticated });
   // Etapa 13 (prontidão): separa "nenhum perfil compatível" de "a rede ainda
-  // está autorizando o termo" — a primeira aceitante via o vazio errado.
+  // está autorizando o termo" — a primeira aceitante via o vazio errado. Vale
+  // também para a Bronze (U3): com zero conexões possíveis porque o outro lado
+  // ainda não aceitou o termo, a causa é a rede, não o perfil dela, e as contas
+  // novas nascem Bronze. A resposta é só a contagem, sem dado pessoal.
   const redeQuery = trpc.matches.redeAguardando.useQuery(undefined, { enabled: isAuthenticated });
-  const statsQuery = trpc.matches.list.useQuery({ limit: 50 }, { enabled: isAuthenticated, select: (data) => ({
+  const statsQuery = trpc.matches.list.useQuery({ limit: 50 }, { enabled: isAuthenticated && listaLiberada, select: (data) => ({
     total: data.length,
     highScore: data.filter(m => m.overallScore >= 80).length,
     avgScore: data.length > 0 ? Math.round(data.reduce((s, m) => s + m.overallScore, 0) / data.length) : 0,
@@ -1009,7 +1020,8 @@ export default function Dashboard() {
     maiorAvisoVisto.current = maior;
     if (anterior !== null && maior > anterior) {
       void connectionsQuery.refetch();
-      void matchesQuery.refetch();
+      // U3: o `refetch` passa por cima do `enabled: false`, e a Bronze não lê a lista.
+      if (listaLiberada) void matchesQuery.refetch();
     }
     // As duas consultas ficam fora das dependências de propósito: a identidade
     // delas muda a cada render, e o que decide a releitura é o aviso novo.
@@ -1046,7 +1058,9 @@ export default function Dashboard() {
   // item 6.4 pedia: o servidor guardou `userSeen` no caminho silencioso abaixo.
   const novidadesDaCarga = useRef<number | null>(null);
   const sugestoesJaContadas = useRef<Set<number> | null>(null);
-  if (matchesQuery.data) {
+  // U3: lista de quem não a vê (a Bronze; ou a conta que caiu de nível com a
+  // lista antiga ainda no cache) não conta novidade nenhuma.
+  if (listaLiberada && matchesQuery.data) {
     const contadas = sugestoesJaContadas.current;
     const temSugestaoNova = !contadas || matchesQuery.data.some(m => !contadas.has(m.matchId));
     if (temSugestaoNova) {
@@ -1068,12 +1082,15 @@ export default function Dashboard() {
       toast.success(data?.revelou ? t("dashboard.connectionAccepted") : t("dashboard.interestSent"));
       connectionsQuery.refetch(); matchesQuery.refetch();
     },
-    onError: (err) => toast.error(err.message || t("dashboard.interestError")),
+    // As frases conhecidas do servidor saem no idioma da tela: entre elas, a da
+    // conta que caiu para Bronze com o cartão ainda aberto (U3, FORBIDDEN).
+    onError: (err) => toast.error(err.message ? traduzirMensagemDoServidor(err.message, t) : t("dashboard.interestError")),
   });
   const respondMutation = trpc.connections.respond.useMutation({
     // `matchesQuery` também: o nome do cartão vem do servidor, e sem este refetch
-    // a pessoa aceita e o cartão continua anônimo até apertar F5.
-    onSuccess: (_, vars) => { toast.success(vars.accept ? t("dashboard.connectionAccepted") : t("dashboard.connectionDeclined")); connectionsQuery.refetch(); matchesQuery.refetch(); },
+    // a pessoa aceita e o cartão continua anônimo até apertar F5. A Bronze
+    // responde pela aba Conexões e não lê a lista (U3).
+    onSuccess: (_, vars) => { toast.success(vars.accept ? t("dashboard.connectionAccepted") : t("dashboard.connectionDeclined")); connectionsQuery.refetch(); if (listaLiberada) matchesQuery.refetch(); },
   });
   const regenerateMutation = trpc.matches.regenerate.useMutation({
     // Quantas vieram está no aviso desta mutation (`dashboard.newMatches`). O
@@ -1081,10 +1098,33 @@ export default function Dashboard() {
     // refetch trouxer sugestão com id novo (ver `novidadesDaCarga`, acima).
     // Zerar à mão fazia o aviso piscar enquanto o refetch não voltava.
     onSuccess: (data) => {
+      // U3: para a Bronze, o número que vale é o do cartão (o tamanho da lista
+      // que ela veria), não as linhas que a rodada gravou — as duas contas
+      // diferem (janela de 50, dispensadas, portão na leitura).
+      if (!listaLiberada) {
+        toast.success(t("dashboard.possiveisAtualizadas"));
+        possiveisQuery.refetch();
+        return;
+      }
       toast.success(data.count > 0 ? t("dashboard.newMatches", { count: data.count }) : t("dashboard.analysisDone"));
       matchesQuery.refetch();
     },
+    // Falhou não é "nada de novo": o número do cartão e a lista ficariam iguais,
+    // sem nada dizendo que a análise não rodou (o banco fora do ar, por exemplo).
+    onError: (erro) => toast.error(mensagemDeErroParaTela(erro, t)),
   });
+
+  // U3: o nível que decide a tela vem de auth.me, que não se relê no foco. A
+  // conta promovida em outra aba (salvou o Perfil) ou por uma admin ficava presa
+  // à visão da Bronze até recarregar. O número das conexões possíveis, relido no
+  // foco, já diz que a lista está liberada: aí a tela relê o nível.
+  const utils = trpc.useUtils();
+  const listaLiberadaNoServidor = possiveisQuery.data?.listaLiberada === true;
+  useEffect(() => {
+    if (listaLiberadaNoServidor && !listaLiberada) void utils.auth.me.invalidate();
+    // `utils` fica fora das dependências: o que decide é o nível de cada lado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listaLiberadaNoServidor, listaLiberada]);
 
   // Reteste v4 (item 6.4): "N novas conexões sugeridas esperando pela sua
   // atenção" nunca baixava — `userSeen` nasce false e nada marcava a linha como
@@ -1100,7 +1140,7 @@ export default function Dashboard() {
   // SEGUINTE, que já o lê do banco.
   const marcarVistasMutation = trpc.matches.marcarVistas.useMutation();
   useEffect(() => {
-    if (activeTab !== "matches") return;
+    if (activeTab !== "matches" || !listaLiberada) return;
     const naoVistas = (matchesQuery.data ?? [])
       .filter(m => !m.userSeen && !vistasEnviadas.current.has(m.matchId))
       .map(m => m.matchId);
@@ -1110,7 +1150,7 @@ export default function Dashboard() {
     // A mutation fica fora das dependências de propósito: sua identidade muda a
     // cada render e o que decide a chamada é o conteúdo da lista.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, matchesQuery.data]);
+  }, [activeTab, matchesQuery.data, listaLiberada]);
 
   // Cadastro não concluído não chega aqui: o ProtectedRoute manda para
   // /onboarding (user.onboardingCompleted === false) e o servidor recusa
@@ -1149,15 +1189,23 @@ export default function Dashboard() {
     );
   }
 
-  const stats = statsQuery.data;
+  // U3: com a lista trancada (Bronze), nada dela é desenhado, nem o que tiver
+  // ficado no cache de quando a conta ainda a via (o React Query guarda o dado
+  // da consulta desligada).
+  const stats = listaLiberada ? statsQuery.data : undefined;
   const plataforma = plataformaQuery.data;
-  const matches = matchesQuery.data || [];
+  const matches = listaLiberada ? matchesQuery.data || [] : [];
   // O número do aviso sai da lista que a tela DESENHA — as mesmas linhas que o
   // efeito acima manda marcar como vistas. Contar a janela inteira (statsQuery,
   // 50) deixava o aviso alto para sempre em quem tem mais sugestões do que a
   // lista mostra: ninguém chega a ver as de fora para "zerá-las". E o valor é o
   // congelado, que só se refaz quando chega sugestão de id novo.
-  const novidades = novidadesDaCarga.current ?? 0;
+  const novidades = listaLiberada ? novidadesDaCarga.current ?? 0 : 0;
+  // U3: para a Bronze, o número das sugestões é o das conexões possíveis (o
+  // tamanho da lista que ela veria como Prata), e as notas da lista ficam
+  // trancadas com ela — nada além do número.
+  const totalDeSugestoes = listaLiberada ? stats?.total : possiveisQuery.data?.total;
+  const totalDeSugestoesFalhou = listaLiberada ? statsQuery.isError : possiveisQuery.isError;
   const aguardandoTermo = Boolean(consentQuery.data?.document) && !consentQuery.data?.accepted;
   const connections = comSouDestinatariaBooleana(connectionsQuery.data || []);
   const profileData = profileQuery.data;
@@ -1216,10 +1264,10 @@ export default function Dashboard() {
             <p className="text-white/40">
               {novidades > 0
                 ? <><span className="text-[#c98f70] font-semibold">{t("dashboard.greetingUnseen", { count: novidades })}</span> {t("dashboard.greetingUnseenSuffix")}</>
-                : stats?.total && stats.total > 0
-                  ? t("dashboard.greetingTotal", { count: stats.total })
+                : totalDeSugestoes && totalDeSugestoes > 0
+                  ? t("dashboard.greetingTotal", { count: totalDeSugestoes })
                   // Em erro, nada de convite a "gerar os primeiros matches": eles podem existir.
-                  : statsQuery.isError ? "" : t("dashboard.greetingWelcome")}
+                  : totalDeSugestoesFalhou ? "" : t("dashboard.greetingWelcome")}
             </p>
           </div>
           {/* O gravador em um toque, também daqui (pedido da cliente de 20/10/2026). */}
@@ -1238,11 +1286,13 @@ export default function Dashboard() {
           {[
             // Consulta falhou não é "0 matches": o traço diz que o número não veio
             // (o erro com "tentar de novo" está na aba de matches, logo abaixo).
-            { label: t("dashboard.matches"), value: statsQuery.isError ? "—" : stats?.total ?? 0, color: "#c98f70", icon: "🎯", suffix: "" },
+            { label: t("dashboard.matches"), value: totalDeSugestoesFalhou ? "—" : totalDeSugestoes ?? 0, color: "#c98f70", icon: "🎯", suffix: "" },
             // O único dos quatro que é porcentagem, e o único que saía sem
             // unidade nenhuma ao lado de três contagens (item 6.3).
-            { label: t("dashboard.compatibility"), value: statsQuery.isError ? "—" : stats?.avgScore ?? 0, color: "#3b82f6", icon: "📊", suffix: "%" },
-            { label: t("dashboard.topMatches"), value: statsQuery.isError ? "—" : stats?.highScore ?? 0, color: "#10b981", icon: "⭐", suffix: "" },
+            // U3: para a Bronze, as duas notas da lista ficam trancadas (🔒, e
+            // não o traço, que aqui quer dizer "a consulta falhou").
+            { label: t("dashboard.compatibility"), value: !listaLiberada ? "🔒" : statsQuery.isError ? "—" : stats?.avgScore ?? 0, color: "#3b82f6", icon: "📊", suffix: "%" },
+            { label: t("dashboard.topMatches"), value: !listaLiberada ? "🔒" : statsQuery.isError ? "—" : stats?.highScore ?? 0, color: "#10b981", icon: "⭐", suffix: "" },
             { label: t("dashboard.connectionsEstablished"), value: connectionsQuery.isError ? "—" : conexoesEfetivadas, color: "#8b5cf6", icon: "🤝", suffix: "" },
           ].map((s, i) => (
             <StatCard key={s.label} {...s} index={i} />
@@ -1361,9 +1411,13 @@ export default function Dashboard() {
             <div>
               {stats && stats.total > 0 && (
                 <div className="bg-[#1b1714] border border-white/8 rounded-2xl p-6 mb-6 animate-fade-in-scale">
-                  <div className="flex items-center justify-between mb-5">
-                    <div>
-                      <h2 className="font-bold text-white">{t("dashboard.distribution")}</h2>
+                  {/* A 375 px (conferido na U3, 19/11) o título saía no tamanho
+                      global de h2 e espremia o botão, que vazava do cartão e
+                      abria rolagem lateral na página: o título ganha tamanho
+                      próprio e o botão desce de linha quando não cabe. */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold leading-tight text-white">{t("dashboard.distribution")}</h2>
                       <p className="text-xs text-white/35 mt-0.5">{t("dashboard.distributionDesc")}</p>
                     </div>
                     <button onClick={() => regenerateMutation.mutate()} disabled={regenerateMutation.isPending}
@@ -1376,11 +1430,11 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {matchesQuery.isLoading ? (
+              {listaLiberada && matchesQuery.isLoading ? (
                 <div className="grid md:grid-cols-2 gap-4">
                   {[1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
                 </div>
-              ) : matchesQuery.isError ? (
+              ) : listaLiberada && matchesQuery.isError ? (
                 // Consulta falhou não é "nenhum match" com botão de gerar:
                 // o servidor lança de propósito quando o banco cai.
                 <ErroDeConsulta erro={matchesQuery.error} aoTentarDeNovo={() => matchesQuery.refetch()} />
@@ -1389,7 +1443,15 @@ export default function Dashboard() {
                 // aceito, a lista viria vazia SEM EXPLICAÇÃO — a trava age em
                 // silêncio no servidor. O convite de autorização mora aqui,
                 // no caminho principal, não só em /intelligent-matches.
-                <SmartMatchConsent onAccepted={() => { consentQuery.refetch(); matchesQuery.refetch(); statsQuery.refetch(); }} />
+                <SmartMatchConsent onAccepted={() => {
+                  consentQuery.refetch();
+                  if (listaLiberada) { matchesQuery.refetch(); statsQuery.refetch(); } else possiveisQuery.refetch();
+                }} />
+              ) : !listaLiberada ? (
+                // U3: a Bronze vê quantas conexões são possíveis e o que falta
+                // no perfil para a lista se liberar (a régua da Prata).
+                <ConexoesPossiveis consulta={possiveisQuery} ocultas={redeQuery.data?.ocultas ?? 0} role={user?.role} perfil={profile}
+                  aoBuscar={() => regenerateMutation.mutate()} buscando={regenerateMutation.isPending} />
               ) : matches.length === 0 && (redeQuery.data?.ocultas ?? 0) > 0 ? (
                 // Há matches, mas o outro lado ainda não autorizou o termo: a
                 // causa é a rede, não o perfil dela — dizer o contrário fazia a

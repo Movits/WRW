@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -64,15 +65,15 @@ const itemPorId = async (itemId: string) => (await (await db()).select().from(me
 async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
     // A ação com prazo agenda o lembrete no sino (H15).
-    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
-    await banco.delete(privateContacts).where(eq(privateContacts.ownerId, dona));
-    await banco.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, dona));
+    await apagarPelaChave(banco, lembretes, eq(lembretes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, privateContacts, eq(privateContacts.ownerId, dona));
+    await apagarPelaChave(banco, consumoDeMinutos, eq(consumoDeMinutos.ownerId, dona));
   }
 }
 
@@ -324,7 +325,7 @@ describe.skipIf(!temBanco)("Próximas ações no banco (integração)", () => {
     expect((await acoesDa(DONA)).map(acao => acao.itemId).sort()).toEqual([acaoId, tarefaId].sort());
     expect(await acaoDoItem(decisaoId)).toBeUndefined();
     // O item confirmado sem ação (a ação apagada por fora) volta na leitura da lista.
-    await banco.delete(proximasAcoes).where(and(eq(proximasAcoes.ownerId, DONA), eq(proximasAcoes.itemId, tarefaId)));
+    await apagarPelaChave(banco, proximasAcoes, and(eq(proximasAcoes.ownerId, DONA), eq(proximasAcoes.itemId, tarefaId)));
     await acoes.listarProximasAcoes(DONA, "todas");
     expect(await acaoDoItem(tarefaId)).toMatchObject({ texto: "Contrato", detalhe: "Revisar as cláusulas" });
     expect(await acoesDa(DONA)).toHaveLength(2);

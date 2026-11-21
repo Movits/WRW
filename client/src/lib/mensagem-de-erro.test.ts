@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
@@ -302,5 +302,27 @@ describe("traduzirMensagemDoServidor — as falhas da fila da gravação em part
   it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
     await i18n.changeLanguage("en");
     expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// O interesse da conta que caiu para Bronze com o cartão ainda aberto (U3,
+// server/routers/connections.ts): a frase do servidor, traduzida pela tabela.
+describe("mensagemDeErroParaTela — a recusa do interesse da Bronze (U3) no idioma da tela", () => {
+  const recusa = () =>
+    TRPCClientError.from({ error: { code: -32003, message: MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, data: { code: "FORBIDDEN", httpStatus: 403 } } });
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("em português é a frase do servidor, caractere a caractere", () => {
+    expect(i18n.t("dashboard.interestNeedsSilver")).toBe(MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO);
+    expect(mensagemDeErroParaTela(recusa(), c => i18n.t(c))).toBe(MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO);
+  });
+
+  it("em inglês sai traduzida", async () => {
+    await i18n.changeLanguage("en");
+    expect(traduzirMensagemDoServidor(MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, c => i18n.t(c)))
+      .toBe("Complete your profile to see the suggested connections and express interest in them.");
   });
 });

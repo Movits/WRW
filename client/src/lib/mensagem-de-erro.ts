@@ -4,8 +4,10 @@ import {
   MENSAGEM_ERRO_DE_CONSULTA,
   MENSAGEM_FALHA_DA_MONTAGEM,
   MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO,
+  MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
   MENSAGEM_PARTES_SEM_TRANSCRICAO,
+  MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
@@ -85,6 +87,10 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO]: "meetings.processingFailedNoAudioSent",
   [MENSAGEM_FALHA_DA_MONTAGEM]: "meetings.processingFailedRetryLater",
   [MENSAGEM_PARTES_SEM_TRANSCRICAO]: "meetings.processingFailedNoTranscript",
+  // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
+  [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
+  // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
+  [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
 };
 
 /**

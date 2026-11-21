@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { generateMatchesForUser, dismissMatch } from "./matching";
 import { users, userProfiles, matches, conexoesParticipantes, conexoesRegistradas } from "../drizzle/schema";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 /**
  * Prova comportamental contra um banco real DE TESTE: a regeneração faz UPSERT
@@ -40,19 +41,22 @@ describe.skipIf(!temBanco)("Match — regeneração não duplica (integração)"
     if (db) await limpar(db);
   });
 
-  const contarDe = async (userId: number) => {
+  // Só as linhas do par deste arquivo. A rodada lê todos os perfis ativos do
+  // banco compartilhado, e A (perfil quase vazio, que tira 41 com quase todo
+  // mundo) casa com as contas que os outros arquivos de integração criam e apagam
+  // ao mesmo tempo: contar todas as linhas de A fazia o resultado depender de
+  // quando cada arquivo roda (revisão do pacote do match, 20/11).
+  const contarOPar = async () => {
     const db = (await getDb())!;
-    return (await db.select({ id: matches.id }).from(matches).where(eq(matches.userId, userId))).length;
+    return (await db.select({ id: matches.id }).from(matches).where(and(eq(matches.userId, A), eq(matches.matchedUserId, B)))).length;
   };
 
   it("regenerar duas vezes não cria linhas novas", async () => {
     await generateMatchesForUser(A);
-    const depoisDa1a = await contarDe(A);
-    expect(depoisDa1a).toBeGreaterThan(0); // o par A→B casou
+    expect(await contarOPar()).toBe(1); // o par A→B casou
 
     await generateMatchesForUser(A);
-    const depoisDa2a = await contarDe(A);
-    expect(depoisDa2a).toBe(depoisDa1a); // upsert: mesmo número, não o dobro
+    expect(await contarOPar()).toBe(1); // upsert: a mesma linha, não outra
   });
 
   it("dispensar sobrevive à regeneração e não vira linha nova", async () => {
@@ -61,25 +65,24 @@ describe.skipIf(!temBanco)("Match — regeneração não duplica (integração)"
     expect(par).toBeDefined();
 
     await dismissMatch(A, par.id);
-    const antes = await contarDe(A);
 
     await generateMatchesForUser(A);
 
     const [depois] = await db.select().from(matches).where(and(eq(matches.userId, A), eq(matches.matchedUserId, B)));
     expect(depois.userDismissed).toBe(true);      // decisão preservada
     expect(depois.id).toBe(par.id);               // é a MESMA linha, não uma nova
-    expect(await contarDe(A)).toBe(antes);        // nenhuma linha acrescentada
+    expect(await contarOPar()).toBe(1);           // nenhuma linha acrescentada ao par
   });
 });
 
 async function limpar(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
   // A rodada também registra o par como PLATFORM_MATCH (network-registro.ts).
-  await db.delete(conexoesRegistradas).where(eq(conexoesRegistradas.chaveDoPar, `PLATFORM_MATCH|membro:${A}|membro:${B}`));
+  await apagarPelaChave(db, conexoesRegistradas, eq(conexoesRegistradas.chaveDoPar, `PLATFORM_MATCH|membro:${A}|membro:${B}`));
   for (const id of [A, B]) {
-    await db.delete(conexoesParticipantes).where(eq(conexoesParticipantes.userId, id));
-    await db.delete(matches).where(eq(matches.userId, id));
-    await db.delete(matches).where(eq(matches.matchedUserId, id));
-    await db.delete(userProfiles).where(eq(userProfiles.userId, id));
+    await apagarPelaChave(db, conexoesParticipantes, eq(conexoesParticipantes.userId, id));
+    await apagarPelaChave(db, matches, eq(matches.userId, id));
+    await apagarPelaChave(db, matches, eq(matches.matchedUserId, id));
+    await apagarPelaChave(db, userProfiles, eq(userProfiles.userId, id));
     await db.delete(users).where(eq(users.id, id));
   }
 }
