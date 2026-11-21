@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
+import { idiomaDaTranscricao } from "@shared/idioma-da-reuniao";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
@@ -403,7 +404,9 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const durationSeconds = Math.round(partes.filter(p => p.status === "transcribed").reduce((total, p) => total + p.durationMs, 0) / 1000);
     await gravarResultadoDaReuniao(db, {
       meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, durationSeconds,
-      transcription: { text: texto, segments: segmentos, language: r?.idioma ?? "pt-BR" },
+      // Com "Detectar sozinho" (G16), o idioma da transcrição (e do resumo) é o
+      // que mais aparece nas falas de todas as partes; senão, o escolhido.
+      transcription: { text: texto, segments: segmentos, language: idiomaDaTranscricao(r?.idioma, segmentos) },
       extraction,
     });
     await db.update(meetings).set({ lockToken: null, lockedUntil: null }).where(and(eq(meetings.id, reuniao.id), eq(meetings.lockToken, token)));

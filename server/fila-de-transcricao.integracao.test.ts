@@ -148,6 +148,35 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     expect(resumos).toEqual([expect.objectContaining({ ownerId: DONA, status: "pending", transcriptId: transcricao.id, attempts: 0, lockToken: null })]);
   });
 
+  it("G16: com \"Detectar sozinho\", a parte vai à IA como \"auto\" e a transcrição montada fica com o idioma que mais aparece, com o de cada fala", async () => {
+    const id = await reuniao("recording", null, { language: "auto" });
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 100, falante: "F1", texto: "Good morning, let's review the contract.", idioma: "en" }], idioma: "auto", modelo: "gemini-teste" });
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0]).toMatchObject({ idioma: "auto" });
+    await (await db()).update(meetings).set({ status: "uploading", expectedSlices: 2 }).where(eq(meetings.id, id));
+    await parte(id, 1, { status: "transcribed", offsetMs: 600_000, result: { segmentos: [
+      { inicio: 601, fim: 640, falante: "F2", texto: "Então combinado, eu mando hoje.", idioma: "pt-BR" },
+    ] } });
+    await rodar();
+    expect(await reuniaoDe(id)).toMatchObject({ status: "ready", language: "auto" });
+    const [transcricao] = await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id));
+    // 99 s em inglês contra 39 s em português: o resumo sai em inglês.
+    expect(transcricao.language).toBe("en");
+    expect((transcricao.segments as Array<{ idioma?: string }>).map(segmento => segmento.idioma)).toEqual(["en", "pt-BR"]);
+  });
+
+  it("G16: com \"Detectar sozinho\" e nenhum idioma reconhecido, a transcrição fica com o padrão; com o idioma escolhido, com ele", async () => {
+    const auto = await reuniao("uploading", 1, { language: "auto" });
+    await parte(auto, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Oi." }] } });
+    const italiano = await reuniao("uploading", 1, { language: "it" });
+    await parte(italiano, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Ciao.", idioma: "en" }] } });
+    await rodar();
+    const idiomaDe = async (meetingId: string) => (await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, meetingId)))[0]?.language;
+    expect(await idiomaDe(auto)).toBe("pt-BR");
+    expect(await idiomaDe(italiano)).toBe("it");
+  });
+
   it("áudio que sumiu do bucket é falha definitiva: a parte vira lacuna, e a reunião monta com o que chegou", async () => {
     const id = await reuniao("uploading", 2);
     await parte(id, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Antes." }] } });

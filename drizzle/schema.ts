@@ -1318,6 +1318,15 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   language: varchar("language", { length: 12 }),
   // O emoji do título, como no app de referência da cliente. Nulo: sem emoji.
   emoji: varchar("emoji", { length: 16 }),
+  // O título sugerido pela IA, escrito com o resumo, como no app de referência
+  // da cliente ("📱 Preparação e validação do aplicativo": o emoji acima e a
+  // data da reunião ficam fora do texto). É só sugestão: o título da reunião
+  // muda quando a dona toca em "Usar este título", e nunca sozinho. Nulo: a IA
+  // não sugeriu (ou o resumo é de antes da sugestão).
+  suggestedTitle: varchar("suggested_title", { length: 200 }),
+  // pending: a dona ainda não decidiu; confirmed: usou; ignored: manteve o
+  // dela. Enum só no TypeScript, como o status do resumo.
+  suggestedTitleStatus: varchar("suggested_title_status", { length: 12, enum: ["pending", "confirmed", "ignored"] }),
   // O id do modelo de IA que escreveu o resumo.
   model: varchar("model", { length: 80 }),
   // Sobe a cada resumo que a fila grava, e só aí: editar ou acrescentar um item

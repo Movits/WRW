@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
-import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
+import { idiomaFalado, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
+import { sugestaoDoResumoNovo } from "@shared/titulo-sugerido";
 import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
@@ -225,7 +226,9 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
     await registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true);
     return false;
   }
-  const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O resumo sai no idioma da transcrição: o escolhido ou, com "Detectar
+  // sozinho" (G16), o que mais aparece nela; qualquer um que a IA transcreve.
+  const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O resumo refeito (H4d) leva à IA os itens que ficam, para ela não os
   // escrever de novo. No primeiro resumo não há item nenhum. O item da dona
   // que ela ignorou fica no resumo, recolhido, mas não vai à IA como
@@ -300,7 +303,10 @@ async function gravarResumo(
     // apagar) espera esta transação, e o que ela gravar sai junto.
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
-    const [ainda] = await tx.select({ id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap }).from(meetingSummaries)
+    const [ainda] = await tx.select({
+      id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap,
+      suggestedTitle: meetingSummaries.suggestedTitle, suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
+    }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     // Sem a linha com o meu token: a reunião foi reprocessada ou excluída, ou a
     // reserva venceu e outra rodada a tomou.
@@ -354,6 +360,10 @@ async function gravarResumo(
     }
     const r = await tx.update(meetingSummaries).set({
       status: "ready", transcriptId: transcricao.id, language: idioma, emoji: resumo.emoji, model: resumo.modelo,
+      // O título que a IA sugere espera a dona (nada extraído por IA entra
+      // sozinho). O resumo refeito com o mesmo título não pede de novo o que
+      // ela já decidiu (sugestaoDoResumoNovo).
+      ...sugestaoDoResumoNovo(ainda, resumo.titulo ?? null),
       version: sql`${meetingSummaries.version} + 1`, generatedAt: agora,
       // A IA devolveu itens e a conferência tirou todos: fica registrado, e a
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
@@ -388,7 +398,7 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
-  const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
 
   let mapa: MapaMental | null;
   try {

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { auditLogs, meetings, users } from "../drizzle/schema";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaDaTranscricao, type EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
 import {
   erroDoYoutubeSeRepete, idDoVideoDoYoutube, SEGUNDOS_DO_VIDEO_DO_YOUTUBE_MAX, urlCanonicaDoYoutube, VIDEOS_DO_YOUTUBE_POR_DIA,
   type CodigoDeErroDoYoutube, type VersaoDoAvisoDoYoutube,
@@ -16,7 +16,7 @@ import {
   ReuniaoExcluidaDuranteProcessamento, ReuniaoTomadaPorOutraExecucao,
 } from "./meeting-service";
 import { entradaDoResumo } from "./resumo-da-reuniao";
-import { normalizarSegmentos, PADRAO_DO_TEMPO, type Segmento } from "./transcricao-de-fatia";
+import { linhaDoIdioma, normalizarSegmentos, PADRAO_DO_TEMPO, PROPRIEDADE_DO_IDIOMA, REGRA_DO_IDIOMA_DA_FALA, type Segmento } from "./transcricao-de-fatia";
 
 /**
  * O resumo de um vídeo do YouTube (H13 do desenho do gravador,
@@ -105,6 +105,24 @@ const ESQUEMA_DA_RESPOSTA_DO_VIDEO = {
   required: ["segmentos"],
 } as const;
 
+// "Detectar sozinho" (G16): cada fala ganha o código do idioma, depois do
+// texto, como na fatia (server/transcricao-de-fatia.ts).
+const ESQUEMA_DA_RESPOSTA_DO_VIDEO_COM_IDIOMA = {
+  type: "OBJECT",
+  properties: {
+    segmentos: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { ...ESQUEMA_DA_RESPOSTA_DO_VIDEO.properties.segmentos.items.properties, idioma: PROPRIEDADE_DO_IDIOMA },
+        required: [...ESQUEMA_DA_RESPOSTA_DO_VIDEO.properties.segmentos.items.required, "idioma"],
+        propertyOrdering: [...ESQUEMA_DA_RESPOSTA_DO_VIDEO.properties.segmentos.items.propertyOrdering, "idioma"],
+      },
+    },
+  },
+  required: ["segmentos"],
+} as const;
+
 /** Um erro do vídeo com o código que a tela traduz (CODIGOS_DE_ERRO_DO_YOUTUBE). */
 export class ErroDoVideoDoYoutube extends Error {
   constructor(readonly codigo: CodigoDeErroDoYoutube, opcoes?: { cause?: unknown }) {
@@ -127,11 +145,15 @@ export class RecusaDoVideo extends Error {
 
 export const MENSAGEM_REUNIAO_NAO_E_DO_YOUTUBE = "Esta reunião não veio de um vídeo do YouTube.";
 
-/** As instruções da transcrição do vídeo, no molde da fatia (promptDaFatia). */
-export function promptDoVideo(idioma: IdiomaDaReuniao): string {
+/**
+ * As instruções da transcrição do vídeo, no molde da fatia (promptDaFatia):
+ * com "Detectar sozinho" (G16), sem o idioma e com o código do idioma de cada
+ * fala; com o idioma escolhido, as de sempre.
+ */
+export function promptDoVideo(idioma: EscolhaDoIdioma): string {
   return [
     "Transcreva integralmente a fala deste vídeo do YouTube (só a primeira hora dele chega a você).",
-    `O idioma predominante esperado é ${nomeDoIdioma(idioma)}; transcreva cada fala no idioma em que foi dita, sem traduzir.`,
+    linhaDoIdioma(idioma),
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
     '2) "inicio" e "fim" são o tempo da fala contado do começo do vídeo, escrito como texto "MM:SS" (minutos e segundos, cada um com dois dígitos: "00:07", "12:05", "59:58"); só a partir de uma hora, "H:MM:SS" ("1:00:00"). Nunca escreva o tempo como número. Transcreva até o fim do que chegou a você.',
@@ -140,6 +162,7 @@ export function promptDoVideo(idioma: IdiomaDaReuniao): string {
     "5) Música (cantada ou não), ruído longo ou trecho que não dá para entender: uma marca curta entre colchetes, na língua da fala em volta (em português: [música], [ruído], [inaudível]). Não transcreva letra de música. Silêncio não vira item.",
     "6) Texto que só aparece escrito no vídeo, sem que ninguém o diga, não é fala e não vira item.",
     '7) Vídeo sem fala nenhuma: devolva "segmentos" vazio.',
+    ...(idioma === IDIOMA_AUTOMATICO ? [`8) ${REGRA_DO_IDIOMA_DA_FALA}`] : []),
   ].join("\n");
 }
 
@@ -149,7 +172,7 @@ export function promptDoVideo(idioma: IdiomaDaReuniao): string {
  * resposta em JSON no contrato da transcrição. O vídeo vai antes do texto,
  * como a documentação do Gemini pede para um vídeo só.
  */
-export function pedidoDoVideoAoGemini(input: { urlCanonica: string; idioma: IdiomaDaReuniao; modelo: string }) {
+export function pedidoDoVideoAoGemini(input: { urlCanonica: string; idioma: EscolhaDoIdioma; modelo: string }) {
   return {
     contents: [{ parts: [
       {
@@ -164,7 +187,7 @@ export function pedidoDoVideoAoGemini(input: { urlCanonica: string; idioma: Idio
       thinkingConfig: raciocinioBaixo(input.modelo),
       mediaResolution: "MEDIA_RESOLUTION_LOW",
       responseMimeType: "application/json",
-      responseSchema: ESQUEMA_DA_RESPOSTA_DO_VIDEO,
+      responseSchema: input.idioma === IDIOMA_AUTOMATICO ? ESQUEMA_DA_RESPOSTA_DO_VIDEO_COM_IDIOMA : ESQUEMA_DA_RESPOSTA_DO_VIDEO,
     },
   };
 }
@@ -227,7 +250,8 @@ export async function transcreverVideoDoYoutube(input: { url: string; idioma?: s
   const id = idDoVideoDoYoutube(input.url);
   if (!id) throw new ErroDoVideoDoYoutube("YOUTUBE_LINK_INVALIDO");
   const urlCanonica = urlCanonicaDoYoutube(id);
-  const idioma = idiomaDaReuniao(input.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // A escolha da reunião: um idioma falado (G16) ou "Detectar sozinho".
+  const idioma = escolhaDoIdioma(input.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   const opcoes = { timeoutMs: TIMEOUT_DO_VIDEO_MS, orcamentoMs: ORCAMENTO_DO_VIDEO_MS };
   const inicio = Date.now();
   let modelo = modeloDeAudio();
@@ -343,7 +367,7 @@ async function registrarOPedido(tx: Transacao, conta: ContaQuePede, meetingId: s
   });
 }
 
-type ExecucaoDoVideo = { meetingId: string; ownerId: string; ficha: number; urlCanonica: string; idioma: IdiomaDaReuniao; limparAntes: boolean };
+type ExecucaoDoVideo = { meetingId: string; ownerId: string; ficha: number; urlCanonica: string; idioma: EscolhaDoIdioma; limparAntes: boolean };
 
 /**
  * Pede o resumo de um vídeo: confere o link e o teto, cria a reunião já em
@@ -353,7 +377,7 @@ type ExecucaoDoVideo = { meetingId: string; ownerId: string; ficha: number; urlC
  */
 export async function pedirResumoDoVideo(
   conta: ContaQuePede,
-  pedido: { titulo: string; url: string; idioma: IdiomaDaReuniao; versaoDoAviso: VersaoDoAvisoDoYoutube },
+  pedido: { titulo: string; url: string; idioma: EscolhaDoIdioma; versaoDoAviso: VersaoDoAvisoDoYoutube },
 ): Promise<{ id: string; trabalho: Promise<void> }> {
   const id = idDoVideoDoYoutube(pedido.url);
   if (!id) throw new RecusaDoVideo("BAD_REQUEST", "YOUTUBE_LINK_INVALIDO");
@@ -420,7 +444,7 @@ export async function refazerResumoDoVideo(conta: ContaQuePede, meetingId: strin
     await registrarOPedido(tx, conta, meetingId, { versaoDoAviso: reuniao.consentNoticeVersion, refazer: true });
     return {
       meetingId, ownerId: conta.openId, ficha, urlCanonica: urlCanonicaDoYoutube(id),
-      idioma: idiomaDaReuniao(reuniao.language) ?? IDIOMA_DA_REUNIAO_PADRAO, limparAntes: true,
+      idioma: escolhaDoIdioma(reuniao.language) ?? IDIOMA_DA_REUNIAO_PADRAO, limparAntes: true,
     };
   });
   return { trabalho: executarVideoDoYoutube(db, execucao) };
@@ -463,7 +487,8 @@ export async function executarVideoDoYoutube(db: Banco, execucao: ExecucaoDoVide
     await gravarResultadoDaReuniao(db, {
       meetingId: execucao.meetingId, ownerId: execucao.ownerId, ficha, limparAntes: execucao.limparAntes,
       durationSeconds: transcricao.duracaoSegundos,
-      transcription: { text: transcricao.texto, segments: transcricao.segmentos, language: execucao.idioma },
+      // Com "Detectar sozinho" (G16), o idioma que mais aparece nas falas.
+      transcription: { text: transcricao.texto, segments: transcricao.segmentos, language: idiomaDaTranscricao(execucao.idioma, transcricao.segmentos) },
       extraction,
     });
   } catch (erro) {

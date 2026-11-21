@@ -325,6 +325,17 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.getByText("We agreed on Friday.")).toBeInTheDocument();
   });
 
+  it("G16: reunião em italiano pelo link, com a tela em pt-BR: traduz, e a lista ganha \"Italiano (original)\", que volta ao original", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "Abbiamo concordato venerdì.", idioma: "it" } }));
+    abrirNaTranscricao();
+    expect(duble.traduzir.mutate).toHaveBeenCalledWith({ token: TOKEN, language: "pt-BR" }, expect.anything());
+    expect(screen.getByRole("option", { name: "Italiano (original)" })).toBeInTheDocument();
+    duble.traduzir.mutate.mockClear();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "it" } });
+    expect(duble.traduzir.mutate).not.toHaveBeenCalled();
+    expect(screen.getByText("Abbiamo concordato venerdì.")).toBeInTheDocument();
+  });
+
   it("reunião longa: 'em andamento' mostra o aviso e pergunta de novo em 5 s (G8)", async () => {
     vi.useFakeTimers();
     try {

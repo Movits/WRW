@@ -110,6 +110,8 @@ vi.mock("@/lib/trpc", () => ({
       exportar: duble.registrar("exportar"),
       // O áudio da reunião (H8c): só monta quando a dona abre o aviso do "Baixar o áudio".
       baixarAudio: duble.registrar("baixarAudio"),
+      // O título que a IA sugeriu: só monta quando há sugestão.
+      decidirTituloSugerido: duble.registrar("decidirTituloSugerido"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -893,6 +895,67 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     } finally {
       await i18n.changeLanguage("pt-BR");
     }
+  });
+
+  it("G16: o gravador oferece \"Detectar sozinho\", com a dica dele, e manda \"auto\"", async () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    duble.duracao.mockResolvedValue(120);
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
+    render(<Meetings />);
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
+    expect(within(seletor).getByRole("option", { name: "🌐 Detectar sozinho" })).toBeInTheDocument();
+    fireEvent.change(seletor, { target: { value: "auto" } });
+    expect(screen.getByText(/A IA reconhece o idioma de cada fala/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Call with Ana" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" })));
+    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
+  });
+
+  it("G16: um idioma fora dos 10 da tela (italiano) está na lista e vai ao servidor", async () => {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    duble.duracao.mockResolvedValue(120);
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
+    render(<Meetings />);
+    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    fireEvent.change(screen.getByLabelText("Idioma da reunião"), { target: { value: "it" } });
+    expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("it");
+    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Riunione" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
+    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "it" })));
+  });
+
+  it("G16: reunião em italiano com a tela em pt-BR: o pt-BR é TRADUZIDO, e a lista ganha \"Italiano (original)\", que volta ao original", () => {
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Parliamo del contratto.", language: "it" } });
+    expect(duble.mutacoes.translateTranscript.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, language: "pt-BR" }, expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    const original = screen.getByRole("option", { name: "Italiano (original)" });
+    expect(original).toBeInTheDocument();
+    duble.mutacoes.translateTranscript.mutate.mockClear();
+    fireEvent.change(original.closest("select")!, { target: { value: "it" } });
+    expect(screen.getByText(/Parliamo del contratto\./)).toBeInTheDocument();
+    expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
+  });
+
+  it("G16: com \"Detectar sozinho\", a aba da transcrição diz os idiomas que a IA reconheceu e o do resumo", () => {
+    abrirDetalhe({ status: "ready", language: "auto" } as Partial<typeof REUNIAO>, { transcript: {
+      id: "t1", transcript: "Good morning.\nBom dia.", language: "en",
+      segments: [{ inicio: 0, fim: 60, falante: "F1", texto: "Good morning.", idioma: "en" }, { inicio: 60, fim: 100, falante: "F2", texto: "Bom dia.", idioma: "pt-BR" }],
+    } });
+    fireEvent.click(screen.getByRole("button", { name: TRANSCRICAO_ABA }));
+    expect(screen.getByRole("note")).toHaveTextContent(/Idiomas reconhecidos pela IA: inglês \(60\s?%\), português \(40\s?%\)\. O resumo sai em inglês/);
+  });
+
+  it("o título sugerido pela IA aparece só com a sugestão, e \"Usar este título\" pede o uso", () => {
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: "📱", idioma: "pt-BR", erro: null, itens: [], tituloSugerido: "Lançamento nas lojas" }, isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn() });
+    abrirDetalhe({ status: "ready" }, { transcript: { id: "t1", transcript: "Fala.", language: "pt-BR" } });
+    const caixa = screen.getByRole("region", { name: "Título sugerido pela IA" });
+    expect(caixa).toHaveTextContent("📱Lançamento nas lojas");
+    fireEvent.click(within(caixa).getByRole("button", { name: "Usar este título" }));
+    expect(duble.mutacoes.decidirTituloSugerido.mutate).toHaveBeenCalledWith({ meetingId: REUNIAO.id, usar: true });
   });
 
   it("reunião antiga gravada como 'pt' com a tela em pt-BR: o original, sem pedir tradução", () => {

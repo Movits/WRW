@@ -7,6 +7,7 @@ import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { ITENS_DO_RESUMO_MAX, secaoTemAssunto, secaoTemResponsavel, type SecaoDoItem } from "@shared/item-do-resumo";
+import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
@@ -45,6 +46,9 @@ const COLUNAS_DO_RESUMO = {
   lastError: meetingSummaries.lastError,
   template: meetingSummaries.template,
   version: meetingSummaries.version,
+  // O título que a IA sugere (só para a dona; o link não o recebe).
+  suggestedTitle: meetingSummaries.suggestedTitle,
+  suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
 };
 
 /**
@@ -74,7 +78,7 @@ const foraDaFila = (status: string) => status === "ready" || status === "failed"
  * linha fica presa até o fim dela, e o estado lido é o mais novo.
  */
 export async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
-  const consulta = db.select({ status: meetings.status }).from(meetings)
+  const consulta = db.select({ status: meetings.status, title: meetings.title }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
   const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
@@ -98,7 +102,7 @@ async function linhaDoResumo(db: Executor, ownerId: string, meetingId: string, t
  */
 export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  await reuniaoDaDona(db, ownerId, meetingId);
+  const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const estado = estadoDe(linha, Date.now());
   const itens = linha
@@ -124,7 +128,20 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   return {
     estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
+    tituloSugerido: tituloSugeridoNaTela(estado, linha, reuniao.title),
   };
+}
+
+/**
+ * O título que a IA sugeriu, enquanto espera a dona: só com o resumo pronto,
+ * só a sugestão pendente e só quando ela é outro título (a igual ao de agora
+ * não pede nada). Passa de novo pela conferência: a linha antiga, gravada sem
+ * ela, não chega à tela fora da regra.
+ */
+function tituloSugeridoNaTela(estado: EstadoDoResumo, linha: { suggestedTitle: string | null; suggestedTitleStatus: string | null } | undefined, tituloAtual: string): string | null {
+  if (estado !== "pronto" || linha?.suggestedTitleStatus !== "pending") return null;
+  const titulo = tituloSugeridoValido(linha.suggestedTitle);
+  return titulo && !mesmoTitulo(titulo, tituloAtual) ? titulo : null;
 }
 
 /**

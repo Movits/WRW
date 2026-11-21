@@ -20,7 +20,7 @@ import { pareceSerADona } from "@shared/reuniao-no-match";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
-import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, idiomaFalado, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } from "./audio-guardado-das-partes";
 import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
@@ -586,8 +586,9 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
   // reunião em inglês "traduzida" para pt-BR voltava em inglês. Reunião antiga
   // guarda 'pt', e idioma gravado fora da lista conta como pt-BR, o padrão de
-  // quando ela foi gravada.
-  const idiomaOriginal = idiomaDaReuniao(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // quando ela foi gravada. A lista é a dos idiomas falados (G16): a reunião
+  // em italiano traduzida para pt-BR não volta em italiano.
+  const idiomaOriginal = idiomaFalado(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   if (normalizedLanguage === idiomaOriginal) {
     return { language: normalizedLanguage, text: transcript.transcript, cached: true };
   }

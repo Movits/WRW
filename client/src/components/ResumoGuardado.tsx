@@ -18,7 +18,9 @@ import { LANGUAGES } from "@/i18n";
 import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, idiomaFalado } from "@shared/idioma-da-reuniao";
+import { OpcaoDoIdiomaOriginal } from "@/components/SeletorDoIdiomaDaReuniao";
+import { rotuloDoIdioma } from "@/lib/idiomas-na-tela";
 import { ROTA_DAS_PROXIMAS_ACOES, viraProximaAcao } from "@shared/proximas-acoes";
 import { vozesCitadas } from "@shared/vozes-na-edicao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
@@ -161,7 +163,8 @@ function mensagemDaDecisao(t: TranslateFn, erro: unknown) {
   }
 }
 
-const nomeNaTela = (codigo: string | null) => LANGUAGES.find(idioma => idioma.code === codigo)?.label ?? codigo ?? "";
+// G16: o idioma fora dos 10 da tela vai pelo nome no idioma de quem lê.
+const nomeNaTela = (codigo: string | null, tela: string) => rotuloDoIdioma(codigo, tela);
 
 // O nome de um idioma dito em outro ("português", "Portuguese"): a voz o lê
 // no idioma da fala. Só a base, como a voz.
@@ -338,9 +341,13 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   // títulos e os rótulos vão no idioma dela, e a leitura começa dizendo que é
   // uma tradução da IA.
   const traduzido = traducao?.estado === "pronta";
-  const idiomaDoResumo = idiomaDaReuniao(traduzido ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
-  const traduzidoDe = traduzido && traducao.idiomaOriginal ? nomeDoIdiomaEm(idiomaDoResumo, traducao.idiomaOriginal) : null;
-  const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDoResumo), visiveis, nomes, traduzidoDe) : [];
+  // A voz lê no idioma do texto (G16: qualquer um que a IA transcreve); os
+  // títulos e os rótulos vêm dos 10 da tela, e o idioma fora deles fica com
+  // os do padrão.
+  const idiomaDoResumo = idiomaFalado(traduzido ? traducao.idioma : dados?.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const idiomaDosRotulos = idiomaDaReuniao(idiomaDoResumo) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const traduzidoDe = traduzido && traducao.idiomaOriginal ? nomeDoIdiomaEm(idiomaDosRotulos, traducao.idiomaOriginal) : null;
+  const falas = podeOuvir ? falasDoResumo(i18n.getFixedT(idiomaDosRotulos), visiveis, nomes, traduzidoDe) : [];
 
   // Editar e acrescentar (H4f), só para a dona. O formulário recebe o que a
   // tela mostra no lugar de cada voz, para a dona editar o texto como o lê.
@@ -487,8 +494,9 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         {/* O idioma do resumo (H11): começa no da tela, e o original fica marcado. */}
         {traducao && comEscolhaDoIdioma && <label className="inline-flex items-center gap-2 text-xs text-amber-100/70">
           {t("meetings.summary.translation.language")}
-          <select value={traducao.idioma} onChange={evento => { const idioma = idiomaDaReuniao(evento.target.value); if (idioma) traducao.escolher(idioma); }}
+          <select value={traducao.idioma} onChange={evento => { const idioma = idiomaFalado(evento.target.value); if (idioma) traducao.escolher(idioma); }}
             className="rounded-lg border border-white/15 bg-[#211e1b] px-2 py-1 text-sm text-white">
+            <OpcaoDoIdiomaOriginal idioma={traducao.idiomaOriginal}/>
             {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === traducao.idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
           </select>
         </label>}
@@ -504,7 +512,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     </div>
     {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={modeloAtual} aoFechar={() => setRefazerAberto(false)}/>}
     {traducao?.estado === "traduzindo" && <p role="status" className="mt-3 text-xs text-amber-100/70"><Loader2 size={13} className="mr-1.5 inline animate-spin"/>{t("meetings.summary.translation.translating")}</p>}
-    {traducao?.estado === "pronta" && <p className="mt-3 text-xs text-white/45">{t("meetings.summary.translation.notice", { idioma: nomeNaTela(traducao.idiomaOriginal) })}</p>}
+    {traducao?.estado === "pronta" && <p className="mt-3 text-xs text-white/45">{t("meetings.summary.translation.notice", { idioma: nomeNaTela(traducao.idiomaOriginal, i18n.resolvedLanguage ?? i18n.language) })}</p>}
     {traducao?.estado === "erro" && <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-xs text-amber-200/80">
       <span>{mensagemDaFalhaDaTraducao(t, traducao.erro, peloLink, t("meetings.summary.translation.error"))}</span>
       <button type="button" onClick={traducao.tentarDeNovo} className="rounded-lg border border-amber-300/30 px-3 py-1 font-semibold text-amber-200 hover:bg-amber-300/10">{t("meetings.summary.retry")}</button>
