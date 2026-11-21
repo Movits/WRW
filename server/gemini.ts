@@ -41,15 +41,31 @@ export class GeminiCotaEsgotadaError extends GeminiIndisponivelError {
 // 404 modelo inexistente): não melhora repetindo nem trocando de modelo. A
 // mensagem é para a dona da reunião — ela vai parar em `processing_error` e
 // na caixa vermelha da tela; o JSON do Google (que cita "API key", o nome do
-// modelo, o endpoint) fica só no log, para quem for diagnosticar.
+// modelo, o endpoint) fica só no log, para quem for diagnosticar. O começo dele
+// fica também em `detalhe`, que nunca vai à tela nem ao banco: quem chama o lê
+// para escolher o código do erro (o vídeo do YouTube privado é um 400 como o
+// pedido malformado; server/youtube.ts separa um do outro por ele).
 export class GeminiRecusouChamadaError extends GeminiIndisponivelError {
-  constructor(status: number) {
+  constructor(status: number, readonly detalhe = "") {
     super(status, `O serviço de IA recusou a chamada (HTTP ${status}). Avise o suporte.`);
   }
 }
 
 const pareceCotaEsgotada = (detalhe: string) =>
   /exceeded your current quota|free_tier_requests|RESOURCE_EXHAUSTED/i.test(detalhe);
+
+/**
+ * O Gemini desistiu dentro do prazo dele: HTTP 504, DEADLINE_EXCEEDED ("Deadline
+ * expired before operation could complete."), que a documentação de erros da
+ * Google dá para a entrada grande demais para o tempo da chamada. Como não é
+ * 429, 500 nem 503, o geminiPost o devolve como GeminiRecusouChamadaError, mas
+ * ele não é recusa do pedido nem do conteúdo: quem escolhe o código do erro
+ * para a tela o trata como IA indisponível, ANTES do ramo da recusa (sem isso,
+ * o vídeo público de 1 h virava "vídeo privado", e o PDF longo, "a IA recusou").
+ */
+export function prazoEsgotadoNoGemini(erro: unknown): boolean {
+  return erro instanceof GeminiRecusouChamadaError && (erro.status === 504 || /DEADLINE_EXCEEDED|Deadline expired/i.test(erro.detalhe));
+}
 
 function getGeminiKey() {
   // Mesma cadeia de fallback do resto do app (LLM_API_KEY > chaves legadas >
@@ -62,7 +78,9 @@ function getGeminiKey() {
 
 type OpcoesDaChamada = { timeoutMs?: number; orcamentoMs?: number };
 
-async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
+// Exportada para o vídeo do YouTube (server/youtube.ts), que manda a URL do
+// vídeo (file_data) em vez dos bytes e tem prazos próprios.
+export async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_MS.length + 1, opcoes: OpcoesDaChamada = {}): Promise<T> {
   const timeoutMs = opcoes.timeoutMs ?? TIMEOUT_POR_CHAMADA_MS;
   const orcamentoMs = opcoes.orcamentoMs ?? ORCAMENTO_RETENTATIVAS_MS;
   // Falta de chave é erro de configuração, não de rede: sai antes do laço —
@@ -97,7 +115,7 @@ async function geminiPost<T>(path: string, body: unknown, tentativas = ESPERAS_M
     // ela acaba gravada em processing_error e mostrada na tela da dona.
     if (!STATUS_PASSAGEIROS.has(response.status)) {
       console.error(`[Gemini] ${response.status} em ${path} (não passageiro): ${details.slice(0, 400)}`);
-      throw new GeminiRecusouChamadaError(response.status);
+      throw new GeminiRecusouChamadaError(response.status, details.slice(0, 400));
     }
     // Cota esgotada não é pico: repetir no mesmo modelo só queima tempo. Sai
     // já — na transcrição, é o que aciona o modelo reserva de imediato.
@@ -227,26 +245,96 @@ const ORCAMENTO_DA_PARTE_MS = 8 * 60_000;
 const SAIDA_MAXIMA_DA_PARTE = 32_768;
 
 /**
- * Uma chamada com áudio inline e resposta (opcionalmente) em JSON, no modelo de
- * áudio e, se ele estiver lotado, no reserva — a mesma cartada do
- * transcribeWithGemini. Devolve o texto das partes que não são raciocínio.
- * Resposta que não terminou em STOP lança GeminiRespostaCortadaError.
+ * O teto de um arquivo inline numa chamada ao Gemini: 50 MB por arquivo, inline
+ * ou pela File API (documentação de documentos da Google, lida em 18/11/2026).
+ * Quem chama gerarComArquivoNoGemini passa o próprio teto, que nunca passa
+ * deste.
  */
-export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
-  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+export const TETO_INLINE_DO_GEMINI_BYTES = 50 * 1000 * 1000;
+
+/**
+ * O teto do áudio inline: o tamanho máximo de uma parte da gravação em partes
+ * (TAMANHO_MAXIMO_DA_PARTE, em server/fatias-de-reuniao.ts, que a rota das
+ * partes já confere). Fica escrito aqui para gemini.ts não importar o módulo
+ * das partes, que traz banco e bucket; um teste confere que os dois batem.
+ */
+export const TETO_INLINE_DO_AUDIO_BYTES = 16 * 1024 * 1024;
+
+/**
+ * O arquivo passou do teto inline de quem chamou (ou está vazio): recusado
+ * ANTES de sair do servidor, sem gastar a chamada nem o envio de megabytes que
+ * a Google recusaria. A mensagem é para o log.
+ */
+export class ArquivoForaDoTetoDoGeminiError extends Error {
+  constructor(readonly bytes: number, readonly teto: number) {
+    super(`O arquivo de ${bytes} bytes está fora do teto de ${teto} bytes da chamada ao Gemini.`);
+    this.name = "ArquivoForaDoTetoDoGeminiError";
+  }
+}
+
+/**
+ * A resposta terminou (STOP) sem texto nenhum fora do raciocínio. A frase é a
+ * de sempre da transcrição; o documento (server/documento-da-reuniao.ts)
+ * reconhece a classe e grava o código dele.
+ */
+export class GeminiSemTextoError extends Error {
+  constructor() {
+    super("O Gemini não retornou uma transcrição válida.");
+    this.name = "GeminiSemTextoError";
+  }
+}
+
+/**
+ * Uma chamada com um arquivo inline (áudio, PDF) e resposta, opcionalmente, em
+ * JSON, no modelo multimodal (o do áudio, LLM_AUDIO_MODEL) e, se ele estiver
+ * lotado, no reserva — a mesma cartada do transcribeWithGemini. Devolve o texto
+ * das partes que não são raciocínio e o modelo que respondeu.
+ *
+ * - O arquivo vazio ou acima de `tetoInlineBytes` (nunca acima de
+ *   TETO_INLINE_DO_GEMINI_BYTES) é recusado antes de qualquer chamada
+ *   (ArquivoForaDoTetoDoGeminiError).
+ * - Resposta que não terminou em STOP lança GeminiRespostaCortadaError, com o
+ *   motivo (MAX_TOKENS, SAFETY, RECITATION...): texto cortado nunca passa por
+ *   inteiro.
+ * - STOP sem texto lança GeminiSemTextoError.
+ * - O raciocínio vai sempre no nível baixo (raciocinioBaixo), dentro do teto de
+ *   saída; os prazos e o teto de saída vêm de quem chama, e o padrão é o da
+ *   parte do áudio.
+ * - `reservaSoAteMs`: a reserva só é tentada se o modelo principal desistiu
+ *   antes desse tempo, contado do começo da chamada. Sem ele, a reserva vem
+ *   sempre que o principal está lotado. Quem trabalha contra a varredura de
+ *   interrompidas (o documento, em server/documento-da-reuniao.ts) o passa,
+ *   como o vídeo do YouTube faz com RESERVA_SO_ATE_MS: a reserva que começa
+ *   tarde passaria do prazo.
+ */
+export async function gerarComArquivoNoGemini(input: {
+  bytes: Buffer;
+  mimeType: string;
+  prompt: string;
+  esquemaJson?: unknown;
+  tetoInlineBytes: number;
+  saidaMaxima?: number;
+  timeoutMs?: number;
+  orcamentoMs?: number;
+  reservaSoAteMs?: number;
+}): Promise<{ texto: string; modelo: string }> {
+  const teto = Math.min(input.tetoInlineBytes, TETO_INLINE_DO_GEMINI_BYTES);
+  if (!input.bytes.length || input.bytes.length > teto) throw new ArquivoForaDoTetoDoGeminiError(input.bytes.length, teto);
+  const dados = input.bytes.toString("base64");
   const corpo = (modelo: string) => ({
     contents: [{ parts: [
       { text: input.prompt },
-      { inline_data: { mime_type: geminiMimeType, data: input.audio.toString("base64") } },
+      { inline_data: { mime_type: input.mimeType, data: dados } },
     ] }],
     generationConfig: {
       temperature: 0,
-      maxOutputTokens: SAIDA_MAXIMA_DA_PARTE,
+      maxOutputTokens: input.saidaMaxima ?? SAIDA_MAXIMA_DA_PARTE,
       thinkingConfig: raciocinioBaixo(modelo),
       ...(input.esquemaJson ? { responseMimeType: "application/json", responseSchema: input.esquemaJson } : {}),
     },
   });
-  const opcoes = { timeoutMs: TIMEOUT_DA_PARTE_MS, orcamentoMs: ORCAMENTO_DA_PARTE_MS };
+  const opcoes = { timeoutMs: input.timeoutMs ?? TIMEOUT_DA_PARTE_MS, orcamentoMs: input.orcamentoMs ?? ORCAMENTO_DA_PARTE_MS };
+  const inicio = Date.now();
   let modelo = modeloDeAudio();
   let payload: RespostaComFim;
   try {
@@ -255,6 +343,10 @@ export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: st
     if (!(erro instanceof GeminiIndisponivelError) || erro instanceof GeminiRecusouChamadaError) throw erro;
     const reserva = modeloDeAudioReserva();
     if (reserva === modelo) throw erro;
+    if (input.reservaSoAteMs !== undefined && Date.now() - inicio >= input.reservaSoAteMs) {
+      console.warn(`[Gemini] ${modelo} indisponível depois de ${Math.round((Date.now() - inicio) / 1000)} s; tarde demais para a reserva ${reserva}`);
+      throw erro;
+    }
     console.warn(`[Gemini] ${modelo} sobrecarregado; tentando a reserva ${reserva}`);
     try {
       payload = await geminiPost<RespostaComFim>(`/models/${reserva}:generateContent`, corpo(reserva), 1, opcoes);
@@ -272,6 +364,18 @@ export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: st
     throw new GeminiRespostaCortadaError(motivo);
   }
   const texto = (candidato?.content?.parts ?? []).filter(parte => !parte.thought).map(parte => parte.text ?? "").join("").trim();
-  if (!texto) throw new Error("O Gemini não retornou uma transcrição válida.");
+  if (!texto) throw new GeminiSemTextoError();
   return { texto, modelo };
+}
+
+/**
+ * A transcrição de uma parte da gravação em partes (server/transcricao-de-fatia.ts):
+ * o áudio inline, com o teto da parte, pela chamada genérica.
+ */
+export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
+  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+  return gerarComArquivoNoGemini({
+    bytes: input.audio, mimeType: geminiMimeType, prompt: input.prompt, esquemaJson: input.esquemaJson,
+    tetoInlineBytes: TETO_INLINE_DO_AUDIO_BYTES,
+  });
 }

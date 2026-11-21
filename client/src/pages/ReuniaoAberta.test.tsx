@@ -39,6 +39,7 @@ const duble = vi.hoisted(() => ({
   // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
   propsDaPergunta: null as Record<string, unknown> | null,
   propsDoResumo: null as Record<string, unknown> | null,
+  propsDoMapa: null as Record<string, unknown> | null,
   // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
   // resposta da pergunta pelo link daqui (o `data` da mutação).
   perguntaDeVerdade: false,
@@ -107,9 +108,9 @@ vi.mock("@/components/ResumoGuardado", () => ({
 // "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
 type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
-    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
-  }) => (
+  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos, ...resto }: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void; documento?: boolean;
+  }) => (duble.propsDoMapa = { token, meetingId, titulo, ...resto }) && (
     <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
       <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
       {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
@@ -711,5 +712,157 @@ describe("Reunião aberta pelo link — a tradução do resumo (H11)", () => {
     const [, segundo] = duble.traduzirResumo.mutate.mock.calls[1] as Pedido;
     act(() => segundo.onSuccess({ estado: "pronta", idioma: "en", mapa: { Prazos: "Deadlines" }, itens: ITENS }));
     expect(screen.getByTestId("traducao-do-mapa")).toHaveTextContent("pronta Deadlines");
+  });
+});
+
+// A reunião que nasceu de um documento (H12 e H12b): o link mostra o texto lido
+// e o resumo, como mostra a transcrição de uma reunião de áudio, sem player,
+// sem a seção da gravação e sem o arquivo, que o servidor nem manda
+// (server/link-aberto-da-reuniao.ts; o texto chega corrido, sem as páginas).
+describe("Reunião aberta pelo link — o documento (H12)", () => {
+  const DOCUMENTO = {
+    titulo: "Proposta da feira",
+    criadaEm: 1_700_000_000_000,
+    documento: true,
+    transcricao: { texto: "Proposta de exportação de café para Lisboa.\n\nContato: Ana Souza.", idioma: "pt-BR", segmentos: [] },
+    gravacao: null,
+    gravacaoExpirada: false,
+    gravacaoSaindo: false,
+  };
+
+  it("o texto do documento no lugar da transcrição, com o resumo e as perguntas, e nada de áudio nem do arquivo", () => {
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    const { container } = abrir();
+    expect(screen.getByText("Quem enviou este documento compartilhou o link com você. Leia o texto do documento ou peça à IA um resumo e respostas sobre ele.")).toBeInTheDocument();
+    expect(screen.getByTestId("resumo")).toHaveTextContent(TOKEN);
+    expect(screen.getByTestId("pergunte")).toHaveTextContent(TOKEN);
+    // Sem a seção da gravação, que diria "nenhum áudio guardado", e sem player.
+    expect(screen.queryByText("Gravação")).not.toBeInTheDocument();
+    expect(screen.queryByText(/áudio/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Texto do documento" })).toBeInTheDocument();
+    expect(screen.getByText(/Proposta de exportação de café para Lisboa\./)).toBeInTheDocument();
+    expect(screen.getByText("Escolha o idioma em que você quer ler o texto do documento.")).toBeInTheDocument();
+    // Nenhum caminho para o arquivo guardado.
+    expect(container.innerHTML).not.toMatch(/manus-storage|\/documento|pdfjs|\.pdf/);
+  });
+
+  // Conferência de tela de 20/11/2026 (captura 15b): o link aberto do documento
+  // repetia "Trecho da transcrição" e "Traduzir o que foi dito nesta reunião".
+  it("o resumo, o Pergunte e o mapa recebem que é documento, e a tradução fala do texto do documento", () => {
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ token: TOKEN, documento: true });
+    expect(duble.propsDaPergunta).toMatchObject({ token: TOKEN, documento: true });
+    fireEvent.click(screen.getByRole("button", { name: "Texto do documento" }));
+    expect(screen.getByText("Traduzir o texto do documento")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/foi dito|transcrição/);
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    expect(duble.propsDoMapa).toMatchObject({ token: TOKEN, documento: true });
+  });
+
+  it("a reunião de áudio pelo link segue com os textos da transcrição", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(duble.propsDoResumo).toMatchObject({ documento: false });
+    expect(duble.propsDaPergunta).toMatchObject({ documento: false });
+  });
+
+  it("em árabe: a aba e a introdução no idioma da tela", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.ver.mockReturnValue(pronta(DOCUMENTO));
+    abrir();
+    expect(screen.getByRole("button", { name: "نص المستند" })).toBeInTheDocument();
+    expect(screen.getByText(/شارك معك الشخص الذي أرسل هذا المستند الرابط/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Texto do documento|Quem enviou/);
+  });
+
+  it("a resposta de um servidor de antes da H12 (sem o campo) segue como reunião de áudio", () => {
+    duble.ver.mockReturnValue(pronta());
+    abrir();
+    expect(screen.getByRole("button", { name: "Transcrição" })).toBeInTheDocument();
+    expect(screen.getByText("Gravação")).toBeInTheDocument();
+  });
+});
+
+describe("Reunião aberta pelo link — o vídeo do YouTube (H13)", () => {
+  // A reunião que veio de um vídeo não tem gravação: o servidor manda só o id
+  // do vídeo (videoDoYoutube), e o "▶" abre o YouTube no segundo, numa aba nova.
+  const ID_DO_VIDEO = "dQw4w9WgXcQ";
+  const DO_VIDEO = `https://www.youtube.com/watch?v=${ID_DO_VIDEO}`;
+  const noYoutube = (segundos: number) => `${DO_VIDEO}&t=${segundos}s`;
+  const VISTA_DO_VIDEO = {
+    titulo: "Painel de exportação",
+    criadaEm: 1_700_000_000_000,
+    transcricao: { texto: "Bem-vindas ao painel.\nObrigada pelo convite.", idioma: "pt-BR", segmentos: [
+      { inicio: 7, fim: 12, falante: "F1", texto: "Bem-vindas ao painel." },
+      { inicio: 725, fim: 751, falante: "F2", texto: "Obrigada pelo convite." },
+    ] },
+    gravacao: null,
+    // Sem linha de áudio e criada há mais de 30 dias: o servidor diz "expirada", mas não houve gravação.
+    gravacaoExpirada: true,
+    gravacaoSaindo: false,
+    vozes: {},
+    videoDoYoutube: ID_DO_VIDEO,
+  };
+
+  it("sem player: o link para o vídeo no lugar da gravação, a apresentação do vídeo, e nenhum aviso de gravação apagada", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    const { container } = abrir();
+    expect(screen.getByText(/Quem criou esta página a partir de um vídeo do YouTube compartilhou o link com você/)).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.openLink.intro"))).not.toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Abrir o vídeo no YouTube/ });
+    expect(link).toHaveAttribute("href", DO_VIDEO);
+    expect(link).toHaveAttribute("target", "_blank");
+    // O aviso de privacidade é da conta da dona: pelo link, não aparece.
+    expect(screen.queryByText(/A WRW não guarda o vídeo/)).not.toBeInTheDocument();
+    expect(container.querySelector("audio, video, iframe")).toBeNull();
+    expect(screen.queryByText(i18n.t("meetings.recordingExpiredNotice"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("meetings.noRecordingStored"))).not.toBeInTheDocument();
+  });
+
+  it("o resumo e a pergunta recebem o link do vídeo no segundo, e não o player", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    abrir();
+    const resumo = duble.propsDoResumo as { aoIrPara?: unknown; linkDoTempo?: (segundo: number) => string };
+    expect(resumo.aoIrPara).toBeUndefined();
+    expect(resumo.linkDoTempo?.(725)).toBe(noYoutube(725));
+    const pergunta = duble.propsDaPergunta as { aoIrPara?: unknown; linkDoTempo?: (segundo: number) => string };
+    expect(pergunta.aoIrPara).toBeUndefined();
+    expect(pergunta.linkDoTempo?.(7)).toBe(noYoutube(7));
+  });
+
+  it("a transcrição: o ▶ de cada fala abre o vídeo no YouTube no segundo dela", () => {
+    duble.ver.mockReturnValue(pronta(VISTA_DO_VIDEO));
+    abrirNaTranscricao();
+    const link = screen.getByRole("link", { name: "Ver no YouTube a partir de 12:05 (abre em nova aba)" });
+    expect(link).toHaveAttribute("href", noYoutube(725));
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("a reunião gravada continua com a gravação: sem campo do vídeo (servidor de antes da H13) ou com ele nulo", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, videoDoYoutube: null }));
+    const { container } = abrir();
+    expect(container.querySelector("audio")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/audio`);
+    expect(screen.queryByRole("link", { name: /Abrir o vídeo no YouTube/ })).not.toBeInTheDocument();
+    expect((duble.propsDoResumo as { linkDoTempo?: unknown }).linkDoTempo).toBeUndefined();
+  });
+
+  it("em árabe, a 375 px: a página vira da direita para a esquerda, os textos do vídeo em árabe, o ▶ com o mesmo endereço e só lados lógicos no bloco do vídeo", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    // Um vídeo falado em árabe: com a tela no idioma do original, a transcrição aparece por fala (sem tradução).
+    duble.ver.mockReturnValue(pronta({ ...VISTA_DO_VIDEO, transcricao: { ...VISTA_DO_VIDEO.transcricao, idioma: "ar" } }));
+    abrir();
+    expect(document.documentElement.dir).toBe("rtl");
+    expect(screen.getByText(i18n.t("meetings.youtube.linkIntro"))).toBeInTheDocument();
+    const bloco = screen.getByRole("link", { name: new RegExp(i18n.t("meetings.youtube.openOnYoutube")) }).closest("section")!;
+    const ladosFisicos = [bloco, ...bloco.querySelectorAll("*")].flatMap(elemento => [...elemento.classList]
+      .filter(classe => /^(?:[a-z0-9-]+:)*-?(?:left|right|ml|mr|pl|pr|border-l|border-r|rounded-l|rounded-r|text-left|text-right)(?:-|$)/.test(classe)));
+    expect(ladosFisicos).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.transcriptTab") }));
+    expect(screen.getByRole("link", { name: "المشاهدة على YouTube من 12:05 (يُفتح في علامة تبويب جديدة)" })).toHaveAttribute("href", noYoutube(725));
   });
 });

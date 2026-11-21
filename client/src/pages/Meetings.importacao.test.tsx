@@ -94,6 +94,9 @@ vi.mock("@/lib/trpc", () => ({
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
       reprocess: duble.registrar("reprocess"),
+      // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
+      resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
+      refazerVideoDoYoutube: duble.registrar("refazerVideoDoYoutube"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
       pedirResumo: duble.registrar("pedirResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),

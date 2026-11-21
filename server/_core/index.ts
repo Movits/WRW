@@ -19,6 +19,8 @@ import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
+import { registrarRotaDoDocumento } from "./rota-do-documento";
+import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
 import { linhaDoRaciocinioDeIa } from "./raciocinio-de-ia";
@@ -206,6 +208,14 @@ async function startServer() {
   // próprio leitor de corpo (express.raw, até 16 MB) e PRECISA vir antes do
   // express.json e do urlencoded, que senão leriam o corpo primeiro. Guarda:
   // server/agendados-autenticacao.test.ts confere a ordem no index.ts real.
+  // O documento da reunião (H12: o PDF, ou as fotos de um texto juntas num PDF)
+  // chega do mesmo jeito, cru, até 15 MB; vem antes do tratador do corpo
+  // grande, que responde o 413 em JSON às duas rotas de /api/reunioes/. O GET
+  // do mesmo endereço devolve o PDF guardado à dona, para a tela mostrar as
+  // páginas, e os decodificadores de imagem do leitor de PDF (H12b) saem por
+  // /pdfjs/<versão>/, sem sessão (server/_core/arquivos-do-leitor-de-pdf.ts).
+  registrarRotaDoDocumento(app);
+  registrarArquivosDoLeitorDePdf(app);
   registrarRotaDasPartes(app);
   app.use(tratarCorpoGrandeDasPartes);
 

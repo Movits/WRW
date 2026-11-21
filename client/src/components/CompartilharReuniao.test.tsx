@@ -341,6 +341,68 @@ describe("o painel anuncia o que mudou e não perde o foco", () => {
   });
 });
 
+/**
+ * A reunião sem gravação (o vídeo do YouTube, H13, e o documento, H12): o painel,
+ * a caixa e a prova não falam de gravação. Conferência de tela de 20/11/2026
+ * (captura 14c): no YouTube, o cartão dizia "ouve a gravação" e a caixa (a frase
+ * que vai para a prova, MEETING_OPEN_LINK_ON) falava da gravação da reunião, que
+ * não existe.
+ */
+describe("a reunião do YouTube: o painel e a prova falam do vídeo, nunca de gravação", () => {
+  it("o cartão diz o que o link mostra do vídeo, e a caixa marcada é a frase que vai para a prova, com a versão que mostra os nomes", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="BC te Explica" token={null} youtube/>);
+    expect(screen.getByText(/lê a transcrição e pede à IA o resumo e respostas sobre o vídeo/)).toBeInTheDocument();
+    expect(screen.getByText(/Os nomes que você der às vozes aparecem para quem tem o link/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/gravação/);
+    fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
+    const caixa = screen.getByRole("checkbox");
+    expect(caixa).toHaveAccessibleName("Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.");
+    expect(document.body.textContent).not.toMatch(/gravação|todas as pessoas que falaram/);
+    fireEvent.click(caixa);
+    fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
+    expect(duble.mutacoes.ligar.mutate).toHaveBeenCalledWith({
+      meetingId: ID,
+      autorizacaoDasPessoas: true,
+      idioma: "pt-BR",
+      textoExibido: "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.",
+      versaoDaAutorizacao: 2,
+    });
+  });
+
+  it.each(CODIGOS)("%s: a caixa do vídeo é outra que a da gravação e que a do documento, e é ela que vai para a prova", async idioma => {
+    await act(async () => { await i18n.changeLanguage(idioma); });
+    try {
+      render(<CompartilharReuniao meetingId={ID} titulo="Vídeo" token={null} youtube/>);
+      expect(screen.getByText(i18n.t("meetings.youtube.shareIntro"))).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.button") }));
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("meetings.share.createButton") }));
+      const { textoExibido } = duble.mutacoes.ligar.mutate.mock.calls[0][0];
+      expect(textoExibido).toBe(i18n.t("meetings.youtube.shareAuthorization"));
+      expect(textoExibido).not.toBe(i18n.t("meetings.share.authorization"));
+      expect(textoExibido).not.toBe(i18n.t("meetings.document.shareAuthorization"));
+      expect(i18n.t("meetings.youtube.shareIntro")).not.toBe(i18n.t("meetings.share.intro"));
+    } finally {
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
+  });
+
+  it.each([
+    ["do vídeo do YouTube", { youtube: true }],
+    ["do documento", { documento: true }],
+  ])("desligar o link %s não fala de quem está ouvindo a gravação", (_caso, origem) => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} {...origem}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar o link" }));
+    expect(screen.getByRole("button", { name: "Manter" })).toHaveAccessibleDescription("Desligar o link? Quem tem o endereço deixa de conseguir abri-lo na hora. Se você compartilhar de novo, o link será outro.");
+    expect(document.body.textContent).not.toMatch(/gravação/);
+  });
+
+  it("a reunião gravada continua com o painel e a caixa da gravação", () => {
+    render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
+    expect(screen.getByText(/Quem receber o link ouve a gravação/)).toBeInTheDocument();
+  });
+});
+
 describe("o que o link mostra do resumo (H4f)", () => {
   it("antes de ligar, o painel diz que o link mostra o resumo como a dona o deixar, com o que ela escrever, e o mapa mental", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);

@@ -59,9 +59,11 @@ type Extras = {
   traducao?: TraducaoDoMapa;
   /** Os rótulos do mapa pronto, para a página pedir a tradução deles (H11). */
   aoMudarRotulos?: (rotulos: string[]) => void;
+  /** A reunião nasceu de um documento (H12): o aviso fala do texto do documento, e não da transcrição. */
+  documento?: boolean;
 };
 type Props = ({ meetingId: string; token?: undefined } | { token: string; meetingId?: undefined }) & Extras;
-type DoCorpo = Omit<Extras, "emoji"> & { emoji: string | null };
+type DoCorpo = Omit<Extras, "emoji" | "documento"> & { emoji: string | null; documento: boolean };
 /**
  * N5: o ramo "Conexões desta reunião", só no mapa da dona (o do link nunca o
  * recebe), e o erro da consulta dele, que aparece no lugar do ramo.
@@ -77,7 +79,7 @@ const erroDefinitivo = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || 
 const esperaDaConsulta = (estado: string | undefined, erro: unknown) => (estado === "pendente" || estado === "gerando") && !erro ? 5_000 : false;
 
 export function MapaMentalDaReuniao(props: Props) {
-  const extras: DoCorpo = { titulo: props.titulo, emoji: props.emoji ?? null, traducao: props.traducao, aoMudarRotulos: props.aoMudarRotulos };
+  const extras: DoCorpo = { titulo: props.titulo, emoji: props.emoji ?? null, traducao: props.traducao, aoMudarRotulos: props.aoMudarRotulos, documento: !!props.documento };
   return props.token !== undefined
     ? <MapaDoLink token={props.token} {...extras}/>
     : <MapaDaDona meetingId={props.meetingId} {...extras}/>;
@@ -120,7 +122,7 @@ function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink {...extras}/>;
 }
 
-function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, traducao, aoMudarRotulos, ramoExtra, erroDoRamo }: {
+function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, traducao, aoMudarRotulos, documento, ramoExtra, erroDoRamo }: {
   consulta: ConsultaDoMapa;
   pedido: PedidoDoMapa;
   aoPedir: () => void;
@@ -171,7 +173,8 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
     </div>;
   } else {
     corpo = <div className="mt-4 space-y-4">
-      <AvisoDeConferir>{t("meetings.mindMap.notice")}</AvisoDeConferir>
+      {/* No documento (H12) não há transcrição: o aviso fala do texto dele (conferência de tela de 20/11/2026). */}
+      <AvisoDeConferir>{documento ? t("meetings.document.mindMapNotice") : t("meetings.mindMap.notice")}</AvisoDeConferir>
       {traducao && <EstadoDaTraducao traducao={traducao} peloLink={peloLink}/>}
       {/* Com a tradução pronta (H11), os rótulos e a direção são os do idioma dela. */}
       <ArvoreDoMapa raiz={titulo} emoji={emoji} mapa={dados.mapa} idioma={traducao?.estado === "pronta" ? traducao.idioma : dados.idioma}

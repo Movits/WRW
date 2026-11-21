@@ -48,6 +48,30 @@ describe("TranscricaoPorFalante (D1)", () => {
     expect(screen.getByText("02:00 · 80%")).toBeInTheDocument();
   });
 
+  // Conferência de tela de 20/11/2026 (captura 13c): a vinheta de um vídeo do
+  // YouTube veio como "[música]" com o falante F2, e o tempo de fala mostrava
+  // "Falante 2: 00:12, 8%", uma voz que não existe.
+  it("a marca sem fala ([música], [ruído]) não é voz: fica fora do tempo de fala e sem rótulo na lista", () => {
+    const comVinheta: SegmentoDaTela[] = [
+      { inicio: 0, fim: 12, falante: "F2", texto: "[música]" },
+      { inicio: 12, fim: 132, falante: "F1", texto: "Hoje eu vou contar como o Pix nasceu." },
+      { inicio: 132, fim: 140, falante: "F1", texto: "[ruído] [música]" },
+      { inicio: 140, fim: 150, falante: "F3", texto: "[inaudível] obrigado" },
+    ];
+    expect(tempoDeFala(comVinheta)).toEqual([
+      { falante: "F1", segundos: 120, fracao: 120 / 130 },
+      { falante: "F3", segundos: 10, fracao: 10 / 130 },
+    ]);
+    render(<TranscricaoPorFalante segmentos={comVinheta} />);
+    const tempo = screen.getByText("Tempo de fala").closest("div")!;
+    expect(within(tempo).queryByText("Falante 2")).not.toBeInTheDocument();
+    const lista = document.querySelector("ol")!;
+    expect(within(lista).queryByText("Falante 2")).not.toBeInTheDocument();
+    expect(within(lista).getByText("[música]")).toBeInTheDocument();
+    expect(within(lista).getAllByText("Falante 1")).toHaveLength(1);
+    expect(within(lista).getByText("Falante 3")).toBeInTheDocument();
+  });
+
   it("só segmentos no formato do contrato entram (a transcrição antiga, sem falantes, fica de fora)", () => {
     expect(segmentosValidos(null)).toEqual([]);
     expect(segmentosValidos([{ texto: "sem tempo" }, ...FALAS])).toHaveLength(4);

@@ -14,11 +14,15 @@ import ru from "./locales/ru.json";
 
 type Dicionario = Record<string, unknown>;
 
-// As chaves da G13b (novas e mudadas) que levam número, e as da H9a (o MP3 em partes).
+// As chaves da G13b (novas e mudadas) que levam número, as da H9a (o MP3 em
+// partes) e as da H13 (os minutos do vídeo do YouTube que a IA transcreve).
 const CHAVES = [
   "smartNetwork.record.desc",
   "meetings.uploadLimit",
   "meetings.importTooLong",
+  "meetings.youtube.dialogIntro",
+  "meetings.youtube.notice",
+  "meetings.youtube.firstHourNote",
   "networkPanel.minutesLimitHelp",
   "networkPanel.hoursValue",
   "networkPanel.moreTimeUnavailable",
