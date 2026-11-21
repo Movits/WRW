@@ -478,7 +478,7 @@ Tamanho: P é pequena, M é média e G é grande.
   por amostra (FLAC). Sem pausa na janela, o corte cai no teto. O Vorbis e o Opus em modo
   CELT só acham a pausa em silêncio digital (conferência de tela do pacote 4b: a fala que
   atravessava a emenda do WAV, cortado a cada 14 MB, sumia da transcrição).
-- **G14:** tirar o envio único em base64. Feita em duas partes:
+- **G14:** tirar o envio único em base64. Em duas partes:
   - **parte 1 (pacote 5b, 21/11, decisão do Claude, vetável):** o gravador grava sempre
     em partes. Saíram o `?envioUnico=1` (a saída de suporte da G13b, que agora grava em
     partes como o `/gravar` de sempre), a revisão antes de enviar ("Transcrever áudio",
