@@ -2165,7 +2165,7 @@
       "noLocalResults": "No meeting with this title, tag, place, contact or context in the chosen filters.",
       "inContent": "In what was said and in the summaries",
       "searching": "Searching…",
-      "typeMore": "Type at least 3 letters to also search what was said.",
+      "typeMore": "Type a little more to also search what was said.",
       "noContentResults": "Nothing found in what was said or in the summaries.",
       "moreResults": "There are more results. Type more words or use the filters to find what you are looking for.",
       "transcriptHit": "In the transcript",
@@ -2194,7 +2194,7 @@
       "errorState": "One of the meetings is not ready (still recording, processing or failed).",
       "errorOnlyAudio": "Documents and YouTube videos cannot be merged.",
       "errorNoAudio": "The audio of one of the meetings is no longer stored (more than 30 days have passed).",
-      "errorTooLong": "The merged meeting would go over the 12-hour limit.",
+      "errorTooLong": "The merged meeting would go over the limits of a meeting (12 hours of recording, 200 segments or 99 voices). Merge fewer meetings.",
       "errorTooMany": "Too many merges in a row. Wait a few minutes and try again.",
       "error": "Could not merge the meetings. Try again."
     },

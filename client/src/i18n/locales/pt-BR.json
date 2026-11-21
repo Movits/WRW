@@ -2165,7 +2165,7 @@
       "noLocalResults": "Nenhuma reunião com esse título, etiqueta, lugar, contato ou contexto nos filtros escolhidos.",
       "inContent": "No que foi dito e nos resumos",
       "searching": "Buscando…",
-      "typeMore": "Escreva pelo menos 3 letras para buscar também no que foi dito.",
+      "typeMore": "Escreva um pouco mais para buscar também no que foi dito.",
       "noContentResults": "Nada encontrado no que foi dito nem nos resumos.",
       "moreResults": "Há mais resultados. Escreva mais palavras ou use os filtros para achar o que procura.",
       "transcriptHit": "Na transcrição",
@@ -2194,7 +2194,7 @@
       "errorState": "Alguma das reuniões não está pronta (ainda gravando, processando ou com falha).",
       "errorOnlyAudio": "Documentos e vídeos do YouTube não podem ser juntados.",
       "errorNoAudio": "O áudio de alguma das reuniões não está mais guardado (passou dos 30 dias).",
-      "errorTooLong": "A reunião juntada passaria do limite de 12 horas.",
+      "errorTooLong": "A reunião juntada passaria dos limites de uma reunião (12 horas de gravação, 200 trechos ou 99 vozes). Junte menos reuniões.",
       "errorTooMany": "Muitas junções em sequência. Aguarde alguns minutos e tente de novo.",
       "error": "Não foi possível juntar as reuniões. Tente de novo."
     },

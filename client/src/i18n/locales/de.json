@@ -2165,7 +2165,7 @@
       "noLocalResults": "Kein Meeting mit diesem Titel, Schlagwort, Ort, Kontakt oder Kontext in den gewählten Filtern.",
       "inContent": "Im Gesagten und in den Zusammenfassungen",
       "searching": "Suche läuft…",
-      "typeMore": "Geben Sie mindestens 3 Buchstaben ein, um auch im Gesagten zu suchen.",
+      "typeMore": "Geben Sie etwas mehr ein, um auch im Gesagten zu suchen.",
       "noContentResults": "Nichts im Gesagten oder in den Zusammenfassungen gefunden.",
       "moreResults": "Es gibt weitere Ergebnisse. Geben Sie mehr Wörter ein oder nutzen Sie die Filter, um das Gesuchte zu finden.",
       "transcriptHit": "Im Transkript",
@@ -2194,7 +2194,7 @@
       "errorState": "Eines der Meetings ist nicht fertig (noch in Aufnahme, in Verarbeitung oder fehlgeschlagen).",
       "errorOnlyAudio": "Dokumente und YouTube-Videos können nicht zusammengeführt werden.",
       "errorNoAudio": "Das Audio eines der Meetings ist nicht mehr gespeichert (mehr als 30 Tage vergangen).",
-      "errorTooLong": "Das zusammengeführte Meeting würde das Limit von 12 Stunden überschreiten.",
+      "errorTooLong": "Das zusammengeführte Meeting würde die Grenzen eines Meetings überschreiten (12 Stunden Aufnahme, 200 Abschnitte oder 99 Stimmen). Führen Sie weniger Meetings zusammen.",
       "errorTooMany": "Zu viele Zusammenführungen hintereinander. Warten Sie einige Minuten und versuchen Sie es erneut.",
       "error": "Die Meetings konnten nicht zusammengeführt werden. Versuchen Sie es erneut."
     },

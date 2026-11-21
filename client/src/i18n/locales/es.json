@@ -2165,7 +2165,7 @@
       "noLocalResults": "Ninguna reunión con ese título, etiqueta, lugar, contacto o contexto en los filtros elegidos.",
       "inContent": "En lo que se dijo y en los resúmenes",
       "searching": "Buscando…",
-      "typeMore": "Escribe al menos 3 letras para buscar también en lo que se dijo.",
+      "typeMore": "Escribe un poco más para buscar también en lo que se dijo.",
       "noContentResults": "No se encontró nada en lo que se dijo ni en los resúmenes.",
       "moreResults": "Hay más resultados. Escribe más palabras o usa los filtros para encontrar lo que buscas.",
       "transcriptHit": "En la transcripción",
@@ -2194,7 +2194,7 @@
       "errorState": "Alguna de las reuniones no está lista (todavía grabando, procesando o con error).",
       "errorOnlyAudio": "Los documentos y los videos de YouTube no se pueden unir.",
       "errorNoAudio": "El audio de alguna de las reuniones ya no está guardado (pasaron más de 30 días).",
-      "errorTooLong": "La reunión unida superaría el límite de 12 horas.",
+      "errorTooLong": "La reunión unida superaría los límites de una reunión (12 horas de grabación, 200 tramos o 99 voces). Une menos reuniones.",
       "errorTooMany": "Demasiadas uniones seguidas. Espera unos minutos e inténtalo de nuevo.",
       "error": "No se pudieron unir las reuniones. Inténtalo de nuevo."
     },

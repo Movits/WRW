@@ -2165,7 +2165,7 @@
       "noLocalResults": "Aucune réunion avec ce titre, cette étiquette, ce lieu, ce contact ou ce contexte dans les filtres choisis.",
       "inContent": "Dans ce qui a été dit et dans les résumés",
       "searching": "Recherche en cours…",
-      "typeMore": "Tapez au moins 3 lettres pour chercher aussi dans ce qui a été dit.",
+      "typeMore": "Tapez encore quelques caractères pour chercher aussi dans ce qui a été dit.",
       "noContentResults": "Rien trouvé dans ce qui a été dit ni dans les résumés.",
       "moreResults": "Il y a d'autres résultats. Tapez plus de mots ou utilisez les filtres pour trouver ce que vous cherchez.",
       "transcriptHit": "Dans la transcription",
@@ -2194,7 +2194,7 @@
       "errorState": "L'une des réunions n'est pas prête (encore en enregistrement, en traitement ou en échec).",
       "errorOnlyAudio": "Les documents et les vidéos YouTube ne peuvent pas être fusionnés.",
       "errorNoAudio": "L'audio de l'une des réunions n'est plus conservé (plus de 30 jours se sont écoulés).",
-      "errorTooLong": "La réunion fusionnée dépasserait la limite de 12 heures.",
+      "errorTooLong": "La réunion fusionnée dépasserait les limites d’une réunion (12 heures d’enregistrement, 200 segments ou 99 voix). Fusionnez moins de réunions.",
       "errorTooMany": "Trop de fusions d'affilée. Attendez quelques minutes et réessayez.",
       "error": "Impossible de fusionner les réunions. Réessayez."
     },

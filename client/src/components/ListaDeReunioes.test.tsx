@@ -112,7 +112,7 @@ describe("ListaDeReunioes — busca e filtros (H7b)", () => {
     };
     abrir();
     fireEvent.change(campo(), { target: { value: "pr" } });
-    expect(screen.getByText("Escreva pelo menos 3 letras para buscar também no que foi dito.")).toBeInTheDocument();
+    expect(screen.getByText("Escreva um pouco mais para buscar também no que foi dito.")).toBeInTheDocument();
     fireEvent.change(campo(), { target: { value: "proposta" } });
     const noConteudo = await screen.findByRole("region", { name: "No que foi dito e nos resumos" }).catch(() => screen.getByLabelText("No que foi dito e nos resumos"));
     await waitFor(() => expect(within(noConteudo).getByText("Na transcrição")).toBeInTheDocument());
