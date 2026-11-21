@@ -46,6 +46,19 @@ export function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string
   return (LANGUAGES.some(idioma => idioma.code === atual) ? atual : "pt-BR") as IdiomaDaTela;
 }
 
+/**
+ * A frase da caixa da autorização, a que vai para a prova (MEETING_OPEN_LINK_ON):
+ * a do documento (H12 e H12b), a do vídeo do YouTube (H13) ou a da gravação. O
+ * "Compartilhar" e o resumo por e-mail (H22), que liga o link junto com o
+ * envio, mostram e guardam a mesma: a reunião sem gravação nunca confirma que
+ * "quem receber o link ouça a gravação".
+ */
+export function fraseDaAutorizacao(t: TranslateFn, origem: { documento?: boolean; youtube?: boolean }): string {
+  if (origem.documento) return t("meetings.document.shareAuthorization");
+  if (origem.youtube) return t("meetings.youtube.shareAuthorization");
+  return t("meetings.share.authorization");
+}
+
 /** O endereço completo do link, no domínio em que a dona está. */
 export function enderecoDoLinkAberto(token: string, origem: string = window.location.origin) {
   return `${origem}${rotaDaReuniaoAberta(token)}`;
@@ -123,7 +136,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
 }) {
   const { t, i18n } = useTranslation();
   const apresentacao = documento ? t("meetings.document.shareIntro") : youtube ? t("meetings.youtube.shareIntro") : t("meetings.share.intro");
-  const autorizacao = documento ? t("meetings.document.shareAuthorization") : youtube ? t("meetings.youtube.shareAuthorization") : t("meetings.share.authorization");
+  const autorizacao = fraseDaAutorizacao(t, { documento, youtube });
   // Sem gravação, ninguém fica "ouvindo até terminar" depois de o link desligar.
   const perguntaDeDesligar = documento || youtube ? t("meetings.share.turnOffConfirmNoRecording") : t("meetings.share.turnOffConfirm");
   // Sem gravação, o link não tem áudio a levar: a escolha do áudio (H23) não

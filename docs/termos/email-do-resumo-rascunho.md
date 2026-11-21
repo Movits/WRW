@@ -22,6 +22,11 @@ gravação.
   envio: sem o áudio, não fala da gravação; com a senha, diz que ela não vai no e-mail e
   a quem pedi-la. A senha nunca vai no e-mail (o banco só guarda o hash dela). O link que
   o envio liga, quando estava desligado, é o de antes da H23: sem senha e com o áudio.
+- **Na reunião sem gravação (a de documento, H12 e H12b, e a de vídeo do YouTube, H13; no
+  Pacote 4d, depois do 4c):** a caixa da confirmação é a frase do "Compartilhar" para o
+  documento ou para o vídeo, que não fala de gravação; o link liga sem o áudio; e o e-mail
+  nunca fala da gravação, não diz que a reunião foi "gravada" e, sem o nome da conta, manda
+  pedir a senha a "quem compartilhou o resumo", no lugar de "quem gravou a reunião".
 - Se o link estiver desligado, a dona marca a mesma caixa do "Compartilhar por link"
   (*"Confirmo que todas as pessoas que falaram nesta reunião autorizaram…"*), e o link liga
   junto com o envio. A frase marcada, o idioma, o IP e o navegador vão para a auditoria.
@@ -53,6 +58,9 @@ gravação.
    dona, pelo nome dela, o aviso de encaminhamento passa a falar do link e da senha, e o
    painel avisa a dona de que a senha vai por ela, à parte. Basta, ou o e-mail deve dizer
    mais (por exemplo, não mandar a senha pelo mesmo canal)?
+7. Na reunião de documento ou de vídeo do YouTube, o e-mail diz "o resumo de "{título}",
+   feito na WRW" e, sem o nome da conta, "quem compartilhou o resumo". O texto serve, ou
+   deve dizer que é um documento ou um vídeo?
 
 ## O texto em português (referência)
 
@@ -63,20 +71,25 @@ gravação.
 - **Título:** Resumo da reunião
 - {nome da dona} compartilhou com você o resumo da reunião "{título}", gravada na WRW.
   (sem nome: "Você recebeu o resumo da reunião "{título}", gravada na WRW.")
+  (sem gravação, a de documento e a de vídeo: "{nome da dona} compartilhou com você o
+  resumo de "{título}", feito na WRW."; sem nome: "Você recebeu o resumo de "{título}",
+  feito na WRW.")
 - Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver
   guardada e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.
-  (link sem o áudio, H23: "Pelo link, você lê o resumo e a transcrição e pode fazer
-  perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")
+  (link sem o áudio, H23, e sempre na reunião sem gravação: "Pelo link, você lê o resumo e
+  a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")
 - (só no link com senha, H23) Este link pede uma senha de 6 dígitos, que não vai neste
   e-mail: peça a senha a {nome da dona}. (sem nome: "…peça a senha a quem gravou a
-  reunião.")
+  reunião."; sem nome e sem gravação: "…peça a senha a quem compartilhou o resumo com
+  você.")
 - **Botão:** Abrir o resumo
 - Se o botão não funcionar, copie este endereço no navegador: {link}
 - Quem tiver este link abre a reunião. Não o encaminhe a quem não deve ver o que foi dito.
   (link com senha, H23: "Quem tiver este link e a senha abre a reunião. Não encaminhe o
   link nem a senha a quem não deve ver o que foi dito.")
 - Você recebeu este e-mail porque {nome da dona} o mandou a você pela WRW. Se não esperava
-  por ele, pode ignorá-lo. (sem nome: "…porque quem gravou a reunião o mandou a você…")
+  por ele, pode ignorá-lo. (sem nome: "…porque quem gravou a reunião o mandou a você…";
+  sem nome e sem gravação: "…porque quem compartilhou o resumo o mandou a você…")
 - Este é um e-mail automático: não responda.
 - WRW — Women Rocking the World
 

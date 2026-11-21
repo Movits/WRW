@@ -191,9 +191,19 @@ export type EstadoDoLinkLigado = { token: string; comSenha: boolean; comAudio: b
  * grava os envios numa transação só, e a recusa de um desfaz o outro. Devolve o
  * token e como o link ficou, que o texto do e-mail segue. Lançar aqui desfaz o
  * UPDATE.
+ *
+ * `incluirAudio: false` liga o link sem o áudio: é o da reunião sem gravação
+ * (a de documento, H12 e H12b, e a de vídeo do YouTube, H13), como o
+ * "Compartilhar" a liga. Sem a opção, com o áudio.
  */
-export async function ligarLinkAbertoNaTransacao(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<EstadoDoLinkLigado> {
-  const { token, comSenha, comAudio } = await ligarNaTransacao(tx, ownerId, meetingId, prova, { senha: null, hash: null, incluirAudio: true });
+export async function ligarLinkAbertoNaTransacao(
+  tx: Transacao,
+  ownerId: string,
+  meetingId: string,
+  prova: ProvaDoLinkLigado,
+  opcoes: { incluirAudio?: boolean } = {},
+): Promise<EstadoDoLinkLigado> {
+  const { token, comSenha, comAudio } = await ligarNaTransacao(tx, ownerId, meetingId, prova, { senha: null, hash: null, incluirAudio: opcoes.incluirAudio !== false });
   return { token, comSenha, comAudio };
 }
 

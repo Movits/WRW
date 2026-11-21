@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
-import { idiomaDaTela } from "@/components/CompartilharReuniao";
+import { fraseDaAutorizacao, idiomaDaTela } from "@/components/CompartilharReuniao";
 import { emailDoParticipanteValido } from "@shared/agenda";
 import { VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import {
@@ -51,6 +51,13 @@ import {
  * (emailDoResumo.oQueAbreSemAudio, senha, senhaSemNome, senhaDona e
  * avisoComSenha, e resumoPorEmail.linkComSenha) esperam a revisão da Cris, nos
  * 10 idiomas.
+ *
+ * A reunião sem gravação, a de documento (H12 e H12b) e a de vídeo do YouTube
+ * (H13), segue o "Compartilhar": a caixa e a prova são a frase dela
+ * (fraseDaAutorizacao), o link liga sem o áudio, e a prévia, como o e-mail,
+ * não promete a gravação nem diz que a reunião foi gravada. Os textos dela
+ * (emailDoResumo.aberturaSemGravacao, aberturaSemNomeSemGravacao,
+ * senhaSemNomeSemGravacao e porQueSemNomeSemGravacao) também esperam a Cris.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -104,6 +111,10 @@ type PropsDoResumoPorEmail = {
   linkComSenha?: boolean;
   /** O link ligado leva o áudio (meeting.linkComAudio, H23). */
   linkComAudio?: boolean;
+  /** A reunião nasceu de um documento (H12 e H12b): não há gravação. */
+  documento?: boolean;
+  /** A reunião veio de um vídeo do YouTube (H13): não há gravação. */
+  youtube?: boolean;
 };
 
 /**
@@ -130,8 +141,12 @@ export function ResumoPorEmail(props: PropsDoResumoPorEmail) {
   </section>;
 }
 
-function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = false, linkComAudio = true, idDoPainel }: PropsDoResumoPorEmail & { idDoPainel: string }) {
+function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = false, linkComAudio = true, documento = false, youtube = false, idDoPainel }: PropsDoResumoPorEmail & { idDoPainel: string }) {
   const { t, i18n } = useTranslation();
+  // A caixa e a prova com a frase da origem, como no "Compartilhar": a reunião
+  // sem gravação nunca confirma que quem recebe "ouça a gravação".
+  const autorizacao = fraseDaAutorizacao(t, { documento, youtube });
+  const temGravacao = !documento && !youtube;
   const utils = trpc.useUtils();
   const id = useId();
   const [paraMim, setParaMim] = useState(false);
@@ -205,9 +220,11 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
   const total = chaves.size;
   const precisaAutorizar = !linkLigado;
   // Como o link vai estar quando o e-mail sair (H23): o desligado liga agora
-  // como o de antes, sem senha e com o áudio; o ligado fica como está.
+  // como o de antes, sem senha e com o áudio; o ligado fica como está. Sem
+  // gravação, nunca com o áudio (o servidor liga o link sem ele e não promete a
+  // gravação nem no link antigo, ligado com o áudio).
   const comSenha = linkLigado && linkComSenha;
-  const comAudio = !linkLigado || linkComAudio;
+  const comAudio = temGravacao && (!linkLigado || linkComAudio);
   const ocupado = mandar.isPending || deNovo.isPending;
   const podeMandar = total > 0 && total <= DESTINATARIAS_POR_ENVIO_MAX && (!precisaAutorizar || autorizou) && !ocupado;
   const nomeDoIdioma = LANGUAGES.find(idioma => idioma.code === dados.idioma)?.label ?? dados.idioma;
@@ -261,7 +278,7 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
           autorizacaoDasPessoas: true as const,
           // A prova guarda a frase que a dona viu, no idioma dela, e a versão da caixa (H3b).
           idioma: idiomaDaTela(i18n),
-          textoExibido: t("meetings.share.authorization"),
+          textoExibido: autorizacao,
           versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES,
         },
       } : {}),
@@ -273,15 +290,23 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
   const tDoEmail = i18n.getFixedT(dados.idioma);
   const valoresDaPrevia = valoresDoEmailDoResumo(titulo, dados.nomeDaDona);
   const comNome = Boolean(valoresDaPrevia.dona);
+  // Sem gravação, a abertura não diz que a reunião foi gravada, e sem o nome da
+  // conta quem dá a senha é quem compartilhou o resumo, e não "quem gravou".
+  const chaveDaAbertura = temGravacao
+    ? (comNome ? "emailDoResumo.abertura" : "emailDoResumo.aberturaSemNome")
+    : (comNome ? "emailDoResumo.aberturaSemGravacao" : "emailDoResumo.aberturaSemNomeSemGravacao");
   const previa = {
     assunto: comNome ? tDoEmail("emailDoResumo.assunto", valoresDaPrevia) : tDoEmail("emailDoResumo.assuntoSemNome", valoresDaPrevia),
-    abertura: comNome ? tDoEmail("emailDoResumo.abertura", valoresDaPrevia) : tDoEmail("emailDoResumo.aberturaSemNome", valoresDaPrevia),
+    abertura: tDoEmail(chaveDaAbertura, valoresDaPrevia),
     oQueAbre: comAudio ? tDoEmail("emailDoResumo.oQueAbre") : tDoEmail("emailDoResumo.oQueAbreSemAudio"),
-    senha: !comSenha ? null : comNome ? tDoEmail("emailDoResumo.senha", valoresDaPrevia) : tDoEmail("emailDoResumo.senhaSemNome", valoresDaPrevia),
+    senha: !comSenha ? null
+      : comNome ? tDoEmail("emailDoResumo.senha", valoresDaPrevia)
+      : tDoEmail(temGravacao ? "emailDoResumo.senhaSemNome" : "emailDoResumo.senhaSemNomeSemGravacao", valoresDaPrevia),
     botao: tDoEmail("emailDoResumo.botao"),
     // Com a senha, o aviso fala do link e da senha, como o do servidor.
     aviso: comSenha ? tDoEmail("emailDoResumo.avisoComSenha") : tDoEmail("emailDoResumo.aviso"),
-    porQue: comNome ? tDoEmail("emailDoResumo.porQue", valoresDaPrevia) : tDoEmail("emailDoResumo.porQueSemNome", valoresDaPrevia),
+    porQue: comNome ? tDoEmail("emailDoResumo.porQue", valoresDaPrevia)
+      : tDoEmail(temGravacao ? "emailDoResumo.porQueSemNome" : "emailDoResumo.porQueSemNomeSemGravacao", valoresDaPrevia),
   };
 
   return <div id={idDoPainel} className="mt-4 space-y-4">
@@ -365,7 +390,7 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
         <p className="text-sm text-amber-100/90">{t("resumoPorEmail.linkDesligado")}</p>
         <label className="flex items-start gap-3 text-sm text-white/80">
           <input type="checkbox" checked={autorizou} onChange={evento => setAutorizou(evento.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-amber-400"/>
-          <span>{t("meetings.share.authorization")}</span>
+          <span>{autorizacao}</span>
         </label>
       </div>}
 

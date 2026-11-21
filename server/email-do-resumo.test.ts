@@ -238,6 +238,82 @@ describe("montarEmailDoResumo", () => {
     }
   });
 
+  // A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
+  // vídeo do YouTube (H13) não têm gravação, e o e-mail dizia "gravada na WRW",
+  // "ouve a gravação" (com o link ligado com o áudio) e "quem gravou a reunião".
+  const GRAVACAO = /gravaç|gravad|gravou/i;
+  const ABERTURA_SEM_GRAVACAO = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na WRW.";
+  const ABERTURA_SEM_GRAVACAO_SEM_NOME = "Você recebeu o resumo de “Reunião com a Apex”, feito na WRW.";
+  const SENHA_SEM_NOME_SEM_GRAVACAO = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.";
+  const POR_QUE_SEM_NOME_SEM_GRAVACAO = "Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela WRW. Se não esperava por ele, pode ignorá-lo.";
+
+  it("a reunião sem gravação (documento e vídeo): nem a promessa da gravação, nem 'gravada', nem 'quem gravou', com o link como estiver", () => {
+    const links = [{ comSenha: true, comAudio: true }, { comSenha: false, comAudio: true }, { comSenha: true, comAudio: false }, { comSenha: false, comAudio: false }, undefined];
+    for (const modelo of ["participante", "dona"] as const) {
+      for (const dona of ["Glenda", null]) {
+        for (const link of links) {
+          const email = montarEmailDoResumo({ ...base, dona, modelo, link, semGravacao: true });
+          const caso = `${modelo}, ${dona ?? "sem nome"}, ${JSON.stringify(link)}`;
+          for (const parte of [email.assunto, email.text, email.html]) expect(parte, caso).not.toMatch(GRAVACAO);
+          expect(email.text, caso).toContain(SEM_AUDIO);
+        }
+      }
+    }
+    const comNome = montarEmailDoResumo({ ...base, modelo: "participante", link: { comSenha: true, comAudio: true }, semGravacao: true });
+    expect(comNome.text).toContain(`${ABERTURA_SEM_GRAVACAO}\n\n${SEM_AUDIO}\n\n${SENHA}`);
+    expect(comNome.html).toContain(ABERTURA_SEM_GRAVACAO);
+    const semNome = montarEmailDoResumo({ ...base, dona: null, modelo: "participante", link: { comSenha: true, comAudio: true }, semGravacao: true });
+    expect(semNome.text).toContain(`${ABERTURA_SEM_GRAVACAO_SEM_NOME}\n\n${SEM_AUDIO}\n\n${SENHA_SEM_NOME_SEM_GRAVACAO}`);
+    expect(semNome.text).toContain(POR_QUE_SEM_NOME_SEM_GRAVACAO);
+    expect(semNome.html).toContain(POR_QUE_SEM_NOME_SEM_GRAVACAO);
+    // À dona, o texto dela, sem a promessa da gravação.
+    const daDona = montarEmailDoResumo({ ...base, modelo: "dona", link: { comSenha: true, comAudio: true }, semGravacao: true });
+    expect(daDona.text).toContain(SENHA_DA_DONA);
+    expect(daDona.text).not.toContain(ABERTURA_SEM_GRAVACAO);
+  });
+
+  it("a reunião gravada segue com o texto da gravação: semGravacao falso é o e-mail de sempre", () => {
+    for (const dona of ["Glenda", null]) {
+      const link = { comSenha: true, comAudio: true };
+      const gravada = montarEmailDoResumo({ ...base, dona, modelo: "participante", link, semGravacao: false });
+      expect(gravada.text).toBe(montarEmailDoResumo({ ...base, dona, modelo: "participante", link }).text);
+      expect(gravada.text).toContain(COM_AUDIO);
+    }
+    expect(montarEmailDoResumo({ ...base, dona: null, modelo: "participante", link: { comSenha: true, comAudio: true } }).text).toContain(SENHA_SEM_NOME);
+  });
+
+  it("os textos sem gravação nos 10 idiomas: as marcas certas, outros que os da gravação, e são eles que vão no e-mail", () => {
+    const PARES = [
+      ["aberturaSemGravacao", "abertura"],
+      ["aberturaSemNomeSemGravacao", "aberturaSemNome"],
+      ["senhaSemNomeSemGravacao", "senhaSemNome"],
+      ["porQueSemNomeSemGravacao", "porQueSemNome"],
+    ] as const;
+    for (const idioma of IDIOMAS_DA_REUNIAO) {
+      const textos = TEXTOS_DO_EMAIL_DO_RESUMO[idioma];
+      expect(textos.aberturaSemGravacao, idioma).toContain("{{dona}}");
+      expect(textos.aberturaSemGravacao, idioma).toContain("{{titulo}}");
+      expect(textos.aberturaSemNomeSemGravacao, idioma).toContain("{{titulo}}");
+      for (const chave of ["aberturaSemNomeSemGravacao", "senhaSemNomeSemGravacao", "porQueSemNomeSemGravacao"] as const) {
+        expect(textos[chave], `${idioma}.${chave}`).not.toContain("{{dona}}");
+      }
+      for (const [semGravacao, daGravacao] of PARES) expect(textos[semGravacao], `${idioma}.${semGravacao}`).not.toBe(textos[daGravacao]);
+      expect(textos.senhaSemNomeSemGravacao, idioma).toMatch(/6/);
+
+      const valores = valoresDoEmailDoResumo(base.titulo, null);
+      const semNome = montarEmailDoResumo({ ...base, idioma, dona: null, modelo: "participante", link: { comSenha: true, comAudio: true }, semGravacao: true });
+      for (const chave of ["aberturaSemNomeSemGravacao", "oQueAbreSemAudio", "senhaSemNomeSemGravacao", "porQueSemNomeSemGravacao"] as const) {
+        expect(semNome.text, `${idioma}.${chave}`).toContain(preencher(textos[chave], valores));
+      }
+      for (const chave of ["aberturaSemNome", "oQueAbre", "senhaSemNome", "porQueSemNome"] as const) {
+        expect(semNome.text, `${idioma}.${chave}`).not.toContain(preencher(textos[chave], valores));
+      }
+      const comNome = montarEmailDoResumo({ ...base, idioma, modelo: "participante", semGravacao: true });
+      expect(comNome.text, idioma).toContain(preencher(textos.aberturaSemGravacao, valoresDoEmailDoResumo(base.titulo, base.dona)));
+      expect(comNome.text, idioma).not.toContain(preencher(textos.abertura, valoresDoEmailDoResumo(base.titulo, base.dona)));
+    }
+  });
+
   it("título e nome longos são cortados", () => {
     const email = montarEmailDoResumo({ ...base, titulo: "t".repeat(500), dona: "n".repeat(500), modelo: "participante" });
     expect(email.text).toContain(`“${"t".repeat(TITULO_NO_EMAIL_MAX)}”`);

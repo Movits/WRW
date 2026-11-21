@@ -28,6 +28,8 @@ import {
   type OrigemDoResumoPorEmail,
 } from "@shared/resumo-por-email";
 import { rotaDaReuniao, rotaDaReuniaoAberta } from "@shared/rotas";
+import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
+import { idDoVideoDaReuniao } from "@shared/youtube";
 import { agendaReunioes, auditLogs, meetings, meetingSummaries, resumoPorEmail, users } from "../drizzle/schema";
 import { sendEmailBatch } from "./_core/email";
 import { participantesDe } from "./agenda-de-reunioes";
@@ -75,6 +77,13 @@ import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
  * promete a gravação; com a senha, diz que ela não vai no e-mail e a quem
  * pedi-la. A senha nunca vai no e-mail: o banco só tem o hash. O link que o
  * envio liga é o de antes da H23, sem senha e com o áudio.
+ *
+ * A reunião sem gravação (a de documento, H12 e H12b, e a de vídeo do YouTube,
+ * H13; reuniaoSemGravacao) não tem áudio a levar: o envio liga o link dela sem
+ * o áudio, como o "Compartilhar", e o e-mail nunca promete a gravação, nem no
+ * link que já estava ligado com o share_audio verdadeiro (o padrão da coluna).
+ * O texto também não diz que ela foi gravada, nem fala de "quem gravou"
+ * (emailDoResumo.*SemGravacao).
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -201,6 +210,8 @@ async function reuniaoTravada(tx: Transacao, ownerId: string, meetingId: string)
   const [reuniao] = await tx.select({
     status: meetings.status, titulo: meetings.title, idioma: meetings.language, token: meetings.shareToken,
     senhaDoLink: meetings.sharePasswordHash, audioDoLink: meetings.shareAudio,
+    // De onde a reunião veio: a de documento e a de vídeo não têm gravação.
+    origem: meetings.origem, sourceUrl: meetings.sourceUrl,
   })
     .from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)))
@@ -210,13 +221,27 @@ async function reuniaoTravada(tx: Transacao, ownerId: string, meetingId: string)
 }
 
 /**
+ * A reunião sem gravação: a que nasceu de um documento (H12 e H12b) e a que
+ * veio de um vídeo do YouTube (H13), pela mesma regra da tela e do link
+ * (ehReuniaoDeDocumento e idDoVideoDaReuniao). O link dela não tem áudio a
+ * levar, e o e-mail não fala de gravação.
+ */
+export function reuniaoSemGravacao(reuniao: { origem: string | null; sourceUrl: string | null }): boolean {
+  return ehReuniaoDeDocumento(reuniao.origem) || idDoVideoDaReuniao(reuniao) !== null;
+}
+
+/**
  * O link aberto ligado e como ele está (H23), com a leitura do link
  * (reuniaoDoLink): hash que não é nulo pede a senha, e só o `true` do banco
- * leva o áudio. Null com o link desligado.
+ * leva o áudio. Null com o link desligado. Na reunião sem gravação, o link
+ * nunca leva o áudio, valha o que valer o share_audio: o link ligado antes
+ * desta regra ficou com o padrão da coluna, verdadeiro.
  */
-function linkDaReuniao(reuniao: { token: string | null; senhaDoLink: string | null; audioDoLink: boolean | null }): EstadoDoLinkLigado | null {
+export function linkDaReuniao(reuniao: {
+  token: string | null; senhaDoLink: string | null; audioDoLink: boolean | null; origem: string | null; sourceUrl: string | null;
+}): EstadoDoLinkLigado | null {
   if (!reuniao.token) return null;
-  return { token: reuniao.token, comSenha: reuniao.senhaDoLink !== null, comAudio: reuniao.audioDoLink === true };
+  return { token: reuniao.token, comSenha: reuniao.senhaDoLink !== null, comAudio: reuniao.audioDoLink === true && !reuniaoSemGravacao(reuniao) };
 }
 
 /** Há um resumo gravado (a versão sobe a cada resumo que a fila grava; o refeito mantém a anterior à vista). */
@@ -318,7 +343,8 @@ export function comPrazo<T>(promessa: Promise<T>, ms: number, seEstourar: () => 
  * Manda as linhas pela Resend e grava o resultado de cada uma. O e-mail é
  * montado agora, com o link de agora: o "Tentar de novo" depois de desligar e
  * ligar o link manda o link novo, e o texto segue a senha e o áudio dele
- * (H23). A falha da Resend não lança: a linha fica 'falhou', e quem chama
+ * (H23). A reunião sem gravação (`semGravacao`) leva o texto que não fala de
+ * gravação. A falha da Resend não lança: a linha fica 'falhou', e quem chama
  * decide a resposta.
  */
 async function mandarAsLinhas(
@@ -326,7 +352,11 @@ async function mandarAsLinhas(
   ownerId: string,
   meetingId: string,
   linhas: LinhaParaMandar[],
-  contexto: { site: string; link: EstadoDoLinkLigado | null; titulo: string; nomeDaDona: string | null },
+  contexto: {
+    site: string; link: EstadoDoLinkLigado | null; titulo: string; nomeDaDona: string | null;
+    /** A reunião sem gravação (reuniaoSemGravacao). O automático não precisa: o texto dele não fala de gravação. */
+    semGravacao?: boolean;
+  },
 ): Promise<{ enviados: number; falharam: number }> {
   const emails = linhas.map(linha => {
     const modelo: ModeloDoEmailDoResumo = linha.automatico ? "pronto" : linha.origem === "dona" ? "dona" : "participante";
@@ -335,7 +365,7 @@ async function mandarAsLinhas(
       : `${contexto.site}${rotaDaReuniaoAberta(contexto.link.token)}`;
     const { assunto, html, text } = montarEmailDoResumo({
       modelo, idioma: idiomaDaReuniao(linha.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO, titulo: contexto.titulo, dona: contexto.nomeDaDona, endereco,
-      link: contexto.link,
+      link: contexto.link, semGravacao: contexto.semGravacao === true,
     });
     return { to: linha.destinatario, subject: assunto, html, text };
   });
@@ -400,6 +430,7 @@ export async function mandarResumoPorEmail(
     // Só a linha nova conta no teto: a que volta a sair já contou quando nasceu.
     await conferirTetos(tx, dona.openId, meetingId, novas.length, agora);
 
+    const semGravacao = reuniaoSemGravacao(reuniao);
     let link = linkDaReuniao(reuniao);
     const linkLigadoAgora = !link;
     if (!link) {
@@ -412,6 +443,9 @@ export async function mandarResumoPorEmail(
         textoExibido: pedido.autorizacao.textoExibido,
         versaoDaAutorizacao: pedido.autorizacao.versaoDaAutorizacao,
         origem: "resumo_por_email",
+      }, {
+        // Sem gravação, sem áudio a levar: o link sai como o "Compartilhar" o liga.
+        incluirAudio: !semGravacao,
       });
     }
 
@@ -423,7 +457,7 @@ export async function mandarResumoPorEmail(
     }));
     // Todas as pessoas já têm o e-mail saindo agora (outra aba mandou há instantes): nada a gravar nem a mandar.
     if (!linhasNovas.length && !deNovo.length) {
-      return { linhas: [] as LinhaParaMandar[], link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
+      return { linhas: [] as LinhaParaMandar[], link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora, semGravacao };
     }
     if (linhasNovas.length) await tx.insert(resumoPorEmail).values(linhasNovas);
     if (deNovo.length) {
@@ -462,12 +496,12 @@ export async function mandarResumoPorEmail(
       ...linhasNovas.map(linha => ({ id: linha.id, destinatario: linha.destinatario, origem: linha.origem, automatico: false, idioma: linha.idioma })),
       ...deNovo.map(({ linha }) => ({ id: linha.id, destinatario: linha.destinatario, origem: linha.origem, automatico: false, idioma: linha.idioma })),
     ];
-    return { linhas, link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
+    return { linhas, link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora, semGravacao };
   });
 
   if (!preparado.linhas.length) return { enviados: 0, falharam: 0, linkLigadoAgora: preparado.linkLigadoAgora };
   const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
-    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona, semGravacao: preparado.semGravacao,
   });
   // Nada saiu: o pedido está guardado ('falhou'), e a tela diz isso no idioma de quem lê.
   if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
@@ -537,10 +571,11 @@ export async function mandarResumoPorEmailDeNovo(dona: DonaDoEnvio, meetingId: s
       link: linkDaReuniao(reuniao),
       titulo: reuniao.titulo,
       nomeDaDona: conta.nome?.trim() || null,
+      semGravacao: reuniaoSemGravacao(reuniao),
     };
   });
   const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
-    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
+    site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona, semGravacao: preparado.semGravacao,
   });
   if (!resultado.enviados) throw recusa("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
   return resultado;

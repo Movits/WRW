@@ -56,6 +56,11 @@ export type EmailDoResumo = { assunto: string; html: string; text: string };
  * não vai no e-mail e a quem pedi-la, e o aviso de encaminhamento fala do link
  * e da senha (o de sem senha diria que basta o link). A senha nunca entra aqui.
  * Sem `link`, o link de antes da H23: sem senha e com o áudio.
+ *
+ * `semGravacao` é a reunião que não tem gravação, a de documento (H12 e H12b)
+ * e a de vídeo do YouTube (H13): o texto nunca promete a gravação, com o link
+ * como estiver, e às participantes não diz que a reunião foi gravada nem fala
+ * de quem a gravou (as chaves *SemGravacao).
  */
 export function montarEmailDoResumo(dados: {
   modelo: ModeloDoEmailDoResumo;
@@ -64,16 +69,18 @@ export function montarEmailDoResumo(dados: {
   dona: string | null;
   endereco: string;
   link?: { comSenha: boolean; comAudio: boolean } | null;
+  semGravacao?: boolean;
 }): EmailDoResumo {
   const textos = TEXTOS_DO_EMAIL_DO_RESUMO[dados.idioma] ?? TEXTOS_DO_EMAIL_DO_RESUMO["pt-BR"];
   const valores = valoresDoEmailDoResumo(dados.titulo, dados.dona);
   const { dona } = valores;
   const t = (texto: string) => preencher(texto, valores);
+  const semGravacao = dados.semGravacao === true;
   // Sem `link`, o texto de antes da H23: com o áudio e sem senha. Com ele, os
   // dois valores vêm da leitura do banco (linkDaReuniao, em resumo-por-email.ts),
   // que já falha fechada: só o `true` do banco leva o áudio, e hash que não é
-  // nulo pede a senha.
-  const oQueAbre = t(dados.link?.comAudio === false ? textos.oQueAbreSemAudio : textos.oQueAbre);
+  // nulo pede a senha. Sem gravação, não há o que ouvir, leve o link o que levar.
+  const oQueAbre = t(semGravacao || dados.link?.comAudio === false ? textos.oQueAbreSemAudio : textos.oQueAbre);
   const comSenha = dados.link?.comSenha === true;
   // Com a senha, o aviso não pode dizer que basta o link: o parágrafo logo
   // acima diz que ele pede a senha, num e-mail que vai a terceiros.
@@ -98,10 +105,16 @@ export function montarEmailDoResumo(dados: {
     porQue = t(textos.porQueDona);
   } else {
     assunto = t(dona ? textos.assunto : textos.assuntoSemNome);
-    paragrafos = [t(dona ? textos.abertura : textos.aberturaSemNome), oQueAbre, ...(comSenha ? [t(dona ? textos.senha : textos.senhaSemNome)] : [])];
+    // Sem gravação, a abertura não diz "gravada", e sem o nome da conta a
+    // pessoa a quem pedir a senha é quem compartilhou o resumo, não "quem gravou".
+    const abertura = semGravacao
+      ? (dona ? textos.aberturaSemGravacao : textos.aberturaSemNomeSemGravacao)
+      : (dona ? textos.abertura : textos.aberturaSemNome);
+    const senha = dona ? textos.senha : semGravacao ? textos.senhaSemNomeSemGravacao : textos.senhaSemNome;
+    paragrafos = [t(abertura), oQueAbre, ...(comSenha ? [t(senha)] : [])];
     botao = t(textos.botao);
     aviso = avisoDoLink;
-    porQue = t(dona ? textos.porQue : textos.porQueSemNome);
+    porQue = t(dona ? textos.porQue : semGravacao ? textos.porQueSemNomeSemGravacao : textos.porQueSemNome);
   }
   assunto = linhaLimpa(assunto, 250);
 

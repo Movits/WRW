@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
-const { comPrazo, destinatariasDoPedido, hashDoEmail, PRAZO_DA_RESEND_MS, separarPeloQueJaHa } = await import("./resumo-por-email");
+const { comPrazo, destinatariasDoPedido, hashDoEmail, linkDaReuniao, PRAZO_DA_RESEND_MS, reuniaoSemGravacao, separarPeloQueJaHa } = await import("./resumo-por-email");
 type LinhaQueNaoSaiu = import("./resumo-por-email").LinhaQueNaoSaiu;
 const {
   DESTINATARIAS_POR_ENVIO_MAX,
@@ -158,5 +158,39 @@ describe("separarPeloQueJaHa: o pedido novo diante do que não saiu nesta reuni�
     // A participante que antes foi digitada recebe o mesmo texto: reaproveita.
     const digitadaAntes = linha({ destinatario: "ana@exemplo.invalid", origem: "digitado" });
     expect(separarPeloQueJaHa([ana], [digitadaAntes], AGORA).deNovo).toHaveLength(1);
+  });
+});
+
+/**
+ * A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
+ * vídeo do YouTube (H13) não têm gravação. Por ela, o envio liga o link sem o
+ * áudio e o e-mail não fala de gravação (resumo-por-email.integracao.test.ts).
+ */
+describe("reuniaoSemGravacao: a de documento e a de vídeo, pela regra da tela e do link", () => {
+  it("o PDF, as fotos de um texto e o vídeo do YouTube não têm gravação", () => {
+    expect(reuniaoSemGravacao({ origem: "pdf", sourceUrl: null })).toBe(true);
+    expect(reuniaoSemGravacao({ origem: "foto", sourceUrl: null })).toBe(true);
+    expect(reuniaoSemGravacao({ origem: "youtube", sourceUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" })).toBe(true);
+  });
+
+  it("a gravada, o arquivo de áudio, a aba e a de antes da origem têm", () => {
+    for (const origem of ["gravacao", "arquivo", "aba", null]) expect(reuniaoSemGravacao({ origem, sourceUrl: null }), String(origem)).toBe(false);
+  });
+});
+
+describe("linkDaReuniao: como o link está, que o texto do e-mail segue (H23)", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const gravada = { token: TOKEN, senhaDoLink: null, audioDoLink: true, origem: null, sourceUrl: null };
+
+  it("desligado é null; ligado, a senha pelo hash e o áudio só com o true do banco", () => {
+    expect(linkDaReuniao({ ...gravada, token: null })).toBeNull();
+    expect(linkDaReuniao(gravada)).toEqual({ token: TOKEN, comSenha: false, comAudio: true });
+    expect(linkDaReuniao({ ...gravada, senhaDoLink: "hash", audioDoLink: null })).toEqual({ token: TOKEN, comSenha: true, comAudio: false });
+  });
+
+  it("sem gravação (documento e vídeo), nunca com o áudio, nem no link antigo, que ficou com o share_audio verdadeiro", () => {
+    expect(linkDaReuniao({ ...gravada, origem: "pdf" })).toEqual({ token: TOKEN, comSenha: false, comAudio: false });
+    expect(linkDaReuniao({ ...gravada, origem: "foto", senhaDoLink: "hash" })).toEqual({ token: TOKEN, comSenha: true, comAudio: false });
+    expect(linkDaReuniao({ ...gravada, origem: "youtube", sourceUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" })?.comAudio).toBe(false);
   });
 });

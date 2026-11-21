@@ -76,9 +76,9 @@ const consulta = (dados: Partial<typeof PAINEL> = {}) => ({ data: { ...PAINEL, .
 const erroDoServidor = (code: string, message: string) => Object.assign(new Error(message), { data: { code } });
 const mutacao = (nome: string) => duble.mutacoes[nome];
 
-function abrir(props: Partial<{ linkLigado: boolean; titulo: string; linkComSenha: boolean; linkComAudio: boolean }> = {}) {
+function abrir(props: Partial<{ linkLigado: boolean; titulo: string; linkComSenha: boolean; linkComAudio: boolean; documento: boolean; youtube: boolean }> = {}) {
   const resultado = render(<ResumoPorEmail meetingId={ID} titulo={props.titulo ?? "Reunião com a Apex"} linkLigado={props.linkLigado ?? true}
-    linkComSenha={props.linkComSenha} linkComAudio={props.linkComAudio}/>);
+    linkComSenha={props.linkComSenha} linkComAudio={props.linkComAudio} documento={props.documento} youtube={props.youtube}/>);
   fireEvent.click(screen.getByRole("button", { name: /Mandar por e-mail|Send by email|إرسال بالبريد الإلكتروني/ }));
   return resultado;
 }
@@ -350,6 +350,69 @@ describe("a prévia do e-mail", () => {
     expect(screen.queryByText(SEM_AUDIO)).not.toBeInTheDocument();
     expect(screen.queryByText(PEDE_A_SENHA)).not.toBeInTheDocument();
     expect(screen.queryByText(AVISO_DA_SENHA)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
+ * vídeo do YouTube (H13) não têm gravação. O painel montava a caixa e a prova
+ * com a frase da gravação ("…autorizaram que quem receber o link ouça a
+ * gravação…"), a prévia prometia a gravação (o link desligado liga agora, e o
+ * antigo ficou com o áudio) e dizia que a reunião foi gravada, ou mandava pedir
+ * a senha a quem a gravou.
+ */
+describe("a reunião sem gravação: o documento e o vídeo do YouTube", () => {
+  const SEM_GRAVACAO = [
+    ["do documento", { documento: true }, "meetings.document.shareAuthorization"],
+    ["do vídeo do YouTube", { youtube: true }, "meetings.youtube.shareAuthorization"],
+  ] as const;
+  const GRAVACAO = /gravaç|gravad|gravou|todas as pessoas que falaram/i;
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
+  const ABERTURA = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na WRW.";
+
+  it.each(SEM_GRAVACAO)("o link desligado %s: a caixa e a prova são a frase da origem, como no Compartilhar, nunca a da gravação", (_caso, origem, chave) => {
+    abrir({ linkLigado: false, ...origem });
+    expect(screen.queryByRole("checkbox", { name: i18n.t("meetings.share.authorization") })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Para mim/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: i18n.t(chave) }));
+    fireEvent.click(botaoMandar());
+    expect(mutacao("mandar").mutate).toHaveBeenCalledWith(expect.objectContaining({
+      autorizacao: { autorizacaoDasPessoas: true, idioma: "pt-BR", textoExibido: i18n.t(chave), versaoDaAutorizacao: VERSAO_DA_AUTORIZACAO_COM_NOMES },
+    }));
+    expect(document.body.textContent).not.toMatch(GRAVACAO);
+  });
+
+  it.each(SEM_GRAVACAO)("a prévia %s não promete a gravação: nem com o link desligado, que liga agora, nem no link antigo, ligado com o áudio", (_caso, origem) => {
+    for (const link of [{ linkLigado: false }, { linkLigado: true, linkComAudio: true }]) {
+      const { unmount } = abrir({ ...link, ...origem });
+      expect(screen.getByText(SEM_AUDIO)).toBeInTheDocument();
+      expect(screen.getByText(ABERTURA)).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(GRAVACAO);
+      unmount();
+    }
+  });
+
+  it.each(SEM_GRAVACAO)("conta sem nome e link com senha %s: a prévia pede a senha a quem compartilhou o resumo, nunca a quem gravou", (_caso, origem) => {
+    duble.painel.mockReturnValue(consulta({ nomeDaDona: null }));
+    abrir({ linkComSenha: true, ...origem });
+    expect(screen.getByText("Você recebeu o resumo de “Reunião com a Apex”, feito na WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.")).toBeInTheDocument();
+    expect(screen.getByText("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela WRW. Se não esperava por ele, pode ignorá-lo.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(GRAVACAO);
+  });
+
+  it("a prévia segue o idioma da reunião também sem gravação", () => {
+    duble.painel.mockReturnValue(consulta({ idioma: "en" }));
+    abrir({ documento: true });
+    expect(screen.getByText("Glenda shared with you the summary of “Reunião com a Apex”, made on WRW.")).toBeInTheDocument();
+    expect(screen.queryByText(/recorded on WRW/)).not.toBeInTheDocument();
+  });
+
+  it("a reunião gravada continua com a caixa e a prévia da gravação", () => {
+    abrir({ linkLigado: false });
+    expect(screen.getByRole("checkbox", { name: i18n.t("meetings.share.authorization") })).toBeInTheDocument();
+    expect(screen.getByText(/ouve a gravação enquanto ela estiver guardada/)).toBeInTheDocument();
+    expect(screen.getByText("Glenda compartilhou com você o resumo da reunião “Reunião com a Apex”, gravada na WRW.")).toBeInTheDocument();
   });
 });
 

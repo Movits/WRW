@@ -142,7 +142,11 @@ auditoria. O envio automático vai só à dona, com o link da conta, e nunca lig
 O texto segue a senha e o áudio do link na hora de cada envio (H23): sem o áudio, não
 promete a gravação; com a senha, diz que ela não vai no e-mail (ela nunca vai) e o aviso
 de encaminhamento fala do link e da senha (`avisoComSenha`). O link
-que o envio liga é o de antes da H23, sem senha e com o áudio.
+que o envio liga é o de antes da H23, sem senha e com o áudio, salvo na reunião sem gravação
+(a de documento, H12 e H12b, e a de vídeo do YouTube, H13; `reuniaoSemGravacao`): o link
+dela liga sem o áudio, a caixa e a prova são a frase da origem, como no "Compartilhar", e o
+e-mail nunca promete a gravação (nem no link antigo, com o `share_audio` verdadeiro do padrão
+da 0023) nem diz que a reunião foi gravada (`emailDoResumo.*SemGravacao`).
 
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de

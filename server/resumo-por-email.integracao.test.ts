@@ -101,6 +101,8 @@ async function cenario(opcoes: {
   idioma?: string; link?: boolean; participantes?: Array<{ nome: string | null; email: string | null }>;
   versao?: number; status?: "ready" | "processing"; email?: string | null; nome?: string | null;
   automatico?: boolean; ativa?: boolean; semAgenda?: boolean;
+  /** A reunião sem gravação: a de documento (H12 e H12b) e a de vídeo do YouTube (H13), com a URL dele. */
+  origem?: "pdf" | "foto" | "youtube"; sourceUrl?: string;
 } = {}): Promise<Cenario> {
   const db = (await getDb())!;
   const openId = `teste-resumo-email-${crypto.randomUUID()}`;
@@ -117,6 +119,7 @@ async function cenario(opcoes: {
   await db.insert(meetings).values({
     id: meetingId, ownerId: openId, title: "Reunião com a Apex", status: opcoes.status ?? "ready",
     consentGranted: true, consentAt: AGORA, language: opcoes.idioma ?? "pt-BR", createdAt: AGORA, updatedAt: AGORA,
+    ...(opcoes.origem ? { origem: opcoes.origem, sourceUrl: opcoes.sourceUrl ?? null } : {}),
   });
   await db.insert(meetingSummaries).values({
     id: crypto.randomUUID(), meetingId, ownerId: openId, status: "ready", version: opcoes.versao ?? 1, language: "pt-BR", createdAt: AGORA, updatedAt: AGORA,
@@ -480,6 +483,86 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       const [item] = loteMandado(1);
       expect(item.text).toContain(PEDE_A_SENHA_DA_DONA);
       expect(item.text).not.toContain(senha);
+    });
+  });
+
+  // A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
+  // vídeo do YouTube (H13) não têm gravação. O envio ligava o link delas com o
+  // áudio, e o e-mail prometia a gravação, dizia "gravada na WRW" e mandava
+  // pedir a senha a "quem gravou a reunião".
+  describe("a reunião sem gravação: o documento (H12) e o vídeo do YouTube (H13)", () => {
+    const VIDEO = { origem: "youtube" as const, sourceUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+    const SEM_GRAVACAO = [
+      ["de documento", { origem: "pdf" as const },
+        "Confirmo que posso compartilhar este documento e autorizo que quem receber o link leia o texto lido dele e o resumo, sem o arquivo."],
+      ["de vídeo do YouTube", VIDEO,
+        "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes."],
+    ] as const;
+    const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião.";
+    const GRAVACAO = /gravaç|gravad|gravou/i;
+    const provaDa = (dona: { id: number }) => ({ userId: dona.id, ...REQUISICAO });
+
+    it.each(SEM_GRAVACAO)("reunião %s com o link desligado: o envio o liga sem o áudio, a prova guarda a frase da origem, e o e-mail não fala de gravação", async (_caso, origem, frase) => {
+      const { dona, meetingId, participantes } = await cenario(origem);
+      const ana = participantes[0].email!;
+      await mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, participantes: [ana], autorizacao: { ...AUTORIZACAO, textoExibido: frase } }), REQUISICAO);
+      const db = (await getDb())!;
+      const [depois] = await db.select({ token: meetings.shareToken, hash: meetings.sharePasswordHash, audio: meetings.shareAudio })
+        .from(meetings).where(eq(meetings.id, meetingId));
+      expect(depois.token).toMatch(/^[A-Za-z0-9_-]{32}$/);
+      expect(depois).toMatchObject({ hash: null, audio: false });
+      const provas = await auditoriaDa(meetingId, ACAO_LINK_LIGADO);
+      expect(provas).toHaveLength(1);
+      expect(provas[0].details).toMatchObject({ incluirAudio: false, comSenha: false, origem: "resumo_por_email", textoExibido: frase, versaoDaAutorizacao: 2 });
+      const lote = loteMandado();
+      expect(lote).toHaveLength(2);
+      for (const item of lote) {
+        expect(item.text, item.to).toContain(SEM_AUDIO);
+        for (const parte of [item.subject, item.text, item.html]) expect(parte, item.to).not.toMatch(GRAVACAO);
+      }
+      expect(lote.find(item => item.to === ana)!.text).toContain("Glenda Teste compartilhou com você o resumo de “Reunião com a Apex”, feito na WRW.");
+    });
+
+    it.each(SEM_GRAVACAO)("reunião %s com o link antigo, ligado com o áudio (o padrão da 0023): o e-mail não promete a gravação, nem no Tentar de novo", async (_caso, origem) => {
+      const { dona, meetingId, participantes } = await cenario({ ...origem, link: true });
+      const db = (await getDb())!;
+      const [antes] = await db.select({ audio: meetings.shareAudio }).from(meetings).where(eq(meetings.id, meetingId));
+      expect(antes.audio).toBe(true);
+      const ana = participantes[0].email!;
+      dubles.lote.mockImplementation(async lista => lista.map(() => false));
+      await recusaDe(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, participantes: [ana] }), REQUISICAO));
+      dubles.lote.mockImplementation(async lista => lista.map(() => true));
+      await expect(mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO)).resolves.toEqual({ enviados: 2, falharam: 0 });
+      for (const n of [0, 1]) {
+        for (const item of loteMandado(n)) {
+          expect(item.text, `${n} ${item.to}`).toContain(SEM_AUDIO);
+          expect(item.text, `${n} ${item.to}`).not.toMatch(GRAVACAO);
+        }
+      }
+      // O envio não mexe no link que já estava ligado.
+      const [depois] = await db.select({ audio: meetings.shareAudio }).from(meetings).where(eq(meetings.id, meetingId));
+      expect(depois.audio).toBe(true);
+    });
+
+    it("reunião de documento, conta sem nome e link com senha: a senha se pede a quem compartilhou o resumo, nunca a 'quem gravou a reunião'", async () => {
+      const { dona, meetingId, participantes } = await cenario({ origem: "pdf", nome: null, link: true });
+      await novaSenhaDoLink(dona.openId, meetingId, provaDa(dona));
+      const ana = participantes[0].email!;
+      await mandarResumoPorEmail(dona, meetingId, pedido({ participantes: [ana] }), REQUISICAO);
+      const [item] = loteMandado();
+      expect(item.text).toContain("Você recebeu o resumo de “Reunião com a Apex”, feito na WRW.");
+      expect(item.text).toContain("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.");
+      expect(item.text).toContain("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela WRW.");
+      for (const parte of [item.subject, item.text, item.html]) expect(parte).not.toMatch(GRAVACAO);
+    });
+
+    it("a reunião gravada continua: o link desligado liga com o áudio, e o e-mail fala da gravação", async () => {
+      const { dona, meetingId } = await cenario();
+      await mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, autorizacao: AUTORIZACAO }), REQUISICAO);
+      const db = (await getDb())!;
+      const [depois] = await db.select({ audio: meetings.shareAudio }).from(meetings).where(eq(meetings.id, meetingId));
+      expect(depois.audio).toBe(true);
+      expect(loteMandado()[0].text).toContain("ouve a gravação enquanto ela estiver guardada");
     });
   });
 

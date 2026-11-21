@@ -1244,10 +1244,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
       linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}
       comSenha={!!meeting.linkComSenha} comAudio={meeting.linkComAudio !== false} documento={ehDocumento} youtube={!!idDoVideo}/>}
-    {/* H22: o resumo por e-mail, quando já há um resumo gravado (o pronto, ou o anterior enquanto é refeito). */}
+    {/* H22: o resumo por e-mail, quando já há um resumo gravado (o pronto, ou o anterior enquanto é refeito). A
+        origem vai junto, como no Compartilhar: o documento e o vídeo não têm gravação a prometer. */}
     {meeting.status === "ready" && (resumoGuardado.data?.estado === "pronto" || resumoGuardado.data?.versaoAnterior) &&
       <ResumoPorEmail meetingId={meetingId} titulo={meeting.title} linkLigado={!!meeting.shareToken}
-        linkComSenha={!!meeting.linkComSenha} linkComAudio={meeting.linkComAudio !== false}/>}
+        linkComSenha={!!meeting.linkComSenha} linkComAudio={meeting.linkComAudio !== false} documento={ehDocumento} youtube={!!idDoVideo}/>}
     {meeting.status === "failed" && ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
       {/* O documento (H12) se reprocessa pelo arquivo guardado, com a mesma
