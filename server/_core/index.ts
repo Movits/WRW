@@ -9,6 +9,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
+import { registrarAssetLinks } from "../assetlinks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -252,6 +253,10 @@ async function startServer() {
   // Vite e do estático, que responderiam a página no lugar delas. Sem as
   // variáveis, 404 (server/rotas-da-google-agenda.ts).
   registrarRotasDaGoogleAgenda(app);
+  // O Digital Asset Links do app das lojas (M1), antes do Vite e do estático:
+  // o express.static ignora /.well-known e o pedido cairia no index.html
+  // (server/assetlinks.ts).
+  registrarAssetLinks(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
