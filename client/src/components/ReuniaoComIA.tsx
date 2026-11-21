@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, Loader2, MessageCircleQuestion, Play, Send } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -46,6 +46,11 @@ type FonteDaReuniao =
       aoIrPara?: (segundo: number) => void;
       linkDoTempo?: (segundo: number) => string;
       documento?: boolean;
+      /**
+       * O link com senha recusou a pergunta (UNAUTHORIZED): a entrada venceu ou
+       * a dona trocou a senha. A página relê a reunião, que traz a tela da senha.
+       */
+      aoPedirSenha?: () => void;
     };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
@@ -67,6 +72,8 @@ export function mensagemDoErroDaIA(t: TranslateFn, erro: unknown, padrao: string
     case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
     // Pelo link, NOT_FOUND é o link desligado no meio da visita.
     case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
+    // Pelo link com senha (H23), a entrada que venceu.
+    case "UNAUTHORIZED": return peloLink ? t("meetings.openLink.password.required") : padrao;
     case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
     default: return padrao;
   }
@@ -145,6 +152,13 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
   const nomes = fonte.nomes ?? {};
   const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
   const idDasCitacoes = useId();
+  // A pergunta pelo link com senha recusada pela entrada vencida: a página relê a reunião.
+  const recusouPelaSenha = peloLink && perguntarPeloLink.isError
+    && (perguntarPeloLink.error as { data?: { code?: string } } | null)?.data?.code === "UNAUTHORIZED";
+  const aoPedirSenha = fonte.token !== undefined ? fonte.aoPedirSenha : undefined;
+  useEffect(() => {
+    if (recusouPelaSenha) aoPedirSenha?.();
+  }, [recusouPelaSenha]);
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();

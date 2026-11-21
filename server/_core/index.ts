@@ -6,6 +6,7 @@ import helmet from "helmet";
 import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { CHAMADAS_POR_LOTE_MAX } from "@shared/lote-do-trpc";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
@@ -387,6 +388,9 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // O lote tem teto (shared/lote-do-trpc.ts): sem ele, um pedido levava
+      // centenas de chamadas a um procedimento caro, e o limite contava uma.
+      maxBatchSize: CHAMADAS_POR_LOTE_MAX,
     })
   );
 

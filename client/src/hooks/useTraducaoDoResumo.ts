@@ -74,6 +74,8 @@ export function mensagemDaFalhaDaTraducao(t: TranslateFn, erro: unknown, peloLin
   switch ((erro as { data?: { code?: string } } | null)?.data?.code) {
     case "TOO_MANY_REQUESTS": return t("assistenteTexto.muitosPedidos");
     case "NOT_FOUND": return peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound");
+    // Pelo link com senha (H23), a entrada que venceu: a página relê a reunião e traz a tela da senha.
+    case "UNAUTHORIZED": return peloLink ? t("meetings.openLink.password.required") : padrao;
     case "INTERNAL_SERVER_ERROR": return mensagemDeErroParaTela(erro, t);
     default: return padrao;
   }

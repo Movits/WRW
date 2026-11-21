@@ -13,6 +13,7 @@ import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarMapaMental } from "./mapa-mental";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
 import { numeracaoDoResumoRefeito } from "./resumo-refeito";
+import { envioAutomaticoDoResumo } from "./resumo-por-email";
 
 /**
  * A fila do resumo guardado da reunião (H4 do desenho do gravador,
@@ -486,6 +487,10 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   const alvo = await proximoTrabalho(db, agora, escopo);
   if (!alvo || parada) return;
   const resumoGravado = await executar(db, alvo, alvo.fase, agora);
+  // O e-mail automático do resumo (H22), desligado por padrão: só para a dona
+  // que o ligou, e só no primeiro resumo da reunião. Sem await: a Resend lenta
+  // não segura o mapa nem o próximo resumo. Nunca rejeita (o erro vai ao log).
+  if (resumoGravado) void envioAutomaticoDoResumo(alvo.ownerId, alvo.meetingId);
   if (resumoGravado && !parada) await executar(db, alvo, "mapa", Date.now());
 }
 
