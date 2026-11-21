@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse } from "./enrichment-flow";
+import { dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse, valorQueNaoInforma } from "./enrichment-flow";
 
 describe("roteiro de enriquecimento", () => {
   it("mantém as seis perguntas na ordem obrigatória", () => {
@@ -59,4 +59,19 @@ describe("roteiro de enriquecimento", () => {
     expect(indiceDaEtapaDoCampo("relationship_type")).toBe(5);
     expect(indiceDaEtapaDoCampo("email")).toBe(-1);
   });
+
+  // Na tela (21/11), a IA devolveu o telefone "Não informado", confiança 1, para "o telefone eu não sei, mas...".
+  it.each(["Não informado", "não informado.", "Desconhecido", "desconhecida", "N/A", "n/a", "não sabe", "sem telefone", "—", "-", "?", "Unknown", "não sei", "Nenhum"])(
+    "o valor '%s' é a falta do dado, e não vira cartão",
+    valor => {
+      expect(valorQueNaoInforma(valor)).toBe(true);
+    },
+  );
+
+  it.each(["11 99999-8888", "Café Brasil Ltda", "Sem Limites Ltda", "Sem Fronteiras", "Nenhuma Ltda", "Exportação de café", "Não-Me-Toque Agro"])(
+    "o valor '%s' é dado de verdade",
+    valor => {
+      expect(valorQueNaoInforma(valor)).toBe(false);
+    },
+  );
 });

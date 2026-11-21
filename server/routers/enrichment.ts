@@ -13,7 +13,7 @@ import {
 import { contextoParaOferecer } from "../contexto-oferecido";
 import {
   dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse, limiteDoValor,
-  type EnrichmentField,
+  valorQueNaoInforma, type EnrichmentField,
 } from "../enrichment-flow";
 
 // A IA tem um teto por chamada e um orçamento total (com as retentativas):
@@ -107,7 +107,7 @@ function antecipadasDaResposta(parsed: unknown, etapaAtual: number): Antecipada[
     const indice = indiceDaEtapaDoCampo(String(field_type ?? ""));
     const valor = typeof value === "string" ? value.trim() : "";
     const confianca = Number(confidence);
-    if (indice <= etapaAtual || !valor || !(confianca >= CONFIANCA_DO_CARTAO)) continue;
+    if (indice <= etapaAtual || !valor || valorQueNaoInforma(valor) || !(confianca >= CONFIANCA_DO_CARTAO)) continue;
     const campo = ENRICHMENT_STEPS[indice].fieldType;
     porCampo.set(campo, [...(porCampo.get(campo) ?? []), { field_type: campo, value: valor, confidence: confianca }]);
   }
@@ -299,11 +299,12 @@ REGRAS DE OURO:
 - Se o usuário responder algo relevante a uma pergunta do roteiro, EXTRAIA a entidade imediatamente.
 - Se a resposta for vaga (ex: "tem uma empresa"), PERGUNTE O NOME em vez de aceitar.
 - Se o usuário disser "não sei", pule para a próxima pergunta do roteiro.
+- Se a pessoa não souber ou não tiver o dado da pergunta da vez, deixe "extracted_entities" VAZIO: nunca ponha "não informado", "desconhecido" ou coisa parecida como valor.
 - NUNCA diga "Pode me contar mais sobre esta pessoa?" — isso é proibido. Seja específico.
 - SEMPRE responda em JSON válido. NUNCA adicione texto fora do JSON.
 
 NESTE TURNO, extraia em "extracted_entities" SOMENTE o campo "${step.fieldType}". Não avance o roteiro; a interface avançará após uma única confirmação de quem responde.
-Se a resposta TAMBÉM disser, com todas as letras, o dado de outra pergunta do roteiro (ex.: "Não sei o telefone. Ela oferece exportação de café."), ponha esse dado em "outros_campos", com o field_type daquela pergunta; ele não entra agora, só vira confirmação quando o roteiro chegar lá. Nada deduzido, como nas regras de ouro; sem dado de outra pergunta, "outros_campos" fica vazio.
+Se a resposta TAMBÉM disser, com todas as letras, o dado de outra pergunta do roteiro (ex.: "Não sei o telefone. Ela oferece exportação de café."), ponha esse dado em "outros_campos", com o field_type daquela pergunta e UM ITEM POR ENTRADA ("oferece exportação de café e tem um armazém em Santos" são duas entradas: "Exportação de café" e "Armazém em Santos"); ele não entra agora, só vira confirmação quando o roteiro chegar lá. Nada deduzido, como nas regras de ouro; sem dado de outra pergunta, "outros_campos" fica vazio.
 FORMATO DE SAÍDA (JSON obrigatório):
 {"next_question": null, "extracted_entities": [{"field_type": "${step.fieldType}", "value": "valor extraído da resposta", "confidence": 0.9, "is_complete": true}], "outros_campos": [{"field_type": "campo de outra pergunta do roteiro", "value": "valor dito", "confidence": 0.9}], "pending_fields": ["array dos campos ainda não respondidos"], "session_status": "active", "notes_for_user": "texto curto e direto para confirmar o valor, máximo 15 palavras"}`;
 
@@ -359,7 +360,9 @@ FORMATO DE SAÍDA (JSON obrigatório):
       // lista, cada item da resposta ("uma mina, uma fábrica e a patente")
       // vira um cartão — antes só o 1º sobrevivia e os outros sumiam sem
       // aviso; nas demais etapas, um valor só.
-      extracted = extracted.filter(entity => isExpectedField(entity.field_type, step.fieldType) && entity.value?.trim());
+      // O valor que é, ele mesmo, a falta do dado ("Não informado") também não
+      // vira cartão: confirmado, ele seria gravado como o telefone do contato.
+      extracted = extracted.filter(entity => isExpectedField(entity.field_type, step.fieldType) && entity.value?.trim() && !valorQueNaoInforma(entity.value));
       extracted = ETAPAS_DE_LISTA.has(step.fieldType) ? semRepetidas(extracted) : extracted.slice(0, 1);
       if (extracted.length === 0) {
         // "Não sei o telefone." (com ou sem mais coisa na frase) pula como o

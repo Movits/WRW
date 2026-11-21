@@ -39,6 +39,19 @@ export function dizQueNaoSabe(value: string) {
   return DIZ_QUE_NAO_SABE.test(value);
 }
 
+// O valor inteiro é um "não há dado": "Não informado", "Desconhecido", "N/A", "não sabe", "sem telefone", "—".
+const VALOR_QUE_NAO_INFORMA =
+  /^(?:n[aã]o\s+(?:informad[oa]|sabe|sei|consta|tem|possui|dispon[ií]vel)|desconhecid[oa]|ignorad[oa]|sem\s+(?:telefone|n[uú]mero|empresa|informa[cç][aã]o|dados?|contato)|nenhum[a]?|n\/?a|unknown|not\s+(?:provided|informed|available)|desconocid[oa]|-+|—|\?+)$/i;
+
+/**
+ * O valor que a IA extraiu é, ele mesmo, a falta do dado. Na tela (21/11), "o telefone eu não sei, mas ela oferece..."
+ * voltou com o telefone "Não informado", confiança 1: virava um cartão que, confirmado, gravava "Não informado" no
+ * telefone do contato. Valor assim não vira cartão; com a resposta dizendo que não sabe, a pergunta é pulada.
+ */
+export function valorQueNaoInforma(value: string) {
+  return isSkipResponse(value) || VALOR_QUE_NAO_INFORMA.test(value.trim().replace(/[.!…]+$/, "").trim());
+}
+
 /** O índice, no roteiro, da pergunta que o campo responde (os apelidos de `isExpectedField` valem), ou -1. */
 export function indiceDaEtapaDoCampo(fieldType: string) {
   return ENRICHMENT_STEPS.findIndex(step => isExpectedField(fieldType, step.fieldType));

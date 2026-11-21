@@ -111,6 +111,43 @@ describe("'Não sei o telefone. O que ela tem para oferecer: Exportação de caf
     expect(daPergunta).toMatchObject({ role: "assistant", content: PERGUNTA.company, metadata: { questionIndex: 1, fieldType: "company", skippedPrevious: true } });
   });
 
+  it("o pedido à IA traz o campo das outras perguntas, um item por entrada: 'exportação de café e um armazém em Santos' são dois cartões, e não um", async () => {
+    // Na tela (21/11), sem o "um item por entrada", a IA devolveu "exportação de café e armazém em Santos" numa
+    // entrada só, que virou UMA palavra-chave no "possui" e não casaria com quem procura café nem armazém.
+    invokeLLM.mockResolvedValue(respostaDaIA({}));
+
+    await enviar("o telefone eu não sei, mas ela oferece exportação de café e tem um armazém em Santos");
+
+    const sistema = (invokeLLM.mock.calls[0][0] as { messages: Array<{ role: string; content: string }> }).messages[0].content;
+    expect(sistema).toContain("\"outros_campos\"");
+    expect(sistema).toMatch(/UM ITEM POR ENTRADA/);
+  });
+
+  it("a IA devolve o telefone 'Não informado' (confiança 1): não vira cartão, a pergunta é pulada e o 'possui' fica guardado", async () => {
+    // Na tela (21/11): confirmado, o cartão gravaria "Não informado" no telefone do contato.
+    invokeLLM.mockResolvedValue(respostaDaIA({
+      extracted_entities: [{ field_type: "phone", value: "Não informado", confidence: 1 }],
+      outros_campos: [
+        { field_type: "assets", value: "Exportação de café", confidence: 0.9 },
+        { field_type: "assets", value: "Armazém em Santos", confidence: 0.9 },
+        { field_type: "company", value: "Desconhecida", confidence: 0.9 },
+      ],
+      notes_for_user: "Registrado que você não sabe o telefone.",
+    }));
+
+    const r = await enviar("o telefone eu não sei, mas ela oferece exportação de café e tem um armazém em Santos");
+
+    expect(saveEnrichmentSuggestions).not.toHaveBeenCalled();
+    expect(r.suggestions).toEqual([]);
+    expect(r.aiResponse).toBe(PERGUNTA.company);
+    expect(advanceEnrichmentSession).toHaveBeenCalledWith("sessao-1", "email_teste", 0, true);
+    // A empresa "Desconhecida" também não fica guardada para depois.
+    expect(gravadas()[0].metadata).toEqual({ antecipadas: [
+      { field_type: "assets", value: "Exportação de café", confidence: 0.9 },
+      { field_type: "assets", value: "Armazém em Santos", confidence: 0.9 },
+    ] });
+  });
+
   it("chegando à pergunta do que ela oferece (pela confirmação da empresa), o 'possui' dito antes vem como cartão, na mesma mensagem", async () => {
     invokeLLM.mockResolvedValue(respostaDaIA({ outros_campos: [{ field_type: "assets", value: "Exportação de café", confidence: 0.9 }] }));
     await enviar(RESPOSTA_DO_K1);
