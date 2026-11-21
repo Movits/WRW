@@ -1606,23 +1606,33 @@ export async function deleteContext(ownerId: string, contextId: string): Promise
   // dona em context_media, e só depois o DELETE em contexts afetava 0 linhas —
   // a resposta dizia NOT_FOUND com as linhas já perdidas (reverificação de
   // 04/09, etapa 5).
-  const [r] = await db.delete(contexts)
-    .where(and(eq(contexts.id, contextId), eq(contexts.ownerId, ownerId), eq(contexts.isCustom, true)));
-  if (!((r as any).affectedRows > 0)) return false;
-  // Os registros de anexos saem junto: não há FK/cascade no schema herdado, e
-  // linha de mídia órfã esconderia arquivo que continua existindo no bucket.
-  await db.delete(contextMedia)
-    .where(and(eq(contextMedia.contextId, contextId), eq(contextMedia.ownerId, ownerId)));
-  // Fora de escopo (pendências registradas): (1) os vínculos em
-  // contact_contexts e os participantes em context_participants do contexto
-  // apagado continuam na base — listContextsByContact os esconde pelo
-  // innerJoin em contexts, mas as linhas não são limpas aqui; (2) os dois
-  // DELETEs não estão numa transação: se o de context_media falhar depois do
-  // de contexts, sobra registro de mídia sem contexto (e o arquivo no bucket,
-  // que o router só apaga depois). Transação seria padrão novo no repositório
-  // (nenhum helper usa db.transaction), por isso fica registrado em vez de
-  // introduzido aqui.
-  return true;
+  //
+  // Tudo numa transação (H7c do plano do gravador): o contexto, os registros
+  // dos anexos e o ponteiro das reuniões da dona que estavam nele. Com um
+  // commit por passo, a falha no meio deixava registro de mídia sem contexto,
+  // ou reunião apontando para um contexto que não existe mais.
+  return db.transaction(async tx => {
+    const [r] = await tx.delete(contexts)
+      .where(and(eq(contexts.id, contextId), eq(contexts.ownerId, ownerId), eq(contexts.isCustom, true)));
+    if (!((r as any).affectedRows > 0)) return false;
+    // Os registros de anexos saem junto: não há FK/cascade no schema herdado, e
+    // linha de mídia órfã esconderia arquivo que continua existindo no bucket.
+    await tx.delete(contextMedia)
+      .where(and(eq(contextMedia.contextId, contextId), eq(contextMedia.ownerId, ownerId)));
+    // A reunião fica, sem o contexto: é registro da própria dona, como no
+    // contato excluído (apagarRastroDoContato, acima). Só as reuniões DELA: o
+    // contexto personalizado é dela, e o índice (dona, contexto) acha as linhas.
+    // O updated_at da reunião não muda: é a ficha de quem a processa
+    // (server/meeting-service.ts).
+    await tx.update(meetings).set({ contextId: null })
+      .where(and(eq(meetings.ownerId, ownerId), eq(meetings.contextId, contextId)));
+    // Fora de escopo (pendência registrada): os vínculos em contact_contexts e
+    // os participantes em context_participants do contexto apagado continuam
+    // na base — listContextsByContact os esconde pelo innerJoin em contexts,
+    // mas as linhas não são limpas aqui. O arquivo no bucket o router só apaga
+    // depois do commit.
+    return true;
+  });
 }
 
 export async function listContextMediaByContext(ownerId: string, contextId: string) {

@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
+  contexts,
   meetingAudioSlices,
   meetingContactSuggestions,
   meetingDocuments,
@@ -38,13 +39,15 @@ import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
   apagarPendenciasDaReuniao, emailEstaNaFonte, expressaoEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
-  REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type ItemProposto,
+  REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type BancoOuTransacao, type ItemProposto,
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
 import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
+import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
+import { nomesDosPonteiros } from "./detalhes-da-reuniao";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
@@ -1053,8 +1056,20 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   contarMinutos?: boolean;
   transcription: { text: string; segments: unknown; language: string };
   extraction: MeetingExtraction;
+  /**
+   * Zera os nomes das vozes (H3) ao promover? Por padrão, sempre que limpa o
+   * resultado anterior: a transcrição nova renumera as vozes, e o nome velho
+   * cairia na voz errada. A montagem da reunião em partes passa `false`: ela
+   * relê as falas que as partes já guardam, com os mesmos rótulos, e quem
+   * transcreve de novo zera os nomes antes (o reprocesso das partes, em
+   * reprocessarEmPartes, e a junção que retranscreve, server/juntar-reunioes.ts).
+   * A junção sem retranscrever leva os nomes das reuniões juntadas à reunião
+   * que fica, e a montagem os mantém.
+   */
+  zerarNomes?: boolean;
 }) {
   const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
+  const zerarNomes = execucao.zerarNomes ?? execucao.limparAntes;
 
   // Entre a tomada e aqui passaram 1–2 minutos de Gemini e LLM: tempo de sobra
   // para a dona ter clicado em Excluir, para um reprocessamento novo ou para a
@@ -1183,7 +1198,7 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // a execução dona da reunião limpa antes de gravar o resultado dela.
   // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
   // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(execucao.limparAntes ? { speakerNames: null } : {}) })
+  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(zerarNomes ? { speakerNames: null } : {}) })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
@@ -1263,8 +1278,12 @@ async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string
   if (Number(partes!.prazo ?? 0) <= now() + margemDoReprocesso(esperadas ?? Number(partes!.maiorSeq) + 1)) {
     throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
   }
+  // Os nomes das vozes (H3) saem aqui, na tomada, e não na montagem: as partes
+  // que falharam são transcritas de novo e podem renumerar as vozes. A montagem
+  // mantém os nomes (gravarResultadoDaReuniao, zerarNomes), porque a junção de
+  // reuniões (server/juntar-reunioes.ts) também passa por ela.
   const tomada = await db.update(meetings).set({
-    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(),
+    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(), speakerNames: null,
     expectedSlices: sql`coalesce(${meetings.expectedSlices}, ${Number(partes!.maiorSeq) + 1})`,
   }).where(and(
     eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"),
@@ -1433,6 +1452,10 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // (server/link-aberto-da-reuniao.ts).
   origem: meetings.origem,
   sourceUrl: meetings.sourceUrl,
+  // Os detalhes (H7c): as etiquetas e o "Onde foi", só da dona. O link aberto
+  // não os leva: ele escolhe as colunas dele (server/link-aberto-da-reuniao.ts).
+  etiquetas: meetings.etiquetas,
+  ondeFoi: meetings.ondeFoi,
 };
 
 /**
@@ -1462,10 +1485,22 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
   });
 }
 
+/**
+ * A lista da dona, com o nome do contato e o do contexto de cada reunião, que a
+ * busca e os filtros da tela leem (H7b). Os nomes vêm só da rede da dona (o
+ * contexto: dela ou do catálogo): o ponteiro para o contato ou o contexto de
+ * outra conta, que sobrou de antes da conferência de posse (H7c), sai sem nome.
+ */
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
-  return lista.map(meeting => ({ ...meeting, processingError: processingErrorSeguro(meeting.processingError) }));
+  const lista = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name })
+    .from(meetings)
+    .leftJoin(privateContacts, and(eq(privateContacts.id, meetings.contactId), eq(privateContacts.ownerId, meetings.ownerId)))
+    .leftJoin(contexts, and(eq(contexts.id, meetings.contextId), or(eq(contexts.ownerId, meetings.ownerId), isNull(contexts.ownerId))))
+    .where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
+  return lista.map(meeting => ({
+    ...meeting, processingError: processingErrorSeguro(meeting.processingError), etiquetas: etiquetasDaReuniao(meeting.etiquetas),
+  }));
 }
 
 /**
@@ -2040,8 +2075,15 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
   // sai também pelo link. Sem link, falso, sem consultar a auditoria.
   const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
+  // O contato e o contexto com o nome, só da rede da dona (H7c).
+  const { contato, contexto } = await nomesDosPonteiros(db, ownerId, {
+    contactId: meeting.contactId === null ? null : Number(meeting.contactId), contextId: meeting.contextId,
+  });
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
+    meeting: {
+      ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes,
+      etiquetas: etiquetasDaReuniao(meeting.etiquetas), contato, contexto,
+    },
     transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, audioParaBaixar, andamento,
     documento, documentoExpirado, documentoSaindo,
   };
@@ -2168,7 +2210,7 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
  * enquanto a reunião e os nomes das vozes ainda existem (`reuniaoSai` é a
  * exclusão; sem ele, o reprocesso, que zera os nomes e refaz os itens).
  */
-async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string, reuniaoSai: boolean) {
+async function apagarDerivadosSemGravacao(db: BancoOuTransacao, ownerId: string, meetingId: string, reuniaoSai: boolean) {
   await soltarAcoesDaReuniao(db, ownerId, meetingId, reuniaoSai);
   await db.delete(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId)));
   // As pendências de Quem Sou / Tenho / Preciso tiradas desta reunião carregam
@@ -2185,6 +2227,21 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   await db.delete(meetingSummaryTranslations).where(and(eq(meetingSummaryTranslations.meetingId, meetingId), eq(meetingSummaryTranslations.ownerId, ownerId)));
   await db.delete(meetingSummaryItems).where(and(eq(meetingSummaryItems.meetingId, meetingId), eq(meetingSummaryItems.ownerId, ownerId)));
   await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
+}
+
+/**
+ * Os derivados de uma reunião que foi JUNTADA a outra (H17,
+ * server/juntar-reunioes.ts), dentro da transação da junção: tudo o que a IA
+ * gerou dela (a mesma lista de apagarDerivadosSemGravacao, como na exclusão:
+ * as próximas ações se soltam com os nomes resolvidos), os avisos dela no sino
+ * e o ponteiro da agenda. O áudio NÃO sai: as partes e a gravação foram para a
+ * reunião que fica, na mesma transação, antes desta chamada. Sem bucket aqui:
+ * a transação não espera o expurgo.
+ */
+export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
+  await apagarDerivadosSemGravacao(tx, ownerId, meetingId, true);
+  await apagarAvisosDaReuniao(tx, ownerId, meetingId);
+  await soltarGravacaoDaAgenda(tx, ownerId, meetingId);
 }
 
 export async function deletePrivateMeeting(ownerId: string, meetingId: string) {

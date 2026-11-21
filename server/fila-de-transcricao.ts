@@ -401,8 +401,13 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const extraction = await comVagaDeIA(() => extrairDadosDaReuniao(entrada.texto, { rotulada: entrada.rotulada }));
     // Só o que foi transcrito conta minutos: a lacuna não é cobrada.
     const durationSeconds = Math.round(partes.filter(p => p.status === "transcribed").reduce((total, p) => total + p.durationMs, 0) / 1000);
+    // Os nomes das vozes ficam (zerarNomes: false): a montagem relê as falas
+    // que as partes guardam, com os mesmos rótulos. Quem transcreve de novo os
+    // zera antes (o reprocesso, em meeting-service.ts, e a junção que
+    // retranscreve, em server/juntar-reunioes.ts); a junção sem retranscrever
+    // traz os nomes das reuniões juntadas, já nos rótulos novos.
     await gravarResultadoDaReuniao(db, {
-      meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, durationSeconds,
+      meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, zerarNomes: false, durationSeconds,
       transcription: { text: texto, segments: segmentos, language: r?.idioma ?? "pt-BR" },
       extraction,
     });
