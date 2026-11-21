@@ -220,9 +220,9 @@ export default function ReuniaoAberta() {
           </label>
         </div>
         {traducaoLonga.aguardando
-          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
+          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
           : traduzir.isPending
-          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin mr-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div>
+          ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div>
           : <>
             {traduzir.isError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">
               <span>{mensagemDaTraducao(t, traduzir.error)}</span>

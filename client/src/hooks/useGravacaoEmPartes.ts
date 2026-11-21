@@ -6,6 +6,7 @@ import { aoTerminarUmDescarte, apagarGravacaoDescartada, guardarDescarte, retoma
 import { declararFim, fimRecusadoDeVez, guardarFim, retomarPartesEFins, type ServidorDaGravacao } from "@/lib/retomada-das-partes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import type { AudioGravado } from "./useGravadorDeAudio";
+import type { TipoDaParte } from "@/lib/corte-comum";
 import type { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
 /** De quanto em quanto tempo o gravador fecha uma parte (o desenho: ~10 min). */
@@ -31,13 +32,14 @@ export type ResultadoDoDescarte = "descartada" | "pendente" | "nada";
 type Inicio = { title: string; language: string; consentNoticeVersion: typeof VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO; contactId?: number | null; contextId?: string | null; origem?: "gravacao" | "arquivo" };
 
 /**
- * Uma parte a enviar: a que o gravador fecha (AudioGravado) ou a de um MP3
- * importado em partes (H9a), que sobe como audio/mpeg.
+ * Uma parte a enviar: a que o gravador fecha (AudioGravado) ou a de um
+ * arquivo importado em partes (H9a, H9b e H9c), que sobe no tipo que o corte
+ * diz (audio/mpeg, audio/mp4, audio/ogg, audio/flac...: TipoDaParte).
  */
-export type ParteParaEnviar = Omit<AudioGravado, "mimeType"> & { mimeType: AudioGravado["mimeType"] | "audio/mpeg"; seq: number; ultima: boolean };
+export type ParteParaEnviar = Omit<AudioGravado, "mimeType"> & { mimeType: AudioGravado["mimeType"] | TipoDaParte; seq: number; ultima: boolean };
 
 /**
- * Uma parte do MP3 importado em partes (H9a): sem o `ultima`, porque o fim do
+ * Uma parte do arquivo importado em partes (H9a): sem o `ultima`, porque o fim do
  * arquivo vem à parte (encerrarArquivo), depois de todas as partes recebidas.
  */
 export type ParteDoArquivo = Omit<ParteParaEnviar, "ultima">;
@@ -98,9 +100,9 @@ export type FimDoArquivo = "declarado" | "pendente" | "recusado" | "descartada";
  * a tela sair (o desmonte gravando para e entrega, G13b) sobe e encerra a
  * gravação do mesmo jeito.
  *
- * O MP3 importado em partes (H9a, hooks/useImportacaoEmPartes.ts) passa por
+ * O arquivo importado em partes (H9a, hooks/useImportacaoEmPartes.ts) passa por
  * aqui também: a reunião nasce com a origem "arquivo", cada parte cortada sobe
- * pela mesma fila, como audio/mpeg (subirParteDoArquivo, que responde o que
+ * pela mesma fila, no tipo da parte (subirParteDoArquivo, que responde o que
  * houve com ela: a importação só manda a seguinte quando esta chegou), e o fim
  * vem depois de todas (encerrarArquivo).
  *
@@ -299,7 +301,7 @@ export function useGravacaoEmPartes(opcoes: {
   }, [dona, subir]);
 
   /**
-   * O fim do MP3 importado em partes (H9a), depois de todas as partes: pela
+   * O fim do arquivo importado em partes (H9a), depois de todas as partes: pela
    * mesma fila, atrás da última (ver FimDoArquivo). A falha que não é recusa
    * (rede, deploy) não vira o aviso de envio que falhou: as partes já estão no
    * servidor, o fim fica guardado para a retomada, e a tela diz que o envio

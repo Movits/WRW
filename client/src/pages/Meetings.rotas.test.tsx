@@ -1166,13 +1166,14 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
   });
 });
 
-// O MP3 vai em partes desde a H9a (Meetings.importacao.test.tsx): o envio
-// único do /gravar, aqui, é o dos outros formatos, com os 10 min e 10 MB dele.
+// Desde a H9b e a H9c, todo arquivo do /gravar vai em partes
+// (Meetings.importacao.test.tsx): o envio único, aqui, é o do ?envioUnico=1, a
+// saída de suporte, com os formatos, os 10 min e os 10 MB dele.
 describe("Reuniões — envio de arquivo", () => {
   it("o formulário trava do começo ao fim do envio: a autorização não se desmarca no meio", async () => {
     let entregarDuracao: (segundos: number | null) => void = () => {};
     duble.duracao.mockImplementation(() => new Promise(resolver => { entregarDuracao = resolver; }));
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     let entregarCriacao: (reuniao: { id: string }) => void = () => {};
     duble.mutacoes.create.mutateAsync.mockImplementation(() => new Promise(resolver => { entregarCriacao = resolver; }));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
@@ -1202,7 +1203,7 @@ describe("Reuniões — envio de arquivo", () => {
 
   it("o servidor recusa o envio: o aviso aparece e o formulário destrava", async () => {
     duble.duracao.mockResolvedValue(30);
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
     duble.mutacoes.submitRecording.mutateAsync.mockRejectedValue(new Error("Não foi possível processar o áudio."));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
@@ -1216,7 +1217,7 @@ describe("Reuniões — envio de arquivo", () => {
 
   it("o envio de arquivo recusado com um erro sem mensagem avisa com a frase genérica, e não com um aviso em branco", async () => {
     duble.duracao.mockResolvedValue(30);
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
     // Como na gravação: o catch troca o aviso do onError, que já usou a frase genérica.
     duble.mutacoes.submitRecording.mutateAsync.mockRejectedValue(new Error(""));
@@ -1230,7 +1231,7 @@ describe("Reuniões — envio de arquivo", () => {
   it("com o banco fora do ar, o aviso do envio de arquivo sai no idioma da tela", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
     duble.duracao.mockResolvedValue(30);
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
     fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
@@ -1248,7 +1249,7 @@ describe("Reuniões — envio de arquivo", () => {
   }
 
   it("sem a autorização marcada, o arquivo não sobe: o create, que grava consentGranted, nem é chamado", async () => {
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Marque a caixa de autorização antes de enviar o áudio."));
@@ -1263,7 +1264,7 @@ describe("Reuniões — envio de arquivo", () => {
     { caso: "em formato que a tela não aceita", titulo: "Conversa com a Bia", arquivo: () => new File(["x"], "notas.txt", { type: "text/plain" }), aviso: "Envie um arquivo WebM, MP3, M4A, MP4, OGG ou WAV." },
     { caso: "acima de 10 MB", titulo: "Conversa com a Bia", arquivo: () => new File([new Uint8Array(11 * 1024 * 1024)], "longa.m4a", { type: "audio/m4a" }), aviso: "O arquivo de áudio deve ter no máximo 10 MB." },
   ])("o arquivo $caso é recusado antes de travar o formulário", async ({ titulo, arquivo, aviso }) => {
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     if (titulo) fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivo()] } });
@@ -1273,7 +1274,7 @@ describe("Reuniões — envio de arquivo", () => {
 
   it("a reunião não chega a ser criada no envio de arquivo: o aviso sai sem id, nada é enviado e o formulário destrava", async () => {
     duble.duracao.mockResolvedValue(30);
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error("Banco de dados indisponível. Tente de novo em instantes."));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
@@ -1287,7 +1288,7 @@ describe("Reuniões — envio de arquivo", () => {
 
   it("a reunião não chega a ser criada e o erro vem sem mensagem: o aviso do arquivo sai com a frase genérica do envio, sem id", async () => {
     duble.duracao.mockResolvedValue(30);
-    abrirEm("/gravar");
+    abrirEm("/gravar?envioUnico=1");
     duble.mutacoes.create.mutateAsync.mockRejectedValue(new Error(""));
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));

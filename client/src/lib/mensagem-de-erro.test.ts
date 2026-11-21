@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { MENSAGEM_DO_LIMITE, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
-import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
+import { RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
+import { mensagemDaRecusaDaParte, mensagemDaRecusaDoAudio, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
  * O que a tela mostra quando a consulta falha (revisão da PR-A): só a
@@ -231,6 +232,76 @@ describe("mensagemDeErroParaTela — as recusas das próximas ações no idioma 
   it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+// As recusas de baixar o áudio (H8c): o servidor manda o CÓDIGO, e a tela o traduz.
+describe("mensagemDaRecusaDoAudio — o código do servidor vira o aviso no idioma da tela", () => {
+  const recusa = (code: string, message: string) =>
+    TRPCClientError.from({ error: { code: -32000, message, data: { code, httpStatus: 400 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.vencido, "meetings.audioDownload.expired", "This meeting's audio is more than 30 days old and can no longer be downloaded. The transcript is still here."],
+    ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.ausente, "meetings.audioDownload.noAudio", "This meeting has no stored audio to download."],
+    ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.aindaGravando, "meetings.audioDownload.stillRecording", "The recording is still coming in. Wait for it to finish to download the audio."],
+    ["TOO_MANY_REQUESTS", RECUSAS_DO_AUDIO.demais, "meetings.audioDownload.tooMany", "Too many audio files downloaded in the last hour. Wait a little and try again."],
+    ["TOO_MANY_REQUESTS", RECUSAS_DO_AUDIO.ocupado, "meetings.audioDownload.busy", "The server is preparing other audio files right now. Try again in a few minutes."],
+    ["INTERNAL_SERVER_ERROR", RECUSAS_DO_AUDIO.indisponivel, "meetings.audioDownload.unavailable", "Audio download is unavailable right now. Try again later."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("cada código de RECUSAS_DO_AUDIO tem o seu aviso (nenhum cai no genérico nem sai cru)", () => {
+    expect(CASOS.map(([, codigo]) => codigo).sort()).toEqual(Object.values(RECUSAS_DO_AUDIO).sort());
+    for (const [code, codigo, chave] of CASOS) expect(mensagemDaRecusaDoAudio(recusa(code, codigo), t)).toBe(`[${chave}]`);
+  });
+
+  it.each(CASOS)("%s %s: em inglês sai traduzido", async (code, codigo, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDaRecusaDoAudio(recusa(code, codigo), c => i18n.t(c))).toBe(emIngles);
+  });
+
+  it("a reunião de outra conta ou excluída (NOT_FOUND) é a 'reunião não encontrada'", () => {
+    expect(mensagemDaRecusaDoAudio(recusa("NOT_FOUND", "Reunião não encontrada."), t)).toBe("[meetings.meetingNotFound]");
+  });
+
+  it("as mensagens comuns do servidor (banco fora do ar, limite da API) passam pela tabela", () => {
+    expect(mensagemDaRecusaDoAudio(recusa("INTERNAL_SERVER_ERROR", MENSAGEM_BANCO_INDISPONIVEL), t)).toBe("[errors.databaseUnavailable]");
+    expect(mensagemDaRecusaDoAudio(recusa("TOO_MANY_REQUESTS", MENSAGEM_DO_LIMITE), t)).toBe("[errors.tooManyRequests]");
+  });
+
+  it("frase desconhecida, nome de propriedade do objeto ou rede fora: o aviso genérico do áudio, nunca o texto cru", () => {
+    expect(mensagemDaRecusaDoAudio(recusa("PRECONDITION_FAILED", "Uma frase em português que a tela não conhece."), t)).toBe("[meetings.audioDownload.error]");
+    expect(mensagemDaRecusaDoAudio(recusa("BAD_REQUEST", "constructor"), t)).toBe("[meetings.audioDownload.error]");
+    expect(mensagemDaRecusaDoAudio(recusa("BAD_REQUEST", "toString"), t)).toBe("[meetings.audioDownload.error]");
+    expect(mensagemDaRecusaDoAudio(new TRPCClientError("Failed to fetch", { cause: new TypeError("Failed to fetch") }), t)).toBe("[meetings.audioDownload.error]");
+    expect(mensagemDaRecusaDoAudio(null, t)).toBe("[meetings.audioDownload.error]");
+  });
+});
+
+// Conferência de tela do pacote 4b: as frases que a fila da gravação em partes
+// grava em processing_error (server/fila-de-transcricao.ts) saíam em português
+// na caixa vermelha da reunião que falhou, em qualquer idioma (captura 32).
+describe("traduzirMensagemDoServidor — as falhas da fila da gravação em partes no idioma da tela", () => {
+  const CASOS: Array<[string, string, string]> = [
+    [MENSAGEM_PARTES_SEM_TRANSCRICAO, "meetings.processingFailedNoTranscript", "This meeting's audio couldn't be transcribed."],
+    [MENSAGEM_FALHA_DA_MONTAGEM, "meetings.processingFailedRetryLater", "This meeting couldn't be processed. Try again later."],
+    [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, "meetings.processingFailedNoAudioSent", "The recording was interrupted before the audio was sent."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português é a frase do servidor, caractere a caractere", (mensagem, chave) => {
+    expect(i18n.t(chave)).toBe(mensagem);
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(mensagem);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(traduzirMensagemDoServidor(mensagem, c => i18n.t(c))).toBe(emIngles);
   });
 });
 

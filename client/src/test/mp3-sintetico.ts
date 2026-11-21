@@ -44,10 +44,40 @@ function aleatorios(n: number, semente: number): Uint8Array {
   return saida;
 }
 
-/** Um quadro de áudio: o cabeçalho e o miolo pseudoaleatório. */
+/**
+ * A informação lateral da camada III de um som forte e constante: em cada
+ * grânulo e canal, part2_3_length 2.000, big_values 200 e global_gain 170
+ * (o resto zerado). O corte acha a pausa da fala pelo global_gain
+ * (lib/nivel-dos-quadros.ts): com a informação lateral pseudoaleatória, cada
+ * quadro teria um volume ao acaso, e as "pausas" do acaso mudariam os cortes.
+ * Null nas camadas I e II, que não a têm.
+ */
+function informacaoLateral(cabecalho: readonly number[]): number[] | null {
+  if (((cabecalho[1] >> 1) & 3) !== 1) return null;
+  const mpeg1 = ((cabecalho[1] >> 3) & 3) === 3;
+  const mono = cabecalho[3] >> 6 === 3;
+  const canais = mono ? 1 : 2;
+  const bits: number[] = [];
+  const escrever = (valor: number, n: number) => { for (let k = n - 1; k >= 0; k--) bits.push((valor >> k) & 1); };
+  escrever(0, mpeg1 ? 9 + (mono ? 5 : 3) + 4 * canais : 8 + (mono ? 1 : 2));
+  for (let granulo = 0; granulo < (mpeg1 ? 2 : 1); granulo++) {
+    for (let canal = 0; canal < canais; canal++) {
+      escrever(mpeg1 ? 2000 : 1000, 12);
+      escrever(200, 9);
+      escrever(170, 8);
+      escrever(0, mpeg1 ? 30 : 34);
+    }
+  }
+  return Array.from({ length: Math.ceil(bits.length / 8) }, (_, i) => bits.slice(i * 8, i * 8 + 8).reduce((byte, bit, k) => byte | (bit << (7 - k)), 0));
+}
+
+/** Um quadro de áudio: o cabeçalho, a informação lateral de um som constante (na camada III) e o miolo pseudoaleatório. */
 export function quadro(formato: FormatoDoQuadro, semente = 7): Uint8Array {
   const q = aleatorios(formato.tamanho, semente);
   q.set(formato.cabecalho, 0);
+  const lateral = informacaoLateral(formato.cabecalho);
+  // Depois do cabeçalho e, com o bit de proteção em 0, do CRC de 2 bytes.
+  if (lateral) q.set(lateral, 4 + ((formato.cabecalho[1] & 1) === 0 ? 2 : 0));
   return q;
 }
 

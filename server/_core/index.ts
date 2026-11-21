@@ -18,6 +18,7 @@ import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
+import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
 import { registrarRotaDoDocumento } from "./rota-do-documento";
 import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
@@ -254,6 +255,10 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // O download do áudio da reunião (H8c): só com a ficha de uso único que
+  // meetings.baixarAudio emitiu para a sessão da dona; o arquivo é convertido
+  // pelo ffmpeg enquanto sai (server/_core/rota-do-audio-baixado.ts).
+  registrarRotaDoAudioBaixado(app);
   // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
   // Vite e do estático, que responderiam a página no lugar delas. Sem as
   // variáveis, 404 (server/rotas-da-google-agenda.ts).

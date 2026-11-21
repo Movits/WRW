@@ -241,6 +241,52 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
   });
 });
 
+// H8c, revisão do pacote 4b: o botão "Baixar o áudio" segue o audioParaBaixar
+// do detalhe, que conta as partes com o áudio no bucket (também as que falharam
+// na IA, que o player não toca), no mesmo tempo da preparação do download.
+describe("Baixar o áudio — o detalhe diz o que se baixa, também quando nada toca", () => {
+  const parte = (seq: number, extra: Record<string, unknown> = {}) => ({
+    id: `parte-${seq}`, meetingId: "reuniao-1", ownerId: "dona-1", seq, status: "transcribed", lastError: null,
+    storageKey: `meetings/dona-1/reuniao-1/partes/${seq}.webm`, storageUrl: `/manus-storage/meetings/dona-1/reuniao-1/partes/${seq}.webm`,
+    mimeType: "audio/webm", durationMs: 600_000, offsetMs: seq * 600_000, expiresAt: AGORA + TTL_MS, ...extra,
+  });
+  const emPartes = (status: string, partes: Array<Record<string, unknown>>) => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, status, audioPipeline: "slices" }]);
+    tabelas.set(schema.meetingAudioSlices, partes);
+  };
+
+  it("a reunião que falhou inteira na IA: nada toca, mas o áudio guardado se baixa (a parte que nunca subiu fica de fora)", async () => {
+    emPartes("failed", [
+      parte(0, { status: "failed", lastError: "IA_INDISPONIVEL", offsetMs: null }),
+      parte(1, { status: "failed", lastError: "TENTATIVAS_ESGOTADAS", offsetMs: null }),
+      parte(2, { status: "failed", lastError: "NAO_RECEBIDA", offsetMs: null, durationMs: 300_000 }),
+    ]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS });
+  });
+
+  it("com partes que tocam, a que falhou na IA no fim entra na duração do arquivo, e não na do player", async () => {
+    emPartes("ready", [parte(0), parte(1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null, expiresAt: AGORA + TTL_MS - 5 })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording?.durationSeconds).toBe(600);
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS - 5 });
+  });
+
+  it("sem parte nenhuma com o áudio no bucket: nada a baixar", async () => {
+    emPartes("failed", [parte(0, { status: "failed", lastError: "AUDIO_AUSENTE" }), parte(1, { status: "uploading" })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toBeNull();
+  });
+
+  it("o envio único: a gravação inteira, com o prazo dela", async () => {
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 92, expiresAt: AGORA + 1000 });
+  });
+});
+
 describe("Leitura — processing_error legado com o SQL do driver não chega à tela", () => {
   // Antes de mensagemDaFalha, a mensagem do DrizzleQueryError ia inteira para
   // a coluna: há linhas assim em produção, com o INSERT e os parâmetros

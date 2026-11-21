@@ -1,4 +1,7 @@
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
+import { corteCancelado, PARTE_BYTES_MAX, PARTE_SEGUNDOS_MAX, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
+import { nivelDoMp3 } from "./nivel-dos-quadros";
+import { bitsPorMs, cortarNasPausas, partesDoCorte, SEM_PAUSAS } from "./pausas-do-corte";
 
 /**
  * O corte de um MP3 em partes para a importação em partes (H9a do plano do
@@ -25,23 +28,29 @@ import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
  * O corte nos quadros não mexe no reservatório de bits do Layer III: o
  * primeiro quadro de cada parte pode apontar para bytes do quadro anterior,
  * que ficou na outra parte, e o decodificador cala uns milissegundos ali. Para
- * a transcrição, não muda nada.
+ * a transcrição, não muda nada, ainda mais porque a parte fecha numa pausa da
+ * fala (lib/pausas-do-corte.ts): o nível de cada quadro é o passo do
+ * quantizador dele (o global_gain da informação lateral, lib/nivel-dos-quadros.ts),
+ * que acompanha o volume mesmo no MP3 de taxa constante.
  *
- * O módulo não toca o DOM: roda no Worker (workers/corte-do-mp3.worker.ts), na
- * página quando o Worker não sobe (lib/corte-do-mp3-no-worker.ts) e nos testes.
+ * O módulo não toca o DOM: roda no Worker (workers/corte-do-arquivo.worker.ts),
+ * na página quando o Worker não sobe (lib/corte-do-arquivo-no-worker.ts) e nos
+ * testes. Quem escolhe este corte é o do arquivo (lib/corte-do-arquivo.ts), que
+ * reconhece o formato pelos bytes (H9b e H9c).
  */
 
 /** O teto de cada parte do arquivo importado: o da parte da gravação (PARTE_SEGUNDOS). */
-export const PARTE_DO_MP3_SEGUNDOS_MAX = 600;
+export const PARTE_DO_MP3_SEGUNDOS_MAX = PARTE_SEGUNDOS_MAX;
 /**
  * 14 MB, e não os 15 do plano: cada parte vai ao Gemini inline, em base64 (um
  * terço a mais), e 14 MB viram 18,7 MB, abaixo dos 20 MB do pedido com áudio
  * inline; 15 MB virariam 20,97 MB. A rota das partes aceita até 16 MB
  * (TAMANHO_MAXIMO_DA_PARTE), e o MP3 de 12 h a 320 kbps fica em 118 partes,
  * dentro do teto de 120 a cada 10 min da rota (PARTES_POR_DONA_EM_10_MIN).
- * Só o MP3 de mais de ~196 kbps chega a este teto antes dos 600 s.
+ * Só o MP3 de mais de ~196 kbps chega a este teto antes dos 600 s. Os outros
+ * formatos (lib/corte-comum.ts) usam os mesmos tetos.
  */
-export const PARTE_DO_MP3_BYTES_MAX = 14 * 1024 * 1024;
+export const PARTE_DO_MP3_BYTES_MAX = PARTE_BYTES_MAX;
 
 /** De quanto em quanto o arquivo é lido. */
 const BLOCO = 4 * 1024 * 1024;
@@ -70,32 +79,9 @@ export type CorteDoMp3 =
   | { ok: true; partes: ParteDoMp3[]; duracaoMs: number }
   | { ok: false; codigo: CodigoDaRecusaDoMp3 };
 
-/** Lê os bytes de `inicio` até `fim` (sem incluir) do arquivo. */
-export type LerBytes = (inicio: number, fim: number) => Promise<Uint8Array>;
-
-export type OpcoesDoCorte = {
-  segundosPorParte?: number;
-  bytesPorParte?: number;
-  /** O teto da reunião: acima dele o corte recusa (LONGO_DEMAIS). */
-  segundosNoTotal?: number;
-  /** A leitura andou: quantos bytes do arquivo já foram lidos, de quantos. */
-  aoLer?: (lidos: number, total: number) => void;
-  sinal?: AbortSignal;
-};
-
-/** O erro do corte cancelado (AbortError, como o fetch). */
-export function corteCancelado() {
-  return new DOMException("Corte do MP3 cancelado.", "AbortError");
-}
-
-export function ehCorteCancelado(erro: unknown) {
-  return erro instanceof DOMException && erro.name === "AbortError";
-}
-
-/** O leitor de um Blob (o File escolhido): o Worker e a página leem do mesmo jeito. */
-export function lerBlob(blob: Blob): LerBytes {
-  return async (inicio, fim) => new Uint8Array(await blob.slice(inicio, fim).arrayBuffer());
-}
+// O que todos os cortes usam mora em lib/corte-comum.ts; os nomes seguem
+// saindo daqui para quem já os importa.
+export { corteCancelado, ehCorteCancelado, lerBlob, type LerBytes, type OpcoesDoCorte } from "./corte-comum";
 
 // ─── Quadros MPEG (as tabelas de server/duracao-do-audio.ts, sem o ADTS) ─────
 
@@ -244,8 +230,8 @@ function confirmado(j: Janela, p: number, q: Quadro, fimDoAudio: number) {
 const u32le = (b: Uint8Array, i: number) => (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0;
 const asciiDe = (b: Uint8Array, i: number, n: number) => Array.from(b.subarray(i, i + n), c => String.fromCharCode(c)).join("");
 
-/** Onde o áudio termina: antes do ID3v1 ("TAG", 128 bytes) e do APEv2 do fim, nas duas ordens. */
-async function fimSemEtiquetas(ler: LerBytes, tamanho: number): Promise<number> {
+/** Onde o áudio termina: antes do ID3v1 ("TAG", 128 bytes) e do APEv2 do fim, nas duas ordens. O AAC em ADTS e o FLAC também as levam às vezes. */
+export async function fimSemEtiquetas(ler: LerBytes, tamanho: number): Promise<number> {
   let fim = tamanho;
   for (let volta = 0; volta < 4; volta++) {
     if (fim >= 128 && asciiDe(await ler(fim - 128, fim - 125), 0, 3) === "TAG") {
@@ -268,17 +254,37 @@ async function fimSemEtiquetas(ler: LerBytes, tamanho: number): Promise<number> 
   return fim;
 }
 
+/**
+ * As partes do MP3 como receitas (lib/corte-comum.ts): as faixas do próprio
+ * arquivo, deslocadas de `deslocamento` (o começo do "data" do WAV que traz MP3
+ * dentro; 0 no arquivo .mp3).
+ */
+export function partesCortadasDoMp3(partes: ParteDoMp3[], deslocamento = 0): ParteCortada[] {
+  return partes.map(parte => ({
+    novos: new Uint8Array(0),
+    ordem: Float64Array.from(parte.faixas.flatMap(faixa => [1, deslocamento + faixa.inicio, deslocamento + faixa.fim])),
+    bytes: parte.bytes,
+    duracaoMs: parte.duracaoMs,
+  }));
+}
+
 type ParteEmMontagem = { faixas: FaixaDeBytes[]; bytes: number; tiques: number };
 
 const fechada = (parte: ParteEmMontagem): ParteDoMp3 => ({ faixas: parte.faixas, bytes: parte.bytes, duracaoMs: Math.round(parte.tiques / TIQUES_POR_MS) });
 
 /**
- * Corta o MP3 em partes (ver o comentário do módulo). Recusa com NAO_E_MP3
- * quando não acha quadros, ou quando o lixo passa do áudio, e com
- * LONGO_DEMAIS assim que a soma passa do teto, sem ler o resto. O cancelamento
- * (`sinal`) rejeita com AbortError.
+ * Corta o MP3 em partes (ver o comentário do módulo), cada uma fechando numa
+ * pausa da fala quando há uma perto do teto (lib/pausas-do-corte.ts). Recusa
+ * com NAO_E_MP3 quando não acha quadros, ou quando o lixo passa do áudio, e
+ * com LONGO_DEMAIS assim que a soma passa do teto, sem ler o resto. O
+ * cancelamento (`sinal`) rejeita com AbortError.
  */
 export async function cortarMp3(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoMp3> {
+  return cortarNasPausas(o => cortarMp3UmaVez(ler, tamanho, o), tamanho, opcoes, partesDoCorte);
+}
+
+async function cortarMp3UmaVez(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte): Promise<CorteDoMp3> {
+  const pausas = opcoes.pausas ?? SEM_PAUSAS;
   const tiquesPorParte = (opcoes.segundosPorParte ?? PARTE_DO_MP3_SEGUNDOS_MAX) * TIQUES_POR_SEGUNDO;
   const bytesPorParte = opcoes.bytesPorParte ?? PARTE_DO_MP3_BYTES_MAX;
   const tiquesNoTotal = (opcoes.segundosNoTotal ?? GRAVACAO_EM_PARTES_SEGUNDOS_MAX) * TIQUES_POR_SEGUNDO;
@@ -318,7 +324,7 @@ export async function cortarMp3(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
         anterior = q;
         if (!ehQuadroDeEtiqueta(janela, pos, q)) {
           if (tiques + q.tiques > tiquesNoTotal) return { ok: false, codigo: "LONGO_DEMAIS" };
-          if (atual && (atual.tiques + q.tiques > tiquesPorParte || atual.bytes + q.tamanho > bytesPorParte)) {
+          if (atual && (atual.tiques + q.tiques > tiquesPorParte || atual.bytes + q.tamanho > bytesPorParte || pausas.antes(atual.tiques / TIQUES_POR_MS, atual.bytes))) {
             partes.push(fechada(atual));
             atual = null;
           }
@@ -330,6 +336,9 @@ export async function cortarMp3(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
           atual.tiques += q.tiques;
           tiques += q.tiques;
           bytesDeAudio += q.tamanho;
+          // O nível: o global_gain na camada III; nas camadas I e II (raras, de taxa constante), o tamanho, que não acha pausa.
+          const ms = q.tiques / TIQUES_POR_MS;
+          pausas.depois(ms, q.tamanho, !pausas.ouvindo ? 0 : q.camada === 3 ? nivelDoMp3(i => janela.b(i), pos, q) : bitsPorMs(q.tamanho, ms));
         }
         pos += q.tamanho;
         continue;
@@ -349,29 +358,4 @@ export async function cortarMp3(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   if (atual) partes.push(fechada(atual));
   if (!partes.length || lixo > bytesDeAudio) return { ok: false, codigo: "NAO_E_MP3" };
   return { ok: true, partes, duracaoMs: Math.round(tiques / TIQUES_POR_MS) };
-}
-
-// ─── O pedido ao Worker ──────────────────────────────────────────────────────
-
-export type PedidoDeCorte = { arquivo: Blob; opcoes?: Pick<OpcoesDoCorte, "segundosPorParte" | "bytesPorParte" | "segundosNoTotal"> };
-export type RespostaDoCorte =
-  | { tipo: "lendo"; lidos: number; total: number }
-  | { tipo: "pronto"; corte: CorteDoMp3 }
-  | { tipo: "erro" };
-
-/** O que o Worker faz com cada pedido: corta e responde, com o andamento da leitura no caminho. */
-export async function atenderPedidoDeCorte(pedido: PedidoDeCorte, responder: (resposta: RespostaDoCorte) => void): Promise<void> {
-  try {
-    const corte = await cortarMp3(lerBlob(pedido.arquivo), pedido.arquivo.size, {
-      ...pedido.opcoes,
-      aoLer: (lidos, total) => responder({ tipo: "lendo", lidos, total }),
-    });
-    responder({ tipo: "pronto", corte });
-  } catch (erro) {
-    // A resposta à página não leva o detalhe; o console do Worker (que aparece
-    // no DevTools da página) leva, para distinguir um arquivo estragado de um
-    // defeito no corte.
-    console.error("[Importação] o corte do MP3 falhou no Worker:", erro);
-    responder({ tipo: "erro" });
-  }
 }
