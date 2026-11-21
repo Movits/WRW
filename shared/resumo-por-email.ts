@@ -71,13 +71,38 @@ export function linhaLimpa(valor: string | null | undefined, maximo: number): st
   return limpo.slice(0, maximo).join("").trim();
 }
 
+// O endereço com esquema (http://, ftp://...) ou com www., até colado a uma
+// palavra ("Ganhehttps://..."): sem \b, que não casa entre duas letras.
+const ESQUEMA_OU_WWW = new RegExp("(?:[a-z][a-z0-9+.-]*://|www[.\\u3002\\uFF0E\\uFF61])\\S*", "giu");
+// O endereço de e-mail, também com a arroba de largura cheia.
+const ENDERECO_DE_EMAIL = new RegExp("\\S+[@\\uFF20]\\S+", "gu");
+// O domínio sem esquema, com ou sem porta e caminho: rótulos separados por
+// ponto e um fim de duas letras ou mais ("bit.ly/x", "golpe.com.br/pix", e o
+// domínio em outra escrita, "пример.рф"). O fim de uma letra só não é domínio:
+// "e.g." e "1.500" ficam.
+const DOMINIO = new RegExp("(?:[\\p{L}\\p{M}\\p{N}-]+\\.)+\\p{L}[\\p{L}\\p{M}]+(?:[/:?#]\\S*)?", "gu");
+// O mesmo com o ponto japonês ou o de largura cheia ("golpe。com"), que alguns
+// clientes também aceitam, só com o fim em letras latinas: o ponto japonês
+// fecha frase em japonês e chinês, e "会議。次回" não é domínio.
+const DOMINIO_COM_OUTRO_PONTO = new RegExp("(?:[\\p{L}\\p{M}\\p{N}-]+[.\\u3002\\uFF0E\\uFF61])+[a-z]{2,}(?:[/:?#]\\S*)?", "giu");
+
 /**
  * O título e o nome não levam endereço web ao e-mail: o único link dele é o da
- * WRW. Sem isto, um título "Ganhe já em www.golpe.example" chegaria a quem a
- * dona digitou, e o app de e-mail o transformaria em link.
+ * WRW. Sem isto, um título "Confirme seus dados em banco-seguro.com.br/acesso"
+ * chegaria a quem a dona digitou, num e-mail que sai do remetente da WRW (o
+ * mesmo do "Esqueci a senha"), e o app de e-mail (Gmail, Outlook, Apple Mail)
+ * transformaria o endereço em link. Viram "…": o endereço com esquema ou com
+ * www., o endereço de e-mail e o domínio sem esquema. O custo é o falso
+ * positivo: "Node.js" também vira "…".
  */
 export function semEnderecoWeb(texto: string): string {
-  return texto.replace(/\b(?:https?:\/\/|www\.)\S*/gi, "…").replace(/\s+/g, " ").trim();
+  return texto
+    .replace(ESQUEMA_OU_WWW, "…")
+    .replace(ENDERECO_DE_EMAIL, "…")
+    .replace(DOMINIO, "…")
+    .replace(DOMINIO_COM_OUTRO_PONTO, "…")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**

@@ -18,6 +18,7 @@ import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } 
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { mensagemDaRecusaDaParte, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
@@ -282,5 +283,24 @@ describe("mensagemDeErroParaTela — as recusas das próximas ações no idioma 
   it.each(CASOS)("%s: em inglês sai traduzida", async (mensagem, _chave, emIngles) => {
     await i18n.changeLanguage("en");
     expect(mensagemDeErroParaTela(recusa(mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+});
+
+describe("mensagemDeErroParaTela — o link com senha no idioma da tela (H23)", () => {
+  const recusa = TRPCClientError.from({ error: { code: -32001, message: MENSAGEM_SENHA_DO_LINK_PEDIDA, data: { code: "UNAUTHORIZED", httpStatus: 401 } } });
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("em português é a frase do servidor; nos outros 9 idiomas sai traduzida, nunca a frase em português", async () => {
+    expect(i18n.t("meetings.openLink.password.required")).toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    expect(mensagemDeErroParaTela(recusa, c => i18n.t(c))).toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    for (const idioma of CODIGOS.filter(codigo => codigo !== "pt-BR")) {
+      await i18n.changeLanguage(idioma);
+      const traduzida = mensagemDeErroParaTela(recusa, c => i18n.t(c));
+      expect(traduzida, idioma).toBe(i18n.t("meetings.openLink.password.required"));
+      expect(traduzida, idioma).not.toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
+    }
   });
 });

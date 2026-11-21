@@ -1769,7 +1769,8 @@
         "incomplete": "Saisissez les 6 chiffres du mot de passe.",
         "wrong": "Mot de passe incorrect. Vérifiez les 6 chiffres et réessayez.",
         "wait": "Trop de tentatives erronées. Réessayez {{quando}}.",
-        "error": "Impossible de vérifier le mot de passe pour le moment. Réessayez."
+        "error": "Impossible de vérifier le mot de passe pour le moment. Réessayez.",
+        "required": "Ce lien demande le mot de passe à 6 chiffres."
       }
     },
     "export": {

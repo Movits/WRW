@@ -26,7 +26,8 @@ gravação.
   (*"Confirmo que todas as pessoas que falaram nesta reunião autorizaram…"*), e o link liga
   junto com o envio. A frase marcada, o idioma, o IP e o navegador vão para a auditoria.
 - O e-mail não leva nada da reunião além do título e do nome da conta da dona. Não há
-  campo de texto livre.
+  campo de texto livre. Endereço web e endereço de e-mail no título ou no nome viram "…"
+  (inclusive o domínio sem "http", como "bit.ly/x"): o único link do e-mail é o da WRW.
 - **Envio automático** (desligado por padrão): a dona pode ligar, para a conta dela, o
   e-mail "o resumo ficou pronto" no fim de cada reunião. Ele vai **só para ela**, com o
   link da reunião dentro da conta (pede entrar), e não liga o link aberto.

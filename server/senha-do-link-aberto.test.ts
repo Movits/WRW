@@ -6,6 +6,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const {
   comCookiesDoPedido,
   comMaisUmaFalha,
+  comMaisUmaFalhaDoLink,
   cookieDaEntrada,
   cookiesDoPedido,
   criarFreioPorRede,
@@ -14,7 +15,11 @@ const {
   ESPERA_INICIAL_MS,
   ESPERA_MAXIMA_MS,
   esperaDepoisDe,
+  esperaDoLinkDepoisDe,
   esperaRestante,
+  ESQUECER_UMA_FALHA_DO_LINK_MS,
+  FALHAS_LIVRES_DO_LINK,
+  falhasDoLinkQueContam,
   FREIO_ZERADO,
   gerarSenhaDoLink,
   hashDaSenhaDoLink,
@@ -206,6 +211,85 @@ describe("o freio da força bruta", () => {
     quinta.devolver();
     expect(freio.cobrar("203.0.113.7", AGORA).aceita).toBe(true);
     expect(freio.cobrar("203.0.113.7", AGORA).aceita).toBe(false);
+  });
+
+  it("por rede: a senha certa numa rede acima do limite não deixa espera nova para a pessoa seguinte da mesma rede", () => {
+    const freio = criarFreioPorRede();
+    for (let i = 0; i < TENTATIVAS_LIVRES; i++) freio.cobrar("203.0.113.7", AGORA);
+    // Passada a espera de 1 minuto, a senha certa (cobrar e devolver).
+    const certa = freio.cobrar("203.0.113.7", AGORA + 61_000);
+    if (!certa.aceita) throw new Error("a espera tinha vencido");
+    certa.devolver();
+    // 30 s depois, a próxima pessoa do escritório, também com a senha certa: entra.
+    expect(freio.cobrar("203.0.113.7", AGORA + 91_000).aceita).toBe(true);
+  });
+
+  it("por rede: o acerto não renova a hora da última falha; as falhas antigas se esquecem 24 horas depois da última", () => {
+    const freio = criarFreioPorRede();
+    for (let i = 0; i < TENTATIVAS_LIVRES - 1; i++) freio.cobrar("203.0.113.7", AGORA);
+    const certa = freio.cobrar("203.0.113.7", AGORA + 23 * 60 * 60_000);
+    if (!certa.aceita) throw new Error("4 falhas não esperam");
+    certa.devolver();
+    // 25 horas depois das 4 falhas, a errada é a 1ª: mais 4 seguidas ainda não esperam.
+    for (let i = 0; i < TENTATIVAS_LIVRES - 1; i++) expect(freio.cobrar("203.0.113.7", AGORA + 25 * 60 * 60_000).aceita).toBe(true);
+    expect(freio.cobrar("203.0.113.7", AGORA + 25 * 60 * 60_000).aceita).toBe(true);
+    expect(freio.cobrar("203.0.113.7", AGORA + 25 * 60 * 60_000).aceita).toBe(false);
+  });
+
+  it("por rede: com outra tentativa no meio, a senha certa devolve só a falha dela", () => {
+    const freio = criarFreioPorRede();
+    for (let i = 0; i < 2; i++) freio.cobrar("203.0.113.7", AGORA);
+    const certa = freio.cobrar("203.0.113.7", AGORA);
+    if (!certa.aceita) throw new Error("3 falhas não esperam");
+    freio.cobrar("203.0.113.7", AGORA);
+    certa.devolver();
+    // Ficaram 3 (as 2 de antes e a do meio): mais 2 livres, e a seguinte espera.
+    expect(freio.cobrar("203.0.113.7", AGORA).aceita).toBe(true);
+    expect(freio.cobrar("203.0.113.7", AGORA).aceita).toBe(true);
+    expect(freio.cobrar("203.0.113.7", AGORA).aceita).toBe(false);
+  });
+
+  it(`o link: ${FALHAS_LIVRES_DO_LINK} falhas antes da espera, que dobra como a da rede, até 60 minutos`, () => {
+    expect(FALHAS_LIVRES_DO_LINK).toBeGreaterThan(10 * TENTATIVAS_LIVRES - 1);
+    for (const falhas of [0, TENTATIVAS_LIVRES, FALHAS_LIVRES_DO_LINK - 1]) expect(esperaDoLinkDepoisDe(falhas)).toBe(0);
+    expect(esperaDoLinkDepoisDe(FALHAS_LIVRES_DO_LINK)).toBe(ESPERA_INICIAL_MS);
+    expect(esperaDoLinkDepoisDe(FALHAS_LIVRES_DO_LINK + 1)).toBe(2 * ESPERA_INICIAL_MS);
+    expect(esperaDoLinkDepoisDe(FALHAS_LIVRES_DO_LINK + 6)).toBe(ESPERA_MAXIMA_MS);
+    expect(esperaDoLinkDepoisDe(1_000_000)).toBe(ESPERA_MAXIMA_MS);
+  });
+
+  it("o link esquece uma falha a cada 30 minutos desde a última, e nunca fica abaixo de zero", () => {
+    let estado = FREIO_ZERADO;
+    for (let i = 0; i < 10; i++) estado = comMaisUmaFalhaDoLink(estado, AGORA);
+    expect(estado).toEqual({ falhas: 10, ultimaFalhaEm: AGORA, bloqueadoAte: null });
+    expect(falhasDoLinkQueContam(estado, AGORA + ESQUECER_UMA_FALHA_DO_LINK_MS - 1)).toBe(10);
+    expect(falhasDoLinkQueContam(estado, AGORA + 3 * ESQUECER_UMA_FALHA_DO_LINK_MS)).toBe(7);
+    expect(falhasDoLinkQueContam(estado, AGORA + 24 * 60 * 60_000)).toBe(0);
+    expect(comMaisUmaFalhaDoLink(estado, AGORA + 2 * ESQUECER_UMA_FALHA_DO_LINK_MS)).toEqual({ falhas: 9, ultimaFalhaEm: AGORA + 2 * ESQUECER_UMA_FALHA_DO_LINK_MS, bloqueadoAte: null });
+    let cheio = FREIO_ZERADO;
+    for (let i = 0; i < FALHAS_LIVRES_DO_LINK; i++) cheio = comMaisUmaFalhaDoLink(cheio, AGORA);
+    expect(cheio.bloqueadoAte).toBe(AGORA + ESPERA_INICIAL_MS);
+  });
+
+  it("uma rede sozinha, presa ao freio dela, não tranca o link nem em 3 dias de tentativas", () => {
+    const freio = criarFreioPorRede();
+    let link = FREIO_ZERADO;
+    let maior = 0;
+    let tentativas = 0;
+    let agora = AGORA;
+    while (agora < AGORA + 3 * 24 * 60 * 60_000) {
+      const cobranca = freio.cobrar("203.0.113.7", agora);
+      if (!cobranca.aceita) {
+        agora += cobranca.esperaMs;
+        continue;
+      }
+      tentativas += 1;
+      expect(esperaRestante(link, agora)).toBe(0);
+      link = comMaisUmaFalhaDoLink(link, agora);
+      maior = Math.max(maior, link.falhas);
+    }
+    expect(tentativas).toBeGreaterThan(FALHAS_LIVRES_DO_LINK);
+    expect(maior).toBeLessThan(FALHAS_LIVRES_DO_LINK);
   });
 
   it("por rede: guarda no máximo as redes do limite, e sai a parada há mais tempo", () => {

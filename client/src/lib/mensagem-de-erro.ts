@@ -26,6 +26,7 @@ import {
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
 } from "@shared/resumo-por-email";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 
 /**
  * O que a tela mostra quando uma consulta falha.
@@ -97,6 +98,8 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA]: "resumoPorEmail.erros.tetoDaDona",
   [MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU]: "resumoPorEmail.erros.naoSaiu",
   [MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR]: "resumoPorEmail.erros.nadaAReenviar",
+  // O link com senha, sem a entrada de quem a acertou (H23, server/link-aberto-da-reuniao.ts).
+  [MENSAGEM_SENHA_DO_LINK_PEDIDA]: "meetings.openLink.password.required",
 };
 
 /**

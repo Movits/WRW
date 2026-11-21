@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IDIOMAS_DA_REUNIAO } from "@shared/idioma-da-reuniao";
+import { valoresDoEmailDoResumo } from "@shared/resumo-por-email";
 import {
   linhaLimpa,
   montarEmailDoResumo,
@@ -97,7 +98,8 @@ describe("montarEmailDoResumo", () => {
   it("o assunto é uma linha só: quebra e caractere de controle do título ou do nome não entram no cabeçalho", () => {
     const email = montarEmailDoResumo({ ...base, titulo: "Linha 1\r\nBcc: alguem@x.invalid", dona: "Glen\nda\u0007", modelo: "dona" });
     expect(email.assunto).not.toMatch(/[\r\n\u0000-\u001F]/);
-    expect(email.assunto).toBe("O link aberto da sua reunião “Linha 1 Bcc: alguem@x.invalid”");
+    // O endereço de e-mail do título também sai (o teste abaixo).
+    expect(email.assunto).toBe("O link aberto da sua reunião “Linha 1 Bcc: …”");
     const participante = montarEmailDoResumo({ ...base, dona: "Glen\nda\u0007", modelo: "participante" });
     expect(participante.assunto).toBe("Glen da compartilhou com você o resumo de uma reunião");
   });
@@ -110,6 +112,35 @@ describe("montarEmailDoResumo", () => {
     expect(email.text).toContain("“Oferta em … e …”");
     expect(email.assunto).toBe("Glenda … compartilhou com você o resumo de uma reunião");
     expect(email.html.match(/href="/g)).toHaveLength(2);
+  });
+
+  it("nem o domínio sem esquema, nem o endereço de e-mail, nem o esquema colado a uma palavra: o app de e-mail os faria link", () => {
+    const golpes = [
+      ["Pague a taxa em golpe.com.br/pix ou fale com contato@golpe.example", "Suporte bit.ly/wrw-premio"],
+      ["Resgate seu Pix em premio-pix.com.br/resgate", "Glenda golpe.example"],
+      ["Ganhehttps://golpe.example/x e bit.ly/3abc", "Ana a@golpe.example"],
+      // O ponto japonês e o de largura cheia, que alguns clientes também aceitam.
+      ["Acesse golpe。com/x já", "Glenda golpe．com"],
+    ] as const;
+    for (const [titulo, dona] of golpes) {
+      const email = montarEmailDoResumo({ ...base, titulo, dona, modelo: "participante" });
+      for (const parte of [email.assunto, email.html, email.text]) {
+        expect(parte, titulo).not.toMatch(/golpe|bit\.ly|premio-pix/i);
+      }
+      // Os únicos links seguem os dois da WRW: o botão e o endereço por extenso.
+      expect(email.html.match(/href="/g), titulo).toHaveLength(2);
+    }
+    const primeiro = montarEmailDoResumo({ ...base, titulo: golpes[0][0], dona: golpes[0][1], modelo: "participante" });
+    expect(primeiro.assunto).toBe("Suporte … compartilhou com você o resumo de uma reunião");
+    expect(primeiro.text).toContain("“Pague a taxa em … ou fale com …”");
+    // A prévia da tela passa pela mesma função, e mostra o mesmo.
+    expect(valoresDoEmailDoResumo(golpes[1][0], golpes[1][1])).toEqual({ titulo: "Resgate seu Pix em …", dona: "Glenda …" });
+  });
+
+  it("o que não é endereço fica: número com ponto, abreviação, o ponto que fecha frase em japonês", () => {
+    for (const titulo of ["Reunião 1.2 com a Apex", "Proposta de R$ 1.500,00 (e.g. frete)", "Dra. Glenda e S.A.", "会議。次回の予定", "Planejamento Q3.2026 às 10:30"]) {
+      expect(valoresDoEmailDoResumo(titulo, "Glenda").titulo).toBe(titulo);
+    }
   });
 
   // Pacote 4d: o e-mail (H22) segue a senha e o áudio do link aberto (H23).

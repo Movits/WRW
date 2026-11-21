@@ -5,6 +5,18 @@ import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
+// O scrypt de verdade, contado: ligar com senha só o paga depois da leitura barata.
+const hashesFeitos = vi.hoisted(() => ({ total: 0 }));
+vi.mock("./senha-do-link-aberto", async original => {
+  const real = await original<typeof import("./senha-do-link-aberto")>();
+  return {
+    ...real,
+    hashDaSenhaDoLink: (senha: string) => {
+      hashesFeitos.total += 1;
+      return real.hashDaSenhaDoLink(senha);
+    },
+  };
+});
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./db";
 import { auditLogs, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
@@ -25,7 +37,7 @@ import {
   verReuniaoPeloLink,
 } from "./link-aberto-da-reuniao";
 import { ACAO_LINK_BLOQUEADO, entrarNoLink, freioDaEntradaPorRede } from "./entrada-no-link-aberto";
-import { comCookiesDoPedido, DURACAO_DA_ENTRADA_MS, ESPERA_INICIAL_MS, TENTATIVAS_LIVRES } from "./senha-do-link-aberto";
+import { comCookiesDoPedido, DURACAO_DA_ENTRADA_MS, ESPERA_INICIAL_MS, FALHAS_LIVRES_DO_LINK, TENTATIVAS_LIVRES } from "./senha-do-link-aberto";
 import { getPrivateMeeting } from "./meeting-service";
 import { resumoGuardadoPeloLink } from "./resumo-guardado";
 import { mapaMentalPeloLink } from "./mapa-mental-guardado";
@@ -40,7 +52,8 @@ import { appRouter } from "./routers";
  *
  * - a senha certa abre e a errada não; o banco guarda só o hash;
  * - o freio do link, com a linha travada: as tentativas em paralelo entram uma
- *   de cada vez e a 6ª já espera; o freio da rede segura quem varre links;
+ *   de cada vez e a que passa do limite do link já espera; o freio da rede
+ *   segura quem varre links, e uma rede sozinha não tranca o link;
  * - trocar a senha derruba a anterior e a entrada de quem a usou;
  * - sem o áudio, a página não traz a gravação e a rota do áudio responde 404;
  * - o link ligado antes da H23 segue sem senha e com o áudio;
@@ -182,6 +195,32 @@ describe.skipIf(!temBanco)("Link aberto com senha e sem o áudio (H23) no banco 
     expect((await auditoria("MEETING_OPEN_LINK_ON", COM_SENHA)).at(-1)!.details).toMatchObject({ comSenha: true, incluirAudio: true });
   });
 
+  it("ligar com senha a reunião de outra conta, a que não existe e a que não está pronta: a recusa sai sem o scrypt", async () => {
+    const PROCESSANDO = crypto.randomUUID();
+    await (await getDb())!.insert(meetings).values(reuniao(PROCESSANDO, { status: "processing" }));
+    hashesFeitos.total = 0;
+    expect((await recusaDe(ligarLinkAbertoComOpcoes(OUTRA, COM_SENHA, { ...PROVA, userId: PROVA_DA_OUTRA.userId }, { comSenha: true }))).codigo).toBe("NOT_FOUND");
+    expect((await recusaDe(ligarLinkAbertoComOpcoes(DONA, crypto.randomUUID(), PROVA, { comSenha: true }))).codigo).toBe("NOT_FOUND");
+    expect((await recusaDe(ligarLinkAbertoComOpcoes(DONA, PROCESSANDO, PROVA, { comSenha: true }))).codigo).toBe("PRECONDITION_FAILED");
+    expect(hashesFeitos.total).toBe(0);
+    expect((await linhaDoLink(COM_SENHA)).shareToken).toBeNull();
+  });
+
+  it("ligar com senha o link que já está ligado: o mesmo link, nenhuma senha sorteada nem scrypt, e a confirmação vai à auditoria como em todo ligar", async () => {
+    const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
+    const hash = (await linhaDoLink(COM_SENHA)).hash;
+    const confirmacoes = (await auditoria("MEETING_OPEN_LINK_ON", COM_SENHA)).length;
+    hashesFeitos.total = 0;
+    expect(await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, { ...PROVA, versaoDaAutorizacao: 2 }, { comSenha: true })).toEqual({ token, senha: null });
+    expect(hashesFeitos.total).toBe(0);
+    expect((await linhaDoLink(COM_SENHA)).hash).toBe(hash);
+    const depois = await auditoria("MEETING_OPEN_LINK_ON", COM_SENHA);
+    expect(depois).toHaveLength(confirmacoes + 1);
+    expect(depois.at(-1)!.details).toMatchObject({ comSenha: true, incluirAudio: true, versaoDaAutorizacao: 2 });
+    // A senha de antes segue valendo.
+    await expect(entrarNoLink(token, senha!, "203.0.113.130")).resolves.toMatchObject({ entrou: true });
+  });
+
   it("a senha certa abre (o cookie leva à reunião e ao áudio); a errada não", async () => {
     const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
     expect(await entrarNoLink(token, outraSenha(senha!), "203.0.113.20")).toEqual({ entrou: false, motivo: "senha" });
@@ -234,47 +273,87 @@ describe.skipIf(!temBanco)("Link aberto com senha e sem o áudio (H23) no banco 
     }
   });
 
-  it(`o teto do link: ${TENTATIVAS_LIVRES} erradas seguidas, de redes diferentes, e a seguinte espera, até com a senha certa; a espera dobra; a certa depois dela entra e zera`, async () => {
+  it(`o teto do link: ${FALHAS_LIVRES_DO_LINK} erradas, de redes diferentes, e a seguinte espera, até com a senha certa; a espera dobra; a certa depois dela entra e devolve só a falha dela`, async () => {
     const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
     const errada = outraSenha(senha!);
     const bloqueiosAntes = (await auditoria(ACAO_LINK_BLOQUEADO, COM_SENHA)).length;
     const T0 = Date.now();
-    for (let i = 0; i < TENTATIVAS_LIVRES; i++) {
+    for (let i = 0; i < FALHAS_LIVRES_DO_LINK; i++) {
       expect(await entrarNoLink(token, errada, `198.51.100.${10 + i}`, T0)).toEqual({ entrou: false, motivo: "senha" });
     }
-    expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: TENTATIVAS_LIVRES, ultimaFalhaEm: T0, bloqueadoAte: T0 + ESPERA_INICIAL_MS });
+    expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: FALHAS_LIVRES_DO_LINK, ultimaFalhaEm: T0, bloqueadoAte: T0 + ESPERA_INICIAL_MS });
     // A senha certa, de outra rede, na espera: nem é conferida.
-    expect(await entrarNoLink(token, senha!, "198.51.100.40", T0 + 1000)).toEqual({ entrou: false, motivo: "espera", segundos: 59 });
+    expect(await entrarNoLink(token, senha!, "192.0.2.40", T0 + 1000)).toEqual({ entrou: false, motivo: "espera", segundos: 59 });
 
     // O começo da espera vai à auditoria, com o IP de quem a abriu; sem a senha.
     const bloqueios = (await auditoria(ACAO_LINK_BLOQUEADO, COM_SENHA)).slice(bloqueiosAntes);
     expect(bloqueios).toHaveLength(1);
     expect(bloqueios[0]).toMatchObject({
-      userId: null, resource: "meetings", ipAddress: `198.51.100.${10 + TENTATIVAS_LIVRES - 1}`, status: "blocked", riskLevel: "medium",
-      details: { falhasSeguidas: TENTATIVAS_LIVRES, esperaSegundos: ESPERA_INICIAL_MS / 1000 },
+      userId: null, resource: "meetings", ipAddress: `198.51.100.${10 + FALHAS_LIVRES_DO_LINK - 1}`, status: "blocked", riskLevel: "medium",
+      details: { falhasQueContam: FALHAS_LIVRES_DO_LINK, esperaSegundos: ESPERA_INICIAL_MS / 1000 },
     });
     expect(JSON.stringify(bloqueios[0])).not.toContain(senha!);
 
     // Passada a espera, mais uma errada dobra a espera.
     const T1 = T0 + ESPERA_INICIAL_MS + 1000;
-    expect(await entrarNoLink(token, errada, "198.51.100.41", T1)).toEqual({ entrou: false, motivo: "senha" });
+    expect(await entrarNoLink(token, errada, "192.0.2.41", T1)).toEqual({ entrou: false, motivo: "senha" });
     expect((await linhaDoLink(COM_SENHA)).bloqueadoAte).toBe(T1 + 2 * ESPERA_INICIAL_MS);
-    expect(await entrarNoLink(token, senha!, "198.51.100.42", T1 + 1000)).toMatchObject({ entrou: false, motivo: "espera" });
+    expect(await entrarNoLink(token, senha!, "192.0.2.42", T1 + 1000)).toMatchObject({ entrou: false, motivo: "espera" });
 
-    // Passada a segunda, a certa entra e o freio volta a zero.
+    // Passada a segunda, a certa entra e devolve só a falha que cobrou: o freio
+    // fica como antes dela (não zera), e a pessoa seguinte não encontra espera.
     const T2 = T1 + 2 * ESPERA_INICIAL_MS + 1000;
-    expect(await entrarNoLink(token, senha!, "198.51.100.43", T2)).toMatchObject({ entrou: true });
-    expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: 0, ultimaFalhaEm: null, bloqueadoAte: null });
+    expect(await entrarNoLink(token, senha!, "192.0.2.43", T2)).toMatchObject({ entrou: true });
+    expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: FALHAS_LIVRES_DO_LINK + 1, ultimaFalhaEm: T1, bloqueadoAte: T1 + 2 * ESPERA_INICIAL_MS });
+    expect(await entrarNoLink(token, senha!, "192.0.2.44", T2 + 1000)).toMatchObject({ entrou: true });
   });
 
-  it(`tentativas em paralelo: a linha travada as enfileira, e só ${TENTATIVAS_LIVRES} são conferidas antes da espera`, async () => {
+  it(`tentativas em paralelo: a linha travada as enfileira, e só ${FALHAS_LIVRES_DO_LINK} são conferidas antes da espera`, async () => {
     const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
     const T0 = Date.now();
-    const resultados = await Promise.all(Array.from({ length: TENTATIVAS_LIVRES + 3 }, (_, i) =>
+    const resultados = await Promise.all(Array.from({ length: FALHAS_LIVRES_DO_LINK + 3 }, (_, i) =>
       entrarNoLink(token, outraSenha(senha!), `192.0.2.${i + 1}`, T0)));
-    expect(resultados.filter(r => !r.entrou && r.motivo === "senha")).toHaveLength(TENTATIVAS_LIVRES);
+    expect(resultados.filter(r => !r.entrou && r.motivo === "senha")).toHaveLength(FALHAS_LIVRES_DO_LINK);
     expect(resultados.filter(r => !r.entrou && r.motivo === "espera")).toHaveLength(3);
-    expect((await linhaDoLink(COM_SENHA)).falhas).toBe(TENTATIVAS_LIVRES);
+    expect((await linhaDoLink(COM_SENHA)).falhas).toBe(FALHAS_LIVRES_DO_LINK);
+  });
+
+  it("uma rede só não tranca o link: as 5 erradas dela não barram a senha certa de outra rede, nem 3 dias de tentativas no ritmo do freio dela", async () => {
+    const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
+    const errada = outraSenha(senha!);
+    const T0 = Date.now();
+    for (let i = 0; i < TENTATIVAS_LIVRES; i++) expect(await entrarNoLink(token, errada, "203.0.113.90", T0)).toEqual({ entrou: false, motivo: "senha" });
+    expect(await entrarNoLink(token, errada, "203.0.113.90", T0)).toMatchObject({ entrou: false, motivo: "espera" });
+    expect(await entrarNoLink(token, senha!, "198.51.100.200", T0 + 1000)).toMatchObject({ entrou: true });
+
+    // A mesma rede segue errando no ritmo que o freio dela deixa: o link nunca entra na espera.
+    let agora = T0;
+    let erradas = TENTATIVAS_LIVRES;
+    let maior = 0;
+    while (agora < T0 + 3 * 24 * 60 * 60_000) {
+      const resultado = await entrarNoLink(token, errada, "203.0.113.90", agora);
+      if (resultado.entrou) throw new Error("a senha errada entrou");
+      if (resultado.motivo === "espera") {
+        agora += resultado.segundos * 1000;
+        continue;
+      }
+      erradas += 1;
+      const linha = await linhaDoLink(COM_SENHA);
+      expect(linha.bloqueadoAte).toBeNull();
+      maior = Math.max(maior, linha.falhas);
+    }
+    expect(erradas).toBeGreaterThan(FALHAS_LIVRES_DO_LINK);
+    expect(maior).toBeLessThan(FALHAS_LIVRES_DO_LINK);
+    expect(await entrarNoLink(token, senha!, "198.51.100.201", agora)).toMatchObject({ entrou: true });
+  }, 60_000);
+
+  it("pessoas do mesmo escritório (o mesmo IPv4) que acertam a senha uma depois da outra: todas entram", async () => {
+    const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });
+    const T0 = Date.now();
+    for (let i = 0; i < TENTATIVAS_LIVRES + 1; i++) {
+      expect(await entrarNoLink(token, senha!, "203.0.113.120", T0 + i * 1000), `pessoa ${i + 1}`).toMatchObject({ entrou: true });
+    }
+    expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: 0, bloqueadoAte: null });
   });
 
   it("o teto da rede: quem varre links de uma rede só espera na 6ª, inclusive no link certo com a senha certa; outra rede segue", async () => {

@@ -199,6 +199,31 @@ describe("a resposta", () => {
     expect(toast.warning).toHaveBeenCalledWith("Saíram 2 e-mails, e 1 não saíram agora. O pedido ficou guardado: tente de novo.");
   });
 
+  it("nada saiu agora, mas o pedido ficou guardado: a escolha sai, como no envio que saiu, para o mesmo e-mail não ser pedido de novo", () => {
+    duble.painel.mockReturnValue(consulta({ linkLigado: false }));
+    abrir({ linkLigado: false });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Para mim/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Todas" }));
+    digitar("zeca@exemplo.invalid");
+    fireEvent.click(screen.getByRole("checkbox", { name: i18n.t("meetings.share.authorization") }));
+    expect(botaoMandar()).toBeEnabled();
+    act(() => mutacao("mandar").opcoes.onError?.(erroDoServidor("SERVICE_UNAVAILABLE", MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU)));
+    expect(toast.error).toHaveBeenLastCalledWith(MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU);
+    expect(screen.getByRole("checkbox", { name: /Para mim/ })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Todas" })).not.toBeChecked();
+    expect(screen.queryByText("zeca@exemplo.invalid")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: i18n.t("meetings.share.authorization") })).not.toBeChecked();
+    expect(botaoMandar()).toBeDisabled();
+    expect(duble.invalidarPainel).toHaveBeenCalledWith({ meetingId: ID });
+  });
+
+  it("a recusa que não guardou nada (o teto, o link desligado) deixa a escolha, para a dona corrigir e mandar", () => {
+    abrir();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Para mim/ }));
+    act(() => mutacao("mandar").opcoes.onError?.(erroDoServidor("TOO_MANY_REQUESTS", MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA)));
+    expect(screen.getByRole("checkbox", { name: /Para mim/ })).toBeChecked();
+  });
+
   it("a recusa do servidor sai no idioma da tela (o teto, a Resend fora, o link desligado)", async () => {
     abrir();
     act(() => mutacao("mandar").opcoes.onError?.(erroDoServidor("TOO_MANY_REQUESTS", MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA)));

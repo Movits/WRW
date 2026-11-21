@@ -62,6 +62,12 @@ const RECUSAS = new Set<string>([
   MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU, MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR,
 ]);
 
+/** A recusa de quando nada saiu agora, mas o servidor guardou o pedido para o "Tentar de novo". */
+export function pedidoGuardado(erro: unknown): boolean {
+  const { data, message } = (erro ?? {}) as { data?: { code?: string }; message?: unknown };
+  return data?.code === "SERVICE_UNAVAILABLE" && message === MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU;
+}
+
 export function mensagemDoErroDoEnvio(t: TranslateFn, erro: unknown): string {
   const { data, message } = (erro ?? {}) as { data?: { code?: string }; message?: unknown };
   if (data?.code === "NOT_FOUND") return t("meetings.meetingNotFound");
@@ -140,19 +146,27 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
     // O link pode ter ligado no envio, mesmo quando a Resend falhou depois.
     void utils.meetings.get.invalidate({ meetingId });
   };
+  const limparEscolha = () => {
+    setParaMim(false);
+    setEscolhidas([]);
+    setOutros([]);
+    setAutorizou(false);
+    setAvisoDoCampo(null);
+  };
   const mandar = trpc.meetings.mandarResumoPorEmail.useMutation({
     onSuccess: resultado => {
       if (resultado.falharam) toast.warning(t("resumoPorEmail.parcial", { enviados: resultado.enviados, falharam: resultado.falharam }));
       else toast.success(t("resumoPorEmail.mandado", { n: resultado.enviados }));
-      setParaMim(false);
-      setEscolhidas([]);
-      setOutros([]);
-      setAutorizou(false);
-      setAvisoDoCampo(null);
+      limparEscolha();
       reler();
     },
     onError: erro => {
       toast.error(mensagemDoErroDoEnvio(t, erro));
+      // Nada saiu, mas o pedido ficou guardado (as linhas 'falhou', e o link já
+      // ligado, se estava desligado): a escolha sai, como no envio que saiu, e
+      // o que falta vai pelo "Tentar de novo" do histórico. Com a escolha
+      // marcada, mandar de novo pedia outra vez o mesmo e-mail.
+      if (pedidoGuardado(erro)) limparEscolha();
       reler();
     },
   });

@@ -1769,7 +1769,8 @@
         "incomplete": "Digite os 6 dígitos da senha.",
         "wrong": "Senha incorreta. Confira os 6 dígitos e tente de novo.",
         "wait": "Muitas tentativas erradas. Tente de novo {{quando}}.",
-        "error": "Não foi possível conferir a senha agora. Tente de novo."
+        "error": "Não foi possível conferir a senha agora. Tente de novo.",
+        "required": "Este link pede a senha de 6 dígitos."
       }
     },
     "export": {

@@ -550,6 +550,65 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       expect(dubles.lote).not.toHaveBeenCalled();
     });
 
+    it("nada saiu e a dona manda de novo às mesmas pessoas: as mesmas linhas saem, sem linha nova, e nada sobra para o Tentar de novo", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      const digitado = `um-${sufixo()}@teste.invalid`;
+      dubles.lote.mockImplementation(async lista => lista.map(() => false));
+      await recusaDe(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, outros: [digitado] }), REQUISICAO));
+      const antes = await linhasDa(meetingId);
+      expect(antes.map(l => l.status)).toEqual(["falhou", "falhou"]);
+
+      dubles.lote.mockImplementation(async lista => lista.map(() => true));
+      await expect(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, outros: [digitado.toUpperCase()] }), REQUISICAO))
+        .resolves.toEqual({ enviados: 2, falharam: 0, linkLigadoAgora: false });
+      const depois = await linhasDa(meetingId);
+      // As duas de antes, e não quatro: cada pessoa recebe um e-mail, e o teto conta duas linhas.
+      expect(depois.map(l => l.id).sort()).toEqual(antes.map(l => l.id).sort());
+      expect(depois.map(l => [l.status, l.tentativas])).toEqual([["enviado", 2], ["enviado", 2]]);
+      expect(loteMandado(1)).toHaveLength(2);
+      expect((await painelDoResumoPorEmail(dona.openId, meetingId)).podeMandarDeNovo).toBe(false);
+      expect(await recusaDe(mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO))).toMatchObject({ message: MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR });
+      const provas = await auditoriaDa(meetingId, ACAO_RESUMO_POR_EMAIL);
+      expect(provas.map(prova => (prova.details as Record<string, unknown>).deNovo)).toEqual([undefined, 2]);
+    });
+
+    it("o e-mail que está saindo agora (outra aba mandou há instantes) fica de fora; o das outras pessoas sai", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      const saindo = `saindo-${sufixo()}@teste.invalid`;
+      const outra = `outra-${sufixo()}@teste.invalid`;
+      const db = (await getDb())!;
+      const idDaSaindo = crypto.randomUUID();
+      await db.insert(resumoPorEmail).values({
+        id: idDaSaindo, meetingId, ownerId: dona.openId, loteId: crypto.randomUUID(), destinatario: saindo, origem: "digitado",
+        idioma: "pt-BR", status: "pendente", automatico: false, tentativas: 0, createdAt: Date.now() - 30_000, updatedAt: Date.now() - 30_000,
+      });
+      await expect(mandarResumoPorEmail(dona, meetingId, pedido({ outros: [saindo, outra] }), REQUISICAO)).resolves.toEqual({ enviados: 1, falharam: 0, linkLigadoAgora: false });
+      expect(loteMandado().map(item => item.to)).toEqual([outra]);
+      expect((await linhasDa(meetingId)).find(l => l.id === idDaSaindo)).toMatchObject({ status: "pendente", tentativas: 0 });
+      // Só ela no pedido: nada a gravar nem a mandar, e nenhuma linha nova.
+      dubles.lote.mockClear();
+      await expect(mandarResumoPorEmail(dona, meetingId, pedido({ outros: [saindo] }), REQUISICAO)).resolves.toEqual({ enviados: 0, falharam: 0, linkLigadoAgora: false });
+      expect(dubles.lote).not.toHaveBeenCalled();
+      expect(await linhasDa(meetingId)).toHaveLength(2);
+    });
+
+    it("sendEmailBatch que lança: as linhas ficam 'falhou', o erro é traduzível, e o log diz o nome do erro, sem o endereço", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      const digitado = `um-${sufixo()}@teste.invalid`;
+      dubles.lote.mockImplementation(async () => { throw new TypeError("defeito no lote"); });
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const erro = await recusaDe(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, outros: [digitado] }), REQUISICAO));
+        expect(erro).toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU });
+        expect((await linhasDa(meetingId)).map(l => l.status)).toEqual(["falhou", "falhou"]);
+        const linhasDoLog = log.mock.calls.map(chamada => chamada.map(String).join(" "));
+        expect(linhasDoLog.some(linha => linha.includes("sendEmailBatch lançou") && linha.includes("TypeError"))).toBe(true);
+        for (const linha of linhasDoLog) expect(linha).not.toContain(digitado);
+      } finally {
+        log.mockRestore();
+      }
+    });
+
     it("sem FRONTEND_URL não há link: nada é gravado e o link não liga", async () => {
       const { dona, meetingId } = await cenario();
       delete process.env.FRONTEND_URL;
@@ -557,6 +616,54 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       expect(erro).toMatchObject({ code: "SERVICE_UNAVAILABLE", message: MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU });
       expect(await tokenDa(meetingId)).toBeNull();
       expect(await linhasDa(meetingId)).toEqual([]);
+    });
+  });
+
+  // O "Tentar de novo" e a linha 'pendente': a recente está saindo e não volta
+  // a sair; a presa (o envio cortado por um deploy) volta.
+  describe("o Tentar de novo e a linha 'pendente'", () => {
+    async function linhaPendente(dona: { openId: string }, meetingId: string, atrasMs: number) {
+      const db = (await getDb())!;
+      const id = crypto.randomUUID();
+      const destinatario = `pendente-${sufixo()}@teste.invalid`;
+      await db.insert(resumoPorEmail).values({
+        id, meetingId, ownerId: dona.openId, loteId: crypto.randomUUID(), destinatario, origem: "digitado",
+        idioma: "pt-BR", status: "pendente", automatico: false, tentativas: 0, createdAt: Date.now() - atrasMs, updatedAt: Date.now() - atrasMs,
+      });
+      return { id, destinatario };
+    }
+
+    it("a presa há mais de 5 minutos (o envio que não terminou) aparece no Tentar de novo e sai", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      const presa = await linhaPendente(dona, meetingId, 6 * 60_000);
+      expect((await painelDoResumoPorEmail(dona.openId, meetingId)).podeMandarDeNovo).toBe(true);
+      await expect(mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO)).resolves.toEqual({ enviados: 1, falharam: 0 });
+      expect(loteMandado().map(item => item.to)).toEqual([presa.destinatario]);
+      expect((await linhasDa(meetingId)).find(l => l.id === presa.id)).toMatchObject({ status: "enviado", tentativas: 1 });
+    });
+
+    it("a de 1 minuto atrás ainda está saindo: o Tentar de novo não a manda de novo", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      await linhaPendente(dona, meetingId, 60_000);
+      expect((await painelDoResumoPorEmail(dona.openId, meetingId)).podeMandarDeNovo).toBe(false);
+      expect(await recusaDe(mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO))).toMatchObject({ code: "PRECONDITION_FAILED", message: MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR });
+      expect(dubles.lote).not.toHaveBeenCalled();
+    });
+
+    it("dois Tentar de novo ao mesmo tempo (duplo clique, duas abas): o e-mail sai uma vez só", async () => {
+      const { dona, meetingId } = await cenario({ link: true });
+      dubles.lote.mockImplementation(async lista => lista.map(() => false));
+      await recusaDe(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true }), REQUISICAO));
+      dubles.lote.mockClear();
+      // A Resend demora: o segundo pedido chega com o primeiro ainda saindo.
+      dubles.lote.mockImplementation(async lista => {
+        await new Promise(pronto => setTimeout(pronto, 300));
+        return lista.map(() => true);
+      });
+      const resultados = await Promise.allSettled([mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO), mandarResumoPorEmailDeNovo(dona, meetingId, REQUISICAO)]);
+      expect(dubles.lote).toHaveBeenCalledTimes(1);
+      expect(resultados.filter(r => r.status === "fulfilled").map(r => (r as PromiseFulfilledResult<unknown>).value)).toEqual([{ enviados: 1, falharam: 0 }]);
+      expect(resultados.filter(r => r.status === "rejected").map(r => (r as PromiseRejectedResult).reason)).toMatchObject([{ message: MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR }]);
     });
   });
 

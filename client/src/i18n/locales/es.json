@@ -1769,7 +1769,8 @@
         "incomplete": "Escribe los 6 dígitos de la contraseña.",
         "wrong": "Contraseña incorrecta. Revisa los 6 dígitos e inténtalo de nuevo.",
         "wait": "Demasiados intentos fallidos. Inténtalo de nuevo {{quando}}.",
-        "error": "No se pudo comprobar la contraseña ahora. Inténtalo de nuevo."
+        "error": "No se pudo comprobar la contraseña ahora. Inténtalo de nuevo.",
+        "required": "Este enlace pide la contraseña de 6 dígitos."
       }
     },
     "export": {

@@ -6,6 +6,13 @@
 
 export const DIGITOS_DA_SENHA_DO_LINK = 6;
 
+/**
+ * A recusa (UNAUTHORIZED) de tudo o que o link com senha abre, sem o cookie de
+ * quem a acertou. A tela a traduz pela frase (client/src/lib/mensagem-de-erro.ts,
+ * chave meetings.openLink.password.required, cujo pt-BR é esta frase).
+ */
+export const MENSAGEM_SENHA_DO_LINK_PEDIDA = "Este link pede a senha de 6 dígitos.";
+
 /** A senha que o servidor aceita, depois de normalizada: só os 6 algarismos de 0 a 9. */
 export const FORMATO_DA_SENHA_DO_LINK = /^[0-9]{6}$/;
 

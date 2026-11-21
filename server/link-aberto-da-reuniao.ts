@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, meetings, users } from "../drizzle/schema";
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
@@ -48,7 +49,8 @@ export const ROTA_DO_AUDIO_DO_LINK = "/reuniao-aberta";
 
 export const MENSAGEM_LINK_NAO_ENCONTRADO = "Este link de reunião não existe ou foi desligado.";
 export const MENSAGEM_SO_REUNIAO_PRONTA = "Só dá para compartilhar uma reunião pronta.";
-export const MENSAGEM_SENHA_DO_LINK_PEDIDA = "Este link pede a senha de 6 dígitos.";
+// A frase mora em shared/: a tela a traduz. Sai daqui também, para quem já a importava deste módulo.
+export { MENSAGEM_SENHA_DO_LINK_PEDIDA };
 export const MENSAGEM_LINK_DESLIGADO = "O link desta reunião está desligado.";
 const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
 
@@ -145,6 +147,12 @@ export async function ligarLinkAberto(ownerId: string, meetingId: string, prova:
  * instante sem ela. A senha em texto volta só a quem criou o link; o banco
  * guarda o hash. O hash sai antes da transação, para o scrypt não segurar a
  * linha.
+ *
+ * O scrypt custa 16 MiB e dezenas de milissegundos do pool do libuv (o mesmo
+ * do DNS das conexões novas ao banco): antes dele, uma leitura barata recusa a
+ * reunião que não é da dona ou não está pronta, e o link que já está ligado
+ * fica como está, sem senha sorteada à toa (confirmarLinkJaLigado). O router
+ * ainda conta cada ligar com senha no teto das senhas (routers/meetings.ts).
  */
 export async function ligarLinkAbertoComOpcoes(
   ownerId: string,
@@ -152,9 +160,20 @@ export async function ligarLinkAbertoComOpcoes(
   prova: ProvaDoLinkLigado,
   opcoes: OpcoesDoLink = {},
 ): Promise<LinkLigado> {
+  const db = await exigirDb();
+  if (opcoes.comSenha === true) {
+    const [atual] = await db.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+    if (!atual || atual.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (atual.status !== "ready") throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
+    if (atual.shareToken) {
+      const confirmado = await db.transaction(tx => confirmarLinkJaLigado(tx, ownerId, meetingId, prova));
+      if (confirmado) return confirmado;
+      // Desligado nesse meio-tempo: liga abaixo, já com a senha.
+    }
+  }
   const senha = opcoes.comSenha === true ? gerarSenhaDoLink() : null;
   const hash = senha ? await hashDaSenhaDoLink(senha) : null;
-  const db = await exigirDb();
   const ligado = await db.transaction(tx => ligarNaTransacao(tx, ownerId, meetingId, prova, { senha, hash, incluirAudio: opcoes.incluirAudio !== false }));
   return { token: ligado.token, senha: ligado.senha };
 }
@@ -205,7 +224,29 @@ async function ligarNaTransacao(
   // nulo pede a senha, e só o `true` do banco leva o áudio.
   const comSenha = reuniao.sharePasswordHash !== null;
   const comAudio = reuniao.shareAudio === true;
-  await tx.insert(auditLogs).values({
+  await tx.insert(auditLogs).values(linhaDaConfirmacao(prova, meetingId, { comSenha, incluirAudio: reuniao.shareAudio }));
+  return { token: reuniao.shareToken, senha: criou ? escolha.senha : null, comSenha, comAudio };
+}
+
+/**
+ * Ligar com senha o link que já está ligado (duplo clique, outra aba): nada
+ * muda no link e nenhuma senha é sorteada, e a confirmação da dona vai à
+ * auditoria como em todo ligar (a mais nova decide os nomes das vozes, H3b).
+ * Null se o link foi desligado nesse meio-tempo: quem chama liga com a senha.
+ */
+async function confirmarLinkJaLigado(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<LinkLigado | null> {
+  const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio })
+    .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
+  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (reuniao.status !== "ready") throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
+  if (!reuniao.shareToken) return null;
+  await tx.insert(auditLogs).values(linhaDaConfirmacao(prova, meetingId, { comSenha: reuniao.sharePasswordHash !== null, incluirAudio: reuniao.shareAudio }));
+  return { token: reuniao.shareToken, senha: null };
+}
+
+/** A linha da confirmação da dona em `audit_logs`, a cada ligar, com como o link ficou (H23). */
+function linhaDaConfirmacao(prova: ProvaDoLinkLigado, meetingId: string, link: { comSenha: boolean; incluirAudio: boolean | null }) {
+  return {
     ...quemPediu(prova),
     action: ACAO_LINK_LIGADO,
     resource: "meetings",
@@ -218,15 +259,14 @@ async function ligarNaTransacao(
       textoExibido: prova.textoExibido,
       textoHash: crypto.createHash("sha256").update(prova.textoExibido).digest("hex"),
       // Como o link ficou (H23): com o pedido de agora, ou como já estava.
-      comSenha,
-      incluirAudio: reuniao.shareAudio,
+      comSenha: link.comSenha,
+      incluirAudio: link.incluirAudio,
       // De onde a dona ligou (H22), quando não foi pelo painel do link.
       ...(prova.origem ? { origem: prova.origem } : {}),
     },
-    status: "success",
-    riskLevel: "medium",
-  });
-  return { token: reuniao.shareToken, senha: criou ? escolha.senha : null, comSenha, comAudio };
+    status: "success" as const,
+    riskLevel: "medium" as const,
+  };
 }
 
 /**

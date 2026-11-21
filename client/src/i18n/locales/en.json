@@ -1769,7 +1769,8 @@
         "incomplete": "Enter the 6 digits of the password.",
         "wrong": "Incorrect password. Check the 6 digits and try again.",
         "wait": "Too many wrong attempts. Try again {{quando}}.",
-        "error": "Couldn't check the password right now. Please try again."
+        "error": "Couldn't check the password right now. Please try again.",
+        "required": "This link asks for the 6-digit password."
       }
     },
     "export": {

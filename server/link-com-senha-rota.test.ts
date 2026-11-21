@@ -173,6 +173,29 @@ describe("meetings — a dona escolhe a senha e o áudio do link", () => {
     }
   });
 
+  it(`ligar com senha gasta vaga do teto das senhas: a ${SENHAS_DO_LINK_POR_JANELA + 1}ª na janela é TOO_MANY_REQUESTS sem chegar ao serviço; a recusa e o link que já estava ligado não gastam`, async () => {
+    ligarLinkAbertoComOpcoes.mockRejectedValue(new LinkAbertoRecusado("NOT_FOUND", "Reunião não encontrada."));
+    for (let i = 0; i < SENHAS_DO_LINK_POR_JANELA + 5; i++) {
+      await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, comSenha: true })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    }
+    // O link que já estava ligado: nenhuma senha saiu, e a vaga volta.
+    ligarLinkAbertoComOpcoes.mockReset();
+    ligarLinkAbertoComOpcoes.mockResolvedValue({ token: TOKEN, senha: null });
+    for (let i = 0; i < SENHAS_DO_LINK_POR_JANELA + 5; i++) await daDona().meetings.ligarLinkAberto({ ...LIGAR, comSenha: true });
+    ligarLinkAbertoComOpcoes.mockResolvedValue({ token: TOKEN, senha: "482913" });
+    for (let i = 0; i < SENHAS_DO_LINK_POR_JANELA; i++) await daDona().meetings.ligarLinkAberto({ ...LIGAR, comSenha: true });
+    ligarLinkAbertoComOpcoes.mockClear();
+    await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, comSenha: true })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(ligarLinkAbertoComOpcoes).not.toHaveBeenCalled();
+    // É o mesmo teto da senha nova.
+    await expect(daDona().meetings.novaSenhaDoLink({ meetingId: ID })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(novaSenhaDoLink).not.toHaveBeenCalled();
+    // Ligar sem senha não é scrypt e não conta; o teto é de cada dona.
+    await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, comSenha: false })).resolves.toMatchObject({ token: TOKEN });
+    await expect(daDona().meetings.ligarLinkAberto(LIGAR)).resolves.toMatchObject({ token: TOKEN });
+    await expect(daDona("dona-2").meetings.ligarLinkAberto({ ...LIGAR, comSenha: true })).resolves.toEqual({ token: TOKEN, senha: "482913" });
+  });
+
   it("senha nova: vai com a dona da sessão e a prova, e devolve a senha", async () => {
     novaSenhaDoLink.mockResolvedValue("482913");
     await expect(daDona().meetings.novaSenhaDoLink({ meetingId: ID })).resolves.toEqual({ senha: "482913" });

@@ -1769,7 +1769,8 @@
         "incomplete": "Geben Sie die 6 Ziffern des Passworts ein.",
         "wrong": "Falsches Passwort. Prüfen Sie die 6 Ziffern und versuchen Sie es erneut.",
         "wait": "Zu viele falsche Versuche. Versuchen Sie es {{quando}} erneut.",
-        "error": "Das Passwort konnte gerade nicht geprüft werden. Bitte versuchen Sie es erneut."
+        "error": "Das Passwort konnte gerade nicht geprüft werden. Bitte versuchen Sie es erneut.",
+        "required": "Dieser Link verlangt das 6-stellige Passwort."
       }
     },
     "export": {

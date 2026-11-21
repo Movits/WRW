@@ -21,7 +21,9 @@ Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
 `network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
-nenhum recorte por caminho). Upload novo entra nos dois lugares.
+nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto: até
+`CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
+dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio

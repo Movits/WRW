@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
-const { comPrazo, destinatariasDoPedido, hashDoEmail, PRAZO_DA_RESEND_MS } = await import("./resumo-por-email");
+const { comPrazo, destinatariasDoPedido, hashDoEmail, PRAZO_DA_RESEND_MS, separarPeloQueJaHa } = await import("./resumo-por-email");
+type LinhaQueNaoSaiu = import("./resumo-por-email").LinhaQueNaoSaiu;
 const {
   DESTINATARIAS_POR_ENVIO_MAX,
   EMAILS_DIGITADOS_POR_ENVIO_MAX,
@@ -11,6 +12,8 @@ const {
   MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA,
   MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA,
   MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA,
+  PENDENTE_PRESO_MS,
+  TENTATIVAS_POR_EMAIL_MAX,
 } = await import("@shared/resumo-por-email");
 
 /**
@@ -120,5 +123,40 @@ describe("hashDoEmail", () => {
     expect(hashDoEmail(" Ana@Exemplo.invalid ")).toBe(hashDoEmail("ana@exemplo.invalid"));
     expect(hashDoEmail("ana@exemplo.invalid")).toMatch(/^[0-9a-f]{64}$/);
     expect(hashDoEmail("ana@exemplo.invalid")).not.toBe(hashDoEmail("bia@exemplo.invalid"));
+  });
+});
+
+describe("separarPeloQueJaHa: o pedido novo diante do que não saiu nesta reunião", () => {
+  const AGORA = 1_800_000_000_000;
+  const linha = (extra: Partial<LinhaQueNaoSaiu> & Pick<LinhaQueNaoSaiu, "destinatario">): LinhaQueNaoSaiu => ({
+    id: `linha-${extra.destinatario}`, origem: "digitado", idioma: "pt-BR", loteId: "lote-1", status: "falhou", tentativas: 1, updatedAt: AGORA - 60_000, ...extra,
+  });
+  const ana = { email: "Ana@Exemplo.invalid", origem: "participante" as const };
+  const bia = { email: "bia@exemplo.invalid", origem: "digitado" as const };
+
+  it("quem tem um e-mail que não saiu o recebe de novo pela mesma linha, sem diferença de caixa; quem não tem ganha linha nova", () => {
+    const anterior = linha({ destinatario: "ana@exemplo.invalid" });
+    expect(separarPeloQueJaHa([ana, bia], [anterior], AGORA)).toEqual({ novas: [bia], deNovo: [{ destinataria: ana, linha: anterior }], jaSaindo: [] });
+  });
+
+  it("a 'pendente' recente está saindo agora: fica de fora; a presa há mais de 5 minutos volta a sair pela mesma linha", () => {
+    const saindo = linha({ destinatario: "ana@exemplo.invalid", status: "pendente", updatedAt: AGORA - 60_000 });
+    expect(separarPeloQueJaHa([ana], [saindo], AGORA)).toEqual({ novas: [], deNovo: [], jaSaindo: [ana] });
+    const presa = linha({ destinatario: "ana@exemplo.invalid", status: "pendente", updatedAt: AGORA - PENDENTE_PRESO_MS - 1 });
+    expect(separarPeloQueJaHa([ana], [presa], AGORA).deNovo).toEqual([{ destinataria: ana, linha: presa }]);
+  });
+
+  it(`a que já foi tentada ${TENTATIVAS_POR_EMAIL_MAX} vezes não volta: o pedido novo da dona ganha linha nova`, () => {
+    const esgotada = linha({ destinatario: "ana@exemplo.invalid", tentativas: TENTATIVAS_POR_EMAIL_MAX });
+    expect(separarPeloQueJaHa([ana], [esgotada], AGORA)).toEqual({ novas: [ana], deNovo: [], jaSaindo: [] });
+  });
+
+  it("o e-mail da dona para ela mesma e o das outras pessoas são textos diferentes: um não reaproveita o outro", () => {
+    const daDona = { email: "glenda@exemplo.invalid", origem: "dona" as const };
+    const comoDigitado = linha({ destinatario: "glenda@exemplo.invalid", origem: "digitado" });
+    expect(separarPeloQueJaHa([daDona], [comoDigitado], AGORA)).toEqual({ novas: [daDona], deNovo: [], jaSaindo: [] });
+    // A participante que antes foi digitada recebe o mesmo texto: reaproveita.
+    const digitadaAntes = linha({ destinatario: "ana@exemplo.invalid", origem: "digitado" });
+    expect(separarPeloQueJaHa([ana], [digitadaAntes], AGORA).deNovo).toHaveLength(1);
   });
 });

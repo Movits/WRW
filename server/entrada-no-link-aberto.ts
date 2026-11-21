@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { ResultadoDaEntradaNoLink } from "@shared/senha-do-link";
 import { auditLogs, meetings, users } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { chaveDeRede } from "./ip-da-cliente";
 import { FORMATO_DO_TOKEN } from "./link-aberto-da-reuniao";
 import {
-  comMaisUmaFalha,
+  comMaisUmaFalhaDoLink,
   cookieDaEntrada,
   criarFreioPorRede,
   esperaRestante,
@@ -13,6 +13,7 @@ import {
   segundosDeEspera,
   senhaConfere,
   type CookieDaEntrada,
+  type EstadoDoFreio,
 } from "./senha-do-link-aberto";
 
 /**
@@ -26,14 +27,16 @@ import {
  *   a rajada não chega ao banco nem ao scrypt;
  * - o do link, no banco (as colunas share_password_* de `meetings`), cobrado
  *   com a linha travada: as tentativas em paralelo entram uma de cada vez, e a
- *   6ª já encontra a espera. É ele que segura quem troca de rede a cada
- *   tentativa, e o deploy não o zera.
+ *   que passa do limite já encontra a espera. É ele que segura quem troca de
+ *   rede a cada tentativa, e o deploy não o zera. É bem mais largo que o da
+ *   rede (FALHAS_LIVRES_DO_LINK), para uma rede sozinha não trancar o link
+ *   para todas as destinatárias.
  *
  * A resposta não diz se o link existe: o link que não existe, o desligado, o
  * de conta inativa e o que não tem senha respondem "senha", como a senha
  * errada, depois de um scrypt contra um hash qualquer (o tempo fica parecido),
- * e cada um desses pedidos gasta uma falha da rede. O começo da espera do link
- * vai à auditoria, na mesma transação que a grava, com o IP de quem tentou.
+ * e cada um desses pedidos gasta uma falha da rede. O começo de cada espera do
+ * link vai à auditoria, na mesma transação que a grava, com o IP de quem tentou.
  */
 
 export const ACAO_LINK_BLOQUEADO = "MEETING_OPEN_LINK_PASSWORD_LOCKED";
@@ -51,7 +54,7 @@ function hashParaGastarTempo(): Promise<string> {
 }
 
 type Alvo =
-  | { tipo: "link"; id: string; hash: string }
+  | { tipo: "link"; id: string; hash: string; antes: EstadoDoFreio; cobrado: EstadoDoFreio }
   | { tipo: "espera"; esperaMs: number }
   | { tipo: "nenhum" };
 
@@ -78,31 +81,49 @@ async function cobrarDoLink(token: string, ip: string, agora: number): Promise<A
     if (!linha || linha.shareToken !== token || linha.status !== "ready" || linha.hash === null) return { tipo: "nenhum" as const };
     const [conta] = await tx.select({ ativa: users.isActive }).from(users).where(eq(users.openId, linha.ownerId)).limit(1);
     if (!conta?.ativa) return { tipo: "nenhum" as const };
-    const estado = { falhas: linha.falhas, ultimaFalhaEm: linha.ultimaFalhaEm, bloqueadoAte: linha.bloqueadoAte };
-    const espera = esperaRestante(estado, agora);
+    const antes: EstadoDoFreio = { falhas: linha.falhas, ultimaFalhaEm: linha.ultimaFalhaEm, bloqueadoAte: linha.bloqueadoAte };
+    const espera = esperaRestante(antes, agora);
     if (espera) return { tipo: "espera" as const, esperaMs: espera };
-    const novo = comMaisUmaFalha(estado, agora);
+    const cobrado = comMaisUmaFalhaDoLink(antes, agora);
     await tx.update(meetings).set({
-      sharePasswordFailures: novo.falhas, sharePasswordFailedAt: novo.ultimaFalhaEm, sharePasswordLockedUntil: novo.bloqueadoAte,
+      sharePasswordFailures: cobrado.falhas, sharePasswordFailedAt: cobrado.ultimaFalhaEm, sharePasswordLockedUntil: cobrado.bloqueadoAte,
     }).where(eq(meetings.id, achado.id));
-    // Esta tentativa abre a espera. Se for a senha certa, a espera se desfaz
+    // Esta tentativa abre uma espera. Se for a senha certa, a espera se desfaz
     // logo adiante; a linha fica, como registro de que o link chegou ao limite.
-    if (novo.bloqueadoAte !== null) {
+    if (cobrado.bloqueadoAte !== null) {
       await tx.insert(auditLogs).values({
         userId: null, action: ACAO_LINK_BLOQUEADO, resource: "meetings", resourceId: achado.id,
-        details: { falhasSeguidas: novo.falhas, esperaSegundos: segundosDeEspera(novo.bloqueadoAte - agora) },
+        details: { falhasQueContam: cobrado.falhas, esperaSegundos: segundosDeEspera(cobrado.bloqueadoAte - agora) },
         ipAddress: ip.substring(0, 45), status: "blocked", riskLevel: "medium",
       });
     }
-    return { tipo: "link" as const, id: achado.id, hash: linha.hash };
+    return { tipo: "link" as const, id: achado.id, hash: linha.hash, antes, cobrado };
   });
 }
 
-/** O freio do link volta a zero com a senha certa, se a senha ainda for a mesma que acabou de conferir. */
-async function zerarFreioDoLink(id: string, hash: string) {
+/** Quantas linhas o UPDATE encontrou (o mysql2 liga CLIENT_FOUND_ROWS: conta a que o WHERE achou, não a que mudou). */
+function linhasAfetadas(resultado: unknown): number {
+  const cabecalho = Array.isArray(resultado) ? resultado[0] : resultado;
+  const linhas = (cabecalho as { affectedRows?: unknown } | null | undefined)?.affectedRows;
+  return typeof linhas === "number" ? linhas : 0;
+}
+
+/**
+ * A senha certa devolve a falha que esta tentativa cobrou do link, se a senha
+ * ainda for a que acabou de conferir: sem outra tentativa no meio, o freio
+ * volta a ser o de antes (a espera que ela abriu se desfaz); com outra, só
+ * esta falha sai. Não zera: com o freio largo do link, zerar daria a quem
+ * tenta adivinhar outras 50 tentativas a cada entrada de quem tem a senha.
+ */
+async function devolverAFalhaDoLink(id: string, hash: string, antes: EstadoDoFreio, cobrado: EstadoDoFreio) {
   const db = await exigirDb();
-  await db.update(meetings).set({ sharePasswordFailures: 0, sharePasswordFailedAt: null, sharePasswordLockedUntil: null })
-    .where(and(eq(meetings.id, id), eq(meetings.sharePasswordHash, hash)));
+  const daMesmaSenha = and(eq(meetings.id, id), eq(meetings.sharePasswordHash, hash));
+  const ninguemNoMeio = and(eq(meetings.sharePasswordFailures, cobrado.falhas), eq(meetings.sharePasswordFailedAt, cobrado.ultimaFalhaEm ?? 0));
+  const voltou = await db.update(meetings)
+    .set({ sharePasswordFailures: antes.falhas, sharePasswordFailedAt: antes.ultimaFalhaEm, sharePasswordLockedUntil: antes.bloqueadoAte })
+    .where(and(daMesmaSenha, ninguemNoMeio));
+  if (linhasAfetadas(voltou) > 0) return;
+  await db.update(meetings).set({ sharePasswordFailures: sql`GREATEST(${meetings.sharePasswordFailures} - 1, 0)` }).where(daMesmaSenha);
 }
 
 export type EntradaNoLink = Exclude<ResultadoDaEntradaNoLink, { entrou: true }> | { entrou: true; cookie: CookieDaEntrada };
@@ -121,7 +142,7 @@ export async function entrarNoLink(token: string, senha: string, ip: string, ago
     if (alvo.tipo === "espera") return { entrou: false, motivo: "espera", segundos: segundosDeEspera(alvo.esperaMs) };
     const confere = await senhaConfere(senha, alvo.tipo === "link" ? alvo.hash : await hashParaGastarTempo());
     if (alvo.tipo !== "link" || !confere) return { entrou: false, motivo: "senha" };
-    await zerarFreioDoLink(alvo.id, alvo.hash);
+    await devolverAFalhaDoLink(alvo.id, alvo.hash, alvo.antes, alvo.cobrado);
     cobranca.devolver();
     return { entrou: true, cookie: cookieDaEntrada(token, alvo.hash, agora) };
   } catch (erro) {

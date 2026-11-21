@@ -149,9 +149,10 @@ export const tetoDaTraducaoDoResumo = criarTeto(
 export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
 
 // Cada senha nova do link aberto (H23) é um scrypt e uma linha de auditoria:
-// teto próprio por dona, em memória como os outros, de 20 a cada 10 minutos.
-// Só conta a senha que saiu: a recusa (outra conta, link desligado) e a falha
-// devolvem a vaga.
+// teto próprio por dona, em memória como os outros, de 20 a cada 10 minutos,
+// somando a senha nova e o ligar com senha. Só conta a senha que saiu: a
+// recusa (outra conta, link desligado), a falha e o ligar do link que já
+// estava ligado devolvem a vaga.
 export const SENHAS_DO_LINK_POR_JANELA = 20;
 export const tetoDasSenhasDoLink = criarTeto(
   SENHAS_DO_LINK_POR_JANELA,
@@ -531,14 +532,25 @@ export const meetingsRouter = router({
       incluirAudio: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      return comRecusaTraduzida(() => ligarLinkAbertoComOpcoes(ctx.user.openId, input.meetingId, {
-        userId: ctx.user.id,
-        ipAddress: ipDaCliente(ctx.req),
-        userAgent: ctx.req.headers["user-agent"],
-        idioma: input.idioma,
-        textoExibido: input.textoExibido,
-        versaoDaAutorizacao: input.versaoDaAutorizacao,
-      }, { comSenha: input.comSenha, incluirAudio: input.incluirAudio }));
+      // Ligar com senha é um scrypt, como a senha nova: gasta uma vaga do
+      // mesmo teto, antes do serviço. A vaga volta na recusa, na falha e
+      // quando nenhuma senha saiu (o link já estava ligado).
+      const soltarVaga = input.comSenha === true ? tetoDasSenhasDoLink.reservar(ctx.user.openId) : () => {};
+      try {
+        const ligado = await comRecusaTraduzida(() => ligarLinkAbertoComOpcoes(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+          idioma: input.idioma,
+          textoExibido: input.textoExibido,
+          versaoDaAutorizacao: input.versaoDaAutorizacao,
+        }, { comSenha: input.comSenha, incluirAudio: input.incluirAudio }));
+        if (ligado.senha === null) soltarVaga();
+        return ligado;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
     }),
 
   // Uma senha nova para o link ligado (H23): liga a senha no link que não

@@ -24,9 +24,17 @@ import { requireSecret } from "./_core/env";
  *   server/sessao.ts assina JWT (server/sessao-guarda.test.ts).
  * - O freio: a cada tentativa, o link e a rede de quem tenta (o IP; o IPv6 pelo
  *   /56) ganham uma falha ANTES de a senha ser conferida, e a senha certa a
- *   devolve. Da 5ª falha seguida em diante, espera de 1 minuto que dobra a cada
- *   falha (1, 2, 4... até 60 minutos); as falhas se esquecem depois de 24 horas
- *   sem nenhuma. Na espera, a senha nem é conferida.
+ *   devolve. Na espera, a senha nem é conferida.
+ *   - A rede: da 5ª falha seguida em diante, espera de 1 minuto que dobra a
+ *     cada falha (1, 2, 4... até 60 minutos); as falhas se esquecem depois de
+ *     24 horas sem nenhuma.
+ *   - O link: bem mais largo, para uma rede sozinha nunca trancar o link para
+ *     todas as destinatárias (o caso da H23: o link vazou, e a dona pôs a
+ *     senha). Ele esquece uma falha a cada 30 minutos, e só da 50ª falha que
+ *     ainda conta em diante entra na espera, que dobra como a da rede. Uma
+ *     rede sozinha, presa ao freio dela, chega a umas 10 falhas e desce; quem
+ *     tenta de muitas redes fica em uns 45 palpites por dia (mais as 50 livres
+ *     do primeiro), décadas para o milhão de senhas.
  */
 
 // ─── A senha ──────────────────────────────────────────────────────────────
@@ -203,6 +211,33 @@ export function segundosDeEspera(esperaMs: number): number {
   return Math.max(1, Math.ceil(esperaMs / 1000));
 }
 
+// O freio do link (no banco, as colunas share_password_* de `meetings`):
+// separado do da rede. Com o mesmo limite, uma rede só que tivesse o endereço
+// errava 5 vezes e deixava o link inteiro na espera, até para quem tem a
+// senha certa; depois, 1 pedido por hora a mantinha.
+export const FALHAS_LIVRES_DO_LINK = 50;
+export const ESQUECER_UMA_FALHA_DO_LINK_MS = 30 * 60_000;
+
+/** A espera do link depois de N falhas que contam: nenhuma até a 49ª, 1 minuto na 50ª, o dobro a cada uma, até 60 minutos. */
+export function esperaDoLinkDepoisDe(falhas: number): number {
+  if (falhas < FALHAS_LIVRES_DO_LINK) return 0;
+  return Math.min(ESPERA_INICIAL_MS * 2 ** Math.min(falhas - FALHAS_LIVRES_DO_LINK, 30), ESPERA_MAXIMA_MS);
+}
+
+/** As falhas do link que ainda contam agora: uma a menos a cada 30 minutos desde a última. */
+export function falhasDoLinkQueContam(estado: EstadoDoFreio, agora: number): number {
+  if (estado.ultimaFalhaEm === null) return 0;
+  const esquecidas = Math.floor(Math.max(0, agora - estado.ultimaFalhaEm) / ESQUECER_UMA_FALHA_DO_LINK_MS);
+  return Math.max(0, estado.falhas - esquecidas);
+}
+
+/** O estado do link depois de mais uma falha. */
+export function comMaisUmaFalhaDoLink(estado: EstadoDoFreio, agora: number): EstadoDoFreio {
+  const falhas = Math.min(falhasDoLinkQueContam(estado, agora) + 1, 1_000_000);
+  const espera = esperaDoLinkDepoisDe(falhas);
+  return { falhas, ultimaFalhaEm: agora, bloqueadoAte: espera ? agora + espera : null };
+}
+
 // O mesmo limite de memória dos tetos (MAXIMO_DE_CHAVES_POR_TETO, em
 // assistente-de-texto.ts), sem importar aquele módulo, que puxa a IA.
 const MAXIMO_DE_REDES_NO_FREIO = 5000;
@@ -220,7 +255,11 @@ export type CobrancaDoFreio =
  *
  * A senha certa devolve só a falha que ela mesma cobrou, e não zera a rede:
  * quem acertasse a senha de um link seu não ganharia tentativas novas no link
- * dos outros.
+ * dos outros. Se ninguém da rede tentou depois dela, a rede volta a ser o que
+ * era, como se a tentativa não tivesse existido: a espera que ela abriu se
+ * desfaz e a hora da última falha volta (senão, numa rede acima do limite, a
+ * senha certa deixava uma espera nova para a pessoa seguinte, e as falhas
+ * antigas nunca se esqueciam). Com outra tentativa no meio, só a falha sai.
  */
 export function criarFreioPorRede(maximoDeChaves = MAXIMO_DE_REDES_NO_FREIO) {
   const estados = new Map<string, EstadoDoFreio>();
@@ -239,7 +278,8 @@ export function criarFreioPorRede(maximoDeChaves = MAXIMO_DE_REDES_NO_FREIO) {
       const atual = estados.get(chave) ?? FREIO_ZERADO;
       const espera = esperaRestante(atual, agora);
       if (espera) return { aceita: false, esperaMs: espera };
-      guardar(chave, comMaisUmaFalha(atual, agora));
+      const cobrado = comMaisUmaFalha(atual, agora);
+      guardar(chave, cobrado);
       let devolvida = false;
       return {
         aceita: true,
@@ -248,6 +288,12 @@ export function criarFreioPorRede(maximoDeChaves = MAXIMO_DE_REDES_NO_FREIO) {
           devolvida = true;
           const estado = estados.get(chave);
           if (!estado) return;
+          // O estado guardado ainda é o desta cobrança: ninguém tentou depois.
+          if (estado === cobrado) {
+            if (atual === FREIO_ZERADO) estados.delete(chave);
+            else guardar(chave, atual);
+            return;
+          }
           const falhas = Math.max(0, estado.falhas - 1);
           // Abaixo do limite, a espera que esta cobrança abriu se desfaz.
           guardar(chave, { ...estado, falhas, bloqueadoAte: falhas >= TENTATIVAS_LIVRES ? estado.bloqueadoAte : null });

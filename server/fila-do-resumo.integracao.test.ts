@@ -18,9 +18,31 @@ vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof im
 const gerarMapaMental = vi.hoisted(() => vi.fn());
 vi.mock("./mapa-mental", async original => ({ ...(await original<typeof import("./mapa-mental")>()), gerarMapaMental: (...a: unknown[]) => gerarMapaMental(...a) }));
 const MAPA = { ramos: [{ rotulo: "Exportação de café", folhas: [] }, { rotulo: "Transportadora", folhas: [] }] };
+// O e-mail automático do resumo (H22), que a rodada dispara sem await: a
+// Resend é dublê (nenhum e-mail de verdade sai), e o disparo de verdade fica
+// registrado para o teste esperar por ele.
+const envioAutomatico = vi.hoisted(() => ({
+  lote: vi.fn(async (lista: Array<{ to: string }>) => lista.map(() => true)),
+  emCurso: [] as Array<Promise<unknown>>,
+}));
+vi.mock("./_core/email", async original => ({
+  ...(await original<typeof import("./_core/email")>()),
+  sendEmailBatch: (lista: Array<{ to: string }>) => envioAutomatico.lote(lista),
+}));
+vi.mock("./resumo-por-email", async original => {
+  const real = await original<typeof import("./resumo-por-email")>();
+  return {
+    ...real,
+    envioAutomaticoDoResumo: (...args: Parameters<typeof real.envioAutomaticoDoResumo>) => {
+      const envio = real.envioAutomaticoDoResumo(...args);
+      envioAutomatico.emCurso.push(envio);
+      return envio;
+    },
+  };
+});
 
 const { getDb } = await import("./db");
-const { consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, platformNotifications, proximasAcoes, users } = await import("../drizzle/schema");
+const { auditLogs, consumoDeMinutos, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, platformNotifications, proximasAcoes, resumoPorEmail, users } = await import("../drizzle/schema");
 const fila = await import("./fila-do-resumo");
 const servico = await import("./resumo-guardado");
 const acoes = await import("./proximas-acoes");
@@ -502,6 +524,42 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await deletePrivateMeeting(DONA, id);
     expect(await itensDe(id)).toEqual([]);
     expect(await linhaDoResumo(id)).toBeUndefined();
+  });
+
+  it("com o envio automático ligado (H22), o resumo gravado manda o e-mail à dona uma vez; o refeito (versão 2) não manda de novo", async () => {
+    const banco = await db();
+    const [conta] = await banco.select({ id: users.id }).from(users).where(eq(users.openId, DONA));
+    const email = `dona-auto-${crypto.randomUUID().slice(0, 8)}@teste.invalid`;
+    const siteAntes = process.env.FRONTEND_URL;
+    await banco.update(users).set({ email, resumoPorEmailAutomatico: true }).where(eq(users.openId, DONA));
+    process.env.FRONTEND_URL = "https://wrw.teste";
+    envioAutomatico.lote.mockClear();
+    envioAutomatico.emCurso.length = 0;
+    try {
+      const id = await reuniaoPronta();
+      await pedir(id);
+      await rodar();
+      await vi.waitFor(() => expect(envioAutomatico.lote).toHaveBeenCalledTimes(1));
+      await Promise.all(envioAutomatico.emCurso);
+      expect(envioAutomatico.lote.mock.calls[0][0].map(item => item.to)).toEqual([email]);
+      const linhas = await banco.select().from(resumoPorEmail).where(eq(resumoPorEmail.meetingId, id));
+      expect(linhas).toHaveLength(1);
+      expect(linhas[0]).toMatchObject({ ownerId: DONA, automatico: true, origem: "dona", status: "enviado", destinatario: email });
+
+      // O resumo refeito passa pela mesma linha da rodada, e o disparo sai sem mandar.
+      await banco.update(meetingSummaries).set({ status: "pending", attempts: 0 }).where(eq(meetingSummaries.meetingId, id));
+      await rodar();
+      expect(envioAutomatico.emCurso).toHaveLength(2);
+      await Promise.all(envioAutomatico.emCurso);
+      expect(await linhaDoResumo(id)).toMatchObject({ version: 2 });
+      expect(envioAutomatico.lote).toHaveBeenCalledTimes(1);
+    } finally {
+      if (siteAntes === undefined) delete process.env.FRONTEND_URL;
+      else process.env.FRONTEND_URL = siteAntes;
+      await banco.update(users).set({ email: null, resumoPorEmailAutomatico: false }).where(eq(users.openId, DONA));
+      await banco.delete(resumoPorEmail).where(eq(resumoPorEmail.ownerId, DONA));
+      await banco.delete(auditLogs).where(eq(auditLogs.userId, conta.id));
+    }
   });
 
   describe("o disparo automático (H4c): toda reunião que fica pronta ganha o pedido do resumo", () => {

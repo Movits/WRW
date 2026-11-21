@@ -59,6 +59,9 @@ import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
  *     para a auditoria (ligarLinkAbertoNaTransacao);
  *  5. uma linha 'pendente' por e-mail e a auditoria MEETING_SUMMARY_EMAILED,
  *     com quantos, de que origem e o hash de cada endereço (não o endereço).
+ *     Quem já tem nesta reunião um e-mail que não saiu o recebe de novo pela
+ *     mesma linha, e quem tem um saindo agora fica de fora (separarPeloQueJaHa):
+ *     o mesmo e-mail não vai duas vezes, e a linha nova é a única que conta no teto.
  * Depois, fora da transação, a Resend: o que ela aceita vira 'enviado', o que
  * não aceita vira 'falhou', e o pedido fica guardado para o "Tentar de novo".
  * Nada aqui diz se um e-mail digitado é de alguém da WRW.
@@ -224,6 +227,75 @@ async function temResumoGravado(ex: Executor, ownerId: string, meetingId: string
   return resumo && Number(resumo.versao) > 0 ? { versao: Number(resumo.versao) } : null;
 }
 
+/** Uma linha desta reunião que ainda não saiu: 'falhou', ou 'pendente' (saindo agora, ou presa num envio que não terminou). */
+export type LinhaQueNaoSaiu = {
+  id: string;
+  destinatario: string;
+  origem: OrigemDoResumoPorEmail;
+  idioma: string;
+  loteId: string;
+  status: "pendente" | "falhou";
+  tentativas: number;
+  updatedAt: number;
+};
+
+/** As linhas que a dona mandou nesta reunião (não as automáticas, que levam o link da conta) e que ainda não saíram. */
+async function linhasQueNaoSairam(ex: Executor, ownerId: string, meetingId: string): Promise<LinhaQueNaoSaiu[]> {
+  const linhas = await ex.select({
+    id: resumoPorEmail.id, destinatario: resumoPorEmail.destinatario, origem: resumoPorEmail.origem, idioma: resumoPorEmail.idioma,
+    loteId: resumoPorEmail.loteId, status: resumoPorEmail.status, tentativas: resumoPorEmail.tentativas, updatedAt: resumoPorEmail.updatedAt,
+  }).from(resumoPorEmail).where(and(
+    eq(resumoPorEmail.ownerId, ownerId),
+    eq(resumoPorEmail.meetingId, meetingId),
+    eq(resumoPorEmail.automatico, false),
+    isNotNull(resumoPorEmail.destinatario),
+    inArray(resumoPorEmail.status, ["pendente", "falhou"]),
+  ));
+  return linhas.map(linha => ({
+    id: linha.id,
+    destinatario: linha.destinatario as string,
+    origem: linha.origem as OrigemDoResumoPorEmail,
+    idioma: linha.idioma,
+    loteId: linha.loteId,
+    status: linha.status as "pendente" | "falhou",
+    tentativas: Number(linha.tentativas),
+    updatedAt: Number(linha.updatedAt),
+  }));
+}
+
+/**
+ * O pedido novo diante do que já há nesta reunião. Quem tem uma linha que não
+ * saiu e ainda pode sair (a mesma que o "Tentar de novo" mandaria) a recebe de
+ * novo por ela, sem linha nova: o e-mail não vai em dobro (a linha velha
+ * seguiria no "Tentar de novo") nem gasta o teto duas vezes. Quem tem o e-mail
+ * saindo agora (outra aba mandou há instantes) fica de fora deste envio. Só
+ * vale a linha do mesmo e-mail: o da dona (o link para ela guardar) e o das
+ * outras pessoas têm textos diferentes.
+ */
+export function separarPeloQueJaHa(destinatarias: Destinataria[], anteriores: LinhaQueNaoSaiu[], agora: number) {
+  const chave = (email: string, origem: OrigemDoResumoPorEmail) => `${origem === "dona" ? "dona" : "outra"}\n${emailComparavel(email)}`;
+  const podeSairDeNovo = new Map<string, LinhaQueNaoSaiu>();
+  const saindoAgora = new Set<string>();
+  for (const linha of anteriores) {
+    const k = chave(linha.destinatario, linha.origem);
+    // A mesma regra do "Tentar de novo" (condicaoDoMandarDeNovo): a 'pendente' recente está saindo.
+    const presa = linha.status === "pendente" && linha.updatedAt < agora - PENDENTE_PRESO_MS;
+    if (linha.status === "pendente" && !presa) saindoAgora.add(k);
+    else if (linha.tentativas < TENTATIVAS_POR_EMAIL_MAX && !podeSairDeNovo.has(k)) podeSairDeNovo.set(k, linha);
+  }
+  const novas: Destinataria[] = [];
+  const deNovo: Array<{ destinataria: Destinataria; linha: LinhaQueNaoSaiu }> = [];
+  const jaSaindo: Destinataria[] = [];
+  for (const destinataria of destinatarias) {
+    const k = chave(destinataria.email, destinataria.origem);
+    const anterior = podeSairDeNovo.get(k);
+    if (saindoAgora.has(k)) jaSaindo.push(destinataria);
+    else if (anterior) deNovo.push({ destinataria, linha: anterior });
+    else novas.push(destinataria);
+  }
+  return { novas, deNovo, jaSaindo };
+}
+
 type LinhaParaMandar = { id: string; destinatario: string; origem: OrigemDoResumoPorEmail; automatico: boolean; idioma: string };
 
 /** Quanto a resposta da Resend pode demorar antes de o pedido ficar 'falhou' (e a dona, sem a roda girando). */
@@ -268,7 +340,13 @@ async function mandarAsLinhas(
     return { to: linha.destinatario, subject: assunto, html, text };
   });
   const nenhum = () => emails.map(() => false);
-  const aceitos = await comPrazo(sendEmailBatch(emails).catch(nenhum), PRAZO_DA_RESEND_MS, () => {
+  // sendEmailBatch não lança: se lançar, é defeito de código, e o nome do erro
+  // vai ao log (sem o endereço), para a falha não parecer ser da Resend.
+  const mandados = sendEmailBatch(emails).catch((erro: unknown) => {
+    console.error(`[ResumoPorEmail] sendEmailBatch lançou (reunião ${meetingId}): ${erro instanceof Error ? erro.name : "erro desconhecido"}`);
+    return nenhum();
+  });
+  const aceitos = await comPrazo(mandados, PRAZO_DA_RESEND_MS, () => {
     console.error(`[ResumoPorEmail] a Resend não respondeu em ${PRAZO_DA_RESEND_MS / 1000} s (reunião ${meetingId}); os e-mails ficam para o "Tentar de novo".`);
     return nenhum();
   });
@@ -318,7 +396,9 @@ export async function mandarResumoPorEmail(
     }
     const daAgenda = (await participantesComEmail(tx, dona.openId, meetingId)).map(participante => participante.email);
     const destinatarias = destinatariasDoPedido(pedido, { emailDaDona: conta.email?.trim() || null, daAgenda });
-    await conferirTetos(tx, dona.openId, meetingId, destinatarias.length, agora);
+    const { novas, deNovo, jaSaindo } = separarPeloQueJaHa(destinatarias, await linhasQueNaoSairam(tx, dona.openId, meetingId), agora);
+    // Só a linha nova conta no teto: a que volta a sair já contou quando nasceu.
+    await conferirTetos(tx, dona.openId, meetingId, novas.length, agora);
 
     let link = linkDaReuniao(reuniao);
     const linkLigadoAgora = !link;
@@ -336,12 +416,21 @@ export async function mandarResumoPorEmail(
     }
 
     const idioma: IdiomaDaReuniao = idiomaDaReuniao(reuniao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
-    const linhas = destinatarias.map(destinataria => ({
+    const linhasNovas = novas.map(destinataria => ({
       id: crypto.randomUUID(), meetingId, ownerId: dona.openId, loteId: lote,
       destinatario: destinataria.email, origem: destinataria.origem, idioma,
       status: "pendente" as const, automatico: false, tentativas: 0, createdAt: agora, updatedAt: agora,
     }));
-    await tx.insert(resumoPorEmail).values(linhas);
+    // Todas as pessoas já têm o e-mail saindo agora (outra aba mandou há instantes): nada a gravar nem a mandar.
+    if (!linhasNovas.length && !deNovo.length) {
+      return { linhas: [] as LinhaParaMandar[], link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
+    }
+    if (linhasNovas.length) await tx.insert(resumoPorEmail).values(linhasNovas);
+    if (deNovo.length) {
+      await tx.update(resumoPorEmail).set({ status: "pendente", updatedAt: agora })
+        .where(and(eq(resumoPorEmail.ownerId, dona.openId), inArray(resumoPorEmail.id, deNovo.map(item => item.linha.id))));
+    }
+    const vaoAgora = [...novas, ...deNovo.map(item => item.destinataria)];
     // A prova do pedido, na mesma transação: sem ela, nada é gravado nem sai.
     await tx.insert(auditLogs).values({
       userId: dona.id,
@@ -350,25 +439,33 @@ export async function mandarResumoPorEmail(
       resourceId: meetingId,
       details: {
         lote,
-        quantidade: linhas.length,
+        quantidade: vaoAgora.length,
         porOrigem: {
-          dona: destinatarias.filter(d => d.origem === "dona").length,
-          participante: destinatarias.filter(d => d.origem === "participante").length,
-          digitado: destinatarias.filter(d => d.origem === "digitado").length,
+          dona: vaoAgora.filter(d => d.origem === "dona").length,
+          participante: vaoAgora.filter(d => d.origem === "participante").length,
+          digitado: vaoAgora.filter(d => d.origem === "digitado").length,
         },
         idioma,
         linkLigadoAgora,
         automatico: false,
-        destinatarios: destinatarias.map(d => hashDoEmail(d.email)),
+        destinatarios: vaoAgora.map(d => hashDoEmail(d.email)),
+        // As que não saíram antes e voltam a sair agora, e as que já estavam saindo (de fora deste envio).
+        ...(deNovo.length ? { deNovo: deNovo.length, lotesDeNovo: Array.from(new Set(deNovo.map(item => item.linha.loteId))) } : {}),
+        ...(jaSaindo.length ? { jaSaindo: jaSaindo.length } : {}),
       },
       ipAddress: requisicao.ipAddress.substring(0, 45),
       userAgent: requisicao.userAgent ? requisicao.userAgent.substring(0, 500) : null,
       status: "success",
       riskLevel: "medium",
     });
+    const linhas: LinhaParaMandar[] = [
+      ...linhasNovas.map(linha => ({ id: linha.id, destinatario: linha.destinatario, origem: linha.origem, automatico: false, idioma: linha.idioma })),
+      ...deNovo.map(({ linha }) => ({ id: linha.id, destinatario: linha.destinatario, origem: linha.origem, automatico: false, idioma: linha.idioma })),
+    ];
     return { linhas, link, titulo: reuniao.titulo, nomeDaDona: conta.nome?.trim() || null, linkLigadoAgora };
   });
 
+  if (!preparado.linhas.length) return { enviados: 0, falharam: 0, linkLigadoAgora: preparado.linkLigadoAgora };
   const resultado = await mandarAsLinhas(db, dona.openId, meetingId, preparado.linhas, {
     site, link: preparado.link, titulo: preparado.titulo, nomeDaDona: preparado.nomeDaDona,
   });

@@ -41,6 +41,7 @@ const duble = vi.hoisted(() => ({
   // As props que o "Pergunte à reunião" e o resumo receberam da página, na última vez.
   propsDaPergunta: null as Record<string, unknown> | null,
   propsDoResumo: null as Record<string, unknown> | null,
+  propsDoMapa: null as Record<string, unknown> | null,
   // Ligado, a página monta o "Pergunte à reunião" de verdade, que lê a
   // resposta da pergunta pelo link daqui (o `data` da mutação).
   perguntaDeVerdade: false,
@@ -110,14 +111,16 @@ vi.mock("@/components/ResumoGuardado", () => ({
 // "Prazos" traduzido), e o botão faz o papel do mapa que fica pronto.
 type TraducaoDoMapaRecebida = { estado: string; traduzirRotulo: (rotulo: string) => string };
 vi.mock("@/components/MapaMental", () => ({
-  MapaMentalDaReuniao: ({ token, meetingId, titulo, emoji, traducao, aoMudarRotulos }: {
-    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void;
-  }) => (
-    <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
+  MapaMentalDaReuniao: (props: {
+    token?: string; meetingId?: string; titulo: string; emoji?: string | null; traducao?: TraducaoDoMapaRecebida; aoMudarRotulos?: (rotulos: string[]) => void; aoPedirSenha?: () => void;
+  }) => {
+    duble.propsDoMapa = props;
+    const { token, meetingId, titulo, emoji, traducao, aoMudarRotulos } = props;
+    return <div data-testid="mapa-mental">{token} | {meetingId ?? "sem id"} | {titulo} | {emoji ?? "sem emoji"}
       <span data-testid="traducao-do-mapa">{traducao?.estado} {traducao?.traduzirRotulo("Prazos")}</span>
       {aoMudarRotulos && <button type="button" onClick={() => aoMudarRotulos(["Prazos"])}>rótulos do mapa</button>}
-    </div>
-  ),
+    </div>;
+  },
 }));
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
@@ -157,6 +160,7 @@ beforeEach(() => {
   duble.traduzirResumoDaDona = { mutate: vi.fn() };
   duble.propsDaPergunta = null;
   duble.propsDoResumo = null;
+  duble.propsDoMapa = null;
   duble.perguntaDeVerdade = false;
   duble.respostaDaPergunta = undefined;
 });
@@ -755,6 +759,53 @@ describe("o link com senha e o link sem o áudio (H23)", () => {
     duble.resumoGuardado.mockReturnValue({ data: undefined, isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch: vi.fn() });
     abrir();
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a entrada vence com a pergunta, o mapa ou o áudio na tela: cada um relê a reunião, que traz a tela da senha", () => {
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    const { container } = abrir();
+    act(() => (duble.propsDaPergunta!.aoPedirSenha as () => void)());
+    expect(refetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Mapa mental" }));
+    act(() => (duble.propsDoMapa!.aoPedirSenha as () => void)());
+    expect(refetch).toHaveBeenCalledTimes(2);
+    // Sem a entrada, a rota do áudio responde 404: o áudio que não carrega relê também.
+    fireEvent.error(container.querySelector("audio")!);
+    expect(refetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("a tradução da transcrição recusou com a entrada vencida: com a senha de novo, ela é pedida outra vez (e não só limpa)", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    duble.ver.mockReturnValue({ ...pronta(), isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch: vi.fn() });
+    duble.traduzir = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: true, error: { data: { code: "UNAUTHORIZED" } } } as typeof duble.traduzir;
+    abrir();
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByRole("textbox", { name: "6-digit password" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open the meeting" }));
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(2);
+    expect(duble.traduzir.mutate.mock.calls[1][0]).toEqual({ token: TOKEN, language: "en" });
+  });
+
+  it("a tradução do resumo recusa com a entrada vencida: a página relê a reunião; com a senha de novo, a tradução é pedida outra vez", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    const refetch = vi.fn();
+    duble.ver.mockReturnValue({ ...pronta(), refetch });
+    duble.resumoGuardado.mockReturnValue({ data: { estado: "pronto", emoji: null, idioma: "pt-BR", itens: [{ section: "decision", subject: null, text: "Renovar o contrato", assignee: null, due: null, excerpt: "vamos renovar", startSeconds: 9, status: "confirmed" }] }, isError: false, error: null, refetch: vi.fn() });
+    abrir();
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(1);
+    const [, { onError }] = duble.traduzirResumo.mutate.mock.calls[0] as [unknown, { onError: (erro: unknown) => void }];
+    // A releitura da reunião já vem com a tela da senha.
+    duble.ver.mockReturnValue({ ...pronta(), isError: true, error: { data: { code: "UNAUTHORIZED" } }, refetch });
+    act(() => onError({ data: { code: "UNAUTHORIZED" } }));
+    expect(refetch).toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "6-digit password" }), { target: { value: "482913" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open the meeting" }));
+    const { onSuccess } = duble.entrar.mutate.mock.calls[0][1] as { onSuccess: (resultado: unknown) => void };
+    act(() => onSuccess({ entrou: true }));
+    expect(duble.traduzirResumo.mutate).toHaveBeenCalledTimes(2);
   });
 
   it("a tela da senha em árabe: a página da direita para a esquerda, o campo da esquerda para a direita", async () => {
