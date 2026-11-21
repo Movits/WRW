@@ -49,8 +49,9 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 // arquivos em paralelo no mesmo banco.
 type Escopo = { ownerId?: string };
 
-// Os tokens das reservas desta instância: o SIGTERM devolve exatamente estes.
-const tokensVivos = new Set<string>();
+// As reservas desta instância, do token para a linha: o SIGTERM devolve
+// exatamente estas, pela chave de cada linha.
+const tokensVivos = new Map<string, string>();
 let parada = false;
 
 function linhas(resultado: unknown): number {
@@ -84,6 +85,14 @@ const semReservaViva = (agora: number) => or(isNull(meetingSummaries.lockedUntil
  * tela oferece tentar de novo. O mapa esgotado falha sozinho: o resumo
  * continua pronto. Aqui não sai o aviso de reunião pronta no sino (H15), que
  * registrarFalha dá: é o caso raro, e a varredura é em lote.
+ *
+ * Trava só pela chave: os esgotados saem de uma leitura sem trava, e cada um
+ * vira falha num UPDATE pelo id que repete as condições (a linha que mudou no
+ * meio, reservada ou pedida de novo, não casa mais e fica). O UPDATE pelo
+ * intervalo do índice (estado, locked_until) travava o vão inteiro, com os
+ * resumos de outras donas; a reserva, a gravação do resumo e o pedido movem a
+ * linha dentro desse índice e se travavam com ele (deadlock no CI de 18/11,
+ * com os arquivos de integração em paralelo no mesmo banco).
  */
 async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   const esgotado = (fase: Fase) => and(
@@ -92,10 +101,17 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
     semReservaViva(agora),
     escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
   );
-  await db.update(meetingSummaries).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(esgotado("resumo"));
-  await db.update(meetingSummaries).set({ mindMapStatus: "failed", mindMapError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(esgotado("mapa"));
+  const desistencia = {
+    resumo: { status: "failed" as const, lastError: "TENTATIVAS_ESGOTADAS" },
+    mapa: { mindMapStatus: "failed" as const, mindMapError: "TENTATIVAS_ESGOTADAS" },
+  };
+  for (const fase of ["resumo", "mapa"] as const) {
+    const esgotados = await db.select({ id: meetingSummaries.id }).from(meetingSummaries).where(esgotado(fase));
+    for (const { id } of esgotados) {
+      await db.update(meetingSummaries).set({ ...desistencia[fase], lockToken: null, lockedUntil: null, updatedAt: agora })
+        .where(and(eq(meetingSummaries.id, id), esgotado(fase)));
+    }
+  }
 }
 
 /** O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta ativa. */
@@ -132,7 +148,7 @@ async function proximoTrabalho(db: Banco, agora: number, escopo: Escopo): Promis
 
 async function reservar(db: Banco, id: string, agora: number, fase: Fase): Promise<string | null> {
   const token = crypto.randomUUID();
-  tokensVivos.add(token);
+  tokensVivos.set(token, id);
   const r = await db.update(meetingSummaries).set({
     lockToken: token, lockedUntil: agora + DURACAO_DA_RESERVA_MS,
     attempts: sql`${meetingSummaries.attempts} + 1`, updatedAt: agora,
@@ -502,12 +518,18 @@ export function iniciarFilaDoResumo(intervaloMs = INTERVALO_DA_RODADA_MS) {
  * as reservas desta instância, sem gastar a tentativa, para o próximo processo
  * retomar na hora. O trabalho em curso é abandonado: a gravação dele confere o
  * token, que já não vale.
+ *
+ * Cada reserva volta pela chave da linha, com o token no WHERE. O UPDATE por
+ * `lock_token IN (...)` não tem índice para a coluna e varria os resumos na
+ * fila de todas as donas, travando cada um: a gravação de um resumo vizinho,
+ * que trava a linha dele e depois a move no índice, se travava com ele
+ * (deadlock no CI de 18/11).
  */
 export async function pararFilaDoResumo(): Promise<{ resumos: number }> {
   parada = true;
   clearTimeout(timer);
-  const tokens = Array.from(tokensVivos);
-  if (!tokens.length) return { resumos: 0 };
+  const reservas = Array.from(tokensVivos);
+  if (!reservas.length) return { resumos: 0 };
   let db: Banco;
   try {
     db = await exigirDb();
@@ -516,10 +538,14 @@ export async function pararFilaDoResumo(): Promise<{ resumos: number }> {
     return { resumos: 0 };
   }
   // As duas fases: o resumo pendente e o mapa pendente de um resumo pronto.
-  const r = await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
-    .where(and(inArray(meetingSummaries.lockToken, tokens), or(naFila("resumo"), naFila("mapa"))));
+  let resumos = 0;
+  for (const [token, id] of reservas) {
+    const r = await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
+      .where(and(eq(meetingSummaries.id, id), eq(meetingSummaries.lockToken, token), or(naFila("resumo"), naFila("mapa"))));
+    resumos += linhas(r);
+  }
   tokensVivos.clear();
-  return { resumos: linhas(r) };
+  return { resumos };
 }
 
 /** Só para os testes: a fila volta a aceitar rodadas. */

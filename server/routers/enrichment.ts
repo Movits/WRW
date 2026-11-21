@@ -11,7 +11,10 @@ import {
   getPendingEnrichmentSuggestions, undoEnrichmentSuggestion, criarContextoOferecido,
 } from "../db";
 import { contextoParaOferecer } from "../contexto-oferecido";
-import { ENRICHMENT_STEPS, getEnrichmentStep, isExpectedField, isSkipResponse, limiteDoValor, type EnrichmentField } from "../enrichment-flow";
+import {
+  dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse, limiteDoValor,
+  valorQueNaoInforma, type EnrichmentField,
+} from "../enrichment-flow";
 
 // A IA tem um teto por chamada e um orçamento total (com as retentativas):
 // a tela fica em "pensando" com o campo travado enquanto o servidor espera, e
@@ -71,7 +74,86 @@ async function etapaAtualDaSugestao(sessionId: string, ownerId: string, fieldTyp
   if (!session || session.status !== "active") return null;
   const etapa = session.questionsAnswered ?? 0;
   const step = getEnrichmentStep(etapa);
-  return step && isExpectedField(fieldType, step.fieldType) ? { step, etapa } : null;
+  return step && isExpectedField(fieldType, step.fieldType) ? { step, etapa, contactId: session.contactId } : null;
+}
+
+// ─── O dado de outra pergunta, dito antes da vez ──────────────────────────────
+// "Não sei o telefone. O que ela tem para oferecer: Exportação de café." chega
+// na pergunta do telefone e traz a resposta da pergunta do que ela oferece. A
+// pendência continua POR ETAPA (só a pergunta da vez vira cartão agora): o
+// dado de pergunta SEGUINTE fica guardado na mensagem da usuária
+// (metadata.antecipadas) e vira cartão quando o roteiro chega à pergunta dele —
+// a usuária confirma ou ignora ali, como qualquer outro cartão (nada extraído
+// por IA entra sozinho). Antes ele sumia, e ela tinha de dizer tudo de novo
+// (conferência de tela do pacote do match, 20/11/2026).
+type Antecipada = { field_type: EnrichmentField; value: string; confidence: number };
+
+const CONFIANCA_DO_CARTAO = 0.7;
+
+/**
+ * O que a IA devolveu para OUTRAS perguntas do roteiro, só as que ainda vêm (a
+ * de antes já passou). Vale o que veio em `outros_campos` e o que veio em
+ * `extracted_entities` com o campo de outra pergunta; o campo vai pelo nome da
+ * pergunta (os apelidos de isExpectedField valem), com o teto e a confiança de
+ * qualquer cartão.
+ */
+function antecipadasDaResposta(parsed: unknown, etapaAtual: number): Antecipada[] {
+  const resposta = (parsed && typeof parsed === "object" ? parsed : {}) as { extracted_entities?: unknown; outros_campos?: unknown };
+  const candidatas = [resposta.extracted_entities, resposta.outros_campos].flatMap(lista => (Array.isArray(lista) ? lista : []));
+  const porCampo = new Map<EnrichmentField, Extraida[]>();
+  for (const candidata of candidatas) {
+    if (!candidata || typeof candidata !== "object") continue;
+    const { field_type, value, confidence } = candidata as { field_type?: unknown; value?: unknown; confidence?: unknown };
+    const indice = indiceDaEtapaDoCampo(String(field_type ?? ""));
+    const valor = typeof value === "string" ? value.trim() : "";
+    const confianca = Number(confidence);
+    if (indice <= etapaAtual || !valor || valorQueNaoInforma(valor) || !(confianca >= CONFIANCA_DO_CARTAO)) continue;
+    const campo = ENRICHMENT_STEPS[indice].fieldType;
+    porCampo.set(campo, [...(porCampo.get(campo) ?? []), { field_type: campo, value: valor, confidence: confianca }]);
+  }
+  return Array.from(porCampo.entries()).flatMap(([campo, itens]) =>
+    (ETAPAS_DE_LISTA.has(campo) ? semRepetidas(itens) : itens.slice(-1)).map(item => ({ field_type: campo, value: item.value, confidence: item.confidence })));
+}
+
+/** As antecipadas da sessão para esta pergunta, na ordem em que foram ditas (na etapa de valor único, a última dita). */
+async function antecipadasDaEtapa(sessionId: string, ownerId: string, fieldType: EnrichmentField): Promise<Extraida[]> {
+  const mensagens = [...(await getEnrichmentMessages(sessionId, ownerId, 50))].reverse(); // cronológica
+  const ditas: Extraida[] = mensagens.flatMap(mensagem => {
+    const guardadas = (mensagem.metadata as { antecipadas?: unknown } | null)?.antecipadas;
+    return (Array.isArray(guardadas) ? guardadas as Antecipada[] : [])
+      .filter(antecipada => antecipada && typeof antecipada.value === "string" && antecipada.value.trim() && isExpectedField(String(antecipada.field_type), fieldType))
+      .map(antecipada => ({ field_type: fieldType, value: antecipada.value.trim(), confidence: Number(antecipada.confidence) || CONFIANCA_DO_CARTAO }));
+  });
+  return ETAPAS_DE_LISTA.has(fieldType) ? semRepetidas(ditas) : ditas.slice(-1);
+}
+
+/**
+ * Faz a pergunta da etapa `indice` (que acabou de chegar). Com antecipadas
+ * para ela, a pergunta já vem com os cartões delas, na mesma mensagem — o que
+ * getMessages devolve ao reidratar —, e a tela espera a decisão em vez do campo
+ * de digitar.
+ */
+async function perguntarEtapa(sessionId: string, ownerId: string, contactId: number, indice: number, metadataExtra: Record<string, unknown> = {}) {
+  const step = getEnrichmentStep(indice)!;
+  const antecipadas = await antecipadasDaEtapa(sessionId, ownerId, step.fieldType);
+  const pergunta = antecipadas.length
+    ? `${step.question} Você já tinha contado isto antes: confirme o que vale ou ignore.`
+    : step.question;
+  const messageId = await saveEnrichmentMessage({
+    sessionId, ownerId, role: "assistant", content: pergunta,
+    metadata: {
+      questionIndex: indice, fieldType: step.fieldType, ...metadataExtra,
+      ...(antecipadas.length ? { awaitingConfirmation: true, deAntecipadas: true } : {}),
+    },
+  });
+  if (!antecipadas.length) return { pergunta, messageId, cartoes: [] as ReturnType<typeof paraCartao>[] };
+  const ids = await saveEnrichmentSuggestions(antecipadas.map(antecipada => ({
+    sessionId, messageId, ownerId, contactId, fieldType: step.fieldType, suggestedValue: antecipada.value, confidence: antecipada.confidence,
+  })));
+  const cartoes = antecipadas.map((antecipada, i) => paraCartao({
+    id: ids[i] ?? "", fieldType: step.fieldType, suggestedValue: antecipada.value, confidence: antecipada.confidence,
+  }));
+  return { pergunta, messageId, cartoes };
 }
 
 // Depois de decidir um cartão: o roteiro só anda quando não sobra NENHUM
@@ -80,7 +162,7 @@ async function etapaAtualDaSugestao(sessionId: string, ownerId: string, fieldTyp
 async function avancarOuEsperarOsOutros(sessionId: string, ownerId: string, fieldType: string, status: "applied" | "ignored", skipped: boolean) {
   const atual = await etapaAtualDaSugestao(sessionId, ownerId, fieldType);
   if (!atual) return { success: true, status, nextQuestion: null, sessionComplete: false, pendentesRestantes: 0 };
-  const { step, etapa } = atual;
+  const { step, etapa, contactId } = atual;
 
   const restantes = separarPendentes(await getPendingEnrichmentSuggestions(sessionId, ownerId), step.fieldType).daEtapaAtual;
   if (restantes.length > 0) {
@@ -99,11 +181,12 @@ async function avancarOuEsperarOsOutros(sessionId: string, ownerId: string, fiel
     await completeEnrichmentSession(sessionId, ownerId, "Cadastro enriquecido com sucesso!");
     return { success: true, status, nextQuestion: null, sessionComplete: true, pendentesRestantes: 0 };
   }
-  const nextMsgId = await saveEnrichmentMessage({
-    sessionId, ownerId, role: "assistant", content: nextStep.question,
-    metadata: { questionIndex: advanced.questionsAnswered, fieldType: nextStep.fieldType },
-  });
-  return { success: true, status, nextQuestion: nextStep.question, nextMessageId: nextMsgId, sessionComplete: false, pendentesRestantes: 0 };
+  // A pergunta seguinte, com os cartões do que a usuária já tinha dito para ela.
+  const proxima = await perguntarEtapa(sessionId, ownerId, contactId, advanced.questionsAnswered);
+  return {
+    success: true, status, nextQuestion: proxima.pergunta, nextMessageId: proxima.messageId, nextSuggestions: proxima.cartoes,
+    sessionComplete: false, pendentesRestantes: 0,
+  };
 }
 
 // ─── Módulo de Enriquecimento com IA (Etapa 4) ────────────────────────────────
@@ -168,24 +251,29 @@ export const enrichmentRouter = router({
       // passava) a resposta da IA em created_at e a conversa reabria trocada.
       const mensagemDaUsuaria = { sessionId: input.sessionId, ownerId: ctx.user.openId, role: "user", content: input.content, createdAt: Date.now() };
 
-      // "Não sei" avança diretamente sem abrir confirmação nem repetir a pergunta anterior.
-      if (isSkipResponse(input.content)) {
-        await saveEnrichmentMessage(mensagemDaUsuaria);
+      // Pular a pergunta da vez (a resposta da usuária já está gravada): a
+      // seguinte, com os cartões do que ela já tinha dito para ela, ou o fim.
+      const pularAPergunta = async () => {
         const advanced = await advanceEnrichmentSession(input.sessionId, ctx.user.openId, session.questionsAnswered ?? 0, true);
         // Outra aba avançou primeiro: nada a gravar; a tela reidrata pelo getMessages.
         if (!advanced) {
           return { messageId: null, aiResponse: null, suggestions: [], sessionComplete: false, completionSummary: null, awaitingConfirmation: false };
         }
-        const nextStep = getEnrichmentStep(advanced.questionsAnswered);
-        if (!nextStep) {
+        if (!getEnrichmentStep(advanced.questionsAnswered)) {
           await completeEnrichmentSession(input.sessionId, ctx.user.openId, "Cadastro enriquecido com sucesso!");
           return { messageId: null, aiResponse: null, suggestions: [], sessionComplete: true, completionSummary: "Cadastro enriquecido com sucesso!", awaitingConfirmation: false };
         }
-        const messageId = await saveEnrichmentMessage({
-          sessionId: input.sessionId, ownerId: ctx.user.openId, role: "assistant", content: nextStep.question,
-          metadata: { questionIndex: advanced.questionsAnswered, fieldType: nextStep.fieldType, skippedPrevious: true },
-        });
-        return { messageId, aiResponse: nextStep.question, suggestions: [], sessionComplete: false, completionSummary: null, awaitingConfirmation: false };
+        const proxima = await perguntarEtapa(input.sessionId, ctx.user.openId, session.contactId, advanced.questionsAnswered, { skippedPrevious: true });
+        return {
+          messageId: proxima.messageId, aiResponse: proxima.pergunta, suggestions: proxima.cartoes, sessionComplete: false, completionSummary: null,
+          awaitingConfirmation: proxima.cartoes.length > 0,
+        };
+      };
+
+      // "Não sei" avança diretamente sem abrir confirmação nem repetir a pergunta anterior.
+      if (isSkipResponse(input.content)) {
+        await saveEnrichmentMessage(mensagemDaUsuaria);
+        return pularAPergunta();
       }
 
       // Buscar histórico das últimas 10 mensagens (em ordem cronológica). A
@@ -211,12 +299,14 @@ REGRAS DE OURO:
 - Se o usuário responder algo relevante a uma pergunta do roteiro, EXTRAIA a entidade imediatamente.
 - Se a resposta for vaga (ex: "tem uma empresa"), PERGUNTE O NOME em vez de aceitar.
 - Se o usuário disser "não sei", pule para a próxima pergunta do roteiro.
+- Se a pessoa não souber ou não tiver o dado da pergunta da vez, deixe "extracted_entities" VAZIO: nunca ponha "não informado", "desconhecido" ou coisa parecida como valor.
 - NUNCA diga "Pode me contar mais sobre esta pessoa?" — isso é proibido. Seja específico.
 - SEMPRE responda em JSON válido. NUNCA adicione texto fora do JSON.
 
-NESTE TURNO, extraia SOMENTE o campo "${step.fieldType}". Não avance o roteiro; a interface avançará após uma única confirmação de quem responde.
+NESTE TURNO, extraia em "extracted_entities" SOMENTE o campo "${step.fieldType}". Não avance o roteiro; a interface avançará após uma única confirmação de quem responde.
+Se a resposta TAMBÉM disser, com todas as letras, o dado de outra pergunta do roteiro (ex.: "Não sei o telefone. Ela oferece exportação de café."), ponha esse dado em "outros_campos", com o field_type daquela pergunta e UM ITEM POR ENTRADA ("oferece exportação de café e tem um armazém em Santos" são duas entradas: "Exportação de café" e "Armazém em Santos"); ele não entra agora, só vira confirmação quando o roteiro chegar lá. Nada deduzido, como nas regras de ouro; sem dado de outra pergunta, "outros_campos" fica vazio.
 FORMATO DE SAÍDA (JSON obrigatório):
-{"next_question": null, "extracted_entities": [{"field_type": "${step.fieldType}", "value": "valor extraído da resposta", "confidence": 0.9, "is_complete": true}], "pending_fields": ["array dos campos ainda não respondidos"], "session_status": "active", "notes_for_user": "texto curto e direto para confirmar o valor, máximo 15 palavras"}`;
+{"next_question": null, "extracted_entities": [{"field_type": "${step.fieldType}", "value": "valor extraído da resposta", "confidence": 0.9, "is_complete": true}], "outros_campos": [{"field_type": "campo de outra pergunta do roteiro", "value": "valor dito", "confidence": 0.9}], "pending_fields": ["array dos campos ainda não respondidos"], "session_status": "active", "notes_for_user": "texto curto e direto para confirmar o valor, máximo 15 palavras"}`;
 
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
         { role: "system", content: systemPrompt },
@@ -248,11 +338,9 @@ FORMATO DE SAÍDA (JSON obrigatório):
         return { messageId, aiResponse: aviso, suggestions: [], sessionComplete: false, completionSummary: null, awaitingConfirmation: false, aiUnavailable: true as const };
       }
 
-      // A IA respondeu: agora a resposta da usuária é parte da conversa.
-      await saveEnrichmentMessage(mensagemDaUsuaria);
-
       let aiText = `Confirme esta informação para continuar.`;
       let extracted: Extraida[] = [];
+      let antecipadas: Antecipada[] = [];
       if (aiResp?.choices?.[0]?.message?.content) {
         try {
           const rawContent = aiResp.choices[0].message.content as string;
@@ -260,16 +348,27 @@ FORMATO DE SAÍDA (JSON obrigatório):
           const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawContent);
           if (parsed.notes_for_user) aiText = parsed.notes_for_user;
           if (parsed.extracted_entities) extracted = parsed.extracted_entities;
+          antecipadas = antecipadasDaResposta(parsed, session.questionsAnswered ?? 0);
         } catch { /* usa defaults */ }
       }
+
+      // A IA respondeu: agora a resposta da usuária é parte da conversa — com o
+      // dado que ela já deu para uma pergunta seguinte, que vira cartão lá.
+      await saveEnrichmentMessage(antecipadas.length ? { ...mensagemDaUsuaria, metadata: { antecipadas } } : mensagemDaUsuaria);
 
       // Não aceitar sugestões de pergunta anterior/seguinte. Na etapa de
       // lista, cada item da resposta ("uma mina, uma fábrica e a patente")
       // vira um cartão — antes só o 1º sobrevivia e os outros sumiam sem
       // aviso; nas demais etapas, um valor só.
-      extracted = extracted.filter(entity => isExpectedField(entity.field_type, step.fieldType) && entity.value?.trim());
+      // O valor que é, ele mesmo, a falta do dado ("Não informado") também não
+      // vira cartão: confirmado, ele seria gravado como o telefone do contato.
+      extracted = extracted.filter(entity => isExpectedField(entity.field_type, step.fieldType) && entity.value?.trim() && !valorQueNaoInforma(entity.value));
       extracted = ETAPAS_DE_LISTA.has(step.fieldType) ? semRepetidas(extracted) : extracted.slice(0, 1);
       if (extracted.length === 0) {
+        // "Não sei o telefone." (com ou sem mais coisa na frase) pula como o
+        // "não sei" sozinho: nada saiu da pergunta da vez e quem responde disse
+        // que não sabe. Repetir a pergunta aqui a repetia para sempre.
+        if (dizQueNaoSabe(input.content)) return pularAPergunta();
         const repeatQuestion = step.fieldType === "company"
           ? "Qual é o nome da empresa em que trabalha?"
           : step.question;

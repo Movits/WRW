@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -70,8 +71,8 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     const db = await getDb();
     if (!db) return;
     for (const dona of [DONA, OUTRA]) {
-      await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, dona));
-      await db.delete(meetings).where(eq(meetings.ownerId, dona));
+      await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.ownerId, dona));
+      await apagarPelaChave(db, meetings, eq(meetings.ownerId, dona));
       await db.delete(users).where(eq(users.openId, dona));
     }
   });

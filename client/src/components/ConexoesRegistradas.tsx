@@ -138,7 +138,12 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
           {conexao.detalhesVisiveis === false
             ? t("networkInteligente.connections.reasonNoAuthorization")
             : conexao.origem === "PLATFORM_MATCH"
-              ? t("networkInteligente.connections.reasonPlatformMatch", { pontuacao: Math.round(conexao.pontuacao ?? 0) })
+              // U3: a nota não chega a quem ainda não vê a lista das conexões
+              // sugeridas (o servidor a manda nula); a frase diz quando ela aparece,
+              // em vez de mostrar "compatibilidade de 0%".
+              ? conexao.pontuacao == null
+                ? t("networkInteligente.connections.reasonPlatformMatchLocked")
+                : t("networkInteligente.connections.reasonPlatformMatch", { pontuacao: Math.round(conexao.pontuacao) })
               : conexao.motivo}
         </p>
       )}

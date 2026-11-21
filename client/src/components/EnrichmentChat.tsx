@@ -33,6 +33,9 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
   country: "network.campoPaisIA", linkedin_url: "network.campoLinkedinIA", instagram_handle: "network.campoInstagramIA",
   asset_tag: "network.campoAtivoIA", need_tag: "network.campoNecessidadeIA", context_link: "network.campoContextoIA",
   relationship_type: "network.campoRelacionamentoIA", notes: "network.campoNotasIA",
+  // Os campos com o nome da PERGUNTA do roteiro (server/enrichment-flow.ts), que é o que o servidor grava no cartão
+  // dessas etapas: sem eles, o cartão do que a pessoa oferece saía rotulado "assets", em inglês e cru.
+  assets: "network.campoAtivoIA", needs: "network.campoNecessidadeIA", how_met: "network.campoContextoIA",
 };
 
 // ─── Card de sugestão ─────────────────────────────────────────────────────────
@@ -287,6 +290,14 @@ export function EnrichmentChat({ contactId, contactName }: { contactId: number; 
     }
   };
 
+  // A pergunta seguinte, que chega na resposta de confirmar ou ignorar; com os
+  // cartões do que a usuária já tinha dito para ela, quando há.
+  const acrescentarPergunta = (id: string, content: string, suggestions?: Suggestion[]) => {
+    setMessages(prev => prev.some(msg => msg.id === id)
+      ? prev
+      : [...prev, { id, role: "assistant", content, ...(suggestions?.length ? { suggestions } : {}) }]);
+  };
+
   // Decisão registrada no servidor: o cartão sai da tela por aqui, nunca antes.
   const marcarSugestao = (suggestionId: string, status: Suggestion["status"]) => {
     setMessages(prev => prev.map(m => m.suggestions
@@ -376,16 +387,17 @@ export function EnrichmentChat({ contactId, contactName }: { contactId: number; 
         setOfertaDeContexto({ suggestionId, nome: data.contextoParaCriar });
       }
       // A etapa de lista pode ter vários cartões: a digitação só volta quando
-      // o servidor diz que não sobrou nenhum — é ele quem conta.
-      setAwaitingConfirmation(data.pendentesRestantes > 0);
+      // o servidor diz que não sobrou nenhum — é ele quem conta. A pergunta
+      // seguinte pode chegar com cartões (o que a usuária já tinha dito para
+      // ela): aí a tela espera a decisão deles.
+      const cartoesNovos = "nextSuggestions" in data && data.nextSuggestions ? data.nextSuggestions : [];
+      setAwaitingConfirmation(data.pendentesRestantes > 0 || cartoesNovos.length > 0);
       if (data.sessionComplete) {
         setIsComplete(true);
         setCompletionSummary(t("enrichment.enrichedSuccess"));
         void utils.enrichment.getActiveSession.invalidate({ contactId });
       } else if (data.nextQuestion && data.nextMessageId) {
-        setMessages(prev => prev.some(msg => msg.id === data.nextMessageId)
-          ? prev
-          : [...prev, { id: data.nextMessageId, role: "assistant", content: data.nextQuestion }]);
+        acrescentarPergunta(data.nextMessageId, data.nextQuestion, cartoesNovos);
       }
       sincronizarDepoisDoServidor();
     },
@@ -410,15 +422,14 @@ export function EnrichmentChat({ contactId, contactName }: { contactId: number; 
   const ignoreMut = trpc.enrichment.ignoreSuggestion.useMutation({
     onSuccess: (data, { suggestionId }) => {
       marcarSugestao(suggestionId, "ignored");
-      setAwaitingConfirmation(data.pendentesRestantes > 0);
+      const cartoesNovos = "nextSuggestions" in data && data.nextSuggestions ? data.nextSuggestions : [];
+      setAwaitingConfirmation(data.pendentesRestantes > 0 || cartoesNovos.length > 0);
       if (data.sessionComplete) {
         setIsComplete(true);
         setCompletionSummary(t("enrichment.enrichedSuccess"));
         void utils.enrichment.getActiveSession.invalidate({ contactId });
       } else if (data.nextQuestion && data.nextMessageId) {
-        setMessages(prev => prev.some(msg => msg.id === data.nextMessageId)
-          ? prev
-          : [...prev, { id: data.nextMessageId, role: "assistant", content: data.nextQuestion }]);
+        acrescentarPergunta(data.nextMessageId, data.nextQuestion, cartoesNovos);
       }
       sincronizarDepoisDoServidor();
     },

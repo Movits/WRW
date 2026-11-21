@@ -23,8 +23,10 @@ import { ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlo
 import {
   avancarConexao, ComissaoAntesDoFechamento, ConexaoNaoEncontrada, contarConexoes, definirStatusDeComissao,
   ETAPAS_DA_CONEXAO, EtapaForaDeOrdem, listarConexoesDaSolicitante, listarTodasAsConexoes, ORIGENS_DA_CONEXAO, sincronizarConexoesInternas,
+  trancarANotaEntreMembras, type ConexaoParaQuemPergunta,
 } from "../network-registro";
 import { createAuditLog } from "../security";
+import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import { hasValidConsent } from "./consent";
 
 /**
@@ -167,7 +169,10 @@ export const networkInteligenteRouter = router({
     if (!(await termoDoSmartMatch(ctx.user.id))) return { termoAceito: false as const };
     await sincronizarConexoesInternas(ctx.user.openId);
     const lista = await listarConexoesDaSolicitante(ctx.user);
-    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: lista.slice(0, 50) };
+    // U3: a nota das conexões entre membras (PLATFORM_MATCH) não vai a quem ainda não vê a lista das conexões
+    // sugeridas (a Bronze, inclusive a que tem o poder de distribuidora: o poder não é nível). A contagem não lê nota.
+    const visiveis: ConexaoParaQuemPergunta[] = veAsConexoesSugeridas(ctx.user.role) ? lista : trancarANotaEntreMembras(lista);
+    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: visiveis.slice(0, 50) };
   }),
 
   avancarConexao: protectedProcedure

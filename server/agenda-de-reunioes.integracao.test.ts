@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -56,10 +57,10 @@ describe.skipIf(!temBanco)("Agenda de reuniões (integração)", () => {
     const db = await getDb();
     if (!db) return;
     const donas = [DONA, OUTRA, EXCLUIDA];
-    await db.delete(agendaReunioes).where(inArray(agendaReunioes.ownerId, donas));
+    await apagarPelaChave(db, agendaReunioes, inArray(agendaReunioes.ownerId, donas));
     // A reunião marcada com lembrete agenda o aviso no sino (H15).
-    await db.delete(lembretes).where(inArray(lembretes.ownerId, donas));
-    await db.delete(meetings).where(inArray(meetings.ownerId, donas));
+    await apagarPelaChave(db, lembretes, inArray(lembretes.ownerId, donas));
+    await apagarPelaChave(db, meetings, inArray(meetings.ownerId, donas));
     await db.delete(users).where(inArray(users.openId, donas));
   });
 

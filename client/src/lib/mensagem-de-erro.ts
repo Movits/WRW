@@ -2,7 +2,9 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
@@ -104,6 +106,10 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR]: "resumoPorEmail.erros.nadaAReenviar",
   // O link com senha, sem a entrada de quem a acertou (H23, server/link-aberto-da-reuniao.ts).
   [MENSAGEM_SENHA_DO_LINK_PEDIDA]: "meetings.openLink.password.required",
+  // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
+  [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
+  // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
+  [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
 };
 
 /**
