@@ -8,7 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { SmartMatchConsent } from "@/components/SmartMatchConsent";
-import { analisarTermo, nomeiamAMesmaCoisa, slugDoTermo } from "@shared/direcao-do-termo";
+import { analisarTermo, mesmoObjetoAMenosDoLugar, nomeiamAMesmaCoisa, slugDoTermo } from "@shared/direcao-do-termo";
 import { familiaDoServico, mesmaFamiliaEEspecialidade, necessidadeGenericaNomeiaOServico } from "@shared/tipo-da-oferta";
 
 type EntryKind = "asset" | "need";
@@ -43,11 +43,14 @@ export function seloDoMatch(match: { matchType: string; matchedAssets: ItemDoMat
   }
   if (match.matchType !== "exact") return t("intelligentMatches.seloSignificados");
 
+  // O mesmo objeto vale a menos do lugar de um lado só, como no motor (revisão de 17/11): "Exportação de café" ×
+  // "Importação de café do Brasil" é oferta e procura, e não "Tag exata".
   const porDirecaoOposta = match.matchedAssets.some(ativo =>
     match.matchedNeeds.some(necessidade => {
       const a = analisarTermo(ativo.label);
       const n = analisarTermo(necessidade.label);
-      return a.objeto === n.objeto && a.direcao !== "neutro" && n.direcao !== "neutro" && a.direcao !== n.direcao;
+      const mesmoObjeto = a.objeto === n.objeto || mesmoObjetoAMenosDoLugar(a.objeto, n.objeto);
+      return mesmoObjeto && a.direcao !== "neutro" && n.direcao !== "neutro" && a.direcao !== n.direcao;
     }));
 
   if (porDirecaoOposta) return t("intelligentMatches.seloOfertaProcura");
