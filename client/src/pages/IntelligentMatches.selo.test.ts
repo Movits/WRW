@@ -89,3 +89,17 @@ describe("seloDoMatch — o 100 pelo mesmo serviço não é 'Tag exata' (9e866b9
     expect(seloDoMatch({ matchType: "exact", matchedAssets: [item("Exportar vinho")], matchedNeeds: [item("Importar vinho")] }, t)).toBe("seloOfertaProcura");
   });
 });
+
+describe("seloDoMatch — o lugar não muda o selo (revisão de 17/11)", () => {
+  it("o mesmo objeto em direções opostas, com o lugar de um lado só ou a rota, diz 'Oferta e procura'", () => {
+    for (const [ativo, necessidade] of [
+      ["Exportação de café", "Importação de café"],
+      ["Exportação de café", "Importação de café do Brasil"],
+      ["Export coffee", "Import coffee to Europe"],
+      ["Exportar café", "Importar café del Brasil"],
+      ["Exportação de soja do Brasil", "Importação de soja para a China"],
+    ]) {
+      expect(seloDoMatch({ matchType: "exact", matchedAssets: [item(ativo)], matchedNeeds: [item(necessidade)] }, t), `${ativo} × ${necessidade}`).toBe("seloOfertaProcura");
+    }
+  });
+});

@@ -29,6 +29,8 @@ vi.mock("./routers/consent", () => ({
 vi.mock("./_core/llm", () => ({ invokeLLM: async () => ({ choices: [{ message: { content: "insight" } }] }) }));
 
 // Banco simulado por fila: cada SELECT terminado devolve a próxima resposta.
+// Na rodada do motor de perfis a ordem é: o perfil da dona, as linhas que ela já tem em `matches` e as
+// páginas de candidatas (sem o teto de 50, as linhas existentes passaram a ser lidas antes da comparação).
 const filas: unknown[][] = [];
 const upserts: Array<{ values: Record<string, unknown> }> = [];
 const deletes: unknown[] = [];
@@ -215,7 +217,7 @@ const candidata = (userId: number, extra: Record<string, unknown>) => ({ userId,
 
 describe("generateMatchesForUser — o par bloqueado não é gravado nem apagado", () => {
   it("candidata sem demanda expressa: nenhum upsert e NENHUM delete (a dispensa da dona sobrevive); candidata com 'consultoria': upsert", async () => {
-    filas.push([dona], [candidata(2, { whatINeed: ["fornecedores"] }), candidata(3, { whatINeed: ["consultoria"] })], []);
+    filas.push([dona], [], [candidata(2, { whatINeed: ["fornecedores"] }), candidata(3, { whatINeed: ["consultoria"] })]);
 
     const criados = await generateMatchesForUser(1);
 
@@ -423,7 +425,7 @@ describe("calculateCompatibilityScore — área de atuação que o classificador
 
   it("no 'Reanalisar' o par da advogada com a indústria não é gravado", async () => {
     const advogada = { userId: 1, whatIHave: [], whatINeed: [], activityArea: "Direito", primarySpecialty: "legal", sector: "Jurídico", country: "BR", city: "Brasília", values: ["innovation"] };
-    filas.push([advogada], [candidata(2, { whatINeed: ["distribuidores"], sector: "Indústria" })], []);
+    filas.push([advogada], [], [candidata(2, { whatINeed: ["distribuidores"], sector: "Indústria" })]);
 
     const criados = await generateMatchesForUser(1);
 

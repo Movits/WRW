@@ -708,13 +708,28 @@ async function blocoOuro(oppId) {
 }
 
 async function blocoConsentimentoFecho() {
-  const S = estado.sessao.S;
+  const S = estado.sessao.S, P = estado.sessao.P;
   checar("revogar o termo do Smart Match", await S.post("consent.revoke", { type: "termo_smart_match" }), d => d?.success === true);
   checarNegativa("Smart Match volta a barrar após a revogação", await S.get("intelligentMatches.list"), [SEM_CONSENTIMENTO]);
   checar("histórico guarda a revogação (revokedAt)", await S.get("consent.history"), d => lista(d).some(h => h.revokedAt));
-  // A conta QA nunca tem linha em `matches`, então [] não distingue trava de tabela
-  // vazia; o que esta linha prova é que a rota DEGRADA com 200 em vez de 403.
-  checar("matches.list degrada (200 com lista) em vez de 403 sem termo", await S.get("matches.list", {}), d => Array.isArray(d) && d.length === 0);
+  // A conta S chega aqui Bronze (o blocoOuro a revoga, e sem perfil ela cai em
+  // Bronze), e desde a U3 matches.list sai vazio para a Bronze ANTES de olhar o
+  // termo: esta linha prova só a trava do nível, e diz isso.
+  checar("matches.list da Bronze: 200 e lista vazia, antes do termo (U3)", await S.get("matches.list", {}), d => Array.isArray(d) && d.length === 0);
+  // O número das conexões possíveis passa pela trava do termo em qualquer nível:
+  // sem termo, 200 e zero, e não 403.
+  checar("matches.conexoesPossiveis sem termo (Bronze): 200, zero e a lista trancada", await S.get("matches.conexoesPossiveis"),
+    d => d?.total === 0 && d?.listaLiberada === false);
+  // A degradação da LISTA sem termo se prova com quem vê a lista: a presidente QA
+  // também revoga o dela. A conta QA nunca tem linha em `matches`, então [] não
+  // distingue trava de tabela vazia; o que estas linhas provam é que as rotas
+  // DEGRADAM com 200 em vez de 403.
+  if (checar("revogar o termo do Smart Match (presidente QA)", await P.post("consent.revoke", { type: "termo_smart_match" }), d => d?.success === true)) {
+    checar("matches.list degrada (200 com lista) em vez de 403 sem termo (presidente QA, que vê a lista)", await P.get("matches.list", {}),
+      d => Array.isArray(d) && d.length === 0);
+    checar("matches.conexoesPossiveis sem termo (presidente QA): 200, zero e a lista liberada", await P.get("matches.conexoesPossiveis"),
+      d => d?.total === 0 && d?.listaLiberada === true);
+  }
 }
 
 async function blocoSessao() {

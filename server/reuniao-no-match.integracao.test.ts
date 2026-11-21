@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -161,23 +162,23 @@ describe.skipIf(!temBanco)("N5 — a reunião vira conexões e refina o perfil (
     const participacoes = await db.select({ conexaoId: conexoesParticipantes.conexaoId }).from(conexoesParticipantes).where(eq(conexoesParticipantes.ownerId, DONA));
     if (participacoes.length) {
       const ids = participacoes.map(p => p.conexaoId);
-      await db.delete(conexoesParticipantes).where(inArray(conexoesParticipantes.conexaoId, ids));
+      await apagarPelaChave(db, conexoesParticipantes, inArray(conexoesParticipantes.conexaoId, ids));
       await db.delete(conexoesRegistradas).where(inArray(conexoesRegistradas.id, ids));
     }
-    await db.delete(aiMatchSuggestions).where(eq(aiMatchSuggestions.ownerId, DONA));
-    await db.delete(contactAssets).where(eq(contactAssets.ownerId, DONA));
-    await db.delete(contactNeeds).where(eq(contactNeeds.ownerId, DONA));
-    await db.delete(networkSugestoes).where(eq(networkSugestoes.ownerId, DONA));
-    await db.delete(privateContacts).where(eq(privateContacts.ownerId, DONA));
-    await db.delete(meetingContactSuggestions).where(eq(meetingContactSuggestions.ownerId, DONA));
-    await db.delete(meetingEntities).where(eq(meetingEntities.ownerId, DONA));
-    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, aiMatchSuggestions, eq(aiMatchSuggestions.ownerId, DONA));
+    await apagarPelaChave(db, contactAssets, eq(contactAssets.ownerId, DONA));
+    await apagarPelaChave(db, contactNeeds, eq(contactNeeds.ownerId, DONA));
+    await apagarPelaChave(db, networkSugestoes, eq(networkSugestoes.ownerId, DONA));
+    await apagarPelaChave(db, privateContacts, eq(privateContacts.ownerId, DONA));
+    await apagarPelaChave(db, meetingContactSuggestions, eq(meetingContactSuggestions.ownerId, DONA));
+    await apagarPelaChave(db, meetingEntities, eq(meetingEntities.ownerId, DONA));
+    await apagarPelaChave(db, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, consumoDeMinutos, eq(consumoDeMinutos.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     // A prova do link ligado (ligarLinkAberto grava a auditoria).
-    await db.delete(auditLogs).where(eq(auditLogs.userId, idDaDona));
-    await db.delete(userProfiles).where(eq(userProfiles.userId, idDaDona));
+    await apagarPelaChave(db, auditLogs, eq(auditLogs.userId, idDaDona));
+    await apagarPelaChave(db, userProfiles, eq(userProfiles.userId, idDaDona));
     await db.delete(users).where(eq(users.openId, DONA));
   });
 

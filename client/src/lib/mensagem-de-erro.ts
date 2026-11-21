@@ -2,7 +2,9 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
@@ -76,6 +78,10 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
   [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
   [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
+  // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
+  [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
+  // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
+  [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
 };
 
 /**

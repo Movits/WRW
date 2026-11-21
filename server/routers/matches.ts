@@ -7,6 +7,7 @@ import { exigirDb } from "../db";
 // Todo recálculo daqui também registra as conexões internas novas (Meu Network
 // Inteligente, item 16): o registro mora no fim de recalculatePrivateMatches.
 import { recalculatePrivateMatches, slugifyMatchTag } from "../match-service";
+import { direcoesDoMotivo, slugsPorContato } from "../motivo-da-conexao-privada";
 import { protectedProcedure, router } from "../_core/trpc";
 import { origemDasConexoes } from "../reuniao-no-match";
 import { hasValidConsent } from "./consent";
@@ -49,15 +50,21 @@ async function assertOwnedContact(ownerId: string, contactId: number) {
 export const intelligentMatchesRouter = router({
   list: smartMatchProcedure.query(async ({ ctx }) => {
     const db = await exigirDb();
-    const [matches, contacts] = await Promise.all([
+    const [matches, contacts, ativos] = await Promise.all([
       db.select().from(aiMatchSuggestions).where(eq(aiMatchSuggestions.ownerId, ctx.user.openId)).orderBy(desc(aiMatchSuggestions.matchScore)),
       db.select().from(privateContacts).where(eq(privateContacts.ownerId, ctx.user.openId)),
+      db.select({ contactId: contactAssets.contactId, slug: contactAssets.tagSlug, label: contactAssets.tagLabel })
+        .from(contactAssets).where(eq(contactAssets.ownerId, ctx.user.openId)),
     ]);
     const names = new Map(contacts.map(contact => [contact.id, { name: contact.fullName, company: contact.company, jobTitle: contact.jobTitle }]));
     // N5: a reunião de que a conexão nasceu (o item confirmado que ela cita), com o trecho.
     const origens = await origemDasConexoes(ctx.user.openId, matches);
+    // A frase do motivo vai à tela também como dado (quem possui o quê), para sair no idioma dela: a reasonText é
+    // escrita em português pela rodada do motor (conferência de tela do pacote do match, 20/11).
+    const possuidos = slugsPorContato(ativos);
     return matches.map(match => ({
       ...match, contactA: names.get(match.contactAId), contactB: names.get(match.contactBId), origem: origens.get(match.id) ?? null,
+      motivo: direcoesDoMotivo(match, possuidos),
     }));
   }),
 

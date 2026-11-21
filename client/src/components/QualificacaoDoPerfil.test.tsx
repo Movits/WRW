@@ -110,4 +110,11 @@ describe("QualificacaoDoPerfil", () => {
     expect(screen.getByRole("heading", { name: "Bronze Member: your profile is being qualified" })).toBeInTheDocument();
     expect(screen.getByRole("listitem")).toHaveTextContent("City");
   });
+
+  it("o título tem tamanho próprio: sem ele, herda o tamanho global de h2 e engole o cartão", () => {
+    // Visto a 375 px no Painel da Bronze (U3, 19/11): o título ocupava quatro
+    // linhas em letra de manchete. O tamanho é o dos títulos de seção do Perfil.
+    render(<QualificacaoDoPerfil role="bronze" perfil={{}} />);
+    expect(screen.getByRole("heading", { name: "Membro Bronze: seu perfil está em qualificação" })).toHaveClass("text-base");
+  });
 });

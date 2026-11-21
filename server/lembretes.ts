@@ -167,15 +167,28 @@ async function contaDaDona(ex: Executor, ownerId: string): Promise<number | null
   return conta?.id ?? null;
 }
 
-/** Os avisos do gravador da dona que levam a um endereço. Os de outros tipos ficam. */
+/**
+ * Os avisos do gravador da dona que levam a um endereço. Os de outros tipos ficam.
+ *
+ * Pela chave, como o aviso de pronta (avisarReuniaoPronta, abaixo): o DELETE pela
+ * conta, pelo tipo e pelo endereço travava o intervalo da conta no índice
+ * pnotif_userId_idx, com o vão até a conta vizinha, e esperava pelo aviso que
+ * outra transação acabava de criar na mesma conta; duas contas vizinhas excluindo
+ * uma reunião e recebendo um aviso ao mesmo tempo travavam uma o INSERT da outra
+ * (deadlock). A leitura sem trava basta: o aviso que nascer depois dela, para uma
+ * origem que está saindo, é o caso estreito do lembrete que dispara no mesmo
+ * instante da exclusão, e fica no sino como aviso sem destino; o deadlock fazia a
+ * exclusão inteira falhar.
+ */
 export async function apagarAvisosDoEndereco(ex: Executor, ownerId: string, endereco: string) {
   const contaId = await contaDaDona(ex, ownerId);
   if (contaId === null) return;
-  await ex.delete(platformNotifications).where(and(
+  const avisos = await ex.select({ id: platformNotifications.id }).from(platformNotifications).where(and(
     eq(platformNotifications.userId, contaId),
     inArray(platformNotifications.type, [...TIPOS_DO_GRAVADOR]),
     eq(platformNotifications.actionUrl, endereco),
   ));
+  for (const { id } of avisos) await ex.delete(platformNotifications).where(eq(platformNotifications.id, id));
 }
 
 /** A reunião excluída leva os avisos dela (o de pronta, com o título): nada dela fica no sino. */
@@ -197,11 +210,19 @@ export async function avisarReuniaoPronta(ex: Executor, ownerId: string, meeting
     .limit(1);
   if (!reuniao) return false;
   const endereco = rotaDaReuniao(meetingId);
-  await ex.delete(platformNotifications).where(and(
+  // O aviso anterior sai pela chave. O DELETE pela conta travava o intervalo
+  // dela no índice pnotif_userId_idx, com o vão até a conta vizinha: duas
+  // reuniões de contas vizinhas ficando prontas ao mesmo tempo travavam uma o
+  // INSERT da outra (deadlock no CI de 18/11). A leitura sem trava basta:
+  // quem chama segura a linha do resumo desta reunião (gravarResumo e
+  // registrarFalha, em server/fila-do-resumo.ts), então outro aviso dela não
+  // entra no meio.
+  const anteriores = await ex.select({ id: platformNotifications.id }).from(platformNotifications).where(and(
     eq(platformNotifications.userId, reuniao.contaId),
     eq(platformNotifications.type, "reuniao_pronta"),
     eq(platformNotifications.actionUrl, endereco),
   ));
+  for (const { id } of anteriores) await ex.delete(platformNotifications).where(eq(platformNotifications.id, id));
   const parametros: ParametrosDaReuniaoPronta = { titulo: reuniao.titulo, resumo };
   await ex.insert(platformNotifications).values({
     userId: reuniao.contaId, type: "reuniao_pronta", title: tituloDoAviso(reuniao.titulo), body: null,
