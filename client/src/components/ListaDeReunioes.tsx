@@ -187,7 +187,11 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
               onChange={evento => setTermo(evento.target.value)}
               onFocus={() => setMostraRecentes(true)}
               onBlur={() => setTimeout(() => setMostraRecentes(false), 150)}
-              onKeyDown={evento => { if (evento.key === "Enter" && termo.trim()) { lembrar(termo); setMostraRecentes(false); } }}
+              onKeyDown={evento => {
+                // O Enter que confirma a composição do teclado (japonês, chinês) não é uma busca.
+                if (evento.nativeEvent.isComposing) return;
+                if (evento.key === "Enter" && termo.trim()) { lembrar(termo); setMostraRecentes(false); }
+              }}
               className="w-full min-w-0 bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-white/35" />
             {termo && <button type="button" aria-label={t("meetings.search.clear")} onClick={() => { setTermo(""); campo.current?.focus(); }}
               className="shrink-0 rounded-md p-1 text-white/50 hover:text-white"><X size={15} /></button>}

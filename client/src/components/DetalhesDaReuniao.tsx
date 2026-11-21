@@ -160,6 +160,8 @@ function Editor({ meetingId, detalhes, etiquetasSugeridas, aoFechar }: {
           <input dir="auto" value={novaEtiqueta} disabled={cheia} maxLength={ETIQUETA_MAX} placeholder={t("meetings.details.tagsPlaceholder")}
             onChange={evento => setNovaEtiqueta(evento.target.value)}
             onKeyDown={evento => {
+              // O Enter que confirma a composição do teclado (japonês, chinês) é do teclado, não da etiqueta.
+              if (evento.nativeEvent.isComposing) return;
               if ((evento.key === "Enter" || evento.key === ",") && novaEtiqueta.trim()) { evento.preventDefault(); acrescentar(novaEtiqueta); }
             }}
             className={campoDeTexto} />

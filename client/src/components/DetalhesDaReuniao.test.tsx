@@ -87,6 +87,18 @@ describe("DetalhesDaReuniao", () => {
     });
   });
 
+  it("o Enter que confirma a composição do teclado (japonês, chinês) não cria etiqueta", () => {
+    abrir({ titulo: "Reunião" });
+    fireEvent.click(screen.getByRole("button", { name: "Editar detalhes" }));
+    const etiqueta = screen.getByRole("textbox", { name: "Etiquetas" });
+    fireEvent.change(etiqueta, { target: { value: "かいぎ" } });
+    fireEvent.keyDown(etiqueta, { key: "Enter", isComposing: true });
+    expect(screen.queryByRole("button", { name: "Tirar a etiqueta かいぎ" })).not.toBeInTheDocument();
+    expect(etiqueta).toHaveValue("かいぎ");
+    fireEvent.keyDown(etiqueta, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Tirar a etiqueta かいぎ" })).toBeInTheDocument();
+  });
+
   it("escolhe o contato pela busca na rede da dona", async () => {
     rede.respostas["network.list"] = { data: [{ id: 42, fullName: "Bia Souza", company: "Café Brasil" }], total: 1 };
     abrir({ titulo: "Reunião" });
