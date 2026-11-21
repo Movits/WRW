@@ -1933,6 +1933,7 @@
     "contatoBFallback": "联系人B",
     "rotuloOferece": "提供：",
     "rotuloProcura": "· 寻找：",
+    "motivoDaConexao": "{{quem}}拥有{{itens}}，正是{{outro}}在寻找的。",
     "botaoAceitar": "接受",
     "botaoDispensar": "忽略",
     "statusAceita": "连接已接受",

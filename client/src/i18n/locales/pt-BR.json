@@ -1933,6 +1933,7 @@
     "contatoBFallback": "Contato B",
     "rotuloOferece": "Oferece:",
     "rotuloProcura": "· Procura:",
+    "motivoDaConexao": "{{quem}} possui {{itens}}, que {{outro}} procura.",
     "botaoAceitar": "Aceitar",
     "botaoDispensar": "Dispensar",
     "statusAceita": "Conexão aceita",

@@ -1933,6 +1933,7 @@
     "contatoBFallback": "Contact B",
     "rotuloOferece": "Offers:",
     "rotuloProcura": "· Looking for:",
+    "motivoDaConexao": "{{quem}} has {{itens}}, which {{outro}} is looking for.",
     "botaoAceitar": "Accept",
     "botaoDispensar": "Dismiss",
     "statusAceita": "Connection accepted",

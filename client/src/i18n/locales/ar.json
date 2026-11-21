@@ -1933,6 +1933,7 @@
     "contatoBFallback": "جهة الاتصال ب",
     "rotuloOferece": "يقدّم:",
     "rotuloProcura": "· يبحث عن:",
+    "motivoDaConexao": "لدى {{quem}}: {{itens}}، وهو ما يبحث عنه {{outro}}.",
     "botaoAceitar": "قبول",
     "botaoDispensar": "تجاهل",
     "statusAceita": "تم قبول الاتصال",

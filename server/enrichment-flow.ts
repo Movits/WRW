@@ -17,6 +17,33 @@ export function isSkipResponse(value: string) {
   return /^(n[aã]o sei|não tenho|nao tenho|desconheço|desconheco|não informado|nao informado)$/i.test(value.trim());
 }
 
+// "Não sei", "não tenho", "não lembro", "desconheço" (e o mesmo em inglês e espanhol) em qualquer ponto da resposta,
+// como palavra inteira: "Não sei o telefone.", "o telefone eu não sei", "não tenho o número dela", "I don't know".
+const DIZ_QUE_NAO_SABE = new RegExp(
+  "(?<!\\p{L})(?:"
+  + "n[aã]o\\s+(?:sei|sabemos|lembro|me\\s+lembro|tenho|temos|tem|conhe[cç]o|fa[cç]o\\s+ideia)|desconhe[cç]o|sei\\s+l[aá]"
+  + "|(?:do\\s+not|don['’]?t)\\s+(?:know|have|remember)|no\\s+idea"
+  + "|no\\s+(?:lo\\s+)?s[eé]|no\\s+tengo|no\\s+recuerdo|ni\\s+idea"
+  + ")(?!\\p{L})",
+  "iu",
+);
+
+/**
+ * A resposta diz que quem responde não sabe (ou não tem) o dado: "Não sei o telefone. O que ela tem para oferecer:
+ * Exportação de café." Vale só quando a IA não tirou nada da pergunta da vez — "não sei o celular, o fixo é
+ * 3333-4444" tem o fixo, e o fixo vira cartão. Antes só o "não sei" sozinho pulava a pergunta (`isSkipResponse`), e a
+ * frase com qualquer coisa a mais repetia a mesma pergunta para sempre (conferência de tela do pacote do match,
+ * 20/11/2026).
+ */
+export function dizQueNaoSabe(value: string) {
+  return DIZ_QUE_NAO_SABE.test(value);
+}
+
+/** O índice, no roteiro, da pergunta que o campo responde (os apelidos de `isExpectedField` valem), ou -1. */
+export function indiceDaEtapaDoCampo(fieldType: string) {
+  return ENRICHMENT_STEPS.findIndex(step => isExpectedField(fieldType, step.fieldType));
+}
+
 /**
  * Teto do valor confirmado, por campo, igual ao da coluna de destino em
  * drizzle/schema.ts (ver aplicarRespostaAoContato em server/db.ts). Sem isto,

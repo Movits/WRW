@@ -1933,6 +1933,7 @@
     "contatoBFallback": "連絡先B",
     "rotuloOferece": "提供：",
     "rotuloProcura": "· 希望：",
+    "motivoDaConexao": "{{quem}}は{{itens}}を持っていて、{{outro}}がそれを探しています。",
     "botaoAceitar": "承認",
     "botaoDispensar": "却下",
     "statusAceita": "つながりを承認済み",

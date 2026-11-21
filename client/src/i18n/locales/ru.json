@@ -1933,6 +1933,7 @@
     "contatoBFallback": "Контакт B",
     "rotuloOferece": "Предлагает:",
     "rotuloProcura": "· Ищет:",
+    "motivoDaConexao": "{{quem}} предлагает {{itens}}, а {{outro}} это ищет.",
     "botaoAceitar": "Принять",
     "botaoDispensar": "Отклонить",
     "statusAceita": "Связь принята",

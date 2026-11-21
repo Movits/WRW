@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENRICHMENT_STEPS, getEnrichmentStep, isExpectedField, isSkipResponse } from "./enrichment-flow";
+import { dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse } from "./enrichment-flow";
 
 describe("roteiro de enriquecimento", () => {
   it("mantém as seis perguntas na ordem obrigatória", () => {
@@ -19,5 +19,44 @@ describe("roteiro de enriquecimento", () => {
     expect(isSkipResponse("não sei")).toBe(true);
     expect(isSkipResponse("Nao tenho")).toBe(true);
     expect(isSkipResponse("Farmacore")).toBe(false);
+  });
+
+  // Conferência de tela do pacote do match (20/11/2026): "Não sei o telefone. O que ela tem para oferecer: Exportação
+  // de café." repetia a pergunta do telefone. O router só pula com isto quando a IA não tirou nada da pergunta da vez.
+  it.each([
+    "Não sei o telefone. O que ela tem para oferecer: Exportação de café.",
+    "o telefone eu não sei",
+    "NÃO SEI",
+    "nao tenho o numero dela",
+    "Ela não tem empresa",
+    "não lembro o nome da empresa",
+    "Não faço ideia",
+    "desconheço",
+    "sei lá",
+    "I don't know her phone",
+    "no idea",
+    "No sé el teléfono",
+  ])("'%s' diz que não sabe", resposta => {
+    expect(dizQueNaoSabe(resposta)).toBe(true);
+  });
+
+  it.each([
+    "11 99999-8888",
+    "Ela trabalha na Café Brasil",
+    "Conheci numa feira",
+    "Ela é ótima, conheci numa feira",
+    // Como palavra inteira: "nãosei" colado, "seila", "sabão" e "knowledge" não são a expressão.
+    "Exportação de knowledge e sabão",
+  ])("'%s' não diz que não sabe", resposta => {
+    expect(dizQueNaoSabe(resposta)).toBe(false);
+  });
+
+  it("o campo leva ao índice da pergunta dele no roteiro, com os apelidos", () => {
+    expect(indiceDaEtapaDoCampo("phone")).toBe(0);
+    expect(indiceDaEtapaDoCampo("whatsapp")).toBe(0);
+    expect(indiceDaEtapaDoCampo("asset_tag")).toBe(2);
+    expect(indiceDaEtapaDoCampo("context")).toBe(4);
+    expect(indiceDaEtapaDoCampo("relationship_type")).toBe(5);
+    expect(indiceDaEtapaDoCampo("email")).toBe(-1);
   });
 });

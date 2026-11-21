@@ -65,6 +65,42 @@ export function seloDoMatch(match: { matchType: string; matchedAssets: ItemDoMat
   return t(mesmoServico ? "intelligentMatches.seloMesmoServico" : "intelligentMatches.seloTagExata");
 }
 
+type DirecaoDoMotivo = { deId: number; paraId: number; possui: string[] };
+
+/**
+ * A frase do motivo ("Ana possui Exportar café, que Bia procura."), uma por direção, no idioma da tela.
+ *
+ * A rodada do motor grava a frase em português (`reasonText`), e a tela a desenhava crua: em árabe, a 375 px, saía
+ * "Contato K3 Exportar possui Exportar café, que Contato K2 Importadora procura." (conferência de tela do pacote do
+ * match, 20/11). O servidor manda também de quem para quem e o que um possui (`motivo`); a frase sai daqui, com a
+ * lista no jeito do idioma ("X, Y e Z", "X, Y and Z", "X وY"). Sem direção nenhuma (resposta de antes desta
+ * versão), fica a frase gravada.
+ *
+ * Não é um componente de React (não usa hooks) — recebe `t` e o idioma de quem chama.
+ */
+export function frasesDoMotivo(
+  match: {
+    contactAId: number; contactBId: number; reasonText: string; motivo?: DirecaoDoMotivo[];
+    contactA?: { name: string } | null; contactB?: { name: string } | null;
+  },
+  t: (chave: string, opcoes?: Record<string, unknown>) => string,
+  idioma: string,
+): string[] {
+  const direcoes = (match.motivo ?? []).filter(direcao => direcao.possui.length > 0);
+  if (!direcoes.length) return [match.reasonText];
+  const nome = (id: number) => (id === match.contactAId
+    ? match.contactA?.name ?? t("intelligentMatches.contatoAFallback")
+    : match.contactB?.name ?? t("intelligentMatches.contatoBFallback"));
+  const listar = (itens: string[]) => {
+    try {
+      return new Intl.ListFormat(idioma, { style: "long", type: "conjunction" }).format(itens);
+    } catch {
+      return itens.join(", ");
+    }
+  };
+  return direcoes.map(direcao => t("intelligentMatches.motivoDaConexao", { quem: nome(direcao.deId), itens: listar(direcao.possui), outro: nome(direcao.paraId) }));
+}
+
 export default function IntelligentMatches() {
   const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
@@ -306,7 +342,9 @@ export default function IntelligentMatches() {
                     <span className={`rounded-full px-3 py-1 text-xs ${match.matchType === "mutual" ? "border border-emerald-400/50 bg-emerald-400/10 font-semibold text-emerald-300" : "border border-white/15 text-white/60"}`}>{seloDoMatch(match, t)}</span>
                   </div>
                   <h2 className="text-lg font-semibold">{match.contactA?.name ?? t("intelligentMatches.contatoAFallback")} <span className="text-white/35">→</span> {match.contactB?.name ?? t("intelligentMatches.contatoBFallback")}</h2>
-                  <p className="mt-2 text-sm text-white/65">{match.reasonText}</p>
+                  <p className="mt-2 text-sm text-white/65">
+                    {frasesDoMotivo(match, t, i18n.language).map((frase, indice) => <span key={indice} className="block">{frase}</span>)}
+                  </p>
                   <p className="mt-3 text-xs text-white/40">{t("intelligentMatches.rotuloOferece")} {match.matchedAssets.map(item => item.label).join(", ")} {t("intelligentMatches.rotuloProcura")} {match.matchedNeeds.map(item => item.label).join(", ")}</p>
                   {/* N5: a reunião de que a conexão nasceu, com o trecho que a dona confirmou. */}
                   {match.origem && (
