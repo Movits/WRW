@@ -1,7 +1,7 @@
-import { corteCancelado, lerBlob, limitesDoCorte, recusa, type CorteDoArquivo, type FormatoDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
+import { corteCancelado, lerBlob, limitesDoCorte, recusa, type CorteDoArquivo, type FormatoDoArquivo, type LerBytes, type OpcoesDoCorte } from "./corte-comum";
 import { cortarAdts } from "./corte-do-adts";
 import { cortarFlac } from "./corte-do-flac";
-import { cortarMp3 } from "./corte-do-mp3";
+import { cortarMp3, partesCortadasDoMp3 } from "./corte-do-mp3";
 import { cortarMp4 } from "./corte-do-mp4";
 import { cortarOgg } from "./corte-do-ogg";
 import { cortarWav } from "./corte-do-wav";
@@ -18,6 +18,7 @@ import { cortarWebm } from "./corte-do-webm";
  * | MP3                     | lib/corte-do-mp3.ts      | MP3 (audio/mpeg) |
  * | AAC em ADTS (.aac)      | lib/corte-do-adts.ts     | ADTS (audio/aac) |
  * | WAV (PCM)               | lib/corte-do-wav.ts      | WAV (audio/wav) |
+ * | WAV com MP3 ou MP2      | lib/corte-do-wav.ts      | MP3 (audio/mpeg) |
  * | FLAC                    | lib/corte-do-flac.ts     | FLAC (audio/flac) |
  * | Ogg Opus e Vorbis       | lib/corte-do-ogg.ts      | Ogg (audio/ogg) |
  * | WebM e MKV (Opus, AAC)  | lib/corte-do-webm.ts     | Ogg Opus ou MP4 |
@@ -89,13 +90,7 @@ async function cortarMp3ComoArquivo(ler: LerBytes, tamanho: number, opcoes: Opco
   const corte = await cortarMp3(ler, tamanho, opcoes);
   if (!corte.ok) return recusa(corte.codigo === "LONGO_DEMAIS" ? "LONGO_DEMAIS" : "DANIFICADO", "mp3");
   if (corte.partes.length > limitesDoCorte(opcoes).partesNoMaximo) return recusa("MUITAS_PARTES", "mp3");
-  const partes: ParteCortada[] = corte.partes.map(parte => ({
-    novos: new Uint8Array(0),
-    ordem: Float64Array.from(parte.faixas.flatMap(faixa => [1, faixa.inicio, faixa.fim])),
-    bytes: parte.bytes,
-    duracaoMs: parte.duracaoMs,
-  }));
-  return { ok: true, formato: "mp3", mimeType: "audio/mpeg", partes, duracaoMs: corte.duracaoMs };
+  return { ok: true, formato: "mp3", mimeType: "audio/mpeg", partes: partesCortadasDoMp3(corte.partes), duracaoMs: corte.duracaoMs };
 }
 
 const CORTES: Record<FormatoDoArquivo, (ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte) => Promise<CorteDoArquivo>> = {

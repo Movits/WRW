@@ -25,11 +25,14 @@ const CASOS: Array<[string, Uint8Array, string]> = [
   ["o FLAC de bloco variável", flac({ quadros: 500, variavel: true, bloco: 1152 }).bytes, "audio/flac"],
   ["o Ogg Opus (o áudio do WhatsApp)", oggOpus({ pacotes: 2500 }).bytes, "audio/ogg"],
   ["o Ogg Vorbis", oggVorbis({ pacotes: 1500 }).bytes, "audio/ogg"],
+  // O grânulo do começo não vai para a primeira parte (o servidor lê o maior grânulo dela).
+  ["o Ogg Vorbis que não começa no 0 (o trecho de uma transmissão)", oggVorbis({ pacotes: 1500, granuloInicial: 3600 * 44100 }).bytes, "audio/ogg"],
   ["o WebM do Chrome (em Ogg Opus)", webm({ pacotes: 2500, desconhecido: true }).bytes, "audio/ogg"],
   ["o MKV com AAC (em MP4)", webm({ codec: "A_AAC", pacotes: 2500, video: true }).bytes, "audio/mp4"],
   ["o M4A", mp4({ quadros: 2500, moovNoFim: true }).bytes, "audio/mp4"],
   ["o MOV com vídeo", mp4({ quadros: 2500, qt: true, video: true }).bytes, "audio/mp4"],
   ["o MP4 fragmentado", mp4({ quadros: 2500, fragmentado: true }).bytes, "audio/mp4"],
+  ["o MP4 fragmentado com vídeo e a base implícita (o omit_tfhd_offset do ffmpeg)", mp4({ quadros: 2500, fragmentado: true, video: true, baseDoFragmento: "implicita" }).bytes, "audio/mp4"],
 ];
 
 function partesDe(corte: CorteDoArquivo) {

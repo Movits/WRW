@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import { PARTE_BYTES_MAX } from "./corte-comum";
 import { cortarWav } from "./corte-do-wav";
-import { leitorDe, wav, type OpcoesDoWav } from "@/test/audio-sintetico";
+import { ascii, juntar, leitorDe, u16le, u32le, wav, type OpcoesDoWav } from "@/test/audio-sintetico";
 import { mesmosBytes, montar, partesDe } from "@/test/conferir-partes";
+import { MPEG1_128K, quadros, type FormatoDoQuadro } from "@/test/mp3-sintetico";
+
+/** O quadro MPEG-1 camada II a 128 kbps e 44,1 kHz (o MP2): 417 bytes, 1.152 amostras. */
+const MPEG1_CAMADA_2: FormatoDoQuadro = { cabecalho: [0xff, 0xfd, 0x80, 0x00], tamanho: 417, segundos: 1152 / 44100 };
 
 /**
  * O corte do WAV (H9b): cada parte é um WAV sozinho, com o "fmt " do arquivo,
@@ -87,11 +91,41 @@ describe("cortarWav", () => {
 
   it.each<[string, number, string]>([
     ["o ADPCM da Microsoft", 2, "MS ADPCM"],
-    ["o MP3 dentro do WAV", 0x55, "MP3"],
+    ["o GSM 6.10", 0x31, "GSM 6.10"],
     ["um formato sem nome", 0x1234, "WAV 0x1234"],
   ])("%s: SEM_SUPORTE, com o nome", async (_caso, formato, detalhe) => {
     const { corte } = await cortar({ segundos: 1, formato });
     expect(corte).toEqual({ ok: false, codigo: "SEM_SUPORTE", formato: "wav", detalhe });
+  });
+
+  // O "MP3 em WAV" de gravadores e programas de ligação: a H9a o cortava como
+  // MP3 (pulando o RIFF), e a H9b passou a recusá-lo dizendo "usa MP3".
+  it.each<[string, number, FormatoDoQuadro]>([
+    ["o MP3 dentro do WAV (0x55)", 0x55, MPEG1_128K],
+    ["o MP2 dentro do WAV (0x50)", 0x50, MPEG1_CAMADA_2],
+  ])("%s: sai como MP3, cada parte só com os quadros do data, e as etiquetas depois dele ficam de fora", async (_caso, formato, quadroMpeg) => {
+    const mpeg = quadros(quadroMpeg, 120);
+    const fmt = [...u16le(formato), ...u16le(2), ...u32le(44100), ...u32le(16000), ...u16le(1), ...u16le(0), ...u16le(12), ...new Array(12).fill(0)];
+    const pedaco = (id: string, corpo: ArrayLike<number>) => juntar(ascii(id), u32le(corpo.length), corpo, corpo.length % 2 ? [0] : []);
+    const miolo = juntar(ascii("WAVE"), pedaco("fmt ", fmt), pedaco("fact", u32le(120 * 1152)), pedaco("data", mpeg), pedaco("LIST", juntar(ascii("INFOINAM"), u32le(9), ascii("Reuniao!\0"))));
+    const arquivo = juntar(ascii("RIFF"), u32le(miolo.length), miolo);
+    const lidos: number[] = [];
+    const corte = await cortarWav(leitorDe(arquivo), arquivo.length, { segundosPorParte: 1, aoLer: lidosAgora => lidos.push(lidosAgora) });
+    expect(corte).toMatchObject({ ok: true, formato: "wav", mimeType: "audio/mpeg" });
+    const partes = partesDe(corte);
+    // 120 quadros de 26 ms em partes de 1 s: 38, 38, 38 e 6 quadros.
+    expect(partes.map(p => p.bytes / quadroMpeg.tamanho)).toEqual([38, 38, 38, 6]);
+    const juntas = juntar(...partes.map(parte => montar(arquivo, parte)));
+    expect(mesmosBytes(juntas, mpeg)).toBe(true);
+    if (corte.ok) expect(corte.duracaoMs).toBe(Math.round(120 * quadroMpeg.segundos * 1000));
+    // O andamento conta sobre o arquivo inteiro, e não sobre o data.
+    expect(Math.max(...lidos)).toBeLessThanOrEqual(arquivo.length);
+    expect(Math.max(...lidos)).toBeGreaterThan(mpeg.length);
+  });
+
+  it("o MP3 dentro do WAV que não tem quadros: DANIFICADO, e não 'usa MP3'", async () => {
+    const { corte } = await cortar({ segundos: 1, formato: 0x55 });
+    expect(corte).toEqual({ ok: false, codigo: "DANIFICADO", formato: "wav" });
   });
 
   it("acima de 12 h: LONGO_DEMAIS; e o que passaria de 200 partes: MUITAS_PARTES", async () => {

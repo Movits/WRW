@@ -451,21 +451,46 @@ function quadrosDaTabela(trak: Trak, tamanhoDoArquivo: number, aoQuadro: (posica
   return null;
 }
 
-/** Os quadros da faixa num `moof` (o MP4 fragmentado), com os padrões do `trex`. */
+/** Os padrões do `trex` de cada faixa (a duração e o tamanho das amostras que o fragmento não escreve). */
+type PadroesDasFaixas = Map<number, { duracao: number; tamanho: number }>;
+
+/**
+ * Os quadros da faixa num `moof` (o MP4 fragmentado), com os padrões do `trex`.
+ * Todos os `traf` são percorridos, na ordem, também os das outras faixas: a
+ * base dos dados de cada um (ISO 14496-12, §8.8.7.1) é o base_data_offset,
+ * quando escrito (0x01); o começo do moof, com o default-base-is-moof
+ * (0x020000); e, sem nenhum dos dois, o começo do moof no primeiro `traf` e o
+ * FIM DOS DADOS do `traf` anterior nos seguintes (o implicit_offset do ffmpeg).
+ * O MP4 do ffmpeg com `omit_tfhd_offset` põe o vídeo no primeiro `traf` e o
+ * áudio no segundo assim: contar a base do áudio do começo do moof montava
+ * partes com bytes do vídeo no lugar do AAC.
+ */
 function quadrosDoFragmento(
-  moof: Moof, inicioDoMoof: number, idDaFaixa: number, padrao: { duracao: number; tamanho: number }, tamanhoDoArquivo: number,
+  moof: Moof, inicioDoMoof: number, idDaFaixa: number, padroes: PadroesDasFaixas, tamanhoDoArquivo: number,
   aoQuadro: (posicao: number, tamanho: number, duracao: number) => CodigoDaRecusaDoCorte | null,
 ): CodigoDaRecusaDoCorte | null {
+  let fimDoAnterior = inicioDoMoof;
   for (const traf of moof.trafs ?? []) {
     const tfhd = traf.tfhd;
-    if (!tfhd || tfhd.track_id !== idDaFaixa) continue;
-    // A base é o base_data_offset, quando escrito; senão, o começo do moof (default-base-is-moof, e o que o primeiro traf usa).
-    const base = tfhd.flags & 0x01 ? tfhd.base_data_offset : inicioDoMoof;
+    if (!tfhd) return "DANIFICADO";
+    const daFaixa = tfhd.track_id === idDaFaixa;
+    const padrao = padroes.get(tfhd.track_id) ?? { duracao: 0, tamanho: 0 };
+    const base = tfhd.flags & 0x01 ? tfhd.base_data_offset : tfhd.flags & 0x020000 ? inicioDoMoof : fimDoAnterior;
     const duracaoPadrao = tfhd.flags & 0x08 ? tfhd.default_sample_duration : padrao.duracao;
     const tamanhoPadrao = tfhd.flags & 0x10 ? tfhd.default_sample_size : padrao.tamanho;
     let posicao = base;
     for (const trun of traf.truns ?? []) {
+      // Sem o data_offset, o trun começa onde o anterior do mesmo traf terminou.
       if (trun.flags & 0x01) posicao = base + trun.data_offset;
+      if (!daFaixa) {
+        // A outra faixa (o vídeo) só conta onde os dados dela terminam.
+        for (let i = 0; i < trun.sample_count; i++) {
+          const tamanho = trun.flags & 0x200 ? trun.sample_size[i] : tamanhoPadrao;
+          if (!(tamanho >= 0)) return "DANIFICADO";
+          posicao += tamanho;
+        }
+        continue;
+      }
       for (let i = 0; i < trun.sample_count; i++) {
         const tamanho = trun.flags & 0x200 ? trun.sample_size[i] : tamanhoPadrao;
         const duracao = trun.flags & 0x100 ? trun.sample_duration[i] : duracaoPadrao;
@@ -478,6 +503,7 @@ function quadrosDoFragmento(
         posicao += tamanho;
       }
     }
+    fimDoAnterior = posicao;
   }
   return null;
 }
@@ -489,7 +515,7 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   let ftyp: Uint8Array | null = null;
   let escolhida: Escolhida | null = null;
   let partes: PartesEmFmp4 | null = null;
-  let padrao = { duracao: 0, tamanho: 0 };
+  const padroes: PadroesDasFaixas = new Map();
   let caixas = 0;
   let quadros = 0;
   const contar = (posicao: number, tamanhoDoQuadro: number, duracao: number) => {
@@ -538,9 +564,10 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
       if (!("trak" in escolha)) return recusa(escolha.codigo, "mp4", escolha.detalhe);
       escolhida = escolha;
       partes = new PartesEmFmp4(escolha.faixa, opcoes);
-      const id = escolha.trak.tkhd?.track_id ?? 0;
-      const trex = (iso.moov.mvex?.trexs ?? []).find(t => t.track_id === id);
-      padrao = { duracao: trex?.default_sample_duration ?? 0, tamanho: trex?.default_sample_size ?? 0 };
+      // Os padrões de TODAS as faixas: o fim dos dados do traf do vídeo é a base do traf do áudio que vem depois dele.
+      for (const trex of iso.moov.mvex?.trexs ?? []) {
+        if (!padroes.has(trex.track_id)) padroes.set(trex.track_id, { duracao: trex.default_sample_duration ?? 0, tamanho: trex.default_sample_size ?? 0 });
+      }
       const motivo = quadrosDaTabela(escolha.trak, tamanho, contar);
       if (motivo) return recusa(motivo, "mp4");
     } else if (caixa.tipo === "moof" && escolhida) {
@@ -554,7 +581,7 @@ export async function cortarMp4(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
       }
       const moof = iso.moofs?.[0];
       if (!moof) return recusa("DANIFICADO", "mp4");
-      const motivo = quadrosDoFragmento(moof, caixa.inicio, escolhida.trak.tkhd?.track_id ?? 0, padrao, tamanho, contar);
+      const motivo = quadrosDoFragmento(moof, caixa.inicio, escolhida.trak.tkhd?.track_id ?? 0, padroes, tamanho, contar);
       if (motivo) return recusa(motivo, "mp4");
     }
   }

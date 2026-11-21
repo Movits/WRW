@@ -187,10 +187,21 @@ describe("preparar: as recusas não gravam nada", () => {
     expect(erroDe(recente)).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DO_AUDIO.ausente });
   });
 
-  it("partes que nunca chegaram ou falharam, no prazo: AUDIO_AUSENTE", async () => {
-    const r = await prepararCom({ reuniao: REUNIAO_EM_PARTES, partes: [linha(0, { status: "uploading" }), linha(1, { status: "failed" })] });
+  it("partes que nunca chegaram ou cujo áudio sumiu do bucket, no prazo: AUDIO_AUSENTE", async () => {
+    const r = await prepararCom({ reuniao: REUNIAO_EM_PARTES, partes: [
+      linha(0, { status: "uploading" }), linha(1, { status: "failed", lastError: "NAO_RECEBIDA" }), linha(2, { status: "failed", lastError: "AUDIO_AUSENTE" }),
+    ] });
     expect(erroDe(r)).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DO_AUDIO.ausente });
     expect(r.inserido.valores).toBeUndefined();
+  });
+
+  it("a reunião em que todas as partes falharam na IA tem o áudio guardado: baixa, e não é 'sem áudio'", async () => {
+    const r = await prepararCom({ reuniao: { ...REUNIAO_EM_PARTES, status: "failed" }, partes: [
+      linha(0, { status: "failed", lastError: "TENTATIVAS_ESGOTADAS", offsetMs: null }),
+      linha(1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null }),
+    ] });
+    expect((r as { dados: { partes: Array<{ seq: number; inicioMs: number }> } }).dados.partes.map(p => [p.seq, p.inicioMs])).toEqual([[0, 0], [1, 600_000]]);
+    expect(r.passos).toEqual(["begin", "select meetings", "select meeting_audio_slices", "insert", "commit"]);
   });
 
   it("envio único vencido: AUDIO_VENCIDO; sem gravação, pela data da reunião", async () => {
@@ -206,12 +217,12 @@ describe("preparar: as recusas não gravam nada", () => {
 });
 
 describe("partesParaBaixar: as partes na ordem e no tempo do player", () => {
-  it("ordena pelo seq, usa o início gravado pela fila e, sem ele, a soma das anteriores (contando as que não tocam)", () => {
+  it("ordena pelo seq, usa o início gravado pela fila e, sem ele, a soma das anteriores (contando as que não saem)", () => {
     const partes = partesParaBaixar([
       linha(3, { offsetMs: null, durationMs: 100_000 }),
       linha(0, { offsetMs: 0, durationMs: 600_000 }),
-      // A parte 1 falhou: não sai, mas o tempo dela conta para as seguintes.
-      linha(1, { status: "failed", offsetMs: null, durationMs: 590_000 }),
+      // A parte 1 nunca subiu: não sai, mas o tempo dela conta para as seguintes.
+      linha(1, { status: "failed", lastError: "NAO_RECEBIDA", offsetMs: null, durationMs: 590_000 }),
       linha(2, { status: "received", offsetMs: null, durationMs: 610_000 }),
     ], AGORA);
     expect(partes.map(p => [p.seq, p.inicioMs, p.duracaoMs])).toEqual([[0, 0, 600_000], [2, 1_190_000, 610_000], [3, 1_800_000, 100_000]]);
@@ -220,6 +231,23 @@ describe("partesParaBaixar: as partes na ordem e no tempo do player", () => {
   it("parte vencida ou ainda subindo não sai", () => {
     const partes = partesParaBaixar([linha(0), linha(1, { status: "uploading" }), linha(2, { expiresAt: AGORA })], AGORA);
     expect(partes.map(p => p.seq)).toEqual([0]);
+  });
+
+  // O áudio da parte que falhou na IA continua no bucket (o reprocesso o relê):
+  // sem ele, o arquivo trazia silêncio justo no trecho sem transcrição.
+  it("a parte que falhou na IA, no banco ou nas tentativas sai; a que nunca subiu ou cujo áudio sumiu do bucket, não", () => {
+    const causas = ["IA_INDISPONIVEL", "IA_RECUSOU", "IA_CORTOU", "TEMPOS_FORA_DA_PARTE", "TENTATIVAS_ESGOTADAS", "BANCO_INDISPONIVEL", "ERRO", null];
+    const linhas = [
+      ...causas.map((lastError, seq) => linha(seq, { status: "failed", lastError })),
+      linha(causas.length, { status: "failed", lastError: "NAO_RECEBIDA" }),
+      linha(causas.length + 1, { status: "failed", lastError: "AUDIO_AUSENTE" }),
+    ];
+    expect(partesParaBaixar(linhas, AGORA).map(p => p.seq)).toEqual(causas.map((_c, seq) => seq));
+  });
+
+  it("a mesma regra do reprocesso: a parte com falha da IA no meio sai no tempo dela, entre as transcritas", () => {
+    const partes = partesParaBaixar([linha(0), linha(1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null }), linha(2)], AGORA);
+    expect(partes.map(p => [p.seq, p.inicioMs])).toEqual([[0, 0], [1, 600_000], [2, 1_200_000]]);
   });
 });
 
@@ -291,6 +319,41 @@ describe("a conferência do ffmpeg", () => {
     await expect(conferir()).resolves.toBe(true);
     await expect(conferir()).resolves.toBe(true);
   }, 20_000);
+
+  // Com o servidor como root, a conversão só sobe o ffmpeg como nobody: a
+  // conferência sobe com o mesmo usuário, e a troca recusada vira "não" ANTES de
+  // a preparação auditar e emitir a ficha de um download que falharia.
+  it.each(["EPERM", "EINVAL"])("como root, a troca para o nobody recusada (%s): não, com o motivo no log", async codigo => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const opcoesDoSpawn: unknown[] = [];
+    const recusada = ((_executavel: string, _args: readonly string[], opcoes: unknown) => {
+      opcoesDoSpawn.push(opcoes);
+      throw Object.assign(new Error(`spawn ${codigo}`), { code: codigo });
+    }) as unknown as typeof import("node:child_process").spawn;
+    const conferir = criarConferenciaDoFfmpeg("ffmpeg", () => 0, { usuario: { uid: 65534, gid: 65534 }, spawn: recusada });
+    await expect(conferir()).resolves.toBe(false);
+    expect(opcoesDoSpawn).toHaveLength(1);
+    expect(opcoesDoSpawn[0]).toMatchObject({ uid: 65534, gid: 65534 });
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("não deixou o ffmpeg rodar como o usuário nobody"));
+    vi.restoreAllMocks();
+  });
+
+  it("a conferência sobe o ffmpeg com o mesmo usuário da conversão (usuarioDoFfmpeg), e sem ele fora do root", async () => {
+    const { usuarioDoFfmpeg } = await import("./conversao-do-audio");
+    const opcoesDoSpawn: Array<Record<string, unknown>> = [];
+    const espia = ((_executavel: string, _args: readonly string[], opcoes: Record<string, unknown>) => {
+      opcoesDoSpawn.push(opcoes);
+      throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+    }) as unknown as typeof import("node:child_process").spawn;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await criarConferenciaDoFfmpeg("ffmpeg", () => 0, { spawn: espia })();
+    const esperado = usuarioDoFfmpeg();
+    if (esperado) expect(opcoesDoSpawn[0]).toMatchObject(esperado);
+    else expect(opcoesDoSpawn[0]).not.toHaveProperty("uid");
+    // Sem a troca (fora do root), o "não" é o de sempre, do ffmpeg que não subiu.
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("não subiu ou não tem libmp3lame e aac"));
+    vi.restoreAllMocks();
+  });
 });
 
 describe("nomeDoArquivoDoAudio: o nome que o navegador grava", () => {

@@ -206,12 +206,12 @@ const REUNIAO = {
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
-type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean };
+type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean; audioParaBaixar: unknown };
 function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<Detalhe> = {}) {
   const meeting = { ...REUNIAO, ...reuniao };
   duble.list.mockReturnValue({ data: [meeting], isLoading: false });
   duble.get.mockReturnValue({
-    data: { meeting, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false, ...detalhe },
+    data: { meeting, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false, audioParaBaixar: null, ...detalhe },
     isLoading: false,
   });
   render(<Meetings />);
@@ -321,9 +321,11 @@ describe("Detalhe da reunião — baixar o PDF (H8)", () => {
 // components/BaixarAudioDaReuniao.test.tsx.
 describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   const botaoDoAudio = () => screen.queryByRole("button", { name: "Baixar o áudio" });
+  // O que o servidor diz que se baixa (server/meeting-service.ts, gravacaoParaOuvir).
+  const PARA_BAIXAR = { duracaoSegundos: 900, expiresAt: Date.now() + 1e9 };
 
   it.each(["ready", "processing", "failed"])("'%s' com o áudio no prazo: o botão abre o aviso, com o tamanho da gravação; nada é pedido antes de preparar", status => {
-    abrirDetalhe({ status }, { recording: GRAVACAO });
+    abrirDetalhe({ status }, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
     fireEvent.click(botaoDoAudio()!);
     const aviso = screen.getByRole("dialog", { name: "Baixar o áudio da reunião" });
     // 900 s a 64 kbps: 7,2 MB.
@@ -336,14 +338,14 @@ describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   });
 
   it.each(["recording", "uploading"])("'%s' (a gravação ainda chega): sem o botão", status => {
-    abrirDetalhe({ status, audioPipeline: "slices" }, { recording: GRAVACAO });
+    abrirDetalhe({ status, audioPipeline: "slices" }, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
     expect(botaoDoAudio()).not.toBeInTheDocument();
   });
 
   it.each([
     ["venceu e saiu do bucket", { recording: null, recordingExpired: true }],
     ["venceu e ainda está saindo do bucket", { recording: null, recordingDeletionPending: true }],
-    ["a página aberta desde antes do prazo", { recording: { ...GRAVACAO, expiresAt: Date.now() - 1 } }],
+    ["a página aberta desde antes do prazo", { recording: { ...GRAVACAO, expiresAt: Date.now() - 1 }, audioParaBaixar: { ...PARA_BAIXAR, expiresAt: Date.now() - 1 } }],
   ])("depois dos 30 dias o botão some: %s", (_caso, detalhe) => {
     abrirDetalhe({ status: "ready" }, detalhe);
     expect(screen.getByRole("heading", { name: "Gravação" })).toBeInTheDocument();
@@ -351,9 +353,27 @@ describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   });
 
   it("sem áudio guardado, sem o botão", () => {
-    abrirDetalhe({ status: "ready" }, { recording: null });
+    abrirDetalhe({ status: "ready" }, { recording: null, audioParaBaixar: null });
     expect(screen.getByText("Nenhum áudio guardado para esta reunião.")).toBeInTheDocument();
     expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  // Revisão do pacote 4b: as partes que falharam na IA não tocam no player, mas
+  // o áudio delas está no bucket e sai no arquivo. O botão segue o servidor, e
+  // não a gravação que toca: na reunião que falhou inteira, antes ele sumia.
+  it("a reunião que falhou inteira na IA: nada toca, mas o áudio guardado se baixa, com o aviso de por que não toca", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices" }, { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 1e9 } });
+    expect(screen.getByText("O áudio desta reunião está guardado, mas não toca aqui porque a transcrição falhou. Você pode baixá-lo.")).toBeInTheDocument();
+    expect(screen.queryByText("Nenhum áudio guardado para esta reunião.")).not.toBeInTheDocument();
+    fireEvent.click(botaoDoAudio()!);
+    // 1.500 s a 64 kbps: 12 MB.
+    expect(screen.getByRole("dialog", { name: "Baixar o áudio da reunião" })).toHaveTextContent("Tamanho aproximado: 12 MB.");
+  });
+
+  it("com a parte que falhou na IA depois das que tocam, o aviso leva a duração do arquivo, e não a do player", () => {
+    abrirDetalhe({ status: "ready", audioPipeline: "slices" }, { recording: GRAVACAO, audioParaBaixar: { ...PARA_BAIXAR, duracaoSegundos: 1500 } });
+    fireEvent.click(botaoDoAudio()!);
+    expect(screen.getByRole("dialog", { name: "Baixar o áudio da reunião" })).toHaveTextContent("Tamanho aproximado: 12 MB.");
   });
 });
 

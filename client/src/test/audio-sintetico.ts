@@ -318,9 +318,13 @@ export function oggOpus(o: OpcoesDoOggOpus) {
   return { bytes: juntarMuitos([...paginas, ...audio]), pacotes, amostras: o.pacotes * porPacote };
 }
 
-export type OpcoesDoOggVorbis = { pacotes: number; porPagina?: number; taxa?: number; semente?: number };
+export type OpcoesDoOggVorbis = {
+  pacotes: number; porPagina?: number; taxa?: number; semente?: number;
+  /** O grânulo que o fluxo traz antes do primeiro pacote (o trecho de uma transmissão, gravado de um Icecast). */
+  granuloInicial?: number;
+};
 
-/** Ogg Vorbis: os três cabeçalhos (o setup com bytes de mentira) e os pacotes de áudio, com o grânulo andando 1.024 amostras por pacote. */
+/** Ogg Vorbis: os três cabeçalhos (o setup com bytes de mentira) e os pacotes de áudio, com o grânulo andando 1.024 amostras por pacote (o bloco longo de 2.048). */
 export function oggVorbis(o: OpcoesDoOggVorbis) {
   const serial = 0x777;
   const taxa = o.taxa ?? 44100;
@@ -335,7 +339,7 @@ export function oggVorbis(o: OpcoesDoOggVorbis) {
   const paginas = [
     paginaOgg({ tipo: 2, granulo: 0, serial, seq: 0, lacos: [identificacao.length], corpo: identificacao }),
     ...paginar([comentario, setup], { serial, seqInicial: 1, porPagina: 2, granuloDe: () => 0 }),
-    ...paginar(pacotes, { serial, seqInicial: 2, porPagina: o.porPagina ?? 40, granuloDe: ultimo => (ultimo + 1) * 1024, eos: true }),
+    ...paginar(pacotes, { serial, seqInicial: 2, porPagina: o.porPagina ?? 40, granuloDe: ultimo => (o.granuloInicial ?? 0) + (ultimo + 1) * 1024, eos: true }),
   ];
   return { bytes: juntar(...paginas), pacotes, taxa, amostras: o.pacotes * 1024 };
 }
@@ -459,8 +463,19 @@ export type OpcoesDoMp4 = {
   video?: boolean;
   /** Sem faixa de áudio nenhuma. */
   semAudio?: boolean;
-  /** O MP4 fragmentado (o do Safari): o moov sem amostras e um moof com mdat a cada `porFragmento` quadros. */
+  /**
+   * O MP4 fragmentado (o do Safari): o moov sem amostras e um moof com mdat a
+   * cada `porFragmento` quadros. Com `video`, cada moof traz o traf do vídeo
+   * ANTES do traf do áudio, e o mdat, os dados do vídeo antes dos do áudio.
+   */
   fragmentado?: boolean; porFragmento?: number;
+  /**
+   * De onde o tfhd conta a base dos dados no fragmento: do começo do moof
+   * (default-base-is-moof, o padrão), do base_data_offset escrito ("explicita")
+   * ou de nenhum dos dois ("implicita": o primeiro traf conta do moof, e os
+   * seguintes do fim dos dados do traf anterior, como no omit_tfhd_offset do ffmpeg).
+   */
+  baseDoFragmento?: "moof" | "explicita" | "implicita";
   /** O MOV do QuickTime: ftyp "qt  ", a entrada de som de versão 1 e o esds dentro do wave. Com `semFtyp`, o QuickTime antigo. */
   qt?: boolean; semFtyp?: boolean;
   /** O co64 no lugar do stco. */
@@ -506,16 +521,39 @@ export function mp4(o: OpcoesDoMp4) {
   const quadrosNoArquivo = o.cortado ? quadros.slice(0, Math.floor(quadros.length / 2)) : quadros;
 
   if (o.fragmentado) {
-    const stblVazia = caixa("stbl", caixaCheia("stsd", 0, 0, u32be(1), entradaDeSom(o)), caixaCheia("stts", 0, 0, u32be(0)), caixaCheia("stsc", 0, 0, u32be(0)), caixaCheia("stsz", 0, 0, u32be(0), u32be(0)), caixaCheia("stco", 0, 0, u32be(0)));
-    const moov = caixa("moov", mvhd, trak(1, "soun", stblVazia, taxa), caixa("mvex", caixaCheia("trex", 0, 0, u32be(1), u32be(1), u32be(1024), u32be(0), u32be(0))));
+    const stblVazia = (entrada: Uint8Array) => caixa("stbl", caixaCheia("stsd", 0, 0, u32be(1), entrada), caixaCheia("stts", 0, 0, u32be(0)), caixaCheia("stsc", 0, 0, u32be(0)), caixaCheia("stsz", 0, 0, u32be(0), u32be(0)), caixaCheia("stco", 0, 0, u32be(0)));
+    const avc1 = caixa("avc1", new Array(6).fill(0), u16be(1), new Array(70).fill(0));
+    // O vídeo usa os padrões do trex (512 de duração), e o tamanho vem em cada trun.
+    const trexs = [
+      ...(o.video ? [caixaCheia("trex", 0, 0, u32be(1), u32be(1), u32be(512), u32be(0), u32be(0))] : []),
+      caixaCheia("trex", 0, 0, u32be(idDoAudio), u32be(1), u32be(1024), u32be(0), u32be(0)),
+    ];
+    const moov = caixa("moov", mvhd, ...(o.video ? [trak(1, "vide", stblVazia(avc1), 15360)] : []), trak(idDoAudio, "soun", stblVazia(entradaDeSom(o)), taxa), caixa("mvex", ...trexs));
+    const base = o.baseDoFragmento ?? "moof";
+    const flagsDoTfhd = base === "moof" ? 0x020000 : base === "explicita" ? 0x01 : 0;
     const fragmentos: Uint8Array[] = [];
     const porFragmento = o.porFragmento ?? 25;
+    let posicao = ftyp.length + moov.length;
     for (let i = 0, seq = 1; i < quadros.length; i += porFragmento, seq++) {
       const deste = quadros.slice(i, i + porFragmento);
-      const trun = (dataOffset: number) => caixaCheia("trun", 0, 0x201, u32be(deste.length), u32be(dataOffset), listaU32be(deste.map(q => q.length)));
-      const moofCom = (dataOffset: number) => caixa("moof", caixaCheia("mfhd", 0, 0, u32be(seq)), caixa("traf", caixaCheia("tfhd", 0, 0x020000, u32be(1)), caixaCheia("tfdt", 1, 0, u64be(i * 1024)), trun(dataOffset)));
-      const tamanhoDoMoof = moofCom(0).length;
-      fragmentos.push(moofCom(tamanhoDoMoof + 8), caixa("mdat", juntar(...deste)));
+      const doVideo = o.video ? [aleatorios(3000, 900 + seq), aleatorios(2000, 1900 + seq)] : [];
+      const bytesDoVideo = doVideo.reduce((s, q) => s + q.length, 0);
+      const tfhd = (id: number) => caixaCheia("tfhd", 0, flagsDoTfhd, u32be(id), flagsDoTfhd & 0x01 ? u64be(posicao) : []);
+      const moofCom = (tamanhoDoMoof: number) => {
+        // O data_offset conta da base: o moof (ou o base_data_offset, que aponta para ele) até os dados, depois do cabeçalho do mdat.
+        const dadosDoMoof = tamanhoDoMoof + 8;
+        const trafDoVideo = o.video
+          ? [caixa("traf", tfhd(1), caixaCheia("tfdt", 1, 0, u64be((seq - 1) * 1024)), caixaCheia("trun", 0, 0x201, u32be(doVideo.length), u32be(dadosDoMoof), listaU32be(doVideo.map(q => q.length))))]
+          : [];
+        // Com a base implícita, o áudio conta do fim dos dados do vídeo: data_offset 0, como o ffmpeg escreve.
+        const offsetDoAudio = base === "implicita" && o.video ? 0 : dadosDoMoof + bytesDoVideo;
+        const trafDoAudio = caixa("traf", tfhd(idDoAudio), caixaCheia("tfdt", 1, 0, u64be(i * 1024)), caixaCheia("trun", 0, 0x201, u32be(deste.length), u32be(offsetDoAudio), listaU32be(deste.map(q => q.length))));
+        return caixa("moof", caixaCheia("mfhd", 0, 0, u32be(seq)), ...trafDoVideo, trafDoAudio);
+      };
+      const moof = moofCom(moofCom(0).length);
+      const mdat = caixa("mdat", juntar(...doVideo, ...deste));
+      fragmentos.push(moof, mdat);
+      posicao += moof.length + mdat.length;
     }
     return { bytes: juntarMuitos([ftyp, moov, ...fragmentos]), quadros, taxa };
   }

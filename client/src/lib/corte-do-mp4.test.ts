@@ -59,6 +59,11 @@ describe("cortarMp4: os formatos do MP4", () => {
     ["o MOV antigo, sem o ftyp", { qt: true, semFtyp: true }],
     ["o MP4 com o co64 (os deslocamentos de 64 bits)", { co64: true }],
     ["o MP4 fragmentado (o do Safari)", { fragmentado: true }],
+    // Com mais de um traf por moof, a base de cada traf (ISO 14496-12, §8.8.7.1).
+    ["o MP4 fragmentado com vídeo, a base no moof (default-base-is-moof)", { fragmentado: true, video: true }],
+    ["o MP4 fragmentado com vídeo, a base escrita no tfhd (base_data_offset)", { fragmentado: true, video: true, baseDoFragmento: "explicita" }],
+    // O omit_tfhd_offset do ffmpeg: o traf do áudio, o segundo, conta do fim dos dados do vídeo.
+    ["o MP4 fragmentado com vídeo e a base implícita: o áudio começa onde os dados do vídeo terminam", { fragmentado: true, video: true, baseDoFragmento: "implicita" }],
   ])("%s", async (_caso, o) => {
     const { arquivo, corte } = await cortar({ quadros: 300, ...o }, { segundosPorParte: 2 });
     expect(corte).toMatchObject({ ok: true, formato: "mp4", mimeType: "audio/mp4" });

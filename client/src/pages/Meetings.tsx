@@ -175,7 +175,8 @@ function avisoDaImportacaoRecusada(t: TranslateFn, motivo: CodigoDaRecusaDoCorte
   switch (motivo) {
     case "LONGO_DEMAIS": return t("meetings.importTooLong", { horas: HORAS_DA_GRAVACAO_EM_PARTES });
     case "MUITAS_PARTES": return t("meetings.importTooManyParts");
-    case "SEM_SUPORTE": return t("meetings.importUnsupportedFormat", { formato: detalhe ?? "?" });
+    // Sem o nome do formato (o Ogg encadeado: duas gravações emendadas num arquivo só), o aviso não o cita.
+    case "SEM_SUPORTE": return detalhe ? t("meetings.importUnsupportedFormat", { formato: detalhe }) : t("meetings.importUnsupportedAudio");
     case "SEM_AUDIO": return t("meetings.importNoAudio");
     case "DANIFICADO": return t("meetings.importDamaged");
     case "FORMATO_DESCONHECIDO": return t("meetings.importUnknownFormat");
@@ -599,8 +600,14 @@ export default function Meetings() {
     return enviarArquivoUnico(file, mimeType);
   }
 
-  /** O envio único: o arquivo inteiro num pedido só, até 10 minutos e 10 MB. */
-  async function enviarArquivoUnico(file: File, mimeType: NonNullable<ReturnType<typeof supportedAudioMime>>) {
+  /**
+   * O envio único: o arquivo inteiro num pedido só, até 10 minutos e 10 MB.
+   * `recusaDoCorte` é o motivo de o arquivo ter vindo do corte para cá (o codec
+   * que o corte não lê): se o envio único também não o aceita pela duração,
+   * vale aquele aviso, e não o dos 10 minutos, que a dica da tela não promete
+   * para esse formato.
+   */
+  async function enviarArquivoUnico(file: File, mimeType: NonNullable<ReturnType<typeof supportedAudioMime>>, recusaDoCorte?: { motivo: CodigoDaRecusaDoCorte; detalhe?: string }) {
     if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
@@ -618,6 +625,9 @@ export default function Meetings() {
       const [audioBase64, durationSeconds] = await Promise.all([readAsDataUrl(t, file), lerDuracaoNoNavegador(file)]);
       // Sem duração legível, recusa: assumir um valor (eram 60 s) deixava um
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
+      if (recusaDoCorte && (durationSeconds === null || durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX)) {
+        return toast.error(avisoDaImportacaoRecusada(t, recusaDoCorte.motivo, recusaDoCorte.detalhe));
+      }
       if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
       if (durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) return toast.error(t("meetings.audioTooLong"));
       const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
@@ -652,7 +662,9 @@ export default function Meetings() {
   // O arquivo de um formato que o corte reconhece, mas cujo áudio ele não lê
   // (o Vorbis no WebM, o ALAC no M4A), segue pelo envio único de sempre quando
   // cabe nele (até 10 MB, num tipo que ele aceita; a duração ele confere): é o
-  // que esse arquivo já fazia antes da H9b. Maior que isso, recebe o aviso.
+  // que esse arquivo já fazia antes da H9b. Maior que isso, recebe o aviso; e o
+  // que o envio único recusa pela duração (mais de 10 min, ou ilegível) também
+  // recebe o aviso do formato, que é o motivo de verdade.
   async function importarArquivo(file: File) {
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique.
@@ -663,7 +675,7 @@ export default function Meetings() {
     toast.dismiss(ID_DO_AVISO_SEM_COPIA);
     toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
     toast.dismiss(ID_DO_AVISO_FIM_PENDENTE);
-    let envioUnico: NonNullable<ReturnType<typeof supportedAudioMime>> | null = null;
+    let envioUnico: { tipo: NonNullable<ReturnType<typeof supportedAudioMime>>; recusaDoCorte: { motivo: CodigoDaRecusaDoCorte; detalhe?: string } } | null = null;
     // Como no envio de arquivo: a sessão fica ocupada do clique ao fim.
     const liberarEnvio = ocupar("enviando");
     try {
@@ -674,8 +686,9 @@ export default function Meetings() {
       );
       if (resultado.tipo === "recusada") {
         const tipoDoEnvioUnico = supportedAudioMime(file);
-        if (resultado.motivo === "SEM_SUPORTE" && tipoDoEnvioUnico && file.size <= ENVIO_UNICO_BYTES_MAX) envioUnico = tipoDoEnvioUnico;
-        else toast.error(avisoDaImportacaoRecusada(t, resultado.motivo, resultado.detalhe));
+        if (resultado.motivo === "SEM_SUPORTE" && tipoDoEnvioUnico && file.size <= ENVIO_UNICO_BYTES_MAX) {
+          envioUnico = { tipo: tipoDoEnvioUnico, recusaDoCorte: { motivo: resultado.motivo, detalhe: resultado.detalhe } };
+        } else toast.error(avisoDaImportacaoRecusada(t, resultado.motivo, resultado.detalhe));
       } else if (resultado.tipo === "cancelada") {
         if (resultado.exclusao) void utils.meetings.list.invalidate();
         // A exclusão que falhou fica guardada, e a retomada de toda tela logada
@@ -707,7 +720,7 @@ export default function Meetings() {
     } finally {
       liberarEnvio();
     }
-    if (envioUnico) await enviarArquivoUnico(file, envioUnico);
+    if (envioUnico) await enviarArquivoUnico(file, envioUnico.tipo, envioUnico.recusaDoCorte);
   }
 
   async function processCapturedAudio() {
@@ -1146,7 +1159,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
     <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} />
   </div></main>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
-  const { meeting, transcript, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento } = data;
+  const { meeting, transcript, entities, suggestions, recording, recordingExpired, recordingDeletionPending, audioParaBaixar, andamento } = data;
   const partesParaOuvir = recording?.partes ?? (recording ? [{ seq: 0, url: recording.url, mimeType: recording.mimeType, inicioSegundos: 0, duracaoSegundos: recording.durationSeconds }] : []);
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
@@ -1171,8 +1184,15 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
   // H8c: baixar o áudio só com a gravação encerrada (gravando ou recebendo
   // partes, o arquivo sairia pela metade) e no prazo dos 30 dias; depois dele o
   // botão some, mesmo com a página aberta desde antes. O servidor recusa os
-  // mesmos casos com código traduzido (server/baixar-audio-da-reuniao.ts).
-  const podeBaixarAudio = !!recording && meeting.status !== "recording" && meeting.status !== "uploading" && recording.expiresAt > Date.now();
+  // mesmos casos com código traduzido (server/baixar-audio-da-reuniao.ts). O
+  // botão segue o `audioParaBaixar` do servidor, e não a gravação que toca: as
+  // partes que falharam na IA não tocam no player, mas o áudio delas está
+  // guardado e sai no arquivo (na reunião que falhou inteira, só ele existe).
+  const podeBaixarAudio = !!audioParaBaixar && meeting.status !== "recording" && meeting.status !== "uploading" && audioParaBaixar.expiresAt > Date.now();
+  const botaoDoAudio = podeBaixarAudio && audioParaBaixar
+    ? <BaixarAudioDaReuniao meetingId={meetingId} duracaoSegundos={audioParaBaixar.duracaoSegundos}
+        nomeSugerido={nomeDoArquivo({ titulo: meeting.title, criadaEm: meeting.createdAt })}/>
+    : null;
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
@@ -1256,8 +1276,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
         <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
         {/* Só a dona baixa o áudio: este detalhe é o dela, e a página do link aberto (ReuniaoAberta.tsx) não tem o botão. */}
-        {podeBaixarAudio && <BaixarAudioDaReuniao meetingId={meetingId} duracaoSegundos={recording.durationSeconds}
-          nomeSugerido={nomeDoArquivo({ titulo: meeting.title, criadaEm: meeting.createdAt })}/>}
+        {botaoDoAudio}
       </> : recordingExpired ? (
         // "A transcrição continua aqui" só é verdade com transcrição, e numa
         // reunião que falhou antes de guardar o áudio não houve gravação apagada.
@@ -1265,7 +1284,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir }: { meetingId: string; on
       ) : recordingDeletionPending ? (
         // Venceu e ainda não saiu do bucket: "foi apagada" só depois que saiu.
         <p className="text-sm text-white/50 mt-3">{t("meetings.recordingDeletionPending")}</p>
-      ) : (
+      ) : botaoDoAudio ? <>
+        {/* Nada toca (as partes falharam na IA), mas o áudio está guardado e se baixa. */}
+        <p className="text-sm text-white/50 mt-3">{t("meetings.recordingOnlyToDownload")}</p>
+        {botaoDoAudio}
+      </> : (
         <p className="text-sm text-white/50 mt-3">{t("meetings.noRecordingStored")}</p>
       )}
       <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></section></div>}

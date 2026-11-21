@@ -21,7 +21,8 @@ import { sdk } from "./sdk";
  *   download como falho (em vez de guardar um arquivo pela metade como se
  *   estivesse inteiro).
  * - A dona que fecha o download, ou cuja rede para por 5 min, encerra a
- *   conversão; a vaga do balcão volta em qualquer saída.
+ *   conversão; a vaga do balcão volta em qualquer saída. A conexão que fecha
+ *   ainda na conferência da sessão nem toma a ficha.
  * - As recusas são JSON `{ codigo }`, como na rota das partes: a tela não lê
  *   esta resposta (a navegação é do próprio navegador), e as recusas que a dona
  *   precisa ler, traduzidas, já saíram no passo do tRPC.
@@ -65,6 +66,10 @@ export function registrarRotaDoAudioBaixado(app: Express, deps: Dependencias = P
       res.setHeader("Allow", "GET");
       return res.status(405).end();
     }
+    // O fim da conexão vale desde já: a dona pode fechar o download (ou a rede
+    // cair) enquanto a sessão é conferida no banco, e esse 'close' não volta.
+    const controle = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) controle.abort(); });
     let usuaria: Awaited<ReturnType<Dependencias["autenticar"]>>;
     try {
       usuaria = await deps.autenticar(req);
@@ -73,14 +78,17 @@ export function registrarRotaDoAudioBaixado(app: Express, deps: Dependencias = P
       return res.status(401).json({ codigo: "SEM_SESSAO" });
     }
     if (usuaria.isCron) return res.status(403).json({ codigo: "SEM_SESSAO" });
+    // A conexão fechou durante a conferência: nada a transmitir, e a ficha nem é
+    // tomada (segue valendo, no prazo dela, para a dona tentar de novo). Sem
+    // isto, a conversão escrevia num destino morto, parava para sempre e
+    // prendia a vaga do balcão até o próximo deploy.
+    if (controle.signal.aborted || res.destroyed) return;
 
     const tomada = deps.balcao.tomar(String(req.params.ficha ?? ""), usuaria.openId);
     // Vencida, já usada, de outra conta ou inventada: a mesma resposta, sem dizer qual.
     if (!tomada) return res.status(404).json({ codigo: "ENDERECO_VENCIDO" });
     const { ficha, terminar } = tomada;
 
-    const controle = new AbortController();
-    res.on("close", () => { if (!res.writableFinished) controle.abort(); });
     res.setTimeout(PRAZO_DA_CONEXAO_PARADA_MS, () => res.destroy());
     try {
       res.status(200);

@@ -373,7 +373,11 @@ sem URL assinada para o navegador. Quem converte é o **ffmpeg que o `Dockerfile
 Mesa e o LLVM junto, e cerca de 134 MB de download no build. A conversão roda com
 prioridade baixa (nice 10), no máximo 2 por vez, e cada dona baixa até 10 áudios por
 hora. Sem o ffmpeg o servidor sobe do mesmo jeito, e só o "Baixar o áudio" responde
-`AUDIO_INDISPONIVEL` (o log diz `[Áudio] o ffmpeg ... não subiu`).
+`AUDIO_INDISPONIVEL` (o log diz `[Áudio] o ffmpeg ... não subiu`). Com o Node como root (a
+imagem não tem `USER`), o ffmpeg só roda como o usuário nobody: se o host negar a troca de
+usuário (as capacidades SETUID e SETGID removidas do contêiner), ele não sobe como root, e o
+mesmo `AUDIO_INDISPONIVEL` sai, com `[Áudio] o sistema não deixou o ffmpeg rodar como o
+usuário nobody` no log.
 
 **Gravação de reunião.** `server/routers/meetings.ts` recebe o áudio como base64
 de até 15 MB em uma requisição e transcreve com LLM dentro dela. Um request pode

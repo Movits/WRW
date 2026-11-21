@@ -34,6 +34,8 @@ const converter = vi.fn();
 const balcao = criarBalcaoDoAudio({ limite: 5 });
 let servidor: Server;
 let base = "";
+/** As respostas cuja conexão fechou, pelo caminho pedido: o servidor percebeu o fechamento. */
+const fechadas: string[] = [];
 
 const CHAVE = "meetings/dona-1/0b6f2c1e/partes/0000-abcd1234.webm";
 const PARTES = [{ seq: 0, storageKey: CHAVE, mimeType: "audio/webm", inicioMs: 0, duracaoMs: 1000 }];
@@ -46,6 +48,7 @@ const baixar = (numero: string) => fetch(`${base}${ROTA_DO_AUDIO_BAIXADO}/${nume
 beforeAll(async () => {
   const app = express();
   app.use(compression());
+  app.use((req, res, proximo) => { res.on("close", () => { if (!res.writableFinished) fechadas.push(req.url); }); proximo(); });
   registrarRotaDoAudioBaixado(app, { autenticar, balcao, converter });
   await new Promise<void>(pronto => { servidor = app.listen(0, "127.0.0.1", () => pronto()); });
   base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
@@ -166,6 +169,32 @@ describe(`GET ${ROTA_DO_AUDIO_BAIXADO}/{ficha}`, () => {
     expect(resposta.status).toBe(200);
     await expect(resposta.arrayBuffer()).rejects.toThrow();
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("parou no meio: o codificador saiu com 1"));
+    await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0), { timeout: 10_000 });
+  });
+
+  // Revisão do pacote 4b: o 'close' que chega enquanto a sessão é conferida no
+  // banco não volta. Antes, a rota tomava a ficha depois, e a conversão de
+  // verdade escrevia num destino morto, parava para sempre e prendia a vaga.
+  it("a conexão que fecha enquanto a sessão é conferida: nada converte, a ficha não é gasta, e a vaga não fica presa", async () => {
+    const numero = emitir();
+    const caminho = `${ROTA_DO_AUDIO_BAIXADO}/${numero}`;
+    let soltar: () => void = () => undefined;
+    autenticar.mockImplementationOnce(() => new Promise(resolver => { soltar = () => resolver({ openId: "dona-1" }); }));
+    const controle = new AbortController();
+    const pedido = fetch(`${base}${caminho}`, { signal: controle.signal }).catch(() => undefined);
+    await vi.waitFor(() => expect(autenticar).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    controle.abort();
+    await pedido;
+    // O servidor já sabe que a conexão fechou; só então a sessão responde.
+    await vi.waitFor(() => expect(fechadas).toContain(caminho), { timeout: 10_000 });
+    soltar();
+    await new Promise(pronto => setTimeout(pronto, 100));
+    expect(converter).not.toHaveBeenCalled();
+    // A ficha segue no balcão, no prazo dela: a dona baixa na tentativa seguinte, e a vaga volta no fim.
+    expect(balcao.ocupadas()).toBe(1);
+    const daDona = await baixar(numero);
+    expect(daDona.status).toBe(200);
+    expect(Buffer.from(await daDona.arrayBuffer()).toString()).toBe("ÁUDIO-1ÁUDIO-2");
     await vi.waitFor(() => expect(balcao.ocupadas()).toBe(0), { timeout: 10_000 });
   });
 
@@ -291,4 +320,21 @@ describe.skipIf(!comFfmpeg)("de ponta a ponta: a rota de verdade, com o ffmpeg d
     },
     60_000,
   );
+
+  // Revisão do pacote 4b: o arquivo só de silêncio (ou vazio) saía com 200, e o
+  // navegador o guardava como o download completo da reunião.
+  it.each([
+    ["nenhuma está no bucket", [`meetings/dona-1/${ID}/partes/0000-sumiu000.webm`, `meetings/dona-1/${ID}/partes/0001-sumiu111.webm`]],
+    ["todas estão estragadas", [`meetings/dona-1/${ID}/partes/0000-estrag00.webm`, `meetings/dona-1/${ID}/partes/0001-estrag11.webm`]],
+  ])("nenhuma parte decodifica (%s): a conexão é cortada, o download fica marcado como falho, e a vaga volta", async (_caso, chaves) => {
+    for (const chave of chaves) if (chave.includes("estrag")) bucket[chave] = Buffer.from("isto não é áudio de verdade");
+    const numero = balcaoReal.reservar().emitir({
+      ownerId: "dona-1", meetingId: ID, formato: "mp3", nomeDoArquivo: "Reunião - 2026-11-18.mp3",
+      partes: chaves.map((storageKey, seq) => ({ seq, storageKey, mimeType: "audio/webm", inicioMs: seq * 1000, duracaoMs: 1000 })),
+    });
+    const resposta = await fetch(`${baseReal}${ROTA_DO_AUDIO_BAIXADO}/${numero}`);
+    expect(resposta.status).toBe(200);
+    await expect(resposta.arrayBuffer()).rejects.toThrow();
+    await vi.waitFor(() => expect(balcaoReal.ocupadas()).toBe(0), { timeout: 10_000 });
+  }, 60_000);
 });

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -75,6 +75,202 @@ describe("o ffmpeg roda contido", () => {
     expect(m4a.join(" ")).toContain("-movflags +empty_moov+default_base_moof");
     expect(m4a.join(" ")).toContain("-f ipod pipe:1");
   });
+});
+
+/**
+ * As proteções da conversão com um ffmpeg DE MENTIRA (revisão do pacote 4b): o
+ * spawn é trocado por um que sobe o próprio Node com um roteiro curto no papel
+ * de cada ffmpeg (o codificador, que recebe o PCM pela entrada; o decodificador
+ * de cada parte). Assim se provam, em qualquer máquina e sem esperar 60 s, o
+ * decodificador parado, o teto do arquivo, o codificador que sai antes da
+ * hora, a troca de usuário recusada, o cancelamento na hora de subir um ffmpeg,
+ * a saída que fecha no meio e o arquivo que sairia só com silêncio.
+ */
+describe("converterPartes: as proteções, com um ffmpeg de mentira", () => {
+  /** O codificador de mentira devolve o PCM como recebeu (um cat), e assim o arquivo é o próprio PCM. */
+  const CAT = "process.stdin.pipe(process.stdout)";
+  /** O decodificador que entrega `bytes` de áudio e termina. */
+  const entrega = (bytes: number) => `process.stdout.write(Buffer.alloc(${bytes}, 7), () => process.exit(0))`;
+  /** O decodificador que entrega `bytes` de áudio e para, sem sair (o ffmpeg travado). */
+  const entregaEPara = (bytes: number) => `process.stdout.write(Buffer.alloc(${bytes}, 7)); setInterval(() => {}, 1 << 30)`;
+  /** O decodificador que não entrega nada e sai com erro (a parte estragada, o codec fora da lista). */
+  const NADA = "process.exit(1)";
+
+  type Chamada = { args: string[]; opcoes: SpawnOptions };
+
+  /** O spawn de mentira: o codificador é o que lê da entrada (pipe:0); o resto é decodificador. */
+  function ffmpegDeMentira(papeis: { codificador?: string; decodificador: string | ((n: number) => string) }) {
+    const chamadas: Chamada[] = [];
+    let decodificadores = 0;
+    const dublado = (_executavel: string, args: readonly string[], opcoes: SpawnOptions) => {
+      chamadas.push({ args: [...args], opcoes });
+      const roteiro = args.includes("pipe:0")
+        ? papeis.codificador ?? CAT
+        : typeof papeis.decodificador === "function" ? papeis.decodificador(decodificadores++) : papeis.decodificador;
+      return spawn(process.execPath, ["-e", roteiro], opcoes);
+    };
+    return { spawn: dublado as unknown as typeof spawn, chamadas };
+  }
+
+  const parte = (seq: number, inicioMs: number, duracaoMs = 1000): ParteDoAudio => ({ seq, storageKey: `parte-${seq}`, mimeType: "audio/webm", inicioMs, duracaoMs });
+
+  async function converterComMentira(
+    partes: ParteDoAudio[], dublado: ReturnType<typeof ffmpegDeMentira>,
+    extra: Partial<DependenciasDaConversao> & { saida?: Writable; sinal?: AbortSignal } = {},
+  ) {
+    const pedacos: Buffer[] = [];
+    const avisos: string[] = [];
+    const pids: number[] = [];
+    const saida = extra.saida ?? new Writable({ write(pedaco, _c, pronto) { pedacos.push(pedaco); pronto(); } });
+    const promessa = converterPartes(partes, "mp3", saida, {
+      lerParte: async () => Buffer.from("parte"), avisar: m => avisos.push(m), aoIniciar: pid => pids.push(pid),
+      prioridade: 0, usuario: null, spawn: dublado.spawn, ...extra,
+    }, extra.sinal ?? new AbortController().signal);
+    return { promessa, pedacos, avisos, pids, bytes: () => Buffer.concat(pedacos) };
+  }
+
+  /** Os erros que escapam sem dono (o 'error' de um filho sem ouvinte derrubaria o servidor). */
+  async function semErroSolto(fazer: () => Promise<void>) {
+    const soltos: unknown[] = [];
+    const registrar = (erro: unknown) => soltos.push(erro);
+    process.on("uncaughtException", registrar);
+    try {
+      await fazer();
+      // O AbortError do spawn cancelado chega num tique seguinte: dá tempo a ele.
+      await new Promise(pronto => setTimeout(pronto, 300));
+    } finally {
+      process.off("uncaughtException", registrar);
+    }
+    expect(soltos).toEqual([]);
+  }
+
+  const todosSairam = (pids: number[]) =>
+    vi.waitFor(() => { for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow(); }, { timeout: 15_000, interval: 50 });
+
+  it("o decodificador que para de entregar áudio é encerrado no prazo, com o aviso, e o arquivo segue com a parte seguinte", async () => {
+    // A parte 0 entrega 0,1 s e para; a 1 entrega 0,1 s e termina.
+    const dublado = ffmpegDeMentira({ decodificador: n => (n === 0 ? entregaEPara(4800) : entrega(4800)) });
+    // 5 s, e não menos: o prazo conta desde a subida do processo, e o Node de
+    // mentira demora a subir com a suíte inteira rodando em paralelo (com 300 ms,
+    // ele era encerrado antes de entregar o primeiro pedaço).
+    const r = await converterComMentira([parte(0, 0), parte(1, 1000)], dublado, { prazoSemSaidaMs: 5000 });
+    await r.promessa;
+    // 0,1 s de cada parte, sem silêncio entre elas (o vão é menor que a folga de 1 s).
+    expect(r.bytes().length).toBe(9600);
+    expect(r.bytes().every(b => b === 7)).toBe(true);
+    expect(r.avisos).toEqual(["[Áudio] a parte 0 passou 5 s sem decodificar; o resto dela sai em silêncio."]);
+    await todosSairam(r.pids);
+  }, 30_000);
+
+  it("o arquivo para no teto: nem o áudio de uma parte nem o silêncio antes da seguinte passam dele", async () => {
+    // A parte entrega mais que o teto (1 s = 48.000 bytes de PCM): o arquivo para no teto.
+    const longa = await converterComMentira([parte(0, 0), parte(1, 5000)], ffmpegDeMentira({ decodificador: entrega(60_000) }), { tetoDoArquivoSegundos: 1 });
+    await longa.promessa;
+    expect(longa.bytes().length).toBe(48_000);
+    // Um início de parte além do teto (um início errado no banco) não vira horas de silêncio.
+    const longe = await converterComMentira([parte(0, 0), parte(1, 3_600_000)], ffmpegDeMentira({ decodificador: entrega(4800) }), { tetoDoArquivoSegundos: 1 });
+    await longe.promessa;
+    expect(longe.bytes().length).toBe(48_000);
+    expect(longe.bytes().subarray(4800).every(b => b === 0)).toBe(true);
+  }, 30_000);
+
+  it("o codificador que sai antes da hora para a conversão, sem ela ficar esperando para sempre", async () => {
+    const dublado = ffmpegDeMentira({ codificador: "process.exit(3)", decodificador: entrega(4 * 1024 * 1024) });
+    const r = await converterComMentira([parte(0, 0)], dublado);
+    await expect(r.promessa).rejects.toThrow();
+    await todosSairam(r.pids);
+  }, 30_000);
+
+  it.each(["EPERM", "EINVAL"])("como root, a troca para o nobody recusada (%s) não sobe o ffmpeg sem ela: a conversão para, e o log diz por quê", async codigo => {
+    const chamadas: SpawnOptions[] = [];
+    const recusada = ((_executavel: string, _args: readonly string[], opcoes: SpawnOptions) => {
+      chamadas.push(opcoes);
+      // O spawn do Node lança na hora quando o sistema recusa o setuid/setgid.
+      throw Object.assign(new Error(`spawn ${codigo}`), { code: codigo, errno: -1, syscall: "spawn" });
+    }) as unknown as typeof spawn;
+    const avisos: string[] = [];
+    const conversao = converterPartes([parte(0, 0)], "mp3", new Writable({ write(_p, _c, pronto) { pronto(); } }), {
+      lerParte: async () => Buffer.from("parte"), avisar: m => avisos.push(m), prioridade: 0,
+      usuario: { uid: 65534, gid: 65534 }, spawn: recusada,
+    }, new AbortController().signal);
+    await expect(conversao).rejects.toMatchObject({ code: codigo });
+    // Uma tentativa só, como nobody: nenhuma como root.
+    expect(chamadas).toHaveLength(1);
+    expect(chamadas[0]).toMatchObject({ uid: 65534, gid: 65534 });
+    expect(avisos.join("\n")).toMatch(/não deixou o ffmpeg rodar como nobody/);
+  });
+
+  it("cancelado enquanto a parte seguinte vai para a pasta temporária: o ffmpeg dela nem sobe, sem erro solto, e nada fica para trás", async () => {
+    const temporaria = mkdtempSync(path.join(os.tmpdir(), "wrw-audio-cancelar-ao-subir-"));
+    try {
+      await semErroSolto(async () => {
+        const controle = new AbortController();
+        const dublado = ffmpegDeMentira({ decodificador: entrega(4800) });
+        const r = await converterComMentira([parte(0, 0), parte(1, 1000)], dublado, {
+          pastaTemporaria: temporaria, sinal: controle.signal,
+          // A parte 0 não está no bucket; a 1 chega depois de um tempo e, ao chegar,
+          // agenda o cancelamento para o meio da gravação dela na pasta temporária.
+          lerParte: async chave => {
+            if (chave === "parte-0") throw new ObjetoAusenteNoStorageError(chave);
+            await new Promise(pronto => setTimeout(pronto, 100));
+            setImmediate(() => controle.abort());
+            return Buffer.alloc(256 * 1024, 1);
+          },
+        });
+        await expect(r.promessa).rejects.toMatchObject({ name: "AbortError" });
+        // Só o codificador subiu: o decodificador da parte 1 não.
+        expect(dublado.chamadas.filter(c => !c.args.includes("pipe:0"))).toHaveLength(0);
+        await todosSairam(r.pids);
+      });
+      expect(readdirSync(temporaria)).toEqual([]);
+    } finally {
+      rmSync(temporaria, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("cancelado logo depois de começar: nenhum ffmpeg sobe, e nenhum erro fica solto", async () => {
+    await semErroSolto(async () => {
+      const controle = new AbortController();
+      const dublado = ffmpegDeMentira({ decodificador: entrega(4800) });
+      const r = await converterComMentira([parte(0, 0)], dublado, { sinal: controle.signal });
+      controle.abort();
+      await expect(r.promessa).rejects.toMatchObject({ name: "AbortError" });
+      expect(dublado.chamadas).toHaveLength(0);
+    });
+  }, 30_000);
+
+  it("a saída que fecha no meio (a conexão caiu) para a conversão: nada fica esperando o cano andar, e os ffmpeg saem", async () => {
+    let chegou = false;
+    const parada = new Writable({ highWaterMark: 1, write() { chegou = true; } });
+    const dublado = ffmpegDeMentira({ decodificador: entrega(2 * 1024 * 1024) });
+    const r = await converterComMentira([parte(0, 0)], dublado, { saida: parada });
+    await vi.waitFor(() => expect(chegou).toBe(true), { timeout: 15_000, interval: 20 });
+    parada.destroy();
+    await expect(r.promessa).rejects.toMatchObject({ name: "AbortError" });
+    await todosSairam(r.pids);
+  }, 30_000);
+
+  it("a saída já fechada: nem começa, e nenhum ffmpeg sobe", async () => {
+    const fechada = new Writable({ write(_p, _c, pronto) { pronto(); } });
+    fechada.destroy();
+    const dublado = ffmpegDeMentira({ decodificador: entrega(4800) });
+    const r = await converterComMentira([parte(0, 0)], dublado, { saida: fechada });
+    await expect(r.promessa).rejects.toMatchObject({ name: "AbortError" });
+    expect(dublado.chamadas).toHaveLength(0);
+  });
+
+  it("nenhuma parte entrega áudio (todas estragadas, ou fora do bucket): a conversão lança, em vez de um arquivo só de silêncio", async () => {
+    const estragadas = await converterComMentira([parte(0, 0), parte(1, 5000)], ffmpegDeMentira({ decodificador: NADA }));
+    await expect(estragadas.promessa).rejects.toThrow("Nenhuma das 2 partes do áudio decodificou");
+    const forDoBucket = await converterComMentira([parte(0, 0), parte(1, 5000)], ffmpegDeMentira({ decodificador: entrega(4800) }), {
+      lerParte: async chave => { throw new ObjetoAusenteNoStorageError(chave); },
+    });
+    await expect(forDoBucket.promessa).rejects.toThrow("Nenhuma das 2 partes do áudio decodificou");
+    // Basta uma que entregue: a outra vira silêncio, e o arquivo sai.
+    const umaBoa = await converterComMentira([parte(0, 0), parte(1, 2000)], ffmpegDeMentira({ decodificador: n => (n === 0 ? NADA : entrega(4800)) }));
+    await umaBoa.promessa;
+    expect(umaBoa.bytes().length).toBe(96_000 + 4800);
+  }, 30_000);
 });
 
 describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
@@ -213,6 +409,44 @@ describe.skipIf(!comFfmpeg)("converterPartes, com o ffmpeg de verdade", () => {
     const m = medir(r.bytes, "mp3");
     const tocou = partes.map(p => ({ tipo: p.mimeType, tocou: m.volume(p.inicioMs / 1000 + 0.2, p.inicioMs / 1000 + 0.8) > ALTO }));
     expect(tocou).toEqual(partes.map(p => ({ tipo: p.mimeType, tocou: true })));
+  }, 60_000);
+
+  it("todo codec que entra numa reunião toca no áudio baixado, e não só um por tipo: o MP2 no audio/mpeg, o ADPCM e o GSM no WAV, o AC-3 e o PCM do QuickTime no MP4", async () => {
+    const codificadores = spawnSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8" }).stdout;
+    const tom = (frequencia: number) => ["-f", "lavfi", "-i", `sine=frequency=${frequencia}:duration=1`, "-ac", "1"];
+    // [nome do arquivo de teste, tipo da parte, argumentos do ffmpeg, codificador que ele pede]
+    const amostras: Array<[string, string, string[], string]> = [
+      // O corte do MP3 e a medida do servidor aceitam as camadas I e II no mesmo audio/mpeg.
+      ["mp2.mp2", "audio/mpeg", [...tom(500), "-ar", "44100", "-c:a", "mp2", "-b:a", "64k", "-f", "mp2"], "mp2"],
+      // O WAV do envio único: o servidor mede o ADPCM e o GSM pelo cabeçalho.
+      ["adpcm-ms.wav", "audio/wav", [...tom(600), "-ar", "16000", "-c:a", "adpcm_ms"], "adpcm_ms"],
+      ["adpcm-ima.wav", "audio/wav", [...tom(700), "-ar", "16000", "-c:a", "adpcm_ima_wav"], "adpcm_ima_wav"],
+      ["gsm.wav", "audio/wav", [...tom(800), "-ar", "8000", "-c:a", "libgsm_ms"], "libgsm_ms"],
+      // O MP4 do envio único traz o que o contêiner trouxer.
+      ["ac3.mp4", "audio/mp4", [...tom(900), "-c:a", "ac3", "-b:a", "96k"], "ac3"],
+      ["eac3.mp4", "audio/mp4", [...tom(1000), "-c:a", "eac3", "-b:a", "96k"], "eac3"],
+      ["pcm-s24be.mov", "audio/mp4", [...tom(1100), "-c:a", "pcm_s24be"], "pcm_s24be"],
+      ["pcm-f32be.mov", "audio/mp4", [...tom(1200), "-c:a", "pcm_f32be"], "pcm_f32be"],
+      // E o WebM do envio único, com o AC-3 dentro.
+      ["ac3.mkv", "audio/webm", [...tom(1300), "-c:a", "ac3", "-b:a", "96k", "-f", "matroska"], "ac3"],
+    ];
+    const disponiveis = amostras.filter(([, , , codificador]) => new RegExp(`\\s${codificador}\\s`).test(codificadores));
+    // O GSM pede a libgsm, que nem todo ffmpeg traz; os outros são do próprio ffmpeg e precisam estar aqui.
+    expect(amostras.filter(a => !disponiveis.includes(a)).map(a => a[3]).filter(c => c !== "libgsm_ms")).toEqual([]);
+    for (const [nome, , args] of disponiveis) audio[`codec:${nome}`] = gerar(nome, args);
+    const partes = disponiveis.map(([nome, tipo], seq) => parte(seq, `codec:${nome}`, tipo, seq * 5000, 1000));
+    const r = await converter(partes);
+    expect(r.avisos).toEqual([]);
+    const m = medir(r.bytes, "mp3");
+    const tocou = partes.map(p => ({ amostra: p.storageKey, tocou: m.volume(p.inicioMs / 1000 + 0.2, p.inicioMs / 1000 + 0.8) > ALTO }));
+    expect(tocou).toEqual(partes.map(p => ({ amostra: p.storageKey, tocou: true })));
+  }, 60_000);
+
+  it("nenhuma parte decodifica (todas estragadas): a conversão lança, em vez de entregar um arquivo só de silêncio", async () => {
+    await expect(converter([
+      parte(0, "bytes:isto não é áudio", "audio/webm", 0, 1000),
+      parte(1, "bytes:nem isto", "audio/mpeg", 1000, 1000),
+    ])).rejects.toThrow("Nenhuma das 2 partes do áudio decodificou");
   }, 60_000);
 
   it("em M4A: AAC fragmentado, mono, 24 kHz, com a duração da reunião", async () => {

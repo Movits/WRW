@@ -6,7 +6,8 @@ import { auditLogs, meetingAudioSlices, meetingRecordings, meetings } from "../d
 import {
   ACAO_AUDIO_BAIXADO, CONVERSOES_DE_AUDIO_SIMULTANEAS, RECUSAS_DO_AUDIO, VALIDADE_DO_ENDERECO_DO_AUDIO_MS, type FormatoDoAudio,
 } from "@shared/baixar-audio";
-import { ambienteDoFfmpeg, type ParteDoAudio } from "./conversao-do-audio";
+import { partesParaBaixar } from "./audio-guardado-das-partes";
+import { ambienteDoFfmpeg, ehTrocaDeUsuarioRecusada, usuarioDoFfmpeg, type ParteDoAudio } from "./conversao-do-audio";
 import { exigirDb } from "./db";
 import { MEETING_AUDIO_TTL_MS, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { storageGetBytes } from "./storage";
@@ -30,10 +31,13 @@ import { storageGetBytes } from "./storage";
  * - Gravando ou recebendo partes, ainda não: o arquivo sairia pela metade.
  *   Processando, pronta ou com falha, sim: o áudio já está inteiro no bucket (e
  *   é justamente na falha que a dona pode querer o áudio).
- * - Saem as partes que o player toca (recebidas ou transcritas, no prazo), no
- *   tempo do player; sem nenhuma, a recusa diz se o áudio passou dos 30 dias
- *   (a mesma conta de gravacaoParaOuvir, em meeting-service.ts) ou se não há
- *   áudio guardado.
+ * - Saem as partes que têm o áudio no bucket, no prazo, no tempo do player: as
+ *   recebidas, as transcritas e as que falharam na IA (que o reprocesso também
+ *   relê; regra em audio-guardado-das-partes.ts). O player toca só as duas
+ *   primeiras, então a tela decide o botão pelo `audioParaBaixar` do detalhe, e
+ *   não pela gravação que toca. Sem nenhuma, a recusa diz se o áudio passou dos
+ *   30 dias (a mesma conta de gravacaoParaOuvir, em meeting-service.ts) ou se
+ *   não há áudio guardado.
  * - A auditoria guarda o formato, as contagens, a duração e os formatos de
  *   origem; nunca a chave do bucket, o título ou o conteúdo.
  */
@@ -52,29 +56,8 @@ export type AudioPreparado = {
   duracaoSegundos: number;
 };
 
-/** O que a preparação lê de cada parte. */
-type LinhaDaParte = {
-  seq: number; status: string; storageKey: string; mimeType: string;
-  durationMs: number; offsetMs: number | null; expiresAt: number;
-};
-
-/**
- * As partes que saem no arquivo, no tempo do player (gravacaoParaOuvir, em
- * meeting-service.ts): o início é o gravado pela fila (offset) ou, antes de ela
- * transcrever, a soma das anteriores, contada sobre TODAS as linhas; saem só as
- * recebidas ou transcritas, no prazo.
- */
-export function partesParaBaixar(linhas: LinhaDaParte[], agora: number): ParteDoAudio[] {
-  const partes: ParteDoAudio[] = [];
-  let acumulado = 0;
-  for (const linha of [...linhas].sort((a, b) => a.seq - b.seq)) {
-    const inicio = linha.offsetMs !== null && linha.offsetMs !== undefined ? Number(linha.offsetMs) : acumulado;
-    acumulado = inicio + Number(linha.durationMs);
-    if ((linha.status !== "received" && linha.status !== "transcribed") || Number(linha.expiresAt) <= agora) continue;
-    partes.push({ seq: linha.seq, storageKey: linha.storageKey, mimeType: linha.mimeType, inicioMs: inicio, duracaoMs: Number(linha.durationMs) });
-  }
-  return partes;
-}
+// A regra das partes que saem mora em audio-guardado-das-partes.ts (a mesma do reprocesso).
+export { partesParaBaixar };
 
 const recusa = (code: "PRECONDITION_FAILED", codigo: string) => new TRPCError({ code, message: codigo });
 const semAudio = (vencido: boolean) => recusa("PRECONDITION_FAILED", vencido ? RECUSAS_DO_AUDIO.vencido : RECUSAS_DO_AUDIO.ausente);
@@ -101,6 +84,7 @@ export async function prepararAudioDaReuniao(ownerId: string, meetingId: string,
       const linhas = await tx.select({
         seq: meetingAudioSlices.seq,
         status: meetingAudioSlices.status,
+        lastError: meetingAudioSlices.lastError,
         storageKey: meetingAudioSlices.storageKey,
         mimeType: meetingAudioSlices.mimeType,
         durationMs: meetingAudioSlices.durationMs,
@@ -264,47 +248,66 @@ export function lerParteDoBucket(storageKey: string): Promise<Buffer> {
 /** Depois de um ffmpeg ausente, quanto tempo até conferir de novo. */
 const ESPERA_DEPOIS_DA_FALTA_MS = 60_000;
 
+/** Como a conferência sobe o ffmpeg; os testes trocam o usuário e o spawn. */
+export type OpcoesDaConferencia = {
+  /** O usuário do ffmpeg; padrão, o mesmo da conversão (usuarioDoFfmpeg: o nobody, com o servidor como root). */
+  usuario?: { uid: number; gid: number } | null;
+  spawn?: typeof spawn;
+};
+
 /**
- * O ffmpeg sobe e tem os dois codificadores (libmp3lame e aac)? A preparação
- * confere antes de auditar, para a dona receber um código traduzido em vez de
- * um download que falha. O sim fica guardado; o não, só por um minuto: uma
+ * O ffmpeg sobe, com o MESMO usuário da conversão, e tem os dois codificadores
+ * (libmp3lame e aac)? A preparação confere antes de auditar, para a dona
+ * receber um código traduzido em vez de um download que falha. Com o servidor
+ * como root, a conversão só sobe o ffmpeg como nobody (server/conversao-do-audio.ts):
+ * se o sistema não deixa trocar de usuário, a conferência diz que não, e o
+ * motivo vai ao log. O sim fica guardado; o não, só por um minuto: uma
  * conferência que falhou por um instante (a instância sem memória para subir
  * mais um processo, por exemplo) não vale até o próximo deploy.
  */
-export function criarConferenciaDoFfmpeg(executavel = "ffmpeg", relogio: () => number = Date.now) {
+export function criarConferenciaDoFfmpeg(executavel = "ffmpeg", relogio: () => number = Date.now, opcoes: OpcoesDaConferencia = {}) {
   let resposta: { ok: boolean; em: number } | null = null;
   let emCurso: Promise<boolean> | null = null;
   return function ffmpegDisponivel(): Promise<boolean> {
     if (resposta?.ok) return Promise.resolve(true);
     if (resposta && relogio() - resposta.em < ESPERA_DEPOIS_DA_FALTA_MS) return Promise.resolve(false);
-    emCurso ??= conferirFfmpeg(executavel).then(ok => {
+    const usuario = opcoes.usuario === undefined ? usuarioDoFfmpeg() : opcoes.usuario;
+    emCurso ??= conferirFfmpeg(executavel, usuario, opcoes.spawn ?? spawn).then(({ ok, trocaRecusada }) => {
       resposta = { ok, em: relogio() };
       emCurso = null;
-      if (!ok) console.error(`[Áudio] o ffmpeg (${executavel}) não subiu ou não tem libmp3lame e aac: baixar o áudio fica indisponível. Confira o Dockerfile.`);
+      if (trocaRecusada) {
+        console.error("[Áudio] o sistema não deixou o ffmpeg rodar como o usuário nobody, e ele não roda como root: baixar o áudio fica indisponível. Confira as capacidades SETUID e SETGID do contêiner.");
+      } else if (!ok) {
+        console.error(`[Áudio] o ffmpeg (${executavel}) não subiu ou não tem libmp3lame e aac: baixar o áudio fica indisponível. Confira o Dockerfile.`);
+      }
       return ok;
     });
     return emCurso;
   };
 }
 
-function conferirFfmpeg(executavel: string): Promise<boolean> {
+function conferirFfmpeg(executavel: string, usuario: { uid: number; gid: number } | null, subir: typeof spawn): Promise<{ ok: boolean; trocaRecusada: boolean }> {
   return new Promise(resolver => {
     let saida = "";
     let filho: ReturnType<typeof spawn>;
+    const recusou = (erro: unknown) => ({ ok: false, trocaRecusada: !!usuario && ehTrocaDeUsuarioRecusada(erro) });
     try {
-      filho = spawn(executavel, ["-hide_banner", "-encoders"], { env: ambienteDoFfmpeg(), windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      resolver(false);
+      filho = subir(executavel, ["-hide_banner", "-encoders"], {
+        env: ambienteDoFfmpeg(), windowsHide: true, stdio: ["ignore", "pipe", "ignore"], ...(usuario ?? {}),
+      });
+    } catch (erro) {
+      resolver(recusou(erro));
       return;
     }
     const prazo = setTimeout(() => filho.kill("SIGKILL"), 15_000);
     filho.stdout?.setEncoding("utf8");
     filho.stdout?.on("data", (pedaco: string) => { saida = (saida + pedaco).slice(-200_000); });
     filho.stdout?.on("error", () => undefined);
-    filho.once("error", () => { clearTimeout(prazo); resolver(false); });
+    // on, e não once: um segundo 'error' sem ouvinte derrubaria o servidor; a promessa só vale a primeira resposta.
+    filho.on("error", erro => { clearTimeout(prazo); resolver(recusou(erro)); });
     filho.once("close", codigo => {
       clearTimeout(prazo);
-      resolver(codigo === 0 && /\slibmp3lame\s/.test(saida) && /^\s*A\S*\s+aac\s/m.test(saida));
+      resolver({ ok: codigo === 0 && /\slibmp3lame\s/.test(saida) && /^\s*A\S*\s+aac\s/m.test(saida), trocaRecusada: false });
     });
   });
 }

@@ -137,13 +137,15 @@ jobs:
       # Dockerfile põe na imagem. server/conversao-do-audio.test.ts usa o ffmpeg de
       # verdade (tons sintéticos, nenhuma gravação real) e, com CI=true, não se
       # pula: sem este passo, a conversão iria para a main sem ninguém a rodar.
-      # Se a imagem do runner já trouxer o ffmpeg, o apt nem roda.
+      # Se a imagem do runner já trouxer o ffmpeg, o apt nem roda. O libvorbis e o
+      # libtheora geram os arquivos de verdade que server/corte-com-codificadores-de-verdade.test.ts
+      # corta (o Ogg Vorbis e o Ogg com vídeo).
       - name: ffmpeg
         run: |
           command -v ffmpeg >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }
           ffmpeg -hide_banner -version | sed -n 1p
           codificadores=$(ffmpeg -hide_banner -encoders)
-          for c in libmp3lame libopus aac; do
+          for c in libmp3lame libopus aac libvorbis libtheora; do
             grep -E " $c " <<<"$codificadores" >/dev/null || { echo "::error::o ffmpeg do runner não tem o codificador $c"; exit 1; }
           done
 

@@ -112,9 +112,15 @@ describe("cortarOgg: o Opus", () => {
 });
 
 describe("cortarOgg: o Vorbis e as recusas", () => {
-  it("o Ogg Vorbis: o grânulo desde o 0 da parte, e os três cabeçalhos (o comentário vazio)", async () => {
-    const { bytes, pacotes, amostras } = oggVorbis({ pacotes: 600 });
+  it.each([
+    ["o Ogg Vorbis", 0],
+    // O grânulo do começo não vira duração da primeira parte: antes ela levava
+    // a hora inteira, e a rota a recusava (mais de 720 s).
+    ["o Ogg Vorbis que não começa no 0 (1 h de grânulo, o trecho de uma transmissão)", 3600 * 44100],
+  ])("%s: o grânulo desde o 0 da parte, e os três cabeçalhos (o comentário vazio)", async (_caso, granuloInicial) => {
+    const { bytes, pacotes, amostras } = oggVorbis({ pacotes: 600, granuloInicial });
     const corte = await cortar(bytes, { segundosPorParte: 3 });
+    expect(corte).toMatchObject({ ok: true, duracaoMs: Math.round((amostras / 44100) * 1000) });
     const partes = partesDe(corte);
     const nasPartes: Uint8Array[] = [];
     let total = 0;
@@ -145,10 +151,23 @@ describe("cortarOgg: o Vorbis e as recusas", () => {
     expect(await cortar(bytes)).toEqual(esperado);
   });
 
-  it("o Ogg encadeado (outra gravação emendada depois do fim do fluxo) não some em silêncio: SEM_SUPORTE", async () => {
+  // Sem o `detalhe`: o nome do formato iria para o aviso em português nos 10
+  // idiomas; a tela usa um aviso próprio para a recusa sem nome (Meetings.tsx).
+  it("o Ogg encadeado (outra gravação emendada depois do fim do fluxo) não some em silêncio: SEM_SUPORTE, sem nome de formato", async () => {
     const primeiro = oggOpus({ pacotes: 100 }).bytes;
     const segundo = oggOpus({ pacotes: 100, semente: 2 }).bytes;
-    expect(await cortar(juntar(primeiro, segundo))).toMatchObject({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
+    expect(await cortar(juntar(primeiro, segundo))).toEqual({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
+  });
+
+  it("outro fluxo de áudio que começa no meio do primeiro (o encadeado sem o fim do fluxo): a mesma recusa", async () => {
+    const primeiro = oggOpus({ pacotes: 300 }).bytes;
+    const inicioDoSegundo = oggOpus({ pacotes: 10, semente: 2 }).bytes.subarray(0, 47);
+    expect(String.fromCharCode(...inicioDoSegundo.subarray(28, 36))).toBe("OpusHead");
+    // Depois da quarta página de áudio do primeiro.
+    const paginas = paginasOgg(primeiro);
+    const corte = paginas.slice(0, 6).reduce((s, p) => s + 27 + p.lacos.length + p.corpo.length, 0);
+    const emendado = juntar(primeiro.subarray(0, corte), inicioDoSegundo, primeiro.subarray(corte));
+    expect(await cortar(emendado)).toEqual({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
   });
 
   it("o que não é Ogg: DANIFICADO", async () => {

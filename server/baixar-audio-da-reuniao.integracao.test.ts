@@ -15,8 +15,9 @@ import { MEETING_AUDIO_TTL_MS } from "./meeting-service";
  *
  * - só a dona: outra conta, reunião excluída e reunião que não existe levam
  *   NOT_FOUND, e nada é gravado em nome de ninguém;
- * - as partes saem na ordem de seq, só as que tocam, no tempo do player, e as
- *   chaves vêm da linha da própria reunião;
+ * - as partes saem na ordem de seq, só as que têm o áudio no bucket (também a
+ *   que falhou na IA), no tempo do player, e as chaves vêm da linha da própria
+ *   reunião;
  * - a gravação que ainda chega, o áudio vencido e o que não existe são
  *   recusados com o código, sem auditoria;
  * - cada preparação aceita grava UMA linha MEETING_AUDIO_DOWNLOADED.
@@ -70,11 +71,13 @@ describe.skipIf(!temBanco)("Baixar o áudio da reunião no banco (integração)"
       reuniao(SEM_AUDIO_ANTIGA, { createdAt: AGORA - MEETING_AUDIO_TTL_MS - DIA }),
     ]);
     await db.insert(meetingAudioSlices).values([
-      // Fora da ordem de inserção, com formatos misturados, uma que falhou e uma ainda subindo.
-      parte(EM_PARTES, 2, { mimeType: "audio/mpeg", offsetMs: null, durationMs: 300_000 }),
+      // Fora da ordem de inserção, com formatos misturados, uma que a IA recusou
+      // (o áudio dela segue no bucket), uma que nunca subiu e uma ainda subindo.
+      parte(EM_PARTES, 3, { mimeType: "audio/mpeg", offsetMs: null, durationMs: 300_000 }),
       parte(EM_PARTES, 0, { mimeType: "audio/mp4" }),
-      parte(EM_PARTES, 1, { status: "failed" }),
-      parte(EM_PARTES, 3, { status: "uploading", offsetMs: null }),
+      parte(EM_PARTES, 1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null }),
+      parte(EM_PARTES, 2, { status: "failed", lastError: "NAO_RECEBIDA", offsetMs: null }),
+      parte(EM_PARTES, 4, { status: "uploading", offsetMs: null }),
       parte(GRAVANDO, 0),
       parte(VENCIDA, 0, { expiresAt: AGORA - DIA }),
       parte(VENCIDA, 1, { expiresAt: AGORA - DIA }),
@@ -97,21 +100,23 @@ describe.skipIf(!temBanco)("Baixar o áudio da reunião no banco (integração)"
     await db.delete(auditLogs).where(eq(auditLogs.userId, CONTA));
   });
 
-  it("as partes que tocam saem na ordem de seq, no tempo do player, com as chaves da própria reunião; uma linha de auditoria", async () => {
+  it("as partes com o áudio guardado saem na ordem de seq, no tempo do player, com as chaves da própria reunião; uma linha de auditoria", async () => {
     const antes = (await auditorias()).length;
     const preparado = await prepararAudioDaReuniao(DONA, EM_PARTES, PEDIDO);
     expect(preparado.partes.map(p => [p.seq, p.mimeType, p.inicioMs, p.duracaoMs])).toEqual([
       [0, "audio/mp4", 0, 600_000],
-      // A 1 falhou e a 3 ainda sobe: ficam de fora, e a 2 começa depois do tempo da 1.
-      [2, "audio/mpeg", 1_200_000, 300_000],
+      // A IA recusou a 1, mas o áudio dela está no bucket: sai no tempo dela, e não vira silêncio.
+      [1, "audio/webm", 600_000, 600_000],
+      // A 2 nunca subiu e a 4 ainda sobe: ficam de fora, e a 3 começa depois do tempo da 2.
+      [3, "audio/mpeg", 1_800_000, 300_000],
     ]);
     for (const p of preparado.partes) expect(p.storageKey.startsWith(`meetings/${DONA}/${EM_PARTES}/partes/`)).toBe(true);
-    expect(preparado.duracaoSegundos).toBe(1500);
+    expect(preparado.duracaoSegundos).toBe(2100);
     const linhas = await auditorias();
     expect(linhas).toHaveLength(antes + 1);
     expect(linhas.at(-1)).toMatchObject({
       resource: "meetings", resourceId: EM_PARTES, status: "success", riskLevel: "medium",
-      details: { formato: "mp3", partes: 2, duracaoSegundos: 1500, emPartes: true, formatosDeOrigem: ["audio/mp4", "audio/mpeg"] },
+      details: { formato: "mp3", partes: 3, duracaoSegundos: 2100, emPartes: true, formatosDeOrigem: ["audio/mp4", "audio/mpeg", "audio/webm"] },
     });
     expect(JSON.stringify(linhas.at(-1))).not.toContain("partes/");
   });
@@ -152,6 +157,6 @@ describe.skipIf(!temBanco)("Baixar o áudio da reunião no banco (integração)"
     const [depois] = await db.select({ status: meetings.status, updatedAt: meetings.updatedAt }).from(meetings).where(eq(meetings.id, EM_PARTES));
     expect(depois).toEqual(antes);
     const partes = await db.select({ seq: meetingAudioSlices.seq, status: meetingAudioSlices.status }).from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, EM_PARTES));
-    expect(partes).toHaveLength(4);
+    expect(partes).toHaveLength(5);
   });
 });

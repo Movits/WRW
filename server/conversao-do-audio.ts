@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Writable } from "node:stream";
+import { finished, type Writable } from "node:stream";
 import { BITS_POR_SEGUNDO_DO_AUDIO, type FormatoDoAudio } from "@shared/baixar-audio";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import { ObjetoAusenteNoStorageError } from "./storage";
@@ -41,7 +41,11 @@ import { ObjetoAusenteNoStorageError } from "./storage";
  * - só com o PATH no ambiente: o banco, as chaves do bucket, a do Gemini e o
  *   JWT_SECRET não descem para ele;
  * - com o servidor rodando como root (a imagem do Dockerfile), como o usuário
- *   nobody, que não lê o ambiente do processo do Node (/proc/1/environ);
+ *   nobody, que não lê o ambiente do processo do Node (/proc/1/environ). Se o
+ *   sistema não deixar trocar de usuário, o ffmpeg NÃO sobe: como root, ele
+ *   leria /proc/1/environ, e tirar as variáveis do ambiente dele não bastaria.
+ *   A conferência (ffmpegDisponivel, em baixar-audio-da-reuniao.ts) sobe com o
+ *   mesmo usuário, e a preparação recusa com AUDIO_INDISPONIVEL antes de auditar;
  * - só com os formatos, os decodificadores e o protocolo de que o áudio da
  *   reunião precisa (uma "parte" que fosse uma lista HLS apontando para
  *   arquivos do servidor é recusada na abertura);
@@ -51,6 +55,11 @@ import { ObjetoAusenteNoStorageError } from "./storage";
  *   (o prazo abaixo); o nice 10 cede ~90% ao site e ainda anda;
  * - e com um prazo sem saída: decodificador que passa 60 s sem entregar nada,
  *   com a saída livre, é encerrado, e a parte vira silêncio.
+ *
+ * O arquivo que sairia só com silêncio (nenhuma parte decodificou: todas fora
+ * da lista de decodificadores, estragadas ou fora do bucket) não sai: a
+ * conversão lança, e a rota corta a conexão, para o navegador marcar o
+ * download como falho em vez de guardar um arquivo mudo como se fosse a reunião.
  */
 
 /** A taxa do áudio cru entre os dois ffmpeg, e do arquivo. */
@@ -92,6 +101,12 @@ export type DependenciasDaConversao = {
    * conversão, e não a fila da CPU.
    */
   prioridade?: number;
+  /** O usuário dos ffmpeg; padrão, usuarioDoFfmpeg() (o nobody, com o servidor como root). Só os testes mudam. */
+  usuario?: { uid: number; gid: number } | null;
+  /** O spawn do node:child_process; só os testes trocam (o ffmpeg de mentira, a troca de usuário recusada). */
+  spawn?: typeof spawn;
+  /** O teto do arquivo, em segundos; padrão, TETO_DO_ARQUIVO_SEGUNDOS. Só os testes mudam. */
+  tetoDoArquivoSegundos?: number;
 };
 
 const EXTENSAO: Record<string, string> = {
@@ -101,10 +116,21 @@ const EXTENSAO: Record<string, string> = {
 
 /** Os demuxers que o áudio da reunião usa: WebM (matroska), MP4/M4A (mov), MP3, OGG, WAV, AAC cru e FLAC. */
 const FORMATOS_LIDOS = "matroska,mov,mp3,ogg,wav,aac,flac";
-/** Os decodificadores de áudio desses formatos. Vídeo de um MP4 do envio único fica de fora (só o áudio é lido). */
+/**
+ * Os decodificadores de todo áudio que entra numa reunião, por codec e não por
+ * tipo: dentro do mesmo audio/mpeg vem o MP3 e também o MP2 e o MP1 (o corte
+ * do MP3 e a medida do servidor aceitam as três camadas); no WAV do envio único,
+ * o ADPCM e o GSM (o servidor mede pelo cabeçalho); no MP4 e no WebM do envio
+ * único, o que o contêiner trouxer (o AC-3, o PCM do QuickTime). Codec que a
+ * reunião aceita e que falta aqui sai em silêncio no arquivo baixado.
+ * Vídeo de um MP4 do envio único fica de fora (só o áudio é lido).
+ */
 const DECODIFICADORES = [
-  "opus", "libopus", "aac", "aac_fixed", "mp3float", "mp3", "vorbis", "libvorbis", "flac", "alac",
-  "pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_f64le", "pcm_u8", "pcm_alaw", "pcm_mulaw",
+  "opus", "libopus", "aac", "aac_fixed", "mp3float", "mp3", "mp2float", "mp2", "mp1float", "mp1",
+  "vorbis", "libvorbis", "flac", "alac", "ac3", "ac3_fixed", "eac3",
+  "adpcm_ms", "adpcm_ima_wav", "gsm_ms",
+  "pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s24be", "pcm_s32le", "pcm_s32be", "pcm_f32le", "pcm_f32be", "pcm_f64le", "pcm_f64be",
+  "pcm_u8", "pcm_s8", "pcm_alaw", "pcm_mulaw",
 ].join(",");
 
 /** O ffmpeg que lê uma parte e entrega PCM cru na saída. */
@@ -160,19 +186,23 @@ export function usuarioDoFfmpeg(
   return getuid() === 0 ? { uid: 65534, gid: 65534 } : null;
 }
 
-// O sistema que não deixa trocar de usuário (EPERM) responde igual a toda
-// conversão: a primeira recusa basta, e as seguintes sobem sem a troca.
-let trocaDeUsuarioRecusada = false;
-
 type Processo = { filho: ChildProcess; fim: Promise<{ codigo: number | null; sinal: NodeJS.Signals | null }>; erros: () => string };
 
-async function subir(executavel: string, args: string[], sinal: AbortSignal, usuario: { uid: number; gid: number } | null, prioridade: number): Promise<Processo> {
-  const filho = spawn(executavel, args, {
+type ComoSubir = { spawn: typeof spawn; usuario: { uid: number; gid: number } | null; prioridade: number };
+
+async function subir(executavel: string, args: string[], sinal: AbortSignal, como: ComoSubir): Promise<Processo> {
+  // Já cancelado, nem sobe: o spawn com o sinal cancelado emite o 'spawn' e, logo
+  // atrás, o AbortError, que chegaria depois de o once() abaixo soltar o ouvinte dele.
+  sinal.throwIfAborted();
+  const filho = como.spawn(executavel, args, {
     stdio: ["pipe", "pipe", "pipe"], env: ambienteDoFfmpeg(), windowsHide: true, signal: sinal, killSignal: "SIGKILL",
-    ...(usuario ?? {}),
+    ...(como.usuario ?? {}),
   });
-  // Os fluxos do filho nunca podem emitir 'error' sem ouvinte: derrubariam o
-  // servidor inteiro (o EPIPE de escrever num ffmpeg que já saiu, por exemplo).
+  // O filho e os fluxos dele nunca podem emitir 'error' sem ouvinte: derrubariam
+  // o servidor inteiro (o AbortError do cancelamento logo depois de subir, o
+  // EPIPE de escrever num ffmpeg que já saiu). O ouvinte entra já, antes de
+  // qualquer espera; o once() abaixo liga o dele e ainda rejeita a subida que falha.
+  filho.on("error", () => undefined);
   filho.stdin?.on("error", () => undefined);
   filho.stdout?.on("error", () => undefined);
   filho.stderr?.on("error", () => undefined);
@@ -182,31 +212,38 @@ async function subir(executavel: string, args: string[], sinal: AbortSignal, usu
   let textoDoErro = "";
   filho.stderr?.setEncoding("utf8");
   filho.stderr?.on("data", (pedaco: string) => { textoDoErro = (textoDoErro + pedaco).slice(-2000); });
-  // Não subiu (sem o executável, sem permissão de trocar de usuário, já cancelado): lança aqui.
+  // Não subiu (sem o executável, sem permissão de trocar de usuário): lança aqui.
   await once(filho, "spawn");
-  filho.on("error", () => undefined);
   try {
-    if (prioridade) os.setPriority(filho.pid ?? 0, prioridade);
+    // Sem o pid, nada: setPriority(0) mudaria a prioridade do próprio servidor.
+    if (como.prioridade && filho.pid) os.setPriority(filho.pid, como.prioridade);
   } catch {
     // Sem permissão de baixar a prioridade, segue na normal.
   }
   return { filho, fim, erros: () => textoDoErro.trim() };
 }
 
-async function iniciarFfmpeg(executavel: string, args: string[], sinal: AbortSignal, deps: Pick<DependenciasDaConversao, "aoIniciar" | "prioridade"> & { avisar: (mensagem: string) => void }): Promise<Processo> {
-  const prioridade = deps.prioridade ?? PRIORIDADE_DO_FFMPEG;
-  const usuario = trocaDeUsuarioRecusada ? null : usuarioDoFfmpeg();
-  let processo: Processo | null = null;
-  if (usuario) {
-    try {
-      processo = await subir(executavel, args, sinal, usuario, prioridade);
-    } catch (erro) {
-      if ((erro as NodeJS.ErrnoException | null)?.code !== "EPERM") throw erro;
-      trocaDeUsuarioRecusada = true;
-      deps.avisar("[Áudio] o sistema não deixou o ffmpeg rodar como nobody; ele segue sem trocar de usuário, ainda sem as variáveis do servidor.");
+/** O sistema recusou a troca de usuário (EPERM sem a capacidade; EINVAL no namespace sem o 65534). */
+export function ehTrocaDeUsuarioRecusada(erro: unknown): boolean {
+  const codigo = (erro as NodeJS.ErrnoException | null)?.code;
+  return codigo === "EPERM" || codigo === "EINVAL";
+}
+
+async function iniciarFfmpeg(
+  executavel: string, args: string[], sinal: AbortSignal,
+  deps: Pick<DependenciasDaConversao, "aoIniciar" | "prioridade" | "usuario" | "spawn"> & { avisar: (mensagem: string) => void },
+): Promise<Processo> {
+  const usuario = deps.usuario === undefined ? usuarioDoFfmpeg() : deps.usuario;
+  let processo: Processo;
+  try {
+    processo = await subir(executavel, args, sinal, { spawn: deps.spawn ?? spawn, usuario, prioridade: deps.prioridade ?? PRIORIDADE_DO_FFMPEG });
+  } catch (erro) {
+    // Sem a troca, não há recuo: como root, o ffmpeg leria o ambiente do servidor em /proc/1/environ.
+    if (usuario && ehTrocaDeUsuarioRecusada(erro)) {
+      deps.avisar("[Áudio] o sistema não deixou o ffmpeg rodar como nobody: ele não sobe como root, e o áudio não é convertido.");
     }
+    throw erro;
   }
-  processo ??= await subir(executavel, args, sinal, null, prioridade);
   if (processo.filho.pid) deps.aoIniciar?.(processo.filho.pid);
   return processo;
 }
@@ -220,37 +257,55 @@ function bytesDoInstante(ms: number): number {
   return bytes - (bytes % 2);
 }
 
+/** O prazo como a pessoa lê no log: em segundos, ou em milissegundos abaixo de 1 s (os testes). */
+const prazoNoLog = (ms: number) => (ms < 1000 ? `${ms} ms` : `${Math.round(ms / 1000)} s`);
+
 /**
  * Converte as partes, na ordem de `seq`, num arquivo `formato`, escrito em
  * `saida`. Resolve quando o arquivo inteiro foi escrito (quem chama termina a
  * resposta); lança se o codificador falhar, se o bucket falhar (fora o objeto
- * ausente, que vira silêncio) ou se `sinal` cancelar (a dona fechou o
- * download). Em qualquer saída, os ffmpeg são encerrados e a pasta temporária
- * sai. `saida` nunca é terminada aqui: no erro, quem chama a destrói, para o
- * navegador marcar o download como falho, e não como um arquivo completo.
+ * ausente, que vira silêncio), se nenhuma parte decodificar (o arquivo seria só
+ * silêncio), se `sinal` cancelar (a dona fechou o download) ou se `saida`
+ * fechar antes do fim (escrever num destino morto pararia o cano para sempre).
+ * Em qualquer saída, os ffmpeg são encerrados e a pasta temporária sai. `saida`
+ * nunca é terminada aqui: no erro, quem chama a destrói, para o navegador
+ * marcar o download como falho, e não como um arquivo completo.
  */
 export async function converterPartes(
-  partes: ParteDoAudio[], formato: FormatoDoAudio, saida: Writable, deps: DependenciasDaConversao, sinal: AbortSignal,
+  partes: ParteDoAudio[], formato: FormatoDoAudio, saida: Writable, deps: DependenciasDaConversao, sinalDeFora: AbortSignal,
 ): Promise<void> {
   if (!partes.length) throw new Error("Nenhuma parte para converter.");
   const avisar = deps.avisar ?? (mensagem => console.error(mensagem));
   const executavel = deps.ffmpeg ?? "ffmpeg";
   const prazoSemSaida = deps.prazoSemSaidaMs ?? PRAZO_DO_DECODIFICADOR_SEM_SAIDA_MS;
   const ordenadas = [...partes].sort((a, b) => a.seq - b.seq);
-  sinal.throwIfAborted();
+  const comoSubir = { avisar, aoIniciar: deps.aoIniciar, prioridade: deps.prioridade, usuario: deps.usuario, spawn: deps.spawn };
+  sinalDeFora.throwIfAborted();
+  if (saida.destroyed) throw new DOMException("A saída do áudio já estava fechada.", "AbortError");
 
-  const vivos = new Set<ChildProcess>();
+  // O cancelamento de quem chama e o fim antes da hora da saída param a conversão do mesmo jeito.
+  const controle = new AbortController();
+  const sinal = controle.signal;
+  const cancelarPorFora = () => controle.abort(sinalDeFora.reason);
+  sinalDeFora.addEventListener("abort", cancelarPorFora, { once: true });
+  const pararDeVigiarASaida = finished(saida, () => {
+    if (!sinal.aborted) controle.abort(new DOMException("A saída do áudio fechou antes do fim.", "AbortError"));
+  });
+
+  // Os ffmpeg vivos e a promessa do fim de cada um.
+  const vivos = new Map<ChildProcess, Promise<unknown>>();
   const encerrarTodos = () => {
-    for (const filho of Array.from(vivos)) if (filho.exitCode === null && filho.signalCode === null) filho.kill("SIGKILL");
+    for (const filho of Array.from(vivos.keys())) if (filho.exitCode === null && filho.signalCode === null) filho.kill("SIGKILL");
   };
   sinal.addEventListener("abort", encerrarTodos, { once: true });
-  const pasta = await mkdtemp(path.join(deps.pastaTemporaria ?? os.tmpdir(), "wrw-audio-"));
+  let pasta: string | null = null;
   try {
+    pasta = await mkdtemp(path.join(deps.pastaTemporaria ?? os.tmpdir(), "wrw-audio-"));
     // O nobody precisa atravessar a pasta para ler a parte pelo nome; listar, não.
     await chmod(pasta, 0o711).catch(() => undefined);
 
-    const codificador = await iniciarFfmpeg(executavel, argumentosDoCodificador(formato), sinal, { avisar, aoIniciar: deps.aoIniciar, prioridade: deps.prioridade });
-    vivos.add(codificador.filho);
+    const codificador = await iniciarFfmpeg(executavel, argumentosDoCodificador(formato), sinal, comoSubir);
+    vivos.set(codificador.filho, codificador.fim);
     const saidaDoCodificador = codificador.filho.stdout!;
     const saidaTerminou = new Promise<void>((resolver, rejeitar) => {
       saidaDoCodificador.once("end", resolver);
@@ -260,8 +315,10 @@ export async function converterPartes(
     saidaDoCodificador.pipe(saida, { end: false });
 
     const entrada = codificador.filho.stdin!;
-    const teto = bytesDoInstante(TETO_DO_ARQUIVO_SEGUNDOS * 1000);
+    const teto = bytesDoInstante((deps.tetoDoArquivoSegundos ?? TETO_DO_ARQUIVO_SEGUNDOS) * 1000);
     let escrito = 0;
+    // As partes que entregaram áudio: sem nenhuma, o arquivo seria só silêncio.
+    let decodificadas = 0;
     // O codificador que sai antes da hora não drena mais nada: a espera acaba com ele.
     const codificadorSaiu = codificador.fim.then(({ codigo, sinal: sinalDoFim }) => {
       throw new Error(`O codificador do áudio saiu antes da hora (${codigo ?? sinalDoFim}): ${codificador.erros().slice(0, 300)}`);
@@ -321,9 +378,10 @@ export async function converterPartes(
 
       const arquivo = path.join(pasta, `parte-${String(parte.seq).padStart(4, "0")}.${EXTENSAO[parte.mimeType] ?? "bin"}`);
       await writeFile(arquivo, bytes, { mode: 0o644 });
-      const decodificador = await iniciarFfmpeg(executavel, argumentosDoDecodificador(arquivo), sinal, { avisar, aoIniciar: deps.aoIniciar, prioridade: deps.prioridade });
-      vivos.add(decodificador.filho);
+      const decodificador = await iniciarFfmpeg(executavel, argumentosDoDecodificador(arquivo), sinal, comoSubir);
+      vivos.set(decodificador.filho, decodificador.fim);
       let travou = false;
+      let entregou = 0;
       let vigia: NodeJS.Timeout | undefined;
       const armar = () => {
         clearTimeout(vigia);
@@ -334,6 +392,7 @@ export async function converterPartes(
         for await (const pedaco of decodificador.filho.stdout! as AsyncIterable<Buffer>) {
           // Esperar a resposta andar (a rede da dona) não é travar: o prazo para.
           clearTimeout(vigia);
+          entregou += pedaco.length;
           const cabe = Math.min(pedaco.length, teto - escrito);
           if (cabe > 0) await escrever(cabe < pedaco.length ? pedaco.subarray(0, cabe) : pedaco);
           if (escrito >= teto) { decodificador.filho.kill("SIGKILL"); break; }
@@ -346,15 +405,20 @@ export async function converterPartes(
       vivos.delete(decodificador.filho);
       await rm(arquivo, { force: true }).catch(() => undefined);
       sinal.throwIfAborted();
+      if (entregou > 0) decodificadas++;
       // A parte cortada no meio de uma amostra desalinharia todo o resto: um byte de silêncio realinha.
       if (escrito % 2) await escrever(SILENCIO.subarray(0, 1));
-      if (travou) avisar(`[Áudio] a parte ${parte.seq} passou ${Math.round(prazoSemSaida / 1000)} s sem decodificar; o resto dela sai em silêncio.`);
+      if (travou) avisar(`[Áudio] a parte ${parte.seq} passou ${prazoNoLog(prazoSemSaida)} sem decodificar; o resto dela sai em silêncio.`);
       else if (codigo !== 0 && escrito < teto) {
         avisar(`[Áudio] a parte ${parte.seq} não decodificou inteira (saída ${codigo ?? sinalDoFim}): ${decodificador.erros().slice(0, 300)}`);
       }
       if (escrito >= teto) break;
     }
 
+    // Nenhuma parte entregou áudio: o arquivo seria só silêncio, ou vazio. Lançar
+    // antes de fechar a entrada do codificador faz a rota cortar a conexão, e o
+    // navegador marca o download como falho, em vez de guardá-lo como a reunião.
+    if (!decodificadas) throw new Error(`Nenhuma das ${ordenadas.length} partes do áudio decodificou; o arquivo sairia só com silêncio.`);
     entrada.end();
     const { codigo, sinal: sinalDoFim } = await codificador.fim;
     vivos.delete(codificador.filho);
@@ -362,8 +426,33 @@ export async function converterPartes(
     if (codigo !== 0) throw new Error(`O codificador do áudio saiu com ${codigo ?? sinalDoFim}: ${codificador.erros().slice(0, 300)}`);
     await saidaTerminou;
   } finally {
+    sinalDeFora.removeEventListener("abort", cancelarPorFora);
+    pararDeVigiarASaida();
     sinal.removeEventListener("abort", encerrarTodos);
     encerrarTodos();
-    await rm(pasta, { recursive: true, force: true }).catch(() => undefined);
+    // A pasta sai depois que os ffmpeg encerrados saem (no Windows de
+    // desenvolvimento, o arquivo aberto por um deles segura a pasta), com um
+    // prazo. O que sobrou na saída deles é descartado: um cano parado (a
+    // resposta que não anda) seguraria o fim do processo.
+    for (const filho of Array.from(vivos.keys())) {
+      filho.stdout?.unpipe();
+      filho.stdout?.resume();
+    }
+    await esperarNoMaximo(Promise.all(Array.from(vivos.values())), PRAZO_PARA_OS_FFMPEG_SAIREM_MS);
+    if (pasta) await rm(pasta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => undefined);
+  }
+}
+
+/** Quanto a limpeza espera os ffmpeg encerrados saírem antes de apagar a pasta. */
+const PRAZO_PARA_OS_FFMPEG_SAIREM_MS = 5_000;
+
+/** Espera a promessa, mas não mais que `ms` (sem segurar o processo com o relógio). */
+async function esperarNoMaximo(promessa: Promise<unknown>, ms: number): Promise<void> {
+  let relogio: NodeJS.Timeout | undefined;
+  const prazo = new Promise<void>(resolver => { relogio = setTimeout(resolver, ms); relogio.unref?.(); });
+  try {
+    await Promise.race([promessa.then(() => undefined, () => undefined), prazo]);
+  } finally {
+    clearTimeout(relogio);
   }
 }

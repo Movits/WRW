@@ -22,8 +22,10 @@ import { amostrasOpus, escreverGranulo, etiquetasVazias, paginar } from "./pagin
  *
  * A duração do Opus é a soma do TOC de cada pacote, a mesma conta do servidor
  * (server/duracao-do-audio.ts); a do Vorbis, a diferença dos grânulos (o
- * servidor lê o maior grânulo da parte). O Opus mantém o pre-skip do arquivo:
- * cada parte descarta os mesmos ~6,5 ms do começo que o arquivo descartava.
+ * servidor lê o maior grânulo da parte). O fluxo cujo primeiro grânulo não é 0
+ * (o trecho de uma transmissão) começa no primeiro som, nos dois codecs. O Opus
+ * mantém o pre-skip do arquivo: cada parte descarta os mesmos ~6,5 ms do começo
+ * que o arquivo descartava.
  */
 
 const LIXO_TOLERADO = 2 * 1024 * 1024;
@@ -120,6 +122,11 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   const { serial, codec } = escolhido;
   const taxa = codec === "opus" ? 48000 : (escolhido.identificacao[12] | (escolhido.identificacao[13] << 8) | (escolhido.identificacao[14] << 16) | (escolhido.identificacao[15] << 24)) >>> 0;
   if (codec === "vorbis" && !(taxa > 0)) return recusa("DANIFICADO", "ogg");
+  // O bloco longo do Vorbis (o expoente nos 4 bits de cima do byte 28 da
+  // identificação, de 6 a 13): cada pacote rende no máximo metade dele. Fora da
+  // faixa, o maior (8.192), que mantém a conta como um teto.
+  const expoenteDoBlocoLongo = (escolhido.identificacao[28] ?? 0) >> 4;
+  const blocoLongoVorbis = expoenteDoBlocoLongo >= 6 && expoenteDoBlocoLongo <= 13 ? 1 << expoenteDoBlocoLongo : 8192;
 
   // Os outros pacotes de cabeçalho: as etiquetas (e o setup do Vorbis). O
   // último termina no fim de uma página, e o áudio começa na seguinte.
@@ -160,7 +167,8 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
   const quantasDoCabecalho = primeira.quantas + resto.quantas;
 
   // ─── As páginas de áudio ──────────────────────────────────────────────────
-  type DeAudio = { inicio: number; cabecalho: number; corpo: number; tipo: number; granulo: number; copia: Uint8Array; amostras: number };
+  /** Uma página de áudio: as amostras Opus dos pacotes que terminam nela e quantos pacotes terminam nela. */
+  type DeAudio = { inicio: number; cabecalho: number; corpo: number; tipo: number; granulo: number; copia: Uint8Array; amostras: number; pacotes: number };
   type EmMontagem = { montagem: MontagemDaParte; base: number; seq: number; amostras: number; bytes: number };
   const amostrasPorParte = limites.segundosPorParte * taxa;
   const amostrasNoTotal = limites.segundosNoTotal * taxa;
@@ -193,8 +201,16 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
     const comGranulo = unidade.filter(p => p.granulo >= 0);
     const ultimoGranulo = comGranulo.length ? comGranulo[comGranulo.length - 1].granulo : granuloAnterior;
     const amostrasOpusDaUnidade = unidade.reduce((s, p) => s + p.amostras, 0);
-    // O Opus que não começa no 0 (um trecho de transmissão): a primeira parte começa no primeiro som.
+    // O fluxo que não começa no 0 (um trecho de transmissão, gravado de um
+    // Icecast): a primeira parte começa no primeiro som, e não leva o grânulo
+    // inicial como duração. O Opus sabe as amostras de cada pacote pelo TOC; o
+    // Vorbis, só o máximo (meio bloco longo por pacote), que tira um pouco a
+    // menos do grânulo e nunca passa abaixo do 0.
     if (primeiraUnidade && codec === "opus") granuloAnterior = Math.max(0, ultimoGranulo - amostrasOpusDaUnidade);
+    if (primeiraUnidade && codec === "vorbis") {
+      const pacotesDaUnidade = unidade.reduce((s, p) => s + p.pacotes, 0);
+      granuloAnterior = Math.max(0, ultimoGranulo - pacotesDaUnidade * (blocoLongoVorbis / 2));
+    }
     primeiraUnidade = false;
     const amostras = codec === "opus" ? amostrasOpusDaUnidade : Math.max(0, ultimoGranulo - granuloAnterior);
     const bytes = unidade.reduce((s, p) => s + p.copia.length, 0);
@@ -257,7 +273,9 @@ export async function cortarOgg(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
       }
     }
     bytesDeAudio += pagina.bytes.length;
-    unidade.push({ inicio: pagina.inicio, cabecalho: pagina.cabecalho, corpo: pagina.corpo, tipo: pagina.tipo, granulo: pagina.granulo, copia: pagina.bytes.slice(), amostras });
+    // Cada laço menor que 255 fecha um pacote.
+    const pacotes = pagina.lacos.reduce((s, laco) => s + (laco < 255 ? 1 : 0), 0);
+    unidade.push({ inicio: pagina.inicio, cabecalho: pagina.cabecalho, corpo: pagina.corpo, tipo: pagina.tipo, granulo: pagina.granulo, copia: pagina.bytes.slice(), amostras, pacotes });
     if (pagina.tipo & 4) {
       fimDoFluxo = true;
       break;

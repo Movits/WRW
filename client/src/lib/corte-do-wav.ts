@@ -1,4 +1,5 @@
 import { ascii, corteCancelado, LeitorEmJanela, limitesDoCorte, MontagemDaParte, recusa, u32le, type CorteDoArquivo, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
+import { cortarMp3, partesCortadasDoMp3 } from "./corte-do-mp3";
 
 /**
  * O corte do WAV (H9b do plano do gravador): o áudio de gravadores de mão e do
@@ -11,8 +12,11 @@ import { ascii, corteCancelado, LeitorEmJanela, limitesDoCorte, MontagemDaParte,
  * (server/duracao-do-audio.ts), a mesma conta daqui.
  *
  * Vale o que o servidor mede pelo alinhamento: PCM, ponto flutuante, A-law e
- * µ-law (também dentro do WAVE_FORMAT_EXTENSIBLE). O resto (ADPCM, GSM, MP3
- * dentro do WAV) não tem suporte. O WAV de 64 bits (RF64/BW64) usa o ds64.
+ * µ-law (também dentro do WAVE_FORMAT_EXTENSIBLE). O MP3 e o MP2 dentro do WAV
+ * (o "MP3 em WAV" de gravadores e programas de ligação, formatos 0x55 e 0x50)
+ * saem como MP3: o "data" é a própria sequência de quadros MPEG, que o corte do
+ * MP3 corta como corta o .mp3 (era o que o arquivo já fazia na H9a). O resto
+ * (ADPCM, GSM) não tem suporte. O WAV de 64 bits (RF64/BW64) usa o ds64.
  *
  * O PCM ocupa muito: o de CD (44,1 kHz, 16 bits, estéreo) enche os 14 MB da
  * parte em 83 s, e o arquivo de mais de ~4,6 h passaria das 200 partes da
@@ -21,6 +25,26 @@ import { ascii, corteCancelado, LeitorEmJanela, limitesDoCorte, MontagemDaParte,
 
 /** Os formatos que o servidor mede pelo alinhamento (FORMATOS_PCM em server/duracao-do-audio.ts). */
 const FORMATOS_ACEITOS = new Set([1, 3, 6, 7]);
+/** O MPEG (camadas I e II) e o MP3 dentro do WAV: o "data" são quadros MPEG. */
+const FORMATOS_MPEG = new Set([0x50, 0x55]);
+
+/**
+ * O WAV com MP3 (ou MP2) dentro: o trecho do "data" vai ao corte do MP3, que
+ * pula o que não for quadro, e cada parte sai como audio/mpeg, só com os
+ * quadros (o servidor mede o MP3 quadro a quadro). O andamento da leitura
+ * conta sobre o arquivo inteiro.
+ */
+async function cortarMpegDoWav(ler: LerBytes, tamanho: number, dados: { inicio: number; fim: number }, opcoes: OpcoesDoCorte): Promise<CorteDoArquivo> {
+  const limites = limitesDoCorte(opcoes);
+  const aoLer = opcoes.aoLer;
+  const corte = await cortarMp3((inicio, fim) => ler(dados.inicio + inicio, dados.inicio + fim), dados.fim - dados.inicio, {
+    ...opcoes,
+    aoLer: aoLer ? lidos => aoLer(dados.inicio + lidos, tamanho) : undefined,
+  });
+  if (!corte.ok) return recusa(corte.codigo === "LONGO_DEMAIS" ? "LONGO_DEMAIS" : "DANIFICADO", "wav");
+  if (corte.partes.length > limites.partesNoMaximo) return recusa("MUITAS_PARTES", "wav");
+  return { ok: true, formato: "wav", mimeType: "audio/mpeg", partes: partesCortadasDoMp3(corte.partes, dados.inicio), duracaoMs: corte.duracaoMs };
+}
 const NOMES: Record<number, string> = { 2: "MS ADPCM", 0x11: "IMA ADPCM", 0x31: "GSM 6.10", 0x50: "MPEG", 0x55: "MP3", 0x160: "WMA", 0x161: "WMA", 0x1610: "AAC", 0x2000: "AC-3" };
 
 export async function cortarWav(ler: LerBytes, tamanho: number, opcoes: OpcoesDoCorte = {}): Promise<CorteDoArquivo> {
@@ -62,6 +86,7 @@ export async function cortarWav(ler: LerBytes, tamanho: number, opcoes: OpcoesDo
     pos += 8 + tamanhoDoPedaco + (tamanhoDoPedaco % 2);
   }
   if (!fmt || !dados) return recusa("DANIFICADO", "wav");
+  if (FORMATOS_MPEG.has(fmt.formato)) return cortarMpegDoWav(ler, tamanho, dados, opcoes);
   if (!FORMATOS_ACEITOS.has(fmt.formato)) return recusa("SEM_SUPORTE", "wav", NOMES[fmt.formato] ?? `WAV 0x${fmt.formato.toString(16).padStart(4, "0")}`);
   if (!(fmt.taxa > 0 && fmt.alinhamento > 0)) return recusa("DANIFICADO", "wav");
 

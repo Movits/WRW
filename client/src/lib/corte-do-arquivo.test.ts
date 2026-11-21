@@ -68,6 +68,16 @@ describe("cortarArquivo", () => {
     expect(mesmosBytes(juntar(...partes.map(p => montar(MP3, p))), quadros(MPEG1_128K, 200))).toBe(true);
   });
 
+  it("o .mp3 que é RIFF/WAVE com MP3 dentro (o 'MP3 em WAV' de gravadores) corta como MP3, como na H9a, e não 'usa MP3'", async () => {
+    const mpeg = quadros(MPEG1_128K, 200);
+    const fmt = [0x55, 0, 2, 0, ...[0x44, 0xac, 0, 0], ...[0x80, 0x3e, 0, 0], 1, 0, 0, 0, 12, 0, ...new Array(12).fill(0)];
+    const miolo = juntar(ascii("WAVEfmt "), [fmt.length, 0, 0, 0], fmt, ascii("data"), [mpeg.length & 0xff, (mpeg.length >> 8) & 0xff, mpeg.length >> 16, 0], mpeg);
+    const gravador = juntar(ascii("RIFF"), [miolo.length & 0xff, (miolo.length >> 8) & 0xff, miolo.length >> 16, 0], miolo);
+    const corte = await cortar(gravador, { segundosPorParte: 2 });
+    expect(corte).toMatchObject({ ok: true, formato: "wav", mimeType: "audio/mpeg" });
+    expect(mesmosBytes(juntar(...partesDe(corte).map(p => montar(gravador, p))), mpeg)).toBe(true);
+  });
+
   it("o AAC com lixo antes do primeiro quadro, que parece MP3: o corte do MP3 não lê, e o do AAC lê", async () => {
     const falsoMp3 = juntar([0xff, 0xfb, 0x90, 0x00], aleatorios(200, 3));
     const audio = adts({ quadros: 100 }).bytes;

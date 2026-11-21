@@ -386,6 +386,34 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
+  // Revisão do pacote 4b: o recuo para o envio único trocava o motivo certo (o
+  // codec) pelo do envio único (os 10 minutos), que a dica da tela não promete
+  // para esse formato.
+  it.each([
+    ["com mais de 10 minutos", 1800],
+    ["com a duração que o navegador não lê", null],
+  ] as const)("o arquivo curto de um formato que o corte não lê, %s: o aviso do formato, e não o do envio único", async (_caso, segundos) => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
+    duble.duracao.mockResolvedValue(segundos);
+    abrir();
+    enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa Vorbis (WebM), que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  // O Ogg encadeado (duas gravações emendadas) não tem um nome de formato: o aviso era "Este arquivo usa ?".
+  it("o arquivo sem suporte e sem o nome do formato (o Ogg encadeado, acima de 10 MB): o aviso próprio, sem '?'", async () => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
+    abrir();
+    enviar(new File([new Uint8Array(11 * 1024 * 1024)], "conversa.ogg", { type: "audio/ogg" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo junta mais de uma gravação ou traz um áudio que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    expect(vi.mocked(toast.error).mock.calls.flat().join(" ")).not.toContain("?");
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["acima de 10 MB (o ALAC do Gravador do iPhone)", new File([new Uint8Array(11 * 1024 * 1024)], "memo.m4a", { type: "audio/x-m4a" }), "ALAC"],
     ["num tipo que o envio único não aceita (o AVI)", new File(["x"], "reuniao.avi", { type: "video/x-msvideo" }), "AVI"],

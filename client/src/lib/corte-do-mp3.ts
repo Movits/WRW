@@ -1,5 +1,5 @@
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
-import { corteCancelado, PARTE_BYTES_MAX, PARTE_SEGUNDOS_MAX, type LerBytes, type OpcoesDoCorte } from "./corte-comum";
+import { corteCancelado, PARTE_BYTES_MAX, PARTE_SEGUNDOS_MAX, type LerBytes, type OpcoesDoCorte, type ParteCortada } from "./corte-comum";
 
 /**
  * O corte de um MP3 em partes para a importação em partes (H9a do plano do
@@ -247,6 +247,20 @@ export async function fimSemEtiquetas(ler: LerBytes, tamanho: number): Promise<n
     break;
   }
   return fim;
+}
+
+/**
+ * As partes do MP3 como receitas (lib/corte-comum.ts): as faixas do próprio
+ * arquivo, deslocadas de `deslocamento` (o começo do "data" do WAV que traz MP3
+ * dentro; 0 no arquivo .mp3).
+ */
+export function partesCortadasDoMp3(partes: ParteDoMp3[], deslocamento = 0): ParteCortada[] {
+  return partes.map(parte => ({
+    novos: new Uint8Array(0),
+    ordem: Float64Array.from(parte.faixas.flatMap(faixa => [1, deslocamento + faixa.inicio, deslocamento + faixa.fim])),
+    bytes: parte.bytes,
+    duracaoMs: parte.duracaoMs,
+  }));
 }
 
 type ParteEmMontagem = { faixas: FaixaDeBytes[]; bytes: number; tiques: number };
