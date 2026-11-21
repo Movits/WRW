@@ -88,6 +88,20 @@ export function margemDoReprocesso(partes: number | null | undefined): number {
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
 
 /**
+ * As frases que a fila da gravação em partes (server/fila-de-transcricao.ts)
+ * grava em `processing_error`: a gravação encerrada sem nenhuma parte, a
+ * montagem que caiu em todas as tentativas e a reunião em que nenhuma parte
+ * rendeu texto (todas falharam na IA, por exemplo). Frases, e não códigos,
+ * pelo mesmo motivo de MENSAGEM_AUDIO_GUARDADO_AUSENTE (o app Expo mostra a
+ * coluna como veio); compartilhadas, porque a tela do site as reconhece e as
+ * mostra no idioma da dona (client/src/lib/mensagem-de-erro.ts). Antes, a caixa
+ * vermelha dessas reuniões saía em português nos outros nove idiomas.
+ */
+export const MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO = "A gravação foi interrompida antes de enviar o áudio.";
+export const MENSAGEM_FALHA_DA_MONTAGEM = "Não foi possível processar esta reunião. Tente de novo mais tarde.";
+export const MENSAGEM_PARTES_SEM_TRANSCRICAO = "Não foi possível transcrever o áudio desta reunião.";
+
+/**
  * O título da reunião, depois do trim: o servidor recusa fora disso
  * (server/routers/meetings.ts), e o gravador confere o mesmo antes de enviar,
  * para a dona ver o aviso no idioma dela, e não o BAD_REQUEST do zod.
@@ -114,6 +128,14 @@ export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
  * bytes e o relógio da tela não batem ao segundo.
  */
 export const GRAVACAO_EM_PARTES_SEGUNDOS_MAX = 12 * 60 * 60;
+
+/**
+ * O teto de partes de uma reunião em partes: a rota das partes recusa a
+ * posição 200 em diante, e o encerrar, mais de 200 (server/fatias-de-reuniao.ts).
+ * Mora aqui porque a importação em partes confere o mesmo antes de a reunião
+ * nascer (H9b): o WAV e o FLAC de horas, em partes de 14 MB, passariam dele.
+ */
+export const PARTES_POR_REUNIAO_MAX = 200;
 
 /**
  * O aviso de hora da gravação em partes: a cada hora cheia de gravação (sem as

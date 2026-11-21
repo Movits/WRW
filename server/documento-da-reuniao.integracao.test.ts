@@ -178,6 +178,8 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     const tela = await getPrivateMeeting(DONA, id);
     expect(tela?.documento).toEqual({ url: documento.storageUrl, mimeType: "application/pdf", sizeBytes: documento.sizeBytes, expiresAt: documento.expiresAt });
     expect(tela?.recording).toBeNull();
+    // Sem áudio, nada para baixar (H8c, Pacote 4b): o detalhe não oferece o "Baixar o áudio".
+    expect(tela?.audioParaBaixar).toBeNull();
     expect(tela?.meeting.origem).toBe("pdf");
     expect(JSON.stringify(tela)).not.toContain(`"storageKey"`);
   });

@@ -322,6 +322,13 @@ sem ele).
   (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que
   `procedimentoDoLink` põe no contexto do pedido. Procedimento novo pelo token usa
   `procedimentoDoLink`; `server/link-com-senha-rota.test.ts` varre o router.
+  O download do áudio pela dona (H8c) também não passa pelo proxy: sai por
+  `GET /api/reunioes/baixar-audio/{ficha}` (`_core/rota-do-audio-baixado.ts`), com a ficha
+  de uso único de `meetings.baixarAudio` e a sessão da dona; o servidor lê as partes do
+  bucket e as converte com o ffmpeg da imagem (`server/conversao-do-audio.ts`), que roda
+  sem as variáveis do servidor e, com o Node como root, como o usuário nobody (se o sistema
+  recusar a troca, o ffmpeg não sobe e o download fica indisponível: como root, ele leria o
+  ambiente do servidor em `/proc/1/environ`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,

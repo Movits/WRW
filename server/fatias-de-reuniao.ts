@@ -5,7 +5,7 @@ import { exigirDb } from "./db";
 import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
-import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PARTES_POR_REUNIAO_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
  * A reunião gravada em partes (G5 do desenho do gravador,
@@ -27,8 +27,9 @@ export const TAMANHO_MAXIMO_DA_PARTE = 16 * 1024 * 1024;
 // então a parte de 10 min pode chegar com mais.
 export const DURACAO_MAXIMA_DA_PARTE_SEGUNDOS = 12 * 60;
 // 12 h em partes de 10 min são 72; 200 deixam folga para partes mais curtas sem
-// deixar uma reunião acumular linhas e objetos no bucket sem fim.
-export const PARTES_NO_MAXIMO = 200;
+// deixar uma reunião acumular linhas e objetos no bucket sem fim. O número mora
+// em shared/const.ts, porque a importação em partes confere o mesmo na tela.
+export const PARTES_NO_MAXIMO = PARTES_POR_REUNIAO_MAX;
 /**
  * A folga sobre as 12 h da gravação em partes, só aqui no servidor: a tela para
  * nas 12 h pelo relógio dela, e a soma é das durações MEDIDAS nos bytes, que não
@@ -50,13 +51,22 @@ export class RecusaDaParte extends Error {
 /** Falha passageira (bucket fora): a mesma parte pode ser reenviada depois. */
 export class FalhaPassageiraDaParte extends Error {}
 
-const EXTENSAO: Record<string, string> = { "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav" };
+const EXTENSAO: Record<string, string> = { "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/flac": "flac", "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav" };
+
+/**
+ * Os tipos que uma parte pode ter: os do envio único e, só aqui, o FLAC e o
+ * AAC em ADTS, que chegam pela importação em partes (H9b): a tela corta o
+ * arquivo sem recodificar, e a parte vai ao Gemini no formato dela (os dois
+ * estão entre os que ele aceita). Cada parte continua medida nos bytes
+ * (server/duracao-do-audio.ts), o que recusa a que não se mede.
+ */
+export const TIPOS_DAS_PARTES: readonly string[] = [...ALLOWED_MEETING_AUDIO_TYPES, "audio/flac", "audio/aac"];
 
 export async function receberParte(entrada: { ownerId: string; meetingId: string; seq: number; mimeType: string; bytes: Buffer }) {
   const { ownerId, meetingId, seq, bytes } = entrada;
   const mimeType = entrada.mimeType.split(";")[0].trim().toLowerCase();
   if (!Number.isInteger(seq) || seq < 0 || seq >= PARTES_NO_MAXIMO) throw new RecusaDaParte("POSICAO", "Parte fora de ordem.");
-  if (!(ALLOWED_MEETING_AUDIO_TYPES as readonly string[]).includes(mimeType)) throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
+  if (!TIPOS_DAS_PARTES.includes(mimeType)) throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
   if (!bytes.length || bytes.length > TAMANHO_MAXIMO_DA_PARTE) throw new RecusaDaParte("GRANDE_DEMAIS", "Parte de áudio vazia ou grande demais.");
   const duracao = medirDuracaoDoAudio(bytes);
   if (duracao === null || duracao <= 0) throw new RecusaDaParte("SEM_DURACAO", "Não foi possível ler a duração desta parte do áudio.");
