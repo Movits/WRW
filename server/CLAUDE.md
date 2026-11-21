@@ -21,7 +21,9 @@ Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
 `network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
-nenhum recorte por caminho). Upload novo entra nos dois lugares.
+nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto: até
+`CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
+dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
@@ -130,6 +132,21 @@ para todas — é a única porta que libera sem consentimento, e vale para todo 
 o do acervo. Cai só essa trava: nível 'ouro' no contato, `goldProcedure` e auditoria
 seguem valendo. Publicar o termo (`scripts/publicar-documento.mjs`) é o que liga a
 exigência.
+
+**O resumo por e-mail (H22, `server/resumo-por-email.ts`)** é o único e-mail que a WRW
+manda a terceiros: o link aberto da reunião, a quem a dona escolhe (ela, participantes da
+agenda, até 10 e-mails digitados), com texto fixo no idioma da reunião (`emailDoResumo.*`
+dos JSONs da tela, importado por `server/email-do-resumo.ts`). Link desligado só liga com a
+confirmação do "Compartilhar", na mesma transação das linhas de `resumo_por_email` e da
+auditoria. O envio automático vai só à dona, com o link da conta, e nunca liga o link.
+O texto segue a senha e o áudio do link na hora de cada envio (H23): sem o áudio, não
+promete a gravação; com a senha, diz que ela não vai no e-mail (ela nunca vai) e o aviso
+de encaminhamento fala do link e da senha (`avisoComSenha`). O link
+que o envio liga é o de antes da H23, sem senha e com o áudio, salvo na reunião sem gravação
+(a de documento, H12 e H12b, e a de vídeo do YouTube, H13; `reuniaoSemGravacao`): o link
+dela liga sem o áudio, a caixa e a prova são a frase da origem, como no "Compartilhar", e o
+e-mail nunca promete a gravação (nem no link antigo, com o `share_audio` verdadeiro do padrão
+da 0023) nem diz que a reunião foi gravada (`emailDoResumo.*SemGravacao`).
 
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
@@ -300,6 +317,18 @@ sem ele).
   com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
+  Desde a H23 a dona tira o áudio do link (a consulta deixa de servi-lo) e põe uma senha
+  de 6 dígitos: o link com senha só abre com o cookie HttpOnly de quem a acertou
+  (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que
+  `procedimentoDoLink` põe no contexto do pedido. Procedimento novo pelo token usa
+  `procedimentoDoLink`; `server/link-com-senha-rota.test.ts` varre o router.
+  O download do áudio pela dona (H8c) também não passa pelo proxy: sai por
+  `GET /api/reunioes/baixar-audio/{ficha}` (`_core/rota-do-audio-baixado.ts`), com a ficha
+  de uso único de `meetings.baixarAudio` e a sessão da dona; o servidor lê as partes do
+  bucket e as converte com o ffmpeg da imagem (`server/conversao-do-audio.ts`), que roda
+  sem as variáveis do servidor e, com o Node como root, como o usuário nobody (se o sistema
+  recusar a troca, o ffmpeg não sobe e o download fica indisponível: como root, ele leria o
+  ambiente do servidor em `/proc/1/environ`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,

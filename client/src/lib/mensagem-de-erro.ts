@@ -2,8 +2,11 @@ import {
   MENSAGEM_BANCO_INDISPONIVEL,
   MENSAGEM_DO_LIMITE,
   MENSAGEM_ERRO_DE_CONSULTA,
+  MENSAGEM_FALHA_DA_MONTAGEM,
+  MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO,
   MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO,
   MENSAGEM_ITEM_NAO_ENCONTRADO,
+  MENSAGEM_PARTES_SEM_TRANSCRICAO,
   MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
   MENSAGEM_RESUMO_SENDO_GERADO,
@@ -15,6 +18,21 @@ import {
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
+import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
+import {
+  MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
+  MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
+  MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA,
+  MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO,
+  MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR,
+  MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
+  MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
+} from "@shared/resumo-por-email";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import {
   DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehCodigoDaFalhaDoDocumento,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento,
@@ -78,6 +96,25 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do PDF da reunião (H8, server/exportar-reuniao.ts e o teto em routers/meetings.ts).
   [MENSAGEM_EXPORTAR_SO_PRONTA]: "meetings.export.onlyReady",
   [MENSAGEM_EXPORTACOES_DEMAIS]: "meetings.export.tooMany",
+  // As recusas do resumo por e-mail (H22, server/resumo-por-email.ts).
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_RESUMO]: "resumoPorEmail.erros.semResumo",
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_DESTINATARIA]: "resumoPorEmail.erros.semDestinataria",
+  [MENSAGEM_RESUMO_POR_EMAIL_DEMAIS]: "resumoPorEmail.erros.demais",
+  [MENSAGEM_RESUMO_POR_EMAIL_FORA_DA_AGENDA]: "resumoPorEmail.erros.foraDaAgenda",
+  [MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO]: "resumoPorEmail.erros.emailInvalido",
+  [MENSAGEM_RESUMO_POR_EMAIL_SEM_EMAIL_DA_DONA]: "resumoPorEmail.erros.semEmailDaDona",
+  [MENSAGEM_RESUMO_POR_EMAIL_LINK_DESLIGADO]: "resumoPorEmail.erros.linkDesligado",
+  [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO]: "resumoPorEmail.erros.tetoDaReuniao",
+  [MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA]: "resumoPorEmail.erros.tetoDaDona",
+  [MENSAGEM_RESUMO_POR_EMAIL_NAO_SAIU]: "resumoPorEmail.erros.naoSaiu",
+  [MENSAGEM_RESUMO_POR_EMAIL_NADA_A_REENVIAR]: "resumoPorEmail.erros.nadaAReenviar",
+  // O link com senha, sem a entrada de quem a acertou (H23, server/link-aberto-da-reuniao.ts).
+  [MENSAGEM_SENHA_DO_LINK_PEDIDA]: "meetings.openLink.password.required",
+  // As falhas que a fila da gravação em partes grava em processing_error
+  // (server/fila-de-transcricao.ts), que a caixa vermelha do detalhe mostra.
+  [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO]: "meetings.processingFailedNoAudioSent",
+  [MENSAGEM_FALHA_DA_MONTAGEM]: "meetings.processingFailedRetryLater",
+  [MENSAGEM_PARTES_SEM_TRANSCRICAO]: "meetings.processingFailedNoTranscript",
   // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
   [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
@@ -135,6 +172,47 @@ export function mensagemDaRecusaDaParte(codigo: string | undefined, t: (chave: s
     ? AVISO_POR_RECUSA_DA_PARTE[codigo as CodigoDaRecusaDaParte]
     : null;
   return aviso ? aviso(t) : t("meetings.partRejected");
+}
+
+/**
+ * As recusas de baixar o áudio da reunião (H8c: server/baixar-audio-da-reuniao.ts
+ * e o teto em routers/meetings.ts). O servidor manda o CÓDIGO como mensagem
+ * (shared/baixar-audio.ts, RECUSAS_DO_AUDIO), nunca frase, e aqui ele vira o
+ * aviso no idioma da tela. O Record é pelo tipo do servidor: código novo lá
+ * não compila aqui sem o aviso dele; cada valor chama t() com a chave literal,
+ * para server/i18n-chaves-usadas.test.ts conferir que todas existem.
+ */
+const AVISO_POR_RECUSA_DO_AUDIO: Record<CodigoDaRecusaDoAudio, (t: (chave: string) => string) => string> = {
+  AUDIO_VENCIDO: t => t("meetings.audioDownload.expired"),
+  AUDIO_AUSENTE: t => t("meetings.audioDownload.noAudio"),
+  AUDIO_AINDA_GRAVANDO: t => t("meetings.audioDownload.stillRecording"),
+  AUDIOS_DEMAIS: t => t("meetings.audioDownload.tooMany"),
+  AUDIO_OCUPADO: t => t("meetings.audioDownload.busy"),
+  AUDIO_INDISPONIVEL: t => t("meetings.audioDownload.unavailable"),
+};
+
+/**
+ * O que a tela diz quando preparar o áudio falha: a reunião que não é da dona
+ * (ou excluída) pelo código NOT_FOUND; as recusas do áudio pelo código delas;
+ * as mensagens comuns do servidor (banco fora do ar, sessão, limite da API)
+ * pela tabela acima; e o resto, inclusive a rede fora, no aviso genérico do
+ * áudio, nunca o texto cru.
+ */
+export function mensagemDaRecusaDoAudio(erro: unknown, t: (chave: string) => string): string {
+  if (erro && typeof erro === "object") {
+    const { message, data } = erro as { message?: unknown; data?: unknown };
+    const codigo = data && typeof data === "object" ? (data as { code?: unknown }).code : undefined;
+    if (typeof codigo === "string") {
+      if (codigo === "NOT_FOUND") return t("meetings.meetingNotFound");
+      if (typeof message === "string") {
+        if (Object.prototype.hasOwnProperty.call(AVISO_POR_RECUSA_DO_AUDIO, message)) {
+          return AVISO_POR_RECUSA_DO_AUDIO[message as CodigoDaRecusaDoAudio](t);
+        }
+        if (Object.prototype.hasOwnProperty.call(CHAVE_POR_MENSAGEM_DO_SERVIDOR, message)) return t(CHAVE_POR_MENSAGEM_DO_SERVIDOR[message]);
+      }
+    }
+  }
+  return t("meetings.audioDownload.error");
 }
 
 /**

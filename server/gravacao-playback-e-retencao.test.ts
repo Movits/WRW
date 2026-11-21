@@ -241,6 +241,52 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
   });
 });
 
+// H8c, revisão do pacote 4b: o botão "Baixar o áudio" segue o audioParaBaixar
+// do detalhe, que conta as partes com o áudio no bucket (também as que falharam
+// na IA, que o player não toca), no mesmo tempo da preparação do download.
+describe("Baixar o áudio — o detalhe diz o que se baixa, também quando nada toca", () => {
+  const parte = (seq: number, extra: Record<string, unknown> = {}) => ({
+    id: `parte-${seq}`, meetingId: "reuniao-1", ownerId: "dona-1", seq, status: "transcribed", lastError: null,
+    storageKey: `meetings/dona-1/reuniao-1/partes/${seq}.webm`, storageUrl: `/manus-storage/meetings/dona-1/reuniao-1/partes/${seq}.webm`,
+    mimeType: "audio/webm", durationMs: 600_000, offsetMs: seq * 600_000, expiresAt: AGORA + TTL_MS, ...extra,
+  });
+  const emPartes = (status: string, partes: Array<Record<string, unknown>>) => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, status, audioPipeline: "slices" }]);
+    tabelas.set(schema.meetingAudioSlices, partes);
+  };
+
+  it("a reunião que falhou inteira na IA: nada toca, mas o áudio guardado se baixa (a parte que nunca subiu fica de fora)", async () => {
+    emPartes("failed", [
+      parte(0, { status: "failed", lastError: "IA_INDISPONIVEL", offsetMs: null }),
+      parte(1, { status: "failed", lastError: "TENTATIVAS_ESGOTADAS", offsetMs: null }),
+      parte(2, { status: "failed", lastError: "NAO_RECEBIDA", offsetMs: null, durationMs: 300_000 }),
+    ]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS });
+  });
+
+  it("com partes que tocam, a que falhou na IA no fim entra na duração do arquivo, e não na do player", async () => {
+    emPartes("ready", [parte(0), parte(1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null, expiresAt: AGORA + TTL_MS - 5 })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording?.durationSeconds).toBe(600);
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS - 5 });
+  });
+
+  it("sem parte nenhuma com o áudio no bucket: nada a baixar", async () => {
+    emPartes("failed", [parte(0, { status: "failed", lastError: "AUDIO_AUSENTE" }), parte(1, { status: "uploading" })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toBeNull();
+  });
+
+  it("o envio único: a gravação inteira, com o prazo dela", async () => {
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 92, expiresAt: AGORA + 1000 });
+  });
+});
+
 describe("Leitura — processing_error legado com o SQL do driver não chega à tela", () => {
   // Antes de mensagemDaFalha, a mensagem do DrizzleQueryError ia inteira para
   // a coluna: há linhas assim em produção, com o INSERT e os parâmetros
@@ -312,13 +358,26 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
-  it("o detalhe também, mais o token do link aberto, que só a dona recebe, e se o link mostra os nomes das vozes (H3b)", async () => {
-    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
+  it("o detalhe também, mais o token do link aberto, que só a dona recebe, se o link mostra os nomes das vozes (H3b), e se pede senha e leva o áudio (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto", sharePasswordHash: "scrypt$hash-da-senha", shareAudio: false }]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes"].sort());
-    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false });
+    // O hash da senha e o freio da força bruta ficam no servidor: a tela recebe só os dois sim ou não.
+    for (const coluna of ["sharePasswordHash", "sharePasswordFailures", "sharePasswordFailedAt", "sharePasswordLockedUntil", "shareAudio"]) {
+      expect(dados?.meeting).not.toHaveProperty(coluna);
+    }
+    expect(JSON.stringify(dados)).not.toContain("hash-da-senha");
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio"].sort());
+    expect(dados?.meeting).toMatchObject({
+      id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false, linkComSenha: true, linkComAudio: false,
+    });
+  });
+
+  it("sem link, o detalhe diz que não há senha, ainda que a linha guarde um hash (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: null, sharePasswordHash: "scrypt$hash-da-senha", shareAudio: true }]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.meeting).toMatchObject({ shareToken: null, linkComSenha: false, linkComAudio: true });
   });
 
   it("com o link ligado, linkMostraNomes vem da última confirmação da dona na auditoria: só a versão 2 mostra os nomes (H3b)", async () => {

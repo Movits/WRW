@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { LANGUAGES } from "@/i18n";
 import Meetings from "./Meetings";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
 
 /**
  * Etapa 3 — a tela de Reuniões (reverificação de 04/09), em duas frentes.
@@ -51,8 +52,12 @@ const duble = vi.hoisted(() => {
     conexoes: vi.fn(),
     candidatos: vi.fn(),
     buscaNaRede: vi.fn(),
+    painelDoEmail: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
+      meetings: {
+        list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
+        resumoPorEmail: { invalidate: vi.fn(), setData: vi.fn() },
+      },
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
@@ -105,8 +110,19 @@ vi.mock("@/lib/trpc", () => ({
       rascunharEmailDeRetorno: duble.registrar("rascunharEmailDeRetorno"),
       ligarLinkAberto: duble.registrar("ligarLinkAberto"),
       desligarLinkAberto: duble.registrar("desligarLinkAberto"),
+      // A senha e o áudio do link ligado (H23).
+      novaSenhaDoLink: duble.registrar("novaSenhaDoLink"),
+      tirarSenhaDoLink: duble.registrar("tirarSenhaDoLink"),
+      mudarAudioDoLink: duble.registrar("mudarAudioDoLink"),
       // O PDF da reunião (H8): só monta quando a dona abre o aviso do "Baixar PDF".
       exportar: duble.registrar("exportar"),
+      // O resumo por e-mail (H22): só monta o painel quando a dona o abre.
+      resumoPorEmail: { useQuery: (...args: unknown[]) => duble.painelDoEmail(...args) },
+      mandarResumoPorEmail: duble.registrar("mandarResumoPorEmail"),
+      mandarResumoPorEmailDeNovo: duble.registrar("mandarResumoPorEmailDeNovo"),
+      envioAutomaticoDoResumo: duble.registrar("envioAutomaticoDoResumo"),
+      // O áudio da reunião (H8c): só monta quando a dona abre o aviso do "Baixar o áudio".
+      baixarAudio: duble.registrar("baixarAudio"),
     },
     reuniaoAberta: {
       pedirResumo: duble.registrar("pedirResumoPeloLink"),
@@ -209,12 +225,12 @@ const REUNIAO = {
 };
 
 /** Monta a lista com uma reunião e abre o detalhe dela. */
-type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean };
+type Detalhe = { transcript: unknown; suggestions: unknown[]; recording: unknown; recordingExpired: boolean; recordingDeletionPending: boolean; audioParaBaixar: unknown };
 function abrirDetalhe(reuniao: Partial<typeof REUNIAO> = {}, detalhe: Partial<Detalhe> = {}) {
   const meeting = { ...REUNIAO, ...reuniao };
   duble.list.mockReturnValue({ data: [meeting], isLoading: false });
   duble.get.mockReturnValue({
-    data: { meeting, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false, ...detalhe },
+    data: { meeting, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false, audioParaBaixar: null, ...detalhe },
     isLoading: false,
   });
   render(<Meetings />);
@@ -319,6 +335,113 @@ describe("Detalhe da reunião — baixar o PDF (H8)", () => {
   });
 });
 
+// H8c: o "Baixar o áudio" fica na seção Gravação, só com a gravação encerrada e
+// no prazo dos 30 dias. O aviso, o pedido e o link de salvar estão em
+// components/BaixarAudioDaReuniao.test.tsx.
+describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
+  const botaoDoAudio = () => screen.queryByRole("button", { name: "Baixar o áudio" });
+  // O que o servidor diz que se baixa (server/meeting-service.ts, gravacaoParaOuvir).
+  const PARA_BAIXAR = { duracaoSegundos: 900, expiresAt: Date.now() + 1e9 };
+
+  it.each(["ready", "processing", "failed"])("'%s' com o áudio no prazo: o botão abre o aviso, com o tamanho da gravação; nada é pedido antes de preparar", status => {
+    abrirDetalhe({ status }, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    fireEvent.click(botaoDoAudio()!);
+    const aviso = screen.getByRole("dialog", { name: "Baixar o áudio da reunião" });
+    // 900 s a 64 kbps: 7,2 MB.
+    expect(aviso).toHaveTextContent("Tamanho aproximado: 7 MB.");
+    expect(duble.mutacoes.baixarAudio.mutate).not.toHaveBeenCalled();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Preparar o arquivo" }));
+    expect(duble.mutacoes.baixarAudio.mutate).toHaveBeenCalledWith(
+      { meetingId: REUNIAO.id, formato: "mp3", nome: "Reunião com a vinícola - 2026-09-04" }, expect.anything(),
+    );
+  });
+
+  it.each(["recording", "uploading"])("'%s' (a gravação ainda chega): sem o botão", status => {
+    abrirDetalhe({ status, audioPipeline: "slices" }, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["venceu e saiu do bucket", { recording: null, recordingExpired: true }],
+    ["venceu e ainda está saindo do bucket", { recording: null, recordingDeletionPending: true }],
+    ["a página aberta desde antes do prazo", { recording: { ...GRAVACAO, expiresAt: Date.now() - 1 }, audioParaBaixar: { ...PARA_BAIXAR, expiresAt: Date.now() - 1 } }],
+  ])("depois dos 30 dias o botão some: %s", (_caso, detalhe) => {
+    abrirDetalhe({ status: "ready" }, detalhe);
+    expect(screen.getByRole("heading", { name: "Gravação" })).toBeInTheDocument();
+    expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  it("sem áudio guardado, sem o botão", () => {
+    abrirDetalhe({ status: "ready" }, { recording: null, audioParaBaixar: null });
+    expect(screen.getByText("Nenhum áudio guardado para esta reunião.")).toBeInTheDocument();
+    expect(botaoDoAudio()).not.toBeInTheDocument();
+  });
+
+  // Revisão do pacote 4b: as partes que falharam na IA não tocam no player, mas
+  // o áudio delas está no bucket e sai no arquivo. O botão segue o servidor, e
+  // não a gravação que toca: na reunião que falhou inteira, antes ele sumia.
+  it("a reunião que falhou inteira na IA: nada toca, mas o áudio guardado se baixa, com o aviso de por que não toca", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices" }, { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 1e9 } });
+    expect(screen.getByText("O áudio desta reunião está guardado, mas não toca aqui porque a transcrição falhou. Você pode baixá-lo.")).toBeInTheDocument();
+    expect(screen.queryByText("Nenhum áudio guardado para esta reunião.")).not.toBeInTheDocument();
+    fireEvent.click(botaoDoAudio()!);
+    // 1.500 s a 64 kbps: 12 MB.
+    expect(screen.getByRole("dialog", { name: "Baixar o áudio da reunião" })).toHaveTextContent("Tamanho aproximado: 12 MB.");
+  });
+
+  it("com a parte que falhou na IA depois das que tocam, o aviso leva a duração do arquivo, e não a do player", () => {
+    abrirDetalhe({ status: "ready", audioPipeline: "slices" }, { recording: GRAVACAO, audioParaBaixar: { ...PARA_BAIXAR, duracaoSegundos: 1500 } });
+    fireEvent.click(botaoDoAudio()!);
+    expect(screen.getByRole("dialog", { name: "Baixar o áudio da reunião" })).toHaveTextContent("Tamanho aproximado: 12 MB.");
+  });
+});
+
+// A junção do Pacote 4b com o 4d na mesma tela: o "Baixar o áudio" (H8c) é da
+// dona e segue o áudio guardado (audioParaBaixar); tirar o áudio do link (H23)
+// não o tira. O resumo por e-mail (H22), lá em cima, segue o link: sem o áudio,
+// não promete a gravação. Cada painel chama só o seu pedido.
+describe("Detalhe da reunião — o 'Baixar o áudio' (4b) e o resumo por e-mail (4d) na mesma reunião", () => {
+  const TOKEN_DO_LINK = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const PARA_BAIXAR = { duracaoSegundos: 900, expiresAt: Date.now() + 1e9 };
+  const comResumoPronto = () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [] },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    duble.painelDoEmail.mockReturnValue({
+      data: { idioma: "pt-BR", linkLigado: true, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+      isPending: false, isError: false, error: null,
+    });
+  };
+
+  it("o link ligado sem o áudio e com senha: o e-mail não promete a gravação, e o 'Baixar o áudio' da dona continua e pede só o áudio", () => {
+    comResumoPronto();
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: true, linkComAudio: false } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(painel.textContent).not.toMatch(/ouve a gravação/);
+
+    // Com o painel do e-mail aberto, o botão da seção Gravação segue lá.
+    fireEvent.click(screen.getByRole("button", { name: "Baixar o áudio" }));
+    const aviso = screen.getByRole("dialog", { name: "Baixar o áudio da reunião" });
+    fireEvent.click(within(aviso).getByRole("button", { name: "Preparar o arquivo" }));
+    expect(duble.mutacoes.baixarAudio.mutate).toHaveBeenCalledWith(
+      { meetingId: REUNIAO.id, formato: "mp3", nome: "Reunião com a vinícola - 2026-09-04" }, expect.anything(),
+    );
+    expect(duble.mutacoes.mandarResumoPorEmail.mutate).not.toHaveBeenCalled();
+  });
+
+  it("o link ligado com o áudio: o e-mail promete a gravação, e o 'Baixar o áudio' é o mesmo", () => {
+    comResumoPronto();
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: false, linkComAudio: true } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Baixar o áudio" })).toBeInTheDocument();
+  });
+});
+
 describe("Detalhe da reunião — em processamento", () => {
   const aviso = () => screen.queryByText(/ainda está em processamento/);
 
@@ -361,6 +484,23 @@ describe("Detalhe da reunião — a falha é explicada no idioma da dona", () =>
   it("sem mensagem, a caixa usa o texto de reserva", () => {
     abrirDetalhe({ status: "failed", processingError: null });
     expect(screen.getByText(/O processamento não foi concluído/)).toBeInTheDocument();
+  });
+
+  // Conferência de tela do pacote 4b: as frases que a fila da gravação em partes
+  // grava em processing_error saíam em português na tela em árabe (captura 32).
+  it.each([
+    [MENSAGEM_PARTES_SEM_TRANSCRICAO, "تعذّر تفريغ صوت هذا الاجتماع نصيًا."],
+    [MENSAGEM_FALHA_DA_MONTAGEM, "تعذّرت معالجة هذا الاجتماع. حاول مرة أخرى لاحقًا."],
+    [MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, "توقف التسجيل قبل إرسال الصوت."],
+  ])("a frase da fila \"%s\" sai no idioma da dona (árabe), e não em português", async (frase, emArabe) => {
+    await i18n.changeLanguage("ar");
+    try {
+      abrirDetalhe({ status: "failed", audioPipeline: "slices", processingError: frase });
+      expect(screen.getByText(emArabe)).toBeInTheDocument();
+      expect(screen.queryByText(frase)).not.toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
   });
 });
 
@@ -419,6 +559,30 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
   it("…e a de uma parte só, com os mesmos 20 min, ainda oferece o botão: a margem cresce com as partes", () => {
     abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 1 }, { recording: gravacaoEmPartes(1, Date.now() + 20 * 60 * 1000) });
     expect(botaoReprocessar()).toBeInTheDocument();
+  });
+
+  // Conferência de tela do pacote 4b (capturas 36 e 32): na reunião em partes que
+  // falhou inteira na IA, nada toca (`recording` nulo), mas o áudio está no bucket,
+  // a seção Gravação o oferece para baixar e o servidor o reprocessa
+  // (reprocessarEmPartes). A caixa vermelha decidia pela gravação que toca e
+  // mandava a dona apagar a reunião.
+  it("a reunião em partes que falhou inteira na IA, com o áudio guardado: a caixa oferece o Reprocessar, e não manda apagar a reunião", () => {
+    const meeting = abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3, processingError: MENSAGEM_PARTES_SEM_TRANSCRICAO },
+      { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 20 * DIA } });
+    expect(screen.queryByText(/não está guardado, então não há o que reprocessar/)).not.toBeInTheDocument();
+    expect(screen.getByText(/continua guardado até .*substitui a transcrição/)).toBeInTheDocument();
+    // A seção Gravação, logo abaixo, diz o mesmo: o áudio está guardado.
+    expect(screen.getByText(/O áudio desta reunião está guardado, mas não toca aqui/)).toBeInTheDocument();
+    fireEvent.click(botaoReprocessar()!);
+    expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
+  });
+
+  it("…e com esse áudio perto de vencer: sem o botão, e o texto não diz que o áudio não está guardado", () => {
+    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3 },
+      { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 10 * 60 * 1000 } });
+    expect(botaoReprocessar()).not.toBeInTheDocument();
+    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
+    expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
   });
 
   it.each(["ready", "processing"])("reunião %s não oferece reprocessar", status => {
@@ -699,8 +863,9 @@ describe("Envio de arquivo — a duração não é inventada", () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
     duble.duracao.mockResolvedValue(duracaoLida);
     duble.mutacoes.create?.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    // A duração lida pelo navegador é a do envio único: desde a H9b, o arquivo do /gravar vai em partes.
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
     render(<Meetings />);
-    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
     fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Ana" } });
     fireEvent.click(screen.getByRole("checkbox"));
@@ -746,8 +911,9 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
   it("o gravador começa no idioma da tela e manda o idioma escolhido e a versão do aviso", async () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
     duble.duracao.mockResolvedValue(120);
+    // O envio único (?envioUnico=1): desde a H9b, o arquivo do /gravar vai em partes, com o idioma no iniciarGravacao.
+    window.history.replaceState(null, "", "/gravar?envioUnico=1");
     render(<Meetings />);
-    fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
     duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
     const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
     expect(seletor.value).toBe("pt-BR");
@@ -1106,6 +1272,22 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     expect(screen.getByText(/Recebendo o áudio: 2 de 3/)).toBeInTheDocument();
     expect(screen.getByText("Transcrevendo: 1 de 3")).toBeInTheDocument();
     expect(screen.getAllByText("Recebendo o áudio").length).toBeGreaterThan(0);
+  });
+
+  // Conferência de tela do pacote 4b: em árabe o ícone girando ficava colado ao
+  // texto ("جارٍ استلام الصوت"), porque a margem era a da direita (mr-2) também
+  // na escrita da direita para a esquerda. A margem lógica (me-2) acompanha o ícone.
+  it("em árabe, o ícone girando do andamento tem a margem do lado do texto (me-2, e não mr-2)", async () => {
+    await i18n.changeLanguage("ar");
+    try {
+      abrirDetalhe({ status: "uploading", audioPipeline: "slices", expectedSlices: 3 } as never, { andamento: { recebidas: 2, transcritas: 1, esperadas: 3 } } as never);
+      const caixa = screen.getByText(/جارٍ استلام الصوت: 2 من 3/).closest("[role=status]")!;
+      const icone = caixa.querySelector("svg.animate-spin")!;
+      expect(icone).toHaveClass("me-2");
+      expect(icone).not.toHaveClass("mr-2");
+    } finally {
+      await i18n.changeLanguage("pt-BR");
+    }
   });
 });
 
@@ -1487,6 +1669,25 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
     expect(screen.queryByText(/não vê os nomes que você deu às vozes/)).not.toBeInTheDocument();
     expect(abrirCampoDoNome()).not.toHaveAccessibleDescription();
   });
+
+  // Pacote 4d: o painel do resumo por e-mail (H22) recebe do detalhe a senha e o
+  // áudio do link ligado (H23), e o e-mail que ele mostra segue os dois.
+  it("o resumo por e-mail recebe do detalhe a senha e o áudio do link ligado (Pacote 4d)", () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [] },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    duble.painelDoEmail.mockReturnValue({
+      data: { idioma: "pt-BR", linkLigado: true, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+      isPending: false, isError: false, error: null,
+    });
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: true, linkComAudio: false } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    expect(duble.painelDoEmail).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
+    expect(screen.getByText("O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.")).toBeInTheDocument();
+    expect(screen.getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.")).toBeInTheDocument();
+  });
 });
 
 describe("Detalhe da reunião — a aba Mapa mental (H10)", () => {
@@ -1708,6 +1909,48 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: frase }));
     fireEvent.click(screen.getByRole("button", { name: /Criar link/ }));
     expect(duble.mutacoes.ligarLinkAberto.mutate).toHaveBeenCalledWith(expect.objectContaining({ textoExibido: frase, versaoDaAutorizacao: 2 }));
+  });
+
+  // A junção do Pacote 4c com o 4d: o detalhe montava o resumo por e-mail (H22)
+  // sem dizer que a reunião veio do YouTube, e o painel pedia a caixa da gravação
+  // (a frase que vai para a prova) e prometia a gravação, também no link antigo.
+  describe("o resumo por e-mail da reunião do YouTube", () => {
+    const GRAVACAO = /gravaç|gravad|gravou|todas as pessoas que falaram/i;
+    const painelDoEmail = (linkLigado: boolean) => {
+      duble.resumoGuardado.mockReturnValue({
+        data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [] },
+        isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+      });
+      duble.painelDoEmail.mockReturnValue({
+        data: { idioma: "pt-BR", linkLigado, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+        isPending: false, isError: false, error: null,
+      });
+    };
+
+    it("o link desligado: a caixa e a prova são a frase do vídeo, e a prévia não fala de gravação", () => {
+      painelDoEmail(false);
+      abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
+      fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+      const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+      expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Reunião com a vinícola”, feito na WRW.")).toBeInTheDocument();
+      expect(painel.textContent).not.toMatch(GRAVACAO);
+      const frase = "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.";
+      fireEvent.click(within(painel).getByRole("checkbox", { name: /Para mim/ }));
+      fireEvent.click(within(painel).getByRole("checkbox", { name: frase }));
+      fireEvent.click(within(painel).getByRole("button", { name: "Mandar o resumo" }));
+      expect(duble.mutacoes.mandarResumoPorEmail.mutate).toHaveBeenCalledWith(expect.objectContaining({
+        meetingId: REUNIAO.id, autorizacao: expect.objectContaining({ textoExibido: frase, versaoDaAutorizacao: 2 }),
+      }));
+    });
+
+    it("o link ligado antes, com o áudio (o padrão da coluna): a prévia segue sem a gravação", () => {
+      painelDoEmail(true);
+      abrirDetalhe({ status: "ready", ...VIDEO, shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345", linkComAudio: true } as never, { transcript: TRANSCRICAO });
+      fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+      const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+      expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+      expect(painel.textContent).not.toMatch(GRAVACAO);
+    });
   });
 
   it("a transcrição: o ▶ de cada fala abre o vídeo no YouTube no segundo dela, numa aba nova", () => {

@@ -52,6 +52,20 @@ describe("ImportacaoEmAndamento", () => {
     expect(screen.getByRole("button", { name: /Cancelar envio/ })).toBeDisabled();
   });
 
+  // Conferência de tela do pacote 4b: em árabe o ícone girando ficava colado ao
+  // texto ("جارٍ إرسال الملف…"): a margem era a da direita (mr-2), que na escrita
+  // da direita para a esquerda fica do lado de fora. A lógica (me-2) acompanha o ícone.
+  it("o ícone girando e o do aviso têm a margem do lado do texto também em árabe (me-2, e não mr-2)", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    render(<ImportacaoEmAndamento andamento={{ fase: "enviando", enviadas: 0, total: 2 }} aoCancelar={vi.fn()} telaPodeApagar/>);
+    const girando = screen.getByRole("status").querySelector("svg")!;
+    expect(girando).toHaveClass("animate-spin", "me-2");
+    expect(girando).not.toHaveClass("mr-2");
+    const doAviso = screen.getByRole("note").querySelector("svg")!;
+    expect(doAviso).toHaveClass("me-2");
+    expect(doAviso).not.toHaveClass("mr-2");
+  });
+
   it("no idioma da tela (árabe, da direita para a esquerda)", async () => {
     await act(async () => { await i18n.changeLanguage("ar"); });
     render(<ImportacaoEmAndamento andamento={{ fase: "enviando", enviadas: 0, total: 2 }} aoCancelar={vi.fn()}/>);

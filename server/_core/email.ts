@@ -93,6 +93,59 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   }
 }
 
+/** Quantos e-mails a API de lote da Resend aceita numa chamada. */
+const LOTE_DA_RESEND_MAX = 100;
+
+/**
+ * Manda vários e-mails pela API de lote da Resend, numa chamada a cada 100: o
+ * resumo por e-mail (H22, server/resumo-por-email.ts) vai a várias pessoas de
+ * uma vez, e a Resend limita as chamadas por segundo. Cada item é um e-mail à
+ * parte, com um destinatário só: ninguém vê o endereço de outra pessoa.
+ *
+ * Devolve, na ordem da lista, se cada e-mail foi aceito. A Resend valida a
+ * chamada inteira: um item recusado recusa os outros da mesma chamada. Nunca
+ * lança. O log da falha leva só o nome do erro, sem a mensagem, que pode
+ * trazer o endereço de quem recebe.
+ */
+export async function sendEmailBatch(lista: SendEmailOptions[]): Promise<boolean[]> {
+  const aceitos = lista.map(() => false);
+  const quemPodeReceber = lista.map((_, posicao) => posicao).filter(posicao => !destinatarioNuncaEntrega(lista[posicao].to));
+  if (quemPodeReceber.length < lista.length) {
+    console.warn("[Email] Destinatário no domínio reservado .invalid — e-mail não enviado.");
+  }
+  if (!quemPodeReceber.length) return aceitos;
+  const client = getResendClient();
+  if (!client) {
+    console.warn("[Email] RESEND_API_KEY não configurada — e-mails não enviados.");
+    return aceitos;
+  }
+  if (!FROM_EMAIL) {
+    console.error('[Email] EMAIL_FROM não configurada — e-mails não enviados. Defina o remetente no formato "endereco@dominio".');
+    return aceitos;
+  }
+  const remetente = remetenteComAMarca(FROM_EMAIL);
+  for (let inicio = 0; inicio < quemPodeReceber.length; inicio += LOTE_DA_RESEND_MAX) {
+    const parte = quemPodeReceber.slice(inicio, inicio + LOTE_DA_RESEND_MAX);
+    try {
+      const { error } = await client.batch.send(parte.map(posicao => ({
+        from: remetente,
+        to: lista[posicao].to,
+        subject: lista[posicao].subject,
+        html: lista[posicao].html,
+        text: lista[posicao].text,
+      })));
+      if (error) {
+        console.error(`[Email] A Resend recusou o lote de ${parte.length} e-mail(s): ${error.name}`);
+        continue;
+      }
+      for (const posicao of parte) aceitos[posicao] = true;
+    } catch (err) {
+      console.error(`[Email] Exceção ao enviar o lote de ${parte.length} e-mail(s): ${err instanceof Error ? err.name : "erro desconhecido"}`);
+    }
+  }
+  return aceitos;
+}
+
 export function buildPasswordResetEmail(name: string, resetUrl: string): { html: string; text: string } {
   const safeName = escapeHtml(name);
   const html = `

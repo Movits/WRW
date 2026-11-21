@@ -152,7 +152,7 @@ código conseguia assinar uma sessão válida.
 | `FRONTEND_URL` | links de e-mail e redirects | o endereço público do site |
 | `LLM_API_URL` | as chamadas de texto: matches, enriquecimento, extração, tradução | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `LLM_API_KEY` | a chave do endpoint acima | Google AI Studio |
-| `RESEND_API_KEY` | e-mail de recuperação de senha | resend.com |
+| `RESEND_API_KEY` | e-mail de recuperação de senha e o resumo por e-mail (H22, até 50 e-mails por conta a cada 24 h); no plano grátis da Resend (100 por dia para a plataforma inteira), o resumo pode esgotar a cota do "Esqueci a senha" | resend.com |
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
@@ -362,6 +362,22 @@ ela redirecionava qualquer requisição anônima para a URL assinada. Exceção 
 12/11/2026: o áudio da reunião com link aberto sai por
 `/reuniao-aberta/{token}/audio`, sem sessão, enquanto a dona mantém o link ligado
 (`server/link-aberto-da-reuniao.ts`).
+
+**Baixar o áudio da reunião (H8c, 20/11/2026).** A dona baixa o áudio inteiro em MP3 ou
+M4A por `GET /api/reunioes/baixar-audio/{ficha}`: a ficha é de uso único, vale 2 minutos
+e só para a sessão que a pediu (`meetings.baixarAudio`, que audita
+`MEETING_AUDIO_DOWNLOADED` na mesma transação), e as partes vêm do bucket pelo servidor,
+sem URL assinada para o navegador. Quem converte é o **ffmpeg que o `Dockerfile` instala**
+(pacote da Debian bookworm, sem as recomendações): pela conta dos índices da Debian, são
+200 pacotes e cerca de 480 MB a mais na imagem, porque o `libavdevice` do ffmpeg traz o
+Mesa e o LLVM junto, e cerca de 134 MB de download no build. A conversão roda com
+prioridade baixa (nice 10), no máximo 2 por vez, e cada dona baixa até 10 áudios por
+hora. Sem o ffmpeg o servidor sobe do mesmo jeito, e só o "Baixar o áudio" responde
+`AUDIO_INDISPONIVEL` (o log diz `[Áudio] o ffmpeg ... não subiu`). Com o Node como root (a
+imagem não tem `USER`), o ffmpeg só roda como o usuário nobody: se o host negar a troca de
+usuário (as capacidades SETUID e SETGID removidas do contêiner), ele não sobe como root, e o
+mesmo `AUDIO_INDISPONIVEL` sai, com `[Áudio] o sistema não deixou o ffmpeg rodar como o
+usuário nobody` no log.
 
 **Gravação de reunião.** `server/routers/meetings.ts` recebe o áudio como base64
 de até 15 MB em uma requisição e transcreve com LLM dentro dela. Um request pode

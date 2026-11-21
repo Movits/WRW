@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
+import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { MapaMentalDaReuniao } from "./MapaMental";
 
 /**
@@ -309,6 +310,26 @@ describe("Mapa mental — os estados", () => {
     unmount();
     doLink(comErro(consulta(undefined), { message: "Link não encontrado.", data: { code: "NOT_FOUND" } }));
     expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
+  });
+
+  it("pelo link, a leitura recusada pela senha (H23): a página é avisada, a frase sai traduzida, sem tentar de novo, e a consulta não repete", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    const aoPedirSenha = vi.fn();
+    duble.doLink.mockReturnValue(comErro(consulta(undefined), { message: MENSAGEM_SENHA_DO_LINK_PEDIDA, data: { code: "UNAUTHORIZED" } }));
+    render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} aoPedirSenha={aoPedirSenha}/>);
+    expect(aoPedirSenha).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("This link asks for the 6-digit password.");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(duble.opcoes.link!.retry(0, { data: { code: "UNAUTHORIZED" } })).toBe(false);
+  });
+
+  it("pelo link, o pedido do mapa recusado pela senha também avisa a página", () => {
+    const aoPedirSenha = vi.fn();
+    preparar("pedirMapaPeloLink", { isError: true, error: { message: MENSAGEM_SENHA_DO_LINK_PEDIDA, data: { code: "UNAUTHORIZED" } } });
+    duble.doLink.mockReturnValue(comEstado("sem_mapa"));
+    render(<MapaMentalDaReuniao token={TOKEN} titulo={TITULO} aoPedirSenha={aoPedirSenha}/>);
+    expect(aoPedirSenha).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(MENSAGEM_SENHA_DO_LINK_PEDIDA);
   });
 
   it("a consulta repete a cada 5 s só com o mapa na fila e sem erro; não tenta de novo o erro definitivo", () => {

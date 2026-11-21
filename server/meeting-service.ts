@@ -13,6 +13,7 @@ import {
   meetingSummaryItems,
   meetingSummaryTranslations,
   privateContacts,
+  resumoPorEmail,
   userProfiles,
   users,
 } from "../drizzle/schema";
@@ -21,6 +22,7 @@ import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } from "./audio-guardado-das-partes";
 import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
@@ -1273,7 +1275,8 @@ async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string
   await db.update(meetingAudioSlices).set({ status: "received", attempts: 0, lastError: null, lockToken: null, lockedUntil: null, updatedAt: now() })
     .where(and(
       eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), eq(meetingAudioSlices.status, "failed"),
-      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, ["AUDIO_AUSENTE", "NAO_RECEBIDA"])),
+      // A mesma regra do "Baixar o áudio" (audio-guardado-das-partes.ts): sem o áudio no bucket, a parte segue lacuna.
+      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, [...CAUSAS_DA_PARTE_SEM_AUDIO])),
     ));
   return { trabalho: Promise.resolve() };
 }
@@ -1545,6 +1548,14 @@ export type AudioDaReuniao = {
   recordingExpired: boolean;
   /** O áudio passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
   recordingDeletionPending: boolean;
+  /**
+   * O que a dona pode baixar (H8c): a duração do arquivo e o prazo mais curto
+   * das partes com o áudio no bucket (audio-guardado-das-partes.ts), que incluem
+   * as que falharam na IA, que o player não toca. Na reunião que falhou inteira
+   * na IA, `recording` é nulo e isto não: o botão "Baixar o áudio" segue isto.
+   * Só a tela da dona o usa; o link aberto não o repassa.
+   */
+  audioParaBaixar: { duracaoSegundos: number; expiresAt: number } | null;
 };
 
 /** O estado da reunião que decide o que a leitura faz com o áudio vencido. */
@@ -1578,7 +1589,8 @@ const STATUS_QUE_SEGURAM_AS_PARTES: Reuniao["status"][] = ["recording", "uploadi
  */
 export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: string, reuniao: ReuniaoDoAudio): Promise<AudioDaReuniao> {
   const agora = now();
-  const semAudio = (expirada: boolean, saindo = false): AudioDaReuniao => ({ recording: null, recordingExpired: expirada, recordingDeletionPending: saindo });
+  const semAudio = (expirada: boolean, saindo = false, audioParaBaixar: AudioDaReuniao["audioParaBaixar"] = null): AudioDaReuniao =>
+    ({ recording: null, recordingExpired: expirada, recordingDeletionPending: saindo, audioParaBaixar });
   // Sem linha: ou nunca houve áudio, ou ele já saiu pelo prazo. A data da
   // reunião distingue os dois casos sem guardar nada a mais (o prazo conta de um
   // instante posterior à criação); sem isto a tela passaria a dizer "nunca houve
@@ -1587,13 +1599,22 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
 
   if (reuniao.emPartes) {
     const linhas = await db.select({
-      id: meetingAudioSlices.id, seq: meetingAudioSlices.seq, status: meetingAudioSlices.status,
+      id: meetingAudioSlices.id, seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, lastError: meetingAudioSlices.lastError,
       storageKey: meetingAudioSlices.storageKey, storageUrl: meetingAudioSlices.storageUrl, mimeType: meetingAudioSlices.mimeType,
       durationMs: meetingAudioSlices.durationMs, offsetMs: meetingAudioSlices.offsetMs, expiresAt: meetingAudioSlices.expiresAt,
     }).from(meetingAudioSlices)
       .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)))
       .orderBy(meetingAudioSlices.seq);
     if (!linhas.length) return semLinha();
+
+    // O que se baixa (H8c): as partes com o áudio no bucket, no prazo, também as
+    // que falharam na IA, no mesmo tempo do player; a regra é a da preparação.
+    const paraBaixar = partesParaBaixar(linhas, agora);
+    const ultimaParaBaixar = paraBaixar[paraBaixar.length - 1];
+    const prazosParaBaixar = linhas.filter(linha => parteTemAudioGuardado(linha) && linha.expiresAt > agora).map(linha => linha.expiresAt);
+    const audioParaBaixar = ultimaParaBaixar
+      ? { duracaoSegundos: Math.round((ultimaParaBaixar.inicioMs + ultimaParaBaixar.duracaoMs) / 1000), expiresAt: Math.min(...prazosParaBaixar) }
+      : null;
 
     const vencidas = linhas.filter(linha => linha.expiresAt <= agora);
     let ficaram = 0;
@@ -1634,13 +1655,14 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
         },
         recordingExpired: false,
         recordingDeletionPending: false,
+        audioParaBaixar,
       };
     }
-    if (ficaram) return semAudio(false, true);
+    if (ficaram) return semAudio(false, true, audioParaBaixar);
     // Nada para ouvir e nada saindo: se todas as partes tinham vencido (e
     // acabaram de sair), é a gravação que passou do prazo; senão, as que sobram
-    // nunca chegaram ao bucket ou falharam.
-    return semAudio(vencidas.length === linhas.length);
+    // nunca chegaram ao bucket ou falharam (e as que falharam na IA ainda se baixam).
+    return semAudio(vencidas.length === linhas.length, false, audioParaBaixar);
   }
 
   // Sem unicidade por reunião no banco: `orderBy` torna a escolha determinista
@@ -1679,6 +1701,7 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
     },
     recordingExpired: false,
     recordingDeletionPending: false,
+    audioParaBaixar: { duracaoSegundos: gravacao.durationSeconds, expiresAt: gravacao.expiresAt },
   };
 }
 
@@ -1980,8 +2003,12 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
   // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
-  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting) return null;
+  // Da senha do link (H23) sai só se ela existe: o hash fica no servidor.
+  const [linha] = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  if (!linha) return null;
+  const { sharePasswordHash, shareAudio, ...meeting } = linha;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
@@ -2003,9 +2030,11 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // A reunião de documento (H12) não tem áudio: no lugar da gravação, o PDF,
   // com a mesma regra dos 30 dias. Sem isto, a reunião de documento com mais
   // de 30 dias diria que "a gravação foi apagada".
+  // O audioParaBaixar é só da dona (H8c): o link aberto não o repassa. A
+  // reunião de documento não tem áudio, e nada para baixar.
   const ehDocumento = ehReuniaoDeDocumento(meeting.origem);
-  const { recording, recordingExpired, recordingDeletionPending } = ehDocumento
-    ? { recording: null, recordingExpired: false, recordingDeletionPending: false }
+  const { recording, recordingExpired, recordingDeletionPending, audioParaBaixar }: AudioDaReuniao = ehDocumento
+    ? { recording: null, recordingExpired: false, recordingDeletionPending: false, audioParaBaixar: null }
     : await gravacaoParaOuvir(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status, emPartes });
   const { documento, documentoExpirado, documentoSaindo }: DocumentoDaReuniao = ehDocumento
     ? await documentoParaVer(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status })
@@ -2016,9 +2045,14 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
   // sai também pelo link. Sem link, falso, sem consultar a auditoria.
   const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
+  // Como está o link ligado (H23): se pede a senha e se leva o áudio, com a
+  // mesma leitura do link (reuniaoDoLink): só o `true` do banco leva o áudio.
+  // Sem link, sem senha.
+  const linkComSenha = !!meeting.shareToken && sharePasswordHash !== null;
+  const linkComAudio = shareAudio === true;
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
-    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento,
+    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes, linkComSenha, linkComAudio },
+    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, audioParaBaixar, andamento,
     documento, documentoExpirado, documentoSaindo,
   };
 }
@@ -2069,6 +2103,12 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
+  // sai com a reunião, também antes do bucket. A linha fica, sem ele, para o
+  // teto da dona (server/resumo-por-email.ts): excluir a reunião não devolve
+  // e-mails ao teto.
+  await db.update(resumoPorEmail).set({ destinatario: null, updatedAt: now() })
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId)));
   // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
   // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
   // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião

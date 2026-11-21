@@ -101,6 +101,27 @@ afterEach(async () => {
   await i18n.changeLanguage("pt-BR");
 });
 
+/**
+ * O "Arquivo .ics" solta o endereço do arquivo 10 s depois do clique
+ * (baixarIcs, em Agenda.tsx). Com o relógio de verdade, esse timer disparava
+ * depois do fim do teste, quando o afterEach já tinha devolvido o
+ * URL.revokeObjectURL do jsdom, que não existe: o arquivo, que leva mais de
+ * 10 s com a máquina carregada, derrubava a suíte com "URL.revokeObjectURL is
+ * not a function" (CI local de 21/11/2026). Com o relógio falso, o teste vê o
+ * endereço sair, e nenhum timer sobra.
+ */
+function clicarNoIcs() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:agenda");
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("Agenda — a lista", () => {
   it("carregando: o aviso de carregamento, nada de 'nenhuma reunião'", () => {
     duble.listar.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null, refetch: vi.fn() });
@@ -230,7 +251,7 @@ describe("Agenda — convites e calendário", () => {
     const cliques: string[] = [];
     const clicar = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { cliques.push(this.download); });
     render(<Agenda/>);
-    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    clicarNoIcs();
     expect(criarUrl).toHaveBeenCalledTimes(1);
     const arquivo = criarUrl.mock.calls[0][0] as Blob;
     expect(arquivo.type).toBe("text/calendar;charset=utf-8");
@@ -247,7 +268,7 @@ describe("Agenda — convites e calendário", () => {
     duble.listar.mockReturnValue(lista([reuniao({ createdAt: criada, updatedAt: criada + 60 * 60_000 })]));
     const clicar = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<Agenda/>);
-    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    clicarNoIcs();
     const linhas = (await (criarUrl.mock.calls[0][0] as Blob).text()).replace(/\r\n /g, "").split("\r\n");
     expect(linhas).toContain(`UID:${ID}@wrwglobal.org`);
     expect(linhas).toContain("SEQUENCE:3600");

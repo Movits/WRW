@@ -6,6 +6,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { AvisoDeConferir, mensagemDoErroDaIA } from "@/components/ReuniaoComIA";
 import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { idiomaDaReuniao } from "@shared/idioma-da-reuniao";
@@ -59,11 +60,17 @@ type Extras = {
   traducao?: TraducaoDoMapa;
   /** Os rótulos do mapa pronto, para a página pedir a tradução deles (H11). */
   aoMudarRotulos?: (rotulos: string[]) => void;
+  /**
+   * Só pelo link: o link com senha recusou (UNAUTHORIZED), porque a entrada
+   * venceu ou a dona trocou a senha. A página relê a reunião, que traz a tela
+   * da senha de volta.
+   */
+  aoPedirSenha?: () => void;
   /** A reunião nasceu de um documento (H12): o aviso fala do texto do documento, e não da transcrição. */
   documento?: boolean;
 };
 type Props = ({ meetingId: string; token?: undefined } | { token: string; meetingId?: undefined }) & Extras;
-type DoCorpo = Omit<Extras, "emoji" | "documento"> & { emoji: string | null; documento: boolean };
+type DoCorpo = Omit<Extras, "emoji" | "aoPedirSenha" | "documento"> & { emoji: string | null; documento: boolean };
 /**
  * N5: o ramo "Conexões desta reunião", só no mapa da dona (o do link nunca o
  * recebe), e o erro da consulta dele, que aparece no lugar do ramo.
@@ -72,8 +79,10 @@ type ComRamoExtra = { ramoExtra?: RamoDasConexoes | null; erroDoRamo?: { erro: u
 
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
 // A reunião que não existe mais e o link desligado (ou cortado) no meio da
-// visita são definitivos: nem tentar de novo, nem perguntar a cada 5 s.
-const erroDefinitivo = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || codigoDoErro(erro) === "BAD_REQUEST";
+// visita são definitivos: nem tentar de novo, nem perguntar a cada 5 s. O link
+// que pede a senha (H23) também: repetir não passa sem a senha.
+const pedeSenha = (erro: unknown) => codigoDoErro(erro) === "UNAUTHORIZED";
+const erroDefinitivo = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || codigoDoErro(erro) === "BAD_REQUEST" || pedeSenha(erro);
 // Para em qualquer erro, não só no definitivo: perguntar a cada 5 s não cura
 // um 500. A releitura que dá certo limpa o erro e religa a repetição.
 const esperaDaConsulta = (estado: string | undefined, erro: unknown) => (estado === "pendente" || estado === "gerando") && !erro ? 5_000 : false;
@@ -81,7 +90,7 @@ const esperaDaConsulta = (estado: string | undefined, erro: unknown) => (estado 
 export function MapaMentalDaReuniao(props: Props) {
   const extras: DoCorpo = { titulo: props.titulo, emoji: props.emoji ?? null, traducao: props.traducao, aoMudarRotulos: props.aoMudarRotulos, documento: !!props.documento };
   return props.token !== undefined
-    ? <MapaDoLink token={props.token} {...extras}/>
+    ? <MapaDoLink token={props.token} aoPedirSenha={props.aoPedirSenha} {...extras}/>
     : <MapaDaDona meetingId={props.meetingId} {...extras}/>;
 }
 
@@ -108,7 +117,7 @@ function MapaDaDona({ meetingId, ...extras }: { meetingId: string } & DoCorpo) {
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ meetingId })} peloLink={false} ramoExtra={ramoExtra} erroDoRamo={erroDoRamo} {...extras}/>;
 }
 
-function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
+function MapaDoLink({ token, aoPedirSenha, ...extras }: { token: string; aoPedirSenha?: () => void } & DoCorpo) {
   const utils = trpc.useUtils();
   // A página do link não pede conta: como o resumo dela, não relê na volta à aba.
   const consulta = trpc.reuniaoAberta.mapaMental.useQuery({ token }, {
@@ -119,6 +128,12 @@ function MapaDoLink({ token, ...extras }: { token: string } & DoCorpo) {
   const pedir = trpc.reuniaoAberta.pedirMapa.useMutation({
     onSettled: () => Promise.all([utils.reuniaoAberta.mapaMental.invalidate({ token }), utils.reuniaoAberta.resumoGuardado.invalidate({ token })]),
   });
+  // A entrada no link com senha venceu (ou a senha mudou): a página relê a
+  // reunião, que traz a tela da senha. Vale para a leitura e para o pedido.
+  const recusouPelaSenha = pedeSenha(consulta.error) || pedeSenha(pedir.error);
+  useEffect(() => {
+    if (recusouPelaSenha) aoPedirSenha?.();
+  }, [recusouPelaSenha]);
   return <CorpoDoMapa consulta={consulta} pedido={pedir} aoPedir={() => pedir.mutate({ token })} peloLink {...extras}/>;
 }
 
@@ -140,6 +155,9 @@ function CorpoDoMapa({ consulta, pedido, aoPedir, peloLink, titulo, emoji, tradu
 
   // Erro de consulta é erro, nunca "sem mapa" nem "gerando".
   const erroDaConsulta = !consulta.isError ? null
+    // A senha do link (H23): a frase traduzida, sem o "tentar de novo", que não passaria.
+    : pedeSenha(consulta.error)
+      ? <p role="alert" className="mt-4 text-sm text-white/70">{mensagemDeErroParaTela(consulta.error, t)}</p>
     : erroDefinitivo(consulta.error)
       ? <p role="alert" className="mt-4 text-sm text-white/70">{peloLink ? t("meetings.openLink.notFound") : t("meetings.meetingNotFound")}</p>
       : <div className="mt-4"><ErroDeConsulta erro={consulta.error} aoTentarDeNovo={() => void consulta.refetch()}/></div>;

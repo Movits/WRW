@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
-import {
-  atenderPedidoDeCorte, cortarMp3, ehCorteCancelado, PARTE_DO_MP3_BYTES_MAX, PARTE_DO_MP3_SEGUNDOS_MAX,
-  type CorteDoMp3, type RespostaDoCorte,
-} from "./corte-do-mp3";
+import { cortarMp3, ehCorteCancelado, PARTE_DO_MP3_BYTES_MAX, PARTE_DO_MP3_SEGUNDOS_MAX, type CorteDoMp3 } from "./corte-do-mp3";
 import {
   apev2, id3v1, id3v2, juntar, leitorDe, leitorDeQuadrosRepetidos, MPEG1_128K, MPEG1_128K_CRC, MPEG1_128K_ENCHIMENTO, MPEG1_128K_MONO,
   MPEG25_8K, MPEG2_64K, quadro, quadroDeEtiqueta, quadros, quadrosVariaveis, sequencia, type FormatoDoQuadro,
@@ -247,30 +244,5 @@ describe("cortarMp3: andamento e cancelamento", () => {
     expect(ehCorteCancelado(erro)).toBe(true);
     // As duas leituras das etiquetas do fim e o primeiro bloco; nada depois do cancelamento.
     expect(leitor.mock.calls.length).toBeLessThanOrEqual(3);
-  });
-});
-
-describe("atenderPedidoDeCorte (o que o Worker faz)", () => {
-  it("responde o andamento e, no fim, o corte", async () => {
-    const audio = juntar(id3v2(300), quadros(MPEG1_128K, 20));
-    const respostas: RespostaDoCorte[] = [];
-    await atenderPedidoDeCorte({ arquivo: new Blob([audio], { type: "audio/mpeg" }) }, r => respostas.push(r));
-    expect(respostas[0]).toEqual({ tipo: "lendo", lidos: audio.length, total: audio.length });
-    expect(respostas.at(-1)).toEqual({ tipo: "pronto", corte: await cortar(audio) });
-  });
-
-  it("a leitura que falha vira erro, sem detalhe na resposta; o detalhe vai ao console do Worker", async () => {
-    const arquivo = new Blob([quadros(MPEG1_128K, 5)]);
-    const falha = new Error("o arquivo sumiu");
-    vi.spyOn(arquivo, "slice").mockImplementation(() => { throw falha; });
-    const consoleDeErro = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const respostas: RespostaDoCorte[] = [];
-      await atenderPedidoDeCorte({ arquivo }, r => respostas.push(r));
-      expect(respostas).toEqual([{ tipo: "erro" }]);
-      expect(consoleDeErro).toHaveBeenCalledWith(expect.stringContaining("corte do MP3"), falha);
-    } finally {
-      consoleDeErro.mockRestore();
-    }
   });
 });

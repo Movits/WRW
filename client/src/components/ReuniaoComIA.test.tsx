@@ -214,6 +214,18 @@ describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
   });
 
+  it("a pergunta recusada pela senha do link (a entrada venceu, H23): a frase traduzida, e a página é avisada para trazer a tela da senha", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    const aoPedirSenha = vi.fn();
+    duble.respostas.perguntarPeloLink = erroDoServidor("UNAUTHORIZED", "Este link pede a senha de 6 dígitos.");
+    render(<PergunteAReuniao token={TOKEN} aoPedirSenha={aoPedirSenha} />);
+    expect(aoPedirSenha).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your question about the meeting" }), { target: { value: "Who spoke?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Ask/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent("This link asks for the 6-digit password.");
+    expect(aoPedirSenha).toHaveBeenCalledTimes(1);
+  });
+
   it("pela dona, NOT_FOUND continua 'reunião não encontrada'", () => {
     duble.respostas.perguntar = erroDoServidor("NOT_FOUND", "Reunião não encontrada.");
     render(<PergunteAReuniao meetingId={ID} />);

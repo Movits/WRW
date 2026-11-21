@@ -208,6 +208,7 @@ function abrir(caminho: string) {
 
 // O arquivo do envio único (um M4A): o MP3 vai em partes desde a H9a, e a
 // ligação dele à agenda está em Meetings.importacao.test.tsx.
+/** O arquivo pelo envio único (o ?envioUnico=1): o que vai em partes, desde a H9b e a H9c, está em Meetings.importacao.test.tsx. */
 function enviarArquivo() {
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [new File(["som"], "reuniao.m4a", { type: "audio/m4a" })] } });
@@ -232,7 +233,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
   });
 
   it("arquivo enviado: a reunião criada é ligada à reunião marcada, e a agenda se relê", async () => {
-    abrir(`/gravar?agendada=${AGENDADA}`);
+    abrir(`/gravar?${ENVIO_UNICO}&agendada=${AGENDADA}`);
     await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
     enviarArquivo();
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
@@ -306,7 +307,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
 
   it("a ligação recusada não trava a gravação: o envio segue e a dona é avisada", async () => {
     ligar().mockRejectedValue(Object.assign(new Error("Gravação não encontrada."), { data: { code: "NOT_FOUND" } }));
-    abrir(`/gravar?agendada=${AGENDADA}`);
+    abrir(`/gravar?${ENVIO_UNICO}&agendada=${AGENDADA}`);
     await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
     enviarArquivo();
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(AVISO_DA_LIGACAO));
@@ -425,7 +426,7 @@ describe("Gravar agora pela agenda, montado como no App", () => {
 
 describe("sem a reunião da agenda, o gravador de sempre", () => {
   it("sem ?agendada: nada de agenda, nem leitura nem ligação", async () => {
-    abrir("/gravar");
+    abrir(`/gravar?${ENVIO_UNICO}`);
     expect(duble.obterDaAgenda).not.toHaveBeenCalled();
     fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Conversa avulsa" } });
     enviarArquivo();
@@ -441,7 +442,7 @@ describe("sem a reunião da agenda, o gravador de sempre", () => {
 
   it("reunião que não está mais na agenda: o aviso, o título vazio, e a gravação sem ligação", async () => {
     duble.obterDaAgenda.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: { message: "Reunião agendada não encontrada.", data: { code: "NOT_FOUND" } } });
-    abrir(`/gravar?agendada=${AGENDADA}`);
+    abrir(`/gravar?${ENVIO_UNICO}&agendada=${AGENDADA}`);
     expect(screen.getByRole("note")).toHaveTextContent("Esta reunião não está mais na sua agenda. A gravação segue sem ligação.");
     expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("");
     fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Conversa avulsa" } });
@@ -526,7 +527,7 @@ describe("a reunião da agenda que carrega depois do Iniciar ou do arquivo", () 
     duble.obterDaAgenda.mockReturnValue(CARREGANDO);
     let soltarDuracao: (segundos: number) => void = () => {};
     duble.duracao.mockImplementation(() => new Promise(resolver => { soltarDuracao = resolver; }));
-    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
+    const { rerender } = abrir(`/gravar?${ENVIO_UNICO}&agendada=${AGENDADA}`);
     fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
     enviarArquivo();
     duble.obterDaAgenda.mockReturnValue(CARREGADA);

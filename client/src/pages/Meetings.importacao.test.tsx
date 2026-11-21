@@ -3,18 +3,20 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { _reiniciarParaTestes } from "@/hooks/useImportacaoEmPartes";
-import { cortarMp3, lerBlob, type CorteDoMp3 } from "@/lib/corte-do-mp3";
-import type { OpcoesDoCorteNoWorker } from "@/lib/corte-do-mp3-no-worker";
+import { lerBlob, type CorteDoArquivo } from "@/lib/corte-comum";
+import { cortarArquivo } from "@/lib/corte-do-arquivo";
+import type { OpcoesDoCorteNoWorker } from "@/lib/corte-do-arquivo-no-worker";
 import { liberarTodas, sessaoOcupada } from "@/lib/sessao-ocupada";
 import { id3v2, juntar, MPEG1_128K, quadroDeEtiqueta, quadros } from "@/test/mp3-sintetico";
 import Meetings from "./Meetings";
 
 /**
- * O MP3 enviado em partes no gravador (H9a): no /gravar, todo MP3 é cortado
- * nos quadros (o Worker é um dublê que corta de verdade, na página) e sobe
- * parte a parte pelo caminho da gravação em partes, com o andamento e o
- * Cancelar na tela. Os outros formatos, e o MP3 no ?envioUnico=1, seguem no
- * envio único (Meetings.rotas.test.tsx).
+ * O arquivo enviado em partes no gravador (H9a, H9b e H9c): no /gravar, todo
+ * arquivo vai ao corte (o Worker é um dublê que corta de verdade, na página),
+ * que reconhece o formato pelos bytes, e sobe parte a parte pelo caminho da
+ * gravação em partes, com o andamento e o Cancelar na tela. No ?envioUnico=1,
+ * tudo segue no envio único (Meetings.rotas.test.tsx); em partes, só o arquivo
+ * curto de um formato que o corte não lê.
  *
  * O tRPC é o dublê de Meetings.agenda.test.tsx.
  */
@@ -65,7 +67,7 @@ const duble = vi.hoisted(() => {
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 vi.mock("@/components/NotificationBell", () => ({ NotificationBell: () => null }));
-vi.mock("@/lib/corte-do-mp3-no-worker", () => ({ cortarMp3NoWorker: (...a: unknown[]) => duble.cortar(...a) }));
+vi.mock("@/lib/corte-do-arquivo-no-worker", () => ({ cortarArquivoNoWorker: (...a: unknown[]) => duble.cortar(...a) }));
 vi.mock("@/lib/envio-das-partes", () => ({
   enviarParte: (...a: unknown[]) => duble.enviarParte(...a),
   enviarPendentes: async () => ({ restantes: 0, semSessao: false }),
@@ -123,8 +125,8 @@ const MP3 = juntar(id3v2(500), quadroDeEtiqueta(MPEG1_128K, "Xing"), quadros(MPE
 const arquivoMp3 = (nome = "reuniao-da-glenda.mp3") => new File([MP3], nome, { type: "audio/mpeg" });
 
 /** O Worker de mentira: corta de verdade, na página, em partes de 1 s. */
-const corteDeVerdade = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker): Promise<CorteDoMp3> =>
-  cortarMp3(lerBlob(arquivo), arquivo.size, { ...opcoes, segundosPorParte: 1 });
+const corteDeVerdade = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker): Promise<CorteDoArquivo> =>
+  cortarArquivo(lerBlob(arquivo), arquivo.size, { ...opcoes, segundosPorParte: 1 });
 
 const iniciarGravacao = () => duble.utils.client.meetings.iniciarGravacao.mutate;
 const encerrarGravacao = () => duble.utils.client.meetings.encerrarGravacao.mutate;
@@ -189,9 +191,11 @@ function partesPresas() {
 }
 
 describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
-  it("a dica do arquivo diz os dois tetos: o MP3 até 12 h e os outros formatos até 10 min ou 10 MB", () => {
+  it("a dica do arquivo diz o teto e os formatos: áudio ou vídeo, até 12 h; o seletor oferece também o vídeo, o FLAC e o AAC", () => {
     abrir();
-    expect(screen.getByText("Arquivo MP3: até 12 horas. Outros formatos: até 10 minutos ou 10 MB.")).toBeInTheDocument();
+    expect(screen.getByText("Áudio ou vídeo (MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC, AAC): até 12 horas.")).toBeInTheDocument();
+    const aceitos = document.querySelector<HTMLInputElement>("input[type='file']")!.accept.split(",");
+    expect(aceitos).toEqual(expect.arrayContaining(["audio/*", "video/mp4", "video/quicktime", ".mov", ".flac", ".aac", ".opus", ".mkv"]));
   });
 
   it("o MP3 vai em partes: a reunião nasce com a origem arquivo, cada parte sobe como audio/mpeg com o andamento na tela, e o fim leva ao detalhe", async () => {
@@ -231,7 +235,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
   });
 
   it("o MP3 acima de 10 MB não é mais recusado: vai ao corte", async () => {
-    duble.cortar.mockResolvedValue({ ok: false, codigo: "NAO_E_MP3" });
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "DANIFICADO", formato: "mp3" });
     abrir();
     enviar(new File([new Uint8Array(11 * 1024 * 1024)], "longa.mp3", { type: "audio/mpeg" }));
     await waitFor(() => expect(duble.cortar).toHaveBeenCalled());
@@ -289,7 +293,10 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
 
   it.each([
     ["passa de 12 h", { ok: false, codigo: "LONGO_DEMAIS" }, "Este áudio passa de 12 horas, o limite de uma reunião."],
-    ["não é um MP3 que se leia", { ok: false, codigo: "NAO_E_MP3" }, "Não foi possível ler este arquivo como MP3. Confira se ele está inteiro."],
+    ["está danificado", { ok: false, codigo: "DANIFICADO", formato: "mp4" }, "Não foi possível ler este arquivo: ele parece incompleto ou danificado. Confira se ele abre no seu aparelho e envie de novo."],
+    ["não é áudio nem vídeo que se reconheça", { ok: false, codigo: "FORMATO_DESCONHECIDO" }, "Este arquivo não é um áudio ou vídeo que a WRW reconheça. Envie MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC ou AAC."],
+    ["é um vídeo sem áudio", { ok: false, codigo: "SEM_AUDIO", formato: "mp4" }, "Este vídeo não tem áudio para transcrever."],
+    ["passaria de 200 partes", { ok: false, codigo: "MUITAS_PARTES", formato: "wav" }, "Este arquivo é grande demais para uma reunião. Converta-o para MP3 ou M4A, que ocupam menos, e envie de novo."],
   ] as const)("o arquivo que %s é recusado antes de a reunião nascer", async (_caso, corte, aviso) => {
     duble.cortar.mockResolvedValue(corte);
     abrir();
@@ -348,11 +355,78 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(iniciarGravacao()).not.toHaveBeenCalled();
   });
 
-  it("os outros formatos seguem no envio único, mesmo no /gravar", async () => {
+  it("o M4A, o vídeo e os outros formatos também vão ao corte, e cada parte sobe no tipo que o corte diz (H9b e H9c)", async () => {
+    // Um corte de duas partes em MP4 fragmentado: os bytes novos (o começo de cada parte) e os trechos do arquivo.
+    const arquivo = new File([Uint8Array.from({ length: 64 }, (_v, i) => i)], "reuniao.mov", { type: "video/quicktime" });
+    const corte: CorteDoArquivo = {
+      ok: true, formato: "mp4", mimeType: "audio/mp4", duracaoMs: 1500,
+      partes: [
+        { novos: Uint8Array.from([0xa1, 0xa2]), ordem: Float64Array.from([0, 0, 2, 1, 10, 20]), bytes: 12, duracaoMs: 1000 },
+        { novos: Uint8Array.from([0xb1]), ordem: Float64Array.from([0, 0, 1, 1, 20, 24]), bytes: 5, duracaoMs: 500 },
+      ],
+    };
+    duble.cortar.mockResolvedValue(corte);
+    encerrarGravacao().mockResolvedValue({ partes: 2 });
     abrir();
-    enviar(new File(["som"], "reuniao.m4a", { type: "audio/m4a" }));
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ mimeType: "audio/m4a" })));
-    expect(duble.cortar).not.toHaveBeenCalled();
+    enviar(arquivo);
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 2 }));
+    expect(duble.cortar).toHaveBeenCalledWith(arquivo, expect.anything());
+    expect(duble.enviarParte.mock.calls.map(c => [c[1], c[3]])).toEqual([[0, "audio/mp4"], [1, "audio/mp4"]]);
+    const bytes = async (blob: Blob) => Array.from(new Uint8Array(await blob.arrayBuffer()));
+    expect(await bytes(duble.enviarParte.mock.calls[0][2] as Blob)).toEqual([0xa1, 0xa2, ...Array.from({ length: 10 }, (_v, i) => 10 + i)]);
+    expect(await bytes(duble.enviarParte.mock.calls[1][2] as Blob)).toEqual([0xb1, 20, 21, 22, 23]);
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("o arquivo curto de um formato que o corte não lê segue no envio único de sempre (o Vorbis no WebM)", async () => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
+    abrir();
+    enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ mimeType: "audio/webm" })));
+    expect(duble.cortar).toHaveBeenCalled();
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  // Revisão do pacote 4b: o recuo para o envio único trocava o motivo certo (o
+  // codec) pelo do envio único (os 10 minutos), que a dica da tela não promete
+  // para esse formato.
+  it.each([
+    ["com mais de 10 minutos", 1800],
+    ["com a duração que o navegador não lê", null],
+  ] as const)("o arquivo curto de um formato que o corte não lê, %s: o aviso do formato, e não o do envio único", async (_caso, segundos) => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
+    duble.duracao.mockResolvedValue(segundos);
+    abrir();
+    enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa Vorbis (WebM), que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  // O Ogg encadeado (duas gravações emendadas) não tem um nome de formato: o aviso era "Este arquivo usa ?".
+  it("o arquivo sem suporte e sem o nome do formato (o Ogg encadeado, acima de 10 MB): o aviso próprio, sem '?'", async () => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
+    abrir();
+    enviar(new File([new Uint8Array(11 * 1024 * 1024)], "conversa.ogg", { type: "audio/ogg" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo junta mais de uma gravação ou traz um áudio que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    expect(vi.mocked(toast.error).mock.calls.flat().join(" ")).not.toContain("?");
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["acima de 10 MB (o ALAC do Gravador do iPhone)", new File([new Uint8Array(11 * 1024 * 1024)], "memo.m4a", { type: "audio/x-m4a" }), "ALAC"],
+    ["num tipo que o envio único não aceita (o AVI)", new File(["x"], "reuniao.avi", { type: "video/x-msvideo" }), "AVI"],
+  ] as const)("o arquivo sem suporte %s recebe o aviso com o formato, sem reunião", async (_caso, arquivo, formato) => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", detalhe: formato });
+    abrir();
+    enviar(arquivo);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`Este arquivo usa ${formato}, que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo.`));
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 });
 

@@ -6,6 +6,7 @@ import helmet from "helmet";
 import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { CHAMADAS_POR_LOTE_MAX } from "@shared/lote-do-trpc";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
@@ -18,6 +19,7 @@ import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
+import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
 import { registrarRotaDoDocumento } from "./rota-do-documento";
 import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
@@ -254,6 +256,10 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // O download do áudio da reunião (H8c): só com a ficha de uso único que
+  // meetings.baixarAudio emitiu para a sessão da dona; o arquivo é convertido
+  // pelo ffmpeg enquanto sai (server/_core/rota-do-audio-baixado.ts).
+  registrarRotaDoAudioBaixado(app);
   // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
   // Vite e do estático, que responderiam a página no lugar delas. Sem as
   // variáveis, 404 (server/rotas-da-google-agenda.ts).
@@ -382,6 +388,9 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // O lote tem teto (shared/lote-do-trpc.ts): sem ele, um pedido levava
+      // centenas de chamadas a um procedimento caro, e o limite contava uma.
+      maxBatchSize: CHAMADAS_POR_LOTE_MAX,
     })
   );
 
