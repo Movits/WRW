@@ -135,7 +135,8 @@ dos JSONs da tela, importado por `server/email-do-resumo.ts`). Link desligado s�
 confirmação do "Compartilhar", na mesma transação das linhas de `resumo_por_email` e da
 auditoria. O envio automático vai só à dona, com o link da conta, e nunca liga o link.
 O texto segue a senha e o áudio do link na hora de cada envio (H23): sem o áudio, não
-promete a gravação; com a senha, diz que ela não vai no e-mail, e ela nunca vai. O link
+promete a gravação; com a senha, diz que ela não vai no e-mail (ela nunca vai) e o aviso
+de encaminhamento fala do link e da senha (`avisoComSenha`). O link
 que o envio liga é o de antes da H23, sem senha e com o áudio.
 
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com

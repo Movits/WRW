@@ -302,12 +302,32 @@ describe("a prévia do e-mail", () => {
   const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
   const PEDE_A_SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
   const AVISO_DA_SENHA = "O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.";
+  // O aviso de encaminhamento da prévia, como o do e-mail (server/email-do-resumo.ts).
+  const ENCAMINHAR = "Quem tiver este link abre a reunião. Não o encaminhe a quem não deve ver o que foi dito.";
+  const ENCAMINHAR_COM_SENHA = "Quem tiver este link e a senha abre a reunião. Não encaminhe o link nem a senha a quem não deve ver o que foi dito.";
 
   it("o link com senha: a prévia diz que ela não vai no e-mail e a quem pedi-la, e o painel avisa a dona de que a senha vai por ela", () => {
     abrir({ linkComSenha: true });
     expect(screen.getByText(PEDE_A_SENHA)).toBeInTheDocument();
     expect(screen.getByText(AVISO_DA_SENHA)).toBeInTheDocument();
     expect(screen.getByText(COM_AUDIO)).toBeInTheDocument();
+  });
+
+  // Conferência de tela do Pacote 4d: com a senha, a prévia dizia que bastava o link.
+  it("o link com senha: o aviso de encaminhamento da prévia fala do link e da senha, e não diz que basta o link", () => {
+    abrir({ linkComSenha: true });
+    expect(screen.getByText(ENCAMINHAR_COM_SENHA)).toBeInTheDocument();
+    expect(screen.queryByText(ENCAMINHAR)).not.toBeInTheDocument();
+  });
+
+  it("o link sem senha, e o desligado que liga com o envio sem senha: o aviso de sempre", () => {
+    const { unmount } = abrir({ linkComSenha: false });
+    expect(screen.getByText(ENCAMINHAR)).toBeInTheDocument();
+    expect(screen.queryByText(ENCAMINHAR_COM_SENHA)).not.toBeInTheDocument();
+    unmount();
+    abrir({ linkLigado: false, linkComSenha: true });
+    expect(screen.getByText(ENCAMINHAR)).toBeInTheDocument();
+    expect(screen.queryByText(ENCAMINHAR_COM_SENHA)).not.toBeInTheDocument();
   });
 
   it("o link com senha e conta sem nome: a senha se pede a quem gravou a reunião", () => {

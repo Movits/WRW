@@ -439,7 +439,36 @@ describe("a senha e o áudio do link (H23)", () => {
     act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
     expect(screen.getByText("135791")).toBeInTheDocument();
     expect(screen.queryByText(/A senha atual deixa de valer na hora/)).not.toBeInTheDocument();
-    expect(toast.success).toHaveBeenCalledWith("Senha criada.");
+    // Conferência de tela do Pacote 4d: a troca dizia "Senha criada.", como o primeiro "Pôr senha".
+    expect(toast.success).toHaveBeenCalledWith("Senha trocada.");
+    expect(toast.success).not.toHaveBeenCalledWith("Senha criada.");
+  });
+
+  it("o aviso diz o que a dona fez: Pôr senha cria, Trocar troca, e Pôr senha de novo, depois de tirar, volta a criar", () => {
+    const { rerender } = render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Pôr senha" }));
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "246801" }));
+    expect(toast.success).toHaveBeenLastCalledWith("Senha criada.");
+
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN} comSenha/>);
+    fireEvent.click(screen.getByRole("button", { name: "Trocar a senha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trocar" }));
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
+    expect(toast.success).toHaveBeenLastCalledWith("Senha trocada.");
+
+    rerender(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={TOKEN}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Pôr senha" }));
+    act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "975310" }));
+    expect(toast.success).toHaveBeenLastCalledWith("Senha criada.");
+    expect(duble.mutacoes.novaSenha.mutate).toHaveBeenCalledTimes(3);
+  });
+
+  it("o aviso da troca nos 10 idiomas é outro, e não o da senha criada", () => {
+    for (const idioma of CODIGOS) {
+      const trocada = i18n.t("meetings.share.passwordChanged", { lng: idioma });
+      expect(trocada, idioma).not.toBe("meetings.share.passwordChanged");
+      expect(trocada, idioma).not.toBe(i18n.t("meetings.share.passwordCreated", { lng: idioma }));
+    }
   });
 
   it("com senha: tirar pede confirmação e, confirmado, o link volta a abrir sem senha", () => {
@@ -464,6 +493,36 @@ describe("a senha e o áudio do link (H23)", () => {
     expect(screen.getByRole("textbox", { name: "Texto pronto para mandar" })).toHaveValue(`Reunião “Reunião” na WRW: ${endereco}\nSenha: 246801`);
     const atualizar = duble.setData.mock.calls.at(-1)![1] as (anterior: unknown) => unknown;
     expect(atualizar({ meeting: { id: ID, linkComSenha: false } })).toEqual({ meeting: { id: ID, linkComSenha: true } });
+    expect(toast.success).toHaveBeenCalledWith("Senha criada.");
+    expect(toast.success).not.toHaveBeenCalledWith("Senha trocada.");
+  });
+
+  /**
+   * Conferência de tela do Pacote 4d: a 375 px, o link quebra em 4 linhas ou
+   * mais, e a caixa de 4 linhas fixas só mostrava a linha da senha rolando
+   * dentro dela. O jsdom não faz layout: o scrollHeight dublado faz o papel da
+   * altura do texto quebrado na largura da tela.
+   */
+  it("a caixa do texto pronto cresce até a linha da senha aparecer sem rolar dentro dela, e acompanha a largura da tela", () => {
+    let alturaDoTexto = 168;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", { configurable: true, get: () => alturaDoTexto });
+    try {
+      render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN} comSenha/>);
+      act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "135791" }));
+      const caixa = screen.getByRole("textbox", { name: "Texto pronto para mandar" });
+      expect(caixa.style.height).toBe("168px");
+      // Girou o celular: o link quebra em menos linhas, e a caixa acompanha.
+      alturaDoTexto = 96;
+      act(() => { window.dispatchEvent(new Event("resize")); });
+      expect(caixa.style.height).toBe("96px");
+      // Fechado o quadro, a caixa sai, e a tela não fica ouvindo o resize.
+      fireEvent.click(screen.getByRole("button", { name: "Pronto" }));
+      alturaDoTexto = 240;
+      act(() => { window.dispatchEvent(new Event("resize")); });
+      expect(caixa.style.height).toBe("96px");
+    } finally {
+      Reflect.deleteProperty(HTMLTextAreaElement.prototype, "scrollHeight");
+    }
   });
 
   it("o áudio do link ligado: desmarcar manda o servidor tirar o áudio, e a tela explica o que muda", () => {

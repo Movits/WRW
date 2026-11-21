@@ -50,8 +50,9 @@ gravação.
    digitar, que pode não ter estado na reunião?
 5. O aviso de encaminhamento ("Não o encaminhe a quem não deve ver o que foi dito") basta?
 6. Com o link com senha (H23), o e-mail diz que a senha não vai nele e manda pedi-la à
-   dona, pelo nome dela, e o painel avisa a dona de que a senha vai por ela, à parte.
-   Basta, ou o e-mail deve dizer mais (por exemplo, não mandar a senha pelo mesmo canal)?
+   dona, pelo nome dela, o aviso de encaminhamento passa a falar do link e da senha, e o
+   painel avisa a dona de que a senha vai por ela, à parte. Basta, ou o e-mail deve dizer
+   mais (por exemplo, não mandar a senha pelo mesmo canal)?
 
 ## O texto em português (referência)
 
@@ -72,6 +73,8 @@ gravação.
 - **Botão:** Abrir o resumo
 - Se o botão não funcionar, copie este endereço no navegador: {link}
 - Quem tiver este link abre a reunião. Não o encaminhe a quem não deve ver o que foi dito.
+  (link com senha, H23: "Quem tiver este link e a senha abre a reunião. Não encaminhe o
+  link nem a senha a quem não deve ver o que foi dito.")
 - Você recebeu este e-mail porque {nome da dona} o mandou a você pela WRW. Se não esperava
   por ele, pode ignorá-lo. (sem nome: "…porque quem gravou a reunião o mandou a você…")
 - Este é um e-mail automático: não responda.
@@ -81,7 +84,8 @@ gravação.
 
 - **Assunto:** O link aberto da sua reunião "{título}"
 - Aqui está o link aberto da sua reunião "{título}", para guardar ou encaminhar.
-- (o mesmo parágrafo do que o link abre, o botão, o aviso de encaminhamento)
+- (o mesmo parágrafo do que o link abre, o botão, o aviso de encaminhamento; no link com
+  senha, o aviso que fala do link e da senha)
 - (só no link com senha, H23) Este link pede a senha de 6 dígitos que você criou, e ela
   não vai neste e-mail. Ao encaminhar o link, mande a senha à parte.
 - Você recebeu este e-mail porque pediu à WRW que o mandasse a você.

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Link2, Loader2, LockKeyhole, LockKeyholeOpen, Mail, MessageCircle, Share2 } from "lucide-react";
 import { toast } from "sonner";
@@ -130,6 +130,9 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   // A senha que o servidor acabou de gerar: só aqui, na memória da tela, até a
   // dona fechar o quadro ou sair da página.
   const [senhaNova, setSenhaNova] = useState<string | null>(null);
+  // A senha nova veio do "Trocar" (o link já pedia senha) ou do "Pôr senha": o
+  // aviso diz o que a dona fez.
+  const trocandoSenha = useRef(false);
 
   // O que mudou entra na tela na hora, e a releitura confirma com o servidor.
   // Este painel sempre liga com a confirmação que fala dos nomes: ligado por
@@ -176,7 +179,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
       focarTextoPronto.current = true;
       setSenhaNova(senha);
       atualizarLink({ linkComSenha: true });
-      toast.success(t("meetings.share.passwordCreated"));
+      toast.success(trocandoSenha.current ? t("meetings.share.passwordChanged") : t("meetings.share.passwordCreated"));
     },
     onError: erro => toast.error(mensagemDoErroNoLinkLigado(t, erro)),
   });
@@ -208,6 +211,24 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
     focarTextoPronto.current = false;
     textoPronto.current.focus();
   }, [senhaNova, token]);
+
+  // O texto pronto (H23): o link e a senha, para colar no WhatsApp ou no e-mail.
+  const mensagemComSenha = token && senhaNova ? t("meetings.share.messageWithPassword", { title: titulo, url: enderecoDoLinkAberto(token), password: senhaNova }) : null;
+  // A caixa do texto pronto cresce até caber o texto inteiro: a 375 px o link
+  // quebra em várias linhas, e com as 4 linhas fixas a da senha só aparecia
+  // rolando dentro do campo. Girar o celular muda a quebra: a altura acompanha.
+  useLayoutEffect(() => {
+    const caixa = textoPronto.current;
+    if (!caixa || !mensagemComSenha) return;
+    const ajustar = () => {
+      caixa.style.height = "auto";
+      // O height conta a borda (border-box); o scrollHeight, não.
+      caixa.style.height = `${caixa.scrollHeight + caixa.offsetHeight - caixa.clientHeight}px`;
+    };
+    ajustar();
+    window.addEventListener("resize", ajustar);
+    return () => window.removeEventListener("resize", ajustar);
+  }, [mensagemComSenha]);
 
   if (!token) {
     return <section aria-labelledby="compartilhar-reuniao" className="mb-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
@@ -265,15 +286,13 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
   const endereco = enderecoDoLinkAberto(token);
   const mensagem = t("meetings.share.message", { title: titulo, url: endereco });
   const assunto = t("meetings.share.emailSubject", { title: titulo });
-  // O texto pronto (H23): o link e a senha, para colar no WhatsApp ou no e-mail.
-  const mensagemComSenha = senhaNova ? t("meetings.share.messageWithPassword", { title: titulo, url: endereco, password: senhaNova }) : null;
   const mudando = novaSenha.isPending || tirarSenha.isPending || desligar.isPending;
 
   // A pergunta de confirmação, para desligar o link e para trocar ou tirar a
   // senha: o "Manter", a saída segura, recebe o foco, e a pergunta vai junto no anúncio.
   const perguntas: Record<Confirmacao, { pergunta: string; sim: string; fazer: () => void; perigosa: boolean }> = {
     desligar: { pergunta: t("meetings.share.turnOffConfirm"), sim: t("meetings.share.turnOffYes"), fazer: () => desligar.mutate({ meetingId }), perigosa: true },
-    trocarSenha: { pergunta: t("meetings.share.changePasswordConfirm"), sim: t("meetings.share.changePasswordYes"), fazer: () => novaSenha.mutate({ meetingId }), perigosa: false },
+    trocarSenha: { pergunta: t("meetings.share.changePasswordConfirm"), sim: t("meetings.share.changePasswordYes"), fazer: () => { trocandoSenha.current = true; novaSenha.mutate({ meetingId }); }, perigosa: false },
     tirarSenha: { pergunta: t("meetings.share.removePasswordConfirm"), sim: t("meetings.share.removePasswordYes"), fazer: () => tirarSenha.mutate({ meetingId }), perigosa: true },
   };
   const confirmacao = confirmar && perguntas[confirmar];
@@ -355,7 +374,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
               className="rounded-lg border border-white/15 px-3 py-1.5 text-sm text-white/85 hover:bg-white/5 disabled:opacity-50">{t("meetings.share.changePassword")}</button>
             <button type="button" onClick={() => setConfirmar("tirarSenha")} disabled={mudando}
               className="rounded-lg border border-white/15 px-3 py-1.5 text-sm text-white/65 hover:bg-white/5 disabled:opacity-50">{t("meetings.share.removePassword")}</button>
-          </> : <button type="button" onClick={() => novaSenha.mutate({ meetingId })} disabled={mudando}
+          </> : <button type="button" onClick={() => { trocandoSenha.current = false; novaSenha.mutate({ meetingId }); }} disabled={mudando}
             className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-sm font-semibold text-amber-200 hover:bg-amber-300/10 disabled:opacity-50">
             {novaSenha.isPending && <Loader2 size={14} className="animate-spin"/>}{t("meetings.share.addPassword")}
           </button>}

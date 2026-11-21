@@ -53,8 +53,9 @@ export type EmailDoResumo = { assunto: string; html: string; text: string };
  *
  * `link` diz como está o link aberto (H23) nos dois modelos que o levam: sem o
  * áudio, o texto não promete a gravação; com a senha, um parágrafo diz que ela
- * não vai no e-mail e a quem pedi-la. A senha nunca entra aqui. Sem `link`, o
- * link de antes da H23: sem senha e com o áudio.
+ * não vai no e-mail e a quem pedi-la, e o aviso de encaminhamento fala do link
+ * e da senha (o de sem senha diria que basta o link). A senha nunca entra aqui.
+ * Sem `link`, o link de antes da H23: sem senha e com o áudio.
  */
 export function montarEmailDoResumo(dados: {
   modelo: ModeloDoEmailDoResumo;
@@ -74,6 +75,9 @@ export function montarEmailDoResumo(dados: {
   // nulo pede a senha.
   const oQueAbre = t(dados.link?.comAudio === false ? textos.oQueAbreSemAudio : textos.oQueAbre);
   const comSenha = dados.link?.comSenha === true;
+  // Com a senha, o aviso não pode dizer que basta o link: o parágrafo logo
+  // acima diz que ele pede a senha, num e-mail que vai a terceiros.
+  const avisoDoLink = t(comSenha ? textos.avisoComSenha : textos.aviso);
 
   let assunto: string;
   let paragrafos: string[];
@@ -90,13 +94,13 @@ export function montarEmailDoResumo(dados: {
     assunto = t(textos.assuntoDona);
     paragrafos = [t(textos.aberturaDona), oQueAbre, ...(comSenha ? [t(textos.senhaDona)] : [])];
     botao = t(textos.botao);
-    aviso = t(textos.aviso);
+    aviso = avisoDoLink;
     porQue = t(textos.porQueDona);
   } else {
     assunto = t(dona ? textos.assunto : textos.assuntoSemNome);
     paragrafos = [t(dona ? textos.abertura : textos.aberturaSemNome), oQueAbre, ...(comSenha ? [t(dona ? textos.senha : textos.senhaSemNome)] : [])];
     botao = t(textos.botao);
-    aviso = t(textos.aviso);
+    aviso = avisoDoLink;
     porQue = t(dona ? textos.porQue : textos.porQueSemNome);
   }
   assunto = linhaLimpa(assunto, 250);

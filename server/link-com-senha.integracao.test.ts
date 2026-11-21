@@ -306,7 +306,9 @@ describe.skipIf(!temBanco)("Link aberto com senha e sem o áudio (H23) no banco 
     expect(await entrarNoLink(token, senha!, "192.0.2.43", T2)).toMatchObject({ entrou: true });
     expect(await linhaDoLink(COM_SENHA)).toMatchObject({ falhas: FALHAS_LIVRES_DO_LINK + 1, ultimaFalhaEm: T1, bloqueadoAte: T1 + 2 * ESPERA_INICIAL_MS });
     expect(await entrarNoLink(token, senha!, "192.0.2.44", T2 + 1000)).toMatchObject({ entrou: true });
-  });
+    // São 50 erradas em sequência, cada uma com o scrypt e uma transação: leva uns
+    // 3 s e, com a máquina carregada, já passou dos 5 s do prazo padrão (5,07 s).
+  }, 60_000);
 
   it(`tentativas em paralelo: a linha travada as enfileira, e só ${FALHAS_LIVRES_DO_LINK} são conferidas antes da espera`, async () => {
     const { token, senha } = await ligarLinkAbertoComOpcoes(DONA, COM_SENHA, PROVA, { comSenha: true });

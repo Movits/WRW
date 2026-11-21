@@ -149,6 +149,8 @@ describe("montarEmailDoResumo", () => {
   const SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
   const SENHA_SEM_NOME = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem gravou a reunião.";
   const SENHA_DA_DONA = "Este link pede a senha de 6 dígitos que você criou, e ela não vai neste e-mail. Ao encaminhar o link, mande a senha à parte.";
+  const AVISO = "Quem tiver este link abre a reunião. Não o encaminhe a quem não deve ver o que foi dito.";
+  const AVISO_COM_SENHA = "Quem tiver este link e a senha abre a reunião. Não encaminhe o link nem a senha a quem não deve ver o que foi dito.";
 
   it("o link sem o áudio (H23): o texto não promete a gravação, às participantes e à dona", () => {
     for (const modelo of ["participante", "dona"] as const) {
@@ -169,6 +171,46 @@ describe("montarEmailDoResumo", () => {
     const daDona = montarEmailDoResumo({ ...base, modelo: "dona", link: { comSenha: true, comAudio: true } });
     expect(daDona.text).toContain(SENHA_DA_DONA);
     expect(daDona.text).not.toContain(SENHA);
+  });
+
+  // Conferência de tela do Pacote 4d: com a senha, o aviso dizia "Quem tiver
+  // este link abre a reunião", logo abaixo do parágrafo que pede a senha.
+  it("o link com a senha (H23): o aviso de encaminhamento fala do link e da senha, e não diz que basta o link, às participantes e à dona", () => {
+    for (const modelo of ["participante", "dona"] as const) {
+      for (const comAudio of [true, false]) {
+        const email = montarEmailDoResumo({ ...base, modelo, link: { comSenha: true, comAudio } });
+        expect(email.text, modelo).toContain(`${AVISO_COM_SENHA}\n\n`);
+        expect(email.html, modelo).toContain(AVISO_COM_SENHA);
+        expect(email.text, modelo).not.toContain("Quem tiver este link abre a reunião.");
+        expect(email.html, modelo).not.toContain("Quem tiver este link abre a reunião.");
+      }
+      // Sem a senha, e no link de antes da H23, o aviso de sempre.
+      for (const link of [{ comSenha: false, comAudio: true }, { comSenha: false, comAudio: false }, undefined]) {
+        const email = montarEmailDoResumo({ ...base, modelo, link });
+        expect(email.text, modelo).toContain(AVISO);
+        expect(email.text, modelo).not.toContain(AVISO_COM_SENHA);
+      }
+    }
+    // O automático leva o link da conta: nenhum dos dois avisos.
+    const pronto = montarEmailDoResumo({ ...base, endereco: NA_CONTA, modelo: "pronto", link: { comSenha: true, comAudio: true } });
+    expect(pronto.text).not.toContain(AVISO_COM_SENHA);
+    expect(pronto.text).not.toContain(AVISO);
+  });
+
+  it("o aviso com a senha nos 10 idiomas: sem marca, diferente do aviso sem senha, e é ele que vai no e-mail do link com senha", () => {
+    for (const idioma of IDIOMAS_DA_REUNIAO) {
+      const textos = TEXTOS_DO_EMAIL_DO_RESUMO[idioma];
+      expect(textos.avisoComSenha, idioma).not.toMatch(/\{\{/);
+      expect(textos.avisoComSenha, idioma).not.toBe(textos.aviso);
+      for (const modelo of ["participante", "dona"] as const) {
+        const comSenha = montarEmailDoResumo({ ...base, idioma, modelo, link: { comSenha: true, comAudio: true } });
+        expect(comSenha.text, `${idioma} ${modelo}`).toContain(textos.avisoComSenha);
+        expect(comSenha.text, `${idioma} ${modelo}`).not.toContain(textos.aviso);
+        const semSenha = montarEmailDoResumo({ ...base, idioma, modelo, link: { comSenha: false, comAudio: true } });
+        expect(semSenha.text, `${idioma} ${modelo}`).toContain(textos.aviso);
+        expect(semSenha.text, `${idioma} ${modelo}`).not.toContain(textos.avisoComSenha);
+      }
+    }
   });
 
   it("sem o link, o de antes da H23 (com o áudio, sem senha); e o automático, que leva o link da conta, não muda com o link aberto", () => {

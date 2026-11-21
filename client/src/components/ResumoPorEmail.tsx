@@ -46,10 +46,11 @@ import {
  *
  * O texto segue a senha e o áudio do link (H23), como o servidor
  * (server/email-do-resumo.ts): sem o áudio, não promete a gravação; com a
- * senha, diz que ela não vai no e-mail, e o painel avisa a dona de que a senha
- * vai por ela, à parte. Os textos novos (emailDoResumo.oQueAbreSemAudio,
- * senha, senhaSemNome e senhaDona, e resumoPorEmail.linkComSenha) esperam a
- * revisão da Cris, nos 10 idiomas.
+ * senha, diz que ela não vai no e-mail e o aviso fala do link e da senha, e o
+ * painel avisa a dona de que a senha vai por ela, à parte. Os textos novos
+ * (emailDoResumo.oQueAbreSemAudio, senha, senhaSemNome, senhaDona e
+ * avisoComSenha, e resumoPorEmail.linkComSenha) esperam a revisão da Cris, nos
+ * 10 idiomas.
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -278,7 +279,8 @@ function PainelDoResumoPorEmail({ meetingId, titulo, linkLigado, linkComSenha = 
     oQueAbre: comAudio ? tDoEmail("emailDoResumo.oQueAbre") : tDoEmail("emailDoResumo.oQueAbreSemAudio"),
     senha: !comSenha ? null : comNome ? tDoEmail("emailDoResumo.senha", valoresDaPrevia) : tDoEmail("emailDoResumo.senhaSemNome", valoresDaPrevia),
     botao: tDoEmail("emailDoResumo.botao"),
-    aviso: tDoEmail("emailDoResumo.aviso"),
+    // Com a senha, o aviso fala do link e da senha, como o do servidor.
+    aviso: comSenha ? tDoEmail("emailDoResumo.avisoComSenha") : tDoEmail("emailDoResumo.aviso"),
     porQue: comNome ? tDoEmail("emailDoResumo.porQue", valoresDaPrevia) : tDoEmail("emailDoResumo.porQueSemNome", valoresDaPrevia),
   };
 
