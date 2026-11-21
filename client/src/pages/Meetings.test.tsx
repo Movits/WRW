@@ -396,6 +396,52 @@ describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   });
 });
 
+// A junção do Pacote 4b com o 4d na mesma tela: o "Baixar o áudio" (H8c) é da
+// dona e segue o áudio guardado (audioParaBaixar); tirar o áudio do link (H23)
+// não o tira. O resumo por e-mail (H22), lá em cima, segue o link: sem o áudio,
+// não promete a gravação. Cada painel chama só o seu pedido.
+describe("Detalhe da reunião — o 'Baixar o áudio' (4b) e o resumo por e-mail (4d) na mesma reunião", () => {
+  const TOKEN_DO_LINK = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const PARA_BAIXAR = { duracaoSegundos: 900, expiresAt: Date.now() + 1e9 };
+  const comResumoPronto = () => {
+    duble.resumoGuardado.mockReturnValue({
+      data: { estado: "pronto", emoji: null, idioma: "pt-BR", erro: null, versaoAnterior: false, itens: [] },
+      isLoading: false, isSuccess: true, isError: false, error: null, refetch: vi.fn(),
+    });
+    duble.painelDoEmail.mockReturnValue({
+      data: { idioma: "pt-BR", linkLigado: true, emailDaDona: "glenda@exemplo.invalid", nomeDaDona: "Glenda", automatico: false, participantes: [], envios: [], podeMandarDeNovo: false },
+      isPending: false, isError: false, error: null,
+    });
+  };
+
+  it("o link ligado sem o áudio e com senha: o e-mail não promete a gravação, e o 'Baixar o áudio' da dona continua e pede só o áudio", () => {
+    comResumoPronto();
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: true, linkComAudio: false } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(painel.textContent).not.toMatch(/ouve a gravação/);
+
+    // Com o painel do e-mail aberto, o botão da seção Gravação segue lá.
+    fireEvent.click(screen.getByRole("button", { name: "Baixar o áudio" }));
+    const aviso = screen.getByRole("dialog", { name: "Baixar o áudio da reunião" });
+    fireEvent.click(within(aviso).getByRole("button", { name: "Preparar o arquivo" }));
+    expect(duble.mutacoes.baixarAudio.mutate).toHaveBeenCalledWith(
+      { meetingId: REUNIAO.id, formato: "mp3", nome: "Reunião com a vinícola - 2026-09-04" }, expect.anything(),
+    );
+    expect(duble.mutacoes.mandarResumoPorEmail.mutate).not.toHaveBeenCalled();
+  });
+
+  it("o link ligado com o áudio: o e-mail promete a gravação, e o 'Baixar o áudio' é o mesmo", () => {
+    comResumoPronto();
+    abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: false, linkComAudio: true } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
+    fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
+    const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Baixar o áudio" })).toBeInTheDocument();
+  });
+});
+
 describe("Detalhe da reunião — em processamento", () => {
   const aviso = () => screen.queryByText(/ainda está em processamento/);
 
