@@ -25,6 +25,13 @@ nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto
 `CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
 dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
+`meetings.submitRecording` (o envio único: o áudio inteiro, em base64, até 10 min e 10 MB)
+não é mais caminho do gravador desde a G14: a tela só o chama no recuo do corte (o arquivo
+curto de um formato que o corte reconhece mas não lê), com `recuoDoCorte: true`, e cada
+chamada deixa no log a linha `[Reuniões] envio único (submitRecording)`, com a marca ou sem
+ela (a sem marca é de um cliente de fora do app). Áudio novo de reunião vai pela rota das
+partes, abaixo.
+
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
 cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por

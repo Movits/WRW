@@ -32,8 +32,8 @@ export type ResumoDoNetworkInteligente = {
     segundosEmReunioesGuardadas: number;
     /**
      * O teto da reunião gravada (12 h desde a G13b, o da gravação em partes), o
-     * mesmo do plano gratuito em networkInteligente.minutos. O arquivo enviado
-     * inteiro segue com os 10 minutos do envio único, e a tela diz isso à parte.
+     * mesmo do plano gratuito em networkInteligente.minutos. Vale também para o
+     * arquivo enviado, que vai em partes (H9a, H9b e H9c), e a tela diz os dois.
      */
     limitePorReuniaoSegundos: number;
   };

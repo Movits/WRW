@@ -526,6 +526,42 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
   de `client/src/index.css`. Sem migração.
 
+## 21/11/2026 — o gravador sem o envio único, com o recuo do corte (G14, parte 1)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pelo pedido de fazer a G14 "pelo caminho
+  mais seguro e vetável". Decisão vetável pelo Roberto.
+- **O quê:** o gravador grava sempre em partes. Saíram o `?envioUnico=1` (a URL antiga
+  grava em partes, como o `?emPartes=1` da G9), a revisão antes de enviar ("Transcrever
+  áudio", "Descartar e gravar novamente") e os textos dos 10 minutos e 10 MB onde as
+  partes já cobrem o caso (a dica sob o relógio, o FAQ da Home e a ajuda do painel de
+  minutos). A gravação ganha em todas as URLs o que era só das partes: a cópia no
+  aparelho, a retomada, o aviso de hora, a entrega ao sair da tela e o Descartar com
+  confirmação.
+- **O que ficou, e por quê:**
+  - `meetings.submitRecording`, com os 10 minutos e 10 MB: é o recuo do corte do pacote
+    4b (o arquivo curto de um formato que o corte reconhece mas não lê, como o ALAC do
+    Gravador do iPhone, o AC-3 e o Vorbis no WebM). Sem ele, esse arquivo só receberia o
+    aviso de converter. A tela o marca com `recuoDoCorte: true`;
+  - a rota também fica para um cliente de fora do repositório, se houver (a pergunta ao
+    Roberto sobre o "app Expo" segue sem resposta, e o log de produção não foi lido):
+    cada chamada deixa uma linha `[Reuniões] envio único (submitRecording)`, com a marca
+    do recuo ou sem ela;
+  - os tetos do envio único seguem no servidor também porque o reprocesso e a junção
+    (H17) leem a gravação inteira das reuniões antigas com eles;
+  - o ditado e a voz do contato não usam o envio único da reunião: têm rotas próprias
+    (`assistenteTexto.transcrever`, 2 minutos e 3 MB, e
+    `networkInteligente.complementarPorVoz`) e não mudaram.
+- **Antes:** a G13b (15/11) fez das partes o padrão e deixou o `?envioUnico=1` como saída
+  de suporte até a G14. O desenho pedia, para tirar o envio único, uma semana de logs sem
+  `submitRecording`, nenhum cliente externo e a H9b pronta (pronta desde o pacote 4b).
+- **Por fazer (parte 2):** tirar a rota, ou levar o recuo do corte às partes (o arquivo
+  inteiro como uma parte só), depois de uma semana de log sem chamada sem a marca do
+  recuo e com o aval do Roberto.
+- **Onde:** `client/src/pages/Meetings.tsx` (`enviarPeloEnvioUnico` e `importarArquivo`),
+  `client/src/hooks/useGravacaoEmPartes.ts` (sem o modo inativo), `meetings.submitRecording`
+  em `server/routers/meetings.ts`, o FAQ em `server/routers/faq.ts` e
+  `networkPanel.minutesLimitHelp` nos 10 JSONs. Sem migração.
+
 ---
 
 ## Lições sem data registrada

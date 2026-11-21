@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "@/_core/hooks/useAuth";
+import i18n from "@/i18n";
+import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
 import { _reiniciarParaTestes } from "@/hooks/useImportacaoEmPartes";
 import { lerBlob, type CorteDoArquivo } from "@/lib/corte-comum";
 import { cortarArquivo } from "@/lib/corte-do-arquivo";
@@ -14,9 +16,10 @@ import Meetings from "./Meetings";
  * O arquivo enviado em partes no gravador (H9a, H9b e H9c): no /gravar, todo
  * arquivo vai ao corte (o Worker é um dublê que corta de verdade, na página),
  * que reconhece o formato pelos bytes, e sobe parte a parte pelo caminho da
- * gravação em partes, com o andamento e o Cancelar na tela. No ?envioUnico=1,
- * tudo segue no envio único (Meetings.rotas.test.tsx); em partes, só o arquivo
- * curto de um formato que o corte não lê.
+ * gravação em partes, com o andamento e o Cancelar na tela. Desde a G14 não há
+ * outro caminho: o ?envioUnico=1 saiu, e o envio único só sobra no recuo do
+ * corte, o arquivo curto de um formato que o corte reconhece mas não lê (o
+ * último bloco deste arquivo).
  *
  * O tRPC é o dublê de Meetings.agenda.test.tsx.
  */
@@ -241,7 +244,9 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     abrir();
     enviar(new File([new Uint8Array(11 * 1024 * 1024)], "longa.mp3", { type: "audio/mpeg" }));
     await waitFor(() => expect(duble.cortar).toHaveBeenCalled());
-    expect(toast.error).not.toHaveBeenCalledWith("O arquivo de áudio deve ter no máximo 10 MB.");
+    // O único aviso é o do corte (o arquivo danificado): nenhum fala dos 10 MB do envio único.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível ler este arquivo: ele parece incompleto ou danificado. Confira se ele abre no seu aparelho e envie de novo."));
+    expect(vi.mocked(toast.error).mock.calls.flat().join(" ")).not.toMatch(/10 MB/);
   });
 
   it("Cancelar no meio: a reunião é excluída, nada mais sobe, o aviso diz que nada ficou, e o formulário volta", async () => {
@@ -341,6 +346,26 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(duble.cortar).not.toHaveBeenCalled();
   });
 
+  // Vindos do envio de arquivo do ?envioUnico=1 (Meetings.rotas.test.tsx), que
+  // saiu na G14: as mesmas recusas valem antes do corte, sem travar o formulário.
+  it.each([
+    { caso: "com título de uma letra só", titulo: "X", marcar: true, aviso: "O título precisa ter de 2 a 200 caracteres." },
+    { caso: "com título de 201 caracteres", titulo: "a".repeat(201), marcar: true, aviso: "O título precisa ter de 2 a 200 caracteres." },
+    { caso: "sem a autorização marcada", titulo: "Conversa com a Bia", marcar: false, aviso: "Marque a caixa de autorização antes de enviar o áudio." },
+  ])("o arquivo $caso é recusado antes do corte, sem reunião nem formulário travado", async ({ titulo, marcar, aviso }) => {
+    abrir();
+    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: titulo } });
+    if (marcar) fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoMp3()] } });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(aviso));
+    expect(duble.cortar).not.toHaveBeenCalled();
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox")).not.toBeDisabled();
+    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeDisabled();
+    expect(sessaoOcupada()).toBe(false);
+  });
+
   it("a reunião da agenda (Gravar agora) fica ligada à reunião que o MP3 criou", async () => {
     abrir(`/gravar?agendada=${AGENDADA}`);
     await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
@@ -349,12 +374,19 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalled());
   });
 
-  it("no ?envioUnico=1, a saída de suporte, o MP3 segue no envio único de antes", async () => {
+  // G14: o ?envioUnico=1, a saída de suporte da G13b, saiu. A URL antiga que
+  // ainda o trouxer (um favorito, um link num e-mail) manda o arquivo em partes.
+  it("o ?envioUnico=1 de antes não muda nada: o MP3 vai ao corte e sobe em partes, sem o envio único", async () => {
     abrir("/gravar?envioUnico=1");
+    // O seletor oferece todos os formatos do corte, e não só os do envio único de antes.
+    expect(document.querySelector<HTMLInputElement>("input[type='file']")!.accept.split(",")).toEqual(expect.arrayContaining(["audio/*", "video/mp4", ".flac"]));
+    expect(screen.getByText("Áudio ou vídeo (MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC, AAC): até 12 horas.")).toBeInTheDocument();
     enviar(arquivoMp3());
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ meetingId: "reuniao-do-envio-unico", mimeType: "audio/mpeg" })));
-    expect(duble.cortar).not.toHaveBeenCalled();
-    expect(iniciarGravacao()).not.toHaveBeenCalled();
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
+    expect(duble.cortar).toHaveBeenCalled();
+    expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ origem: "arquivo" }));
+    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 
   it("o M4A, o vídeo e os outros formatos também vão ao corte, e cada parte sobe no tipo que o corte diz (H9b e H9c)", async () => {
@@ -380,11 +412,15 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("o arquivo curto de um formato que o corte não lê segue no envio único de sempre (o Vorbis no WebM)", async () => {
+  it("o arquivo curto de um formato que o corte não lê segue no envio único de sempre (o Vorbis no WebM), com a duração lida e a marca do recuo (G14)", async () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
+    duble.duracao.mockResolvedValue(301);
     abrir();
     enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ mimeType: "audio/webm" })));
+    // A marca vai ao log do servidor, que separa o recuo de um cliente de fora do app.
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      meetingId: "reuniao-do-envio-unico", mimeType: "audio/webm", durationSeconds: 301, recuoDoCorte: true,
+    })));
     expect(duble.cortar).toHaveBeenCalled();
     expect(iniciarGravacao()).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
@@ -609,5 +645,134 @@ describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do p
     expect(duble.enviarParte).toHaveBeenCalledTimes(1);
     expect(iniciarGravacao()).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toBeInTheDocument());
+  });
+});
+
+/**
+ * O recuo do corte, que a G14 manteve: o arquivo curto (até 10 MB e 10 min) de
+ * um formato que o corte reconhece mas não lê vai inteiro pelo envio único
+ * (meetings.submitRecording), como antes da H9b. Os casos vieram do envio de
+ * arquivo do ?envioUnico=1 (Meetings.rotas.test.tsx), que saiu: o caminho do
+ * recuo é o mesmo daquele envio, da leitura da duração ao aviso da falha.
+ */
+describe("Reuniões — o recuo do corte pelo envio único (o que a G14 manteve)", () => {
+  /** O ALAC do Gravador do iPhone: o corte reconhece o M4A e não lê o áudio. */
+  const alac = () => new File(["som"], "memo.m4a", { type: "audio/x-m4a" });
+
+  beforeEach(() => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" });
+  });
+
+  async function formularioDestravado() {
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
+    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
+  }
+
+  it("o formulário trava do começo ao fim do envio: a autorização não se desmarca no meio, e a dica de instalação sai do alcance sem perder o lugar", async () => {
+    let entregarDuracao: (segundos: number | null) => void = () => {};
+    duble.duracao.mockImplementation(() => new Promise(resolver => { entregarDuracao = resolver; }));
+    let entregarCriacao: (reuniao: { id: string }) => void = () => {};
+    duble.mutacao("create").mutateAsync.mockImplementation(() => new Promise(resolver => { entregarCriacao = resolver; }));
+    abrir();
+    enviar(alac(), "Conversa com a Bia");
+    // Enquanto o navegador lê o arquivo, nada do formulário muda.
+    await waitFor(() => expect(duble.duracao).toHaveBeenCalled());
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "Instale a WRW como app" })).not.toBeInTheDocument();
+    expect(document.querySelector("section[aria-labelledby]")).toHaveStyle({ visibility: "hidden" });
+    await act(async () => { entregarDuracao(30); });
+    // Com a reunião sendo criada, também não: a autorização não se desmarca no meio.
+    await waitFor(() => expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia", consentGranted: true })));
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+    await act(async () => { entregarCriacao({ id: "reuniao-do-arquivo" }); });
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      meetingId: "reuniao-do-arquivo", mimeType: "audio/m4a", durationSeconds: 30, recuoDoCorte: true,
+    })));
+    await formularioDestravado();
+    expect(screen.getByRole("region", { name: "Instale a WRW como app" })).toBeInTheDocument();
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
+  });
+
+  it("o servidor recusa o envio: o aviso leva o id da reunião e o formulário destrava", async () => {
+    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
+    duble.mutacao("submitRecording").mutateAsync.mockRejectedValue(new Error("Não foi possível processar o áudio."));
+    abrir();
+    enviar(alac());
+    // O mesmo id do onError do envio: o sonner troca aquele aviso em vez de empilhar outro igual.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível processar o áudio.", { id: "reuniao-falhou-reuniao-do-arquivo" }));
+    await formularioDestravado();
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+  });
+
+  it("o envio recusado com um erro sem mensagem avisa com a frase genérica, e não com um aviso em branco", async () => {
+    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
+    duble.mutacao("submitRecording").mutateAsync.mockRejectedValue(new Error(""));
+    abrir();
+    enviar(alac());
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.processError"), { id: "reuniao-falhou-reuniao-do-arquivo" }));
+    expect(toast.error).not.toHaveBeenCalledWith("", expect.anything());
+  });
+
+  it("com o banco fora do ar, o aviso sai no idioma da tela, e não na frase do servidor em português", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    try {
+      duble.mutacao("create").mutateAsync.mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
+      abrir();
+      fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [alac()] } });
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("errors.databaseUnavailable")));
+      expect(i18n.t("errors.databaseUnavailable")).not.toBe(MENSAGEM_BANCO_INDISPONIVEL);
+    } finally {
+      cleanup();
+      await act(async () => { await i18n.changeLanguage("pt-BR"); });
+    }
+  });
+
+  it("a reunião não chega a ser criada: o aviso sai sem id, nada é enviado e o formulário destrava", async () => {
+    duble.mutacao("create").mutateAsync.mockRejectedValue(new Error("Banco de dados indisponível. Tente de novo em instantes."));
+    abrir();
+    enviar(alac());
+    // Só a mensagem: sem reunião criada não há aviso do onError para trocar.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Banco de dados indisponível. Tente de novo em instantes."));
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+    await formularioDestravado();
+  });
+
+  it("a reunião não chega a ser criada e o erro vem sem mensagem: a frase genérica do envio do arquivo, sem id", async () => {
+    duble.mutacao("create").mutateAsync.mockRejectedValue(new Error(""));
+    abrir();
+    enviar(alac());
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.uploadError")));
+    expect(toast.error).not.toHaveBeenCalledWith("");
+    expect(toast.error).not.toHaveBeenCalledWith(i18n.t("meetings.processError"));
+    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("quem vai à lista durante o envio e volta ao gravador encontra a trava, e o fim do envio a leva ao detalhe", async () => {
+    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: VINICOLA });
+    let entregarEnvio: () => void = () => {};
+    duble.mutacao("submitRecording").mutateAsync.mockImplementation(() => new Promise<void>(resolver => { entregarEnvio = () => resolver(); }));
+    abrir();
+    enviar(alac());
+    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
+    act(() => window.history.pushState(null, "", "/meetings"));
+    fireEvent.click(await screen.findByRole("button", { name: /Nova reunião/ }));
+    expect(window.location.pathname).toBe("/gravar");
+    // O envio ainda está no ar: o gravador continua travado, sem gravar nem enviar outro.
+    expect(screen.getByText(/Transcrevendo e analisando/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Iniciar gravação/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Enviar arquivo de áudio/ })).not.toBeInTheDocument();
+    expect(sessaoOcupada()).toBe(true);
+    await act(async () => {
+      await duble.mutacao("submitRecording").opcoes.onSuccess?.({}, { meetingId: VINICOLA });
+      entregarEnvio();
+    });
+    expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`);
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 });

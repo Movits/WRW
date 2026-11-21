@@ -112,9 +112,12 @@ export const TITULO_DA_REUNIAO_MAX = 200;
 /**
  * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
  * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
- * os mesmos antes de enviar, para a dona ver o aviso no idioma dela. Valem até
- * a G14 tirar o envio único (docs/arquitetura/gravador-de-reunioes.md); a
- * gravação em partes tem o teto dela, logo abaixo.
+ * os mesmos antes de enviar. Desde a G14 o gravador não usa mais o envio
+ * único: a tela só o chama no recuo do corte (o arquivo curto de um formato
+ * que o corte reconhece, mas não lê), e o servidor ainda lê com eles a
+ * gravação inteira das reuniões antigas, no reprocesso e na junção
+ * (docs/arquitetura/gravador-de-reunioes.md). A gravação em partes, que é a de
+ * todas, tem o teto dela, logo abaixo.
  */
 export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
 export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;

@@ -24,8 +24,9 @@ import { useOcupacao } from "@/lib/sessao-ocupada";
  * aparelho, em geral, logo em seguida), a gravação segue numa parte nova. O
  * tempo sem microfone não é gravado e não conta no relógio, como a pausa; sem
  * microfone por ESPERA_PELO_MICROFONE_MAXIMA_MS, encerra e entrega. Fora das
- * partes (o ditado, a voz do contato, o envio único), a queda segue
- * encerrando e entregando o que foi gravado: um arquivo só não se emenda.
+ * partes (o ditado e a voz do contato; a reunião grava sempre em partes desde
+ * a G14), a queda segue encerrando e entregando o que foi gravado: um arquivo
+ * só não se emenda.
  */
 
 export type EstadoDoGravador = "parado" | "pedindoMicrofone" | "gravando" | "pausado" | "semMicrofone" | "finalizando";
@@ -81,7 +82,7 @@ export type OpcoesDoGravador = {
   /**
    * Sair da tela (o desmonte) com a gravação em curso, gravando ou pausada. Sem
    * isto, o desmonte descarta: para, solta o microfone e não entrega nada (o
-   * ditado, a voz do contato, o envio único da reunião). Com isto, para e
+   * ditado e a voz do contato). Com isto, para e
    * entrega pelo mesmo caminho do Parar — a última parte sai por aoFecharParte e
    * por aoTerminar —, e `aoEntregarAoSair` avisa a tela. É a gravação em partes
    * (G13b): as partes anteriores já estão no servidor, e descartar perdia a

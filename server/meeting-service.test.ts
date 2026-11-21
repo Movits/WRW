@@ -128,6 +128,15 @@ describe("Assistente de Reuniões — validação de áudio", () => {
     expect(() => duracaoConferidaDoAudio(wavDe(3600))).toThrow(MENSAGEM_REUNIAO_LONGA_DEMAIS);
   });
 
+  // G14: a frase dizia "No modo atual, cada reunião pode ter no máximo 10
+  // minutos", e a reunião vai até 12 h desde a G13b. O teto é só do envio de um
+  // arquivo só, que sobra no recuo do corte (e num cliente de fora do app).
+  it("a recusa da duração diz que o teto de 10 minutos é do envio de um arquivo só, e não da reunião (G14)", () => {
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).not.toMatch(/cada reunião|No modo atual/);
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).toContain("10 minutos");
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).toContain("arquivo só");
+  });
+
   it("disponibiliza os dez idiomas do MMM para a tradução", () => {
     expect(MEETING_TRANSCRIPT_LANGUAGES).toEqual(["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"]);
   });
