@@ -2056,7 +2056,7 @@
       "androidOtherBrowser": "Pour installer WRW comme une app, ouvrez cette page dans Chrome."
     },
     "meetingLanguageLabel": "Langue de la réunion",
-    "meetingLanguageHint": "La langue parlée. L'IA transcrit dans cette langue, et la transcription peut être traduite ensuite.",
+    "meetingLanguageHint": "La langue principale de la conversation. Ce qui est dit dans une autre langue est transcrit dans la langue dans laquelle il a été dit ; la traduction se trouve dans l'onglet Transcription.",
     "originalLanguageSuffix": "(original)",
     "meetingLanguageAuto": "🌐 Détecter automatiquement",
     "meetingLanguageAutoHint": "L'IA reconnaît la langue de chaque prise de parole, même quand la conversation change de langue en cours de route. Le résumé est rédigé dans la langue la plus utilisée.",
@@ -2073,6 +2073,8 @@
       "gone": "Cette suggestion n'est plus disponible."
     },
     "translatingLongStatus": "La réunion est longue : la traduction prend quelques minutes. Vous pouvez laisser cet écran ouvert ; le texte apparaît quand il est prêt.",
+    "autoTranslationNotice": "Traduction automatique en {{idioma}}.",
+    "seeOriginal": "Voir l'original",
     "statusUploading": "Réception de l'audio",
     "speakerLabel": "Intervenant {{n}}",
     "gapLabel": "passage non reçu",

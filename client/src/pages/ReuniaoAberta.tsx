@@ -9,6 +9,7 @@ import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
@@ -135,6 +136,8 @@ export default function ReuniaoAberta() {
   // em que a reunião foi transcrita é o texto original.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
   const [idiomaDaTraducao, setIdiomaDaTraducao] = useState(LANGUAGES.some(idioma => idioma.code === idiomaAtual) ? idiomaAtual : "pt-BR");
+  // O "Ver original" some com o aviso de tradução e deixa o foco aqui (T25).
+  const seletorDaTraducao = useRef<HTMLSelectElement>(null);
   const [textoTraduzido, setTextoTraduzido] = useState<string | null>(null);
   const traduzir = trpc.reuniaoAberta.traduzir.useMutation();
   // Reunião longa: a tradução segue em segundo plano no servidor, que responde
@@ -227,6 +230,9 @@ export default function ReuniaoAberta() {
   // a direção vem do próprio texto (dir="auto"), não da tela: português numa
   // tela em árabe continua da esquerda para a direita.
   const idiomaNaTela = textoTraduzido && idiomaDaTraducao !== idiomaDoOriginal ? idiomaDaTraducao : idiomaDoOriginal;
+  // Como no detalhe da dona (T25): a tradução na tela, ou a espera pela da
+  // reunião longa, ganha o aviso com o caminho para o original.
+  const traducaoNaTela = !!transcricao && idiomaDaTraducao !== idiomaDoOriginal && (!!textoTraduzido || traducaoLonga.aguardando);
   return <Moldura comPlayer={!!gravacao && partes.length > 0}>
     <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
@@ -267,12 +273,13 @@ export default function ReuniaoAberta() {
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.openLinkTranslateSubtext") : t("meetings.openLink.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
-            <select value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+            <select ref={seletorDaTraducao} value={idiomaDaTraducao} onChange={evento => setIdiomaDaTraducao(evento.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               <OpcaoDoIdiomaOriginal idioma={idiomaDoOriginal}/>
               {LANGUAGES.map(idioma => <option className="bg-white text-[#322C26]" key={idioma.code} value={idioma.code}>{idioma.flag} {idioma.label}{idioma.code === idiomaDoOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
         </div>
+        {traducaoNaTela && <AvisoDeTraducao idioma={idiomaDaTraducao} aoVerOriginal={() => setIdiomaDaTraducao(idiomaDoOriginal)} focoDepois={seletorDaTraducao}/>}
         {traducaoLonga.aguardando
           ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div>
           : traduzir.isPending

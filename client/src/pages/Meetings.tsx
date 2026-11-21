@@ -27,6 +27,7 @@ import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
 import { TranscricaoDuranteAGravacao } from "@/components/TranscricaoDuranteAGravacao";
@@ -1140,6 +1141,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
   const translationLanguage = idiomaEscolhido ?? (pedeTranscricao && data?.transcript ? idiomaOriginal : initialLanguage);
   const setTranslationLanguage = setIdiomaEscolhido;
+  // O "Ver original" some com o aviso de tradução e deixa o foco aqui (T25).
+  const seletorDaTraducao = useRef<HTMLSelectElement>(null);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   // Reunião longa: o servidor traduz em segundo plano e responde "em andamento";
   // a tela pergunta de novo a cada 5 s até a tradução chegar.
@@ -1290,6 +1293,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const nomesDasVozes = nomesDosFalantes(meeting.speakerNames);
   const rotuloDaVoz = (falante: string) => nomesDasVozes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
+  // A tela mostra a tradução da IA, ou espera a da reunião longa (T25): o aviso
+  // diz que é tradução e leva ao original. A tradução que falhou deixa o
+  // original em texto corrido, sem aviso; o "Traduzindo" curto já diz o que é.
+  const traducaoNaTela = !!transcript && translationLanguage !== idiomaOriginal && (!!translatedText || traducaoLonga.aguardando);
   // Destaques valem só para o texto original: os valores extraídos pela IA não
   // batem com o texto traduzido.
   const segmentos = transcript && translationLanguage === idiomaOriginal
@@ -1489,12 +1496,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
           <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
-            <select value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
+            <select ref={seletorDaTraducao} value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               <OpcaoDoIdiomaOriginal idioma={idiomaOriginal}/>
               {LANGUAGES.map(language => <option className="bg-white text-[#322C26]" key={language.code} value={language.code}>{language.flag} {language.label}{language.code === idiomaOriginal ? ` ${t("meetings.originalLanguageSuffix")}` : ""}</option>)}
             </select>
           </label>
         </div>
+        {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)} focoDepois={seletorDaTraducao}/>}
         {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>

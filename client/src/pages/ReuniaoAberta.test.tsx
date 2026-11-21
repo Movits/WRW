@@ -477,6 +477,60 @@ describe("Reunião aberta pelo link — direção e anúncios", () => {
   });
 });
 
+// T25, como no detalhe da dona: a tradução automática para o idioma da tela
+// diz que é tradução e leva ao original.
+describe("Reunião aberta pelo link — o aviso de tradução automática (T25)", () => {
+  const EM_INGLES = { ...VISTA, transcricao: { texto: "We will sign on Friday. Send me the draft.", idioma: "en", segmentos: [
+    { inicio: 5, fim: 12, falante: "F1", texto: "We will sign on Friday." },
+    { inicio: 13, fim: 20, falante: "F2", texto: "Send me the draft." },
+  ] } };
+
+  it("reunião em inglês aberta com a tela em pt-BR: a tradução vem com o aviso, e 'Ver original' volta às falas com falante e horário", () => {
+    duble.ver.mockReturnValue(pronta(EM_INGLES));
+    abrirNaTranscricao();
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
+    const { onSuccess } = duble.traduzir.mutate.mock.calls[0][1] as { onSuccess: (r: { text: string }) => void };
+    act(() => onSuccess({ text: "Vamos assinar na sexta. Me mande a minuta." }));
+    expect(screen.getByText("Vamos assinar na sexta. Me mande a minuta.")).toBeInTheDocument();
+    expect(screen.getByText("Tradução automática para o português.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ver original" }));
+    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Falante 1")).toBeInTheDocument();
+    expect(within(falas).getByText("We will sign on Friday.")).toBeInTheDocument();
+    expect(within(falas).getByRole("button", { name: "Ouvir a partir de 00:13" })).toBeInTheDocument();
+    // O original já estava aqui: nada é pedido de novo, e o estado da tradução sai.
+    expect(duble.traduzir.mutate).toHaveBeenCalledTimes(1);
+    expect(duble.traduzir.reset).toHaveBeenCalled();
+  });
+
+  it("'Ver original' some com o aviso e deixa o foco no seletor do idioma, que mostra o original, em vez de largá-lo no <body>", () => {
+    duble.ver.mockReturnValue(pronta(EM_INGLES));
+    abrirNaTranscricao();
+    const { onSuccess } = duble.traduzir.mutate.mock.calls[0][1] as { onSuccess: (r: { text: string }) => void };
+    act(() => onSuccess({ text: "Vamos assinar na sexta. Me mande a minuta." }));
+    const verOriginal = screen.getByRole("button", { name: "Ver original" });
+    verOriginal.focus();
+    fireEvent.click(verOriginal);
+    expect(verOriginal).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.getByRole("combobox")).toHaveFocus();
+  });
+
+  it("tela no idioma da reunião: as falas, sem o aviso e sem pedir tradução", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { texto: "Combinamos a entrega na sexta.", idioma: "pt-BR", segmentos: [
+      { inicio: 5, fim: 12, falante: "F1", texto: "Combinamos a entrega na sexta." },
+    ] } }));
+    abrirNaTranscricao();
+    expect(duble.traduzir.mutate).not.toHaveBeenCalled();
+    expect(within(document.querySelector("ol")!).getByText("Falante 1")).toBeInTheDocument();
+    expect(screen.queryByText(/Tradução automática/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ver original" })).not.toBeInTheDocument();
+  });
+});
+
 describe("Reunião aberta pelo link — o resumo guardado (H4c)", () => {
   it("vem pelo token e pergunta de novo a cada 5 s enquanto é gerado; o link desligado para a consulta", () => {
     duble.ver.mockReturnValue(pronta());
