@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "875f8e4f-3528-46fe-a496-2f9e76266c87",
+  "id": "8b465800-baa1-48da-8356-70c0305ce26f",
   "prevId": "147ab069-f79c-43e2-ba43-f269b79d0443",
   "tables": {
     "agenda_reunioes": {
