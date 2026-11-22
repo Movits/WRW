@@ -5,6 +5,7 @@ import { nomesDosFalantes } from "@shared/const";
 import { ACAO_REUNIAO_EXPORTADA, MENSAGEM_EXPORTAR_SO_PRONTA, type FormatoDaExportacao } from "@shared/exportar-reuniao";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { transcricaoEstaEditada } from "./editar-transcricao";
@@ -90,7 +91,7 @@ export async function exportarReuniao(ownerId: string, meetingId: string, pedido
       createdAt: meetings.createdAt,
       speakerNames: meetings.speakerNames,
     }).from(meetings)
-      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
       .limit(1);
     // Lançar aqui desfaz a transação: nada foi gravado ainda.
     if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });

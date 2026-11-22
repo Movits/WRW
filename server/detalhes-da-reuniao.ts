@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { contexts, meetings, privateContacts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { etiquetasDaReuniao, normalizarEtiquetas, normalizarOndeFoi, RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
 
 /**
@@ -97,7 +98,7 @@ export type DetalhesDaReuniao = {
 export async function atualizarDetalhesDaReuniao(ownerId: string, meetingId: string, campos: CamposDosDetalhes): Promise<DetalhesDaReuniao> {
   const db = await exigirDb();
   return db.transaction(async tx => {
-    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel());
     const [reuniao] = await tx.select({ titulo: meetings.title, status: meetings.status }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
     await conferirContatoEContexto(ownerId, { contactId: campos.contactId, contextId: campos.contextId }, tx);

@@ -5,6 +5,7 @@ import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { lerDemandas } from "@shared/o-que-preciso";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
+import { semReuniaoNaLixeira } from "./reuniao-visivel";
 import { invokeLLM } from "./_core/llm";
 import { slugifyMatchTag } from "./match-service";
 
@@ -1151,11 +1152,13 @@ export async function identificacaoDoContato(db: Banco, ownerId: string, contato
 
 /**
  * Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro.
- * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona.
+ * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona. As
+ * da reunião que está na lixeira (H7d) somem até ela voltar: levam o trecho
+ * da fala dela.
  */
 export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string; alvo?: "contato" | "perfil" }) {
   const db = await exigirDb();
-  const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")];
+  const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"), semReuniaoNaLixeira(networkSugestoes.meetingId)];
   if (filtro.contactId !== undefined) condicoes.push(eq(networkSugestoes.contactId, filtro.contactId));
   if (filtro.meetingId !== undefined) condicoes.push(eq(networkSugestoes.meetingId, filtro.meetingId));
   if (filtro.alvo !== undefined) condicoes.push(eq(networkSugestoes.alvo, filtro.alvo));
@@ -1217,10 +1220,11 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
   const db = await exigirDb();
   // Só a pendência do CONTATO: a que vai ao perfil da dona (N5, alvo 'perfil')
   // é confirmada por server/reuniao-no-match.ts, e nunca vira dado de contato.
+  // A da reunião que está na lixeira (H7d) é "não encontrada", como some da lista.
   const [pendencia] = await db.select().from(networkSugestoes)
     .where(and(
       eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
-      eq(networkSugestoes.alvo, "contato"),
+      eq(networkSugestoes.alvo, "contato"), semReuniaoNaLixeira(networkSugestoes.meetingId),
     )).limit(1);
   if (!pendencia || pendencia.contactId === null) throw new PendenciaNaoEncontrada();
   const contactId = Number(pendencia.contactId);
@@ -1245,7 +1249,7 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
       .set({ status: "confirmada", valor, decididaEm: agora, updatedAt: agora })
       .where(and(
         eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
-        eq(networkSugestoes.alvo, "contato"),
+        eq(networkSugestoes.alvo, "contato"), semReuniaoNaLixeira(networkSugestoes.meetingId),
       ));
     if (!((tomada as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
 
@@ -1278,7 +1282,11 @@ export async function ignorarPendencia(ownerId: string, id: string) {
   const agora = Date.now();
   const [resultado] = await db.update(networkSugestoes)
     .set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
-    .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")));
+    // A da reunião na lixeira (H7d) é "não encontrada": a decisão espera ela voltar.
+    .where(and(
+      eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+      semReuniaoNaLixeira(networkSugestoes.meetingId),
+    ));
   if (!((resultado as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
   return { ok: true as const };
 }

@@ -19,6 +19,7 @@ import { rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { foraDaLixeira } from "./reuniao-visivel";
 
 /**
  * Os lembretes e os avisos do gravador no sino (H15 do plano do gravador,
@@ -206,7 +207,8 @@ export function apagarAvisosDaReuniao(ex: Executor, ownerId: string, meetingId: 
 export async function avisarReuniaoPronta(ex: Executor, ownerId: string, meetingId: string, resumo: ResumoDaReuniaoPronta): Promise<boolean> {
   const [reuniao] = await ex.select({ titulo: meetings.title, contaId: users.id }).from(meetings)
     .innerJoin(users, and(eq(users.openId, meetings.ownerId), eq(users.isActive, true)))
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "ready")))
+    // A da lixeira (H7d) não avisa: o aviso levaria à reunião "não encontrada".
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "ready"), foraDaLixeira()))
     .limit(1);
   if (!reuniao) return false;
   const endereco = rotaDaReuniao(meetingId);

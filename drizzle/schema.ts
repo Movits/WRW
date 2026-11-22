@@ -1138,6 +1138,20 @@ export const meetings = mysqlTable("meetings", {
   // a gravação nem assina o áudio pelo link. O padrão é o de antes da H23: o
   // link ligado antes dela segue com o áudio.
   shareAudio: boolean("share_audio").default(true).notNull(),
+  // A pasta da reunião (H7d do plano do gravador): no máximo uma, da própria
+  // dona (meeting_folders). Nula: sem pasta. Apagar a pasta solta as reuniões
+  // dela (a coluna volta a nula) na mesma transação; nada da reunião sai com a
+  // pasta. Só a dona lê; o link aberto não leva a pasta.
+  folderId: varchar("folder_id", { length: 36 }),
+  // A lixeira (H7d): a hora em que a dona mandou a reunião para a lixeira.
+  // Nula: fora da lixeira. É exclusão ADIADA: preenchida, a reunião sai de toda
+  // consulta (a lista, a busca, a Memória, o link aberto, as filas, os motores
+  // e cada procedimento pelo id), salvo a lixeira da própria dona e o
+  // restaurar (server/lixeira-de-reunioes.ts). Passados os 30 dias, a
+  // varredura a exclui de vez pelo caminho de sempre (deletePrivateMeeting).
+  // Ir e voltar da lixeira não mexe no updated_at, que é a ficha de quem
+  // processa a reunião.
+  trashedAt: bigint("trashed_at", { mode: "number" }),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
@@ -1149,6 +1163,31 @@ export const meetings = mysqlTable("meetings", {
   // (deleteContext, em server/db.ts), e o filtro por contexto acha as reuniões
   // dele, sem varrer as reuniões da dona.
   ownerContextIdx: index("meetings_owner_context_idx").on(table.ownerId, table.contextId),
+  // As reuniões de uma pasta (a contagem e o filtro da lista) e o soltar da
+  // pasta apagada, sem varrer as reuniões da dona.
+  ownerFolderIdx: index("meetings_owner_folder_idx").on(table.ownerId, table.folderId),
+  // A varredura acha a lixeira vencida sem varrer as reuniões.
+  trashedIdx: index("meetings_trashed_idx").on(table.trashedAt),
+}));
+
+// As pastas das reuniões (H7d do plano do gravador; HN-67 no app de referência
+// da cliente): cada dona organiza as reuniões dela em pastas com nome, ícone e
+// cor. Uma reunião fica em no máximo uma pasta (meetings.folder_id). O ícone e
+// a cor são chaves de listas fechadas (shared/pastas-de-reunioes.ts),
+// conferidas no servidor: ícone ou cor nova não pede migração. Só a dona lê; o
+// link aberto não leva a pasta. Excluir a conta apaga as pastas
+// (server/exclusao-de-conta.ts). Nomes em inglês, como as irmãs meeting_*.
+export const meetingFolders = mysqlTable("meeting_folders", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  name: varchar("name", { length: 60 }).notNull(),
+  icon: varchar("icon", { length: 24 }).notNull(),
+  color: varchar("color", { length: 16 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // As pastas da dona, na ordem em que nasceram.
+  ownerCreatedIdx: index("meeting_folders_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {

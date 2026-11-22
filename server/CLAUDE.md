@@ -356,7 +356,7 @@ se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áu
 a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
 `processing_error` (`shared/documento-da-reuniao.ts`), que a tela traduz.
 
-## Organizar as reuniões: detalhes, busca e junção (H7c, H7b e H17)
+## Organizar as reuniões: detalhes, busca, junção, pastas e lixeira (H7c, H7b, H17 e H7d)
 
 - **Detalhes** (`server/detalhes-da-reuniao.ts`): etiquetas e "Onde foi" (colunas de
   `meetings`), contato e contexto. A posse do contato (da dona) e do contexto (dela ou do
@@ -379,6 +379,24 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   rótulos depois dos já usados, para vozes e nomes não passarem de uma reunião à outra.
   Por isso a montagem passa `zerarNomes: false` a `gravarResultadoDaReuniao`, e quem
   transcreve de novo zera os nomes antes (o reprocesso das partes, na tomada).
+- **Pastas** (`server/pastas-de-reunioes.ts`, H7d): nome, ícone e cor de listas fechadas
+  (`shared/pastas-de-reunioes.ts`), até 50 por dona, nome sem repetir (sem caixa nem
+  acento) e uma pasta por reunião (`meetings.folder_id`). Apagar a pasta solta as reuniões
+  dela na mesma transação; mover é todo ou nada e não mexe no `updated_at`. O link aberto
+  não leva a pasta.
+- **Lixeira** (`server/lixeira-de-reunioes.ts`, H7d): exclusão ADIADA, por
+  `meetings.trashed_at`. Mandar para a lixeira desliga o link aberto (com a senha), tira os
+  avisos da reunião do sino e grava `MEETINGS_TRASHED`, na mesma transação; a gravação em
+  partes ainda no ar não vai (CONFLICT `LIXEIRA_GRAVANDO`). A reunião na lixeira sai de toda
+  consulta: as entre reuniões (lista, busca, Memória, link aberto, filas, pendências,
+  agenda, perfil do contato) filtram por `server/reuniao-visivel.ts`, e todo procedimento
+  de `routers/meetings.ts`, menos os cinco da lixeira, passa pela guarda
+  `procedimentoDaReuniao` (`server/guarda-da-lixeira.ts`, com a varredura do router em
+  `server/guarda-da-lixeira.test.ts`); a rota das partes também a recusa. Consulta nova de
+  reunião filtra por ali. Restaurar vale por 30 dias e devolve a reunião à pasta, com o
+  link desligado; apagar de vez, esvaziar e o fim dos 30 dias (a varredura das gravações,
+  `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. A lixeira não muda o prazo
+  do áudio.
 
 ## Editar a transcrição (H18)
 

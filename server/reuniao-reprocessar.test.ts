@@ -329,7 +329,8 @@ describe("reprocessar — a tomada", () => {
 
     expect(trabalho).toBeInstanceOf(Promise);
     const [tomada] = de("update", schema.meetings);
-    expect(tomada.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`consent_granted` = ?)");
+    // A reunião que foi para a lixeira (H7d) entre a leitura e a tomada não é tomada.
+    expect(tomada.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`consent_granted` = ? and `meetings`.`trashed_at` is null)");
     expect(tomada.params.slice(0, 3)).toEqual([REUNIAO, DONA, "failed"]);
     expect([true, 1]).toContain(tomada.params[3]);
     expect(tomada.valores).toMatchObject({ status: "processing", processingError: null });

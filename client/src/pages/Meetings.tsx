@@ -51,7 +51,8 @@ import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
 import type { CodigoDaRecusaDoCorte } from "@/lib/corte-comum";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
-import { PARAMETRO_DA_AGENDADA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaReuniao } from "@shared/rotas";
+import { PARAMETRO_DA_AGENDADA, PARAMETRO_DA_LIXEIRA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
+import { podeIrParaALixeira } from "@shared/lixeira-de-reunioes";
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, idiomaFalado as codigoDoIdiomaFalado, type EscolhaDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { DicaDoIdiomaDaReuniao, IdiomasDetectados, OpcaoDoIdiomaOriginal, SeletorDoIdiomaDaReuniao } from "@/components/SeletorDoIdiomaDaReuniao";
@@ -60,6 +61,7 @@ import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { erroDoYoutubeSeRepete, idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
 import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
 import { ListaDeReunioes } from "@/components/ListaDeReunioes";
+import { avisoDaRecusaDaLixeira, LixeiraDeReunioes, restaurarComAviso } from "@/components/LixeiraDeReunioes";
 import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
 import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
@@ -242,6 +244,9 @@ export default function Meetings() {
     const valor = new URLSearchParams(busca).get(PARAMETRO_DA_AGENDADA);
     return valor && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valor) ? valor : null;
   }, [busca]);
+  // A lixeira das reuniões (H7d) é a lista com ?lixeira=1 (rotaDaLixeira): o
+  // voltar do celular sai dela para a lista, e ela abre mesmo com a lista vazia.
+  const naLixeira = useMemo(() => new URLSearchParams(busca).get(PARAMETRO_DA_LIXEIRA) === "1", [busca]);
   // A reunião da agenda lida na tela (nula sem ela, ou se não é mais da agenda), e
   // a que valia quando a gravação começou: durante a gravação a faixa sai da
   // tela sempre que a URL sai de /gravar (e volta, pelo efeito mais abaixo), ou
@@ -887,6 +892,10 @@ export default function Meetings() {
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
     // Excluir sai com replace: o voltar não reabre a reunião que deixou de existir.
     <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} etiquetasSugeridas={etiquetasDaDona(meetings ?? [], i18n.language)} />
+  ) : naLixeira ? (
+    <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
+      <div className="max-w-6xl mx-auto"><LixeiraDeReunioes aoVoltar={() => navigate(ROTA_DAS_REUNIOES)}/></div>
+    </main>
   ) : (
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
@@ -899,7 +908,7 @@ export default function Meetings() {
           </div>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
-        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p></div> : <ListaDeReunioes reunioes={meetings} rotuloDoStatus={reuniao => statusLabel(t, reuniao.status, ehReuniaoDeDocumento(reuniao.origem))} classeDoStatus={statusClass} aoAbrir={destino => navigate(destino)}/>}
+        {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p>{/* A lixeira (H7d) também com a lista vazia: todas as reuniões podem ter ido para lá. */}<button type="button" onClick={() => navigate(rotaDaLixeira())} className="mt-6 inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5"><Trash2 size={15} aria-hidden="true"/>{t("meetings.trash.open")}</button></div> : <ListaDeReunioes reunioes={meetings} rotuloDoStatus={reuniao => statusLabel(t, reuniao.status, ehReuniaoDeDocumento(reuniao.origem))} classeDoStatus={statusClass} aoAbrir={destino => navigate(destino)}/>}
       </div>
     </main>
   );
@@ -1196,6 +1205,20 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
     onSuccess: async () => { await utils.meetings.list.invalidate(); toast.success(t("meetings.deleteSuccess")); if (montado.current) aoExcluir(); },
     onError: error => { setConfirmarExclusao(false); toast.error(error.message || t("meetings.deleteError")); },
   });
+  // O "Excluir" da reunião manda para a lixeira (H7d): ela fica lá por 30 dias,
+  // e o aviso traz o "Desfazer". Só a gravação em partes ainda no ar é
+  // excluída na hora (deleteMeeting), como antes: ela não vai para a lixeira.
+  const mandarParaALixeira = trpc.meetings.mandarParaALixeira.useMutation({
+    onSuccess: async () => {
+      await Promise.all([utils.meetings.list.invalidate(), utils.meetings.pastas.invalidate(), utils.meetings.lixeira.invalidate()]);
+      toast.success(t("meetings.trash.movedOne"), {
+        duration: 10_000,
+        action: { label: t("meetings.trash.undo"), onClick: () => void restaurarComAviso(utils, [meetingId], t) },
+      });
+      if (montado.current) aoExcluir();
+    },
+    onError: erro => { setConfirmarExclusao(false); toast.error(avisoDaRecusaDaLixeira(erro, t, t("meetings.trash.error"))); },
+  });
   const reprocessar = trpc.meetings.reprocess.useMutation({
     onSuccess: () => {
       toast.success(t("meetings.reprocessStarted"));
@@ -1318,12 +1341,14 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const tiposPresentes = segmentos
     ? Array.from(new Set(segmentos.flatMap(s => (s.tipo ? [s.tipo] : []))))
     : [];
-  // Excluir continua possível em processamento: o servidor relê o status
-  // antes de gravar e compensa o que já gravou, então nada fica órfão — e
-  // desabilitar o botão deixava uma reunião morta pelo deploy presa E
-  // inexcluível até a varredura passar. O modal só avisa que o trabalho em
-  // curso será descartado.
   const emProcessamento = meeting.status === "processing";
+  // O "Excluir" manda para a lixeira (H7d), também em processamento: desabilitar
+  // o botão deixava uma reunião morta pelo deploy presa até a varredura passar,
+  // e o trabalho em curso termina e fica guardado nela, sem aparecer. Só a
+  // gravação em partes ainda no ar é excluída na hora (o servidor relê o status
+  // antes de gravar e compensa o que já gravou, então nada fica órfão).
+  const vaiParaALixeira = podeIrParaALixeira(meeting);
+  const excluindo = deleteMeeting.isPending || mandarParaALixeira.isPending;
   // O áudio sumiu do bucket: reprocessar de novo não adianta.
   const audioGuardadoAusente = meeting.processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE;
   // H8c: baixar o áudio só com a gravação encerrada (gravando ou recebendo
@@ -1402,7 +1427,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   </section>;
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${partesParaOuvir.length ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
-    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={deleteMeeting.isPending} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
+    <div className="flex flex-col md:flex-row justify-between gap-4 mb-6"><div><p className="text-amber-300 text-xs font-semibold">{meeting.shareToken ? t("meetings.share.sharedEyebrow") : t("meetings.privateMeetingEyebrow")}</p><h1 dir="auto" className="text-3xl font-bold mt-1">{emojiDoResumo && <span aria-hidden="true" className="mr-2">{emojiDoResumo}</span>}{meeting.title}</h1><p className="text-sm text-white/45 mt-2">{new Date(meeting.createdAt).toLocaleString(i18n.language)}</p></div><div className="flex flex-wrap items-start gap-2"><span className={`h-fit border rounded-full px-3 py-1 text-xs font-semibold ${statusClass(meeting.status)}`}>{statusLabel(t, meeting.status, ehDocumento)}</span>{/* H8: só a dona baixa o PDF, e só da reunião pronta (o servidor recusa as outras). Sem o resumo lido (ainda chegando, ou a consulta em erro), a contagem é desconhecida, e não zero: o servidor põe no PDF os itens confirmados mesmo assim. */}{meeting.status === "ready" && <ExportarReuniao meetingId={meetingId} confirmados={resumoGuardado.isSuccess ? resumoGuardado.data.itens.filter(item => item.status === "confirmed").length : null}/>}<button onClick={() => setConfirmarExclusao(true)} disabled={excluindo} className="rounded-full border border-red-400/25 px-3 py-1 text-xs text-red-200 hover:bg-red-400/10 disabled:opacity-50">{t("meetings.deleteButton")}</button></div></div>
     {/* O título que a IA sugeriu com o resumo: só sugestão; a dona usa ou mantém o dela. */}
     {meeting.status === "ready" && resumoGuardado.data?.tituloSugerido && <TituloSugerido meetingId={meetingId} emoji={emojiDoResumo} sugestao={resumoGuardado.data.tituloSugerido}/>}
     {/* Os detalhes (H7c): etiquetas, "Onde foi", contato e contexto, em qualquer estado da reunião. Só a dona: o link aberto não os tem. */}
@@ -1608,18 +1633,35 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
         </section>}
       </> : <div className="rounded-2xl border border-dashed border-white/15 py-14 text-center text-white/45">{t("meetings.noContactSuggestions")}</div>}</div>}
 
-    {/* Confirmação de exclusão — molde de Network.tsx; o texto nomeia tudo que some. */}
-    {confirmarExclusao && (
+    {/* Confirmação: para a lixeira (H7d), com o prazo e o restaurar; a gravação em
+        partes ainda no ar é excluída na hora — molde de Network.tsx, e o texto
+        nomeia tudo que some. */}
+    {confirmarExclusao && vaiParaALixeira && (
+      <div role="dialog" aria-modal="true" aria-labelledby="confirmar-exclusao-reuniao" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="bg-[#211e1b] border border-white/15 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+          <h3 id="confirmar-exclusao-reuniao" className="font-bold text-white mb-2">{t("meetings.trash.moveConfirmTitleOne")}</h3>
+          <p className="text-sm text-white/50 mb-6">{t("meetings.trash.moveConfirmTextOne")}</p>
+          <div className="flex gap-3">
+            <button type="button" onClick={() => setConfirmarExclusao(false)} disabled={excluindo} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8 disabled:opacity-50">
+              {t("meetings.deleteConfirmCancel")}
+            </button>
+            <button type="button" onClick={() => mandarParaALixeira.mutate({ meetingIds: [meetingId] })} disabled={excluindo} className="flex-1 rounded-xl bg-red-500 hover:bg-red-400 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+              {t("meetings.trash.moveConfirm")}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {confirmarExclusao && !vaiParaALixeira && (
       <div role="dialog" aria-modal="true" aria-labelledby="confirmar-exclusao-reuniao" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
         <div className="bg-[#211e1b] border border-white/15 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
           <h3 id="confirmar-exclusao-reuniao" className="font-bold text-white mb-2">{t("meetings.deleteConfirmTitle")}</h3>
-          <p className={`text-sm text-white/50 ${emProcessamento ? "mb-3" : "mb-6"}`}>{t("meetings.deleteConfirmText")}</p>
-          {emProcessamento && <p className="text-sm text-amber-200/80 mb-6">{t("meetings.deleteConfirmProcessing")}</p>}
+          <p className="text-sm text-white/50 mb-6">{t("meetings.deleteConfirmText")}</p>
           <div className="flex gap-3">
-            <button type="button" onClick={() => setConfirmarExclusao(false)} disabled={deleteMeeting.isPending} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8 disabled:opacity-50">
+            <button type="button" onClick={() => setConfirmarExclusao(false)} disabled={excluindo} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8 disabled:opacity-50">
               {t("meetings.deleteConfirmCancel")}
             </button>
-            <button type="button" onClick={() => deleteMeeting.mutate({ meetingId })} disabled={deleteMeeting.isPending} className="flex-1 rounded-xl bg-red-500 hover:bg-red-400 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+            <button type="button" onClick={() => deleteMeeting.mutate({ meetingId })} disabled={excluindo} className="flex-1 rounded-xl bg-red-500 hover:bg-red-400 py-2.5 text-sm font-bold text-white disabled:opacity-50">
               {t("meetings.deleteConfirmButton")}
             </button>
           </div>

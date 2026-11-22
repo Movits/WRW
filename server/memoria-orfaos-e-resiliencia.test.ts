@@ -453,6 +453,62 @@ describe("Memória — órfão não sobrevive à fonte", () => {
     expect(resultado.removed).toBe(1);
   });
 
+  it("transcrição de reunião na LIXEIRA não vira documento, e o documento antigo dela sai (H7d)", async () => {
+    semear(schema.meetingTranscripts, [
+      { meetingId: "na-lixeira", transcript: "Falamos de logística com o Carlos", language: "pt" },
+      { meetingId: "viva", transcript: "Falamos de exportação", language: "pt" },
+    ]);
+    semear(schema.meetings, [
+      { id: "na-lixeira", title: "Na lixeira", status: "ready", trashedAt: 1_000 },
+      { id: "viva", title: "Reunião viva", status: "ready", trashedAt: null },
+    ]);
+    const conteudo = ["Reunião: Na lixeira", "Falamos de logística com o Carlos"].join("\n");
+    semear(schema.memoryDocuments, [{
+      id: "doc-lixeira", ownerId: "dona", sourceType: "meeting", sourceId: "na-lixeira", title: "Na lixeira", content: conteudo,
+      metadata: { meetingId: "na-lixeira" }, embedding: vetor768(), contentHash: servico.buildMemoryHash(conteudo), indexedAt: 1, createdAt: 1, updatedAt: 1,
+    }]);
+
+    const resultado = await servico.indexOwnerMemory("dona");
+
+    expect(escritas.inseridos.filter(item => item.sourceType === "meeting").map(item => item.sourceId)).toEqual(["viva"]);
+    expect(JSON.stringify(escritas.inseridos)).not.toContain("Carlos");
+    expect(resultado.removed).toBe(1);
+    expect(escritas.apagados.some(apagado => apagado.params.includes("doc-lixeira"))).toBe(true);
+  });
+
+  it("mandar uma reunião para a lixeira muda a assinatura, sem mexer no updated_at dela: a rodada seguinte tira o documento (H7d)", async () => {
+    semear(schema.meetings, [{ id: "m-1", title: "Vinícola", status: "ready", trashedAt: null, updatedAt: 5 }]);
+    semear(schema.meetingTranscripts, [{ meetingId: "m-1", transcript: "Falamos de vinho", language: "pt", updatedAt: 5 }]);
+    await servico.indexOwnerMemory("dona");
+    const indexado = escritas.inseridos.find(item => item.sourceType === "meeting");
+    expect(indexado?.sourceId).toBe("m-1");
+    semear(schema.memoryDocuments, [{ ...indexado, createdAt: 1 }]);
+    // A mesma linha, agora na lixeira: o updated_at (a ficha) não muda.
+    semear(schema.meetings, [{ id: "m-1", title: "Vinícola", status: "ready", trashedAt: 9_000, updatedAt: 5 }]);
+
+    const segunda = await servico.indexOwnerMemory("dona");
+
+    expect(segunda.removed).toBe(1);
+  });
+
+  it("a busca não devolve o documento da reunião na lixeira nem o da reunião que sumiu, mesmo com a reindexação fora do ar (H7d)", async () => {
+    tabelas.set(schema.privateContacts, TABELA_FORA_DO_AR as never);
+    const docDaReuniao = (id: string, titulo: string) => ({
+      ...docDeContato(0, titulo), id: `doc-${id}`, sourceType: "meeting", sourceId: id, metadata: { meetingId: id },
+    });
+    semear(schema.memoryDocuments, [docDaReuniao("na-lixeira", "Na lixeira"), docDaReuniao("sumida", "Sumida"), docDaReuniao("viva", "Viva"), docDeContato(1, "Ana")]);
+    semear(schema.meetings, [
+      { id: "na-lixeira", title: "Na lixeira", status: "ready", trashedAt: 1_000 },
+      { id: "viva", title: "Viva", status: "ready", trashedAt: null },
+    ]);
+    embedWithGemini.mockResolvedValue(vetor768());
+
+    const { hits } = await servico.semanticSearch("dona", "o que combinamos?", 12);
+
+    expect(hits.filter(hit => hit.sourceType === "meeting").map(hit => hit.sourceId)).toEqual(["viva"]);
+    expect(hits.some(hit => hit.title === "Ana")).toBe(true);
+  });
+
   it("nada mudou desde a última rodada: a seguinte nem carrega as fontes (assinatura)", async () => {
     semear(schema.privateContacts, [{ id: 1, fullName: "Ana" }]);
     await servico.indexOwnerMemory("dona");
@@ -605,6 +661,8 @@ describe("Memória — busca e resposta resilientes", () => {
       metadata: { meetingId: "m-longa", janela: n },
     });
     semear(schema.memoryDocuments, [janela(1), janela(2), janela(3), janela(4), docDeContato(1, "Ana")]);
+    // A reunião existe e está fora da lixeira: a busca só devolve documento de reunião que a dona vê (H7d).
+    semear(schema.meetings, [{ id: "m-longa", title: "Reunião longa", status: "ready" }]);
     embedWithGemini.mockResolvedValue(vetor768());
 
     const { hits } = await servico.semanticSearch("dona", "o que combinamos?", 12);

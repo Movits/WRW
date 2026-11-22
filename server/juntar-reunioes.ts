@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, apagarDerivadosDoAlvoDaJuncao, MAX_MEETING_AUDIO_BYTES } from "./meeting-service";
 import { LINK_DESLIGADO } from "./link-aberto-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO } from "./audio-guardado-das-partes";
@@ -337,7 +338,8 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       consentGranted: meetings.consentGranted, expectedSlices: meetings.expectedSlices, speakerNames: meetings.speakerNames,
       etiquetas: meetings.etiquetas, ondeFoi: meetings.ondeFoi, contactId: meetings.contactId, contextId: meetings.contextId,
       shareToken: meetings.shareToken, language: meetings.language, consentAt: meetings.consentAt, consentNoticeVersion: meetings.consentNoticeVersion,
-    }).from(meetings).where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, ids))).orderBy(asc(meetings.id)).for("update");
+      // A reunião na lixeira (H7d) não entra: é "não encontrada", como a de outra conta.
+    }).from(meetings).where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, ids), foraDaLixeira())).orderBy(asc(meetings.id)).for("update");
     if (linhas.length !== ids.length) throw new RecusaDaJuncao("NOT_FOUND", "REUNIAO_NAO_ENCONTRADA");
 
     const partes = await tx.select({

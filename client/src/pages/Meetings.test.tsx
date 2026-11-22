@@ -57,7 +57,7 @@ const duble = vi.hoisted(() => {
     painelDoEmail: vi.fn(),
     utils: {
       meetings: {
-        list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
+        list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
         resumoPorEmail: { invalidate: vi.fn(), setData: vi.fn() },
       },
       auth: { me: { invalidate: vi.fn() } },
@@ -66,7 +66,11 @@ const duble = vi.hoisted(() => {
       // G15a: a transcrição durante a gravação. Função comum, que lê o dublê do
       // teste: o mockReset do projeto client zera o vi.fn a cada teste, e sem
       // resposta combinada vale uma reunião sem nenhuma parte pronta.
-      client: { meetings: { transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } } } },
+      // O "Desfazer" do aviso da lixeira (H7d) restaura pelo cliente do tRPC.
+      client: { meetings: {
+        transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } },
+        restaurarDaLixeira: { mutate: vi.fn() },
+      } },
     },
   };
 });
@@ -102,6 +106,9 @@ vi.mock("@/lib/trpc", () => ({
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      mandarParaALixeira: duble.registrar("mandarParaALixeira"),
       reprocess: duble.registrar("reprocess"),
       // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
@@ -263,8 +270,10 @@ const PARTES = [
 const GRAVACAO = { url: PARTES[0].url, mimeType: "audio/mp4", durationSeconds: 900, sizeBytes: 0, expiresAt: Date.now() + 1e9, partes: PARTES };
 
 const botaoExcluir = () => screen.getByRole("button", { name: /^Excluir$/ });
-const tituloDoModal = () => screen.queryByText("Excluir esta reunião?");
-const botaoConfirmar = () => screen.getByRole("button", { name: "Excluir reunião" });
+// O "Excluir" manda para a lixeira (H7d); só a gravação em partes ainda no ar é excluída na hora.
+const tituloDoModal = () => screen.queryByText("Mandar esta reunião para a lixeira?");
+const botaoConfirmar = () => screen.getByRole("button", { name: "Mandar para a lixeira" });
+const tituloDaExclusaoNaHora = () => screen.queryByText("Excluir esta reunião?");
 
 describe("Gravador — o fim sem nenhum áudio (G17)", () => {
   it("o microfone caiu no primeiro segundo: a reunião vazia saiu, a tela avisa e não vai ao detalhe dela", () => {
@@ -282,53 +291,91 @@ describe("Gravador — o fim sem nenhum áudio (G17)", () => {
   });
 });
 
-describe("Detalhe da reunião — excluir pede confirmação", () => {
-  it("clicar em Excluir abre o modal e NÃO chama o servidor", () => {
+describe("Detalhe da reunião — excluir manda para a lixeira, com confirmação (H7d)", () => {
+  it("clicar em Excluir abre o modal da lixeira e NÃO chama o servidor", () => {
     abrirDetalhe();
 
     expect(tituloDoModal()).not.toBeInTheDocument();
     fireEvent.click(botaoExcluir());
 
     expect(tituloDoModal()).toBeInTheDocument();
-    // o texto nomeia tudo que some, e o que fica: as próximas ações confirmadas (H5a), soltas da reunião
-    expect(screen.getByText(/áudio, a transcrição, as traduções e as sugestões de contato/)).toBeInTheDocument();
-    expect(screen.getByText(/As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião\./)).toBeInTheDocument();
+    // o texto diz o que muda (a lista, a busca e o link aberto) e o prazo para restaurar
+    expect(screen.getByText(/sai da lista, da busca e do link aberto \(que é desligado\) e fica na lixeira por 30 dias/)).toBeInTheDocument();
+    expect(duble.mutacoes.mandarParaALixeira?.mutate).not.toHaveBeenCalled();
     expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
   });
 
-  it("confirmar no modal é o único caminho até delete.mutate, com o id da reunião", () => {
+  it("confirmar no modal é o único caminho até a lixeira, com o id da reunião; a exclusão na hora não é chamada", () => {
     const meeting = abrirDetalhe();
     fireEvent.click(botaoExcluir());
 
     fireEvent.click(botaoConfirmar());
 
-    expect(duble.mutacoes.delete.mutate).toHaveBeenCalledTimes(1);
-    expect(duble.mutacoes.delete.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
+    expect(duble.mutacoes.mandarParaALixeira.mutate).toHaveBeenCalledTimes(1);
+    expect(duble.mutacoes.mandarParaALixeira.mutate).toHaveBeenCalledWith({ meetingIds: [meeting.id] });
+    expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
   });
 
-  it("Cancelar fecha o modal sem excluir", () => {
+  it("Cancelar fecha o modal sem mandar para a lixeira", () => {
     abrirDetalhe();
     fireEvent.click(botaoExcluir());
 
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
     expect(tituloDoModal()).not.toBeInTheDocument();
-    expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
+    expect(duble.mutacoes.mandarParaALixeira.mutate).not.toHaveBeenCalled();
   });
 
-  it("o servidor recusou a exclusão: o modal fecha e a dona lê o motivo no toast — não fica num modal preso com a reunião ainda lá", () => {
+  it("o servidor recusou: o modal fecha e a dona lê o motivo no idioma da tela — não fica num modal preso com a reunião ainda lá", () => {
     const meeting = abrirDetalhe();
     fireEvent.click(botaoExcluir());
     fireEvent.click(botaoConfirmar());
     expect(tituloDoModal()).toBeInTheDocument();
 
-    act(() => { duble.mutacoes.delete.opcoes.onError?.(new Error("x"), { meetingId: meeting.id }); });
+    act(() => { duble.mutacoes.mandarParaALixeira.opcoes.onError?.({ message: "LIXEIRA_GRAVANDO", data: { code: "CONFLICT" } }, { meetingIds: [meeting.id] }); });
 
     expect(tituloDoModal()).not.toBeInTheDocument();
     expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledWith("x");
+    expect(toast.error).toHaveBeenCalledWith("Uma gravação ainda está em andamento: encerre a gravação antes de mandá-la para a lixeira.");
     // a reunião continua aberta: o detalhe não foi trocado pela lista
     expect(screen.getByRole("button", { name: /^Excluir$/ })).toBeInTheDocument();
+  });
+
+  it("deu certo: o aviso diz o prazo e traz o Desfazer, que restaura a mesma reunião", async () => {
+    const meeting = abrirDetalhe();
+    fireEvent.click(botaoExcluir());
+    fireEvent.click(botaoConfirmar());
+
+    await act(async () => { await duble.mutacoes.mandarParaALixeira.opcoes.onSuccess?.({ naLixeira: 1, linksDesligados: 0 }, { meetingIds: [meeting.id] }); });
+
+    expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
+    expect(duble.utils.meetings.lixeira.invalidate).toHaveBeenCalled();
+    const [mensagem, opcoes] = vi.mocked(toast.success).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => void } }];
+    expect(mensagem).toBe("Reunião na lixeira. Dá para restaurar por 30 dias.");
+    expect(opcoes.action.label).toBe("Desfazer");
+    await act(async () => { opcoes.action.onClick(); await Promise.resolve(); });
+    await waitFor(() => expect(duble.utils.client.meetings.restaurarDaLixeira.mutate).toHaveBeenCalledWith({ meetingIds: [meeting.id] }));
+    await waitFor(() => expect(toast.success).toHaveBeenLastCalledWith("Reunião restaurada."));
+  });
+
+  it("a gravação em partes ainda no ar não vai para a lixeira: o modal é o da exclusão na hora, que nomeia tudo o que some", () => {
+    const meeting = abrirDetalhe({ status: "recording", audioPipeline: "slices" });
+    fireEvent.click(botaoExcluir());
+
+    expect(tituloDoModal()).not.toBeInTheDocument();
+    expect(tituloDaExclusaoNaHora()).toBeInTheDocument();
+    // o texto nomeia tudo que some, e o que fica: as próximas ações confirmadas (H5a), soltas da reunião
+    expect(screen.getByText(/áudio, a transcrição, as traduções e as sugestões de contato/)).toBeInTheDocument();
+    expect(screen.getByText(/As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião\./)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Excluir reunião" }));
+    expect(duble.mutacoes.delete.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
+    expect(duble.mutacoes.mandarParaALixeira?.mutate).not.toHaveBeenCalled();
+
+    // A recusa da exclusão na hora fecha o modal e mostra o motivo.
+    act(() => { duble.mutacoes.delete.opcoes.onError?.(new Error("x"), { meetingId: meeting.id }); });
+    expect(tituloDaExclusaoNaHora()).not.toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith("x");
   });
 });
 
@@ -474,9 +521,7 @@ describe("Detalhe da reunião — o 'Baixar o áudio' (4b) e o resumo por e-mail
 });
 
 describe("Detalhe da reunião — em processamento", () => {
-  const aviso = () => screen.queryByText(/ainda está em processamento/);
-
-  it("Excluir continua habilitado; o modal acrescenta o aviso de que o processamento em curso será descartado, e confirmar exclui", () => {
+  it("Excluir continua habilitado e manda para a lixeira: o trabalho em curso termina e fica guardado nela, sem o aviso de descarte", () => {
     const meeting = abrirDetalhe({ status: "processing" });
 
     const botao = botaoExcluir();
@@ -484,18 +529,12 @@ describe("Detalhe da reunião — em processamento", () => {
     fireEvent.click(botao);
 
     expect(tituloDoModal()).toBeInTheDocument();
-    expect(aviso()).toBeInTheDocument();
-    expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
+    expect(screen.queryByText(/será descartado/)).not.toBeInTheDocument();
+    expect(duble.mutacoes.mandarParaALixeira?.mutate).not.toHaveBeenCalled();
 
     fireEvent.click(botaoConfirmar());
-    expect(duble.mutacoes.delete.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
-  });
-
-  it("pronta, o modal não traz o aviso", () => {
-    abrirDetalhe({ status: "ready" });
-    fireEvent.click(botaoExcluir());
-    expect(tituloDoModal()).toBeInTheDocument();
-    expect(aviso()).not.toBeInTheDocument();
+    expect(duble.mutacoes.mandarParaALixeira.mutate).toHaveBeenCalledWith({ meetingIds: [meeting.id] });
+    expect(duble.mutacoes.delete.mutate).not.toHaveBeenCalled();
   });
 });
 

@@ -20,6 +20,10 @@ const perguntarAReuniao = vi.fn();
 const translatePrivateMeetingTranscript = vi.fn();
 const createAuditLog = vi.fn();
 
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => { throw new Error("este teste não usa banco"); },
