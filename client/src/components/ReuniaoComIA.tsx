@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { mmss } from "@/components/TranscricaoPorFalante";
+import { VisualDaResposta } from "@/components/VisualDaResposta";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
 
 /**
@@ -24,7 +25,10 @@ import { vozesNoTexto } from "@shared/vozes-no-texto";
  * reunião que ainda grava: a IA lê o texto das partes prontas, e os textos da
  * caixa dizem isso. O trecho,
  * o tempo, o aviso de conferir e as frases de erro da IA servem também ao
- * resumo guardado (components/ResumoGuardado.tsx).
+ * resumo guardado (components/ResumoGuardado.tsx) e ao Pergunte a várias
+ * reuniões (H6c, components/PergunteAVariasReunioes.tsx). Quando a pergunta
+ * pede, a resposta traz também uma tabela ou um gráfico (H6d), desenhado aqui
+ * com os números que o servidor conferiu (components/VisualDaResposta.tsx).
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -60,7 +64,8 @@ type FonteDaReuniao =
     };
 
 // O idioma RESOLVIDO, como na tradução da transcrição: "en-US" cai fora da lista.
-function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
+// Serve também ao Pergunte a várias reuniões (H6c, PergunteAVariasReunioes.tsx).
+export function idiomaDaTela(i18n: { resolvedLanguage?: string; language: string }): IdiomaDaTela {
   const atual = i18n.resolvedLanguage ?? i18n.language;
   return (LANGUAGES.some(idioma => idioma.code === atual) ? atual : "pt-BR") as IdiomaDaTela;
 }
@@ -231,6 +236,8 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
       {perguntaFeita && <p dir="auto" className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>
         <p dir="auto" className="text-sm leading-6 text-white/85">{comVozes(resposta.resposta)}</p>
+        {/* H6d: a tabela ou o gráfico, quando a pergunta pede; desenhado aqui com os números que o servidor conferiu. */}
+        {resposta.visual && <VisualDaResposta visual={resposta.visual} comVozes={comVozes} />}
         {/* Os trechos ficam como a transcrição os tem: é por eles que se confere. */}
         {citacoes.length > 0 && <div className="border-l-2 border-amber-300/40 pl-3">
           <p id={idDasCitacoes} className="text-[10px] font-semibold uppercase tracking-wider text-white/35">{documento ? t("meetings.document.sourcesLabel") : t("meetings.ai.sourcesLabel")}</p>

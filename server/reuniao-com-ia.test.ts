@@ -107,6 +107,7 @@ const {
   perguntarAReuniao,
   trechoApareceNaTranscricao,
 } = await import("./reuniao-com-ia");
+const { SCHEMA_DO_VISUAL } = await import("./resposta-visual");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const contexto = (openId: string) => ({
@@ -173,12 +174,13 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
   const perguntar = (openId = "dona-1") => rota(openId).perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: "Quando sai o contêiner?" });
   const naoRespondida = () => invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
 
-  it("pede JSON estruturado, com as citações no schema", async () => {
+  it("pede JSON estruturado, com as citações e o visual (H6d) no schema", async () => {
     naoRespondida();
     await expect(perguntar()).resolves.toEqual({ respondida: false });
     expect(invokeLLM.mock.calls[0][0]).toMatchObject({
-      response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true, schema: { required: ["respondida", "resposta", "citacoes"] } } },
+      response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true, schema: { required: ["respondida", "resposta", "citacoes", "visual"] } } },
     });
+    expect(invokeLLM.mock.calls[0][0].response_format.json_schema.schema.properties.visual).toEqual(SCHEMA_DO_VISUAL);
     // A função escolhe o modelo do Pergunte (LLM_MODEL_PERGUNTA; sem ela, o LLM_MODEL).
     expect(invokeLLM.mock.calls[0][0]).toMatchObject({ funcao: "pergunta" });
   });
@@ -556,5 +558,65 @@ describe(`o teto da dona pesa a reunião longa (H6): a pergunta acima de ${ENTRA
     curta();
     await expect(perguntar()).resolves.toEqual({ respondida: false });
     await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+});
+
+describe("a resposta em forma visual (H6d): a tabela ou o gráfico vêm num formato fixo, conferido, e só com a resposta que passou", () => {
+  const perguntar = (pergunta = "Monte uma tabela com os prazos") => rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta });
+  const SANTOS = "O contêiner sai do porto de Santos no dia 12 de março";
+  const responde = (visual: unknown, resposta = "{F2} disse que o contêiner sai dia 12.") =>
+    invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta, citacoes: [{ trecho: SANTOS }], visual }));
+  const tabelaDaIA = (celula: string) => ({
+    tipo: "tabela", titulo: "Prazos", unidade: "", colunas: ["Quem", "O quê"], linhas: [{ celulas: [celula, "contêiner no dia 12"] }],
+  });
+
+  it("as instruções pedem o visual só quando a pergunta pede, com as vozes como rótulo; sem as falas, sem rótulo", async () => {
+    comFalas();
+    invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    await perguntar();
+    expect(mensagens()[0].content).toContain("só quando a pergunta pede uma tabela, um gráfico");
+    expect(mensagens()[0].content).toContain("({F2})");
+    banco.segmentos = [];
+    await perguntar();
+    expect(mensagens(1)[0].content).toContain("Não use rótulos de voz no visual.");
+  });
+
+  it("a tabela conferida vai à tela com a resposta, as vozes como rótulo", async () => {
+    comFalas();
+    responde(tabelaDaIA("{F2}"));
+    await expect(perguntar()).resolves.toMatchObject({
+      respondida: true,
+      visual: { tipo: "tabela", titulo: "Prazos", colunas: ["Quem", "O quê"], linhas: [["{F2}", "contêiner no dia 12"]] },
+    });
+  });
+
+  it("o gráfico de barras chega com os números, não com texto", async () => {
+    comFalas();
+    responde({ tipo: "barras", titulo: "Contêineres", unidade: "", colunas: ["Porto", "Contêineres"], linhas: [{ celulas: ["Santos", "12"] }, { celulas: ["Itajaí", "3"] }] });
+    const resposta = await perguntar("Faça um gráfico dos contêineres por porto");
+    expect(resposta).toMatchObject({ visual: { tipo: "barras", rotulos: ["Santos", "Itajaí"], series: [{ nome: "Contêineres", valores: [12, 3] }] } });
+  });
+
+  it("sem visual pedido (tipo nenhum, ou o campo ausente), a resposta vem sem o campo", async () => {
+    comFalas();
+    responde({ tipo: "nenhum", titulo: "", unidade: "", colunas: [], linhas: [] });
+    const resposta = await perguntar("Quando sai o contêiner?");
+    expect(resposta).toMatchObject({ respondida: true });
+    expect(resposta).not.toHaveProperty("visual");
+  });
+
+  it("a voz que a reunião não tem derruba só o visual: a resposta conferida continua", async () => {
+    comFalas();
+    responde(tabelaDaIA("{F7}"));
+    const resposta = await perguntar();
+    expect(resposta).toMatchObject({ respondida: true, resposta: "{F2} disse que o contêiner sai dia 12." });
+    expect(resposta).not.toHaveProperty("visual");
+    expect(logAviso.mock.calls.map(chamada => chamada.join(" "))).toContain("[Pergunte] visual fora da tela (voz): a IA pediu tabela");
+  });
+
+  it("a resposta que não passa na conferência não leva o visual, mesmo que a IA o mande", async () => {
+    comFalas();
+    invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta: "O frete custa 10 mil.", citacoes: [{ trecho: "o frete custa dez mil reais" }], visual: tabelaDaIA("{F1}") }));
+    await expect(perguntar()).resolves.toEqual({ respondida: false });
   });
 });

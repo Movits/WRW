@@ -30,6 +30,7 @@ import { assistenteTextoRouter } from "./routers/assistenteTexto";
 import { proximasAcoesRouter } from "./routers/proximasAcoes";
 import { agendaRouter } from "./routers/agenda";
 import { googleAgendaRouter } from "./routers/googleAgenda";
+import { perguntasEntreReunioesRouter } from "./routers/perguntasEntreReunioes";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -73,6 +74,8 @@ export const appRouter = router({
   // A conexão com a Google Agenda (H16b): o estado e o desconectar. Conectar
   // é navegação (server/rotas-da-google-agenda.ts).
   googleAgenda: googleAgendaRouter,
+  // O Pergunte a várias reuniões (H6c): escolher por etiqueta ou uma a uma, perguntar e avaliar.
+  perguntasEntreReunioes: perguntasEntreReunioesRouter,
 });
 
 export type AppRouter = typeof appRouter;

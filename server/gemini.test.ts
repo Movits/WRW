@@ -123,6 +123,30 @@ describe("Gemini — o pedido que montamos e a resposta que lemos", () => {
     expect(resultado.language).toBe("pt-BR");
   });
 
+  it("o embedding com pressa (a ordem da Memória na pergunta a várias reuniões, H6c): uma tentativa só, com o prazo pedido; sem as opções, as retentativas de sempre", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let tentativas = 0;
+    let prazo: AbortSignal | null | undefined = null;
+    globalThis.fetch = (async (_entrada: RequestInfo | URL, init?: RequestInit) => {
+      tentativas++;
+      prazo = init?.signal;
+      return new Response("sobrecarga", { status: 503 });
+    }) as typeof globalThis.fetch;
+    await expect(embedWithGemini("O que decidimos?", "RETRIEVAL_QUERY", { tentativas: 1, timeoutMs: 8_000 })).rejects.toThrow();
+    expect(tentativas).toBe(1);
+    expect(prazo).toBeInstanceOf(AbortSignal);
+
+    // Sem as opções, o 503 é passageiro e a chamada tenta de novo (as esperas
+    // entre as tentativas são as do módulo; o relógio falso as pula).
+    vi.useFakeTimers();
+    tentativas = 0;
+    const semPressa = embedWithGemini("O que decidimos?", "RETRIEVAL_QUERY").catch(erro => erro);
+    await vi.runAllTimersAsync();
+    expect(await semPressa).toBeInstanceOf(Error);
+    expect(tentativas).toBeGreaterThan(1);
+    vi.useRealTimers();
+  });
+
   it("recusa antes de sair de casa quando não há chave", async () => {
     // Falhar cedo e com mensagem clara evita a chamada sair pela metade e voltar
     // como erro genérico do provedor, que é muito mais difícil de diagnosticar.

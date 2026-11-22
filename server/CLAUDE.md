@@ -380,6 +380,28 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   Por isso a montagem passa `zerarNomes: false` a `gravarResultadoDaReuniao`, e quem
   transcreve de novo zera os nomes antes (o reprocesso das partes, na tomada).
 
+## O Pergunte a várias reuniões e a resposta visual (H6c e H6d)
+
+- **Várias reuniões** (`server/perguntar-a-varias-reunioes.ts`, router `perguntasEntreReunioes`):
+  a dona escolhe por etiqueta (as prontas, pela chave da busca) ou uma a uma (até 30). A IA lê
+  a transcrição rotulada inteira de cada uma, num bloco por reunião, até o teto da pergunta a
+  uma reunião (400 mil caracteres). Acima dele, entram primeiro as mais ligadas à pergunta,
+  pelos vetores que a Memória já guardou (nada é indexado na hora), e, sem eles, as mais
+  novas; a que não cabe fica de fora com o motivo, nunca cortada. As vozes são por reunião
+  (`{R2:F1}`): o rótulo sem a reunião, com mais de uma lida, derruba a resposta, e cada
+  citação é conferida na transcrição da reunião que ela diz. Toda consulta de reunião daqui
+  passa por `reuniaoVisivel()` (`server/reuniao-visivel.ts`), o ponto da regra da lixeira
+  (H7d). Gasta de 1 a 4 vagas do `tetoDaIADaReuniao` (uma a cada 100 mil caracteres) e conta
+  no teto de 20 em 24 h, contado no banco (`perguntas_entre_reunioes`, com a conta da dona
+  travada). A linha não guarda a pergunta, a resposta nem as reuniões: só quantas, o tamanho,
+  como terminou, o modelo e a avaliação da dona ("ajudou" ou "não ajudou").
+- **Visual** (`server/resposta-visual.ts` e `shared/resposta-visual.ts`): o Pergunte (a uma
+  reunião, durante a gravação, pelo link e a várias) pode devolver uma tabela ou os dados de
+  um gráfico (barras ou linhas), num esquema fixo. O servidor confere a forma, os números (só
+  o número; o resto vira tabela) e as vozes (a inventada derruba só o visual), e o visual só
+  vai com a resposta que passou. A tela o desenha (`VisualDaResposta.tsx`); nunca recebe
+  HTML, SVG ou código da IA.
+
 ## Testes do servidor
 
 - Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os
