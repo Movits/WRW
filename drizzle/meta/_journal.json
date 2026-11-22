@@ -176,6 +176,13 @@
       "when": 1795282857744,
       "tag": "0024_pacote-5a",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1795383582459,
+      "tag": "0025_pacote-5b1",
+      "breakpoints": true
     }
   ]
 }
