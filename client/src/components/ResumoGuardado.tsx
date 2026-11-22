@@ -81,7 +81,9 @@ type ResumoDoLink = Saidas["reuniaoAberta"]["resumoGuardado"];
 // (server/resumo-guardado.ts): do que a dona escreveu (H4f), só a marca
 // `escritoPelaDona`, que a dona não recebe (ela tem a origem e a edição).
 type ItemDaDona = ResumoDaDona["itens"][number];
-type ItemNaTela = Omit<ResumoDoLink["itens"][number], "escritoPelaDona"> & { escritoPelaDona?: boolean }
+// `trechoForaDaTranscricao` só vem pelo link (H18): o trecho do item não está
+// mais na transcrição que a dona editou, e o link o manda vazio.
+type ItemNaTela = Omit<ResumoDoLink["itens"][number], "escritoPelaDona" | "trechoForaDaTranscricao"> & { escritoPelaDona?: boolean; trechoForaDaTranscricao?: boolean }
   & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt">>;
 type Secao = ItemNaTela["section"];
 type ConsultaDoResumo<T> = { data?: T; isError: boolean; error: unknown; refetch: () => unknown };
@@ -621,6 +623,9 @@ function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idio
             : (documento ? t("meetings.document.excerptLabel") : t("meetings.ai.excerptLabel"))}</summary>
           <q dir="auto" lang={idiomaDoTrecho} className="mt-1 block border-l-2 border-amber-300/40 pl-3 text-xs italic text-white/55">{item.excerpt}</q>
         </details>) : null}
+    {/* H18: pelo link, o trecho que não está mais na transcrição que a dona
+        editou vem vazio (server/editar-transcricao.ts); a página diz por quê. */}
+    {peloLink && item.trechoForaDaTranscricao && <p className="mt-2 text-[11px] text-white/45">{t("meetings.editTranscript.excerptCorrected")}</p>}
     {pendente && peloLink && <p className="mt-2 text-xs text-amber-100/70">{t("meetings.summary.linkNotice")}</p>}
     {/* O confirmado: o caminho até a próxima ação (H5a) e o "Desfazer a
         confirmação", que some enquanto o resumo é refeito (H4d) e no item

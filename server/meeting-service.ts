@@ -49,6 +49,7 @@ import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import { nomesDosPonteiros } from "./detalhes-da-reuniao";
+import { edicaoDaTranscricao, transcricaoEstaEditada, type EdicaoDaTranscricao } from "./editar-transcricao";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
@@ -584,7 +585,11 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
   const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
-  const [transcript] = await db.select().from(meetingTranscripts)
+  // A versão que a dona vê, editada ou não (H18), com a revisão: a tradução de
+  // uma revisão anterior não fica guardada (traduzirEGuardar).
+  const [transcript] = await db.select({
+    id: meetingTranscripts.id, transcript: meetingTranscripts.transcript, language: meetingTranscripts.language, revision: meetingTranscripts.revision,
+  }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
   // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
@@ -607,7 +612,9 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
   // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
   // por ela, sem pagar outra chamada nem gastar vaga do teto.
-  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  // A revisão entra na chave (H18): quem pede depois de uma edição não espera a
+  // tradução do texto de antes dela.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id, String(transcript.revision)].join("\u0000");
   const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
   const longa = janelas.length > 1;
   const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
@@ -672,7 +679,7 @@ async function traduzirEGuardar(db: Banco, alvo: {
   meetingId: string;
   normalizedLanguage: string;
   targetLanguage: string;
-  transcript: { id: string; transcript: string };
+  transcript: { id: string; transcript: string; revision: number };
   janelas: string[];
 }): Promise<TraducaoPronta> {
   const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
@@ -694,30 +701,36 @@ async function traduzirEGuardar(db: Banco, alvo: {
   }
   const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
-  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
+  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova),
+  // ou a dona pode tê-la editado (H18: a revisão sobe e as traduções saem).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE
   // (owner, meeting, language) barraria para sempre a tradução certa. Se a
   // transcrição já não é a mesma, a resposta vai para quem pediu, sem cache.
-  const [aindaAMesma] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
-    .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
-  if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
-  const timestamp = now();
-  try {
-    await db.insert(meetingTranscriptTranslations).values({
-      id: crypto.randomUUID(),
-      meetingId,
-      ownerId,
-      language: normalizedLanguage,
-      translatedText,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-  } catch (erro) {
-    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
-    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
-    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
-    if (!ehColisaoDeChave(erro)) throw erro;
-  }
+  // A conferência e a gravação vão numa transação, com a transcrição travada:
+  // a edição que chega no meio espera, e a que veio antes já mudou a revisão.
+  await db.transaction(async tx => {
+    const [aindaAMesma] = await tx.select({ id: meetingTranscripts.id, revision: meetingTranscripts.revision }).from(meetingTranscripts)
+      .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1).for("update");
+    if (aindaAMesma?.id !== transcript.id || Number(aindaAMesma.revision) !== Number(transcript.revision)) return;
+    const timestamp = now();
+    try {
+      await tx.insert(meetingTranscriptTranslations).values({
+        id: crypto.randomUUID(),
+        meetingId,
+        ownerId,
+        language: normalizedLanguage,
+        translatedText,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    } catch (erro) {
+      // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+      // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+      // cópia, e quem pediu recebe a que já foi paga, em vez de um erro. No
+      // MySQL, o comando recusado não desfaz a transação.
+      if (!ehColisaoDeChave(erro)) throw erro;
+    }
+  });
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -1495,13 +1508,20 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
  */
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name })
+  // A transcrição editada pela dona (H18) entra só como sim ou não, sem ler o
+  // texto: a junção (H17) refaz a transcrição pelo áudio, e a tela avisa que as
+  // correções não passam para a reunião juntada.
+  const lista = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name, transcricaoEditada: transcricaoEstaEditada,
+  })
     .from(meetings)
     .leftJoin(privateContacts, and(eq(privateContacts.id, meetings.contactId), eq(privateContacts.ownerId, meetings.ownerId)))
     .leftJoin(contexts, and(eq(contexts.id, meetings.contextId), or(eq(contexts.ownerId, meetings.ownerId), isNull(contexts.ownerId))))
+    .leftJoin(meetingTranscripts, and(eq(meetingTranscripts.meetingId, meetings.id), eq(meetingTranscripts.ownerId, meetings.ownerId)))
     .where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
   return lista.map(meeting => ({
     ...meeting, processingError: processingErrorSeguro(meeting.processingError), etiquetas: etiquetasDaReuniao(meeting.etiquetas),
+    transcricaoEditada: !!Number(meeting.transcricaoEditada),
   }));
 }
 
@@ -2045,7 +2065,25 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   if (!linha) return null;
   const { sharePasswordHash, shareAudio, ...meeting } = linha;
-  const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  // A transcrição como a dona a vê (editada ou não) e o que a tela precisa para
+  // editá-la (H18): a revisão e, dos trechos que a dona mudou, o que a IA tinha
+  // escrito. O texto original inteiro não vem: só as falas originais, e só
+  // quando a transcrição está editada.
+  const [linhaDaTranscricao] = await db.select({
+    id: meetingTranscripts.id, meetingId: meetingTranscripts.meetingId, ownerId: meetingTranscripts.ownerId,
+    transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments, language: meetingTranscripts.language,
+    durationSeconds: meetingTranscripts.durationSeconds, createdAt: meetingTranscripts.createdAt, updatedAt: meetingTranscripts.updatedAt,
+    editedAt: meetingTranscripts.editedAt, revision: meetingTranscripts.revision, editada: transcricaoEstaEditada,
+  }).from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  let transcript: (Omit<typeof linhaDaTranscricao, "editada" | "editedAt" | "revision"> & { edicao: EdicaoDaTranscricao }) | undefined;
+  if (linhaDaTranscricao) {
+    const { editada, editedAt, revision, ...resto } = linhaDaTranscricao;
+    const [original] = Number(editada)
+      ? await db.select({ segments: meetingTranscripts.originalSegments }).from(meetingTranscripts)
+        .where(and(eq(meetingTranscripts.id, resto.id), eq(meetingTranscripts.ownerId, ownerId))).limit(1)
+      : [];
+    transcript = { ...resto, edicao: edicaoDaTranscricao({ segments: resto.segments, originalSegments: original?.segments ?? null, editada: !!Number(editada), editedAt, revision }) };
+  }
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
   // N5: o nome do contato a que a pessoa foi vinculada ("Vinculada a…"), só da

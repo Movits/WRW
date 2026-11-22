@@ -164,8 +164,8 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(resposta).toEqual({
       estado: "pronta", idioma: "en", mapa: {},
       itens: [
-        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending", escritoPelaDona: false },
-        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed", escritoPelaDona: false },
+        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending", escritoPelaDona: false, trechoForaDaTranscricao: false },
+        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed", escritoPelaDona: false, trechoForaDaTranscricao: false },
       ],
     });
     expect(antes).toHaveBeenCalledTimes(1);

@@ -127,6 +127,7 @@ describe.skipIf(!temBanco)("Exportar a reunião no banco (integração)", () => 
       ],
       transcricao: {
         texto: null,
+        editada: false,
         falas: [
           { inicio: 0, fim: 4, falante: "F1", texto: "Bom dia." },
           { inicio: 4, fim: 60, falante: "", texto: "", lacuna: true },
@@ -141,7 +142,7 @@ describe.skipIf(!temBanco)("Exportar a reunião no banco (integração)", () => 
 
   it("a reunião de antes das falas sai com o texto corrido, no idioma dela, e sem os itens de outra reunião", async () => {
     const exportada = await exportarReuniao(DONA, ANTIGA, PEDIDO);
-    expect(exportada.transcricao).toEqual({ texto: "Texto corrido da reunião antiga.", falas: [] });
+    expect(exportada.transcricao).toEqual({ texto: "Texto corrido da reunião antiga.", falas: [], editada: false });
     expect(exportada.idioma).toBe("ar");
     expect(exportada.itens).toEqual([{ secao: "action", assunto: null, texto: "Item confirmado de outra reunião", responsavel: null, prazo: null, feita: false }]);
   });
