@@ -425,6 +425,18 @@ export const meetingsRouter = router({
       }
     }),
 
+  // O envio único: o áudio inteiro, em base64, num pedido só, até 10 min e 10
+  // MB. Desde a G14 o gravador do app não o usa mais (a gravação e o arquivo
+  // vão em partes, pela rota das partes); a tela só o chama no recuo do corte,
+  // o arquivo curto de um formato que o corte reconhece mas não lê (ALAC,
+  // AC-3, o Vorbis no WebM), e manda `recuoDoCorte: true`. Ele fica aqui por
+  // esse recuo e por um cliente de fora do repositório que ainda o chame (o
+  // "app Expo" que o shared/const.ts cita): cada chamada deixa no log uma
+  // linha, com a marca ou sem ela, e a chamada sem a marca é a desse cliente.
+  // Tirar a rota, ou levar o recuo às partes, espera uma semana desse log
+  // (docs/arquitetura/gravador-de-reunioes.md, G14). Os tetos ficam também
+  // porque o reprocesso e a junção leem a gravação inteira das reuniões
+  // antigas com eles (meeting-service.ts e juntar-reunioes.ts).
   submitRecording: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
@@ -432,11 +444,14 @@ export const meetingsRouter = router({
       mimeType: z.enum(ALLOWED_MEETING_AUDIO_TYPES),
       durationSeconds: z.number().positive().max(MAX_MEETING_DURATION_SECONDS),
       language: idiomaDaReuniaoNaEntrada,
+      recuoDoCorte: z.literal(true).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const { recuoDoCorte, ...envio } = input;
+      console.info(`[Reuniões] envio único (submitRecording): ${recuoDoCorte ? "recuo do corte do arquivo" : "sem a marca do recuo do corte (cliente de fora do app?)"}, ${envio.mimeType}`);
       let result: Awaited<ReturnType<typeof processMeetingRecording>>;
       try {
-        result = await processMeetingRecording({ ...input, ownerId: ctx.user.openId });
+        result = await processMeetingRecording({ ...envio, ownerId: ctx.user.openId });
       } catch (erro) {
         if (erro instanceof ReuniaoForaDoEstado || erro instanceof ReuniaoTomadaPorOutraExecucao) {
           throw new TRPCError({ code: "CONFLICT", message: erro.message });

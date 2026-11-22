@@ -55,10 +55,13 @@ import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-vis
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
  * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
- * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
- * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
- * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
- * reunião do painel de minutos (server/minutos-de-reuniao.ts).
+ * mudarem; quem os usa é o envio único (desde a G14, só o recuo do corte do
+ * arquivo e um cliente de fora do app, se houver: ver meetings.submitRecording)
+ * e a leitura da gravação inteira das reuniões antigas, no reprocesso e na
+ * junção (server/juntar-reunioes.ts). A gravação em partes não passa por eles:
+ * tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, em
+ * server/fatias-de-reuniao.ts), que desde a G13b é também o limite por reunião
+ * do painel de minutos (server/minutos-de-reuniao.ts).
  */
 export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
 export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
@@ -76,7 +79,13 @@ export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
  * antes de apagar a linha.
  */
 export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "No modo atual, cada reunião pode ter no máximo 10 minutos.";
+/**
+ * A recusa da duração no envio único. Dizia "No modo atual, cada reunião pode
+ * ter no máximo 10 minutos", o que deixou de valer na G13b (a reunião em partes
+ * vai até 12 h): o teto é só do envio de um arquivo só, que desde a G14 sobra no
+ * recuo do corte e num cliente de fora do app (meetings.submitRecording).
+ */
+export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "Este áudio passa dos 10 minutos que o envio de um arquivo só aceita.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";
 /**
  * Folga sobre o limite medido: o gravador da tela para aos 600 s pelo relógio

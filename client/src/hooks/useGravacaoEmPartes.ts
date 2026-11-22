@@ -105,11 +105,8 @@ export type FimDoArquivo = "declarado" | "pendente" | "recusado" | "descartada";
  * pela mesma fila, no tipo da parte (subirParteDoArquivo, que responde o que
  * houve com ela: a importação só manda a seguinte quando esta chegou), e o fim
  * vem depois de todas (encerrarArquivo).
- *
- * Com `ativo` falso (o envio único, ?envioUnico=1), nada aqui toca o servidor.
  */
 export function useGravacaoEmPartes(opcoes: {
-  ativo: boolean;
   aoEncerrar: (meetingId: string) => void;
   /**
    * O fim sem nenhuma parte com áudio (G17: o microfone caiu antes de 1 s de
@@ -147,7 +144,7 @@ export function useGravacaoEmPartes(opcoes: {
   const donas = useRef(new Map<string, string>());
   const [pendentes, setPendentes] = useState(0);
   const [noAparelho, setNoAparelho] = useState(0);
-  useOcupacao("audio-nao-enviado", opcoes.ativo && noAparelho > 0);
+  useOcupacao("audio-nao-enviado", noAparelho > 0);
 
   // A conta: do cache do React Query ou, se ele ainda não a tem, do servidor.
   const dona = useCallback(async () => utils.auth.me.getData()?.openId ?? (await utils.auth.me.fetch().catch(() => null))?.openId ?? null, [utils]);
@@ -340,7 +337,6 @@ export function useGravacaoEmPartes(opcoes: {
   // conta cuja exclusão falhou, as partes que ficaram no aparelho e os fins que
   // o servidor não confirmou.
   useEffect(() => {
-    if (!opcoes.ativo) return;
     let ativo = true;
     let relogio = 0;
     const tentar = async () => {
@@ -373,15 +369,12 @@ export function useGravacaoEmPartes(opcoes: {
       ativo = false;
       window.clearTimeout(relogio);
     };
-  }, [opcoes.ativo, dona, servidorDaGravacao, excluirNoServidor]);
+  }, [dona, servidorDaGravacao, excluirNoServidor]);
 
   // O descarte guardado que uma retomada terminou de excluir no servidor (a
   // desta tela ou a de toda a sessão): a tela fecha o aviso de que ele não
   // tinha terminado.
-  useEffect(() => {
-    if (!opcoes.ativo) return;
-    return aoTerminarUmDescarte(id => atuais.current.aoConcluirDescarte?.(id));
-  }, [opcoes.ativo]);
+  useEffect(() => aoTerminarUmDescarte(id => atuais.current.aoConcluirDescarte?.(id)), []);
 
   return { iniciar, cancelar, descartar, receberParte, subirParteDoArquivo, encerrarArquivo, enviando: pendentes > 0 };
 }

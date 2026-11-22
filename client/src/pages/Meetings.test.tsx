@@ -75,7 +75,8 @@ const duble = vi.hoisted(() => {
   };
 });
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+// warning e dismiss: o Iniciar da gravação em partes (a única desde a G14) fecha os avisos da gravação anterior.
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 // A gravação em partes (o padrão desde a G13b) retoma, a cada 30 s, o que
 // ficou no aparelho, com a página aberta em qualquer das três rotas: o relógio
 // dela entraria na contagem dos testes da tradução longa (G8), que provam que
@@ -83,13 +84,14 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // gravação em partes está em hooks/useGravacaoEmPartes.test.ts e em
 // Meetings.sessao-ocupada.test.tsx.
 // As opções que a página passa ficam à mão (opcoesDaGravacaoEmPartes) para os
-// testes chamarem os avisos dela como o hook chamaria.
-const opcoesDaGravacaoEmPartes = vi.hoisted(() => ({ atual: null as null | { aoEncerrarSemAudio?: (meetingId: string) => void } }));
+// testes chamarem os avisos dela como o hook chamaria; o iniciar, para os
+// testes do idioma conferirem o que vai ao servidor quando a reunião nasce.
+const opcoesDaGravacaoEmPartes = vi.hoisted(() => ({ atual: null as null | { aoEncerrarSemAudio?: (meetingId: string) => void }, iniciar: vi.fn() }));
 vi.mock("@/hooks/useGravacaoEmPartes", () => ({
   PARTE_SEGUNDOS: 600,
   useGravacaoEmPartes: (opcoes: { aoEncerrarSemAudio?: (meetingId: string) => void }) => {
     opcoesDaGravacaoEmPartes.atual = opcoes;
-    return { iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false };
+    return { iniciar: opcoesDaGravacaoEmPartes.iniciar, cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false };
   },
 }));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
@@ -926,73 +928,54 @@ describe("Detalhe da reunião — enquanto processa", () => {
   });
 });
 
-describe("Envio de arquivo — a duração não é inventada", () => {
-  // Revisão adversarial de 15/09: sem ler a duração, a tela mandava 60 s, e um
-  // .webm de 25 minutos passava pela conferência dos 10 minutos.
-  async function enviarArquivo(duracaoLida: number | null) {
-    duble.list.mockReturnValue({ data: [], isLoading: false });
-    duble.duracao.mockResolvedValue(duracaoLida);
-    duble.mutacoes.create?.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
-    // A duração lida pelo navegador é a do envio único: desde a H9b, o arquivo do /gravar vai em partes.
-    window.history.replaceState(null, "", "/gravar?envioUnico=1");
-    render(<Meetings />);
-    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Ana" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    const arquivo = new File(["audio"], "reuniao.webm", { type: "audio/webm" });
-    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [arquivo] } });
-    await waitFor(() => expect(duble.duracao).toHaveBeenCalledWith(arquivo));
-  }
-
-  // O envio trava o formulário do começo ao fim; a recusa tem de soltá-lo, ou o
-  // gravador fica em "Transcrevendo..." sem os botões até recarregar a página.
-  async function formularioDestravado() {
-    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
-    expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
-  }
-
-  it("o navegador não lê a duração: recusa com a frase, sem criar a reunião nem enviar o áudio", async () => {
-    await enviarArquivo(null);
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível ler a duração deste áudio. Envie o arquivo em MP3 ou M4A."));
-    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
-    await formularioDestravado();
-  });
-
-  it("25 minutos lidos: recusa pelo limite", async () => {
-    await enviarArquivo(25 * 60);
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("No modo atual, o áudio deve ter no máximo 10 minutos."));
-    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
-    await formularioDestravado();
-  });
-
-  it("duração legível dentro do limite: envia com a duração lida", async () => {
-    await enviarArquivo(301);
-    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({ meetingId: "reuniao-nova", mimeType: "audio/webm", durationSeconds: 301 }),
-    ));
-    expect(toast.error).not.toHaveBeenCalled();
-  });
-});
+// A duração do arquivo lida pelo navegador (revisão adversarial de 15/09: sem
+// lê-la, a tela mandava 60 s, e um .webm de 25 minutos passava pela conferência
+// dos 10 minutos) só vale, desde a G14, no recuo do corte, o arquivo curto que
+// ainda vai pelo envio único: os casos dela (ilegível, longa demais e dentro do
+// limite) estão em Meetings.importacao.test.tsx. Todo outro arquivo vai em
+// partes, e o servidor mede cada parte nos bytes.
 
 describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
   const TRANSCRICAO_ABA = /^Transcrição$/;
+
+  /**
+   * O gravador do /gravar com o idioma escolhido, até o Iniciar: desde a G14 a
+   * gravação é sempre em partes, e o idioma e a versão do aviso vão ao servidor
+   * quando a reunião nasce (o iniciar do hook, dublado nesta suíte). O microfone
+   * é negado logo depois: o que interessa aqui é o que o Iniciar mandou.
+   */
+  async function iniciarNoIdioma(idioma: string | null, titulo: string) {
+    duble.list.mockReturnValue({ data: [], isLoading: false });
+    vi.stubGlobal("MediaRecorder", class { static isTypeSupported() { return true; } });
+    const microfone = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => { throw new DOMException("negado", "NotAllowedError"); } } });
+    try {
+      window.history.replaceState(null, "", "/gravar");
+      render(<Meetings />);
+      const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
+      if (idioma) fireEvent.change(seletor, { target: { value: idioma } });
+      fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+      await waitFor(() => expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.unstubAllGlobals();
+      if (microfone) Object.defineProperty(navigator, "mediaDevices", microfone);
+      else delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+  }
+
   it("o gravador começa no idioma da tela e manda o idioma escolhido e a versão do aviso", async () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
-    duble.duracao.mockResolvedValue(120);
-    // O envio único (?envioUnico=1): desde a H9b, o arquivo do /gravar vai em partes, com o idioma no iniciarGravacao.
-    window.history.replaceState(null, "", "/gravar?envioUnico=1");
-    render(<Meetings />);
-    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
-    const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
-    expect(seletor.value).toBe("pt-BR");
-    fireEvent.change(seletor, { target: { value: "en" } });
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Call with Ana" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
-    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "en" })));
-    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }));
+    window.history.replaceState(null, "", "/gravar");
+    const { unmount } = render(<Meetings />);
+    expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("pt-BR");
+    unmount();
+    await iniciarNoIdioma("en", "Call with Ana");
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: "Call with Ana", language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+    // Nada pelo envio único, que saiu do gravador na G14.
+    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
+    expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("com a tela em inglês, o gravador já começa em inglês", async () => {
@@ -1043,33 +1026,21 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
 
   it("G16: o gravador oferece \"Detectar sozinho\", com a dica dele, e manda \"auto\"", async () => {
     duble.list.mockReturnValue({ data: [], isLoading: false });
-    duble.duracao.mockResolvedValue(120);
-    window.history.replaceState(null, "", "/gravar?envioUnico=1");
-    render(<Meetings />);
-    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
+    window.history.replaceState(null, "", "/gravar");
+    const { unmount } = render(<Meetings />);
     const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
     expect(within(seletor).getByRole("option", { name: "🌐 Detectar sozinho" })).toBeInTheDocument();
     fireEvent.change(seletor, { target: { value: "auto" } });
     expect(screen.getByText(/A IA reconhece o idioma de cada fala/)).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Call with Ana" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
-    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" })));
-    expect(duble.mutacoes.create.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
+    unmount();
+    await iniciarNoIdioma("auto", "Call with Ana");
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
   });
 
   it("G16: um idioma fora dos 10 da tela (italiano) está na lista e vai ao servidor", async () => {
-    duble.list.mockReturnValue({ data: [], isLoading: false });
-    duble.duracao.mockResolvedValue(120);
-    window.history.replaceState(null, "", "/gravar?envioUnico=1");
-    render(<Meetings />);
-    duble.mutacoes.create.mutateAsync.mockResolvedValue({ id: "reuniao-nova" });
-    fireEvent.change(screen.getByLabelText("Idioma da reunião"), { target: { value: "it" } });
+    await iniciarNoIdioma("it", "Riunione");
     expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("it");
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Riunione" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector("input[type=file]")!, { target: { files: [new File(["audio"], "reuniao.webm", { type: "audio/webm" })] } });
-    await waitFor(() => expect(duble.mutacoes.submitRecording.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ language: "it" })));
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ title: "Riunione", language: "it" }));
   });
 
   it("G16: reunião em italiano com a tela em pt-BR: o pt-BR é TRADUZIDO, e a lista ganha \"Italiano (original)\", que volta ao original", () => {

@@ -40,7 +40,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { segmentarTranscricao, TIPOS_DE_ENTIDADE, type TipoEntidade } from "@/lib/transcricao-destacada";
 import { lerDuracaoNoNavegador } from "@/lib/duracao-no-navegador";
-import type { TipoDeAudioGravado } from "@/lib/formato-de-audio";
 import { ESPERA_PELO_MICROFONE_MAXIMA_MS, gravacaoDeAudioSuportada, pausaSuportada, useGravadorDeAudio } from "@/hooks/useGravadorDeAudio";
 import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
@@ -49,7 +48,7 @@ import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes
 import { useImportacaoEmPartes, type AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
 import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
 import type { CodigoDaRecusaDoCorte } from "@/lib/corte-comum";
-import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
+import { ocupar } from "@/lib/sessao-ocupada";
 import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { PARAMETRO_DA_AGENDADA, PARAMETRO_DA_LIXEIRA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
 import { podeIrParaALixeira } from "@shared/lixeira-de-reunioes";
@@ -73,12 +72,12 @@ const formatDuration = mmss;
 /** As horas do teto técnico da gravação em partes (12), para os textos. */
 const HORAS_DA_GRAVACAO_EM_PARTES = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
 /**
- * Os arquivos que o seletor oferece. No envio único, os formatos dele. Em
- * partes, também o vídeo (MP4, MOV, WebM e MKV, de que só o áudio sai do
- * aparelho), o FLAC e o AAC: o corte reconhece o formato pelos bytes e recusa,
- * com o aviso, o que não lê (lib/corte-do-arquivo.ts).
+ * Os arquivos que o seletor oferece: o áudio, o vídeo (MP4, MOV, WebM e MKV, de
+ * que só o áudio sai do aparelho), o FLAC e o AAC. Todos vão ao corte, que
+ * reconhece o formato pelos bytes e recusa, com o aviso, o que não lê
+ * (lib/corte-do-arquivo.ts). Desde a G14 não há outra lista: o ?envioUnico=1,
+ * que oferecia só os formatos do envio único, saiu.
  */
-const ACEITOS_NO_ENVIO_UNICO = "audio/webm,audio/mpeg,audio/mp4,audio/m4a,audio/x-m4a,audio/ogg,audio/wav,.mp3,.m4a,.mp4,.ogg,.wav,.webm";
 const ACEITOS_EM_PARTES = "audio/*,video/mp4,video/quicktime,video/webm,video/x-matroska,.mp3,.m4a,.mp4,.mov,.ogg,.oga,.opus,.wav,.webm,.mkv,.flac,.aac";
 /** O id fixo do aviso das 12 h: a gravação seguinte o fecha por ele (toast.dismiss). */
 const ID_DO_AVISO_DO_LIMITE = "gravacao-chegou-ao-limite";
@@ -101,15 +100,14 @@ const ID_DO_AVISO_FIM_PENDENTE = "importacao-com-fim-pendente";
  */
 const ID_DO_AVISO_DO_MICROFONE = "gravacao-microfone";
 
-/**
- * O modo do gravador, pela busca da URL do /gravar (G13b). A gravação em partes
- * é o padrão para todas; `?envioUnico=1` é a saída de suporte até a G14: o
- * envio único de antes, inteiro num pedido só, com 10 minutos e 10 MB.
- * `?emPartes=1`, o interruptor da G9, continua aceito e não muda nada.
+/*
+ * O gravador grava sempre em partes (G13b e G14). O `?envioUnico=1`, a saída de
+ * suporte da G13b para o envio único de antes (o áudio inteiro num pedido só,
+ * com 10 minutos e 10 MB e a revisão antes de enviar), saiu na G14: a URL que
+ * ainda o trouxer grava em partes, como o `?emPartes=1` da G9. O envio único
+ * só sobra no recuo do arquivo de um formato que o corte reconhece e não lê
+ * (importarArquivo, abaixo).
  */
-function gravaEmPartes(busca: string) {
-  return new URLSearchParams(busca).get("envioUnico") !== "1";
-}
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -250,7 +248,7 @@ export default function Meetings() {
   // A reunião da agenda lida na tela (nula sem ela, ou se não é mais da agenda), e
   // a que valia quando a gravação começou: durante a gravação a faixa sai da
   // tela sempre que a URL sai de /gravar (e volta, pelo efeito mais abaixo), ou
-  // se a URL perder o ?agendada, e o envio único só cria a reunião no fim.
+  // se a URL perder o ?agendada.
   const agendaNaTela = useRef<string | null>(null);
   const agendaDaGravacao = useRef<string | null>(null);
   // O ?agendada da URL quando a gravação começou (nulo sem ele): a reunião que
@@ -268,8 +266,8 @@ export default function Meetings() {
   // dela tocado no sino no meio) não leva a gravação.
   const agendaQueCarregou = (agendadaDoInicio: string | null) =>
     agendaNaTela.current !== null && agendaNaTela.current === agendadaDoInicio ? agendaNaTela.current : null;
-  // O endereço do gravador quando a gravação começou, com a busca (?agendada,
-  // ?emPartes): é para ele que a URL volta se sair de /gravar no meio da
+  // O endereço do gravador quando a gravação começou, com a busca (?agendada):
+  // é para ele que a URL volta se sair de /gravar no meio da
   // gravação (o efeito mais abaixo). Assim a faixa da reunião da agenda, com o
   // link da chamada e o convite, continua no gravador.
   const urlDaGravacao = useRef<string>(ROTA_GRAVAR);
@@ -299,7 +297,6 @@ export default function Meetings() {
   // G15a: a reunião em partes da gravação em curso, para a tela mostrar o
   // texto das partes que a fila já transcreveu (e perguntar sobre ele).
   const [reuniaoDaGravacao, setReuniaoDaGravacao] = useState<string | null>(null);
-  const [capturedAudio, setCapturedAudio] = useState<{ blob: Blob; url: string; mimeType: TipoDeAudioGravado; durationSeconds: number } | null>(null);
   const audioInput = useRef<HTMLInputElement | null>(null);
   // true só enquanto ESTA instância está montada, visível e no gravador. O
   // naGravacao vem do useRoute, que casa como a rota (sem caixa e com barra
@@ -315,15 +312,12 @@ export default function Meetings() {
   }, [naGravacao]);
 
   // O microfone, o formato (mp4 antes de webm) e o teto de duração ficam no hook.
-  // Sair da página gravando fecha o microfone: o hook cuida disso ao desmontar
-  // (em partes, entregando o que foi gravado; ver entregarAoSair, abaixo).
+  // Sair da página gravando fecha o microfone: o hook cuida disso ao desmontar,
+  // entregando o que foi gravado (ver entregarAoSair, abaixo).
   // A gravação em partes (G9): enviada ao servidor por baixo, parte a parte, com
-  // cópia no aparelho. Desde a G13b é o padrão para todas (gravaEmPartes, acima).
-  // O modo é lido uma vez, na montagem: as três rotas são a mesma instância, e
-  // trocar de modo no meio deixaria o gravador e o envio em modos diferentes.
-  const emPartes = useRef(typeof window === "undefined" || gravaEmPartes(window.location.search)).current;
+  // cópia no aparelho. Desde a G13b é o padrão para todas, e desde a G14 é a
+  // única: o ?envioUnico=1 saiu.
   const gravacaoEmPartes = useGravacaoEmPartes({
-    ativo: emPartes,
     aoEncerrar: meetingId => {
       // A gravação acabou: a faixa que carregar agora não a liga mais.
       emPartesSemAgenda.current = null;
@@ -364,24 +358,24 @@ export default function Meetings() {
   // envio para do mesmo jeito.
   const importacao = useImportacaoEmPartes({ partes: gravacaoEmPartes, temSessao: () => utils.auth.me.getData() !== null });
   const gravador = useGravadorDeAudio({
-    // Em partes (G13a), sem o teto de 10 min: o aviso de hora pede o OK a cada
-    // hora cheia, e as 12 h são só o teto técnico. O envio único segue nos 10 min.
-    limiteSegundos: emPartes ? GRAVACAO_EM_PARTES_SEGUNDOS_MAX : ENVIO_UNICO_SEGUNDOS_MAX,
-    // A gravação em partes que bate nas 12 h para e entrega como no Encerrar; o
-    // aviso fica até ser fechado, porque quem gravou pode não estar olhando. Sem
-    // prazo, leva o botão de fechar (sem ele, só saía arrastando).
-    aoChegarAoLimite: emPartes ? () => toast.info(t("meetings.recordingMaxReached", { horas: HORAS_DA_GRAVACAO_EM_PARTES }), { id: ID_DO_AVISO_DO_LIMITE, duration: Infinity, closeButton: true }) : undefined,
-    fatiaSegundos: emPartes ? PARTE_SEGUNDOS : undefined,
-    aoFecharParte: emPartes ? gravacaoEmPartes.receberParte : undefined,
-    // Sair da tela gravando (G13b): em partes, o desmonte para e entrega pelo
-    // caminho do Encerrar — a última parte sobe, o fim é declarado (ou guardado
-    // para a retomada) e o microfone é solto —, porque as partes anteriores já
-    // estão no servidor. O aviso fica até ser fechado: a dona já está em outra
-    // tela. No envio único, o desmonte descarta, como antes. E também no fim da
-    // sessão (o Sair, excluir a conta), que zera a conta no cache antes de a
-    // página sair: no diálogo do Sair a dona aceitou perder o áudio, e o envio
-    // reabriria a sessão ocupada (o navegador perguntaria na ida ao login).
-    entregarAoSair: emPartes ? () => Boolean(utils.auth.me.getData()) : false,
+    // Sem o teto de 10 min (G13a): o aviso de hora pede o OK a cada hora cheia,
+    // e as 12 h são só o teto técnico.
+    limiteSegundos: GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
+    // A gravação que bate nas 12 h para e entrega como no Encerrar; o aviso fica
+    // até ser fechado, porque quem gravou pode não estar olhando. Sem prazo,
+    // leva o botão de fechar (sem ele, só saía arrastando).
+    aoChegarAoLimite: () => toast.info(t("meetings.recordingMaxReached", { horas: HORAS_DA_GRAVACAO_EM_PARTES }), { id: ID_DO_AVISO_DO_LIMITE, duration: Infinity, closeButton: true }),
+    fatiaSegundos: PARTE_SEGUNDOS,
+    aoFecharParte: gravacaoEmPartes.receberParte,
+    // Sair da tela gravando (G13b): o desmonte para e entrega pelo caminho do
+    // Encerrar — a última parte sobe, o fim é declarado (ou guardado para a
+    // retomada) e o microfone é solto —, porque as partes anteriores já estão
+    // no servidor. O aviso fica até ser fechado: a dona já está em outra tela.
+    // No fim da sessão (o Sair, excluir a conta), que zera a conta no cache
+    // antes de a página sair, o desmonte descarta: no diálogo do Sair a dona
+    // aceitou perder o áudio, e o envio reabriria a sessão ocupada (o
+    // navegador perguntaria na ida ao login).
+    entregarAoSair: () => Boolean(utils.auth.me.getData()),
     aoEntregarAoSair: () => toast.info(t("meetings.recordingEndedOnLeave"), { id: ID_DO_AVISO_ENCERRADA_AO_SAIR, duration: Infinity, closeButton: true }),
     // G17: o microfone caiu (o cartão do gravador avisa e oferece o Tentar de
     // novo), voltou (a gravação seguiu numa parte nova) ou não voltou a tempo
@@ -396,24 +390,12 @@ export default function Meetings() {
     // ida à lista ou a um detalhe na mesma instância e para o desmonte, porque
     // a limpeza do efeito do noGravadorAgora o zera nos dois casos.
     podeGravar: () => noGravadorAgora.current,
-    aoTerminar: ({ blob, mimeType, duracaoMs }) => {
-      // Em partes, a última já foi ao servidor por aoFecharParte: não há revisão.
-      if (emPartes) return;
-      if (!blob.size) {
-        toast.error(t("meetings.noAudioGenerated"));
-        return;
-      }
-      setCapturedAudio({
-        blob,
-        url: URL.createObjectURL(blob),
-        mimeType,
-        // O fim automático chega com atraso (aba em segundo plano, celular
-        // lento), e o relógio passa do teto, que o servidor confere sem folga
-        // na duração declarada: 601 s eram recusados. A duração medida nos
-        // bytes, que é a que vale, tem a folga de 5 s.
-        durationSeconds: Math.min(ENVIO_UNICO_SEGUNDOS_MAX, Math.max(1, Math.floor(duracaoMs / 1000))),
-      });
-    },
+    // A última parte já foi ao servidor por aoFecharParte, e o fim da gravação
+    // em partes leva ao detalhe (aoEncerrar, acima): não há áudio inteiro para
+    // revisar nem enviar. A revisão antes de enviar ("Transcrever áudio",
+    // "Descartar e gravar novamente") era do envio único, que saiu do gravador
+    // na G14.
+    aoTerminar: () => {},
     // O pedido do microfone falhou (permissão negada, por exemplo). Se a dona
     // já saiu do gravador, o hook nem chama: nada de aviso fora dele, nem de
     // problema guardado para a próxima vez que ela voltar.
@@ -436,16 +418,19 @@ export default function Meetings() {
   const telaAcesa = useTelaAcesa(recording || importacao.andamento.fase !== "parada");
   // Pedindo o microfone ou fechando o arquivo, o gravador fica travado como no envio.
   const gravadorOcupado = gravador.estado === "pedindoMicrofone" || gravador.estado === "finalizando";
-  // O áudio gravado e ainda não enviado só existe nesta aba: a sessão fica ocupada
-  // (lib/sessao-ocupada.ts) até ele ir ao servidor ou ser descartado, e o Sair e o
-  // fechar da aba pedem confirmação. A gravação, o hook do gravador já ocupa; o
-  // envio ocupa à parte (ver processCapturedAudio).
-  useOcupacao("audio-nao-enviado", capturedAudio !== null);
+  // A sessão ocupada (lib/sessao-ocupada.ts): a gravação, o hook do gravador
+  // ocupa; as partes que ficaram só no aparelho, o hook das partes; e o envio
+  // de um arquivo, importarArquivo, do clique ao fim. Desde a G14 não há mais
+  // áudio inteiro esperando a revisão nesta aba.
   // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
   // de /gravar (ver o efeito que devolve a URL, mais abaixo).
   const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
 
   const createMeeting = trpc.meetings.create.useMutation();
+  // O envio único (o áudio inteiro, em base64, num pedido só, até 10 min e 10
+  // MB). Desde a G14 o gravador não o usa mais: a gravação e o arquivo vão em
+  // partes. Ele sobra só no recuo do arquivo curto de um formato que o corte
+  // reconhece, mas não lê (enviarPeloEnvioUnico, abaixo).
   const submitRecording = trpc.meetings.submitRecording.useMutation({
     onSuccess: async (_dados, variaveis) => {
       // A lista pode estar aberta: a dona vai a ela pelo menu durante o envio, e
@@ -453,9 +438,7 @@ export default function Meetings() {
       // consulta sozinha. Sem esta releitura, a lista aberta não mostra o desfecho.
       await utils.meetings.list.invalidate();
       toast.success(t("meetings.processedSuccess"), avisoDaReuniao("processada", variaveis.meetingId));
-      // O gravador recomeça vazio: sem isto, "Nova reunião" reabria o áudio já
-      // enviado, e um segundo toque duplicava a reunião.
-      discardCapturedAudio();
+      // O gravador recomeça vazio, como no fim da gravação em partes.
       setTitle("");
       setConsent(false);
       // Só leva ao detalhe quem continua no gravador desta mesma tela. O
@@ -500,10 +483,10 @@ export default function Meetings() {
   // com a busca de quando a gravação começou (urlDaGravacao): a gravação que
   // veio da agenda continua com a faixa dela. Qualquer outro destino (os outros
   // itens do menu, o logo, a seta, o avatar, o sino, o voltar que sai de
-  // Reuniões) desmonta a página sem perguntar: em partes, a gravação para e é
-  // entregue como no Encerrar, com um aviso (G13b, entregarAoSair); no envio
-  // único, é descartada, como antes. A sessão ocupada (lib/sessao-ocupada.ts)
-  // confirma só o Sair da conta e o fechar ou recarregar da aba. Por isso o
+  // Reuniões) desmonta a página sem perguntar: a gravação para e é entregue
+  // como no Encerrar, com um aviso (G13b, entregarAoSair). A sessão ocupada
+  // (lib/sessao-ocupada.ts) confirma só o Sair da conta e o fechar ou recarregar
+  // da aba. Por isso o
   // "Gravar agora" da agenda põe a lista no histórico antes do gravador
   // (pages/Agenda.tsx).
   // O lembrete de outra reunião da agenda, tocado no sino no meio da gravação,
@@ -562,43 +545,41 @@ export default function Meetings() {
     iniciandoAgora.current = true;
     setIniciando(true);
     try {
-      let reuniao: string | null = null;
-      if (emPartes) {
-        // Os avisos que ficam até ser fechados falam da gravação anterior: na
-        // nova, pareceriam ser dela. Só a gravação em partes os cria: os das 12 h
-        // e da hora sem OK (G13a), e os da parte recusada, da cópia que faltou,
-        // do descarte que não terminou e da gravação encerrada ao sair (G13b), e
-        // o do arquivo cujo fim ficou para a retomada (H9a). O descarte que não
-        // terminou segue ocupando a sessão até a retomada terminá-lo: o Sair e o
-        // fechar da aba ainda perguntam.
-        toast.dismiss(ID_DO_AVISO_DO_LIMITE);
-        toast.dismiss(ID_DO_AVISO_PAROU_SOZINHA);
-        toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
-        toast.dismiss(ID_DO_AVISO_SEM_COPIA);
-        toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
-        toast.dismiss(ID_DO_AVISO_ENCERRADA_AO_SAIR);
-        toast.dismiss(ID_DO_AVISO_FIM_PENDENTE);
-        toast.dismiss(ID_DO_AVISO_DO_MICROFONE);
-        try {
-          reuniao = await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
-        } catch (error) {
-          toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
-          return;
-        }
-        // A dona saiu do gravador (ou da página) enquanto o servidor criava a
-        // reunião: o microfone nem é pedido — o pedido de permissão apareceria
-        // em outra tela —, e a reunião vazia desta tentativa sai.
-        if (!noGravadorAgora.current) {
-          await gravacaoEmPartes.cancelar(reuniao);
-          return;
-        }
+      // Os avisos que ficam até ser fechados falam da gravação anterior: na
+      // nova, pareceriam ser dela. São os das 12 h e da hora sem OK (G13a), os
+      // da parte recusada, da cópia que faltou, do descarte que não terminou e
+      // da gravação encerrada ao sair (G13b), o do arquivo cujo fim ficou para a
+      // retomada (H9a) e o do microfone (G17). O descarte que não terminou segue
+      // ocupando a sessão até a retomada terminá-lo: o Sair e o fechar da aba
+      // ainda perguntam.
+      toast.dismiss(ID_DO_AVISO_DO_LIMITE);
+      toast.dismiss(ID_DO_AVISO_PAROU_SOZINHA);
+      toast.dismiss(ID_DO_AVISO_DA_PARTE_RECUSADA);
+      toast.dismiss(ID_DO_AVISO_SEM_COPIA);
+      toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
+      toast.dismiss(ID_DO_AVISO_ENCERRADA_AO_SAIR);
+      toast.dismiss(ID_DO_AVISO_FIM_PENDENTE);
+      toast.dismiss(ID_DO_AVISO_DO_MICROFONE);
+      let reuniao: string;
+      try {
+        reuniao = await gravacaoEmPartes.iniciar({ title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+      } catch (error) {
+        toast.error((error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || t("meetings.sendRecordingError"));
+        return;
+      }
+      // A dona saiu do gravador (ou da página) enquanto o servidor criava a
+      // reunião: o microfone nem é pedido — o pedido de permissão apareceria
+      // em outra tela —, e a reunião vazia desta tentativa sai.
+      if (!noGravadorAgora.current) {
+        await gravacaoEmPartes.cancelar(reuniao);
+        return;
       }
       const comecou = await gravador.comecar();
       // O microfone não abriu (negado, ocupado): a reunião em partes vazia DESTA
       // tentativa sai, e só ela. Se a exclusão falhar agora, ela fica guardada e
       // a retomada a repete; a dona já viu o aviso do microfone.
       if (reuniao && !comecou) await gravacaoEmPartes.cancelar(reuniao);
-      // Em partes, a reunião nasce no Iniciar: é aqui que ela vai para a agenda,
+      // A reunião nasce no Iniciar: é aqui que ela vai para a agenda,
       // com a reunião da agenda de quando o Iniciar foi tocado ou a que terminou
       // de carregar enquanto o servidor criava a reunião. Sem nenhuma, a faixa
       // que carregar depois liga esta gravação (aoCarregar, abaixo).
@@ -618,9 +599,8 @@ export default function Meetings() {
     }
   }
 
-  // Descartar a gravação em partes, depois da confirmação na tela (G13b): no
-  // envio único a revisão antes de enviar deixa descartar, mas aqui as partes
-  // sobem enquanto grava. O gravador para sem entregar a última parte, e a
+  // Descartar a gravação em partes, depois da confirmação na tela (G13b): as
+  // partes sobem enquanto grava. O gravador para sem entregar a última parte, e a
   // reunião, o que já subiu e a cópia no aparelho saem pelo caminho de exclusão
   // de sempre: nada vai para a transcrição. O título fica, para gravar de novo;
   // a autorização volta desmarcada, como no Encerrar: ela vale para uma gravação.
@@ -654,50 +634,51 @@ export default function Meetings() {
     const avisoTitulo = avisoDoTitulo();
     if (avisoTitulo) return toast.error(avisoTitulo);
     if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
-    // Em partes (H9a, H9b e H9c), todo arquivo vai ao corte, que reconhece o
-    // formato pelos bytes, de qualquer tamanho até 12 h. No ?envioUnico=1, o
-    // envio único de sempre, com os formatos e os 10 minutos dele.
-    if (emPartes) return importarArquivo(file);
-    const mimeType = supportedAudioMime(file);
-    if (!mimeType) return toast.error(t("meetings.unsupportedFormat"));
-    return enviarArquivoUnico(file, mimeType);
+    // Todo arquivo vai ao corte (H9a, H9b e H9c), que reconhece o formato pelos
+    // bytes, de qualquer tamanho até 12 h. Desde a G14 não há outro caminho: o
+    // ?envioUnico=1, que mandava o arquivo inteiro num pedido só, saiu.
+    return importarArquivo(file);
   }
 
   /**
-   * O envio único: o arquivo inteiro num pedido só, até 10 minutos e 10 MB.
-   * `recusaDoCorte` é o motivo de o arquivo ter vindo do corte para cá (o codec
-   * que o corte não lê): se o envio único também não o aceita pela duração,
-   * vale aquele aviso, e não o dos 10 minutos, que a dica da tela não promete
-   * para esse formato.
+   * O recuo do corte (pacote 4b): o arquivo de um formato que o corte reconhece,
+   * mas cujo áudio ele não lê, vai inteiro num pedido só, pelo envio único
+   * (meetings.submitRecording), até 10 minutos e 10 MB. É o único uso do envio
+   * único que sobrou no app depois da G14. Quem chama já conferiu o tipo e os 10
+   * MB (importarArquivo); aqui fica a duração, que o navegador lê. Fora dos 10
+   * minutos, ou sem duração legível, vale o aviso do formato (`recusaDoCorte`),
+   * que é o motivo de verdade: a dica da tela não promete os 10 minutos.
    */
-  async function enviarArquivoUnico(file: File, mimeType: NonNullable<ReturnType<typeof supportedAudioMime>>, recusaDoCorte?: { motivo: CodigoDaRecusaDoCorte; detalhe?: string }) {
-    if (file.size > ENVIO_UNICO_BYTES_MAX) return toast.error(t("meetings.fileTooLarge"));
+  async function enviarPeloEnvioUnico(file: File, mimeType: NonNullable<ReturnType<typeof supportedAudioMime>>, recusaDoCorte: { motivo: CodigoDaRecusaDoCorte; detalhe?: string }) {
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
     // criar a reunião, abaixo).
     const agendaNoClique = agendaNaTela.current;
     const agendadaNoClique = agendada;
     let reuniaoCriada: string | undefined;
-    // Como no envio da gravação: a sessão fica ocupada até o envio terminar.
+    // Como no envio em partes: a sessão fica ocupada até o envio terminar, mesmo
+    // que a dona saia desta tela (o pedido segue no ar). É ocupação avulsa, e não
+    // presa à página montada; antes do fim, só o fim da sessão a solta
+    // (liberarTodas): o logout, depois que a dona confirma o Sair, e a exclusão
+    // da conta.
     const liberarEnvio = ocupar("enviando");
     try {
-      // O formulário trava já aqui, como no envio da gravação: ler o arquivo leva
-      // segundos, e desmarcar a autorização nesse meio não impedia o create, que
-      // grava consentGranted: true.
+      // O formulário trava já aqui: ler o arquivo leva segundos, e desmarcar a
+      // autorização nesse meio não impedia o create, que grava consentGranted: true.
       setFinalizing(true);
       const [audioBase64, durationSeconds] = await Promise.all([readAsDataUrl(t, file), lerDuracaoNoNavegador(file)]);
       // Sem duração legível, recusa: assumir um valor (eram 60 s) deixava um
       // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
-      if (recusaDoCorte && (durationSeconds === null || durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX)) {
+      if (durationSeconds === null || durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) {
         return toast.error(avisoDaImportacaoRecusada(t, recusaDoCorte.motivo, recusaDoCorte.detalhe));
       }
-      if (durationSeconds === null) return toast.error(t("meetings.audioDurationUnreadable"));
-      if (durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) return toast.error(t("meetings.audioTooLong"));
       const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
       reuniaoCriada = created.id;
       ligarAAgenda(agendaId, created.id);
-      await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado });
+      // A marca do recuo vai ao log do servidor: separa este envio do de um
+      // cliente de fora do repositório, se houver (G14, docs/arquitetura/gravador-de-reunioes.md).
+      await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado, recuoDoCorte: true });
     } catch (error) {
       // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
       // troca aquele aviso em vez de pôr outro igual ao lado.
@@ -722,12 +703,14 @@ export default function Meetings() {
   // lido e enviado (MeetingRecorder), e o aoEncerrar da gravação em partes leva
   // ao detalhe no fim.
   //
-  // O arquivo de um formato que o corte reconhece, mas cujo áudio ele não lê
-  // (o Vorbis no WebM, o ALAC no M4A), segue pelo envio único de sempre quando
-  // cabe nele (até 10 MB, num tipo que ele aceita; a duração ele confere): é o
-  // que esse arquivo já fazia antes da H9b. Maior que isso, recebe o aviso; e o
-  // que o envio único recusa pela duração (mais de 10 min, ou ilegível) também
-  // recebe o aviso do formato, que é o motivo de verdade.
+  // O recuo do corte, que a G14 manteve: o arquivo de um formato que o corte
+  // reconhece, mas cujo áudio ele não lê (o Vorbis no WebM, o ALAC no M4A),
+  // segue pelo envio único quando cabe nele (até 10 MB, num tipo que ele
+  // aceita; a duração, enviarPeloEnvioUnico confere): é o que esse arquivo já
+  // fazia antes da H9b, e sem o recuo ele só receberia o aviso de converter.
+  // Maior que isso, recebe o aviso; e o que o envio único recusa pela duração
+  // (mais de 10 min, ou ilegível) também recebe o aviso do formato, que é o
+  // motivo de verdade.
   async function importarArquivo(file: File) {
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique.
@@ -783,58 +766,7 @@ export default function Meetings() {
     } finally {
       liberarEnvio();
     }
-    if (envioUnico) await enviarArquivoUnico(file, envioUnico.tipo, envioUnico.recusaDoCorte);
-  }
-
-  async function processCapturedAudio() {
-    if (!capturedAudio) return;
-    // O título segue editável depois de encerrar a gravação: confere de novo.
-    const avisoTitulo = avisoDoTitulo();
-    if (avisoTitulo) return toast.error(avisoTitulo);
-    // O consentimento vale no envio, não só no início da gravação: desmarcado
-    // depois de gravar, nada vai ao servidor (o create grava consentGranted).
-    if (!consent) return toast.error(t("meetings.consentRequiredUpload"));
-    let reuniaoCriada: string | undefined;
-    // Até o fim do envio a sessão fica ocupada (lib/sessao-ocupada.ts), mesmo que a
-    // dona saia desta tela: o pedido segue no ar, e sair da conta ou fechar a aba
-    // no meio podem perder o áudio. Por isso é ocupação avulsa, e não presa à
-    // página montada; antes do fim, só o fim da sessão a solta (liberarTodas):
-    // o logout, depois que a dona confirma o Sair, e a exclusão da conta.
-    const liberarEnvio = ocupar("enviando");
-    try {
-      setFinalizing(true);
-      const [created, audioBase64] = await Promise.all([
-        createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }),
-        readAsDataUrl(t, capturedAudio.blob),
-      ]);
-      reuniaoCriada = created.id;
-      // A agenda de quando a gravação começou; ou a que terminou de carregar
-      // depois, se for a do ?agendada de quando ela começou. A faixa de outra
-      // reunião (o lembrete dela tocado no sino depois do Encerrar) não leva a
-      // gravação.
-      ligarAAgenda(agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current), created.id);
-      await submitRecording.mutateAsync({
-        meetingId: created.id,
-        audioBase64,
-        mimeType: capturedAudio.mimeType,
-        durationSeconds: capturedAudio.durationSeconds,
-        language: idiomaFalado,
-      });
-    } catch (error) {
-      // Como no envio de arquivo: depois de criada, o aviso é o mesmo do onError.
-      // Erro sem mensagem recua como o onError: o aviso nunca fica em branco.
-      const mensagem = (error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || (reuniaoCriada ? t("meetings.processError") : t("meetings.sendRecordingError"));
-      if (reuniaoCriada) toast.error(mensagem, avisoDaReuniao("falhou", reuniaoCriada));
-      else toast.error(mensagem);
-    } finally {
-      setFinalizing(false);
-      liberarEnvio();
-    }
-  }
-
-  function discardCapturedAudio() {
-    if (capturedAudio) URL.revokeObjectURL(capturedAudio.url);
-    setCapturedAudio(null);
+    if (envioUnico) await enviarPeloEnvioUnico(file, envioUnico.tipo, envioUnico.recusaDoCorte);
   }
 
   function stopRecording() {
@@ -853,18 +785,17 @@ export default function Meetings() {
   const conteudo = screen === "new" ? (
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
-      idioma={idiomaFalado} setIdioma={setIdiomaFalado} emPartes={emPartes}
+      idioma={idiomaFalado} setIdioma={setIdiomaFalado}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
       semMicrofone={semMicrofone} microfoneBloqueado={gravador.microfoneBloqueado} onRetryMicrophone={gravador.tentarOMicrofone}
       starting={iniciando}
       importacao={importacao.andamento} onCancelImport={importacao.cancelar}
-      microphoneIssue={microphoneIssue} audioInput={audioInput} capturedAudio={capturedAudio}
-      onProcessCaptured={processCapturedAudio} onDiscardCaptured={discardCapturedAudio}
-      onDiscardRecording={emPartes ? discardRecording : undefined}
+      microphoneIssue={microphoneIssue} audioInput={audioInput}
+      onDiscardRecording={discardRecording}
       onStart={startRecording} onStop={stopRecording} onUpload={uploadAudio} onBack={() => { if (!recording) navigate(ROTA_DAS_REUNIOES); }}
       validarTitulo={avisoDoTitulo}
       // G15a: o texto das partes prontas durante a gravação, com o Pergunte.
-      transcricaoAoVivo={emPartes && reuniaoDaGravacao ? <TranscricaoDuranteAGravacao key={reuniaoDaGravacao} meetingId={reuniaoDaGravacao} gravando comPergunta/> : null}
+      transcricaoAoVivo={reuniaoDaGravacao ? <TranscricaoDuranteAGravacao key={reuniaoDaGravacao} meetingId={reuniaoDaGravacao} gravando comPergunta/> : null}
       // O documento (H12) enviado: a IA lê em segundo plano, e quem continua no
       // gravador vai ao detalhe, como no fim do envio do áudio.
       onDocumentSent={meetingId => {
@@ -914,9 +845,8 @@ export default function Meetings() {
   );
 
   // O aviso de cada hora cheia de gravação (G13a) pede o OK e, sem ele em 10
-  // min, encerra pelo mesmo caminho do botão Encerrar. Só na gravação em
-  // partes: o envio único para nos 10 min e nunca chega a uma hora.
-  return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}{emPartes && <AvisoDeHoraDeGravacao estado={gravador.estado} segundos={gravador.segundos} retomar={gravador.continuar} encerrar={stopRecording}/>}</>;
+  // min, encerra pelo mesmo caminho do botão Encerrar.
+  return <><AppHeader title={t("meetings.pageTitle")} backTo="/dashboard"/>{conteudo}<AvisoDeHoraDeGravacao estado={gravador.estado} segundos={gravador.segundos} retomar={gravador.continuar} encerrar={stopRecording}/></>;
 }
 
 /** iPhone, iPod e iPad (o iPad se diz Mac, mas tem toque). */
@@ -925,7 +855,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; onDiscardRecording: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode }) {
   const { t } = useTranslation();
   // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
   // fotos de um texto, com o aviso e a autorização do documento. O título e o
@@ -937,8 +867,8 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
   // O arquivo em partes (H9a) trava do mesmo jeito, da leitura ao fim do envio.
   const importacao = props.importacao.fase === "parada" ? null : props.importacao;
   const locked = props.recording || props.processing || props.starting || importacao !== null || documentoOcupado;
-  // A gravação ou o áudio por revisar ficam no modo da gravação.
-  const noDocumento = modo === "documento" && !props.recording && !props.capturedAudio && !importacao;
+  // A gravação e o arquivo em envio ficam no modo da gravação.
+  const noDocumento = modo === "documento" && !props.recording && !importacao;
   // A confirmação do Descartar da gravação em partes (G13b), dentro da página:
   // o window.confirm pararia a página inteira, e no celular some com a troca de
   // app. A gravação segue enquanto ela está aberta (ver DescartarGravacao).
@@ -976,23 +906,23 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {noDocumento ? <div className="mt-7"><DocumentoParaResumir titulo={props.title} idioma={props.idioma} validarTitulo={props.validarTitulo}
         aoMudarOcupado={setDocumentoOcupado} aoVoltar={() => setModo("gravacao")}
         aoEnviar={meetingId => { setModo("gravacao"); props.onDocumentSent(meetingId); }}/></div> : <>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused || props.semMicrofone ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : props.semMicrofone ? <MicOff className="text-red-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : props.semMicrofone ? <p role="status" className="text-sm text-red-200 mt-2">{t("meetings.micLost.status")}</p> : <p className="text-xs text-white/40 mt-2">{props.emPartes ? t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES }) : t("meetings.recordingLimit")}</p>}</div>
+      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused || props.semMicrofone ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : props.semMicrofone ? <MicOff className="text-red-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : props.semMicrofone ? <p role="status" className="text-sm text-red-200 mt-2">{t("meetings.micLost.status")}</p> : <p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
-      <input ref={props.audioInput} type="file" accept={props.emPartes ? ACEITOS_EM_PARTES : ACEITOS_NO_ENVIO_UNICO} className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
-      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin me-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.semMicrofone ? <AvisoSemMicrofone bloqueado={!!props.microfoneBloqueado} aoTentarDeNovo={() => props.onRetryMicrophone?.()}/> : props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button>{props.onDiscardRecording && <DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/>}</div> : props.capturedAudio ? <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4"><p className="text-sm font-semibold text-amber-100">{t("meetings.reviewBeforeTranscribe")}</p><audio controls src={props.capturedAudio.url} className="w-full"/><p className="text-xs text-white/45">{t("meetings.durationLabel")} {formatDuration(props.capturedAudio.durationSeconds)}</p><button onClick={props.onProcessCaptured} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-3 inline-flex justify-center gap-2"><FileText size={18}/> {t("meetings.transcribeButton")}</button><button onClick={props.onDiscardCaptured} className="w-full rounded-xl border border-white/20 py-3 text-sm text-white/75">{t("meetings.discardAndRetry")}</button></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* Em partes, a frase sob o relógio fala só da gravação (G13b): esta diz
-          o teto do arquivo enviado, que vai em partes até 12 h em todos os
-          formatos (H9a, H9b e H9c). */}{props.emPartes && <p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}
+      <input ref={props.audioInput} type="file" accept={ACEITOS_EM_PARTES} className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
+      {importacao ? <ImportacaoEmAndamento andamento={importacao} aoCancelar={props.onCancelImport} telaPodeApagar={telaPodeApagar}/> : props.processing ? <div className="w-full rounded-xl bg-white/8 py-4 text-center text-white/70"><Loader2 className="inline animate-spin me-2" size={17}/>{t("meetings.transcribingStatus")}</div> : props.recording ? <div className="space-y-3">{props.semMicrofone ? <AvisoSemMicrofone bloqueado={!!props.microfoneBloqueado} aoTentarDeNovo={() => props.onRetryMicrophone?.()}/> : props.paused ? <button onClick={props.onResume} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2"><Play size={19}/> {t("meetings.resumeRecording")}</button> : props.onPause && <button onClick={props.onPause} className="w-full rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center gap-2"><Pause size={18}/> {t("meetings.pauseRecording")}</button>}<button onClick={props.onStop} className="w-full rounded-xl bg-red-500 text-white font-bold py-4 inline-flex justify-center gap-2"><Square size={18}/> {t("meetings.stopRecording")}</button><DescartarGravacao aberta={confirmarDescarte} aoAbrirOuFechar={setConfirmarDescarte} aoDescartar={props.onDiscardRecording}/></div> : <div className="space-y-3"><button onClick={props.onStart} disabled={props.starting} aria-busy={props.starting} className="w-full rounded-xl bg-[#c98f70] text-[#1a120c] font-bold py-4 inline-flex justify-center gap-2 disabled:opacity-60">{props.starting ? <Loader2 className="animate-spin" size={19}/> : <Play size={19}/>} {t("meetings.startRecording")}</button><button disabled={props.starting} onClick={() => props.audioInput.current?.click()} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center gap-2 text-sm disabled:opacity-40"><FileText size={17}/> {t("meetings.uploadAudioButton")}</button>{/* A frase sob o relógio fala só da gravação (G13b): esta diz o teto
+          do arquivo enviado, que vai em partes até 12 h em todos os formatos
+          (H9a, H9b e H9c). */}<p className="text-xs text-white/40 text-center">{t("meetings.uploadLimit", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>
           {/* H12 e H12b: um PDF ou as fotos de um texto, resumidos como uma reunião. */}
           <button type="button" disabled={props.starting} onClick={() => setModo("documento")} className="w-full rounded-xl border border-white/20 text-white/75 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><ScanText size={17}/> {t("meetings.document.openButton")}</button></div>}
       </>}
       {/* Abaixo dos botões. Ao gravar e ao enviar ela fica invisível sem
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
-          "Iniciar gravação". Na revisão do áudio ela sai. */}
+          "Iniciar gravação". */}
       {/* G15a: o texto das partes que a fila já transcreveu, enquanto grava. */}
       {props.recording && props.transcricaoAoVivo}
-      {!props.capturedAudio && <DicaDeInstalacao oculta={locked}/>}
+      <DicaDeInstalacao oculta={locked}/>
     </div>
   </main>;
 }

@@ -16,6 +16,8 @@ type Dicionario = Record<string, unknown>;
 
 // As chaves da G13b (novas e mudadas) que levam número, as da H9a (o MP3 em
 // partes) e as da H13 (os minutos do vídeo do YouTube que a IA transcreve).
+// networkPanel.minutesLimitHelp saiu na G14: os minutos do envio único deixaram
+// a frase, que agora diz só que o limite em horas vale também para o arquivo.
 const CHAVES = [
   "smartNetwork.record.desc",
   "meetings.uploadLimit",
@@ -23,7 +25,6 @@ const CHAVES = [
   "meetings.youtube.dialogIntro",
   "meetings.youtube.notice",
   "meetings.youtube.firstHourNote",
-  "networkPanel.minutesLimitHelp",
   "networkPanel.hoursValue",
   "networkPanel.moreTimeUnavailable",
   "networkPanel.actionRecordDesc",
