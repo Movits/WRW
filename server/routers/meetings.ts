@@ -74,6 +74,30 @@ import {
 } from "@shared/busca-de-reunioes";
 import { juntarReunioes, RecusaDaJuncao } from "../juntar-reunioes";
 import { JANELA_DA_JUNCAO_MS, JUNCOES_POR_JANELA, RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX } from "@shared/juntar-reunioes";
+import { editarTranscricao, RecusaDaEdicao } from "../editar-transcricao";
+import {
+  EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, LOCALIZAR_MAX, RECUSAS_DA_EDICAO, SUBSTITUIR_POR_MAX, TEXTO_CORRIDO_MAX, TEXTO_DO_TRECHO_MAX,
+} from "@shared/editar-transcricao";
+
+// O que a dona pede ao editar a transcrição (H18): o zod barra a forma e o
+// tamanho; quem confere a posição do trecho, a voz e o texto vazio, e recusa
+// com o código traduzível, é o serviço (server/editar-transcricao.ts). A
+// posição conta as falas da transcrição, como a lista da tela.
+const posicaoDoTrecho = z.number().int().min(0).max(1_000_000);
+const operacaoDaEdicao = z.discriminatedUnion("tipo", [
+  z.object({ tipo: z.literal("texto"), indice: posicaoDoTrecho, texto: z.string().max(TEXTO_DO_TRECHO_MAX) }),
+  z.object({ tipo: z.literal("voz"), indice: posicaoDoTrecho, falante: z.string().regex(FORMATO_DO_FALANTE) }),
+  z.object({
+    tipo: z.literal("substituir"),
+    // Sem aparar: "R$ " e " ," são o que a dona quer achar; só espaço sozinho não.
+    localizar: z.string().min(1).max(LOCALIZAR_MAX).refine(valor => valor.trim().length > 0),
+    substituirPor: z.string().max(SUBSTITUIR_POR_MAX),
+    diferenciarMaiusculas: z.boolean().optional(),
+  }),
+  z.object({ tipo: z.literal("textoCorrido"), texto: z.string().max(TEXTO_CORRIDO_MAX) }),
+  z.object({ tipo: z.literal("restaurar"), indice: posicaoDoTrecho }),
+  z.object({ tipo: z.literal("restaurarTudo") }),
+]);
 
 // Os e-mails que a tela manda ao resumo por e-mail (H22): o zod só barra o
 // tamanho; quem conta, valida e recusa com a frase traduzível é o serviço
@@ -197,6 +221,12 @@ export const tetoDaBusca = criarTeto(BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENS
 // novo o que veio do envio único): teto próprio por dona, de 3 junções a cada
 // 10 minutos. Só conta a junção que entrou; a recusa devolve a vaga.
 export const tetoDaJuncao = criarTeto(JUNCOES_POR_JANELA, JANELA_DA_JUNCAO_MS, RECUSAS_DA_JUNCAO.demais);
+
+// Editar a transcrição (H18) regrava as falas da reunião e uma linha de
+// auditoria a cada mudança: teto próprio por dona, de 200 edições a cada 10
+// minutos, em memória como os outros. Só conta a edição aceita; a recusa e o
+// pedido que não mudou nada devolvem a vaga.
+export const tetoDaEdicao = criarTeto(EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, RECUSAS_DA_EDICAO.demais);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -988,6 +1018,40 @@ export const meetingsRouter = router({
       const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome);
       if (!nomes) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
       return { nomes };
+    }),
+  // H18: a dona edita a transcrição de uma reunião pronta dela (o texto ou a
+  // voz de um trecho, localizar e substituir, voltar ao original), com a
+  // transcrição e a revisão que a tela leu. Recusas como código que a tela
+  // traduz (shared/editar-transcricao.ts): NOT_FOUND (outra conta, ou não
+  // existe), CONFLICT (não está pronta, ou a transcrição mudou),
+  // PRECONDITION_FAILED (documento), BAD_REQUEST (trecho inválido, ou que
+  // ficaria vazio) e TOO_MANY_REQUESTS (o teto). A auditoria vai na transação
+  // da mudança (server/editar-transcricao.ts).
+  editarTranscricao: protectedProcedure
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      // A transcrição que a tela leu: o servidor compara com a de agora.
+      transcricaoId: z.string().min(1).max(64),
+      revisao: z.number().int().min(0),
+      operacao: operacaoDaEdicao,
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaEdicao.reservar(ctx.user.openId);
+      try {
+        const feita = await editarTranscricao(ctx.user.openId, input.meetingId, {
+          transcricaoId: input.transcricaoId, revisao: input.revisao, operacao: input.operacao,
+        }, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+        if (!feita.mudou) soltarVaga();
+        return feita;
+      } catch (erro) {
+        soltarVaga();
+        if (erro instanceof RecusaDaEdicao) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+        throw erro;
+      }
     }),
   // H7c: os detalhes da reunião (o título, as etiquetas, o "Onde foi", o
   // contato e o contexto). Campo ausente não muda; nulo (ou lista vazia) tira.

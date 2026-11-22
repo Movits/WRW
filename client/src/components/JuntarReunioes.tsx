@@ -13,7 +13,7 @@ import { ordemCronologica, RECUSAS_DA_JUNCAO, type CodigoDaRecusaDaJuncao } from
  * tudo de novo (server/juntar-reunioes.ts); a recusa sai pelo código, no
  * idioma da tela.
  */
-type ReuniaoParaJuntar = { id: string; title: string; createdAt: number; audioPipeline?: string | null };
+type ReuniaoParaJuntar = { id: string; title: string; createdAt: number; audioPipeline?: string | null; transcricaoEditada?: boolean };
 
 /**
  * A junção transcreve de novo quando alguma escolhida foi gravada num arquivo
@@ -22,6 +22,15 @@ type ReuniaoParaJuntar = { id: string; title: string; createdAt: number; audioPi
  */
 export function juncaoTranscreveDeNovo(reunioes: readonly { audioPipeline?: string | null }[]): boolean {
   return reunioes.some(reuniao => reuniao.audioPipeline !== "slices");
+}
+
+/**
+ * A junção monta a transcrição de novo a partir do que a IA transcreveu de
+ * cada parte (server/juntar-reunioes.ts): as correções que a dona fez à mão na
+ * transcrição de uma das escolhidas (H18) não passam para a reunião juntada.
+ */
+export function juncaoPerdeEdicoes(reunioes: readonly { transcricaoEditada?: boolean }[]): boolean {
+  return reunioes.some(reuniao => reuniao.transcricaoEditada === true);
 }
 
 /**
@@ -102,6 +111,7 @@ export function JuntarReunioes({ reunioes, aoFechar, aoJuntar }: {
           <li>{t("meetings.join.warningLink")}</li>
           <li>{t("meetings.join.warningAudio")}</li>
           {juncaoTranscreveDeNovo(ordem) && <li>{t("meetings.join.warningOld")}</li>}
+          {juncaoPerdeEdicoes(ordem) && <li>{t("meetings.join.warningEdits")}</li>}
         </ul>
         <div className="mt-6 flex gap-3">
           <button type="button" onClick={aoFechar} disabled={juntar.isPending} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/5 disabled:opacity-50">{t("meetings.join.cancel")}</button>

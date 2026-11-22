@@ -1265,6 +1265,27 @@ export const meetingTranscripts = mysqlTable("meeting_transcripts", {
   segments: jsonCompat("segments"),
   language: varchar("language", { length: 12 }),
   durationSeconds: int("duration_seconds"),
+  // A edição da transcrição pela dona (H18 da auditoria de 16/11; HN-23 e
+  // HN-27 do app de referência da cliente): `transcript` e `segments` acima
+  // guardam a versão que a dona vê, editada ou não, e todo leitor (o resumo
+  // refeito, o Pergunte, a busca, a Memória, a exportação, o link aberto) lê
+  // essa versão. O texto e as falas como a IA os escreveu ficam aqui, copiados
+  // na primeira edição: a conferência do que a IA tirou da transcrição
+  // original (as pendências da extração, server/network-extracao.ts) e o
+  // "Voltar ao original" leem daqui. Nulos: a transcrição está como a IA a
+  // escreveu (nunca editada, ou toda devolvida ao original). Só a dona os lê,
+  // e o link aberto nunca os seleciona (server/editar-transcricao.ts).
+  originalTranscript: mediumtext("original_transcript"),
+  originalSegments: jsonCompat("original_segments"),
+  // Quando a dona mudou a transcrição por último (editar, trocar a voz,
+  // substituir ou voltar ao original). O resumo e o mapa mental gravados antes
+  // disso são de outra versão: a tela oferece "Refazer o resumo". Nulo: nunca
+  // mudou.
+  editedAt: bigint("edited_at", { mode: "number" }),
+  // Sobe a cada mudança da dona. A tela manda a revisão que viu (a edição de
+  // outra aba é recusada, em vez de desfeita em silêncio), e a fila do resumo
+  // e a tradução descartam o que a IA escreveu sobre uma revisão anterior.
+  revision: int("revision").default(0).notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

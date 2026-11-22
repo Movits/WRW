@@ -1,8 +1,9 @@
 import { NOME_DO_FALANTE_MAX } from "@shared/const";
 import { textoTemFala } from "@shared/fala-na-transcricao";
-import { useId, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Headphones, Play, Search } from "lucide-react";
+import { Check, Headphones, Pencil, Play, RotateCcw, Search } from "lucide-react";
+import { FormularioDoTrecho } from "@/components/FormularioDoTrecho";
 
 /** Onde o navegador de quem lê guarda se a transcrição mostra as vozes e os horários (D2). */
 export const CHAVE_DAS_VOZES_NA_TRANSCRICAO = "wrw:transcricao-com-vozes";
@@ -88,8 +89,13 @@ function comDestaque(texto: string, termo: string) {
  * D2 (HN-26 do HiNoter): quem lê mostra ou esconde as vozes e os horários
  * (guardado no navegador), e, com o player, escolhe ouvir só uma voz: o player
  * toca só as falas dela, e a lista mostra só essas falas, até voltar a todas.
+ *
+ * H18 (HN-23 e HN-27 do HiNoter): na tela da dona, o trecho que ela mudou leva
+ * a marca "editado"; com a edição ligada, cada trecho ganha "Editar" (o texto
+ * e a voz), o original da IA e "Voltar ao original". A posição de um trecho é
+ * a dele em `segmentos`, a mesma que o servidor conta.
  */
-export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoInicial = "", nomes = {}, aoNomear, nomeNoLink, soAVoz = null, aoOuvirSoAVoz }: {
+export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoInicial = "", nomes = {}, aoNomear, nomeNoLink, soAVoz = null, aoOuvirSoAVoz, edicao }: {
   segmentos: SegmentoDaTela[];
   aoIrPara?: (segundo: number) => void;
   /**
@@ -114,6 +120,17 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
   soAVoz?: string | null;
   /** D2: ouvir só uma voz (nulo volta a todas). Sem player, o botão não aparece. */
   aoOuvirSoAVoz?: (falante: string | null) => void;
+  /**
+   * H18, só na tela da dona: o que a IA escreveu em cada trecho que ela mudou,
+   * pela posição em `segmentos`; com `editando`, os botões de editar e de
+   * voltar ao original. O link aberto não recebe nada disto.
+   */
+  edicao?: {
+    originais: ReadonlyMap<number, { texto: string; falante: string }>;
+    editando: boolean;
+    aoSalvarTrecho: (indice: number, mudancas: { texto?: string; falante?: string }) => Promise<boolean>;
+    aoRestaurar: (indice: number) => Promise<unknown>;
+  };
 }) {
   const { t } = useTranslation();
   const idDaDicaDoLink = useId();
@@ -125,10 +142,23 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
   // D2: mostrar ou esconder as vozes e os horários, como quem lê deixou da última vez.
   const [comVozes, setComVozes] = useState(() => mostraGuardado(CHAVE_DAS_VOZES_NA_TRANSCRICAO));
   const [comHorarios, setComHorarios] = useState(() => mostraGuardado(CHAVE_DOS_HORARIOS_NA_TRANSCRICAO));
-  const visiveis = useMemo(() => segmentos.filter(s => {
+  // Cada trecho com a posição dele em `segmentos` (a que a edição manda ao servidor).
+  const visiveis = useMemo(() => segmentos.map((s, indice) => ({ s, indice })).filter(({ s }) => {
     if (soAVoz && (s.lacuna || s.falante !== soAVoz)) return false;
     return !busca || (!s.lacuna && s.texto.toLocaleLowerCase().includes(busca.toLocaleLowerCase()));
   }), [segmentos, busca, soAVoz]);
+  // H18: as vozes que a lista do trecho oferece (todas as da transcrição), o
+  // trecho aberto para editar e o foco que volta ao "Editar" dele ao fechar.
+  const vozesDaTranscricao = useMemo(() => Array.from(new Set(segmentos.filter(s => !s.lacuna && s.falante).map(s => s.falante))), [segmentos]);
+  const [trechoAberto, setTrechoAberto] = useState<number | null>(null);
+  const focarNoTrecho = useRef<number | null>(null);
+  const idDosTrechos = useId();
+  useEffect(() => { if (!edicao?.editando) setTrechoAberto(null); }, [edicao?.editando]);
+  useEffect(() => {
+    if (trechoAberto !== null || focarNoTrecho.current === null) return;
+    document.getElementById(`${idDosTrechos}-${focarNoTrecho.current}`)?.focus();
+    focarNoTrecho.current = null;
+  }, [trechoAberto, idDosTrechos]);
   const vozes = useMemo(() => tempoDeFala(segmentos), [segmentos]);
   const rotulo = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: numeroDoFalante(falante) });
   // A voz cujo nome está sendo editado, e o texto do campo.
@@ -218,12 +248,12 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
       </div>
       {busca && !visiveis.length && <p className="text-sm text-white/45">{t("meetings.searchNoResults")}</p>}
       <ol className="space-y-3">
-        {visiveis.map((s, i) => s.lacuna ? (
-          <li key={`l${i}`} className="rounded-lg border border-dashed border-white/15 px-3 py-2 text-sm italic text-white/45">
+        {visiveis.map(({ s, indice }) => s.lacuna ? (
+          <li key={`l${indice}`} className="rounded-lg border border-dashed border-white/15 px-3 py-2 text-sm italic text-white/45">
             {comHorarios && <>{mmss(s.inicio)}–{mmss(s.fim)} · </>}{t("meetings.gapLabel")}
           </li>
         ) : (
-          <li key={`${s.inicio}-${i}`} className="flex gap-3">
+          <li key={`${s.inicio}-${indice}`} className="flex gap-3">
             {/* D2: com os horários escondidos, o ▶ de cada fala continua, só com o ícone (o tempo vai no
                 nome e na dica): é ele que leva o player, ou o vídeo do YouTube, até o trecho. Sem player
                 nem vídeo, não há para onde ir, e nada aparece. */}
@@ -261,14 +291,67 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
                 {mmss(s.inicio)}
               </button>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               {/* A marca sem fala ([música]) não tem voz: sem o rótulo, como no tempo de fala. */}
               {comVozes && textoTemFala(s.texto) && <p className="text-xs font-semibold text-white/55">{rotulo(s.falante)}</p>}
               <p dir="auto" className="leading-7 text-white/80">{comDestaque(s.texto, busca)}</p>
+              {edicao && <TrechoEditavel indice={indice} segmento={s} original={edicao.originais.get(indice)} editando={edicao.editando}
+                aberto={trechoAberto === indice} idDoEditar={`${idDosTrechos}-${indice}`} vozes={vozesDaTranscricao} rotulo={rotulo}
+                aoAbrir={() => setTrechoAberto(indice)} aoFechar={() => { focarNoTrecho.current = indice; setTrechoAberto(null); }}
+                aoSalvar={mudancas => edicao.aoSalvarTrecho(indice, mudancas)} aoRestaurar={() => edicao.aoRestaurar(indice)}/>}
             </div>
           </li>
         ))}
       </ol>
     </div>
   );
+}
+
+/**
+ * O que um trecho mostra na edição da dona (H18): a marca "editado" quando ela
+ * o mudou e, com a edição ligada, "Editar", o original da IA (o texto e a
+ * voz) e "Voltar ao original", ou o formulário aberto.
+ */
+function TrechoEditavel({ indice, segmento, original, editando, aberto, idDoEditar, vozes, rotulo, aoAbrir, aoFechar, aoSalvar, aoRestaurar }: {
+  indice: number;
+  segmento: SegmentoDaTela;
+  original: { texto: string; falante: string } | undefined;
+  editando: boolean;
+  aberto: boolean;
+  idDoEditar: string;
+  vozes: readonly string[];
+  rotulo: (falante: string) => string;
+  aoAbrir: () => void;
+  aoFechar: () => void;
+  aoSalvar: (mudancas: { texto?: string; falante?: string }) => Promise<boolean>;
+  aoRestaurar: () => Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const [voltando, setVoltando] = useState(false);
+  if (!editando) {
+    return original ? <p className="mt-1 text-[11px] text-white/45">{t("meetings.editTranscript.editedBadge")}</p> : null;
+  }
+  if (aberto) {
+    return <FormularioDoTrecho key={indice} texto={segmento.texto} falante={segmento.falante} vozes={vozes} rotulo={rotulo} aoSalvar={aoSalvar} aoFechar={aoFechar}/>;
+  }
+  return <div className="mt-1 space-y-1">
+    <div className="flex flex-wrap items-center gap-2">
+      <button id={idDoEditar} type="button" onClick={aoAbrir} aria-label={t("meetings.editTranscript.editSegmentAt", { tempo: mmss(segmento.inicio) })}
+        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white/55 hover:bg-white/5 hover:text-white">
+        <Pencil size={13} aria-hidden/> {t("meetings.editTranscript.editSegment")}
+      </button>
+      {original && <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">{t("meetings.editTranscript.editedBadge")}</span>}
+      {original && <button type="button" disabled={voltando} onClick={() => { setVoltando(true); void aoRestaurar().finally(() => setVoltando(false)); }}
+        aria-label={t("meetings.editTranscript.restoreSegmentAt", { tempo: mmss(segmento.inicio) })}
+        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white/55 hover:bg-white/5 hover:text-white disabled:opacity-50">
+        <RotateCcw size={13} aria-hidden/> {t("meetings.editTranscript.restoreSegment")}
+      </button>}
+    </div>
+    {original && <details>
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-white/35">{t("meetings.editTranscript.originalLabel")}</summary>
+      <p dir="auto" className="mt-1 border-s-2 border-amber-300/40 ps-3 text-xs italic text-white/55">
+        {original.falante !== segmento.falante && <span className="font-semibold not-italic">{rotulo(original.falante)}: </span>}{original.texto}
+      </p>
+    </details>}
+  </div>;
 }

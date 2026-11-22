@@ -11,6 +11,7 @@ import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
+import { trechosNaTranscricaoDeAgora } from "./editar-transcricao";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -46,6 +47,9 @@ const COLUNAS_DO_RESUMO = {
   lastError: meetingSummaries.lastError,
   template: meetingSummaries.template,
   version: meetingSummaries.version,
+  // Quando a fila gravou a versão de agora: a transcrição editada depois disso
+  // (H18) faz a tela oferecer "Refazer o resumo".
+  generatedAt: meetingSummaries.generatedAt,
   // O título que a IA sugere (só para a dona; o link não o recebe).
   suggestedTitle: meetingSummaries.suggestedTitle,
   suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
@@ -129,7 +133,24 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
     estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
     tituloSugerido: tituloSugeridoNaTela(estado, linha, reuniao.title),
+    transcricaoEditadaDepois: await transcricaoEditadaDepoisDoResumo(db, ownerId, meetingId, linha),
   };
+}
+
+/**
+ * A dona mudou a transcrição (H18) depois que a fila gravou a versão de agora
+ * do resumo: os itens e o mapa mental saíram da versão anterior, e a tela
+ * oferece "Refazer o resumo". Só com uma versão gravada e fora da fila: o
+ * resumo na fila (o primeiro, ou o refazer pedido) já vai ler a versão nova. A edição trava a reunião antes de
+ * pegar a hora, como a gravação do resumo: a que chega depois do resumo gravado
+ * tem sempre a hora maior (server/editar-transcricao.ts).
+ */
+async function transcricaoEditadaDepoisDoResumo(db: Executor, ownerId: string, meetingId: string, linha: { status: string; version: number; generatedAt: number | null } | undefined): Promise<boolean> {
+  // Na fila (o refazer pedido), a versão nova já vai ler a transcrição editada.
+  if (!linha || linha.status === "pending" || !linha.version || linha.generatedAt === null) return false;
+  const [transcricao] = await db.select({ editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
+    .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  return transcricao?.editadaEm != null && Number(transcricao.editadaEm) > Number(linha.generatedAt);
 }
 
 /**
@@ -547,6 +568,12 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  * `escritoPelaDona`, um sim ou não, sem a origem nem a hora da edição: quem
  * tem o link sabe que o texto é de quem gravou e não da IA, e que o trecho do
  * item editado é o da versão da IA.
+ *
+ * Com a transcrição editada pela dona (H18), o link mostra a versão editada e
+ * não pode expor a da IA: o trecho de cada item saiu da transcrição de quando
+ * o resumo foi escrito, e o que não aparece mais na transcrição de agora (a
+ * dona tirou ou corrigiu aquela fala) vai vazio. O item continua, com o tempo,
+ * e a marca `trechoForaDaTranscricao` diz à página que o trecho existia.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
@@ -570,7 +597,8 @@ export async function resumoGuardadoPeloLink(token: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  const itens = lidos.map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
+  const itens = (await trechosNaTranscricaoDeAgora(reuniao.ownerId, reuniao.id, lidos))
+    .map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
   return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 

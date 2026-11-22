@@ -526,6 +526,50 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
   de `client/src/index.css`. Sem migração.
 
+## 22/11/2026 — a dona edita a transcrição, e o que a IA escreveu fica guardado (H18)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-23 e HN-27 do
+  app de referência da cliente, que entram pela regra da paridade). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** no detalhe da reunião pronta, "Editar a transcrição": o texto e a voz de um
+  trecho (com "Nova voz", o primeiro rótulo livre), localizar e substituir em todos os
+  trechos (o texto literal, com a contagem antes de trocar e a opção de diferenciar
+  maiúsculas) e voltar um trecho, ou tudo, ao que a IA escreveu. A transcrição sem falas
+  (a do envio único) se edita como um texto só; a do documento (PDF ou fotos), não.
+- **Como fica guardado:** `transcript` e `segments` passam a guardar a versão que a dona
+  vê, editada ou não, e todo leitor lê essa: o resumo refeito, o mapa, o Pergunte, a
+  busca, a Memória, a exportação, a tradução, o "ouvir só esta voz" e o link aberto. O que
+  a IA escreveu é copiado, na primeira edição, para `original_transcript` e
+  `original_segments`, e sai quando tudo volta ao original. `edited_at` e `revision` dizem
+  quando e quantas vezes a transcrição mudou: a tela manda a revisão que leu, e a edição
+  feita em outra aba é recusada, em vez de desfeita em silêncio.
+- **Regras:** só a dona, só a reunião pronta. Cada mudança é uma transação que trava a
+  reunião antes da transcrição (a ordem da fila do resumo), apaga as traduções da
+  transcrição e grava `MEETING_TRANSCRIPT_EDITED` com o tipo, as contagens e a revisão,
+  nunca a fala nem o termo procurado. Teto de 200 edições a cada 10 minutos por dona.
+- **O resumo:** não se refaz sozinho (cada vez custa ~US$ 0,05 a 0,10 por hora de
+  reunião). A tela avisa que o resumo, o mapa e o que o link mostra deles são da versão
+  anterior e oferece "Refazer o resumo", que refaz também o mapa. A fila descarta o resumo
+  e o mapa escritos sobre uma revisão anterior. As pendências de cargo e empresa da
+  extração conferem nas duas versões: o que a IA ouviu e o que a dona corrigiu.
+- **O link aberto:** mostra a versão editada, com a frase "Transcrição revisada por quem
+  gravou a reunião", e nunca o texto da IA. O trecho de um item do resumo que não está mais
+  na transcrição editada vai vazio, com um aviso no item, também na tradução do resumo.
+- **Vetáveis:**
+  1. o resumo não se refaz sozinho depois da edição;
+  2. o link diz que a transcrição foi revisada e, no item, que o trecho foi corrigido;
+  3. o texto dos itens e o mapa seguem os de antes, também no link, até a dona refazer o
+     resumo (a tela avisa);
+  4. a junção (H17) remonta a transcrição pelo que a IA transcreveu de cada parte: as
+     correções não passam para a reunião juntada, e a tela avisa antes de juntar;
+  5. o teto de 200 edições a cada 10 minutos;
+  6. o trecho não fica vazio: para tirar uma fala inteira, a dona escreve, por exemplo,
+     "[removido]".
+- **Onde:** `server/editar-transcricao.ts`, `shared/editar-transcricao.ts` e
+  `meetings.editarTranscricao` em `server/routers/meetings.ts`; na tela,
+  `EditarTranscricao.tsx`, `FormularioDoTrecho.tsx` e `TranscricaoPorFalante.tsx`.
+  Migração só aditiva: quatro colunas novas em `meeting_transcripts`.
+
 ---
 
 ## Lições sem data registrada

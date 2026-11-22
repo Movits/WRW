@@ -10,6 +10,7 @@ import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, m
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { transcricaoEstaEditada } from "./editar-transcricao";
 import { gravacaoParaOuvir } from "./meeting-service";
 import { comCookiesDoPedido, cookiesDoPedido, entradaValida, gerarSenhaDoLink, hashDaSenhaDoLink } from "./senha-do-link-aberto";
 import { storageGetSignedUrl } from "./storage";
@@ -486,7 +487,12 @@ export async function verReuniaoPeloLink(token: string) {
   // As falas por falante (D1) vão junto: são o mesmo texto da transcrição,
   // separado por voz e tempo, com o rótulo F1, F2... A página troca o rótulo
   // pelo nome do `vozes`, ou por "Falante n".
-  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments })
+  // A versão que a dona vê, editada ou não (H18). A da IA (original_transcript
+  // e original_segments) nunca é selecionada: do link sai só se a dona editou.
+  const [transcricao] = await db.select({
+    texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments,
+    editada: transcricaoEstaEditada,
+  })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
@@ -504,7 +510,10 @@ export async function verReuniaoPeloLink(token: string) {
     documento: reuniao.documento,
     // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
     // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
-    transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,
+    // `editada`: a dona corrigiu a transcrição (H18), e a página diz isso a quem lê.
+    transcricao: transcricao
+      ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos), editada: !!Number(transcricao.editada) }
+      : null,
     gravacao: recording
       ? {
           url: enderecoDoAudioDoLink(token), mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt,

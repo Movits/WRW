@@ -63,7 +63,7 @@ export function EscolhaDoModelo({ valor, aoMudar, desligado = false, children }:
 // A recusa de refazer o resumo que ainda está na fila em outro modelo
 // (CONFLICT) diz o que está acontecendo: a IA já está escrevendo. As outras
 // (o teto de pedidos, o banco fora do ar) seguem a regra das chamadas à IA.
-function mensagemDoRefazer(t: TranslateFn, erro: unknown) {
+export function mensagemDoRefazer(t: TranslateFn, erro: unknown) {
   if ((erro as { data?: { code?: string } } | null)?.data?.code === "CONFLICT") return t("meetings.summary.generating");
   return mensagemDoErroDaIA(t, erro, t("meetings.summary.requestError"), false);
 }

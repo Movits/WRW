@@ -115,6 +115,15 @@ describe("JuntarReunioes", () => {
     expect(avisoDeArquivoUnico()).toBeInTheDocument();
   });
 
+  it("o aviso de que as correções à mão não passam só aparece quando alguma escolhida tem a transcrição editada (H18)", () => {
+    const avisoDasCorrecoes = () => within(screen.getByRole("dialog")).queryByText(/correções feitas à mão na transcrição/);
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "slices", transcricaoEditada: false }]);
+    expect(avisoDasCorrecoes()).not.toBeInTheDocument();
+    cleanup();
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "slices", transcricaoEditada: true }]);
+    expect(avisoDasCorrecoes()).toBeInTheDocument();
+  });
+
   it("Cancelar fecha sem pedir nada", () => {
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));

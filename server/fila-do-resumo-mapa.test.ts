@@ -22,8 +22,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const banco = vi.hoisted(() => ({
   // Os trabalhos na fila: 'pending' é o resumo; 'ready', o mapa de um resumo pronto.
   trabalhos: [] as Array<{ id: string; meetingId: string; ownerId: string; status: string; updatedAt?: number }>,
-  transcricao: undefined as undefined | { id: string; texto: string; segmentos: unknown; idioma: string },
+  transcricao: undefined as undefined | { id: string; revisao: number; texto: string; segmentos: unknown; idioma: string },
   transcricaoAtual: "t-1",
+  // A revisão e a hora da última edição da transcrição que a gravação relê (H18).
+  revisaoAtual: 0,
+  editadaEm: null as number | null,
   tentativas: 1,
   reuniao: { status: "ready" },
   reservaNoBanco: true,
@@ -57,7 +60,7 @@ vi.mock("./db", async () => {
     }
     if (tabela === schema.meetingTranscripts) {
       if (chaves.includes("texto")) return banco.transcricao ? [banco.transcricao] : [];
-      return [{ id: banco.transcricaoAtual }];
+      return [{ id: banco.transcricaoAtual, revisao: banco.revisaoAtual, editadaEm: banco.editadaEm }];
     }
     // O aviso de reunião pronta no sino (H15), na transação da gravação do resumo: o título e a conta.
     if (tabela === schema.meetings) return chaves.includes("titulo") ? [{ titulo: "Reunião do mapa", contaId: 7 }] : [banco.reuniao];
@@ -101,7 +104,7 @@ const ultima = () => banco.updates.at(-1)!.set;
 
 beforeEach(() => {
   Object.assign(banco, {
-    trabalhos: [], transcricao: { id: "t-1", texto: TEXTO, segmentos: [], idioma: "pt-BR" }, transcricaoAtual: "t-1",
+    trabalhos: [], transcricao: { id: "t-1", revisao: 0, texto: TEXTO, segmentos: [], idioma: "pt-BR" }, transcricaoAtual: "t-1", revisaoAtual: 0, editadaEm: null,
     tentativas: 1, reuniao: { status: "ready" }, reservaNoBanco: true, esgotados: { resumo: [], mapa: [] }, updates: [],
   });
   ia.gerarResumoDaReuniao.mockReset().mockResolvedValue(RESUMO);
@@ -212,6 +215,25 @@ describe("o mapa mental na fila do resumo", () => {
     ia.gerarMapaMental.mockImplementation(async () => { banco.transcricaoAtual = "t-2"; return MAPA; });
     await fila.rodarUmaVez();
     expect(banco.updates.some(u => "mindMap" in u.set)).toBe(false);
+    expect(ultima()).toMatchObject({ lockToken: null, lockedUntil: null });
+    expect(sqlDo(ultima().attempts).sql).toContain("greatest");
+  });
+
+  it("a dona editou a transcrição durante o mapa (H18): nada é gravado, e a reserva volta sem gastar a tentativa", async () => {
+    banco.trabalhos = [trabalho("ready")];
+    ia.gerarMapaMental.mockImplementation(async () => { banco.revisaoAtual = 1; return MAPA; });
+    await fila.rodarUmaVez();
+    expect(banco.updates.some(u => "mindMap" in u.set)).toBe(false);
+    expect(ultima()).toMatchObject({ lockToken: null, lockedUntil: null });
+    expect(sqlDo(ultima().attempts).sql).toContain("greatest");
+  });
+
+  it("a dona editou a transcrição durante o resumo (H18): o resumo não é gravado, e a reserva volta à fila para a versão nova", async () => {
+    banco.trabalhos = [trabalho("pending")];
+    ia.gerarResumoDaReuniao.mockImplementation(async () => { banco.revisaoAtual = 2; return RESUMO; });
+    await fila.rodarUmaVez();
+    expect(banco.updates.some(u => u.set.status === "ready")).toBe(false);
+    expect(ia.gerarMapaMental).not.toHaveBeenCalled();
     expect(ultima()).toMatchObject({ lockToken: null, lockedUntil: null });
     expect(sqlDo(ultima().attempts).sql).toContain("greatest");
   });

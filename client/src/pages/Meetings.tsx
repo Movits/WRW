@@ -27,6 +27,7 @@ import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { AvisoDeResumoDeOutraVersao, BarraDaEdicao, EDICAO_VAZIA, EditorDoTextoCorrido, useEdicaoDaTranscricao } from "@/components/EditarTranscricao";
 import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
@@ -1132,6 +1133,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   // D2: a voz que o player toca sozinha (nula: todas). A transcrição a escolhe
   // e mostra só as falas dela; a barra do player diz qual é, em qualquer aba.
   const [soAVoz, setSoAVoz] = useState<string | null>(null);
+  // H18: a dona edita a transcrição. A barra liga a edição; cada mudança vai
+  // ao servidor com a revisão que o detalhe leu, uma de cada vez.
+  const [editandoTranscricao, setEditandoTranscricao] = useState(false);
+  const edicaoDaTranscricao = useEdicaoDaTranscricao(meetingId, data?.transcript);
   // O idioma RESOLVIDO: o pedido pode ser regional ("en-US") e cair fora da
   // lista, mandando a tradução para pt-BR com a tela em inglês.
   const idiomaAtual = i18n.resolvedLanguage ?? i18n.language;
@@ -1345,6 +1350,24 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
+  // H18: a dona edita a transcrição da reunião pronta, vendo o original (a
+  // tradução é só para ler). O documento não se edita. Os trechos que ela já
+  // mudou levam a marca "editado", com o original da IA, pela posição.
+  const podeEditarATranscricao = meeting.status === "ready" && !ehDocumento && !!transcript && translationLanguage === idiomaOriginal;
+  const editandoATranscricao = editandoTranscricao && podeEditarATranscricao;
+  const edicaoLida = transcript?.edicao ?? EDICAO_VAZIA;
+  const originaisDaEdicao = new Map(edicaoLida.originais.map(original => [original.indice, { texto: original.texto, falante: original.falante }]));
+  // Onde a substituição procura: os textos dos trechos, ou o texto corrido.
+  const textosDaEdicao = falas.length ? falas.filter(fala => !fala.lacuna).map(fala => fala.texto) : [transcript?.transcript ?? ""];
+  // O texto e a voz do mesmo trecho são dois pedidos, em sequência.
+  const salvarTrecho = async (indice: number, mudancas: { texto?: string; falante?: string }) => {
+    if (mudancas.texto !== undefined && !(await edicaoDaTranscricao.editar({ tipo: "texto", indice, texto: mudancas.texto }))) return false;
+    if (mudancas.falante !== undefined && !(await edicaoDaTranscricao.editar({ tipo: "voz", indice, falante: mudancas.falante }))) return false;
+    return true;
+  };
+  // O resumo pronto saiu de uma versão da transcrição anterior à edição da
+  // dona: a tela oferece refazê-lo, no resumo e na transcrição.
+  const resumoDeOutraVersao = meeting.status === "ready" && !!resumoGuardado.data?.transcricaoEditadaDepois;
   // O emoji do resumo vai antes do título, como no app de referência da cliente.
   const emojiDoResumo = meeting.status === "ready" ? resumoGuardado.data?.emoji ?? null : null;
   // Quem participou primeiro; quem só foi citada, à parte. Sugestão sem a marca
@@ -1458,6 +1481,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
+      {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken} documento={ehDocumento}/>
@@ -1511,6 +1535,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
           </label>
         </div>
         {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)} focoDepois={seletorDaTraducao}/>}
+        {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
+        {podeEditarATranscricao && <BarraDaEdicao edicao={edicaoLida} textos={textosDaEdicao} editando={editandoATranscricao}
+          aoMudarEditando={setEditandoTranscricao} comLinkAberto={!!meeting.shareToken} editar={edicaoDaTranscricao.editar} salvando={edicaoDaTranscricao.salvando}/>}
         {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
@@ -1524,6 +1551,10 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
               <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
                 soAVoz={soAVoz} aoOuvirSoAVoz={partesParaOuvir.length ? voz => player.current?.ouvirSoAVoz(voz) : undefined}
+                edicao={podeEditarATranscricao ? {
+                  originais: originaisDaEdicao, editando: editandoATranscricao, aoSalvarTrecho: salvarTrecho,
+                  aoRestaurar: indice => edicaoDaTranscricao.editar({ tipo: "restaurar", indice }),
+                } : undefined}
                 nomes={nomesDosFalantes(meeting.speakerNames)} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
@@ -1534,6 +1565,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
                   }
                 }}/>
             </>
+            : editandoATranscricao
+            // H18: a transcrição sem falas (o envio único) se edita como um texto só.
+            ? <EditorDoTextoCorrido texto={transcript.transcript} editar={edicaoDaTranscricao.editar} salvando={edicaoDaTranscricao.salvando}/>
             : segmentos
             ? <p dir="auto" className="whitespace-pre-wrap leading-7 text-white/75">{segmentos.map((s, i) => s.tipo
                 ? <mark key={i} title={t(TIPOS_DE_ENTIDADE[s.tipo].chave)} className={`rounded-md px-1 py-0.5 font-medium ${TIPOS_DE_ENTIDADE[s.tipo].classes}`}>{s.texto}</mark>

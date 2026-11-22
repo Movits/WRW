@@ -380,6 +380,23 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   Por isso a montagem passa `zerarNomes: false` a `gravarResultadoDaReuniao`, e quem
   transcreve de novo zera os nomes antes (o reprocesso das partes, na tomada).
 
+## Editar a transcrição (H18)
+
+`server/editar-transcricao.ts`: a dona corrige o texto ou a voz de um trecho, localiza e
+substitui e volta um trecho (ou tudo) ao original, só na reunião pronta dela e nunca no
+documento. `transcript` e `segments` guardam a versão que ela vê, e todo leitor lê essa (o
+resumo refeito, o mapa, o Pergunte, a busca, a Memória, a exportação, a tradução e o link
+aberto). O que a IA escreveu fica em `original_transcript` e `original_segments`: só a dona
+os lê (o link nunca os seleciona), e a conferência das pendências da extração
+(`ditosNaReuniao`) também. Cada mudança é uma transação que trava a reunião antes da
+transcrição (a ordem da fila do resumo), confere a revisão que a tela viu, apaga as traduções
+e grava `MEETING_TRANSCRIPT_EDITED`, sem fala. A fila descarta o resumo e o mapa escritos
+sobre uma revisão anterior; o resumo gravado antes da edição faz a tela oferecer "Refazer o
+resumo", que refaz também o mapa; o link manda vazio o trecho de item que não está mais na
+transcrição, no resumo e na tradução dele (`trechosNaTranscricaoDeAgora`: leitura nova de
+item pelo link passa por ele). A junção (H17) remonta a transcrição pelo áudio: as correções
+não passam, e a tela avisa.
+
 ## Testes do servidor
 
 - Lógica nova em `server/` ganha ou atualiza um `*.test.ts` ao lado (fora os

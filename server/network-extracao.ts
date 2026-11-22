@@ -1415,13 +1415,19 @@ async function ignorarRepetidas(
  * Das linhas de cargo e empresa, só as que a transcrição da reunião diz como
  * estão escritas. Sem transcrição não há como conferir, e nenhuma fica: do
  * lado de não inventar. Posse no WHERE.
+ *
+ * A extração leu a transcrição como a IA a escreveu. Se a dona a editou
+ * (H18), essa versão fica guardada (original_transcript) e vale aqui, junto
+ * com a editada: o cargo que a IA ouviu continua sustentado depois que a dona
+ * corrigiu outra palavra do trecho, e o que só a correção dela diz também é
+ * dito (é a palavra dela). Os dois continuam pendentes, à espera dela.
  */
 async function ditosNaReuniao(db: BancoOuTransacao, ownerId: string, meetingId: string, linhas: PendenciaNova[]): Promise<PendenciaNova[]> {
   if (!linhas.length) return [];
-  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript }).from(meetingTranscripts)
+  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, original: meetingTranscripts.originalTranscript }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
-  const fonte = transcricao?.texto ?? "";
-  return linhas.filter(linha => expressaoEstaNaFonte(linha.valor, fonte));
+  const fontes = [transcricao?.texto ?? "", transcricao?.original ?? ""].filter(Boolean);
+  return linhas.filter(linha => fontes.some(fonte => expressaoEstaNaFonte(linha.valor, fonte)));
 }
 
 /**

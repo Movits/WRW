@@ -209,6 +209,18 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.queryByTestId("pergunte")).not.toBeInTheDocument();
   });
 
+  it("a transcrição que a dona editou (H18) diz isso a quem lê; a da IA, não", () => {
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { ...VISTA.transcricao, editada: true } }));
+    const { unmount } = abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(screen.getByText("Transcrição revisada por quem gravou a reunião.")).toBeInTheDocument();
+    unmount();
+    duble.ver.mockReturnValue(pronta({ ...VISTA, transcricao: { ...VISTA.transcricao, editada: false } }));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(screen.queryByText("Transcrição revisada por quem gravou a reunião.")).not.toBeInTheDocument();
+  });
+
   it("trocar de aba não corta o áudio nem perde a tradução", () => {
     duble.ver.mockReturnValue(pronta());
     abrirNaTranscricao();
