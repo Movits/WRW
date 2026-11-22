@@ -338,8 +338,9 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
   ];
   // A lista leva também o nome do contato e o do contexto (a busca na tela, H7b),
   // e o detalhe, o contato e o contexto com o nome (o painel dos detalhes, H7c),
-  // lidos só da rede da dona.
-  const SO_NA_LISTA = ["contatoNome", "contextoNome"];
+  // lidos só da rede da dona. E o sim ou não de a dona ter editado a
+  // transcrição (H18: a junção avisa que as correções não passam), sem o texto.
+  const SO_NA_LISTA = ["contatoNome", "contextoNome", "transcricaoEditada"];
   const SO_NO_DETALHE = ["contato", "contexto"];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),
