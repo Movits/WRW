@@ -371,3 +371,36 @@ describe("H6b: as sugestões prontas do Pergunte", () => {
     expect(duble.chamadas.perguntar).toEqual([{ meetingId: ID, idioma: "ar", pergunta: "ما القرارات الرئيسية التي اتُّخذت؟" }]);
   });
 });
+
+describe("H6d: a resposta em tabela ou gráfico", () => {
+  const tabela = { tipo: "tabela", titulo: "Prazos", colunas: ["Quem", "O quê"], linhas: [["{F1}", "fecha o contrato"], ["{F2}", "manda a minuta"]] };
+
+  it("a dona vê a tabela que o servidor conferiu, com as vozes trocadas pelos nomes dela", () => {
+    duble.respostas.perguntar = { ...respondida("{F1} fecha o contrato.", semTempo("Eu fecho o contrato até sexta-feira.")), visual: tabela };
+    render(<PergunteAReuniao meetingId={ID} nomes={{ F1: "Ana" }} />);
+    perguntarAgora("Monte uma tabela com quem faz o quê");
+    const figura = screen.getByRole("figure", { name: "Prazos" });
+    expect(within(figura).getByRole("rowheader", { name: "Ana" })).toBeInTheDocument();
+    expect(within(figura).getByRole("rowheader", { name: "Falante 2" })).toBeInTheDocument();
+    // O trecho que sustenta a resposta continua embaixo.
+    expect(screen.getByText("Eu fecho o contrato até sexta-feira.")).toBeInTheDocument();
+  });
+
+  it("pelo link, o gráfico também aparece, com o \"Ver como tabela\"", () => {
+    duble.respostas.perguntarPeloLink = {
+      ...respondida("O contêiner sai dia 12.", semTempo("O contêiner sai do porto de Santos no dia 12 de março.")),
+      visual: { tipo: "barras", titulo: "Contêineres", eixo: "Porto", unidade: "", rotulos: ["Santos"], series: [{ nome: "Contêineres", valores: [12] }] },
+    };
+    render(<PergunteAReuniao token="token-do-link" />);
+    perguntarAgora("Faça um gráfico");
+    expect(screen.getByRole("img", { name: "Santos: 12" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ver como tabela" })).toBeInTheDocument();
+  });
+
+  it("sem visual na resposta, nada de tabela nem gráfico", () => {
+    duble.respostas.perguntar = respondida("O contêiner sai dia 12.", semTempo("O contêiner sai do porto de Santos no dia 12 de março."));
+    render(<PergunteAReuniao meetingId={ID} />);
+    perguntarAgora();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+  });
+});

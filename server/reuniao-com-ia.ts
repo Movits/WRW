@@ -9,6 +9,8 @@ import { entradaDoResumo } from "./resumo-da-reuniao";
 import { reuniaoEmAndamento, transcricaoDasPartesProntas } from "./transcricao-durante-a-gravacao";
 import { limparRotulos, localizarTrecho, normalizarParaComparar, REGRA_DO_TRECHO, TRANSCRICAO_E_DADO, trechoApareceNaTranscricao } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
+import { avisarDoVisual, instrucoesDoVisual, SCHEMA_DO_VISUAL, visualConferido } from "./resposta-visual";
+import type { VisualDaResposta } from "@shared/resposta-visual";
 
 // O teste e quem já importava daqui continuam achando a função.
 export { trechoApareceNaTranscricao };
@@ -29,6 +31,11 @@ export { trechoApareceNaTranscricao };
  *
  * O resumo é o GUARDADO (H4): server/resumo-da-reuniao.ts o escreve, na fila
  * do resumo, com a mesma entrada e as mesmas regras do trecho.
+ *
+ * Quando a pergunta pede, a resposta traz também uma tabela ou os dados de um
+ * gráfico (H6d), num esquema fixo, conferidos em server/resposta-visual.ts. O
+ * Pergunte a várias reuniões (H6c, server/perguntar-a-varias-reunioes.ts) usa
+ * o mesmo pedido, o mesmo tempo e o mesmo corte do texto da IA daqui.
  */
 
 export type IdiomaDaTela = (typeof MEETING_TRANSCRIPT_LANGUAGES)[number];
@@ -93,6 +100,11 @@ export type RespostaDaReuniao =
        * antiga é passageira, e o rótulo não expõe nome nenhum.
        */
       trecho: string;
+      /**
+       * A tabela ou o gráfico (H6d), só quando a pergunta pede e a conferência
+       * passa (server/resposta-visual.ts). Sem visual, o campo nem vem.
+       */
+      visual?: VisualDaResposta;
     }
   | { respondida: false };
 
@@ -124,33 +136,39 @@ async function transcricaoDaReuniaoPronta(ownerId: string, meetingId: string): P
  * cota, JSON inválido, resposta cortada) vira SERVICE_UNAVAILABLE, que a tela
  * mostra traduzido.
  */
-async function pedirJsonDaTela(
+export async function pedirJsonDaTela(
   sistema: string, usuario: string, nome: string, schema: Record<string, unknown>,
   tempo: { timeoutMs: number; orcamentoMs: number },
-): Promise<Record<string, unknown>> {
+): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
   try {
-    // Só o Pergunte usa este pedido: LLM_MODEL_PERGUNTA escolhe o modelo dele,
-    // e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
-    return (await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo, funcao: "pergunta" })).dados;
+    // Só o Pergunte usa este pedido (a uma reunião e a várias, H6c):
+    // LLM_MODEL_PERGUNTA escolhe o modelo dele, e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
+    return await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo, funcao: "pergunta" });
   } catch (erro) {
     if (erro instanceof FalhaDaIA) throw new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", MENSAGEM_IA_INDISPONIVEL);
     throw erro;
   }
 }
 
+/** O tempo da chamada à IA pelo tamanho da entrada: ver TEMPO_DA_REUNIAO_CURTA. */
+export function tempoDaPergunta(caracteres: number): { timeoutMs: number; orcamentoMs: number } {
+  return caracteres > ENTRADA_LONGA_DA_PERGUNTA ? TEMPO_DA_REUNIAO_LONGA : TEMPO_DA_REUNIAO_CURTA;
+}
+
 /**
  * Texto aparado e, se passar do limite, cortado por caractere (nunca no meio de
- * um emoji) e sem um rótulo de voz pela metade no fim ("{F" ou "{F2"); vazio
- * ou ausente vira null.
+ * um emoji) e sem um rótulo de voz pela metade no fim ("{F", "{F2" ou, entre
+ * reuniões, "{R2:F"); vazio ou ausente vira null.
  */
-function texto(valor: unknown, limite: number): string | null {
+export function textoDaIA(valor: unknown, limite: number): string | null {
   if (typeof valor !== "string") return null;
   const aparado = valor.trim();
   if (!aparado) return null;
   const letras = Array.from(aparado);
   if (letras.length <= limite) return aparado;
-  return letras.slice(0, limite).join("").replace(/\{F?\d*$/, "").trimEnd() || null;
+  return letras.slice(0, limite).join("").replace(/\{(R\d*:?)?F?\d*$/, "").trimEnd() || null;
 }
+const texto = textoDaIA;
 
 const SCHEMA_DA_RESPOSTA = {
   type: "object",
@@ -166,8 +184,10 @@ const SCHEMA_DA_RESPOSTA = {
         additionalProperties: false,
       },
     },
+    // H6d: a tabela ou o gráfico, quando a pergunta pede (server/resposta-visual.ts).
+    visual: SCHEMA_DO_VISUAL,
   },
-  required: ["respondida", "resposta", "citacoes"],
+  required: ["respondida", "resposta", "citacoes", "visual"],
   additionalProperties: false,
 };
 
@@ -189,6 +209,8 @@ function instrucoes(rotulada: boolean, emAndamento = false): string {
     "Responda no idioma pedido no fim da mensagem, em no máximo 3 frases.",
     `Se a transcrição responde, devolva respondida = true, a resposta e de 1 a ${CITACOES_NO_MAXIMO} citações que a sustentam. Em cada citação, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala.`,
     "Se a transcrição não responde, devolva respondida = false, com a resposta vazia e nenhuma citação.",
+    // H6d: a tabela ou o gráfico, quando a pergunta pede.
+    ...instrucoesDoVisual(rotulada ? "rotulo" : "sem_vozes"),
   ].join("\n");
 }
 
@@ -226,7 +248,7 @@ const ROTULO_DE_VOZ = /\{(F[1-9]\d?)\}/g;
  * tela. As vozes são as que entradaDoResumo rotulou (sem as falas, nenhuma),
  * e não um filtro refeito aqui: a voz que só tem fala vazia não foi ao prompt.
  */
-function vozesForaDaEntrada(resposta: string, vozes: ReadonlySet<string>): string[] {
+export function vozesForaDaEntrada(resposta: string, vozes: ReadonlySet<string>): string[] {
   return Array.from(resposta.matchAll(ROTULO_DE_VOZ), rotulo => rotulo[1]).filter(voz => !vozes.has(voz));
 }
 
@@ -306,13 +328,13 @@ async function responderPelaTranscricao(
   if (entrada.texto.length > LIMITE_DA_ENTRADA_DA_PERGUNTA) throw new RecusaDaReuniaoComIA("PAYLOAD_TOO_LARGE", MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR);
   const longa = entrada.texto.length > ENTRADA_LONGA_DA_PERGUNTA;
   antesDeChamarAIA?.({ longa });
-  const dados = await pedirJsonDaTela(
+  const { dados } = await pedirJsonDaTela(
     instrucoes(entrada.rotulada, emAndamento),
     // A transcrição primeiro e a pergunta por último: ver instrucoes().
     `Transcrição:\n\n${entrada.texto}\n\nResponda em ${nomeDoIdioma(idioma)}.\nPergunta: ${pergunta.slice(0, TAMANHO_MAXIMO_DA_PERGUNTA)}`,
     "resposta_da_reuniao",
     SCHEMA_DA_RESPOSTA,
-    longa ? TEMPO_DA_REUNIAO_LONGA : TEMPO_DA_REUNIAO_CURTA,
+    tempoDaPergunta(entrada.texto.length),
   );
   if (dados.respondida !== true) return naoRespondida("ia_disse_que_nao");
   const resposta = texto(dados.resposta, 1000);
@@ -329,5 +351,8 @@ async function responderPelaTranscricao(
   }
   const inventadas = vozesForaDaEntrada(resposta, entrada.vozes);
   if (inventadas.length) return naoRespondida("voz_inexistente", `${inventadas.join(", ")} fora das ${entrada.vozes.size} vozes da entrada`);
-  return { respondida: true, resposta, citacoes, trecho: citacoes[0].trecho };
+  // H6d: o visual só acompanha a resposta que passou; a voz que a entrada não tem derruba só ele.
+  const conferido = visualConferido(dados.visual, textoDoVisual => (vozesForaDaEntrada(textoDoVisual, entrada.vozes).length ? null : textoDoVisual));
+  avisarDoVisual("Pergunte", conferido);
+  return { respondida: true, resposta, citacoes, trecho: citacoes[0].trecho, ...(conferido.visual ? { visual: conferido.visual } : {}) };
 }

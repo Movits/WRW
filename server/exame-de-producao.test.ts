@@ -627,7 +627,9 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
     // 75: os 73 de antes, mais o documento da reunião (H12, meeting_documents.owner_id)
     // e o resumo por e-mail (H22, resumo_por_email.owner_id).
-    expect(paresDeUsuariaNoSchema).toHaveLength(75);
+    // 76: o Pergunte a várias reuniões (H6c) somou perguntas_entre_reunioes.owner_id.
+    expect(paresDeUsuariaNoSchema).toHaveLength(76);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });

@@ -1699,6 +1699,37 @@ export const resumoPorEmail = mysqlTable("resumo_por_email", {
   meetingCreatedIdx: index("resumo_por_email_meeting_created_idx").on(table.meetingId, table.createdAt),
 }));
 
+// O Pergunte a várias reuniões (H6c do plano do gravador,
+// server/perguntar-a-varias-reunioes.ts): uma linha por pergunta que foi à IA,
+// SEM o conteúdo. Nem a pergunta, nem a resposta, nem as citações, nem quais
+// reuniões: só quantas, o tamanho do que a IA leu, como terminou, o modelo e a
+// avaliação da dona. Serve ao teto de 24 h (contado aqui, e não em memória, para
+// o deploy não zerá-lo) e à avaliação da resposta. Guardar o texto pede o aviso
+// novo da Cris (o histórico do Pergunte, a H6b inteira, está fora).
+export const perguntasEntreReunioes = mysqlTable("perguntas_entre_reunioes", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // 'pendente' enquanto a IA responde; a falha da IA fica 'falhou' (e conta no teto).
+  situacao: varchar("situacao", { length: 16, enum: ["pendente", "respondida", "nao_respondida", "falhou"] }).default("pendente").notNull(),
+  reunioesEscolhidas: int("reunioes_escolhidas").notNull(),
+  reunioesLidas: int("reunioes_lidas").notNull(),
+  // As reuniões diferentes nas citações conferidas: o "número de fontes" da tela.
+  fontesCitadas: int("fontes_citadas").default(0).notNull(),
+  // O tamanho da entrada da IA, o que custa a pergunta.
+  caracteres: int("caracteres").notNull(),
+  // A tabela ou o gráfico que foi à tela (H6d); nulo sem visual.
+  visual: varchar("visual", { length: 12, enum: ["tabela", "barras", "linhas"] }),
+  modelo: varchar("modelo", { length: 80 }),
+  // "Ajudou" (boa) ou "Não ajudou" (ruim); nula enquanto a dona não avalia.
+  avaliacao: varchar("avaliacao", { length: 8, enum: ["boa", "ruim"] }),
+  avaliadaEm: bigint("avaliada_em", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // O teto conta as linhas das últimas 24 h da dona.
+  ownerCreatedIdx: index("perguntas_entre_reunioes_owner_created_idx").on(table.ownerId, table.createdAt),
+}));
+
 // ============================================================
 // MEMÓRIA INTELIGENTE — Etapa 6
 // Vetores ficam em JSON para compatibilidade com MySQL. A similaridade é

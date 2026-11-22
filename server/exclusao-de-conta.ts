@@ -72,6 +72,7 @@ import {
   proximasAcoes,
   googleAgendaConexoes,
   resumoPorEmail,
+  perguntasEntreReunioes,
 } from "../drizzle/schema";
 
 /**
@@ -178,6 +179,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: meetingSummaryTranslations, coluna: meetingSummaryTranslations.ownerId, origem: "openId" },
   // O resumo por e-mail (H22): a quem a dona mandou o link (o e-mail de terceiros) e quando.
   { tabela: resumoPorEmail, coluna: resumoPorEmail.ownerId, origem: "openId" },
+  // O Pergunte a várias reuniões (H6c): uma linha por pergunta, sem o conteúdo (quantas
+  // reuniões, o tamanho, como terminou e a avaliação da dona), para o teto de 24 h.
+  { tabela: perguntasEntreReunioes, coluna: perguntasEntreReunioes.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {

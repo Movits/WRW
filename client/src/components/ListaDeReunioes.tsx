@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { History, Loader2, MapPin, Merge, Milestone, MonitorPlay, ScanText, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
+import { History, Loader2, MapPin, Merge, MessagesSquare, Milestone, MonitorPlay, ScanText, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { JuntarReunioes } from "@/components/JuntarReunioes";
+import { PergunteAVariasReunioes } from "@/components/PergunteAVariasReunioes";
 import { guardarBuscaRecente, lerBuscasRecentes, limparBuscasRecentes } from "@/lib/buscas-recentes";
 import { rotaDaReuniao } from "@shared/rotas";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
@@ -155,6 +156,8 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
   const [escolhendo, setEscolhendo] = useState(false);
   const [escolhidas, setEscolhidas] = useState<string[]>([]);
   const [confirmando, setConfirmando] = useState(false);
+  // H6c: o Pergunte a várias reuniões, num diálogo próprio (components/PergunteAVariasReunioes.tsx).
+  const [perguntando, setPerguntando] = useState(false);
   const campo = useRef<HTMLInputElement | null>(null);
   const termoParado = useTermoParado(termo.trim());
   const agora = useMemo(() => Date.now(), [filtros.periodo]);
@@ -252,6 +255,12 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
             <button type="button" onClick={() => setEscolhendo(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-sm text-white/70 hover:bg-white/5">
               <Merge size={15} aria-hidden="true" />{t("meetings.join.button")}
+            </button>
+          )}
+          {!escolhendo && reunioes.filter(reuniao => reuniao.status === "ready").length >= 2 && (
+            <button type="button" onClick={() => setPerguntando(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-sm text-white/70 hover:bg-white/5">
+              <MessagesSquare size={15} aria-hidden="true" />{t("meetings.multiAsk.button")}
             </button>
           )}
         </div>
@@ -352,6 +361,9 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
         <JuntarReunioes reunioes={reunioes.filter(reuniao => escolhidas.includes(reuniao.id))}
           aoFechar={() => setConfirmando(false)}
           aoJuntar={meetingId => { sairDaEscolha(); aoAbrir(rotaDaReuniao(meetingId)); }} />
+      )}
+      {perguntando && (
+        <PergunteAVariasReunioes aoFechar={() => setPerguntando(false)} aoAbrir={destino => { setPerguntando(false); aoAbrir(destino); }} />
       )}
     </div>
   );
