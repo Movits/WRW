@@ -63,6 +63,19 @@ vi.mock("./db", () => ({
 }));
 // O serviço só lê a frase da reunião não encontrada: o resto do meeting-service não entra.
 vi.mock("./meeting-service", () => ({ MENSAGEM_REUNIAO_NAO_ENCONTRADA: "Reunião não encontrada." }));
+// A regra da reunião que a dona vê é a de verdade, contada: tem de vir do ponto
+// único (server/reuniao-visivel.ts), onde a lixeira da H7d entra.
+const visivel = vi.hoisted(() => ({ chamadas: 0 }));
+vi.mock("./reuniao-visivel", async importOriginal => {
+  const real = await importOriginal<typeof import("./reuniao-visivel")>();
+  return {
+    ...real,
+    reuniaoVisivel: () => {
+      visivel.chamadas += 1;
+      return real.reuniaoVisivel();
+    },
+  };
+});
 
 const { ACAO_LEGENDA_LIGADA, registrarLegendaLigada } = await import("./legenda-ao-vivo");
 
@@ -84,6 +97,7 @@ beforeEach(() => {
   estado.inseridas = [];
   estado.transacoes = 0;
   estado.auditoriaFora = false;
+  visivel.chamadas = 0;
 });
 
 describe("registrarLegendaLigada (G15b)", () => {
@@ -144,6 +158,14 @@ describe("registrarLegendaLigada (G15b)", () => {
     estado.inseridas = [];
     await registrarLegendaLigada(DONA, ID, prova({ userAgent: undefined }));
     expect(estado.inseridas[0].dados.userAgent).toBeNull();
+  });
+
+  it("a reunião que a dona vê vem de reuniaoVisivel(), o ponto único em que a lixeira (H7d) entra, uma vez por pedido", async () => {
+    await registrarLegendaLigada(DONA, ID, prova());
+    expect(visivel.chamadas).toBe(1);
+    estado.reuniao = null;
+    await expect(registrarLegendaLigada(DONA, ID, prova())).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(visivel.chamadas).toBe(2);
   });
 
   it("lê só a reunião (nenhuma outra tabela é escrita além da auditoria)", async () => {

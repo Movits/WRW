@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { RECUSAS_DA_LEGENDA, type VersaoDoAvisoDaLegenda } from "@shared/legenda-ao-vivo";
 import { auditLogs, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+import { reuniaoVisivel } from "./reuniao-visivel";
 
 /**
  * A legenda ao vivo do gravador (G15b; regra em shared/legenda-ao-vivo.ts). O
@@ -42,13 +43,12 @@ export type ProvaDaLegenda = {
 };
 
 /**
- * A reunião que a dona ainda vê: o ponto único desta consulta. A regra da
- * lixeira (H7d, parte 1 do Pacote 5b) entra aqui, trocando esta condição pela
- * `reuniaoVisivel()` de server/reuniao-visivel.ts, sem mexer em quem chama.
+ * A reunião que a dona ainda vê vem de `reuniaoVisivel()` (server/reuniao-visivel.ts),
+ * o ponto único da regra que a pergunta a várias reuniões (H6c) também usa: hoje,
+ * sem a excluída. A lixeira (H7d, parte 1 do Pacote 5b) entra naquele arquivo e
+ * passa a valer aqui sem mexer nesta consulta.
  */
-function reuniaoQueADonaVe() {
-  return ne(meetings.status, "deleted");
-}
+const reuniaoQueADonaVe = reuniaoVisivel;
 
 /**
  * Registra a confirmação da dona antes de a legenda ligar. Lança NOT_FOUND

@@ -152,7 +152,8 @@ da 0023) nem diz que a reunião foi gravada (`emailDoResumo.*SemGravacao`).
 texto dela nunca chega ao servidor. `meetings.ligarLegendaAoVivo` só grava a confirmação
 da dona (o aviso que ela viu, com o hash, e a concordância das pessoas) em `audit_logs`
 (`MEETING_LIVE_CAPTION_ON`), na transação com a leitura travada da reunião dela que está
-gravando; sem a linha, a tela não liga a legenda.
+gravando (pela `reuniaoVisivel()`, o ponto da regra da lixeira); sem a linha, a tela não
+liga a legenda.
 
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
