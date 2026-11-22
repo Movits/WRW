@@ -49,6 +49,8 @@ export type ReuniaoDaLista = {
   audioPipeline?: string | null;
   /** A pasta da reunião (H7d), ou nula. */
   folderId?: string | null;
+  /** A dona editou a transcrição (H18): a confirmação da junção avisa que as correções não passam. */
+  transcricaoEditada?: boolean;
 };
 
 const ESPERA_ATE_BUSCAR_MS = 400;

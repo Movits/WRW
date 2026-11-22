@@ -1074,12 +1074,13 @@ export const meetingsRouter = router({
   // H18: a dona edita a transcrição de uma reunião pronta dela (o texto ou a
   // voz de um trecho, localizar e substituir, voltar ao original), com a
   // transcrição e a revisão que a tela leu. Recusas como código que a tela
-  // traduz (shared/editar-transcricao.ts): NOT_FOUND (outra conta, ou não
-  // existe), CONFLICT (não está pronta, ou a transcrição mudou),
+  // traduz (shared/editar-transcricao.ts): NOT_FOUND (outra conta, não
+  // existe ou na lixeira, H7d: a guarda antes do zod e o serviço na leitura
+  // travada), CONFLICT (não está pronta, ou a transcrição mudou),
   // PRECONDITION_FAILED (documento), BAD_REQUEST (trecho inválido, ou que
   // ficaria vazio) e TOO_MANY_REQUESTS (o teto). A auditoria vai na transação
   // da mudança (server/editar-transcricao.ts).
-  editarTranscricao: protectedProcedure
+  editarTranscricao: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
       // A transcrição que a tela leu: o servidor compara com a de agora.

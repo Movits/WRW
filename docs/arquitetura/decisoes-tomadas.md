@@ -579,10 +579,11 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `original_segments`, e sai quando tudo volta ao original. `edited_at` e `revision` dizem
   quando e quantas vezes a transcrição mudou: a tela manda a revisão que leu, e a edição
   feita em outra aba é recusada, em vez de desfeita em silêncio.
-- **Regras:** só a dona, só a reunião pronta. Cada mudança é uma transação que trava a
-  reunião antes da transcrição (a ordem da fila do resumo), apaga as traduções da
-  transcrição e grava `MEETING_TRANSCRIPT_EDITED` com o tipo, as contagens e a revisão,
-  nunca a fala nem o termo procurado. Teto de 200 edições a cada 10 minutos por dona.
+- **Regras:** só a dona, só a reunião pronta e fora da lixeira (H7d). Cada mudança é uma
+  transação que trava a reunião antes da transcrição (a ordem da fila do resumo), apaga as
+  traduções da transcrição e grava `MEETING_TRANSCRIPT_EDITED` com o tipo, as contagens e a
+  revisão, nunca a fala nem o termo procurado. Teto de 200 edições a cada 10 minutos por
+  dona.
 - **O resumo:** não se refaz sozinho (cada vez custa ~US$ 0,05 a 0,10 por hora de
   reunião). A tela avisa que o resumo, o mapa e o que o link mostra deles são da versão
   anterior e oferece "Refazer o resumo", que refaz também o mapa. A fila descarta o resumo

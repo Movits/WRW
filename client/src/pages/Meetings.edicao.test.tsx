@@ -26,8 +26,8 @@ const duble = vi.hoisted(() => {
     editarTranscricao: vi.fn(),
     utils: {
       meetings: {
-        list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() },
-        mapaMental: { invalidate: vi.fn() },
+        list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() },
+        resumoGuardado: { invalidate: vi.fn() }, mapaMental: { invalidate: vi.fn() },
       },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
@@ -53,11 +53,13 @@ vi.mock("@/lib/trpc", () => ({
       get: { useQuery: () => duble.get() },
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
       conexoes: { useQuery: () => ({ data: undefined }) },
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
       ...Object.fromEntries([
         "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
         "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo",
         "marcarAcaoFeita", "traduzirResumo", "perguntar", "perguntarDuranteAGravacao", "rascunharEmailDeRetorno", "ligarLinkAberto",
-        "desligarLinkAberto", "novaSenhaDoLink", "tirarSenhaDoLink", "mudarAudioDoLink",
+        "desligarLinkAberto", "novaSenhaDoLink", "tirarSenhaDoLink", "mudarAudioDoLink", "mandarParaALixeira",
       ].map(nome => [nome, duble.mutacao(nome)])),
     },
     reuniaoAberta: { pedirResumo: duble.mutacao("reuniaoAberta.pedirResumo"), perguntar: duble.mutacao("reuniaoAberta.perguntar"), traduzirResumo: duble.mutacao("reuniaoAberta.traduzirResumo") },

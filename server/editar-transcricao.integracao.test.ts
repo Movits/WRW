@@ -20,7 +20,10 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * - o resumo gravado antes da edição é de outra versão; "Refazer o resumo"
  *   refaz também o mapa; a edição no meio da geração devolve o resumo à fila;
  * - a busca entre reuniões, a lista, a exportação e a conferência das
- *   pendências da extração (com a versão da IA).
+ *   pendências da extração (com a versão da IA);
+ * - a lixeira (H7d): a reunião que está lá não se edita (a guarda e a leitura
+ *   travada do serviço), e a transcrição editada some com ela, volta com ela e
+ *   sai de vez com ela, a versão da IA junto.
  */
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
@@ -51,7 +54,7 @@ const {
 } = await import("../drizzle/schema");
 const { traduzirResumoPeloLink } = await import("./traducao-do-resumo");
 const { appRouter } = await import("./routers");
-const { editarTranscricao } = await import("./editar-transcricao");
+const { editarTranscricao, RecusaDaEdicao } = await import("./editar-transcricao");
 const { ligarLinkAberto, verReuniaoPeloLink } = await import("./link-aberto-da-reuniao");
 const { resumoGuardadoPeloLink } = await import("./resumo-guardado");
 const { decidirPendenciasDaPessoaSugerida } = await import("./network-extracao");
@@ -260,6 +263,54 @@ describe.skipIf(!temBanco)("Editar a transcrição (integração)", () => {
     expect(await recusa(editar(documento, 0, { tipo: "textoCorrido", texto: "x" }))).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DA_EDICAO.documento });
     for (const { meetingId } of [alvo, processando, documento]) expect((await transcricaoDe(meetingId)).revision).toBe(0);
     expect(await auditoriasDe(alvo.meetingId)).toEqual([]);
+  });
+
+  it("a reunião na lixeira (H7d) não se edita: a guarda recusa pelo router, e o serviço recusa na leitura travada, sem mudar nada", async () => {
+    const alvo = await reuniaoPronta();
+    await editar(alvo, 0, { tipo: "texto", indice: 0, texto: "Bom dia, aqui é a Glenda, diretora da Akme." });
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [alvo.meetingId] });
+
+    // Pelo router, a guarda da lixeira recusa antes do serviço.
+    expect((await recusa(editar(alvo, 1, { tipo: "texto", indice: 1, texto: "Na lixeira." }))).code).toBe("NOT_FOUND");
+    // O serviço sozinho: a edição que passou pela guarda e chegou depois do
+    // "mandar para a lixeira" esbarra na leitura travada da reunião.
+    for (const operacao of [{ tipo: "texto" as const, indice: 1, texto: "Na lixeira." }, { tipo: "restaurarTudo" as const }]) {
+      const erro = await editarTranscricao(DONA, alvo.meetingId, { ...alvo, revisao: 1, operacao },
+        { userId: ID_DA_DONA, ipAddress: "203.0.113.9", userAgent: null }).then(() => null, e => e);
+      expect(erro).toBeInstanceOf(RecusaDaEdicao);
+      expect(erro).toMatchObject({ codigoTrpc: "NOT_FOUND", message: "Reunião não encontrada." });
+    }
+    const linha = await transcricaoDe(alvo.meetingId);
+    expect(linha).toMatchObject({ revision: 1, originalTranscript: TEXTO, segments: [{ ...FALAS[0], texto: "Bom dia, aqui é a Glenda, diretora da Akme." }, FALAS[1], FALAS[2]] });
+    expect(await auditoriasDe(alvo.meetingId)).toHaveLength(1);
+  });
+
+  it("a lixeira (H7d) vale também para a transcrição editada: some do detalhe, da lista, da busca, da exportação e do link; restaurar devolve a edição, e apagar de vez leva a versão da IA junto", async () => {
+    const alvo = await reuniaoPronta();
+    await editar(alvo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glendarosa" });
+    const token = await ligarLinkAberto(DONA, alvo.meetingId, { userId: ID_DA_DONA, ipAddress: "203.0.113.9", userAgent: "vitest", idioma: "pt-BR", textoExibido: "Confirmo." });
+    expect((await verReuniaoPeloLink(token)).transcricao).toMatchObject({ editada: true });
+    expect((await daDona().meetings.buscar({ termo: "Glendarosa" })).resultados.some(r => r.meetingId === alvo.meetingId)).toBe(true);
+
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [alvo.meetingId] });
+    expect((await recusa(daDona().meetings.get({ meetingId: alvo.meetingId }))).code).toBe("NOT_FOUND");
+    expect((await daDona().meetings.list()).some(r => r.id === alvo.meetingId)).toBe(false);
+    expect((await daDona().meetings.buscar({ termo: "Glendarosa" })).resultados.some(r => r.meetingId === alvo.meetingId)).toBe(false);
+    expect((await recusa(daDona().meetings.exportar({ meetingId: alvo.meetingId, formato: "pdf" }))).code).toBe("NOT_FOUND");
+    // Mandar para a lixeira desligou o link: o endereço antigo não abre.
+    await expect(verReuniaoPeloLink(token)).rejects.toMatchObject({ codigo: "NOT_FOUND" });
+
+    // Restaurar devolve a reunião com a edição, a revisão e o original da IA.
+    await daDona().meetings.restaurarDaLixeira({ meetingIds: [alvo.meetingId] });
+    const detalhe = await daDona().meetings.get({ meetingId: alvo.meetingId });
+    expect(detalhe.transcript?.transcript).toContain("Glendarosa");
+    expect(detalhe.transcript?.edicao).toMatchObject({ revisao: 1, editada: true });
+    expect((await daDona().meetings.list()).find(r => r.id === alvo.meetingId)?.transcricaoEditada).toBe(true);
+
+    // Apagar de vez leva a linha da transcrição inteira, com a versão da IA.
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [alvo.meetingId] });
+    await expect(daDona().meetings.apagarDeVez({ meetingIds: [alvo.meetingId] })).resolves.toEqual({ apagadas: 1 });
+    expect(await transcricaoDe(alvo.meetingId)).toBeUndefined();
   });
 
   it("o pedido que não muda nada não sobe a revisão nem entra na auditoria; o trecho vazio e a troca que esvaziaria um trecho são recusados", async () => {

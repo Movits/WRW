@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { auditLogs, meetings, meetingTranscripts, meetingTranscriptTranslations } from "../drizzle/schema";
 import { FORMATO_DO_FALANTE } from "@shared/const";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
@@ -8,6 +8,7 @@ import {
 } from "@shared/editar-transcricao";
 import { exigirDb } from "./db";
 import { conferidorDeTrechos } from "./trecho-da-transcricao";
+import { reuniaoVisivel } from "./reuniao-visivel";
 
 /**
  * Editar a transcrição (H18 da auditoria de 16/11; HN-23 e HN-27 do app de
@@ -270,9 +271,9 @@ export type EdicaoFeita = {
 
 /**
  * A dona muda a transcrição de uma reunião pronta dela. Reunião de outra
- * conta, ou excluída, é "não encontrada". Pedido que não muda nada (o mesmo
- * texto, a voz que já era, a busca sem ocorrência) não grava, não sobe a
- * revisão e não entra na auditoria.
+ * conta, excluída ou na lixeira (H7d) é "não encontrada". Pedido que não muda
+ * nada (o mesmo texto, a voz que já era, a busca sem ocorrência) não grava,
+ * não sobe a revisão e não entra na auditoria.
  */
 export async function editarTranscricao(ownerId: string, meetingId: string, pedido: PedidoDeEdicao, prova: ProvaDaEdicao): Promise<EdicaoFeita> {
   const db = await exigirDb();
@@ -280,8 +281,11 @@ export async function editarTranscricao(ownerId: string, meetingId: string, pedi
     // A reunião primeiro, como a fila do resumo (gravarResumo e gravarMapa):
     // a edição e a gravação de um resumo nunca se travam em ordens opostas, e
     // o resumo que a fila grava depois desta transação relê a revisão nova.
+    // A reunião na lixeira (H7d) é "não encontrada", como a excluída: a
+    // leitura travada é a mesma linha que o "mandar para a lixeira" muda, então
+    // a edição que chega depois dele não passa, nem na corrida com a guarda.
     const [reuniao] = await tx.select({ status: meetings.status, origem: meetings.origem }).from(meetings)
-      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).for("update");
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).for("update");
     if (!reuniao) throw new RecusaDaEdicao("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     if (ehReuniaoDeDocumento(reuniao.origem)) throw recusa(RECUSAS_DA_EDICAO.documento, "PRECONDITION_FAILED");
     if (reuniao.status !== "ready") throw recusa(RECUSAS_DA_EDICAO.foraDoEstado, "CONFLICT");

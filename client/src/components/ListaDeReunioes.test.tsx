@@ -57,14 +57,14 @@ function linkFalso(): TRPCLink<never> {
 const erroDoServidor = (code: string, message: string) => TRPCClientError.from({ error: { code: -32000, message, data: { code, httpStatus: 429 } } });
 
 const aoAbrir = vi.fn();
-function abrir(conta: string | null = "dona-1") {
+function abrir(conta: string | null = "dona-1", reunioes: ReuniaoDaLista[] = REUNIOES) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // A conta da sessão vem do cache do auth.me, como na tela de verdade.
   if (conta) queryClient.setQueryData([["auth", "me"], { type: "query" }], { openId: conta });
   const client = trpc.createClient({ links: [linkFalso() as never] });
   return render(<trpc.Provider client={client} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
-      <ListaDeReunioes reunioes={REUNIOES} rotuloDoStatus={r => `status:${r.status}`} classeDoStatus={() => ""} aoAbrir={aoAbrir}/>
+      <ListaDeReunioes reunioes={reunioes} rotuloDoStatus={r => `status:${r.status}`} classeDoStatus={() => ""} aoAbrir={aoAbrir}/>
     </QueryClientProvider>
   </trpc.Provider>);
 }
@@ -269,6 +269,24 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Cancelar" }));
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  it("a marca da transcrição editada (H18) chega à junção pela seleção: só com ela a confirmação avisa que as correções não passam", () => {
+    const aviso = /As correções feitas à mão na transcrição não passam para a reunião juntada/;
+    const juntarAsDuas = () => {
+      fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
+      fireEvent.click(caixaDe("Reunião com a importadora"));
+      fireEvent.click(caixaDe("Mentoria de exportação"));
+      fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Juntar" }));
+      return screen.getByRole("dialog", { name: "Juntar 2 reuniões" });
+    };
+    // Nenhuma das duas editada: sem o aviso.
+    abrir();
+    expect(within(juntarAsDuas()).queryByText(aviso)).not.toBeInTheDocument();
+    cleanup();
+    // A segunda com a transcrição editada pela dona (a marca que a lista do servidor manda).
+    abrir("dona-1", REUNIOES.map(reuniao => reuniao.title === "Mentoria de exportação" ? { ...reuniao, transcricaoEditada: true } : reuniao));
+    expect(within(juntarAsDuas()).getByText(aviso)).toBeInTheDocument();
   });
 
   it("'Marcar todas' marca as da vista, e vira 'Desmarcar todas'", () => {
