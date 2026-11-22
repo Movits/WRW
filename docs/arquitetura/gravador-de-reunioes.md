@@ -700,7 +700,10 @@ mescla, só por `gh pr merge`).
 
 - Bots que entram no Zoom, no Meet e no Teams: serviço pago por hora, ou software que
   não cabe no servidor de hoje. A agenda entra pela H16, sem robô.
-- Transcrição ao vivo e app de relógio.
+- Transcrição ao vivo pela IA e app de relógio. A legenda ao vivo pelo reconhecimento de voz
+  do próprio navegador (G15b, 22/11/2026) entrou: de graça, liga e desliga, não separa quem
+  fala, não fica guardada e não substitui a transcrição; o aviso dela está em
+  `docs/termos/aviso-de-gravacao-rascunho.md`.
 - Integrações com Notion, Google Docs e OneNote.
 - Espaços de equipe: a reunião compartilhada cobre o caso.
 - Link público com senha. O link aberto, sem senha, entrou em 12/11, por enquanto (ver

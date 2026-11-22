@@ -2126,6 +2126,38 @@
       "notAnswered": "Der bisher transkribierte Text beantwortet diese Frage nicht.",
       "needsTranscript": "Es gibt noch keinen transkribierten Text, den die KI lesen kann. Warte, bis der erste Teil fertig ist."
     },
+    "caption": {
+      "title": "Live-Untertitel",
+      "intro": "Der Text des Gesagten, sofort, über die Spracherkennung des Browsers. Er wird nicht gespeichert und ersetzt nicht die Transkription des Meetings.",
+      "turnOn": "Untertitel einschalten",
+      "turnOff": "Ausschalten",
+      "smaller": "Untertitelschrift verkleinern",
+      "larger": "Untertitelschrift vergrößern",
+      "reminder": "Untertitel auf {{idioma}}, vom Browser: Sie können Wörter falsch erkennen, unterscheiden nicht, wer spricht, und werden nicht gespeichert. Der Text, der im Meeting bleibt, ist die Transkription unten.",
+      "autoLanguage": "Ist die Sprache des Meetings auf „Automatisch erkennen“ gestellt, verwenden die Untertitel die Sprache der Oberfläche.",
+      "boxLabel": "Text der Live-Untertitel",
+      "listening": "Hört zu … der Text erscheint hier einige Sekunden nach dem Gesprochenen.",
+      "pausedEmpty": "Die Untertitel sind zusammen mit der Aufnahme pausiert.",
+      "paused": "Untertitel zusammen mit der Aufnahme pausiert: Sie laufen weiter, wenn die Aufnahme fortgesetzt wird.",
+      "noticeTitle": "Live-Untertitel einschalten?",
+      "noticeBrowser": "Die Untertitel nutzen die Spracherkennung dieses Browsers, kostenlos. In Chrome wird das Audio dafür meist an einen Server von Google gesendet und dort in Text umgewandelt; in anderen Browsern kann das Audio an den Server des Browseranbieters gehen. Diese Übertragung erfolgt durch den Browser, außerhalb von WRW, und unterliegt den Datenschutzregeln dieses Unternehmens.",
+      "noticeSpeakers": "Die Untertitel unterscheiden nicht, wer spricht, und können Wörter falsch erkennen.",
+      "noticeNotSaved": "Sie werden nicht gespeichert: Sie verschwinden beim Ausschalten oder wenn die Aufnahme endet. Die Transkription des Meetings bleibt die der KI, die in Teilen eintrifft.",
+      "consentLabel": "Die Personen in diesem Meeting wissen, dass das Audio bei eingeschalteten Untertiteln an den Sprachdienst des Browsers gehen kann, und sind einverstanden.",
+      "notNow": "Nicht jetzt",
+      "confirm": "Untertitel einschalten",
+      "errors": {
+        "permission": "Der Browser hat den Untertiteln das Mikrofon nicht erlaubt. Erlauben Sie das Mikrofon für diese Website und schalten Sie sie erneut ein.",
+        "service": "Die Spracherkennung ist in diesem Browser oder auf diesem Gerät ausgeschaltet. Die Aufnahme läuft normal weiter.",
+        "microphone": "Die Untertitel konnten das Mikrofon nicht hören. Die Aufnahme läuft normal weiter.",
+        "language": "Die Spracherkennung dieses Browsers unterstützt {{idioma}} nicht. Die Aufnahme läuft normal weiter.",
+        "notResponding": "Die Spracherkennung dieses Browsers hat nicht geantwortet, und die Untertitel wurden ausgeschaltet. Die Aufnahme läuft normal weiter; versuchen Sie es später erneut.",
+        "recordingMicLost": "Die Untertitel wurden ausgeschaltet, weil das Mikrofon der Aufnahme getrennt wurde. Wenn es wieder da ist, schalten Sie sie bei Bedarf erneut ein.",
+        "meetingGone": "Dieses Meeting existiert nicht mehr.",
+        "notRecording": "Die Untertitel lassen sich nur einschalten, während das Meeting aufgenommen wird.",
+        "tooMany": "Die Untertitel wurden zu oft hintereinander eingeschaltet. Warten Sie einige Minuten und versuchen Sie es erneut."
+      }
+    },
     "player": {
       "play": "Abspielen",
       "pause": "Pausieren",

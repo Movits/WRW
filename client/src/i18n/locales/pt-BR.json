@@ -2126,6 +2126,38 @@
       "notAnswered": "O texto transcrito até agora não responde a esta pergunta.",
       "needsTranscript": "Ainda não há texto transcrito para a IA ler. Espere a primeira parte ficar pronta."
     },
+    "caption": {
+      "title": "Legenda ao vivo",
+      "intro": "O texto do que está sendo dito, na hora, pelo reconhecimento de voz do navegador. Não fica guardado e não substitui a transcrição da reunião.",
+      "turnOn": "Ligar a legenda",
+      "turnOff": "Desligar",
+      "smaller": "Diminuir a letra da legenda",
+      "larger": "Aumentar a letra da legenda",
+      "reminder": "Legenda em {{idioma}}, do navegador: pode errar palavras, não separa quem fala e não fica guardada. O texto que fica na reunião é o da transcrição, abaixo.",
+      "autoLanguage": "Com o idioma da reunião em “Detectar sozinho”, a legenda fica no idioma da tela.",
+      "boxLabel": "Texto da legenda ao vivo",
+      "listening": "Ouvindo… o texto aparece aqui alguns segundos depois da fala.",
+      "pausedEmpty": "A legenda está pausada junto com a gravação.",
+      "paused": "Legenda pausada junto com a gravação: ela volta quando a gravação continuar.",
+      "noticeTitle": "Ligar a legenda ao vivo?",
+      "noticeBrowser": "A legenda usa o reconhecimento de voz deste navegador, sem custo. No Chrome, ele costuma mandar o áudio a um servidor do Google para virar texto; em outros navegadores, o áudio pode ir ao servidor da empresa do navegador. Esse envio é feito pelo navegador, fora da WRW, e segue as regras de privacidade dessa empresa.",
+      "noticeSpeakers": "A legenda não separa quem fala e pode errar palavras.",
+      "noticeNotSaved": "Ela não fica guardada: some ao desligar ou ao encerrar a gravação. A transcrição da reunião continua sendo a da IA, que chega por partes.",
+      "consentLabel": "As pessoas desta reunião sabem que, com a legenda ligada, o áudio pode ir ao serviço de voz do navegador, e concordam.",
+      "notNow": "Agora não",
+      "confirm": "Ligar a legenda",
+      "errors": {
+        "permission": "O navegador não deixou a legenda usar o microfone. Libere o microfone para este site e ligue de novo.",
+        "service": "O reconhecimento de voz está desligado neste navegador ou aparelho. A gravação segue normalmente.",
+        "microphone": "A legenda não conseguiu ouvir o microfone. A gravação segue normalmente.",
+        "language": "O reconhecimento de voz deste navegador não tem {{idioma}}. A gravação segue normalmente.",
+        "notResponding": "O reconhecimento de voz deste navegador não respondeu, e a legenda desligou. A gravação segue normalmente; tente ligar de novo mais tarde.",
+        "recordingMicLost": "A legenda desligou porque o microfone da gravação desconectou. Quando ele voltar, ligue de novo se quiser.",
+        "meetingGone": "Esta reunião não existe mais.",
+        "notRecording": "A legenda só liga enquanto a reunião está gravando.",
+        "tooMany": "A legenda foi ligada muitas vezes em sequência. Aguarde alguns minutos e tente de novo."
+      }
+    },
     "player": {
       "play": "Tocar",
       "pause": "Pausar",

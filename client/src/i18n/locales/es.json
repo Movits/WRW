@@ -2126,6 +2126,38 @@
       "notAnswered": "El texto transcrito hasta ahora no responde a esta pregunta.",
       "needsTranscript": "Todavía no hay texto transcrito para que la IA lo lea. Espera a que la primera parte esté lista."
     },
+    "caption": {
+      "title": "Subtítulos en vivo",
+      "intro": "El texto de lo que se está diciendo, al momento, con el reconocimiento de voz del navegador. No se guarda y no sustituye la transcripción de la reunión.",
+      "turnOn": "Activar subtítulos",
+      "turnOff": "Desactivar",
+      "smaller": "Reducir la letra de los subtítulos",
+      "larger": "Aumentar la letra de los subtítulos",
+      "reminder": "Subtítulos en {{idioma}}, del navegador: pueden equivocarse en palabras, no distinguen quién habla y no se guardan. El texto que queda en la reunión es el de la transcripción, abajo.",
+      "autoLanguage": "Con el idioma de la reunión en “Detectar automáticamente”, los subtítulos usan el idioma de la pantalla.",
+      "boxLabel": "Texto de los subtítulos en vivo",
+      "listening": "Escuchando… el texto aparece aquí unos segundos después de que se habla.",
+      "pausedEmpty": "Los subtítulos están en pausa junto con la grabación.",
+      "paused": "Subtítulos en pausa junto con la grabación: vuelven cuando la grabación continúe.",
+      "noticeTitle": "¿Activar los subtítulos en vivo?",
+      "noticeBrowser": "Los subtítulos usan el reconocimiento de voz de este navegador, sin costo. En Chrome, suele enviar el audio a un servidor de Google para convertirlo en texto; en otros navegadores, el audio puede ir al servidor de la empresa del navegador. Este envío lo hace el navegador, fuera de WRW, y sigue las reglas de privacidad de esa empresa.",
+      "noticeSpeakers": "Los subtítulos no distinguen quién habla y pueden equivocarse en palabras.",
+      "noticeNotSaved": "No se guardan: desaparecen al desactivarlos o al terminar la grabación. La transcripción de la reunión sigue siendo la de la IA, que llega por partes.",
+      "consentLabel": "Las personas de esta reunión saben que, con los subtítulos activados, el audio puede ir al servicio de voz del navegador, y están de acuerdo.",
+      "notNow": "Ahora no",
+      "confirm": "Activar subtítulos",
+      "errors": {
+        "permission": "El navegador no dejó que los subtítulos usaran el micrófono. Permite el micrófono para este sitio y actívalos de nuevo.",
+        "service": "El reconocimiento de voz está desactivado en este navegador o dispositivo. La grabación sigue con normalidad.",
+        "microphone": "Los subtítulos no pudieron oír el micrófono. La grabación sigue con normalidad.",
+        "language": "El reconocimiento de voz de este navegador no admite {{idioma}}. La grabación sigue con normalidad.",
+        "notResponding": "El reconocimiento de voz de este navegador no respondió y los subtítulos se desactivaron. La grabación sigue con normalidad; intenta activarlos de nuevo más tarde.",
+        "recordingMicLost": "Los subtítulos se desactivaron porque el micrófono de la grabación se desconectó. Cuando vuelva, actívalos de nuevo si quieres.",
+        "meetingGone": "Esta reunión ya no existe.",
+        "notRecording": "Los subtítulos solo se activan mientras la reunión se está grabando.",
+        "tooMany": "Los subtítulos se activaron demasiadas veces seguidas. Espera unos minutos e inténtalo de nuevo."
+      }
+    },
     "player": {
       "play": "Reproducir",
       "pause": "Pausar",

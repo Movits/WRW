@@ -2126,6 +2126,38 @@
       "notAnswered": "Le texte transcrit jusqu'ici ne répond pas à cette question.",
       "needsTranscript": "Il n'y a pas encore de texte transcrit à lire pour l'IA. Attendez que la première partie soit prête."
     },
+    "caption": {
+      "title": "Sous-titres en direct",
+      "intro": "Le texte de ce qui est dit, en direct, grâce à la reconnaissance vocale du navigateur. Il n'est pas enregistré et ne remplace pas la transcription de la réunion.",
+      "turnOn": "Activer les sous-titres",
+      "turnOff": "Désactiver",
+      "smaller": "Réduire le texte des sous-titres",
+      "larger": "Agrandir le texte des sous-titres",
+      "reminder": "Sous-titres en {{idioma}}, par le navigateur : ils peuvent se tromper de mots, ne distinguent pas qui parle et ne sont pas enregistrés. Le texte conservé dans la réunion est celui de la transcription, ci-dessous.",
+      "autoLanguage": "Avec la langue de la réunion sur « Détecter automatiquement », les sous-titres utilisent la langue de l'écran.",
+      "boxLabel": "Texte des sous-titres en direct",
+      "listening": "Écoute en cours… le texte apparaît ici quelques secondes après la parole.",
+      "pausedEmpty": "Les sous-titres sont en pause avec l'enregistrement.",
+      "paused": "Sous-titres en pause avec l'enregistrement : ils reprennent quand l'enregistrement continue.",
+      "noticeTitle": "Activer les sous-titres en direct ?",
+      "noticeBrowser": "Les sous-titres utilisent la reconnaissance vocale de ce navigateur, gratuitement. Dans Chrome, elle envoie généralement l'audio à un serveur de Google pour le transformer en texte ; dans d'autres navigateurs, l'audio peut aller au serveur de l'éditeur du navigateur. Cet envoi est fait par le navigateur, en dehors de WRW, et suit les règles de confidentialité de cette entreprise.",
+      "noticeSpeakers": "Les sous-titres ne distinguent pas qui parle et peuvent se tromper de mots.",
+      "noticeNotSaved": "Ils ne sont pas enregistrés : ils disparaissent quand vous les désactivez ou terminez l'enregistrement. La transcription de la réunion reste celle de l'IA, qui arrive par parties.",
+      "consentLabel": "Les personnes de cette réunion savent qu'avec les sous-titres activés, l'audio peut aller au service vocal du navigateur, et elles sont d'accord.",
+      "notNow": "Pas maintenant",
+      "confirm": "Activer les sous-titres",
+      "errors": {
+        "permission": "Le navigateur n'a pas autorisé les sous-titres à utiliser le microphone. Autorisez le microphone pour ce site et réactivez-les.",
+        "service": "La reconnaissance vocale est désactivée dans ce navigateur ou sur cet appareil. L'enregistrement continue normalement.",
+        "microphone": "Les sous-titres n'ont pas pu entendre le microphone. L'enregistrement continue normalement.",
+        "language": "La reconnaissance vocale de ce navigateur ne prend pas en charge cette langue ({{idioma}}). L'enregistrement continue normalement.",
+        "notResponding": "La reconnaissance vocale de ce navigateur n'a pas répondu, et les sous-titres ont été désactivés. L'enregistrement continue normalement ; réessayez plus tard.",
+        "recordingMicLost": "Les sous-titres ont été désactivés car le microphone de l'enregistrement s'est déconnecté. Quand il revient, réactivez-les si vous le souhaitez.",
+        "meetingGone": "Cette réunion n'existe plus.",
+        "notRecording": "Les sous-titres ne s'activent que pendant l'enregistrement de la réunion.",
+        "tooMany": "Les sous-titres ont été activés trop de fois d'affilée. Patientez quelques minutes et réessayez."
+      }
+    },
     "player": {
       "play": "Lire",
       "pause": "Pause",

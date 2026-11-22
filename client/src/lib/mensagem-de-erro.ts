@@ -22,6 +22,7 @@ import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
 import { RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
 import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
+import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import {
   MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
   MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
@@ -134,6 +135,9 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DA_JUNCAO.semAudio]: "meetings.join.errorNoAudio",
   [RECUSAS_DA_JUNCAO.longaDemais]: "meetings.join.errorTooLong",
   [RECUSAS_DA_JUNCAO.demais]: "meetings.join.errorTooMany",
+  // As recusas do ligar da legenda ao vivo (G15b, server/legenda-ao-vivo.ts e o teto em routers/meetings.ts).
+  [RECUSAS_DA_LEGENDA.foraDaGravacao]: "meetings.caption.errors.notRecording",
+  [RECUSAS_DA_LEGENDA.demais]: "meetings.caption.errors.tooMany",
 };
 
 /**

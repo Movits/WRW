@@ -148,6 +148,12 @@ dela liga sem o áudio, a caixa e a prova são a frase da origem, como no "Compa
 e-mail nunca promete a gravação (nem no link antigo, com o `share_audio` verdadeiro do padrão
 da 0023) nem diz que a reunião foi gravada (`emailDoResumo.*SemGravacao`).
 
+**A legenda ao vivo (G15b, `server/legenda-ao-vivo.ts`)** é do navegador da dona: o
+texto dela nunca chega ao servidor. `meetings.ligarLegendaAoVivo` só grava a confirmação
+da dona (o aviso que ela viu, com o hash, e a concordância das pessoas) em `audit_logs`
+(`MEETING_LIVE_CAPTION_ON`), na transação com a leitura travada da reunião dela que está
+gravando; sem a linha, a tela não liga a legenda.
+
 **Nada extraído por IA entra sozinho:** no enriquecimento, só sugestões com
 `confidence >= 0.7` viram pendência (`routers/enrichment.ts`); entidades e sugestões de
 reunião nascem `pending`; o SIVC pondera a fonte em `CONFIDENCE_WEIGHTS`.
