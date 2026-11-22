@@ -2126,6 +2126,38 @@
       "notAnswered": "The text transcribed so far doesn't answer this question.",
       "needsTranscript": "There's no transcribed text for the AI to read yet. Wait for the first part to be ready."
     },
+    "caption": {
+      "title": "Live captions",
+      "intro": "What is being said, as it is said, from the browser's speech recognition. It is not saved and does not replace the meeting transcript.",
+      "turnOn": "Turn on captions",
+      "turnOff": "Turn off",
+      "smaller": "Make the caption text smaller",
+      "larger": "Make the caption text larger",
+      "reminder": "Captions in {{idioma}}, from the browser: they may get words wrong, do not tell speakers apart and are not saved. The text kept in the meeting is the transcript below.",
+      "autoLanguage": "With the meeting language set to “Detect automatically”, captions use the screen language.",
+      "boxLabel": "Live caption text",
+      "listening": "Listening… the text appears here a few seconds after it is spoken.",
+      "pausedEmpty": "Captions are paused along with the recording.",
+      "paused": "Captions paused along with the recording: they resume when the recording continues.",
+      "noticeTitle": "Turn on live captions?",
+      "noticeBrowser": "Captions use this browser's speech recognition, at no cost. In Chrome, it usually sends the audio to a Google server to turn it into text; in other browsers, the audio may go to the browser company's server. This is done by the browser, outside WRW, and follows that company's privacy rules.",
+      "noticeSpeakers": "Captions do not tell speakers apart and may get words wrong.",
+      "noticeNotSaved": "They are not saved: they disappear when you turn them off or end the recording. The meeting transcript is still the one made by the AI, which arrives in parts.",
+      "consentLabel": "The people in this meeting know that, with captions on, the audio may go to the browser's speech service, and they agree.",
+      "notNow": "Not now",
+      "confirm": "Turn on captions",
+      "errors": {
+        "permission": "The browser did not let captions use the microphone. Allow the microphone for this site and turn them on again.",
+        "service": "Speech recognition is turned off in this browser or device. The recording continues normally.",
+        "microphone": "Captions could not hear the microphone. The recording continues normally.",
+        "language": "This browser's speech recognition does not support {{idioma}}. The recording continues normally.",
+        "notResponding": "This browser's speech recognition did not respond, and captions were turned off. The recording continues normally; try turning them on again later.",
+        "recordingMicLost": "Captions were turned off because the recording microphone disconnected. When it is back, turn them on again if you want.",
+        "meetingGone": "This meeting no longer exists.",
+        "notRecording": "Captions can only be turned on while the meeting is recording.",
+        "tooMany": "Captions were turned on too many times in a row. Wait a few minutes and try again."
+      }
+    },
     "player": {
       "play": "Play",
       "pause": "Pause",

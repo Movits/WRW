@@ -31,6 +31,7 @@ import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
 import { TranscricaoDuranteAGravacao } from "@/components/TranscricaoDuranteAGravacao";
+import { LegendaAoVivo } from "@/components/LegendaAoVivo";
 import { ID_DO_AVISO_DO_DESCARTE_PENDENTE } from "@/components/RetomadaDosDescartes";
 import { ID_DO_AVISO_DA_PARTE_RECUSADA } from "@/components/RetomadaDasPartes";
 import {
@@ -859,6 +860,13 @@ export default function Meetings() {
       validarTitulo={avisoDoTitulo}
       // G15a: o texto das partes prontas durante a gravação, com o Pergunte.
       transcricaoAoVivo={emPartes && reuniaoDaGravacao ? <TranscricaoDuranteAGravacao key={reuniaoDaGravacao} meetingId={reuniaoDaGravacao} gravando comPergunta/> : null}
+      // G15b: a legenda ao vivo do navegador, que ouve só enquanto grava (a
+      // pausa e o aviso de hora a param; o microfone que cai a desliga). Uma
+      // por gravação (key): o aviso e a confirmação valem para esta. A key
+      // leva o prefixo porque a legenda e a transcrição da G15a são irmãs na
+      // mesma lista do gravador: com a mesma key, o React perdia uma das duas
+      // ao encerrar, e o reconhecimento seguia ouvindo depois da gravação.
+      legendaAoVivo={emPartes && reuniaoDaGravacao ? <LegendaAoVivo key={`legenda-${reuniaoDaGravacao}`} meetingId={reuniaoDaGravacao} idioma={idiomaFalado} ativa={gravador.estado === "gravando"} microfoneCaiu={semMicrofone}/> : null}
       // O documento (H12) enviado: a IA lê em segundo plano, e quem continua no
       // gravador vai ao detalhe, como no fim do envio do áudio.
       onDocumentSent={meetingId => {
@@ -915,7 +923,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; emPartes: boolean; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; capturedAudio: { url: string; durationSeconds: number } | null; onProcessCaptured: () => void; onDiscardCaptured: () => void; onDiscardRecording?: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode; legendaAoVivo?: React.ReactNode }) {
   const { t } = useTranslation();
   // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
   // fotos de um texto, com o aviso e a autorização do documento. O título e o
@@ -980,7 +988,10 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
           perder o lugar: no computador o cartão é centralizado na altura, e
           tirá-la deslocaria o "Encerrar gravação", que nasce no lugar do
           "Iniciar gravação". Na revisão do áudio ela sai. */}
-      {/* G15a: o texto das partes que a fila já transcreveu, enquanto grava. */}
+      {/* G15b: a legenda ao vivo do navegador, o rascunho imediato, logo abaixo
+          dos botões. G15a: o texto das partes que a fila já transcreveu (o que
+          fica na reunião), enquanto grava. */}
+      {props.recording && props.legendaAoVivo}
       {props.recording && props.transcricaoAoVivo}
       {!props.capturedAudio && <DicaDeInstalacao oculta={locked}/>}
     </div>

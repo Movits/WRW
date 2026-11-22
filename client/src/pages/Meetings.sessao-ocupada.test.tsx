@@ -6,6 +6,7 @@ import { PRAZO_DO_AVISO_DE_HORA_MS } from "@shared/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import { RetomadaDosDescartes } from "@/components/RetomadaDosDescartes";
+import { instalarReconhecimentoFalso } from "@/test/reconhecimento-falso";
 import Meetings from "./Meetings";
 
 /**
@@ -622,6 +623,58 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
     } finally {
       consulta.query = original;
     }
+  }, 20_000);
+
+  it("G15b: a legenda ao vivo do navegador aparece no gravador, acima da transcrição das partes; liga depois do aviso, pausa com a gravação e sai com o Encerrar", async () => {
+    const falso = instalarReconhecimentoFalso();
+    const ligar = vi.fn(async () => ({ success: true }));
+    const cliente = duble.utils.client.meetings as Record<string, unknown>;
+    cliente.ligarLegendaAoVivo = { mutate: ligar };
+    try {
+      abrirEmPartes();
+      preencher();
+      expect(screen.queryByRole("heading", { name: "Legenda ao vivo" })).not.toBeInTheDocument();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+      const legenda = await screen.findByRole("heading", { name: "Legenda ao vivo" });
+      const transcricao = await screen.findByRole("heading", { name: "Transcrição até agora" });
+      // As duas convivem: a legenda (o rascunho imediato) antes do texto das partes (o que fica na reunião).
+      expect(legenda.compareDocumentPosition(transcricao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Nada ouve antes do aviso e da confirmação.
+      expect(falso.criados).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
+      const aviso = await screen.findByRole("alertdialog");
+      fireEvent.click(within(aviso).getByRole("checkbox"));
+      await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ligar a legenda" })); });
+      expect(ligar).toHaveBeenCalledWith(expect.objectContaining({ meetingId: VINICOLA, concordanciaDasPessoas: true }));
+      expect(falso.atual()).toMatchObject({ lang: "pt-BR", emCurso: true });
+      falso.resultados(["Bom dia, Bia, vamos falar da feira."]);
+      expect(screen.getByText("Bom dia, Bia, vamos falar da feira.")).toBeInTheDocument();
+
+      // A pausa da gravação para a legenda (o áudio deixa de ir ao serviço do navegador), e o Continuar a religa.
+      fireEvent.click(screen.getByRole("button", { name: "Pausar" }));
+      expect(falso.atual().emCurso).toBe(false);
+      expect(screen.getByText(/Legenda pausada junto com a gravação/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Continuar gravando" }));
+      expect(falso.atual().emCurso).toBe(true);
+
+      // O Encerrar tira a legenda da tela e solta o reconhecimento: nada dela fica.
+      const ultimo = falso.atual();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Encerrar gravação/ })); });
+      expect(ultimo.chamadas.abort).toBe(1);
+      expect(screen.queryByText("Bom dia, Bia, vamos falar da feira.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Legenda ao vivo" })).not.toBeInTheDocument();
+    } finally {
+      delete cliente.ligarLegendaAoVivo;
+    }
+  }, 20_000);
+
+  it("G15b: onde o navegador não tem o reconhecimento de voz, o gravador não mostra a legenda, e a transcrição das partes segue", async () => {
+    abrirEmPartes();
+    preencher();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    expect(await screen.findByRole("heading", { name: "Transcrição até agora" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Legenda ao vivo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ligar a legenda" })).not.toBeInTheDocument();
   }, 20_000);
 });
 
