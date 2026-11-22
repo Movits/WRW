@@ -7,6 +7,7 @@ import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resu
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { FalhaDaIA } from "./ia-em-json";
 import { avisarReuniaoPronta } from "./lembretes";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
@@ -115,7 +116,11 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   }
 }
 
-/** O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta ativa. */
+/**
+ * O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta
+ * ativa. A reunião na lixeira (H7d) fica fora da fila: o resumo dela espera, e
+ * a fila o faz se a dona a restaurar.
+ */
 async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) {
   const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template, updatedAt: meetingSummaries.updatedAt })
     .from(meetingSummaries)
@@ -126,6 +131,7 @@ async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) 
       semReservaViva(agora),
       lt(meetingSummaries.attempts, TENTATIVAS_DO_RESUMO),
       eq(meetings.status, "ready"),
+      foraDaLixeira(),
       eq(users.isActive, true),
       escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
     ))

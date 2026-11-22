@@ -506,11 +506,12 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
       }
       if (/from `proximas_acoes`/.test(sql)) {
         // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, google (H5c),
-        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
+        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato,
+        // origemDoItem e itemEditadoEm (H4f), reuniaoNaLixeira (H7d: nula, a reunião fora da lixeira)
         return [
           ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", "ok", 300, 310,
-            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva"],
-          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva"],
+            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva", null, null, null],
+          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva", null, null, null],
         ];
       }
       return [];

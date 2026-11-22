@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   contexts,
   meetingAudioSlices,
@@ -49,6 +49,7 @@ import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import { nomesDosPonteiros } from "./detalhes-da-reuniao";
+import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
@@ -1318,7 +1319,8 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const db = await exigirDb();
   const [meeting] = await db.select().from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!meeting || reuniaoForaDeVista(meeting)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
   // A reunião que nasceu de um documento (H12) refaz a leitura pelo PDF
@@ -1346,12 +1348,12 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const tomada = await db.update(meetings).set({ status: "processing", processingError: null, updatedAt: ficha })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
-      eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+      eq(meetings.status, "failed"), eq(meetings.consentGranted, true), foraDaLixeira(),
     ));
   if (!linhasAfetadas(tomada)) {
     const [agora] = await db.select().from(meetings)
       .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-    if (!agora || agora.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (!agora || reuniaoForaDeVista(agora)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     throw recusaPeloStatus(agora) ?? new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
   }
 
@@ -1458,6 +1460,9 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // não os leva: ele escolhe as colunas dele (server/link-aberto-da-reuniao.ts).
   etiquetas: meetings.etiquetas,
   ondeFoi: meetings.ondeFoi,
+  // A pasta (H7d), só da dona: a lista filtra e agrupa por ela. O link aberto
+  // não a leva.
+  folderId: meetings.folderId,
 };
 
 /**
@@ -1473,7 +1478,7 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
   const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
   const db = await exigirDb();
   return db.transaction(async tx => {
-    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel());
     const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
     const nomes = nomesDosFalantes(reuniao.speakerNames);
@@ -1499,7 +1504,9 @@ export async function listPrivateMeetings(ownerId: string) {
     .from(meetings)
     .leftJoin(privateContacts, and(eq(privateContacts.id, meetings.contactId), eq(privateContacts.ownerId, meetings.ownerId)))
     .leftJoin(contexts, and(eq(contexts.id, meetings.contextId), or(eq(contexts.ownerId, meetings.ownerId), isNull(contexts.ownerId))))
-    .where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
+    // A reunião na lixeira (H7d) sai da lista: ela aparece só na lixeira da
+    // dona (listarLixeira, em server/lixeira-de-reunioes.ts).
+    .where(and(eq(meetings.ownerId, ownerId), foraDaLixeira())).orderBy(desc(meetings.createdAt));
   return lista.map(meeting => ({
     ...meeting, processingError: processingErrorSeguro(meeting.processingError), etiquetas: etiquetasDaReuniao(meeting.etiquetas),
   }));
@@ -2042,7 +2049,8 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // Da senha do link (H23) sai só se ela existe: o hash fica no servidor.
   const [linha] = await db.select({
     ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
-  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), foraDaLixeira())).limit(1);
+  // A reunião na lixeira (H7d) é "não encontrada", como a de outra conta.
   if (!linha) return null;
   const { sharePasswordHash, shareAudio, ...meeting } = linha;
   const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
@@ -2276,16 +2284,28 @@ export async function apagarDerivadosDoAlvoDaJuncao(tx: BancoOuTransacao, ownerI
   await apagarDerivadosSemGravacao(tx, ownerId, meetingId, false);
 }
 
-export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
+/**
+ * Quando a exclusão vem da lixeira (H7d, server/lixeira-de-reunioes.ts): o
+ * "Apagar de vez" só toma a reunião que continua na lixeira (`soDaLixeira`), e
+ * a varredura do fim dos 30 dias, só a que está lá desde antes do corte
+ * (`naLixeiraAte`). A reunião restaurada no meio fica, e a resposta é false.
+ */
+export type CondicaoDaExclusao = { soDaLixeira?: boolean; naLixeiraAte?: number };
+
+export async function deletePrivateMeeting(ownerId: string, meetingId: string, condicao: CondicaoDaExclusao = {}) {
   const db = await exigirDb();
   // 'deleted' ANTES de apagar, e não um SELECT de existência: é o sinal que
   // um processMeetingRecording em curso (1–2 min de Gemini e LLM) lê antes de
   // gravar, e que barra o UPDATE final dele para 'ready' — sem isto, a
   // transcrição e os contatos entravam depois da exclusão e ficavam órfãos,
   // com a voz e os dados das pessoas que a dona mandou apagar. Zero linhas:
-  // não existe ou não é dela.
+  // não existe, não é dela ou (vinda da lixeira) já não está lá.
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
+    .where(and(
+      eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
+      condicao.soDaLixeira ? isNotNull(meetings.trashedAt) : undefined,
+      condicao.naLixeiraAte !== undefined ? lte(meetings.trashedAt, condicao.naLixeiraAte) : undefined,
+    ));
   if (!linhasAfetadas(marcada)) return false;
   // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
   // dentro, antes do expurgo do bucket.

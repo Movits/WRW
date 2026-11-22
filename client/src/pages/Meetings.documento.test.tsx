@@ -47,7 +47,7 @@ const duble = vi.hoisted(() => {
     mapa: vi.fn(),
     painelDoEmail: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
@@ -75,6 +75,9 @@ vi.mock("@/lib/trpc", () => ({
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      mandarParaALixeira: duble.registrar("mandarParaALixeira"),
       reprocess: duble.registrar("reprocess"),
       // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),

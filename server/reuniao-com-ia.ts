@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { meetings, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista } from "./reuniao-visivel";
 import { FalhaDaIA, pedirJsonAIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
@@ -107,9 +108,10 @@ type TranscricaoDaReuniao = { texto: string; segmentos: Segmento[] };
  */
 async function transcricaoDaReuniaoPronta(ownerId: string, meetingId: string): Promise<TranscricaoDaReuniao> {
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao || reuniao.status === "deleted") throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   // Em processamento a transcrição é da tentativa anterior e está para ser trocada.
   if (reuniao.status !== "ready") throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
   const [transcricao] = await db.select({ transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments }).from(meetingTranscripts)
@@ -280,9 +282,9 @@ export async function perguntarDuranteAGravacao(
   antesDeChamarAIA?: (custo: { longa: boolean }) => void,
 ): Promise<RespostaDaReuniao> {
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao || reuniao.status === "deleted") throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   if (reuniao.status === "ready") return perguntarAReuniao(ownerId, meetingId, pergunta, idioma, antesDeChamarAIA);
   if (reuniao.audioPipeline !== "slices" || !reuniaoEmAndamento(reuniao.status)) throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
   const { texto, segmentos } = await transcricaoDasPartesProntas(db, ownerId, meetingId);

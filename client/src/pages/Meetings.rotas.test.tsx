@@ -44,7 +44,7 @@ const duble = vi.hoisted(() => {
     duracao: vi.fn(),
     resumoGuardado: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      meetings: { list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
       // A gravação em partes, o padrão desde a G13b: ao montar, a página retoma
@@ -87,6 +87,13 @@ vi.mock("@/lib/trpc", () => ({
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
       delete: duble.registrar("delete"),
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      mandarParaALixeira: duble.registrar("mandarParaALixeira"),
+      // A tela da lixeira (?lixeira=1), vazia: o que ela faz está em components/LixeiraDeReunioes.test.tsx.
+      lixeira: { useQuery: () => ({ data: [], isLoading: false, isError: false, error: null, refetch: () => undefined, dataUpdatedAt: 0 }) },
+      restaurarDaLixeira: duble.registrar("restaurarDaLixeira"),
+      apagarDeVez: duble.registrar("apagarDeVez"),
       reprocess: duble.registrar("reprocess"),
       // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
@@ -251,10 +258,22 @@ describe("Reuniões — a URL escolhe a tela", () => {
   it("ir de uma reunião direto a outra remonta o detalhe: nada da anterior fica aberto", () => {
     abrirEm(`/meetings/${VINICOLA}`);
     fireEvent.click(screen.getByRole("button", { name: /^Excluir$/ }));
-    expect(screen.getByText("Excluir esta reunião?")).toBeInTheDocument();
+    expect(screen.getByText("Mandar esta reunião para a lixeira?")).toBeInTheDocument();
     act(() => window.history.pushState(null, "", `/meetings/${BIA}`));
     expect(screen.getByText("Reunião com a Bia")).toBeInTheDocument();
-    expect(screen.queryByText("Excluir esta reunião?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mandar esta reunião para a lixeira?")).not.toBeInTheDocument();
+  });
+
+  it("a lixeira (H7d) é a lista com ?lixeira=1: abre a tela dela, e o voltar dela leva à lista", async () => {
+    abrirEm("/meetings");
+    fireEvent.click(screen.getByRole("button", { name: "Lixeira" }));
+    expect(window.location.pathname).toBe("/meetings");
+    expect(window.location.search).toBe("?lixeira=1");
+    expect(await screen.findByRole("heading", { name: "Lixeira" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Nova reunião/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Voltar às reuniões/ }));
+    expect(window.location.search).toBe("");
+    expect(await screen.findByRole("button", { name: /Nova reunião/ })).toBeInTheDocument();
   });
 });
 
@@ -968,25 +987,25 @@ describe("Reuniões — gravação em curso", () => {
 });
 
 describe("Reuniões — excluir, voltar à lista e link inválido", () => {
-  it("excluir volta à lista trocando o histórico: o voltar não reabre a reunião excluída", async () => {
+  it("mandar para a lixeira volta à lista trocando o histórico: o voltar não reabre a reunião que saiu", async () => {
     const trocar = vi.spyOn(window.history, "replaceState");
     abrirEm(`/meetings/${VINICOLA}`);
     trocar.mockClear();
     fireEvent.click(screen.getByRole("button", { name: /^Excluir$/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Excluir reunião" }));
-    expect(duble.mutacoes.delete.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA });
-    await act(async () => { await duble.mutacoes.delete.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
+    fireEvent.click(screen.getByRole("button", { name: "Mandar para a lixeira" }));
+    expect(duble.mutacoes.mandarParaALixeira.mutate).toHaveBeenCalledWith({ meetingIds: [VINICOLA] });
+    await act(async () => { await duble.mutacoes.mandarParaALixeira.opcoes.onSuccess?.({ naLixeira: 1, linksDesligados: 0 }, { meetingIds: [VINICOLA] }); });
     expect(window.location.pathname).toBe("/meetings");
     expect(trocar.mock.calls.some(chamada => chamada[2] === "/meetings")).toBe(true);
   });
 
-  it("a exclusão que termina depois de a pessoa sair do detalhe não a puxa de volta", async () => {
+  it("a ida para a lixeira que termina depois de a pessoa sair do detalhe não a puxa de volta", async () => {
     abrirEm(`/meetings/${VINICOLA}`);
     fireEvent.click(screen.getByRole("button", { name: /^Excluir$/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Excluir reunião" }));
-    const onSuccessDaExclusao = duble.mutacoes.delete.opcoes.onSuccess;
+    fireEvent.click(screen.getByRole("button", { name: "Mandar para a lixeira" }));
+    const aoTerminar = duble.mutacoes.mandarParaALixeira.opcoes.onSuccess;
     act(() => window.history.pushState(null, "", "/gravar"));
-    await act(async () => { await onSuccessDaExclusao?.({}, { meetingId: VINICOLA }); });
+    await act(async () => { await aoTerminar?.({ naLixeira: 1, linksDesligados: 0 }, { meetingIds: [VINICOLA] }); });
     expect(window.location.pathname).toBe("/gravar");
   });
 
@@ -1116,14 +1135,14 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
     expect(window.location.pathname).toBe("/memory");
   });
 
-  it("a exclusão que termina com o detalhe escondido (a dona foi a uma tela que ainda carrega) não a leva à lista", async () => {
+  it("a ida para a lixeira que termina com o detalhe escondido (a dona foi a uma tela que ainda carrega) não a leva à lista", async () => {
     abrirNoApp(`/meetings/${VINICOLA}`);
     fireEvent.click(screen.getByRole("button", { name: /^Excluir$/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Excluir reunião" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mandar para a lixeira" }));
     act(() => window.history.pushState(null, "", "/memory"));
     expect(screen.getByText("Carregando a tela…")).toBeInTheDocument();
     expect(screen.getByText("Reunião com a vinícola")).not.toBeVisible();
-    await act(async () => { await duble.mutacoes.delete.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
+    await act(async () => { await duble.mutacoes.mandarParaALixeira.opcoes.onSuccess?.({ naLixeira: 1, linksDesligados: 0 }, { meetingIds: [VINICOLA] }); });
     expect(window.location.pathname).toBe("/memory");
   });
 

@@ -9,6 +9,7 @@ import {
 import { partesParaBaixar } from "./audio-guardado-das-partes";
 import { ambienteDoFfmpeg, ehTrocaDeUsuarioRecusada, usuarioDoFfmpeg, type ParteDoAudio } from "./conversao-do-audio";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { MEETING_AUDIO_TTL_MS, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { storageGetBytes } from "./storage";
 
@@ -70,7 +71,7 @@ export async function prepararAudioDaReuniao(ownerId: string, meetingId: string,
       audioPipeline: meetings.audioPipeline,
       createdAt: meetings.createdAt,
     }).from(meetings)
-      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
       .limit(1);
     // Lançar aqui desfaz a transação: nada foi gravado ainda.
     if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });

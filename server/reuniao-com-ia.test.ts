@@ -69,6 +69,10 @@ const dialeto = new MySqlDialect();
 const soOPedido = (campos: Record<string, unknown>, linha: Record<string, unknown>) =>
   Object.fromEntries(Object.keys(campos).map(campo => [campo, linha[campo]]));
 
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => {
@@ -320,7 +324,8 @@ describe("o que vai à IA (H6): a transcrição rotulada inteira primeiro, a per
     expect(prompt).not.toContain("Glória");
     expect(prompt).not.toContain("Otávio");
     const daReuniao = banco.leituras.find(leitura => leitura.tabela === schema.meetings)!;
-    expect(daReuniao.campos).toEqual(["status"]);
+    // O status e a lixeira (H7d), nada dos nomes.
+    expect(daReuniao.campos).toEqual(["status", "trashedAt"]);
   });
 
   it("sem as falas (envio único), vai o texto corrido, sem rótulo, e a IA é avisada de que não há vozes", async () => {

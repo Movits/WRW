@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, count, eq, max, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
@@ -73,13 +74,13 @@ function temVersaoAnterior(linha: { status: string; version: number } | undefine
 const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
 /**
- * A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental
+ * A reunião da dona, não apagada e fora da lixeira (H7d), ou NOT_FOUND. O mapa mental
  * (server/mapa-mental-guardado.ts) usa a mesma. `travar`: numa transação, a
  * linha fica presa até o fim dela, e o estado lido é o mais novo.
  */
 export async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
   const consulta = db.select({ status: meetings.status, title: meetings.title }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).limit(1);
   const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   return reuniao;
@@ -253,11 +254,11 @@ async function itemParaDecidir(db: Executor, ownerId: string, itemId: string) {
   const [onde] = await db.select({ summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
     .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
   if (!onde) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, onde.meetingId), eq(meetings.ownerId, ownerId))).for("update");
   const [resumo] = await db.select({ status: meetingSummaries.status }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, onde.summaryId), eq(meetingSummaries.ownerId, ownerId))).for("update");
-  if (!reuniao || !resumo || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  if (!reuniao || !resumo || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   if (!foraDaFila(resumo.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   const [item] = await db.select({
     id: meetingSummaryItems.id,
@@ -433,9 +434,9 @@ type Transacao = Parameters<Parameters<Banco["transaction"]>[0]>[0];
  * junto o que ela gravou: nunca sobra item de reunião apagada.
  */
 async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: string, naoAchou: string) {
-  const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await tx.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-  if (!reuniao || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
   const [resumo] = await tx.select({ id: meetingSummaries.id, status: meetingSummaries.status, version: meetingSummaries.version }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1).for("update");
   const versaoNaTela = !!resumo && (resumo.status === "ready" || (resumo.status === "failed" && temVersaoAnterior(resumo)));

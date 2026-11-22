@@ -5,6 +5,7 @@ import { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslat
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import { conferirMapaMental, rotulosDoMapaMental } from "@shared/mapa-mental";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 
 /**
@@ -87,7 +88,7 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     mapa: meetingSummaries.mindMap,
   }).from(meetings)
     .leftJoin(meetingSummaries, and(eq(meetingSummaries.meetingId, meetings.id), eq(meetingSummaries.ownerId, meetings.ownerId)))
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .limit(1);
   if (!linha) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   // Em processamento, o resumo é da tentativa anterior e está para ser trocado:
