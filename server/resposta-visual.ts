@@ -20,19 +20,22 @@ import {
  * resposta em texto continua (o motivo vai ao log, sem o conteúdo).
  */
 
+// Só palavras de esquema que o pedido à IA já usa em produção (type, properties,
+// items, required, additionalProperties, enum e maxLength): uma palavra que o
+// endpoint recusasse derrubaria todo Pergunte, e não só o visual. Os limites de
+// colunas e linhas vão nas instruções, e o servidor os confere (visualConferido).
 export const SCHEMA_DO_VISUAL = {
   type: "object",
   properties: {
     tipo: { type: "string", enum: ["nenhum", ...TIPOS_DE_VISUAL] },
     titulo: { type: "string", maxLength: TITULO_DO_VISUAL_MAX },
     unidade: { type: "string", maxLength: UNIDADE_DO_VISUAL_MAX },
-    colunas: { type: "array", maxItems: COLUNAS_DO_VISUAL_MAX, items: { type: "string", maxLength: CABECALHO_DO_VISUAL_MAX } },
+    colunas: { type: "array", items: { type: "string", maxLength: CABECALHO_DO_VISUAL_MAX } },
     linhas: {
       type: "array",
-      maxItems: LINHAS_DO_VISUAL_MAX,
       items: {
         type: "object",
-        properties: { celulas: { type: "array", maxItems: COLUNAS_DO_VISUAL_MAX, items: { type: "string", maxLength: CELULA_DO_VISUAL_MAX } } },
+        properties: { celulas: { type: "array", items: { type: "string", maxLength: CELULA_DO_VISUAL_MAX } } },
         required: ["celulas"],
         additionalProperties: false,
       },

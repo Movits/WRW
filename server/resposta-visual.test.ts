@@ -56,11 +56,24 @@ describe("o texto do visual", () => {
 });
 
 describe("o esquema e as instruções", () => {
-  it("o esquema é fixo: tipo de uma lista, colunas e linhas de texto, com os limites", () => {
+  it("o esquema é fixo: tipo de uma lista, colunas e linhas de texto", () => {
     expect(SCHEMA_DO_VISUAL.properties.tipo.enum).toEqual(["nenhum", "tabela", "barras", "linhas"]);
     expect(SCHEMA_DO_VISUAL.required).toEqual(["tipo", "titulo", "unidade", "colunas", "linhas"]);
-    expect(SCHEMA_DO_VISUAL.properties.linhas.maxItems).toBe(LINHAS_DO_VISUAL_MAX);
     expect(SCHEMA_DO_VISUAL.additionalProperties).toBe(false);
+  });
+
+  it("o esquema só usa as palavras que o pedido à IA já usa em produção: uma recusada derrubaria todo Pergunte", () => {
+    const palavras = new Set<string>();
+    const percorrer = (no: unknown) => {
+      if (!no || typeof no !== "object" || Array.isArray(no)) return;
+      for (const [chave, valor] of Object.entries(no)) {
+        palavras.add(chave);
+        if (chave === "properties") for (const filho of Object.values(valor as object)) percorrer(filho);
+        else percorrer(valor);
+      }
+    };
+    percorrer(SCHEMA_DO_VISUAL);
+    expect([...palavras].sort()).toEqual(["additionalProperties", "enum", "items", "maxLength", "properties", "required", "type"]);
   });
 
   it("as instruções pedem o visual só quando a pergunta pede, sem HTML nem código, e dizem como pôr a voz", () => {
