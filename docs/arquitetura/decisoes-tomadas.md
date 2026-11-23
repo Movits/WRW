@@ -586,8 +586,12 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   dona.
 - **O resumo:** não se refaz sozinho (cada vez custa ~US$ 0,05 a 0,10 por hora de
   reunião). A tela avisa que o resumo, o mapa e o que o link mostra deles são da versão
-  anterior e oferece "Refazer o resumo", que refaz também o mapa. A fila descarta o resumo
-  e o mapa escritos sobre uma revisão anterior. As pendências de cargo e empresa da
+  anterior e oferece "Refazer o resumo", que refaz também o mapa. O resumo e o mapa que a
+  IA escreveu sobre uma revisão anterior (a dona editou durante a geração) são gravados
+  assim mesmo, com a hora de antes da edição, e a tela os mostra como de outra versão. Na
+  primeira versão a fila os descartava e refazia; a revisão do pacote mostrou que cada
+  edição durante a geração jogava fora uma chamada paga e começava outra, sem gastar
+  tentativa nem vaga do teto de IA, sem limite. As pendências de cargo e empresa da
   extração conferem nas duas versões: o que a IA ouviu e o que a dona corrigiu.
 - **O link aberto:** mostra a versão editada, com a frase "Transcrição revisada por quem
   gravou a reunião", e nunca o texto da IA. O trecho de um item do resumo que não está mais
@@ -601,11 +605,57 @@ gravado não se renomeia" no CLAUDE.md da raiz).
      correções não passam para a reunião juntada, e a tela avisa antes de juntar;
   5. o teto de 200 edições a cada 10 minutos;
   6. o trecho não fica vazio: para tirar uma fala inteira, a dona escreve, por exemplo,
-     "[removido]".
+     "[removido]";
+  7. o resumo e o mapa escritos durante uma edição ficam como de outra versão, e não são
+     refeitos sozinhos: o primeiro resumo pode sair com o nome antes da correção, e a dona
+     toca "Refazer o resumo" quando terminar de corrigir. O envio automático do resumo por
+     e-mail (H22), se ligado, sai com essa versão.
 - **Onde:** `server/editar-transcricao.ts`, `shared/editar-transcricao.ts` e
   `meetings.editarTranscricao` em `server/routers/meetings.ts`; na tela,
   `EditarTranscricao.tsx`, `FormularioDoTrecho.tsx` e `TranscricaoPorFalante.tsx`.
   Migração só aditiva: quatro colunas novas em `meeting_transcripts`.
+
+## 22/11/2026 — pastas e lixeira das reuniões, com exclusão adiada (H7d)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-67 do app de
+  referência da cliente: "Excluídas recentemente", com restaurar). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** pastas com nome, ícone e cor (listas fechadas), filtros por origem (Todas,
+  Gravadas, Importadas, YouTube e Pastas), seleção de várias reuniões para mover,
+  juntar (H17) e mandar para a lixeira. O "Excluir" da reunião manda para a lixeira; dentro
+  de 30 dias a dona restaura, e depois disso, ou no "Apagar de vez" e no "Esvaziar a
+  lixeira", a reunião sai pelo caminho de exclusão de sempre, com o áudio e os derivados.
+- **Regras:** a reunião na lixeira sai de toda consulta (a lista, a busca, a Memória, o
+  link aberto, as filas, as pendências, a agenda, o perfil do contato e cada procedimento
+  pelo id) e só aparece na lixeira da própria dona. Mandar para a lixeira desliga o link
+  aberto, com a senha, tira os avisos da reunião do sino e grava `MEETINGS_TRASHED`, na
+  mesma transação. A lixeira não muda o prazo do áudio (30 dias desde o envio). A gravação
+  em partes ainda no ar não vai para a lixeira.
+- **Revisão do pacote (22/11):** a parte da gravação que ficou no aparelho (o fim já
+  declarado, a reunião em `uploading`) era recusada com a reunião na lixeira, e a tela
+  apagava a única cópia: a reunião restaurada voltava com lacuna. Agora a rota das partes a
+  aceita, e ela espera com a reunião (a fila não a transcreve na lixeira). E o Excluir
+  imediato (`meetings.delete`, o do descarte da gravação) tira a reunião de vez também da
+  lixeira: o descarte pendente lia o "não encontrada" da lixeira como "já saiu", e a
+  gravação descartada ficava 30 dias restaurável.
+- **Vetáveis:**
+  1. o prazo de 30 dias na lixeira;
+  2. restaurar (e o "Desfazer" do aviso) não religa o link aberto: a dona liga de novo, e o
+     endereço é outro, então o link dos e-mails de resumo já mandados (H22) não volta a
+     abrir;
+  3. os avisos do sino que saíram não voltam ao restaurar;
+  4. a pendência, a gravação na agenda e o atalho da próxima ação somem enquanto a reunião
+     está na lixeira e voltam ao restaurar; a próxima ação fica, sem o atalho;
+  5. a reunião em processamento ou em `uploading` pode ir para a lixeira: o trabalho da
+     fila espera e volta ao restaurar; o que já estava na IA termina e fica guardado nela;
+  6. a parte atrasada da gravação já encerrada entra na reunião da lixeira (acima);
+  7. o Excluir imediato apaga também da lixeira, sem passar por ela;
+  8. até 50 pastas por dona, e uma pasta por reunião.
+- **Onde:** `server/lixeira-de-reunioes.ts`, `server/guarda-da-lixeira.ts`,
+  `server/reuniao-visivel.ts`, `server/pastas-de-reunioes.ts`, `shared/lixeira-de-reunioes.ts`
+  e `shared/pastas-de-reunioes.ts`; na tela, `ListaDeReunioes.tsx`, `PastasDeReunioes.tsx` e
+  `LixeiraDeReunioes.tsx`. Migração só aditiva (`meeting_folders`, `meetings.folder_id` e
+  `meetings.trashed_at`, na 0025 do pacote).
 
 ---
 

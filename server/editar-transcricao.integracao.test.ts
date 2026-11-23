@@ -408,26 +408,48 @@ describe.skipIf(!temBanco)("Editar a transcrição (integração)", () => {
     expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(false);
   });
 
-  it("a edição no meio da geração do resumo: o resumo da versão anterior não é gravado e volta à fila para a nova", async () => {
+  it("a edição no meio da geração do resumo: o resumo da versão anterior é gravado como de outra versão, e a fila não o refaz sozinha", async () => {
     const alvo = await reuniaoPronta();
     const banco = await db();
     await banco.insert(meetingSummaries).values({ id: crypto.randomUUID(), meetingId: alvo.meetingId, ownerId: DONA, transcriptId: alvo.transcricaoId, status: "pending", createdAt: AGORA(), updatedAt: AGORA() });
+    // A dona corrige um nome enquanto o primeiro resumo é escrito (o caso
+    // típico da H18), e depois outro, durante a geração do mapa.
     gerarResumoDaReuniao.mockImplementationOnce(async () => {
       await editar(alvo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glenda" });
-      return { emoji: null, titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 };
+      return { emoji: "☕", titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 };
     });
-    gerarResumoDaReuniao.mockResolvedValue({ emoji: "☕", titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 });
-    gerarMapaMental.mockResolvedValue({ ramos: [{ rotulo: "Glenda", folhas: [] }, { rotulo: "Proposta", folhas: [] }] });
+    gerarResumoDaReuniao.mockRejectedValue(new Error("a fila não pode refazer o resumo sozinha"));
+    gerarMapaMental.mockImplementationOnce(async () => {
+      await editar(alvo, 1, { tipo: "substituir", localizar: "Glenda", substituirPor: "Glenda Maria" });
+      return { ramos: [{ rotulo: "Glenda", folhas: [] }, { rotulo: "Proposta", folhas: [] }] };
+    });
+    gerarMapaMental.mockRejectedValue(new Error("a fila não pode refazer o mapa sozinha"));
 
     await fila.rodarUmaVez({ ownerId: DONA });
-    const [depois] = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, alvo.meetingId));
-    expect(depois).toMatchObject({ status: "pending", version: 0, lockToken: null, attempts: 0 });
-
-    await fila.rodarUmaVez({ ownerId: DONA });
-    expect(gerarResumoDaReuniao).toHaveBeenCalledTimes(2);
-    expect(gerarResumoDaReuniao.mock.calls[1][0].transcricao).toContain("Glenda");
+    // O que a IA já escreveu (e custou) fica, com a hora de antes da edição: o
+    // resumo e o mapa são de outra versão, e a tela oferece "Refazer o resumo".
     const [gravado] = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, alvo.meetingId));
-    expect(gravado).toMatchObject({ status: "ready", version: 1, emoji: "☕" });
+    expect(gravado).toMatchObject({ status: "ready", version: 1, emoji: "☕", lockToken: null, lockedUntil: null, mindMapStatus: "ready" });
+    const [transcricao] = await banco.select({ editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, alvo.meetingId));
+    expect(Number(gravado.generatedAt)).toBeLessThan(Number(transcricao.editadaEm));
+    expect(Number(gravado.mindMapGeneratedAt)).toBeLessThan(Number(transcricao.editadaEm));
+    expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(true);
+
+    // Nada volta à fila sozinho: sem o "Refazer", nenhuma chamada a mais à IA.
+    await fila.rodarUmaVez({ ownerId: DONA });
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect(gerarResumoDaReuniao).toHaveBeenCalledTimes(1);
+    expect(gerarMapaMental).toHaveBeenCalledTimes(1);
+
+    // O "Refazer o resumo" (uma vaga do teto) lê a versão de agora e refaz o mapa também.
+    gerarResumoDaReuniao.mockResolvedValue({ emoji: "🍵", titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 });
+    gerarMapaMental.mockResolvedValue({ ramos: [{ rotulo: "Glenda Maria", folhas: [] }, { rotulo: "Proposta", folhas: [] }] });
+    await daDona().meetings.refazerResumo({ meetingId: alvo.meetingId, modelo: "general" });
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect(gerarResumoDaReuniao.mock.calls[1][0].transcricao).toContain("Glenda Maria");
+    expect(gerarMapaMental).toHaveBeenCalledTimes(2);
+    const [refeito] = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, alvo.meetingId));
+    expect(refeito).toMatchObject({ status: "ready", version: 2, emoji: "🍵", mindMapStatus: "ready" });
     expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(false);
   });
 

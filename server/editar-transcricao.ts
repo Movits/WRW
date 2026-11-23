@@ -27,9 +27,10 @@ import { reuniaoVisivel } from "./reuniao-visivel";
  *   server/network-extracao.ts), ao "Voltar ao original" e à prova do que
  *   mudou. Só a dona os lê: o link aberto nunca os seleciona;
  * - `edited_at` e `revision` dizem quando e quantas vezes a transcrição mudou.
- *   A fila do resumo descarta o resumo e o mapa escritos sobre uma revisão
- *   anterior (server/fila-do-resumo.ts), e a tradução não guarda a de outra
- *   revisão (server/meeting-service.ts).
+ *   A fila do resumo grava o resumo e o mapa escritos sobre uma revisão
+ *   anterior com a hora de antes da edição, como de outra versão, sem
+ *   refazê-los sozinha (horaDaVersao, em server/fila-do-resumo.ts), e a
+ *   tradução não guarda a de outra revisão (server/meeting-service.ts).
  *
  * Cada mudança é uma transação: a reunião travada antes da transcrição (a
  * ordem da fila do resumo, que grava o resumo travando a reunião primeiro), a
