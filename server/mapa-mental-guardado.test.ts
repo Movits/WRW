@@ -120,9 +120,23 @@ describe("ler o mapa", () => {
     expect((await mapaMentalDaDona("dona-1", ID)).estado).toBe("falhou");
   });
 
-  it("fora de 'pronto', a árvore não sai, mesmo se a coluna tiver uma", async () => {
-    estado.linha = linha({ mindMapStatus: "pending", mindMap: MAPA });
+  it("fora de 'pronto', sem mapa guardado, a árvore não sai", async () => {
+    estado.linha = linha({ mindMapStatus: "pending", mindMap: null });
     expect(await mapaMentalDaDona("dona-1", ID)).toEqual({ estado: "pendente", idioma: "pt-BR", erro: null, mapa: null, versaoAnterior: false });
+  });
+
+  it("H10b: com mapa guardado e o estado na fila ou falho (o refazer em outro estilo), o de antes segue à vista; o editado vale mais; o link não recebe a edição", async () => {
+    estado.linha = { ...linha({ mindMapStatus: "pending", mindMap: MAPA }), mindMapStyle: "timeline", mindMapRevision: 3 };
+    expect(await mapaMentalDaDona("dona-1", ID)).toEqual({
+      estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false, estilo: "timeline",
+      edicao: { revisao: 3, editado: false, editadoEm: null, refazendo: true, erroDoRefazer: null },
+    });
+    const EDITADO = { ramos: [MAPA.ramos[1], MAPA.ramos[0]] };
+    estado.linha = { ...linha({ mindMapStatus: "failed", mindMapError: "IA_INDISPONIVEL", mindMap: MAPA }), mindMapEdited: EDITADO, mindMapEditedAt: 99, mindMapRevision: 4 };
+    expect(await mapaMentalDaDona("dona-1", ID)).toMatchObject({
+      estado: "pronto", mapa: EDITADO, edicao: { revisao: 4, editado: true, editadoEm: 99, refazendo: false, erroDoRefazer: "IA_INDISPONIVEL" },
+    });
+    expect(await mapaMentalPeloLink("t".repeat(32))).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: EDITADO, versaoAnterior: false });
   });
 
   it("enquanto o resumo é refeito (H4d), e se o refazer falhar, o mapa pronto sai para a dona e para o link", async () => {

@@ -3,7 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations } from "../drizzle/schema";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
-import { conferirMapaMental, rotulosDoMapaMental } from "@shared/mapa-mental";
+import { rotulosDoMapaMental } from "@shared/mapa-mental";
+import { mapaQueVale } from "@shared/mapa-mental-edicao";
 import { exigirDb } from "./db";
 import { reuniaoVisivel } from "./reuniao-visivel";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
@@ -64,9 +65,12 @@ function versaoNaTela(status: string | null, versao: number | null): "pronta" | 
  * pronto, não há rótulo a traduzir; o mapa que fica pronto depois pede a
  * tradução de novo pela tela, e o servidor traduz só os rótulos que faltam.
  */
-function rotulosDoMapa(status: string | null, bruto: unknown): string[] {
-  if (status !== "ready") return [];
-  const mapa = conferirMapaMental(bruto);
+function rotulosDoMapa(status: string | null, bruto: unknown, editado: unknown): string[] {
+  // H10b: o mapa que vale, o editado pela dona antes do da IA. Com o mapa
+  // sendo refeito em outro estilo (o estado fora de "pronto"), o de antes
+  // segue à vista e é traduzido; sem mapa guardado, não há o que traduzir.
+  if (status !== "ready" && bruto == null && editado == null) return [];
+  const mapa = mapaQueVale({ mindMap: bruto, mindMapEdited: editado });
   return mapa ? rotulosDoMapaMental(mapa) : [];
 }
 
@@ -86,6 +90,7 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     idiomaDoResumo: meetingSummaries.language,
     statusDoMapa: meetingSummaries.mindMapStatus,
     mapa: meetingSummaries.mindMap,
+    mapaEditado: meetingSummaries.mindMapEdited,
   }).from(meetings)
     .leftJoin(meetingSummaries, and(eq(meetingSummaries.meetingId, meetings.id), eq(meetingSummaries.ownerId, meetings.ownerId)))
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
@@ -131,7 +136,7 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     versao: linha.versao,
     idiomaOriginal,
     itens,
-    rotulosDoMapa: rotulosDoMapa(linha.statusDoMapa, linha.mapa),
+    rotulosDoMapa: rotulosDoMapa(linha.statusDoMapa, linha.mapa, linha.mapaEditado),
     guardado: valeAinda ? guardada.content : null,
     soGuardada: naTela === "so_guardada",
   };

@@ -97,8 +97,14 @@ describe("ler o resumo para traduzir", () => {
     expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", rotulosDoMapa: ["Exportação", "Contêiner", "12 de março", "Feiras"] });
     const [reuniao] = consultasCom("from `meetings` left join");
     expect(reuniao.sql).toContain("`meeting_summaries`.`mind_map_status`");
-    // O mapa na fila, o que falhou e o que a conferência não aceita mais: nada a traduzir.
-    for (const [status, mapa] of [["pending", MAPA], ["failed", MAPA], [null, null], ["ready", { ramos: [{ rotulo: "Só um", folhas: [] }] }]]) {
+    // H10b: o mapa guardado com o estado na fila ou falho é o de antes de um
+    // "Refazer em outro estilo", que segue à vista: os rótulos dele vão.
+    for (const status of ["pending", "failed"]) {
+      banco.reuniao = ["ready", "resumo-1", "ready", 3, "pt-BR", status, JSON.stringify(MAPA)];
+      expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", rotulosDoMapa: ["Exportação", "Contêiner", "12 de março", "Feiras"] });
+    }
+    // O mapa na fila sem mapa guardado, o sem mapa e o que a conferência não aceita mais: nada a traduzir.
+    for (const [status, mapa] of [["pending", null], ["failed", null], [null, null], ["ready", { ramos: [{ rotulo: "Só um", folhas: [] }] }]]) {
       banco.reuniao = ["ready", "resumo-1", "ready", 3, "pt-BR", status, mapa === null ? null : JSON.stringify(mapa)];
       expect(await lerResumoParaTraduzir("dona-1", "reuniao-1", "en")).toMatchObject({ estado: "pronto", rotulosDoMapa: [] });
     }

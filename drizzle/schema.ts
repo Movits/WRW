@@ -1514,6 +1514,21 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   // Muda o ajuste dela (preferencias_do_resumo.length_adjust), que vale para
   // os próximos resumos. O refazer a zera: a versão nova é outra.
   lengthFeedback: varchar("length_feedback", { length: 8, enum: ["short", "right", "long"] }),
+  // O mapa que a dona editou (H10b; HN-40 do app de referência da cliente):
+  // ramos renomeados, arrastados, acrescentados ou apagados. A versão da IA
+  // continua em `mind_map`, como a transcrição da IA fica em
+  // `original_transcript` na H18; a tela e o link mostram esta quando existe.
+  // Passa pela mesma conferência (shared/mapa-mental-edicao.ts). Nulo: o mapa
+  // está como a IA o escreveu.
+  mindMapEdited: jsonCompat("mind_map_edited"),
+  mindMapEditedAt: bigint("mind_map_edited_at", { mode: "number" }),
+  // Sobe a cada mudança no mapa (editar, voltar ao da IA, refazer, o mapa novo
+  // que a fila grava): a tela manda a revisão que viu, e a mudança de outra
+  // aba é recusada em vez de desfeita em silêncio.
+  mindMapRevision: int("mind_map_revision").default(0).notNull(),
+  // O estilo do mapa (H10b): o que a dona pediu no "Refazer em outro estilo",
+  // que a IA segue e a tela desenha. Nulo: a visão geral da H10.
+  mindMapStyle: varchar("mind_map_style", { length: 16, enum: ["overview", "hierarchical", "timeline", "concept"] }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

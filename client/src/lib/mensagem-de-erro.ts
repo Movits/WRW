@@ -27,6 +27,7 @@ import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
 import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { RECUSAS_DOS_MODELOS } from "@shared/modelos-de-resumo";
+import { RECUSAS_DO_MAPA } from "@shared/mapa-mental-edicao";
 import {
   MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
   MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
@@ -160,6 +161,17 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DOS_MODELOS.nomeRepetido]: "meetings.summary.myTemplates.errorRepeated",
   [RECUSAS_DOS_MODELOS.refazeresDemais]: "meetings.summary.errorRedoTooMany",
   [RECUSAS_DOS_MODELOS.pedidoForaDeHora]: "meetings.summary.errorLate",
+  // O mapa mental editável (H10b, server/mapa-mental-edicao.ts e os tetos em routers/meetings.ts).
+  [RECUSAS_DO_MAPA.mudou]: "meetings.mindMap.edit.errorChanged",
+  [RECUSAS_DO_MAPA.semMapa]: "meetings.mindMap.edit.errorNoMap",
+  [RECUSAS_DO_MAPA.refazendo]: "meetings.mindMap.edit.errorRedoing",
+  [RECUSAS_DO_MAPA.poucosRamos]: "meetings.mindMap.edit.errorFewBranches",
+  [RECUSAS_DO_MAPA.grande]: "meetings.mindMap.edit.errorTooBig",
+  [RECUSAS_DO_MAPA.rotulo]: "meetings.mindMap.edit.errorLabel",
+  [RECUSAS_DO_MAPA.repetido]: "meetings.mindMap.edit.errorRepeated",
+  [RECUSAS_DO_MAPA.forma]: "meetings.mindMap.edit.errorShape",
+  [RECUSAS_DO_MAPA.edicoesDemais]: "meetings.mindMap.edit.errorTooManyEdits",
+  [RECUSAS_DO_MAPA.refazeresDemais]: "meetings.mindMap.edit.errorTooManyRedos",
 };
 
 /**

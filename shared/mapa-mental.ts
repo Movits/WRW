@@ -62,7 +62,7 @@ export function rotuloDoMapa(valor: unknown): string | null {
 }
 
 /** Para achar irmãos repetidos: sem acento na letra latina, sem caixa e sem pontuação. */
-function chaveDoRotulo(rotulo: string): string {
+export function chaveDoRotulo(rotulo: string): string {
   return (rotulo.normalize("NFD").replace(SINAIS_DA_LETRA_LATINA, "$1").toLowerCase().match(PALAVRA_DA_CHAVE) ?? []).join(" ");
 }
 

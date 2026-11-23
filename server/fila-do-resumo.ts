@@ -398,7 +398,7 @@ async function gravarResumo(
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
     const [ainda] = await tx.select({
       id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap,
-      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt,
+      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt, mindMapEdited: meetingSummaries.mindMapEdited,
       suggestedTitle: meetingSummaries.suggestedTitle, suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
     }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
@@ -482,8 +482,11 @@ async function gravarResumo(
       // e com as tentativas dele. O mapa pronto que ainda passa na conferência
       // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
       // que ele saiu. O mapa gravado antes de a dona editar a transcrição
-      // (H18) é de outra versão, e é refeito com o resumo.
-      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm)
+      // (H18) é de outra versão, e é refeito com o resumo. O mapa que a dona
+      // editou (H10b) fica como está, em qualquer estado: refazê-lo sozinho
+      // apagaria o trabalho dela, e ela pode pedir o "Refazer pela IA".
+      ...(conferirMapaMental(ainda.mindMapEdited)
+        || (ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm))
         ? {}
         : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
       attempts: 0,
@@ -510,10 +513,15 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
   const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O estilo que a dona pediu no "Refazer em outro estilo" (H10b); nulo é a
+  // visão geral da H10, e o pedido vai como sempre foi.
+  const [daLinha] = await db.select({ estilo: meetingSummaries.mindMapStyle }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.ownerId, alvo.ownerId))).limit(1);
+  const estilo = daLinha?.estilo ?? null;
 
   let mapa: MapaMental | null;
   try {
-    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma });
+    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma, ...(estilo ? { estilo } : {}) });
   } catch (erro) {
     const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
     console.error(`[Mapa] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
@@ -568,6 +576,11 @@ async function gravarMapa(
     const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     const r = await tx.update(meetingSummaries).set({
       mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: geradoEm, mindMapError: null,
+      // H10b: o mapa novo da IA é o que a dona pediu (o primeiro, o que tinha
+      // falhado ou o "Refazer em outro estilo", que ela confirmou sabendo que
+      // a edição sai). A edição de antes não vale sobre ele, e a revisão sobe:
+      // a aba que ainda edita o mapa velho é recusada.
+      mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: sql`${meetingSummaries.mindMapRevision} + 1`,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";

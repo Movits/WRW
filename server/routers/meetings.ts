@@ -58,6 +58,10 @@ import {
   refazeresQueRestam, responderTamanhoDoResumo,
 } from "../modelos-proprios";
 import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
+import { mudarMapaDaDona, RecusaDoMapa, refazerMapaNoEstilo } from "../mapa-mental-edicao";
+import {
+  EDICOES_DO_MAPA_POR_JANELA, ESTILOS_DO_MAPA, JANELA_DA_EDICAO_DO_MAPA_MS, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA, REFAZERES_DO_MAPA_POR_JANELA,
+} from "@shared/mapa-mental-edicao";
 import { traduzirResumoDaDona } from "../traducao-do-resumo";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
@@ -303,6 +307,33 @@ const dadosDoModeloNaEntrada = z.object({
 });
 
 export const tetoDaEdicao = criarTeto(EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, RECUSAS_DA_EDICAO.demais);
+
+// O mapa mental editável (H10b): o teto das edições (cada uma regrava o mapa e
+// uma linha de auditoria) e o de custo do "Refazer em outro estilo" (cada um
+// manda a transcrição inteira à IA), este além do teto comum de pedidos à IA.
+export const tetoDaEdicaoDoMapa = criarTeto(EDICOES_DO_MAPA_POR_JANELA, JANELA_DA_EDICAO_DO_MAPA_MS, RECUSAS_DO_MAPA.edicoesDemais);
+export const tetoDoRefazerDoMapa = criarTeto(REFAZERES_DO_MAPA_POR_JANELA, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA.refazeresDemais);
+
+// A forma do mapa que a dona salva: o zod barra só o tamanho do pedido, com
+// folga; as quantidades e os rótulos são conferidos com o código traduzível
+// em conferirMapaEditado (shared/mapa-mental-edicao.ts).
+const rotuloDoMapaNoPedido = z.string().max(400);
+const mapaNoPedido = z.object({
+  ramos: z.array(z.object({
+    rotulo: rotuloDoMapaNoPedido,
+    folhas: z.array(z.object({ rotulo: rotuloDoMapaNoPedido, filhos: z.array(rotuloDoMapaNoPedido).max(20) })).max(40),
+  })).max(40),
+});
+
+/** A recusa do mapa vira o erro do tRPC com o código que a tela traduz. */
+async function comRecusaDoMapa<T>(fazer: () => Promise<T>): Promise<T> {
+  try {
+    return await fazer();
+  } catch (erro) {
+    if (erro instanceof RecusaDoMapa) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -689,6 +720,49 @@ export const meetingsRouter = router({
   pedirMapa: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(({ ctx, input }) => pedirMapaDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // H10b: a dona salva o mapa que editou (renomeou, arrastou, acrescentou ou
+  // apagou ramos), ou volta ao da IA. Sem IA; a revisão que a tela viu vai
+  // junto, e a de outra aba é recusada (server/mapa-mental-edicao.ts).
+  editarMapa: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      revisao: z.number().int().min(0),
+      operacao: z.discriminatedUnion("tipo", [
+        z.object({ tipo: z.literal("salvar"), mapa: mapaNoPedido }),
+        z.object({ tipo: z.literal("voltar") }),
+      ]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaEdicaoDoMapa.reservar(ctx.user.openId);
+      try {
+        const feito = await comRecusaDoMapa(() => mudarMapaDaDona(ctx.user.openId, input.meetingId,
+          input.operacao.tipo === "salvar" ? { tipo: "salvar", revisao: input.revisao, mapa: input.operacao.mapa } : { tipo: "voltar", revisao: input.revisao },
+          { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] }));
+        if (!feito.mudou) soltarVaga();
+        return feito;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H10b: "Refazer em outro estilo". O mapa volta à fila no estilo pedido, com
+  // o de agora à vista até o novo chegar. Gasta uma vaga do teto comum de
+  // pedidos à IA e uma do teto do refazer; o pedido recusado devolve as duas.
+  refazerMapa: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), revisao: z.number().int().min(0), estilo: z.enum(ESTILOS_DO_MAPA) }))
+    .mutation(({ ctx, input }) => comRecusaDoMapa(() => refazerMapaNoEstilo(ctx.user.openId, input.meetingId,
+      { revisao: input.revisao, estilo: input.estilo },
+      { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+      () => {
+        // Confere os dois antes de gastar: a recusa de um não deixa a vaga do outro gasta.
+        tetoDoRefazerDoMapa.conferir(ctx.user.openId);
+        tetoDaIADaReuniao.conferir(ctx.user.openId);
+        const soltarRefazer = tetoDoRefazerDoMapa.reservar(ctx.user.openId);
+        const soltarIA = tetoDaIADaReuniao.reservar(ctx.user.openId);
+        return () => { soltarRefazer(); soltarIA(); };
+      }))),
 
   // Desconfirmar apaga a próxima ação do item (H5a), e o evento dela sai da
   // Google Agenda depois (H5c, server/acoes-na-google.ts): o token vem antes da

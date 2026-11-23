@@ -195,6 +195,23 @@ describe("o que vai à IA", () => {
     expect(comFuncao.raciocinio).toBeUndefined();
   });
 
+  it("H10b: o estilo pedido entra no prompt com a forma de organizar; a visão geral não acrescenta nada", async () => {
+    invokeLLM.mockResolvedValue(resposta(MAPA));
+    await gerarMapaMental({ transcricao: TRANSCRICAO, idioma: "pt-BR" });
+    const semEstilo = pedido().messages[0].content as string;
+    invokeLLM.mockClear();
+    await gerarMapaMental({ transcricao: TRANSCRICAO, idioma: "pt-BR", estilo: "overview" });
+    expect(pedido().messages[0].content).toBe(semEstilo);
+    for (const [estilo, marca] of [["hierarchical", "Estilo HIERÁRQUICO"], ["timeline", "Estilo LINHA DO TEMPO"], ["concept", "Estilo CONCEITO"]] as const) {
+      invokeLLM.mockClear();
+      await gerarMapaMental({ transcricao: TRANSCRICAO, idioma: "pt-BR", estilo });
+      const sistema = pedido().messages[0].content as string;
+      expect(sistema).toContain(marca);
+      expect(sistema).toContain("Não use rótulos de voz");
+      expect(semEstilo).not.toContain(marca);
+    }
+  });
+
   it("devolve o mapa conferido: o rótulo de voz que a IA escreveu não chega à tela", async () => {
     invokeLLM.mockResolvedValue(resposta({ ramos: [...MAPA.ramos, ramo("{F3} e a feira", ["Colônia"])] }));
     expect(await gerarMapaMental({ transcricao: TRANSCRICAO, idioma: "pt-BR" })).toEqual(MAPA);
