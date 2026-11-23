@@ -442,6 +442,18 @@ transcrição, no resumo e na tradução dele (`trechosNaTranscricaoDeAgora`: le
 item pelo link passa por ele). A junção (H17) remonta a transcrição pelo áudio: as
 correções não passam, e a tela avisa.
 
+## O mapa mental editável (H10b)
+
+`server/mapa-mental-edicao.ts` e `shared/mapa-mental-edicao.ts`: a dona renomeia, arrasta,
+acrescenta e apaga ramos, volta ao mapa da IA e pede "Refazer em outro estilo" (visão
+geral, hierárquico, linha do tempo, conceito). O mapa da IA fica em `mind_map` (só a fila
+grava); o da dona em `mind_map_edited`, e a tela, o link e a tradução leem o que vale
+(`mapaQueVale`). A edição confere as regras da H10 sem podar (código traduzido), confere a
+`mind_map_revision` e grava `MEETING_MIND_MAP_EDITED` na transação, sem rótulos. O refazer
+põe o mapa na fila no estilo (`mind_map_style`), com o de antes à vista até o novo chegar, e
+gasta uma vaga do teto comum de IA e uma do teto do refazer (6 por hora); o mapa novo da
+fila substitui a edição. O resumo refeito não refaz sozinho o mapa que a dona editou.
+
 ## O Pergunte a várias reuniões e a resposta visual (H6c e H6d)
 
 - **Várias reuniões** (`server/perguntar-a-varias-reunioes.ts`, router `perguntasEntreReunioes`):

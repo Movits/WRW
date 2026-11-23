@@ -132,8 +132,10 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const enviado = enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido);
     expect(enviado.itens).toEqual([]);
     expect(enviado.rotulos.map(r => r.rotulo).sort()).toEqual(["Contrato", "Lojas", "Transportadora"]);
-    // O mapa ainda na fila não manda rótulo nenhum.
-    await (await db()).update(meetingSummaries).set({ mindMapStatus: "pending" }).where(eq(meetingSummaries.meetingId, meetingId));
+    // O mapa ainda na fila, sem mapa guardado, não manda rótulo nenhum. (Com um
+    // mapa guardado, a fila está refazendo em outro estilo, H10b: o de antes
+    // segue à vista e é traduzido, em server/mapa-mental-edicao.integracao.test.ts.)
+    await (await db()).update(meetingSummaries).set({ mindMapStatus: "pending", mindMap: null }).where(eq(meetingSummaries.meetingId, meetingId));
     pedirJsonAIA.mockClear();
     await traducao.traduzirResumoDaDona(DONA, meetingId, "es");
     expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).rotulos).toEqual([]);
