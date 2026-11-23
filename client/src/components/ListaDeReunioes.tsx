@@ -219,7 +219,14 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
   }, [reunioes, i18n.language]);
   const noServidor = termoProntoParaOServidor(termoParado) && termoParado === termo.trim();
   const pastaAberta = pastaId ? pastaPorId.get(pastaId) ?? null : null;
-  const reunioesEscolhidas = reunioes.filter(reuniao => escolhidas.includes(reuniao.id));
+  // As ações da seleção (mover, juntar, mandar para a lixeira) valem só para as
+  // escolhidas que estão na tela agora: a vista, a pasta aberta, a busca e os
+  // filtros. A escolhida que a busca escondeu não vai junto sem a dona ver, e
+  // a contagem diz só as que vão. Com as pastas na tela (e não as reuniões),
+  // nenhuma.
+  const naTela = mostraAsPastas ? [] : filtradas;
+  const reunioesEscolhidas = naTela.filter(reuniao => escolhidas.includes(reuniao.id));
+  const idsEscolhidos = reunioesEscolhidas.map(reuniao => reuniao.id);
   const juntaveis = reunioesEscolhidas.length >= 2 && reunioesEscolhidas.every(podeJuntar);
   const vaoParaALixeira = reunioesEscolhidas.length >= 1 && reunioesEscolhidas.every(podeIrParaALixeira);
 
@@ -230,9 +237,13 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
   };
   const alternarEscolha = (id: string) => setEscolhidas(atuais => atuais.includes(id) ? atuais.filter(atual => atual !== id) : [...atuais, id]);
   const sairDaEscolha = () => { setEscolhendo(false); setEscolhidas([]); setConfirmando(null); };
-  const todasEscolhidas = filtradas.length > 0 && filtradas.every(reuniao => escolhidas.includes(reuniao.id));
-  const escolherTodas = () => setEscolhidas(todasEscolhidas ? [] : filtradas.map(reuniao => reuniao.id));
-  const mudarDeVista = (nova: VistaDaLista) => { setVista(nova); setPastaId(null); };
+  const todasEscolhidas = naTela.length > 0 && naTela.every(reuniao => escolhidas.includes(reuniao.id));
+  const escolherTodas = () => setEscolhidas(todasEscolhidas ? [] : naTela.map(reuniao => reuniao.id));
+  // Trocar de vista ou de pasta começa a seleção do zero: a dona que marcou
+  // reuniões em "Todas" e abriu uma pasta mandaria para a lixeira (ou moveria)
+  // também as que não vê.
+  const abrirPasta = (id: string | null) => { setPastaId(id); setEscolhidas([]); };
+  const mudarDeVista = (nova: VistaDaLista) => { setVista(nova); abrirPasta(null); };
 
   /**
    * Manda as escolhidas para a lixeira, em lotes do tamanho que o servidor
@@ -241,7 +252,7 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
    * lote dela, com o aviso traduzido.
    */
   const mandarParaALixeira = async () => {
-    const ids = [...escolhidas];
+    const ids = [...idsEscolhidos];
     setMandando(true);
     const enviadas: string[] = [];
     try {
@@ -374,38 +385,38 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-white/80">
             <div>
               <p>{t("meetings.select.hint")}</p>
-              <p className="mt-1 text-xs text-white/50">{t("meetings.select.selected", { n: escolhidas.length })}</p>
+              <p className="mt-1 text-xs text-white/50">{t("meetings.select.selected", { n: reunioesEscolhidas.length })}</p>
             </div>
-            <button type="button" onClick={escolherTodas} disabled={!filtradas.length}
+            <button type="button" onClick={escolherTodas} disabled={!naTela.length}
               className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/5 disabled:opacity-40">
               {todasEscolhidas ? t("meetings.select.none") : t("meetings.select.all")}
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!escolhidas.length} onClick={() => setConfirmando("mover")}
+            <button type="button" disabled={!reunioesEscolhidas.length} onClick={() => setConfirmando("mover")}
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-sm text-white/80 hover:bg-white/5 disabled:opacity-40">
               <FolderInput size={15} aria-hidden="true" />{t("meetings.select.move")}
             </button>
             <button type="button" disabled={!juntaveis} onClick={() => setConfirmando("juntar")}
-              aria-describedby={escolhidas.length && !reunioesEscolhidas.every(podeJuntar) ? "nao-junta" : undefined}
+              aria-describedby={reunioesEscolhidas.length && !reunioesEscolhidas.every(podeJuntar) ? "nao-junta" : undefined}
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-sm text-white/80 hover:bg-white/5 disabled:opacity-40">
               <Merge size={15} aria-hidden="true" />{t("meetings.select.join")}
             </button>
             <button type="button" disabled={!vaoParaALixeira} onClick={() => setConfirmando("lixeira")}
-              aria-describedby={escolhidas.length && !vaoParaALixeira ? "nao-vai-para-a-lixeira" : undefined}
+              aria-describedby={reunioesEscolhidas.length && !vaoParaALixeira ? "nao-vai-para-a-lixeira" : undefined}
               className="inline-flex items-center gap-2 rounded-xl border border-red-400/30 px-3 py-2 text-sm text-red-200 hover:bg-red-400/10 disabled:opacity-40">
               <Trash2 size={15} aria-hidden="true" />{t("meetings.select.trash")}
             </button>
             <button type="button" onClick={sairDaEscolha} className="ms-auto rounded-xl border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5">{t("meetings.select.cancel")}</button>
           </div>
-          {escolhidas.length > 0 && !reunioesEscolhidas.every(podeJuntar) && <p id="nao-junta" className="text-xs text-white/50">{t("meetings.join.notEligible")}</p>}
-          {escolhidas.length > 0 && !vaoParaALixeira && <p id="nao-vai-para-a-lixeira" className="text-xs text-amber-200/80">{t("meetings.trash.errorRecording")}</p>}
+          {reunioesEscolhidas.length > 0 && !reunioesEscolhidas.every(podeJuntar) && <p id="nao-junta" className="text-xs text-white/50">{t("meetings.join.notEligible")}</p>}
+          {reunioesEscolhidas.length > 0 && !vaoParaALixeira && <p id="nao-vai-para-a-lixeira" className="text-xs text-amber-200/80">{t("meetings.trash.errorRecording")}</p>}
         </div>
       )}
 
       {vista === "pastas" && pastaAberta && (
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => setPastaId(null)} className="inline-flex items-center gap-2 text-sm text-white/60 hover:text-white">
+          <button type="button" onClick={() => abrirPasta(null)} className="inline-flex items-center gap-2 text-sm text-white/60 hover:text-white">
             <ArrowLeft size={16} aria-hidden="true" className="rtl:rotate-180" />{t("meetings.folders.back")}
           </button>
           <p className={`inline-flex min-w-0 items-center gap-2 rounded-full border px-3 py-1 ${CLASSES_DA_COR[pastaAberta.cor].borda} ${CLASSES_DA_COR[pastaAberta.cor].fundo}`}>
@@ -426,7 +437,7 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
             <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {pastas.map(pasta => (
                 <li key={pasta.id}>
-                  <button type="button" onClick={() => setPastaId(pasta.id)}
+                  <button type="button" onClick={() => abrirPasta(pasta.id)}
                     className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-start transition-colors hover:bg-white/[0.07] ${CLASSES_DA_COR[pasta.cor].borda} ${CLASSES_DA_COR[pasta.cor].fundo}`}>
                     <IconeDaPastaNaTela icone={pasta.icone} cor={pasta.cor} tamanho={22} />
                     <span className="min-w-0 flex-1">
@@ -528,13 +539,15 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
           aoJuntar={meetingId => { sairDaEscolha(); aoAbrir(rotaDaReuniao(meetingId)); }} />
       )}
       {confirmando === "mover" && (
-        <EscolherPasta reunioes={escolhidas} pastas={pastas} aoFechar={() => setConfirmando(null)} aoMover={sairDaEscolha} />
+        <EscolherPasta reunioes={idsEscolhidos} pastas={consultaDasPastas.isSuccess ? pastas : null}
+          erro={consultaDasPastas.isError ? consultaDasPastas.error : null} aoTentarDeNovo={() => void consultaDasPastas.refetch()}
+          aoFechar={() => setConfirmando(null)} aoMover={sairDaEscolha} />
       )}
       {confirmando === "lixeira" && (
         <div role="dialog" aria-modal="true" aria-labelledby="mandar-para-a-lixeira-titulo" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#211e1b] p-6 shadow-2xl">
             <h3 id="mandar-para-a-lixeira-titulo" className="mb-2 font-bold text-white">{t("meetings.trash.moveConfirmTitle")}</h3>
-            <p className="mb-2 text-xs text-white/50">{t("meetings.select.selected", { n: escolhidas.length })}</p>
+            <p className="mb-2 text-xs text-white/50">{t("meetings.select.selected", { n: reunioesEscolhidas.length })}</p>
             <p className="mb-6 text-sm text-white/55">{t("meetings.trash.moveConfirmTextMany")}</p>
             <div className="flex gap-3">
               <button type="button" onClick={() => setConfirmando(null)} disabled={mandando} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/5 disabled:opacity-50">{t("meetings.trash.cancel")}</button>
@@ -548,8 +561,8 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
       )}
       {editor && (
         <EditorDePasta pasta={editor === "nova" ? undefined : editor} aoFechar={() => setEditor(null)}
-          aoCriar={id => { setVista("pastas"); setPastaId(id); }}
-          aoApagar={() => setPastaId(null)} />
+          aoCriar={id => { setVista("pastas"); abrirPasta(id); }}
+          aoApagar={() => abrirPasta(null)} />
       )}
     </div>
   );

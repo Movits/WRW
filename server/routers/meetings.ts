@@ -354,7 +354,13 @@ export const meetingsRouter = router({
     return data;
   }),
 
-  create: procedimentoDaReuniao.input(createMeetingInput).mutation(async ({ ctx, input }) => {
+  // O envio único (meetings.submitRecording) nasce aqui. Desde a G14 a tela só
+  // o usa para importar um arquivo (o recuo do corte), e manda a origem
+  // 'arquivo': sem ela, a reunião ficava fora do filtro "Importadas" (H7d).
+  // A origem segue opcional para a aba aberta antes disto, que fica nula.
+  create: procedimentoDaReuniao.input(createMeetingInput.extend({
+    origem: z.enum(["gravacao", "arquivo"]).optional(),
+  })).mutation(async ({ ctx, input }) => {
     const db = await exigirDb();
     // O contato e o contexto têm de ser da dona (o contexto: dela ou do
     // catálogo), antes de gravar o ponteiro (H7c).
@@ -372,6 +378,7 @@ export const meetingsRouter = router({
       consentAt: timestamp,
       consentNoticeVersion: input.consentNoticeVersion ?? null,
       language: input.language,
+      origem: input.origem ?? null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });

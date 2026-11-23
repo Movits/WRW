@@ -77,6 +77,8 @@ const publico = () => appRouter.createCaller({ user: null, req: { headers: {}, i
 
 async function db() { return (await getDb())!; }
 const linha = async (id: string) => (await (await db()).select().from(meetings).where(eq(meetings.id, id)))[0];
+const auditoriaDe = async (id: string, acao: string) => (await db()).select({ userId: auditLogs.userId, details: auditLogs.details, status: auditLogs.status })
+  .from(auditLogs).where(and(eq(auditLogs.resourceId, id), eq(auditLogs.action, acao)));
 
 async function recusa(promessa: Promise<unknown>) {
   const erro = await promessa.then(() => null, e => e);
@@ -313,6 +315,29 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     expect(await banco.select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id))).toEqual([]);
     expect(await banco.select().from(meetingRecordings).where(eq(meetingRecordings.meetingId, id))).toEqual([]);
     expect(apagarAudio).toHaveBeenCalledWith(chave);
+    // A prova da exclusão sem volta: uma linha por reunião, só com o id.
+    expect(await auditoriaDe(id, "MEETINGS_DELETED_FOREVER")).toEqual([{ userId: ID_DA_DONA, details: { reunioes: [id] }, status: "success" }]);
+  });
+
+  it("apagar de vez que falha no meio do pedido: a reunião que já saiu tem a linha da auditoria, e a outra fica na lixeira", async () => {
+    const servico = await import("./meeting-service");
+    const { id: primeira } = await reuniaoPronta(DONA);
+    const { id: segunda } = await reuniaoPronta(DONA);
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [primeira, segunda] });
+    const real = servico.deletePrivateMeeting;
+    const espiao = vi.spyOn(servico, "deletePrivateMeeting").mockImplementation(async (dona, id, condicao) => {
+      if (id === segunda) throw new Error("queda simulada do banco no meio da exclusão");
+      return real(dona, id, condicao);
+    });
+    try {
+      await expect(daDona().meetings.apagarDeVez({ meetingIds: [primeira, segunda] })).rejects.toThrow();
+    } finally {
+      espiao.mockRestore();
+    }
+    expect(await linha(primeira)).toBeUndefined();
+    expect(await auditoriaDe(primeira, "MEETINGS_DELETED_FOREVER")).toEqual([{ userId: ID_DA_DONA, details: { reunioes: [primeira] }, status: "success" }]);
+    expect((await linha(segunda)).trashedAt).not.toBeNull();
+    expect(await auditoriaDe(segunda, "MEETINGS_DELETED_FOREVER")).toEqual([]);
   });
 
   it("esvaziar a lixeira leva só as reuniões da dona que estão lá, e diz se ainda resta alguma", async () => {
@@ -326,6 +351,7 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     while (rodada.restam) rodada = await daDona().meetings.esvaziarLixeira();
     expect(await linha(a)).toBeUndefined();
     expect(await linha(b)).toBeUndefined();
+    for (const id of [a, b]) expect(await auditoriaDe(id, "MEETINGS_TRASH_EMPTIED")).toEqual([{ userId: ID_DA_DONA, details: { reunioes: [id] }, status: "success" }]);
     expect(await linha(fora)).toBeDefined();
     expect(await linha(daOutraConta)).toBeDefined();
     expect(await daDona().meetings.lixeira()).toEqual([]);
@@ -346,6 +372,20 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     expect(await deletePrivateMeeting(DONA, fora, { naLixeiraAte: AGORA - PRAZO_DA_LIXEIRA_MS })).toBe(false);
     expect(await deletePrivateMeeting(DONA, fora, { soDaLixeira: true })).toBe(false);
     expect(await linha(fora)).toBeDefined();
+  });
+
+  it("a varredura dos 30 dias leva também a reunião da lixeira cuja exclusão parou no meio ('deleted', invisível para a dona), com a transcrição", async () => {
+    const banco = await db();
+    // O "Apagar de vez" marcou 'deleted' e o banco caiu antes de os derivados
+    // saírem: a lixeira, a lista e o Esvaziar não a veem mais.
+    const { id: parada } = await reuniaoPronta(DONA, { extra: { status: "deleted", trashedAt: AGORA - PRAZO_DA_LIXEIRA_MS - 1 } });
+    const { id: paradaNoPrazo } = await reuniaoPronta(DONA, { extra: { status: "deleted", trashedAt: AGORA - DIA } });
+    expect((await daDona().meetings.lixeira()).map(r => r.id)).not.toContain(parada);
+    await lixeira.esvaziarLixeiraVencida({ agora: AGORA, limite: 1000 });
+    expect(await linha(parada)).toBeUndefined();
+    expect(await banco.select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, parada))).toEqual([]);
+    // Dentro do prazo, espera: um pedido de exclusão ainda pode estar em curso.
+    expect(await linha(paradaNoPrazo)).toBeDefined();
   });
 
   it("o que nasceu da reunião some enquanto ela está na lixeira: a pendência, a gravação na agenda e o atalho da próxima ação", async () => {
@@ -511,6 +551,26 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     await expect(daDona().networkInteligente.confirmarPendencia({ id: doContato })).resolves.toMatchObject({ alvo: "contato" });
     expect(await cargo()).toBe("Diretora comercial");
     await expect(daDona().networkInteligente.ignorarPendencia({ id: doPerfil })).resolves.toMatchObject({ ok: true, alvo: "perfil" });
+  });
+
+  it("a pendência escondida pela lixeira não engole a igual que a dona dita depois para o mesmo contato", async () => {
+    const { gravarPendencias } = await import("./network-extracao");
+    const banco = await db();
+    const { id } = await reuniaoPronta(DONA);
+    await banco.insert(privateContacts).values({ ownerId: DONA, fullName: "Ana da pendência", createdAt: AGORA, updatedAt: AGORA });
+    const [ana] = await banco.select({ id: privateContacts.id }).from(privateContacts)
+      .where(and(eq(privateContacts.ownerId, DONA), eq(privateContacts.fullName, "Ana da pendência")));
+    const item = { campo: "tenho" as const, valor: "Consultoria jurídica", categoria: null, trecho: null, confianca: 0.9 };
+    // A pendência que a reunião deixou para a Ana; a reunião vai para a lixeira, e ela some do perfil.
+    await expect(gravarPendencias(banco, { ownerId: DONA, origem: "reuniao", contactId: ana.id, meetingId: id, linhas: [{ ...item, trecho: "ela faz consultoria jurídica" }] })).resolves.toBe(1);
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [id] });
+
+    // A dona completa a Ana por voz com o mesmo item: ele entra (antes, a escondida o engolia).
+    await expect(gravarPendencias(banco, { ownerId: DONA, origem: "voz", contactId: ana.id, linhas: [item] })).resolves.toBe(1);
+    const daAna = await listarPendencias(DONA, { contactId: ana.id });
+    expect(daAna.map(p => p.valor)).toEqual(["Consultoria jurídica"]);
+    // Repetir o ditado não abre outra: a aberta fora da lixeira conta.
+    await expect(gravarPendencias(banco, { ownerId: DONA, origem: "voz", contactId: ana.id, linhas: [item] })).resolves.toBe(0);
   });
 
   it("o reprocesso do documento não toma a reunião que está na lixeira, mesmo quando quem chama a leu antes de ela ir para lá", async () => {

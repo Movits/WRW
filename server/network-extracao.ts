@@ -1058,13 +1058,16 @@ export async function gravarPendencias(db: BancoOuTransacao, entrada: {
 }): Promise<number> {
   // A mesma pendência não abre duas vezes: nem repetida na mesma leva, nem
   // igual a uma que o contato já tem aberta (a dona completou por texto duas
-  // vezes com a mesma frase, ou a pessoa da reunião foi vinculada a ele).
+  // vezes com a mesma frase, ou a pessoa da reunião foi vinculada a ele). A
+  // aberta de uma reunião na lixeira (H7d) não conta: a dona não a vê, e o
+  // fim da lixeira a apaga com a reunião; contada, ela engolia o item que a
+  // dona acabou de ditar, que sumia junto.
   const abertas = new Set<string>();
   if (entrada.linhas.length && entrada.contactId != null) {
     const linhasAbertas = await db.select({ campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
       .where(and(
         eq(networkSugestoes.ownerId, entrada.ownerId), eq(networkSugestoes.contactId, entrada.contactId),
-        eq(networkSugestoes.status, "pendente"),
+        eq(networkSugestoes.status, "pendente"), semReuniaoNaLixeira(networkSugestoes.meetingId),
       ));
     for (const aberta of linhasAbertas) abertas.add(chaveDaPendencia(aberta.campo, aberta.valor));
   }

@@ -424,6 +424,8 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
       meetingId: "reuniao-do-envio-unico", mimeType: "audio/webm", durationSeconds: 301, recuoDoCorte: true,
     })));
+    // A reunião nasce com a origem do arquivo: sem ela, ficava fora do filtro "Importadas" (H7d).
+    expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ origem: "arquivo" }));
     expect(duble.cortar).toHaveBeenCalled();
     expect(iniciarGravacao()).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();

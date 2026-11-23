@@ -88,6 +88,15 @@ export function margemDoReprocesso(partes: number | null | undefined): number {
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
 
 /**
+ * A reunião que não é da dona, que não existe, que está sendo excluída ou que
+ * está na lixeira (H7d: a guarda dos procedimentos pelo id,
+ * server/guarda-da-lixeira.ts, devolve esta mesma frase). Compartilhada porque
+ * a tela a traduz (client/src/lib/mensagem-de-erro.ts): a reunião mandada para
+ * a lixeira em outra aba aparecia em português em qualquer idioma.
+ */
+export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+
+/**
  * As frases que a fila da gravação em partes (server/fila-de-transcricao.ts)
  * grava em `processing_error`: a gravação encerrada sem nenhuma parte, a
  * montagem que caiu em todas as tentativas e a reunião em que nenhuma parte

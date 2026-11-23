@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 import {
   contactAssets,
   contactContexts,
@@ -337,6 +337,13 @@ async function assinaturaDaBase(db: Awaited<ReturnType<typeof exigirDb>>, ownerI
     daDona(contactAssets), daDona(contactNeeds),
     daDona(contextParticipants), resumo(meetings, and(eq(meetings.ownerId, ownerId), isNull(meetings.trashedAt))!), daDona(contactContexts),
     resumo(contexts, isNull(contexts.ownerId)),
+    // E a própria lixeira: trocar uma reunião por outra entre duas buscas
+    // (mandar A para lá e restaurar B) mantém a contagem acima e, sem nenhuma
+    // das duas ser a de updated_at maior, o máximo; a rodada não reindexava, e
+    // B ficava fora da Memória até outra edição. A hora mais recente de ida
+    // para a lixeira muda a cada reunião que vai, e a contagem, a cada uma que volta.
+    db.select({ n: sql<number>`count(*)`, m: sql<number>`coalesce(max(${meetings.trashedAt}), 0)` })
+      .from(meetings).where(and(eq(meetings.ownerId, ownerId), isNotNull(meetings.trashedAt))!),
   ]);
   return linhas.map(([linha]) => (linha ? `${linha.n}:${linha.m}` : "0:0")).join("|");
 }

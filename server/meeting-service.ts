@@ -20,7 +20,7 @@ import {
 } from "../drizzle/schema";
 import { pareceSerADona } from "@shared/reuniao-no-match";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, MENSAGEM_REUNIAO_NAO_ENCONTRADA, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, idiomaFalado, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } from "./audio-guardado-das-partes";
@@ -833,7 +833,8 @@ export class ReprocessamentoRecusado extends Error {
   }
 }
 
-export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+// A frase mora em shared/const.ts (a tela a traduz); o nome de sempre fica aqui.
+export { MENSAGEM_REUNIAO_NAO_ENCONTRADA };
 export const MENSAGEM_REPROCESSO_EM_CONFLITO = "Esta reunião não está com falha ou já está sendo processada.";
 export const MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR = "Não há áudio guardado desta reunião para reprocessar.";
 // A tela do site reconhece esta frase (shared/const.ts) para traduzi-la e para

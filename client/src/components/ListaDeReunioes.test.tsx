@@ -322,7 +322,8 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
     fireEvent.click(caixaDe("Reunião com a importadora"));
     fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mover para pasta" }));
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Sem pasta" }));
+    // A janela espera a lista das pastas antes de oferecer "Sem pasta".
+    fireEvent.click(await within(await screen.findByRole("dialog")).findByRole("button", { name: "Sem pasta" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Essa pasta não existe mais. Ela pode ter sido apagada em outra aba."));
     expect(rede.chamadas.find(c => c.path === "meetings.moverParaPasta")?.input).toEqual({ meetingIds: [REUNIOES[0].id], pastaId: null });
     expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
@@ -365,6 +366,65 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Uma gravação ainda está em andamento: encerre a gravação antes de mandá-la para a lixeira.", undefined));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
+  });
+
+  it("trocar de vista ou de pasta começa a seleção do zero: a lixeira leva só a que a dona marcou na pasta aberta", async () => {
+    rede.respostas["meetings.mandarParaALixeira"] = { naLixeira: 1, linksDesligados: 0 };
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
+    fireEvent.click(caixaDe("Mentoria de exportação"));
+    fireEvent.click(caixaDe("Contrato em PDF"));
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 2")).toBeInTheDocument();
+    // Ir a outra vista e voltar não traz a seleção de antes.
+    fireEvent.click(screen.getByRole("button", { name: "Importadas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 0")).toBeInTheDocument();
+    expect(caixaDe("Mentoria de exportação")).not.toBeChecked();
+    fireEvent.click(caixaDe("Mentoria de exportação"));
+    fireEvent.click(screen.getByRole("button", { name: "Pastas" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Clientes/ }));
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 0")).toBeInTheDocument();
+    fireEvent.click(caixaDe("Reunião com a importadora"));
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
+    fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mandar para a lixeira" }));
+    const confirmacao = screen.getByRole("dialog", { name: "Mandar para a lixeira?" });
+    expect(within(confirmacao).getByText("Selecionadas: 1")).toBeInTheDocument();
+    fireEvent.click(within(confirmacao).getByRole("button", { name: "Mandar para a lixeira" }));
+    await waitFor(() => expect(rede.chamadas.some(c => c.path === "meetings.mandarParaALixeira")).toBe(true));
+    expect(rede.chamadas.find(c => c.path === "meetings.mandarParaALixeira")?.input).toEqual({ meetingIds: [REUNIOES[0].id] });
+  });
+
+  it("a escolhida que a busca escondeu não vai junto: as ações valem só para as marcadas que estão na tela", async () => {
+    rede.respostas["meetings.moverParaPasta"] = { movidas: 1 };
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
+    fireEvent.click(caixaDe("Mentoria de exportação"));
+    fireEvent.click(caixaDe("Contrato em PDF"));
+    fireEvent.change(campo(), { target: { value: "contrato" } });
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
+    fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mover para pasta" }));
+    const janela = await screen.findByRole("dialog", { name: "Mover para qual pasta?" });
+    fireEvent.click(await within(janela).findByRole("button", { name: /Clientes/ }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Reuniões movidas para a pasta."));
+    expect(rede.chamadas.find(c => c.path === "meetings.moverParaPasta")?.input).toEqual({ meetingIds: [REUNIOES[2].id], pastaId: PASTA_CLIENTES });
+  });
+
+  it("mover com a consulta das pastas em erro: a janela mostra o erro com 'tentar de novo', e não oferece 'Sem pasta'", async () => {
+    rede.respostas["meetings.pastas"] = erroDoServidor("INTERNAL_SERVER_ERROR", "Banco de dados indisponível. Tente de novo em instantes.");
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
+    fireEvent.click(caixaDe("Reunião com a importadora"));
+    await waitFor(() => expect(rede.chamadas.some(c => c.path === "meetings.pastas")).toBe(true));
+    fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mover para pasta" }));
+    const janela = await screen.findByRole("dialog", { name: "Mover para qual pasta?" });
+    expect(await within(janela).findByRole("alert")).toBeInTheDocument();
+    expect(within(janela).queryByRole("button", { name: "Sem pasta" })).not.toBeInTheDocument();
+    expect(within(janela).queryByRole("button", { name: "Nova pasta" })).not.toBeInTheDocument();
+    // Tentar de novo com as pastas de volta: a janela passa a oferecê-las.
+    rede.respostas["meetings.pastas"] = PASTAS;
+    fireEvent.click(within(janela).getByRole("button", { name: /Tentar novamente/ }));
+    expect(await within(janela).findByRole("button", { name: "Sem pasta" })).toBeInTheDocument();
+    expect(rede.chamadas.some(c => c.path === "meetings.moverParaPasta")).toBe(false);
   });
 
   it("o botão da lixeira abre a lixeira, pelo endereço dela", () => {

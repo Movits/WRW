@@ -7,7 +7,6 @@ import { estaNaLixeira } from "./reuniao-visivel";
 import { deletePrivateMeeting, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { LINK_DESLIGADO } from "./link-aberto-da-reuniao";
 import { apagarAvisosDaReuniao } from "./lembretes";
-import { createAuditLog } from "./security";
 
 /**
  * A lixeira das reuniões (H7d do plano do gravador; HN-67 no app de referência
@@ -157,12 +156,20 @@ export async function listarLixeira(ownerId: string, agora = Date.now()) {
   return linhas.map(linha => ({ ...linha, createdAt: Number(linha.createdAt), trashedAt: Number(linha.trashedAt) }));
 }
 
-/** Registra o "Apagar de vez" da dona: só ids e a contagem. */
-async function auditarApagadasDeVez(prova: ProvaDaLixeira, apagadas: string[], acao: "MEETINGS_DELETED_FOREVER" | "MEETINGS_TRASH_EMPTIED") {
-  if (!apagadas.length) return;
-  await createAuditLog({
-    userId: prova.userId, action: acao, resource: "meetings", resourceId: apagadas.length === 1 ? apagadas[0] : undefined,
-    details: { reunioes: apagadas }, ipAddress: prova.ipAddress, userAgent: prova.userAgent ?? undefined, status: "success", riskLevel: "low",
+/**
+ * Registra a exclusão sem volta de UMA reunião (o "Apagar de vez" e o
+ * "Esvaziar a lixeira"), logo depois de ela sair: só o id. A exclusão não é
+ * uma transação (deletePrivateMeeting tira o áudio do bucket), então a prova
+ * vai por insert direto, que lança, uma linha por reunião antes da próxima
+ * começar: a reunião que saiu nunca fica sem a linha dela porque outra do
+ * mesmo pedido falhou depois, e a falha da auditoria derruba o pedido (a dona
+ * vê o erro, e o log o registra) em vez de sumir no createAuditLog, que só a
+ * escreve no console.
+ */
+async function auditarApagadaDeVez(db: Awaited<ReturnType<typeof exigirDb>>, prova: ProvaDaLixeira, id: string, acao: "MEETINGS_DELETED_FOREVER" | "MEETINGS_TRASH_EMPTIED") {
+  await db.insert(auditLogs).values({
+    userId: prova.userId, action: acao, resource: "meetings", resourceId: id,
+    details: { reunioes: [id] }, ...ipDaProva(prova), status: "success", riskLevel: "low",
   });
 }
 
@@ -182,9 +189,10 @@ export async function apagarDeVez(ownerId: string, idsPedidos: readonly string[]
   if (naLixeira.length !== ids.length) throw new RecusaDaLixeira("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const apagadas: string[] = [];
   for (const id of ids) {
-    if (await deletePrivateMeeting(ownerId, id, { soDaLixeira: true })) apagadas.push(id);
+    if (!(await deletePrivateMeeting(ownerId, id, { soDaLixeira: true }))) continue;
+    apagadas.push(id);
+    await auditarApagadaDeVez(db, prova, id, "MEETINGS_DELETED_FOREVER");
   }
-  await auditarApagadasDeVez(prova, apagadas, "MEETINGS_DELETED_FOREVER");
   return { apagadas: apagadas.length };
 }
 
@@ -200,9 +208,10 @@ export async function esvaziarLixeira(ownerId: string, prova: ProvaDaLixeira) {
     .orderBy(asc(meetings.trashedAt), asc(meetings.id)).limit(REUNIOES_POR_EXCLUSAO_MAX);
   const apagadas: string[] = [];
   for (const { id } of lote) {
-    if (await deletePrivateMeeting(ownerId, id, { soDaLixeira: true })) apagadas.push(id);
+    if (!(await deletePrivateMeeting(ownerId, id, { soDaLixeira: true }))) continue;
+    apagadas.push(id);
+    await auditarApagadaDeVez(db, prova, id, "MEETINGS_TRASH_EMPTIED");
   }
-  await auditarApagadasDeVez(prova, apagadas, "MEETINGS_TRASH_EMPTIED");
   const [restantes] = await db.select({ id: meetings.id }).from(meetings).where(daLixeira).limit(1);
   return { apagadas: apagadas.length, restam: Boolean(restantes) };
 }
@@ -220,12 +229,19 @@ export type ResultadoDaLixeiraVencida = { encontradas: number; apagadas: number 
  * exclusão só toma a reunião que continua na lixeira desde antes do corte, e
  * para entre uma reunião e outra quando o servidor está saindo (deveParar).
  * Banco fora do ar sobe como erro.
+ *
+ * Também a que já está 'deleted': o "Apagar de vez" que parou no meio (a
+ * queda do banco depois da marca, antes de os derivados saírem) deixa a
+ * reunião invisível para a dona (a lixeira e a lista não mostram 'deleted') e
+ * fora do Esvaziar, com a transcrição e o resumo dentro. Só passado o prazo:
+ * nenhum pedido de exclusão dura dias, então a varredura não corre ao lado de
+ * um que ainda está em curso.
  */
 export async function esvaziarLixeiraVencida(opcoes: { agora?: number; limite?: number; deveParar?: () => boolean } = {}): Promise<ResultadoDaLixeiraVencida> {
   const db = await exigirDb();
   const corte = (opcoes.agora ?? Date.now()) - PRAZO_DA_LIXEIRA_MS;
   const vencidas = await db.select({ id: meetings.id, ownerId: meetings.ownerId }).from(meetings)
-    .where(and(isNotNull(meetings.trashedAt), lte(meetings.trashedAt, corte), ne(meetings.status, "deleted")))
+    .where(and(isNotNull(meetings.trashedAt), lte(meetings.trashedAt, corte)))
     .orderBy(asc(meetings.trashedAt)).limit(opcoes.limite ?? LIXEIRA_VENCIDA_POR_PASSADA);
   let apagadas = 0;
   for (const { id, ownerId } of vencidas) {

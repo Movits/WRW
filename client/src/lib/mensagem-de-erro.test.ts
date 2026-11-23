@@ -13,7 +13,7 @@ import {
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_DONA,
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
 } from "@shared/resumo-por-email";
-import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
+import { MENSAGEM_BANCO_INDISPONIVEL, MENSAGEM_DO_LIMITE, MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_PARTES_SEM_TRANSCRICAO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_REUNIAO_NAO_ENCONTRADA, MENSAGEM_SO_ACAO_TEM_CAIXA, type CodigoDaRecusaDaParte } from "@shared/const";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import { TRPCClientError } from "@trpc/client";
@@ -303,6 +303,24 @@ describe("mensagemDeErroParaTela — o link com senha no idioma da tela (H23)", 
       expect(traduzida, idioma).toBe(i18n.t("meetings.openLink.password.required"));
       expect(traduzida, idioma).not.toBe(MENSAGEM_SENHA_DO_LINK_PEDIDA);
     }
+  });
+});
+
+describe("traduzirMensagemDoServidor — a reunião que saiu (a lixeira em outra aba, H7d) no idioma da tela", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it("a frase da guarda da lixeira e da reunião excluída vira a do idioma da tela, nunca o português cru", async () => {
+    for (const idioma of CODIGOS) {
+      await i18n.changeLanguage(idioma);
+      const traduzida = traduzirMensagemDoServidor(MENSAGEM_REUNIAO_NAO_ENCONTRADA, c => i18n.t(c));
+      expect(traduzida, idioma).toBe(i18n.t("meetings.meetingNotFound"));
+      expect(traduzida, idioma).not.toBe(MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    }
+    await i18n.changeLanguage("en");
+    const recusa = TRPCClientError.from({ error: { code: -32004, message: MENSAGEM_REUNIAO_NAO_ENCONTRADA, data: { code: "NOT_FOUND", httpStatus: 404 } } });
+    expect(mensagemDeErroParaTela(recusa, c => i18n.t(c))).toBe(i18n.t("meetings.meetingNotFound"));
   });
 });
 

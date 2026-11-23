@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
+import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import {
   COR_DA_PASTA_PADRAO, CORES_DA_PASTA, ICONE_DA_PASTA_PADRAO, ICONES_DA_PASTA, NOME_DA_PASTA_MAX, normalizarNomeDaPasta, PASTAS_POR_DONA_MAX,
   RECUSAS_DAS_PASTAS, REUNIOES_POR_ACAO_MAX, type CodigoDaRecusaDaPasta, type CorDaPasta, type IconeDaPasta,
@@ -205,9 +206,13 @@ export function emLotes<T>(itens: readonly T[], tamanho = REUNIOES_POR_ACAO_MAX)
  * "Sem pasta" (tira da pasta) ou uma pasta nova, criada ali mesmo. O servidor
  * move todas ou nenhuma de cada lote.
  */
-export function EscolherPasta({ reunioes, pastas, aoFechar, aoMover }: {
+export function EscolherPasta({ reunioes, pastas, erro = null, aoTentarDeNovo, aoFechar, aoMover }: {
   reunioes: string[];
-  pastas: PastaNaTela[];
+  /** As pastas da dona; null enquanto a consulta não deu certo (carregando ou com erro). */
+  pastas: PastaNaTela[] | null;
+  /** O erro da consulta das pastas (o banco fora do ar), que a janela mostra com o "tentar de novo". */
+  erro?: unknown;
+  aoTentarDeNovo?: () => void;
   aoFechar: () => void;
   aoMover: () => void;
 }) {
@@ -229,6 +234,22 @@ export function EscolherPasta({ reunioes, pastas, aoFechar, aoMover }: {
     }
   };
   if (criando) return <EditorDePasta aoFechar={() => setCriando(false)} aoCriar={pastaId => void mover(pastaId)} />;
+  // Sem a lista das pastas (carregando, ou o banco fora do ar), a janela não
+  // oferece nada: só "Sem pasta" e "Nova pasta" pareceria que a dona não tem
+  // pastas, e um toque em "Sem pasta" tiraria as reuniões das delas.
+  if (!pastas) {
+    return (
+      <Janela titulo={t("meetings.folders.moveTitle")} idDoTitulo="escolher-pasta-titulo">
+        <div className="mt-4">
+          {erro ? <ErroDeConsulta erro={erro} aoTentarDeNovo={aoTentarDeNovo} />
+            : <p role="status" className="text-sm text-white/50"><Loader2 size={14} className="me-2 inline animate-spin" aria-hidden="true" />{t("meetings.loadingList")}</p>}
+        </div>
+        <div className="mt-6 flex items-center gap-3">
+          <button type="button" onClick={aoFechar} className="ms-auto rounded-xl border border-white/15 px-4 py-2.5 text-sm text-white/60 hover:bg-white/5">{t("meetings.folders.cancel")}</button>
+        </div>
+      </Janela>
+    );
+  }
   return (
     <Janela titulo={t("meetings.folders.moveTitle")} idDoTitulo="escolher-pasta-titulo">
       <p className="mt-1 text-xs text-white/50">{t("meetings.select.selected", { n: reunioes.length })}</p>

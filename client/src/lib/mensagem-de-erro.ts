@@ -9,6 +9,7 @@ import {
   MENSAGEM_PARTES_SEM_TRANSCRICAO,
   MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
+  MENSAGEM_REUNIAO_NAO_ENCONTRADA,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
@@ -121,6 +122,9 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_PARTES_SEM_TRANSCRICAO]: "meetings.processingFailedNoTranscript",
   // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
   [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
+  // A reunião que saiu (outra aba a excluiu ou a mandou para a lixeira, H7d):
+  // a guarda da lixeira devolve esta frase a uns 50 procedimentos.
+  [MENSAGEM_REUNIAO_NAO_ENCONTRADA]: "meetings.meetingNotFound",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
   [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
   // Os detalhes da reunião (H7c): o contato ou o contexto que não é da dona, em

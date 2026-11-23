@@ -92,7 +92,8 @@ export type VistaDaLista = (typeof VISTAS_DA_LISTA)[number];
  * - "youtube": o vídeo do YouTube.
  * A origem nula (o envio único de antes da gravação em partes, que recebia
  * tanto o microfone quanto um arquivo sem dizer qual) não entra em nenhum dos
- * três: aparece só em "Todas", em vez de chutar de onde veio.
+ * três: aparece só em "Todas", em vez de chutar de onde veio. O envio único
+ * de hoje (a importação pelo recuo do corte, G14) já nasce com 'arquivo'.
  */
 export function vistaDaOrigem(origem: string | null | undefined): "gravadas" | "importadas" | "youtube" | null {
   if (origem === "gravacao" || origem === "aba") return "gravadas";

@@ -152,7 +152,10 @@ const fakeDb = {
         if (linhas === TABELA_FORA_DO_AR) throw new Error("tabela fora do ar");
         const cru = (linhas as Record<string, unknown>[]).filter(linha => !condicao || avaliarWhere(tabela, sql, params, linha));
         if (projecao && "n" in projecao && "m" in projecao) {
-          return [{ n: cru.length, m: cru.reduce((maior, linha) => Math.max(maior, Number(linha.updatedAt ?? 0)), 0) }];
+          // O máximo da coluna que o agregado pede: o updated_at, ou o
+          // trashed_at no agregado da lixeira (H7d).
+          const coluna = dialeto.sqlToQuery(projecao.m as SQL).sql.includes("trashed_at") ? "trashedAt" : "updatedAt";
+          return [{ n: cru.length, m: cru.reduce((maior, linha) => Math.max(maior, Number(linha[coluna] ?? 0)), 0) }];
         }
         return cru;
       },
@@ -488,6 +491,33 @@ describe("Memória — órfão não sobrevive à fonte", () => {
 
     const segunda = await servico.indexOwnerMemory("dona");
 
+    expect(segunda.removed).toBe(1);
+  });
+
+  it("trocar uma reunião da lixeira por outra (mandar A, restaurar B) muda a assinatura, sem mexer na contagem nem no updated_at maior: B volta à Memória (H7d)", async () => {
+    const reunioes = (aNaLixeira: number | null, bNaLixeira: number | null) => [
+      { id: "m-c", title: "Feira", status: "ready", trashedAt: null, updatedAt: 50 },
+      { id: "m-a", title: "Vinícola", status: "ready", trashedAt: aNaLixeira, updatedAt: 5 },
+      { id: "m-b", title: "Cooperativa", status: "ready", trashedAt: bNaLixeira, updatedAt: 5 },
+    ];
+    semear(schema.meetings, reunioes(null, 1_000));
+    semear(schema.meetingTranscripts, [
+      { meetingId: "m-c", transcript: "Falamos da feira", language: "pt", updatedAt: 50 },
+      { meetingId: "m-a", transcript: "Falamos de vinho", language: "pt", updatedAt: 5 },
+      { meetingId: "m-b", transcript: "Falamos da cooperativa", language: "pt", updatedAt: 5 },
+    ]);
+    await servico.indexOwnerMemory("dona");
+    const primeira = escritas.inseridos.filter(item => item.sourceType === "meeting").map(item => item.sourceId);
+    expect(primeira.sort()).toEqual(["m-a", "m-c"]);
+    semear(schema.memoryDocuments, escritas.inseridos.filter(item => item.sourceType === "meeting").map(item => ({ ...item, createdAt: 1 })));
+    escritas.inseridos.length = 0;
+    // A vai para a lixeira e B volta: fora dela seguem duas reuniões, e o
+    // maior updated_at (o da m-c) é o mesmo.
+    semear(schema.meetings, reunioes(2_000, null));
+
+    const segunda = await servico.indexOwnerMemory("dona");
+
+    expect(escritas.inseridos.filter(item => item.sourceType === "meeting").map(item => item.sourceId)).toEqual(["m-b"]);
     expect(segunda.removed).toBe(1);
   });
 

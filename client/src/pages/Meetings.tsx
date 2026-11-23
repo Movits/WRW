@@ -673,7 +673,9 @@ export default function Meetings() {
         return toast.error(avisoDaImportacaoRecusada(t, recusaDoCorte.motivo, recusaDoCorte.detalhe));
       }
       const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
-      const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+      // A origem 'arquivo' põe a reunião no filtro "Importadas" (H7d): o envio
+      // único só sobra para importar um arquivo (G14).
+      const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, origem: "arquivo" });
       reuniaoCriada = created.id;
       ligarAAgenda(agendaId, created.id);
       // A marca do recuo vai ao log do servidor: separa este envio do de um
@@ -1117,7 +1119,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const [vinculando, setVinculando] = useState<string | null>(null);
   // Recusada (CONFLICT: já decidida em outra aba), a tela relê o estado real da sugestão.
   const decideContact = trpc.meetings.decideContactSuggestion.useMutation({
-    onError: erro => toast.error(erro.message),
+    onError: erro => toast.error(traduzirMensagemDoServidor(erro.message, t) || t("meetings.meetingNotFound")),
     onSettled: () => { setVinculando(null); void utils.meetings.get.invalidate({ meetingId }); void pendenciasDaReuniao.refetch(); },
   });
   // Um item decidido muda o que espera a dona e, confirmado, as conexões desta reunião.
@@ -1129,11 +1131,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   // que só dispara para o ÚLTIMO pedido: a tradução de uma transcrição trocada
   // por um reprocessamento, chegando atrasada, não sobrescreve a da nova.
   const translateTranscript = trpc.meetings.translateTranscript.useMutation({
-    onError: error => toast.error(error.message || t("meetings.translateError")),
+    onError: error => toast.error(traduzirMensagemDoServidor(error.message, t) || t("meetings.translateError")),
   });
   const deleteMeeting = trpc.meetings.delete.useMutation({
     onSuccess: async () => { await utils.meetings.list.invalidate(); toast.success(t("meetings.deleteSuccess")); if (montado.current) aoExcluir(); },
-    onError: error => { setConfirmarExclusao(false); toast.error(error.message || t("meetings.deleteError")); },
+    onError: error => { setConfirmarExclusao(false); toast.error(traduzirMensagemDoServidor(error.message, t) || t("meetings.deleteError")); },
   });
   // O "Excluir" da reunião manda para a lixeira (H7d): ela fica lá por 30 dias,
   // e o aviso traz o "Desfazer". Só a gravação em partes ainda no ar é

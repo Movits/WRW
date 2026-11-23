@@ -247,7 +247,17 @@ export function EditorDoTextoCorrido({ texto, editar, salvando }: {
 }) {
   const { t } = useTranslation();
   const [rascunho, setRascunho] = useState(texto);
-  useEffect(() => { setRascunho(texto); }, [texto]);
+  // O texto do servidor que o rascunho acompanhou por último. Quando o texto
+  // muda (a edição salva aqui, outra aba, a recusa por conflito, que relê a
+  // reunião), o rascunho acompanha só se a dona não tinha mexido nele: o que
+  // ela escreveu fica (numa transcrição de até 400 mil caracteres), com o
+  // aviso da recusa, e o "Cancelar" volta ao texto salvo.
+  const textoAcompanhado = useRef(texto);
+  useEffect(() => {
+    const anterior = textoAcompanhado.current;
+    textoAcompanhado.current = texto;
+    setRascunho(atual => (atual.trim() === anterior.trim() ? texto : atual));
+  }, [texto]);
   const mudou = rascunho.trim() !== texto.trim();
 
   async function salvar(evento: FormEvent) {
