@@ -1495,6 +1495,14 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
  * transação com a linha travada: dois nomes salvos juntos não se apagam. O nome
  * que muda de fato muda também o texto das próximas ações que citam a voz, e o
  * evento delas na agenda fica para trás (acoesComAVozRenomeada, H5c).
+ *
+ * Só com a reunião 'ready' (fora disso, NomesSoComReuniaoPronta → CONFLICT),
+ * e sem tocar em `updated_at`: essa coluna é a FICHA de quem processa a
+ * reunião (`gravarResultadoDaReuniao`, a fila das partes) e o relógio da
+ * varredura de gravações abandonadas. Nomear durante o processamento roubava
+ * a ficha e o resultado da IA era descartado; nomear durante a gravação
+ * adiava a varredura. E o nome dado em 'processing' sumiria de todo jeito,
+ * porque o reprocesso zera os nomes ao promover.
  */
 export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
   if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
@@ -1502,17 +1510,26 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
   const db = await exigirDb();
   return db.transaction(async tx => {
     const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel());
-    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
+    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames, status: meetings.status }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
+    if (reuniao.status !== "ready") throw new NomesSoComReuniaoPronta();
     const nomes = nomesDosFalantes(reuniao.speakerNames);
     const antes = nomes[falante] ?? "";
     if (limpo) nomes[falante] = limpo;
     else delete nomes[falante];
     const agora = Date.now();
-    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: agora }).where(daDona);
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null }).where(and(daDona, eq(meetings.status, "ready")));
     if (antes !== limpo) await acoesComAVozRenomeada(tx, ownerId, meetingId, falante, agora);
     return nomes;
   });
+}
+
+/** A reunião ainda não está pronta (gravando, processando, falhou): sem transcrição final, sem nomes. */
+export class NomesSoComReuniaoPronta extends Error {
+  constructor() {
+    super("Os nomes das vozes só podem ser dados com a reunião pronta.");
+    this.name = "NomesSoComReuniaoPronta";
+  }
 }
 
 /**

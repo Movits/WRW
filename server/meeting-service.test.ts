@@ -28,6 +28,8 @@ const banco = vi.hoisted(() => ({
   insertFalha: null as Error | null,
   // Os nomes das vozes (H3) da reunião travada no nomearFalante; undefined é sem a reunião.
   nomesDaReuniao: undefined as unknown,
+  // O status da mesma reunião: o nome só vale com ela 'ready'.
+  statusDaReuniao: "ready",
   // As próximas ações presas a itens da reunião: id, texto, detalhe, responsavel (H5c).
   acoesDaReuniao: [] as unknown[][],
 }));
@@ -54,7 +56,7 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
         return [[pedidas.map(coluna => (coluna === "revision" ? revisao : banco.transcricao[colunas.indexOf(coluna)]))], []];
       }
       if (sql.includes("from `meeting_transcript_translations`")) return [banco.traducaoGuardada ? [banco.traducaoGuardada] : [], []];
-      if (sql.startsWith("select") && sql.includes("from `meetings`") && banco.nomesDaReuniao !== undefined) return [[[banco.nomesDaReuniao]], []];
+      if (sql.startsWith("select") && sql.includes("from `meetings`") && banco.nomesDaReuniao !== undefined) return [[[banco.nomesDaReuniao, banco.statusDaReuniao]], []];
       if (sql.startsWith("select") && sql.includes("from `proximas_acoes`")) return [banco.acoesDaReuniao, []];
       return [[], []];
     },
@@ -78,6 +80,7 @@ const {
   MENSAGEM_REUNIAO_LONGA_DEMAIS,
   MEETING_TRANSCRIPT_LANGUAGES,
   nomearFalante,
+  NomesSoComReuniaoPronta,
   translatePrivateMeetingTranscript,
 } = await import("./meeting-service");
 const { ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
@@ -589,7 +592,26 @@ describe("O nome de uma voz e as próximas ações que a citam (H3 e H5c)", () =
   });
   afterEach(() => {
     banco.nomesDaReuniao = undefined;
+    banco.statusDaReuniao = "ready";
     banco.acoesDaReuniao = [];
+  });
+
+  it("dar nome não grava updated_at na reunião: essa coluna é a ficha de quem a processa", async () => {
+    await nomearFalante(DONA, REUNIAO, "F2", "Carla");
+    const gravacao = banco.consultas.find(c => c.sql.startsWith("update `meetings`"))!;
+    expect(gravacao.sql.startsWith("update `meetings` set `speaker_names` = ? where")).toBe(true);
+    expect(gravacao.sql).not.toContain("updated_at");
+    expect(gravacao.sql).toContain("`meetings`.`status` = ?");
+  });
+
+  it("reunião fora de 'ready' recusa o nome sem gravar nada", async () => {
+    for (const status of ["recording", "uploading", "processing", "failed"]) {
+      banco.consultas.length = 0;
+      banco.statusDaReuniao = status;
+      await expect(nomearFalante(DONA, REUNIAO, "F2", "Carla")).rejects.toBeInstanceOf(NomesSoComReuniaoPronta);
+      expect(banco.consultas.some(c => c.sql.startsWith("update"))).toBe(false);
+      expect(banco.consultas.at(-1)?.sql).toBe("rollback");
+    }
   });
 
   it("dar nome à voz: as ações que a citam ganham a última mudança (o SEQUENCE do .ics) e as que estão na Google ficam 'falhou', com 'Tentar de novo'", async () => {
