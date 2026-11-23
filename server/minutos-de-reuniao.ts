@@ -12,8 +12,10 @@ import { exigirDb } from "./db";
  * partes, sem o teto de 10 minutos, e cada reunião gravada vai até 12 horas
  * (GRAVACAO_EM_PARTES_SEGUNDOS_MAX em shared/const.ts, o teto técnico que a tela
  * e server/fatias-de-reuniao.ts conferem; o teste deste módulo amarra os dois
- * números). O arquivo de áudio enviado inteiro (o envio único, até a H9a e a
- * G14) segue com os 10 minutos e 10 MB dele, em meeting-service.ts.
+ * números). O arquivo de áudio ou vídeo enviado também vai em partes, até 12 h
+ * (H9a, H9b e H9c); desde a G14 o envio único, com os 10 minutos e 10 MB dele
+ * (meeting-service.ts), só sobra no recuo do corte do arquivo de um formato que
+ * o corte não lê.
  *
  * A MENSALIDADE que amplia os minutos é ESTRUTURA, não recurso (decisão do
  * Roberto de 14/09 e item 4: "Se não existir [infraestrutura de pagamento],

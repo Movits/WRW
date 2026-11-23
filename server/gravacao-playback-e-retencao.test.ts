@@ -225,7 +225,8 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     await servico.getPrivateMeeting("dona-1", "reuniao-1");
     const porTabela = (tabela: unknown) => leituras.filter(operacao => operacao.tabela === tabela).map(predicadoDe);
-    expect(porTabela(schema.meetings)).toEqual([REUNIAO_DA_DONA]);
+    // A leitura da reunião deixa de fora a da lixeira (H7d), que é "não encontrada".
+    expect(porTabela(schema.meetings)).toEqual([{ sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`trashed_at` is null)", params: ["reuniao-1", "dona-1"] }]);
     expect(porTabela(schema.meetingTranscripts)).toEqual([derivadaDaReuniaoDaDona("meeting_transcripts")]);
     expect(porTabela(schema.meetingEntities)).toEqual([derivadaDaReuniaoDaDona("meeting_entities")]);
     expect(porTabela(schema.meetingContactSuggestions)).toEqual([derivadaDaReuniaoDaDona("meeting_contact_suggestions")]);
@@ -335,11 +336,14 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "origem", "sourceUrl",
     // Os detalhes (H7c): as etiquetas e o "Onde foi", só da dona.
     "etiquetas", "ondeFoi",
+    // A pasta (H7d), só da dona: a lista filtra e agrupa por ela.
+    "folderId",
   ];
   // A lista leva também o nome do contato e o do contexto (a busca na tela, H7b),
   // e o detalhe, o contato e o contexto com o nome (o painel dos detalhes, H7c),
-  // lidos só da rede da dona.
-  const SO_NA_LISTA = ["contatoNome", "contextoNome"];
+  // lidos só da rede da dona. E o sim ou não de a dona ter editado a
+  // transcrição (H18: a junção avisa que as correções não passam), sem o texto.
+  const SO_NA_LISTA = ["contatoNome", "contextoNome", "transcricaoEditada"];
   const SO_NO_DETALHE = ["contato", "contexto"];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),

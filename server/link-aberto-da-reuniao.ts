@@ -10,6 +10,8 @@ import { auditLogs, meetingAudioSlices, meetingRecordings, meetingTranscripts, m
 import { ACAO_LINK_LIGADO, linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { transcricaoEstaEditada } from "./editar-transcricao";
+import { estaNaLixeira, foraDaLixeira, reuniaoForaDeVista } from "./reuniao-visivel";
 import { gravacaoParaOuvir } from "./meeting-service";
 import { comCookiesDoPedido, cookiesDoPedido, entradaValida, gerarSenhaDoLink, hashDaSenhaDoLink } from "./senha-do-link-aberto";
 import { storageGetSignedUrl } from "./storage";
@@ -171,9 +173,10 @@ export async function ligarLinkAbertoComOpcoes(
 ): Promise<LinkLigado> {
   const db = await exigirDb();
   if (opcoes.comSenha === true) {
-    const [atual] = await db.select({ status: meetings.status, shareToken: meetings.shareToken }).from(meetings)
+    const [atual] = await db.select({ status: meetings.status, shareToken: meetings.shareToken, trashedAt: meetings.trashedAt }).from(meetings)
       .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-    if (!atual || atual.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    // A reunião na lixeira (H7d) é "não encontrada", como a excluída.
+    if (!atual || reuniaoForaDeVista(atual)) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     if (atual.status !== "ready") throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
     if (atual.shareToken) {
       const confirmado = await db.transaction(tx => confirmarLinkJaLigado(tx, ownerId, meetingId, prova));
@@ -227,13 +230,16 @@ async function ligarNaTransacao(
 ): Promise<LinkLigado & EstadoDoLinkLigado> {
   const tokenNovo = gerarTokenDoLink();
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
+  // A reunião na lixeira (H7d) não liga link, nem na corrida com o "mandar
+  // para a lixeira", que trava a mesma linha.
   await tx.update(meetings).set({ shareToken: tokenNovo, sharePasswordHash: escolha.hash, shareAudio: escolha.incluirAudio, ...FREIO_DO_LINK_ZERADO })
-    .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken)));
+    .where(and(daDona, eq(meetings.status, "ready"), isNull(meetings.shareToken), foraDaLixeira()));
   const [reuniao] = await tx.select({
     status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+    trashedAt: meetings.trashedAt,
   }).from(meetings).where(daDona).limit(1);
   // Lançar aqui desfaz o UPDATE.
-  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   // Em gravação, processando ou com falha não há o que compartilhar ainda.
   if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
   // O link já estava ligado (duplo clique, outra aba): fica como estava, e a
@@ -254,9 +260,10 @@ async function ligarNaTransacao(
  * Null se o link foi desligado nesse meio-tempo: quem chama liga com a senha.
  */
 async function confirmarLinkJaLigado(tx: Transacao, ownerId: string, meetingId: string, prova: ProvaDoLinkLigado): Promise<LinkLigado | null> {
-  const [reuniao] = await tx.select({ status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio })
-    .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  const [reuniao] = await tx.select({
+    status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio, trashedAt: meetings.trashedAt,
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   if (reuniao.status !== "ready") throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_SO_REUNIAO_PRONTA);
   if (!reuniao.shareToken) return null;
   await tx.insert(auditLogs).values(linhaDaConfirmacao(prova, meetingId, { comSenha: reuniao.sharePasswordHash !== null, incluirAudio: reuniao.shareAudio }));
@@ -310,8 +317,9 @@ async function linkLigadoDaDona(tx: Transacao, ownerId: string, meetingId: strin
   const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId));
   const [reuniao] = await tx.select({
     status: meetings.status, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+    trashedAt: meetings.trashedAt,
   }).from(meetings).where(daDona).limit(1).for("update");
-  if (!reuniao || reuniao.status === "deleted") throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new LinkAbertoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   if (reuniao.status !== "ready" || !reuniao.shareToken) throw new LinkAbertoRecusado("PRECONDITION_FAILED", MENSAGEM_LINK_DESLIGADO);
   return { ...reuniao, daDona };
 }
@@ -406,6 +414,8 @@ async function reuniaoDoLink(token: string) {
     origem: meetings.origem,
     sourceUrl: meetings.sourceUrl,
     contaAtiva: users.isActive,
+    // A lixeira (H7d), no fim: as leituras em posição (os dublês) não mudam.
+    trashedAt: meetings.trashedAt,
   }).from(meetings)
     .innerJoin(users, eq(users.openId, meetings.ownerId))
     .where(eq(meetings.shareToken, token))
@@ -414,7 +424,9 @@ async function reuniaoDoLink(token: string) {
   // ressalva de server/db.ts sobre os nomes de contexto): no SQL, "AbC..." e
   // "abc..." acham a mesma linha. A igualdade exata fica aqui, em JS, para a
   // variação de caixa não abrir o link nem virar outro balde do teto.
-  if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva) return null;
+  // A reunião na lixeira (H7d) não abre pelo link: mandar para a lixeira já
+  // desliga o link, e esta regra cobre a corrida e o que escapar dela.
+  if (!reuniao || reuniao.shareToken !== token || reuniao.status !== "ready" || !reuniao.contaAtiva || estaNaLixeira(reuniao.trashedAt)) return null;
   // As duas regras da H23 falham fechadas: hash que não é nulo pede a entrada,
   // e só o `true` do banco serve o áudio.
   if (reuniao.sharePasswordHash !== null && !entradaValida(token, reuniao.sharePasswordHash, cookiesDoPedido())) return "senha" as const;
@@ -486,7 +498,12 @@ export async function verReuniaoPeloLink(token: string) {
   // As falas por falante (D1) vão junto: são o mesmo texto da transcrição,
   // separado por voz e tempo, com o rótulo F1, F2... A página troca o rótulo
   // pelo nome do `vozes`, ou por "Falante n".
-  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments })
+  // A versão que a dona vê, editada ou não (H18). A da IA (original_transcript
+  // e original_segments) nunca é selecionada: do link sai só se a dona editou.
+  const [transcricao] = await db.select({
+    texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language, segmentos: meetingTranscripts.segments,
+    editada: transcricaoEstaEditada,
+  })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, reuniao.id), eq(meetingTranscripts.ownerId, reuniao.ownerId)))
     .limit(1);
@@ -504,7 +521,10 @@ export async function verReuniaoPeloLink(token: string) {
     documento: reuniao.documento,
     // Só os campos do contrato do segmento, e só segmentos nesse formato: a coluna
     // é JSON livre, e nada além da fala, da voz e do tempo sai pelo link público.
-    transcricao: transcricao ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos) } : null,
+    // `editada`: a dona corrigiu a transcrição (H18), e a página diz isso a quem lê.
+    transcricao: transcricao
+      ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos), editada: !!Number(transcricao.editada) }
+      : null,
     gravacao: recording
       ? {
           url: enderecoDoAudioDoLink(token), mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt,

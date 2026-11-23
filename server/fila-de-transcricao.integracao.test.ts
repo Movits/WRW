@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
@@ -441,5 +441,35 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await marcarReunioesInterrompidas();
     expect(await reuniaoDe(id)).toMatchObject({ status: "processing" });
     await (await db()).update(meetings).set({ status: "failed" }).where(and(eq(meetings.id, id), eq(meetings.ownerId, DONA)));
+  });
+
+  it("a reunião na lixeira (H7d) fica fora da fila: a parte dela não vai à IA e a reunião não é montada; restaurada, a fila a retoma", async () => {
+    const naLixeira = AGORA();
+    // A parte que chegou (a retomada do aparelho manda a parte atrasada mesmo
+    // com a reunião na lixeira) e a reunião já toda transcrita, à espera da montagem.
+    const comParte = await reuniao("uploading", 1, { trashedAt: naLixeira });
+    await parte(comParte, 0);
+    const paraMontar = await reuniao("uploading", 1, { trashedAt: naLixeira });
+    await parte(paraMontar, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Fechado o frete." }] } });
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Bom dia." }], idioma: "pt-BR", modelo: "gemini-teste" });
+
+    await rodar();
+    expect(transcreverFatia).not.toHaveBeenCalled();
+    expect(invokeLLM).not.toHaveBeenCalled();
+    expect((await partesDe(comParte))[0]).toMatchObject({ status: "received", attempts: 0, lockToken: null });
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "uploading", attempts: 0, lockToken: null });
+
+    // A tomada confere a lixeira de novo: a reunião que foi para lá entre a
+    // seleção e a tomada não é tomada (a seleção acima já a deixou de fora).
+    await fila._paraTestes.montarUmaReuniao(await db(), { id: paraMontar, ownerId: DONA, esperadas: 1 });
+    expect(invokeLLM).not.toHaveBeenCalled();
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "uploading", attempts: 0, lockToken: null });
+
+    // Restauradas, a fila transcreve a parte e monta a reunião.
+    await (await db()).update(meetings).set({ trashedAt: null }).where(and(eq(meetings.ownerId, DONA), inArray(meetings.id, [comParte, paraMontar])));
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect((await partesDe(comParte))[0]).toMatchObject({ status: "transcribed" });
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "ready" });
   });
 });

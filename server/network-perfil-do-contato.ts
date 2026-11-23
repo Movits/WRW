@@ -5,6 +5,7 @@ import {
 } from "../drizzle/schema";
 import { camposFaltantes } from "../shared/completude-do-contato";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { garantirCodigosAnonimos } from "./network-codigo-anonimo";
 import { listarPendencias } from "./network-extracao";
 import { listarConexoesDaSolicitante, type ConexaoVisivel, type Solicitante } from "./network-registro";
@@ -144,7 +145,8 @@ export async function perfilDoContato(quem: Solicitante, contactId: number, opco
     .from(meetings)
     .where(and(
       eq(meetings.ownerId, quem.openId),
-      ne(meetings.status, "deleted"),
+      // A da lixeira (H7d) não aparece no perfil do contato, como a excluída.
+      reuniaoVisivel(),
       idsDeReuniao.length ? or(eq(meetings.contactId, contactId), inArray(meetings.id, idsDeReuniao)) : eq(meetings.contactId, contactId),
     ))
     .orderBy(desc(meetings.createdAt)).limit(50);

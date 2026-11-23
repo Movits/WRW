@@ -3,7 +3,7 @@ import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
-import { ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PRAZO_DO_AVISO_DE_HORA_MS } from "@shared/const";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PRAZO_DO_AVISO_DE_HORA_MS } from "@shared/const";
 
 // O ask é público e cada chamada custa uma requisição de LLM. Sem um teto
 // próprio, qualquer visitante anônimo podia disparar até o limite da API
@@ -50,14 +50,15 @@ const IDIOMA_DA_RESPOSTA: Record<string, string> = {
 };
 
 // Os números da gravação no prompt saem das constantes que a tela e o servidor
-// aplicam (G13b): a gravação em partes vai até 12 h, com o aviso de hora; o
-// arquivo em MP3 vai em partes, também até 12 h (H9a), e os outros formatos
-// seguem no envio único (10 minutos e 10 MB). Escritos à mão, já ficaram para
-// trás uma vez ("reuniões de até 10 minutos").
+// aplicam (G13b): a gravação em partes vai até 12 h, com o aviso de hora, e o
+// arquivo de áudio ou vídeo também vai em partes, até 12 h, nos formatos da
+// dica da tela (H9a, H9b e H9c; meetings.uploadLimit). Os 10 minutos e 10 MB do
+// envio único saíram da resposta na G14: o gravador não o usa mais, e o recuo
+// do corte (o arquivo de um formato que o corte não lê) não é promessa a fazer
+// a quem pergunta. Escritos à mão, os números já ficaram para trás uma vez
+// ("reuniões de até 10 minutos").
 const HORAS_DE_GRAVACAO = GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600;
 const MINUTOS_DO_AVISO_DE_HORA = PRAZO_DO_AVISO_DE_HORA_MS / 60_000;
-const MINUTOS_DO_ARQUIVO = ENVIO_UNICO_SEGUNDOS_MAX / 60;
-const MB_DO_ARQUIVO = ENVIO_UNICO_BYTES_MAX / (1024 * 1024);
 
 // ============================================================
 // FAQ COM IA
@@ -82,7 +83,7 @@ Informações sobre a plataforma:
 - Oportunidades: propostas de sociedade, investimento, mentoria, parceria, projetos e vagas publicadas por membros
 - A plataforma usa IA para sugerir conexões entre perfis e oportunidades (conexões sugeridas); quando duas pessoas demonstram interesse uma na outra, elas criam uma conexão. Chame isso sempre de "conexão", nunca de "match" (Smart Match e Business Match são nomes próprios e continuam assim). Conexões sugeridas e conexões criadas por interesse mútuo existem em todos os níveis (Bronze, Prata e Ouro); não confunda com as Conexões Estratégicas, rede exclusiva do Status Ouro
 - Segurança: acesso com login, bloqueio automático de tentativas de acesso suspeitas, verificação de identidade (SIVC) e sistema de confiança com índice de confiabilidade. Não afirme que existe criptografia de ponta a ponta: ela não existe
-- Meu Network Inteligente: a pessoa grava reuniões gratuitamente, cada uma com até ${HORAS_DE_GRAVACAO} horas: a cada hora de gravação, a plataforma pede que ela confirme que a gravação continua e, sem a confirmação em ${MINUTOS_DO_AVISO_DE_HORA} minutos, a gravação para e o que foi gravado segue para a transcrição; um arquivo de áudio pronto também pode ser enviado: em MP3, com até ${HORAS_DE_GRAVACAO} horas; nos outros formatos, com até ${MINUTOS_DO_ARQUIVO} minutos e ${MB_DO_ARQUIVO} MB; a IA transcreve e sugere os contatos citados, que ficam na rede particular dela, privados por padrão; a plataforma cruza o que cada contato tem e procura para mostrar oportunidades entre pessoas que ela já conhece. Se quiser, ela pode disponibilizar cada contato para oportunidades da rede, de forma anonimizada: a opção começa em NÃO e pode voltar a NÃO quando ela quiser; com SIM, e com o termo do Smart Match aceito, a rede enxerga só um ID anônimo e o que o contato tem e o que precisa, nunca nome, telefone, e-mail, áudio, transcrição ou notas, e a plataforma procura conexões com contatos disponibilizados por outras pessoas e com membros da plataforma. Toda conexão identificada fica registrada com a origem, as etapas e o status da comissão; nenhum percentual, valor ou cobrança é aplicado automaticamente (não informe percentual). Não prometa planos pagos nem minutos extras: ainda não existem
+- Meu Network Inteligente: a pessoa grava reuniões gratuitamente, cada uma com até ${HORAS_DE_GRAVACAO} horas: a cada hora de gravação, a plataforma pede que ela confirme que a gravação continua e, sem a confirmação em ${MINUTOS_DO_AVISO_DE_HORA} minutos, a gravação para e o que foi gravado segue para a transcrição; um arquivo de áudio ou vídeo pronto também pode ser enviado (MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC ou AAC), também com até ${HORAS_DE_GRAVACAO} horas; a IA transcreve e sugere os contatos citados, que ficam na rede particular dela, privados por padrão; a plataforma cruza o que cada contato tem e procura para mostrar oportunidades entre pessoas que ela já conhece. Se quiser, ela pode disponibilizar cada contato para oportunidades da rede, de forma anonimizada: a opção começa em NÃO e pode voltar a NÃO quando ela quiser; com SIM, e com o termo do Smart Match aceito, a rede enxerga só um ID anônimo e o que o contato tem e o que precisa, nunca nome, telefone, e-mail, áudio, transcrição ou notas, e a plataforma procura conexões com contatos disponibilizados por outras pessoas e com membros da plataforma. Toda conexão identificada fica registrada com a origem, as etapas e o status da comissão; nenhum percentual, valor ou cobrança é aplicado automaticamente (não informe percentual). Não prometa planos pagos nem minutos extras: ainda não existem
 - Conexões Estratégicas: rede de contatos exclusiva para membros Ouro
 - Líderes Nacionais: membros nomeados por Ouro para representar a plataforma em suas regiões
 - Plataforma disponível em 10 idiomas

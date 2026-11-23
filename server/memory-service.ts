@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 import {
   contactAssets,
   contactContexts,
@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { rotaDaReuniao } from "@shared/rotas";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { exigirDb } from "./db";
+import { estaNaLixeira } from "./reuniao-visivel";
 import { embedManyWithGemini, embedWithGemini } from "./gemini";
 import { invokeLLM } from "./_core/llm";
 
@@ -96,7 +97,7 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
     db.select().from(contactNeeds).where(eq(contactNeeds.ownerId, ownerId)),
     db.select({ contextId: contextParticipants.contextId, name: contextParticipants.name, company: contextParticipants.company, role: contextParticipants.role, notes: contextParticipants.notes })
       .from(contextParticipants).where(eq(contextParticipants.ownerId, ownerId)),
-    db.select({ id: meetings.id, title: meetings.title, status: meetings.status }).from(meetings).where(eq(meetings.ownerId, ownerId)),
+    db.select({ id: meetings.id, title: meetings.title, status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings).where(eq(meetings.ownerId, ownerId)),
     // O vínculo contato↔contexto (onde e como a pessoa foi conhecida, com
     // cidade/país/notas do encontro) ficava fora dos documentos: "Quem conheço
     // na Nigéria?" não achava a Ana vinculada à "Missão Comercial Lagos"
@@ -249,8 +250,10 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
   // apagar. O filtro é em memória, de propósito: a lista de reuniões da dona
   // já está carregada (para os títulos), então não custa nada — e um JOIN na
   // consulta das transcrições exigiria dos testes da memória um fake de banco
-  // que hoje simula só SELECT simples por tabela.
-  const reunioesVivas = reunioes.filter(reuniao => reuniao.status !== "deleted");
+  // que hoje simula só SELECT simples por tabela. A reunião na lixeira (H7d)
+  // também fica fora: o documento dela sai na rodada seguinte, e volta se a
+  // dona a restaurar.
+  const reunioesVivas = reunioes.filter(reuniao => reuniao.status !== "deleted" && !estaNaLixeira(reuniao.trashedAt));
   const tituloDaReuniao = new Map(reunioesVivas.map(reuniao => [reuniao.id, reuniao.title]));
 
   // A reunião longa é lida INTEIRA, em janelas (G8): o embedding só lê os
@@ -325,11 +328,22 @@ async function assinaturaDaBase(db: Awaited<ReturnType<typeof exigirDb>>, ownerI
   // editar outra coisa (revisão da PR-D). Um count/max sobre as linhas sem
   // dona é barato: a tabela é pequena (catálogo + contextos privados) e a
   // varredura é a mesma que o agregado da dona já faz nela.
+  // As reuniões contam sem as da lixeira (H7d): mandar uma reunião para a
+  // lixeira, ou tirá-la de lá, não mexe no updated_at (a ficha de quem a
+  // processa), mas muda a contagem, e a assinatura nova faz a rodada tirar (ou
+  // devolver) os documentos dela.
   const linhas = await Promise.all([
     daDona(privateContacts), daDona(contexts), daDona(meetingTranscripts),
     daDona(contactAssets), daDona(contactNeeds),
-    daDona(contextParticipants), daDona(meetings), daDona(contactContexts),
+    daDona(contextParticipants), resumo(meetings, and(eq(meetings.ownerId, ownerId), isNull(meetings.trashedAt))!), daDona(contactContexts),
     resumo(contexts, isNull(contexts.ownerId)),
+    // E a própria lixeira: trocar uma reunião por outra entre duas buscas
+    // (mandar A para lá e restaurar B) mantém a contagem acima e, sem nenhuma
+    // das duas ser a de updated_at maior, o máximo; a rodada não reindexava, e
+    // B ficava fora da Memória até outra edição. A hora mais recente de ida
+    // para a lixeira muda a cada reunião que vai, e a contagem, a cada uma que volta.
+    db.select({ n: sql<number>`count(*)`, m: sql<number>`coalesce(max(${meetings.trashedAt}), 0)` })
+      .from(meetings).where(and(eq(meetings.ownerId, ownerId), isNotNull(meetings.trashedAt))!),
   ]);
   return linhas.map(([linha]) => (linha ? `${linha.n}:${linha.m}` : "0:0")).join("|");
 }
@@ -542,6 +556,12 @@ async function executarIndexacao(ownerId: string, forcar: boolean): Promise<Resu
 
 export type ResultadoDaBusca = { hits: SearchHit[]; pending: number; truncated: number };
 
+/** A reunião de um documento da memória: o meetingId do metadata, ou a chave sem a janela ("id#2"). */
+function reuniaoDoDocumento(documento: { sourceId: string; metadata: unknown }): string {
+  const metadata = documento.metadata as Record<string, unknown> | null;
+  return typeof metadata?.meetingId === "string" ? metadata.meetingId : documento.sourceId.split("#")[0];
+}
+
 export async function semanticSearch(ownerId: string, query: string, limit = 6): Promise<ResultadoDaBusca> {
   const cleanQuery = query.trim().slice(0, MAX_QUERY_LENGTH);
   if (!cleanQuery) return { hits: [], pending: 0, truncated: 0 };
@@ -568,7 +588,17 @@ export async function semanticSearch(ownerId: string, query: string, limit = 6):
     console.warn(`[Memória] reindexação adiada (${error instanceof Error ? error.message : error}); buscando no índice existente.`);
   }
   const documents = await db.select().from(memoryDocuments).where(eq(memoryDocuments.ownerId, ownerId));
+  // Só as reuniões que a dona vê (H7d): a reindexação é melhor-esforço, e o
+  // índice que ela não conseguiu atualizar ainda tem o documento da reunião
+  // que foi para a lixeira (ou que está sendo excluída). Aqui ele sai da busca
+  // na hora, sem depender da rodada. Filtro em memória, como o dos títulos.
+  const reunioesDaDona = await db.select({ id: meetings.id, status: meetings.status, trashedAt: meetings.trashedAt })
+    .from(meetings).where(eq(meetings.ownerId, ownerId));
+  const visiveis = new Set(reunioesDaDona
+    .filter(reuniao => reuniao.status !== "deleted" && !estaNaLixeira(reuniao.trashedAt))
+    .map(reuniao => reuniao.id));
   const hits = documents
+    .filter(document => document.sourceType !== "meeting" || visiveis.has(reuniaoDoDocumento(document)))
     .filter(document => Array.isArray(document.embedding) && document.embedding.length === queryEmbedding.length)
     .map(document => ({
       id: document.id,

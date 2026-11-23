@@ -113,6 +113,10 @@ function bancoFalso(transacao?: FeitoNaTransacao) {
   };
   return falso;
 }
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => bancoFalso(),
@@ -276,6 +280,39 @@ describe("meetings.submitRecording — o teto de 10 min do envio único continua
     expect(processMeetingRecording).toHaveBeenCalledTimes(1);
     await expect(envio(601)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(processMeetingRecording).toHaveBeenCalledTimes(1);
+  });
+});
+
+// G14: o gravador do app não usa mais o envio único, que sobra só no recuo do
+// corte (o arquivo de um formato que o corte não lê), com a marca. A rota fica
+// para esse recuo e para um cliente de fora do repositório, que só o log revela:
+// cada chamada deixa uma linha, com a marca ou sem ela.
+describe("meetings.submitRecording — o log separa o recuo do corte de outro cliente (G14)", () => {
+  const entrada = { meetingId: ID, audioBase64: "A".repeat(40), mimeType: "audio/webm" as const, durationSeconds: 30, language: "pt-BR" };
+
+  it("com a marca, a linha diz que é o recuo do corte; sem ela, que pode ser um cliente de fora do app; a marca não chega ao serviço", async () => {
+    processMeetingRecording.mockResolvedValue({ transcript: "texto", extraction: { entities: [], contacts: [] } });
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await expect(rota().submitRecording({ ...entrada, recuoDoCorte: true })).resolves.toMatchObject({ success: true });
+      expect(log).toHaveBeenLastCalledWith("[Reuniões] envio único (submitRecording): recuo do corte do arquivo, audio/webm");
+      expect(processMeetingRecording).toHaveBeenLastCalledWith({ ...entrada, ownerId: "dona-1" });
+      await expect(rota().submitRecording(entrada)).resolves.toMatchObject({ success: true });
+      expect(log).toHaveBeenLastCalledWith("[Reuniões] envio único (submitRecording): sem a marca do recuo do corte (cliente de fora do app?), audio/webm");
+      expect(processMeetingRecording).toHaveBeenLastCalledWith({ ...entrada, ownerId: "dona-1" });
+      // Nada da reunião nem da dona vai à linha: só o caminho e o tipo do áudio.
+      for (const [linha] of log.mock.calls) {
+        expect(String(linha)).not.toContain(ID);
+        expect(String(linha)).not.toContain("dona-1");
+      }
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("a marca só aceita true: false é BAD_REQUEST, sem chegar ao serviço", async () => {
+    await expect(rota().submitRecording({ ...entrada, recuoDoCorte: false as unknown as true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(processMeetingRecording).not.toHaveBeenCalled();
   });
 });
 

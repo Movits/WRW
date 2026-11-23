@@ -25,6 +25,13 @@ nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto
 `CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
 dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
+`meetings.submitRecording` (o envio único: o áudio inteiro, em base64, até 10 min e 10 MB)
+não é mais caminho do gravador desde a G14: a tela só o chama no recuo do corte (o arquivo
+curto de um formato que o corte reconhece mas não lê), com `recuoDoCorte: true`, e cada
+chamada deixa no log a linha `[Reuniões] envio único (submitRecording)`, com a marca ou sem
+ela (a sem marca é de um cliente de fora do app). Áudio novo de reunião vai pela rota das
+partes, abaixo.
+
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
 cru, autenticada pelo cookie), montada ANTES de todo `express.json`; a ordem é guardada por
@@ -356,7 +363,7 @@ se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áu
 a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
 `processing_error` (`shared/documento-da-reuniao.ts`), que a tela traduz.
 
-## Organizar as reuniões: detalhes, busca e junção (H7c, H7b e H17)
+## Organizar as reuniões: detalhes, busca, junção, pastas e lixeira (H7c, H7b, H17 e H7d)
 
 - **Detalhes** (`server/detalhes-da-reuniao.ts`): etiquetas e "Onde foi" (colunas de
   `meetings`), contato e contexto. A posse do contato (da dona) e do contexto (dela ou do
@@ -379,6 +386,54 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   rótulos depois dos já usados, para vozes e nomes não passarem de uma reunião à outra.
   Por isso a montagem passa `zerarNomes: false` a `gravarResultadoDaReuniao`, e quem
   transcreve de novo zera os nomes antes (o reprocesso das partes, na tomada).
+- **Pastas** (`server/pastas-de-reunioes.ts`, H7d): nome, ícone e cor de listas fechadas
+  (`shared/pastas-de-reunioes.ts`), até 50 por dona, nome sem repetir (sem caixa nem
+  acento) e uma pasta por reunião (`meetings.folder_id`). Apagar a pasta solta as reuniões
+  dela na mesma transação; mover é todo ou nada e não mexe no `updated_at`. O link aberto
+  não leva a pasta.
+- **Lixeira** (`server/lixeira-de-reunioes.ts`, H7d): exclusão ADIADA, por
+  `meetings.trashed_at`. Mandar para a lixeira desliga o link aberto (com a senha), tira os
+  avisos da reunião do sino e grava `MEETINGS_TRASHED`, na mesma transação; a gravação em
+  partes ainda no ar não vai (CONFLICT `LIXEIRA_GRAVANDO`). A reunião na lixeira sai de toda
+  consulta: as entre reuniões (lista, busca, Memória, link aberto, filas, pendências,
+  agenda, perfil do contato) filtram por `server/reuniao-visivel.ts`, e todo procedimento
+  de `routers/meetings.ts`, menos os cinco da lixeira e o Excluir imediato
+  (`meetings.delete`, o do descarte da gravação, que tira a reunião de vez também da
+  lixeira), passa pela guarda `procedimentoDaReuniao` (`server/guarda-da-lixeira.ts`, com a
+  varredura do router em `server/guarda-da-lixeira.test.ts`). A guarda recusa com NOT_FOUND
+  e o código `REUNIAO_NA_LIXEIRA` (só a dona o recebe: ela lê só as reuniões da dona, e o id
+  de outra conta segue "não encontrada"), e o detalhe diz que a reunião está na lixeira,
+  com o restaurar. A rota das partes ACEITA a
+  parte atrasada da reunião em `uploading` que foi para a lixeira (a tela apagaria a única
+  cópia no 404): a fila não a transcreve enquanto ela está lá, e restaurar devolve a reunião
+  inteira. Consulta nova de reunião filtra por ali. Restaurar vale por 30 dias e devolve a reunião à pasta, com o
+  link desligado; apagar de vez, esvaziar e o fim dos 30 dias (a varredura das gravações,
+  `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. A lixeira não muda o prazo
+  do áudio.
+
+## Editar a transcrição (H18)
+
+`server/editar-transcricao.ts`: a dona corrige o texto ou a voz de um trecho, localiza e
+substitui e volta um trecho (ou tudo) ao original, só na reunião pronta dela e nunca no
+documento. A reunião na lixeira (H7d) não se edita: a guarda `procedimentoDaReuniao` e a
+leitura travada da reunião (`reuniaoVisivel`) a recusam como não encontrada. `transcript`
+e `segments` guardam a versão que ela vê, e todo leitor lê essa (o resumo refeito, o mapa,
+o Pergunte, a busca, a Memória, a exportação, a tradução e o link aberto). O que a IA
+escreveu fica em `original_transcript` e `original_segments`: só a dona os lê (o link
+nunca os seleciona), e a conferência das pendências da extração (`ditosNaReuniao`) também.
+Cada mudança é uma transação que trava a reunião antes da transcrição (a ordem da fila do
+resumo), confere a revisão que a tela viu, apaga as traduções e grava
+`MEETING_TRANSCRIPT_EDITED`, sem fala. O resumo e o mapa que a IA escreveu sobre uma
+revisão anterior (a dona editou durante a geração) são gravados como de outra versão, com a
+hora antes da edição, e não refeitos sozinhos: descartar e refazer a cada edição gastava a
+IA sem teto. O resumo de outra versão faz a tela oferecer "Refazer o resumo" (uma vaga do
+teto de IA), que refaz também o mapa. O resumo grava se a transcrição que leu estava editada
+(`meeting_summaries.transcript_edited`, nulo nos de antes da H18, que leram a da IA): diante
+de um resumo que leu a da IA, a volta ao original não é outra versão, e a tela não oferece
+refazer. O link manda vazio o trecho de item que não está mais na
+transcrição, no resumo e na tradução dele (`trechosNaTranscricaoDeAgora`: leitura nova de
+item pelo link passa por ele). A junção (H17) remonta a transcrição pelo áudio: as
+correções não passam, e a tela avisa.
 
 ## Testes do servidor
 

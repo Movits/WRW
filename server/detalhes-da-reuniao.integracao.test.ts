@@ -108,6 +108,17 @@ describe.skipIf(!temBanco)("Detalhes da reunião (integração)", () => {
     expect((await linha(emPartes.id)).contextId).toBe(contextoDoCatalogo);
   });
 
+  it("o envio único que a tela usa para importar um arquivo (meetings.create com a origem 'arquivo') entra no filtro 'Importadas'; sem a origem, fica nula como antes", async () => {
+    const { vistaDaOrigem } = await import("@shared/pastas-de-reunioes");
+    const { id: importada } = await daDona().meetings.create({ ...novaReuniao(), origem: "arquivo" });
+    expect((await linha(importada)).origem).toBe("arquivo");
+    expect(vistaDaOrigem((await linha(importada)).origem)).toBe("importadas");
+    const { id: antiga } = await daDona().meetings.create(novaReuniao());
+    expect((await linha(antiga)).origem).toBeNull();
+    // Só as origens do microfone e do arquivo: as outras têm caminho próprio.
+    await expect(daDona().meetings.create({ ...novaReuniao(), origem: "youtube" } as never)).rejects.toBeInstanceOf(TRPCError);
+  });
+
   it("atualizarDetalhes muda o que veio, normaliza as etiquetas e o 'Onde foi', e devolve com os nomes", async () => {
     const { id } = await daDona().meetings.create(novaReuniao());
     const detalhes = await daDona().meetings.atualizarDetalhes({

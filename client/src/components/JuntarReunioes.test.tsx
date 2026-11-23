@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import { JuntarReunioes } from "./JuntarReunioes";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -65,6 +66,7 @@ describe("JuntarReunioes", () => {
   it("abre na ordem cronológica, com a primeira marcada como a que fica", () => {
     abrir();
     expect(ordemNaTela()).toEqual(["Parte 1 da reunião", "Parte 2 da reunião", "Parte 3 da reunião"]);
+    esperarTituloPequeno(screen.getByRole("dialog"));
     expect(within(screen.getByRole("dialog")).getByText("Fica")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Subir: Parte 1 da reunião" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Descer: Parte 3 da reunião" })).toBeDisabled();
@@ -113,6 +115,15 @@ describe("JuntarReunioes", () => {
     // Sem saber como o áudio chegou, avisa.
     abrir([A, { ...B, audioPipeline: "slices" }]);
     expect(avisoDeArquivoUnico()).toBeInTheDocument();
+  });
+
+  it("o aviso de que as correções à mão não passam só aparece quando alguma escolhida tem a transcrição editada (H18)", () => {
+    const avisoDasCorrecoes = () => within(screen.getByRole("dialog")).queryByText(/correções feitas à mão na transcrição/);
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "slices", transcricaoEditada: false }]);
+    expect(avisoDasCorrecoes()).not.toBeInTheDocument();
+    cleanup();
+    abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "slices", transcricaoEditada: true }]);
+    expect(avisoDasCorrecoes()).toBeInTheDocument();
   });
 
   it("Cancelar fecha sem pedir nada", () => {

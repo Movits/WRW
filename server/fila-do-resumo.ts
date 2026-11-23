@@ -7,6 +7,8 @@ import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resu
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { transcricaoEstaEditada } from "./editar-transcricao";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { FalhaDaIA } from "./ia-em-json";
 import { avisarReuniaoPronta } from "./lembretes";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
@@ -115,7 +117,11 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   }
 }
 
-/** O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta ativa. */
+/**
+ * O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta
+ * ativa. A reunião na lixeira (H7d) fica fora da fila: o resumo dela espera, e
+ * a fila o faz se a dona a restaurar.
+ */
 async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) {
   const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template, updatedAt: meetingSummaries.updatedAt })
     .from(meetingSummaries)
@@ -126,6 +132,7 @@ async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) 
       semReservaViva(agora),
       lt(meetingSummaries.attempts, TENTATIVAS_DO_RESUMO),
       eq(meetings.status, "ready"),
+      foraDaLixeira(),
       eq(users.isActive, true),
       escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
     ))
@@ -217,10 +224,44 @@ type ItemAtual = { status: string; done: boolean; origin: string; editedAt: numb
 const escritoPelaDona = (item: ItemAtual) => item.origin === "owner" || item.editedAt !== null;
 const itemQueFica = (item: ItemAtual) => item.status === "confirmed" || item.done || escritoPelaDona(item);
 
+/**
+ * O mapa mental gravado antes da última edição da transcrição (H18): saiu de
+ * outra versão dela. O mapa que a IA escreveu sobre uma revisão anterior (a
+ * dona editou durante a geração) é gravado com a hora de antes da edição
+ * (horaDaVersao), então também conta como de outra versão.
+ */
+export function mapaDeOutraVersao(mapaGravadoEm: number | null, transcricaoEditadaEm: number | null): boolean {
+  if (transcricaoEditadaEm === null) return false;
+  return mapaGravadoEm === null || Number(transcricaoEditadaEm) > Number(mapaGravadoEm);
+}
+
+/**
+ * A hora que o resumo (generated_at) e o mapa (mind_map_generated_at) gravam: a
+ * da versão da transcrição de que saíram, que é o que a tela compara com o
+ * edited_at para dizer "de outra versão" (server/resumo-guardado.ts). Na mesma
+ * revisão que a IA leu, é agora: a edição que chegar depois espera a gravação
+ * (as duas travam a reunião) e fica com a hora maior. Numa revisão nova (a dona
+ * editou durante a geração, H18), é um instante antes da última edição: o que a
+ * IA escreveu é gravado assim mesmo, como de outra versão, e a tela oferece
+ * "Refazer o resumo". Descartar e devolver a reserva fazia a fila refazer o
+ * trabalho a cada edição, sem gastar tentativa nem vaga do teto de IA: uma
+ * chamada paga jogada fora por edição, sem limite.
+ */
+export function horaDaVersao(agora: number, revisaoLida: number, atual: { revisao: number; editadaEm: number | null }): number {
+  if (Number(atual.revisao) === revisaoLida || atual.editadaEm === null) return agora;
+  return Math.min(agora, Number(atual.editadaEm) - 1);
+}
+
 /** A fase do resumo; true quando ele foi gravado (e o mapa vem em seguida). */
 async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
+  // A versão que a dona vê, editada ou não (H18), com a revisão: o resumo
+  // escrito sobre uma revisão anterior é gravado como de outra versão. E se ela
+  // está editada (a coluna da versão da IA preenchida, sem ler esse texto): o
+  // resumo grava a marca (transcript_edited), e a tela sabe se ele leu a versão
+  // da IA (server/resumo-guardado.ts).
   const [transcricao] = await db.select({
-    id: meetingTranscripts.id, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
+    id: meetingTranscripts.id, revisao: meetingTranscripts.revision, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
+    editada: transcricaoEstaEditada,
   }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao) {
@@ -265,7 +306,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const agora = Date.now();
   let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
   try {
-    resultado = await gravarResumo(db, alvo, token, transcricao, idioma, resumo, agora);
+    resultado = await gravarResumo(db, alvo, token, { id: transcricao.id, revisao: transcricao.revisao, editada: Number(transcricao.editada) === 1 }, idioma, resumo, agora);
   } catch (erro) {
     // A IA já respondeu e o banco recusou (queda, deadlock): conta como falha
     // passageira, com espera, em vez de prender a linha até a reserva vencer.
@@ -278,7 +319,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
     return false;
   }
   if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
-    console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada (reprocesso)"} durante a geração; a reserva volta à fila.`);
     await devolverReserva(db, alvo.id, token);
   } else if (resultado === "sem_reserva") {
     console.warn("[Resumo] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
@@ -297,7 +338,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
-  transcricao: { id: string }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+  transcricao: { id: string; revisao: number; editada: boolean }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     // A reunião travada até o fim: a exclusão (que marca 'deleted' antes de
@@ -306,6 +347,7 @@ async function gravarResumo(
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
     const [ainda] = await tx.select({
       id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap,
+      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt,
       suggestedTitle: meetingSummaries.suggestedTitle, suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
     }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
@@ -313,10 +355,17 @@ async function gravarResumo(
     // reserva venceu e outra rodada a tomou.
     if (!ainda) return "sem_reserva";
     if (reuniao?.status !== "ready") return "reuniao_fora";
-    // A transcrição tem de ser a mesma que a IA leu.
-    const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
+    // A transcrição tem de ser a mesma linha que a IA leu: a trocada (o
+    // reprocesso) descarta o resumo, e a reserva volta à fila. Na mesma linha
+    // com outra revisão (a dona editou no meio, H18), o resumo é gravado com a
+    // hora de antes da edição (horaDaVersao), e a tela o mostra como de outra
+    // versão, com "Refazer o resumo". A edição trava a reunião antes da
+    // transcrição, como aqui: a que chega depois desta leitura espera o fim
+    // desta transação e fica com a hora maior que a do resumo.
+    const [atual] = await tx.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-    if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    if (!atual || atual.id !== transcricao.id) return "transcricao_trocada";
+    const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     // Os itens de agora, lidos sem trava, e os que saem apagados pela chave:
     // travar a faixa do resumo no índice prende também o vão vizinho, e duas
     // gravações de resumos vizinhos se travam uma à outra (deadlock). A linha
@@ -365,15 +414,20 @@ async function gravarResumo(
       // sozinho). O resumo refeito com o mesmo título não pede de novo o que
       // ela já decidiu (sugestaoDoResumoNovo).
       ...sugestaoDoResumoNovo(ainda, resumo.titulo ?? null),
-      version: sql`${meetingSummaries.version} + 1`, generatedAt: agora,
+      version: sql`${meetingSummaries.version} + 1`, generatedAt: geradoEm,
+      // A transcrição que a IA leu estava editada (H18)? É a da leitura do
+      // começo, como a revisão do horaDaVersao: a edição no meio da geração não
+      // muda o que a IA leu.
+      transcriptEdited: transcricao.editada,
       // A IA devolveu itens e a conferência tirou todos: fica registrado, e a
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
       // A fase seguinte do mesmo trabalho (H10): o mapa entra na fila, do zero
       // e com as tentativas dele. O mapa pronto que ainda passa na conferência
       // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
-      // que ele saiu.
-      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap)
+      // que ele saiu. O mapa gravado antes de a dona editar a transcrição
+      // (H18) é de outra versão, e é refeito com o resumo.
+      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm)
         ? {}
         : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
       attempts: 0,
@@ -395,7 +449,7 @@ async function gravarResumo(
  * pedir de novo.
  */
 async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
-  const [transcricao] = await db.select({ id: meetingTranscripts.id, texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
+  const [transcricao] = await db.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
@@ -426,7 +480,7 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
     return;
   }
   if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
-    console.warn(`[Mapa] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    console.warn(`[Mapa] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada (reprocesso)"} durante a geração; a reserva volta à fila.`);
     await devolverReserva(db, alvo.id, token);
   } else if (resultado === "sem_reserva") {
     console.warn("[Mapa] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
@@ -439,7 +493,7 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
  * transcrição que a IA leu.
  */
 async function gravarMapa(
-  db: Banco, alvo: Alvo, token: string, transcricao: { id: string }, mapa: MapaMental, agora: number,
+  db: Banco, alvo: Alvo, token: string, transcricao: { id: string; revisao: number }, mapa: MapaMental, agora: number,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
@@ -448,11 +502,16 @@ async function gravarMapa(
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     if (!ainda) return "sem_reserva";
     if (reuniao?.status !== "ready") return "reuniao_fora";
-    const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
+    // A mesma linha da transcrição (a trocada, o reprocesso, volta à fila). Na
+    // revisão nova (a dona editou no meio, H18), o mapa é gravado com a hora de
+    // antes da edição, como o resumo: de outra versão, e o "Refazer o resumo"
+    // o refaz.
+    const [atual] = await tx.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-    if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    if (!atual || atual.id !== transcricao.id) return "transcricao_trocada";
+    const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     const r = await tx.update(meetingSummaries).set({
-      mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: agora, mindMapError: null,
+      mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: geradoEm, mindMapError: null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";

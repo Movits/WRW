@@ -786,6 +786,19 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       expect(dubles.lote).not.toHaveBeenCalled();
     });
 
+    it("a reunião que foi para a lixeira entre a fila e o envio (H7d): o automático não manda nada, e o painel e o envio dela são 'não encontrada'", async () => {
+      const { dona, meetingId } = await cenario({ automatico: true });
+      await (await getDb())!.update(meetings).set({ trashedAt: Date.now() }).where(eq(meetings.id, meetingId));
+      await expect(envioAutomaticoDoResumo(dona.openId, meetingId)).resolves.toBeUndefined();
+      expect(await linhasDa(meetingId)).toEqual([]);
+      expect(dubles.lote).not.toHaveBeenCalled();
+      await expect(painelDoResumoPorEmail(dona.openId, meetingId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      // O envio à mão pela dona também (a guarda do router pode ter passado antes de ela ir para a lixeira).
+      await expect(mandarResumoPorEmail(dona, meetingId, pedido({ paraMim: true, autorizacao: AUTORIZACAO }), REQUISICAO)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      expect(await linhasDa(meetingId)).toEqual([]);
+      expect(await tokenDa(meetingId)).toBeNull();
+    });
+
     it("a Resend fora do ar no automático: não lança, e a linha fica para o Tentar de novo", async () => {
       const { dona, meetingId } = await cenario({ automatico: true });
       dubles.lote.mockImplementation(async lista => lista.map(() => false));

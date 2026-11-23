@@ -28,6 +28,10 @@ const naGoogle = vi.hoisted(() => ({
   depoisDeMexerNoItem: vi.fn(async (..._args: unknown[]) => ({ acaoId: null as string | null, naGoogle: null })),
 }));
 vi.mock("./acoes-na-google", () => naGoogle);
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");

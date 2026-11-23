@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   contexts,
   meetingAudioSlices,
@@ -20,7 +20,7 @@ import {
 } from "../drizzle/schema";
 import { pareceSerADona } from "@shared/reuniao-no-match";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, MENSAGEM_REUNIAO_NAO_ENCONTRADA, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, idiomaFalado, nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } from "./audio-guardado-das-partes";
@@ -49,14 +49,19 @@ import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
 import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import { nomesDosPonteiros } from "./detalhes-da-reuniao";
+import { edicaoDaTranscricao, transcricaoEstaEditada, type EdicaoDaTranscricao } from "./editar-transcricao";
+import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
  * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
- * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
- * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
- * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
- * reunião do painel de minutos (server/minutos-de-reuniao.ts).
+ * mudarem; quem os usa é o envio único (desde a G14, só o recuo do corte do
+ * arquivo e um cliente de fora do app, se houver: ver meetings.submitRecording)
+ * e a leitura da gravação inteira das reuniões antigas, no reprocesso e na
+ * junção (server/juntar-reunioes.ts). A gravação em partes não passa por eles:
+ * tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, em
+ * server/fatias-de-reuniao.ts), que desde a G13b é também o limite por reunião
+ * do painel de minutos (server/minutos-de-reuniao.ts).
  */
 export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
 export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
@@ -74,7 +79,13 @@ export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
  * antes de apagar a linha.
  */
 export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "No modo atual, cada reunião pode ter no máximo 10 minutos.";
+/**
+ * A recusa da duração no envio único. Dizia "No modo atual, cada reunião pode
+ * ter no máximo 10 minutos", o que deixou de valer na G13b (a reunião em partes
+ * vai até 12 h): o teto é só do envio de um arquivo só, que desde a G14 sobra no
+ * recuo do corte e num cliente de fora do app (meetings.submitRecording).
+ */
+export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "Este áudio passa dos 10 minutos que o envio de um arquivo só aceita.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";
 /**
  * Folga sobre o limite medido: o gravador da tela para aos 600 s pelo relógio
@@ -584,7 +595,11 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
   const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
-  const [transcript] = await db.select().from(meetingTranscripts)
+  // A versão que a dona vê, editada ou não (H18), com a revisão: a tradução de
+  // uma revisão anterior não fica guardada (traduzirEGuardar).
+  const [transcript] = await db.select({
+    id: meetingTranscripts.id, transcript: meetingTranscripts.transcript, language: meetingTranscripts.language, revision: meetingTranscripts.revision,
+  }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
   // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
@@ -607,7 +622,9 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
   // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
   // por ela, sem pagar outra chamada nem gastar vaga do teto.
-  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  // A revisão entra na chave (H18): quem pede depois de uma edição não espera a
+  // tradução do texto de antes dela.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id, String(transcript.revision)].join("\u0000");
   const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
   const longa = janelas.length > 1;
   const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
@@ -672,7 +689,7 @@ async function traduzirEGuardar(db: Banco, alvo: {
   meetingId: string;
   normalizedLanguage: string;
   targetLanguage: string;
-  transcript: { id: string; transcript: string };
+  transcript: { id: string; transcript: string; revision: number };
   janelas: string[];
 }): Promise<TraducaoPronta> {
   const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
@@ -694,30 +711,36 @@ async function traduzirEGuardar(db: Banco, alvo: {
   }
   const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
-  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
+  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova),
+  // ou a dona pode tê-la editado (H18: a revisão sobe e as traduções saem).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE
   // (owner, meeting, language) barraria para sempre a tradução certa. Se a
   // transcrição já não é a mesma, a resposta vai para quem pediu, sem cache.
-  const [aindaAMesma] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
-    .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
-  if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
-  const timestamp = now();
-  try {
-    await db.insert(meetingTranscriptTranslations).values({
-      id: crypto.randomUUID(),
-      meetingId,
-      ownerId,
-      language: normalizedLanguage,
-      translatedText,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-  } catch (erro) {
-    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
-    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
-    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
-    if (!ehColisaoDeChave(erro)) throw erro;
-  }
+  // A conferência e a gravação vão numa transação, com a transcrição travada:
+  // a edição que chega no meio espera, e a que veio antes já mudou a revisão.
+  await db.transaction(async tx => {
+    const [aindaAMesma] = await tx.select({ id: meetingTranscripts.id, revision: meetingTranscripts.revision }).from(meetingTranscripts)
+      .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1).for("update");
+    if (aindaAMesma?.id !== transcript.id || Number(aindaAMesma.revision) !== Number(transcript.revision)) return;
+    const timestamp = now();
+    try {
+      await tx.insert(meetingTranscriptTranslations).values({
+        id: crypto.randomUUID(),
+        meetingId,
+        ownerId,
+        language: normalizedLanguage,
+        translatedText,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    } catch (erro) {
+      // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+      // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+      // cópia, e quem pediu recebe a que já foi paga, em vez de um erro. No
+      // MySQL, o comando recusado não desfaz a transação.
+      if (!ehColisaoDeChave(erro)) throw erro;
+    }
+  });
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -810,7 +833,8 @@ export class ReprocessamentoRecusado extends Error {
   }
 }
 
-export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+// A frase mora em shared/const.ts (a tela a traduz); o nome de sempre fica aqui.
+export { MENSAGEM_REUNIAO_NAO_ENCONTRADA };
 export const MENSAGEM_REPROCESSO_EM_CONFLITO = "Esta reunião não está com falha ou já está sendo processada.";
 export const MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR = "Não há áudio guardado desta reunião para reprocessar.";
 // A tela do site reconhece esta frase (shared/const.ts) para traduzi-la e para
@@ -1318,7 +1342,8 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const db = await exigirDb();
   const [meeting] = await db.select().from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!meeting || reuniaoForaDeVista(meeting)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
   // A reunião que nasceu de um documento (H12) refaz a leitura pelo PDF
@@ -1346,12 +1371,12 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const tomada = await db.update(meetings).set({ status: "processing", processingError: null, updatedAt: ficha })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
-      eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+      eq(meetings.status, "failed"), eq(meetings.consentGranted, true), foraDaLixeira(),
     ));
   if (!linhasAfetadas(tomada)) {
     const [agora] = await db.select().from(meetings)
       .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-    if (!agora || agora.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (!agora || reuniaoForaDeVista(agora)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     throw recusaPeloStatus(agora) ?? new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
   }
 
@@ -1458,6 +1483,9 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // não os leva: ele escolhe as colunas dele (server/link-aberto-da-reuniao.ts).
   etiquetas: meetings.etiquetas,
   ondeFoi: meetings.ondeFoi,
+  // A pasta (H7d), só da dona: a lista filtra e agrupa por ela. O link aberto
+  // não a leva.
+  folderId: meetings.folderId,
 };
 
 /**
@@ -1473,7 +1501,7 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
   const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
   const db = await exigirDb();
   return db.transaction(async tx => {
-    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel());
     const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
     const nomes = nomesDosFalantes(reuniao.speakerNames);
@@ -1495,13 +1523,22 @@ export async function nomearFalante(ownerId: string, meetingId: string, falante:
  */
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name })
+  // A transcrição editada pela dona (H18) entra só como sim ou não, sem ler o
+  // texto: a junção (H17) refaz a transcrição pelo áudio, e a tela avisa que as
+  // correções não passam para a reunião juntada.
+  const lista = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name, transcricaoEditada: transcricaoEstaEditada,
+  })
     .from(meetings)
     .leftJoin(privateContacts, and(eq(privateContacts.id, meetings.contactId), eq(privateContacts.ownerId, meetings.ownerId)))
     .leftJoin(contexts, and(eq(contexts.id, meetings.contextId), or(eq(contexts.ownerId, meetings.ownerId), isNull(contexts.ownerId))))
-    .where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
+    .leftJoin(meetingTranscripts, and(eq(meetingTranscripts.meetingId, meetings.id), eq(meetingTranscripts.ownerId, meetings.ownerId)))
+    // A reunião na lixeira (H7d) sai da lista: ela aparece só na lixeira da
+    // dona (listarLixeira, em server/lixeira-de-reunioes.ts).
+    .where(and(eq(meetings.ownerId, ownerId), foraDaLixeira())).orderBy(desc(meetings.createdAt));
   return lista.map(meeting => ({
     ...meeting, processingError: processingErrorSeguro(meeting.processingError), etiquetas: etiquetasDaReuniao(meeting.etiquetas),
+    transcricaoEditada: !!Number(meeting.transcricaoEditada),
   }));
 }
 
@@ -2042,10 +2079,29 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   // Da senha do link (H23) sai só se ela existe: o hash fica no servidor.
   const [linha] = await db.select({
     ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
-  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), foraDaLixeira())).limit(1);
+  // A reunião na lixeira (H7d) é "não encontrada", como a de outra conta.
   if (!linha) return null;
   const { sharePasswordHash, shareAudio, ...meeting } = linha;
-  const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  // A transcrição como a dona a vê (editada ou não) e o que a tela precisa para
+  // editá-la (H18): a revisão e, dos trechos que a dona mudou, o que a IA tinha
+  // escrito. O texto original inteiro não vem: só as falas originais, e só
+  // quando a transcrição está editada.
+  const [linhaDaTranscricao] = await db.select({
+    id: meetingTranscripts.id, meetingId: meetingTranscripts.meetingId, ownerId: meetingTranscripts.ownerId,
+    transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments, language: meetingTranscripts.language,
+    durationSeconds: meetingTranscripts.durationSeconds, createdAt: meetingTranscripts.createdAt, updatedAt: meetingTranscripts.updatedAt,
+    editedAt: meetingTranscripts.editedAt, revision: meetingTranscripts.revision, editada: transcricaoEstaEditada,
+  }).from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  let transcript: (Omit<typeof linhaDaTranscricao, "editada" | "editedAt" | "revision"> & { edicao: EdicaoDaTranscricao }) | undefined;
+  if (linhaDaTranscricao) {
+    const { editada, editedAt, revision, ...resto } = linhaDaTranscricao;
+    const [original] = Number(editada)
+      ? await db.select({ segments: meetingTranscripts.originalSegments }).from(meetingTranscripts)
+        .where(and(eq(meetingTranscripts.id, resto.id), eq(meetingTranscripts.ownerId, ownerId))).limit(1)
+      : [];
+    transcript = { ...resto, edicao: edicaoDaTranscricao({ segments: resto.segments, originalSegments: original?.segments ?? null, editada: !!Number(editada), editedAt, revision }) };
+  }
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
   // N5: o nome do contato a que a pessoa foi vinculada ("Vinculada a…"), só da
@@ -2276,16 +2332,28 @@ export async function apagarDerivadosDoAlvoDaJuncao(tx: BancoOuTransacao, ownerI
   await apagarDerivadosSemGravacao(tx, ownerId, meetingId, false);
 }
 
-export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
+/**
+ * Quando a exclusão vem da lixeira (H7d, server/lixeira-de-reunioes.ts): o
+ * "Apagar de vez" só toma a reunião que continua na lixeira (`soDaLixeira`), e
+ * a varredura do fim dos 30 dias, só a que está lá desde antes do corte
+ * (`naLixeiraAte`). A reunião restaurada no meio fica, e a resposta é false.
+ */
+export type CondicaoDaExclusao = { soDaLixeira?: boolean; naLixeiraAte?: number };
+
+export async function deletePrivateMeeting(ownerId: string, meetingId: string, condicao: CondicaoDaExclusao = {}) {
   const db = await exigirDb();
   // 'deleted' ANTES de apagar, e não um SELECT de existência: é o sinal que
   // um processMeetingRecording em curso (1–2 min de Gemini e LLM) lê antes de
   // gravar, e que barra o UPDATE final dele para 'ready' — sem isto, a
   // transcrição e os contatos entravam depois da exclusão e ficavam órfãos,
   // com a voz e os dados das pessoas que a dona mandou apagar. Zero linhas:
-  // não existe ou não é dela.
+  // não existe, não é dela ou (vinda da lixeira) já não está lá.
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
+    .where(and(
+      eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
+      condicao.soDaLixeira ? isNotNull(meetings.trashedAt) : undefined,
+      condicao.naLixeiraAte !== undefined ? lte(meetings.trashedAt, condicao.naLixeiraAte) : undefined,
+    ));
   if (!linhasAfetadas(marcada)) return false;
   // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
   // dentro, antes do expurgo do bucket.

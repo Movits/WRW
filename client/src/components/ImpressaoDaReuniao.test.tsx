@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import { CLASSE_DA_IMPRESSAO, DocumentoDaReuniao, ImpressaoDaReuniao, type ReuniaoExportada } from "./ImpressaoDaReuniao";
@@ -28,6 +28,7 @@ const REUNIAO: ReuniaoExportada = {
     { secao: "decision", assunto: null, texto: "A entrega fica para dezembro", responsavel: null, prazo: null, feita: false },
   ],
   transcricao: {
+    editada: false,
     texto: null,
     falas: [
       { inicio: 0, fim: 4, falante: "F1", texto: "Bom dia." },
@@ -94,6 +95,14 @@ describe("O PDF da reunião em pt-BR", () => {
     const artigo = documento({ ...REUNIAO, itens: [], transcricao: { texto: "Linha um.\nLinha dois.", falas: [] } });
     expect(titulos(2)).toEqual(["Transcrição"]);
     expect(artigo.querySelector(".documento-da-reuniao__texto-corrido")?.textContent).toBe("Linha um.\nLinha dois.");
+  });
+
+  it("a transcrição que a dona editou (H18) sai com a marca de revisada; a que não foi editada, sem ela", () => {
+    const editada = documento({ ...REUNIAO, transcricao: { ...REUNIAO.transcricao!, editada: true } });
+    expect(editada).toHaveTextContent("Transcrição revisada por quem gravou a reunião.");
+    cleanup();
+    const daIA = documento({ ...REUNIAO, transcricao: { ...REUNIAO.transcricao!, editada: false } });
+    expect(daIA).not.toHaveTextContent("revisada");
   });
 
   it("sem transcrição, o aviso de que ela não está disponível; sem emoji e sem duração, só o título e a data", () => {

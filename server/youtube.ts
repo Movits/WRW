@@ -9,6 +9,7 @@ import {
 import { textoTemFala } from "@shared/fala-na-transcricao";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista } from "./reuniao-visivel";
 import { geminiPost, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, prazoEsgotadoNoGemini, raciocinioBaixo } from "./gemini";
 import { modeloDeAudio, modeloDeAudioReserva } from "./_core/modelos-de-ia";
 import {
@@ -428,9 +429,9 @@ export async function refazerResumoDoVideo(conta: ContaQuePede, meetingId: strin
     const [reuniao] = await tx.select({
       status: meetings.status, origem: meetings.origem, sourceUrl: meetings.sourceUrl, consentGranted: meetings.consentGranted,
       consentNoticeVersion: meetings.consentNoticeVersion, language: meetings.language, updatedAt: meetings.updatedAt,
-      processingError: meetings.processingError,
+      processingError: meetings.processingError, trashedAt: meetings.trashedAt,
     }).from(meetings).where(daDona).limit(1).for("update");
-    if (!reuniao || reuniao.status === "deleted") throw new RecusaDoVideo("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDoVideo("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     const id = reuniao.origem === "youtube" ? idDoVideoDoYoutube(reuniao.sourceUrl) : null;
     if (!id || !reuniao.consentGranted) throw new RecusaDoVideo("PRECONDITION_FAILED", MENSAGEM_REUNIAO_NAO_E_DO_YOUTUBE);
     if (reuniao.status !== "failed") throw new RecusaDoVideo("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);

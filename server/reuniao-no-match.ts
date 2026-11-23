@@ -11,6 +11,7 @@ import {
   CATEGORIA_PADRAO_DO_PRECISO, CATEGORIAS_DO_PRECISO_DA_REUNIAO, LIMITE_DO_QUE_TENHO, mesmoNome, slugDoItem,
 } from "@shared/reuniao-no-match";
 import { exigirDb } from "./db";
+import { reuniaoVisivel, semReuniaoNaLixeira } from "./reuniao-visivel";
 import {
   confirmarPendencia, ignorarPendencia, itemIdentificaOContato, PendenciaNaoEncontrada, ValorInvalido, valorParaGravar,
   type BancoOuTransacao, type CampoDaSugestao, type Identificacao,
@@ -188,7 +189,11 @@ export type ResultadoDaConfirmacao =
  */
 export async function confirmarItemDaDona(dona: { id: number; openId: string }, id: string, entrada: EntradaDaConfirmacao = {}): Promise<ResultadoDaConfirmacao> {
   const db = await exigirDb();
-  const daDona = and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, dona.openId), eq(networkSugestoes.status, "pendente"));
+  // A da reunião que está na lixeira (H7d) é "não encontrada", como some da lista.
+  const daDona = and(
+    eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, dona.openId), eq(networkSugestoes.status, "pendente"),
+    semReuniaoNaLixeira(networkSugestoes.meetingId),
+  );
   const [pendencia] = await db.select().from(networkSugestoes).where(daDona).limit(1);
   if (!pendencia) throw new PendenciaNaoEncontrada();
   if (pendencia.alvo !== "perfil") {
@@ -234,7 +239,10 @@ export async function confirmarItemDaDona(dona: { id: number; openId: string }, 
 export async function ignorarItemDaDona(dona: { openId: string }, id: string): Promise<{ ok: true; alvo: "contato" | "perfil"; reuniaoDecidida: boolean }> {
   const db = await exigirDb();
   const [pendencia] = await db.select({ alvo: networkSugestoes.alvo, meetingId: networkSugestoes.meetingId }).from(networkSugestoes)
-    .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, dona.openId), eq(networkSugestoes.status, "pendente"))).limit(1);
+    .where(and(
+      eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, dona.openId), eq(networkSugestoes.status, "pendente"),
+      semReuniaoNaLixeira(networkSugestoes.meetingId),
+    )).limit(1);
   if (!pendencia) throw new PendenciaNaoEncontrada();
   await ignorarPendencia(dona.openId, id);
   const reuniaoDecidida = pendencia.alvo === "perfil" && pendencia.meetingId ? await perfilDaReuniaoDecidido(db, dona.openId, pendencia.meetingId) : false;
@@ -268,6 +276,8 @@ export async function pendenciasDoPerfil(ownerId: string) {
     .where(and(
       eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"), eq(networkSugestoes.alvo, "perfil"),
       inArray(networkSugestoes.campo, ["tenho", "preciso"]),
+      // As da reunião na lixeira (H7d) somem até ela voltar.
+      semReuniaoNaLixeira(networkSugestoes.meetingId),
     ))
     .orderBy(desc(networkSugestoes.createdAt)).limit(100);
   const reunioes = await titulosDasReunioes(db, ownerId, linhas.map(linha => linha.meetingId));
@@ -284,12 +294,12 @@ export async function pendenciasDoPerfil(ownerId: string) {
 
 type ReuniaoDeOrigem = { id: string; titulo: string; em: number };
 
-/** O título e a data das reuniões, da dona e não excluídas. */
+/** O título e a data das reuniões, da dona, não excluídas e fora da lixeira (H7d). */
 async function titulosDasReunioes(db: BancoOuTransacao, ownerId: string, ids: Array<string | null>): Promise<Map<string, ReuniaoDeOrigem>> {
   const unicos = Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
   if (!unicos.length) return new Map();
   const linhas = await db.select({ id: meetings.id, title: meetings.title, createdAt: meetings.createdAt }).from(meetings)
-    .where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, unicos), ne(meetings.status, "deleted")));
+    .where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, unicos), reuniaoVisivel()));
   return new Map(linhas.map(linha => [linha.id, { id: linha.id, titulo: linha.title, em: Number(linha.createdAt) }]));
 }
 
@@ -400,7 +410,7 @@ export type PessoaDaReuniao = {
 export async function conexoesDaReuniao(ownerId: string, meetingId: string, opcoes: { termoSmartMatch: boolean }) {
   const db = await exigirDb();
   const [reuniao] = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).limit(1);
   if (!reuniao) return null;
   const [pessoas, itens] = await Promise.all([
     db.select({

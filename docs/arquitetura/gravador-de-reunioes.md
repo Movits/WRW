@@ -469,7 +469,8 @@ Tamanho: P é pequena, M é média e G é grande.
   o OGG (Opus e Vorbis), o WebM e o MKV (o Opus vira Ogg Opus; o AAC, MP4 fragmentado), o
   FLAC e o AAC em ADTS (H9b), sem recodificar (`client/src/lib/corte-do-arquivo.ts`). O
   arquivo curto de um formato que o corte reconhece mas não lê (ALAC, AC-3, o Vorbis no
-  WebM) segue no envio único de hoje; o maior recebe o aviso com o nome do formato. Cada
+  WebM) segue no envio único (o recuo do corte, que a G14 manteve); o maior recebe o
+  aviso com o nome do formato. Cada
   parte fecha na última pausa da fala antes do teto, até 20 s antes dele, como a gravação
   ao vivo (`client/src/lib/pausas-do-corte.ts`): o WAV mede o volume das amostras na
   janela antes do teto; os comprimidos são lidos duas vezes, a primeira para achar as
@@ -477,9 +478,26 @@ Tamanho: P é pequena, M é média e G é grande.
   por amostra (FLAC). Sem pausa na janela, o corte cai no teto. O Vorbis e o Opus em modo
   CELT só acham a pausa em silêncio digital (conferência de tela do pacote 4b: a fala que
   atravessava a emenda do WAV, cortado a cada 14 MB, sumia da transcrição).
-- **G14:** tirar o envio único em base64. Só entra quando houver uma semana de logs sem
-  `submitRecording`, nenhum cliente fora do repositório que ainda use esse envio, e o
-  H9b pronto ou o aval da cliente.
+- **G14:** tirar o envio único em base64. Em duas partes:
+  - **parte 1 (pacote 5b, 21/11, decisão do Claude, vetável):** o gravador grava sempre
+    em partes. Saíram o `?envioUnico=1` (a saída de suporte da G13b, que agora grava em
+    partes como o `/gravar` de sempre), a revisão antes de enviar ("Transcrever áudio",
+    "Descartar e gravar novamente"), o modo inativo de `useGravacaoEmPartes` e os textos
+    dos 10 minutos e 10 MB onde as partes já cobrem o caso: a dica sob o relógio, o FAQ
+    da Home e a ajuda do limite no painel de minutos, que agora diz que as 12 h valem
+    também para o arquivo. Ficou o que ainda é preciso: `meetings.submitRecording`, com
+    os 10 minutos e 10 MB, para o recuo do corte (o arquivo curto de um formato que o
+    corte reconhece mas não lê, que a tela marca com `recuoDoCorte: true`) e para um
+    cliente de fora do repositório, se houver; os mesmos tetos, porque o reprocesso e a
+    junção leem a gravação inteira das reuniões antigas; e o ditado e a voz do contato,
+    que têm rotas próprias (`assistenteTexto.transcrever` e
+    `networkInteligente.complementarPorVoz`), não passam pelo envio único e não mudaram.
+    Cada chamada do envio único deixa no log uma linha `[Reuniões] envio único
+    (submitRecording)`, que diz se veio do recuo do corte ou sem a marca;
+  - **parte 2 (por fazer):** tirar a rota, ou levar o recuo do corte às partes (o arquivo
+    inteiro como uma parte só, que a rota das partes aceita até 16 MB e 12 min). Só entra
+    com uma semana de log sem chamada sem a marca do recuo (nenhum cliente de fora) e com
+    o aval do Roberto.
 - **A8:** redirecionar o endereço `.onrender.com` do Render para o domínio próprio,
   quando o Roberto confirmar o `FRONTEND_URL`, o www e o health check.
 
@@ -611,7 +629,9 @@ mescla, só por `gh pr merge`).
       produção;
     - se existe app ou outro cliente fora do repositório chamando
       `meetings.submitRecording` (o `shared/const.ts` cita "o app Expo"), porque a G14
-      só entra sem cliente externo;
+      só entra sem cliente externo. A parte 1 da G14 (21/11) manteve a rota, e cada
+      chamada deixa no log uma linha com a marca do recuo do corte ou sem ela: a
+      chamada sem a marca é a desse cliente;
     - se "o chat" que a administração consulta inclui as perguntas feitas à IA sobre a
       reunião (H6), porque isso muda a H6 e o aviso de gravação (G4);
   - antes da Onda 3:

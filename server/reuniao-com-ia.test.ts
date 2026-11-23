@@ -56,6 +56,8 @@ const banco = {
   segmentos: [] as unknown,
   // Os nomes que a dona deu às vozes (meetings.speaker_names).
   nomes: null as Record<string, string> | null,
+  // A hora em que a reunião foi para a lixeira (H7d); nula fora dela.
+  naLixeira: null as number | null,
   indisponivel: false,
   erroNaConsulta: null as Error | null,
   leituras: [] as Array<{ tabela: unknown; sql: string; params: unknown[]; campos: string[] }>,
@@ -69,6 +71,10 @@ const dialeto = new MySqlDialect();
 const soOPedido = (campos: Record<string, unknown>, linha: Record<string, unknown>) =>
   Object.fromEntries(Object.keys(campos).map(campo => [campo, linha[campo]]));
 
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => {
@@ -81,7 +87,7 @@ vi.mock("./db", () => ({
           if (banco.erroNaConsulta) throw banco.erroNaConsulta;
           // Como o MySQL: a linha só volta se o WHERE pede a dona dela.
           if (!params.includes(banco.dona)) return [];
-          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes })] : [];
+          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes, trashedAt: banco.naLixeira })] : [];
           if (tabela === schema.meetingTranscripts) {
             return banco.transcricao === null ? [] : [soOPedido(campos, { transcript: banco.transcricao, segments: banco.segmentos })];
           }
@@ -135,7 +141,7 @@ beforeEach(() => {
   logInfo.mockClear();
   logAviso.mockClear();
   Object.assign(banco, {
-    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null,
+    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null, naLixeira: null,
     indisponivel: false, erroNaConsulta: null, leituras: [],
   });
 });
@@ -194,6 +200,13 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
 
   it("reunião de outra dona: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
     await expect(perguntar("outra-dona")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(banco.leituras).toHaveLength(1);
+    expect(invokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("a reunião que foi para a lixeira depois da guarda (H7d) é 'não encontrada' na leitura do serviço: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
+    banco.naLixeira = Date.now();
+    await expect(perguntar()).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(banco.leituras).toHaveLength(1);
     expect(invokeLLM).not.toHaveBeenCalled();
   });
@@ -320,7 +333,8 @@ describe("o que vai à IA (H6): a transcrição rotulada inteira primeiro, a per
     expect(prompt).not.toContain("Glória");
     expect(prompt).not.toContain("Otávio");
     const daReuniao = banco.leituras.find(leitura => leitura.tabela === schema.meetings)!;
-    expect(daReuniao.campos).toEqual(["status"]);
+    // O status e a lixeira (H7d), nada dos nomes.
+    expect(daReuniao.campos).toEqual(["status", "trashedAt"]);
   });
 
   it("sem as falas (envio único), vai o texto corrido, sem rótulo, e a IA é avisada de que não há vozes", async () => {

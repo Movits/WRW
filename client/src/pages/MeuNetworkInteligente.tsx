@@ -12,7 +12,6 @@ import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { rotuloDoCampo } from "@/components/CompletudeDoContato";
 import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
-import { ENVIO_UNICO_SEGUNDOS_MAX } from "@shared/const";
 
 /**
  * Meu Network Inteligente — o painel da rede particular (pedido do Nicolas,
@@ -241,8 +240,8 @@ export default function MeuNetworkInteligente() {
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/50">{t("networkPanel.minutesLimit")}</p>
                     <p className="mt-1 text-2xl font-black tabular-nums">{t("networkPanel.hoursValue", { horas: limiteEmHoras })}</p>
-                    {/* O arquivo enviado inteiro segue no envio único (10 min) até a H9a: o limite em horas é o da gravação. */}
-                    <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkPanel.minutesLimitHelp", { minutos: ENVIO_UNICO_SEGUNDOS_MAX / 60 })}</p>
+                    {/* O limite em horas vale para a gravação e para o arquivo enviado, que vão em partes (H9a, H9b, H9c e G14). */}
+                    <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkPanel.minutesLimitHelp")}</p>
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/50">{t("networkInteligente.minutes.monthlyLimit")}</p>

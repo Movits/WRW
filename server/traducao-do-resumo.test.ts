@@ -66,6 +66,19 @@ vi.mock("./ia-em-json", async importOriginal => ({
   pedirJsonAIA: (...args: unknown[]) => pedirJsonAIA(...args),
 }));
 
+// O trecho de cada item pelo link, com a transcrição editada pela dona (H18,
+// server/editar-transcricao.ts): o dublê esvazia os trechos que o teste diz
+// que não estão mais na transcrição. A consulta de verdade está em
+// editar-transcricao.integracao.test.ts.
+const trechos = vi.hoisted(() => ({ fora: new Set<string>(), pedidos: [] as Array<{ ownerId: string; meetingId: string; trechos: string[] }> }));
+vi.mock("./editar-transcricao", async importOriginal => ({
+  ...await importOriginal<typeof import("./editar-transcricao")>(),
+  trechosNaTranscricaoDeAgora: async (ownerId: string, meetingId: string, itens: Array<{ excerpt: string }>) => {
+    trechos.pedidos.push({ ownerId, meetingId, trechos: itens.map(i => i.excerpt) });
+    return itens.map(i => (trechos.fora.has(i.excerpt) ? { ...i, excerpt: "", trechoForaDaTranscricao: true } : { ...i, trechoForaDaTranscricao: false }));
+  },
+}));
+
 const modulo = await import("./traducao-do-resumo");
 const {
   _paraTestes, aplicarTraducao, conferirLote, emLotes, impressaoDoItem, juntarConteudo, lerConteudo, MENSAGEM_TRADUCAO_DO_RESUMO_INDISPONIVEL,
@@ -109,6 +122,8 @@ beforeEach(() => {
     resposta: "pronto", resumoId: "resumo-1", versao: 1, soGuardada: false, idiomaOriginal: "pt-BR", itens: [], rotulos: [],
     guardados: {}, gravarDevolve: true, erroAoGravar: null, gravacoes: [], leituras: 0,
   });
+  trechos.fora.clear();
+  trechos.pedidos = [];
   pedirJsonAIA.mockReset();
   _paraTestes.limpar();
   // Nos testes, a IA dublada responde na hora: o pedido espera até 1 s por ela.
@@ -270,8 +285,8 @@ describe("traduzir o resumo", () => {
     expect(resposta).toEqual({
       estado: "pronta", idioma: "en", mapa: {},
       itens: [
-        { section: "action", subject: null, text: "EN {F2} envia a proposta", assignee: "{F2}", due: "EN até sexta", excerpt: "trecho literal id-acao da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false },
-        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "trecho literal id-tarefa da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false },
+        { section: "action", subject: null, text: "EN {F2} envia a proposta", assignee: "{F2}", due: "EN até sexta", excerpt: "trecho literal id-acao da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false, trechoForaDaTranscricao: false },
+        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "trecho literal id-tarefa da transcrição", startSeconds: 12, status: "pending", escritoPelaDona: false, trechoForaDaTranscricao: false },
       ],
     });
     expect(banco.gravacoes).toHaveLength(1);
@@ -303,6 +318,23 @@ describe("traduzir o resumo", () => {
     const peloLink = await traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", vi.fn());
     expect(peloLink.estado === "pronta" && peloLink.itens.map(i => i.text)).toEqual(["EN Texto a", "EN Texto c"]);
     expect(JSON.stringify(peloLink)).not.toMatch(/"id"|"done"|ignored|"origin"|"editedAt"/);
+  });
+
+  it("pelo link, o trecho que a dona tirou da transcrição (H18) vai vazio, com a marca, como no resumo pelo link; a dona recebe só os textos", async () => {
+    banco.itens = [item("a", { status: "confirmed" }), item("b", { status: "ignored" }), item("c")];
+    trechos.fora.add("trecho literal c da transcrição");
+    pedirJsonAIA.mockImplementation(tradutor(paraIngles));
+    const peloLink = await traduzirResumoPeloLink({ id: "r1", ownerId: "dona-1" }, "en", vi.fn());
+    expect(peloLink.estado === "pronta" && peloLink.itens.map(i => [i.text, i.excerpt, i.trechoForaDaTranscricao])).toEqual([
+      ["EN Texto a", "trecho literal a da transcrição", false], ["EN Texto c", "", true],
+    ]);
+    expect(JSON.stringify(peloLink)).not.toContain("trecho literal c");
+    // A conferência é da reunião do link, pela dona dela, e só dos itens que o link mostra.
+    expect(trechos.pedidos).toEqual([{ ownerId: "dona-1", meetingId: "r1", trechos: ["trecho literal a da transcrição", "trecho literal c da transcrição"] }]);
+    // A tradução para a dona não leva trecho nenhum, e não passa pela conferência.
+    trechos.pedidos = [];
+    await traduzirResumoDaDona("dona-1", "r1", "en");
+    expect(trechos.pedidos).toEqual([]);
   });
 
   it("pelo link, o item que a dona escreveu ou editou (H4f) vai só com a marca, sem a origem nem a hora da edição", async () => {

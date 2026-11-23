@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { meetings, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { nomesDosFalantes } from "@shared/const";
 import { chaveDaEtiqueta, etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import {
@@ -14,8 +15,8 @@ import {
  * mesmos filtros da tela (shared/busca-de-reunioes.ts).
  *
  * - A dona vai no WHERE das duas tabelas (a da transcrição ou a do item, e a da
- *   reunião), e a reunião excluída (status 'deleted', no meio da exclusão) não
- *   aparece.
+ *   reunião), e a reunião excluída (status 'deleted', no meio da exclusão) e a
+ *   da lixeira (H7d, reuniaoVisivel) não aparecem.
  * - O termo vai como padrão de LIKE, parametrizado e com `%`, `_` e `!`
  *   escapados (`ESCAPE '!'`): o que a dona digita nunca vira curinga nem SQL.
  * - O trecho sai do próprio SQL (SUBSTRING em volta do LOCATE): a transcrição
@@ -49,13 +50,13 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 async function reunioesComAEtiqueta(db: Banco, ownerId: string, etiqueta: string): Promise<string[]> {
   const chave = chaveDaEtiqueta(etiqueta);
   const linhas = await db.select({ id: meetings.id, etiquetas: meetings.etiquetas }).from(meetings)
-    .where(and(eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"), isNotNull(meetings.etiquetas)));
+    .where(and(eq(meetings.ownerId, ownerId), reuniaoVisivel(), isNotNull(meetings.etiquetas)));
   return linhas.filter(linha => etiquetasDaReuniao(linha.etiquetas).some(daReuniao => chaveDaEtiqueta(daReuniao) === chave)).map(linha => linha.id);
 }
 
-/** Os filtros da reunião no SQL: a dona, sem as excluídas, e os da tela. */
+/** Os filtros da reunião no SQL: a dona, sem as excluídas e as da lixeira, e os da tela. */
 function condicoesDaReuniao(ownerId: string, filtros: FiltrosDaBusca, agora: number, comAEtiqueta: string[] | null): SQL[] {
-  const condicoes: SQL[] = [eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")];
+  const condicoes: SQL[] = [eq(meetings.ownerId, ownerId), reuniaoVisivel()!];
   // A etiqueta: as reuniões dela, já achadas pela chave (reunioesComAEtiqueta).
   if (comAEtiqueta) condicoes.push(inArray(meetings.id, comAEtiqueta));
   if (filtros.origem === "documento") condicoes.push(inArray(meetings.origem, ["pdf", "foto"]));

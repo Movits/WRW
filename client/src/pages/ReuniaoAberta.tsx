@@ -268,6 +268,8 @@ export default function ReuniaoAberta() {
 
     {aba === "transcript" && <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="inline-flex items-center gap-2 text-base font-semibold mb-4"><IconeDoTexto size={16}/>{rotuloDoTexto}</h2>
+      {/* H18: a dona corrigiu a transcrição; o link mostra a versão dela, e diz isso. */}
+      {transcricao?.editada && <p className="-mt-2 mb-4 text-xs text-white/50">{t("meetings.editTranscript.linkPageNotice")}</p>}
       {transcricao ? <>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>

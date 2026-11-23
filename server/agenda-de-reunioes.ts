@@ -5,6 +5,7 @@ import type { ParticipanteDaAgenda } from "@shared/agenda";
 import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { agendaReunioes, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { agendarLembreteDaAgenda, esquecerLembrete } from "./lembretes";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 
@@ -55,14 +56,16 @@ export type DadosDaAgendada = {
 export type OpcoesDaGoogle = { naGoogle: boolean };
 
 /**
- * A gravação ligada, só quando ainda é da dona e não foi excluída. A exclusão
- * volta o ponteiro a nulo (soltarGravacaoDaAgenda); a junção cobre a corrida
- * entre as duas, e o ponteiro solto aparece como "sem gravação".
+ * A gravação ligada, só quando ainda é da dona, não foi excluída e não está na
+ * lixeira (H7d). A exclusão volta o ponteiro a nulo (soltarGravacaoDaAgenda); a
+ * junção cobre a corrida entre as duas, e o ponteiro solto aparece como "sem
+ * gravação". A gravação na lixeira também aparece como "sem gravação": o
+ * "Gravar agora" volta, e gravar de novo troca o ponteiro, como sempre.
  */
 const JUNCAO_DA_GRAVACAO = and(
   eq(meetings.id, agendaReunioes.meetingId),
   eq(meetings.ownerId, agendaReunioes.ownerId),
-  ne(meetings.status, "deleted"),
+  reuniaoVisivel(),
 );
 
 const COLUNAS = {
@@ -256,7 +259,7 @@ export async function excluirDaAgenda(ownerId: string, id: string): Promise<{ go
 export async function ligarGravacaoNaAgenda(ownerId: string, id: string, meetingId: string): Promise<void> {
   const db = await exigirDb();
   const [gravacao] = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .limit(1);
   if (!gravacao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_GRAVACAO_NAO_ENCONTRADA });
   let resultado: unknown;

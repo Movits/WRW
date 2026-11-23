@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { ResultadoDaEntradaNoLink } from "@shared/senha-do-link";
 import { auditLogs, meetings, users } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { estaNaLixeira } from "./reuniao-visivel";
 import { chaveDeRede } from "./ip-da-cliente";
 import { FORMATO_DO_TOKEN } from "./link-aberto-da-reuniao";
 import {
@@ -77,8 +78,10 @@ async function cobrarDoLink(token: string, ip: string, agora: number): Promise<A
     const [linha] = await tx.select({
       ownerId: meetings.ownerId, status: meetings.status, shareToken: meetings.shareToken, hash: meetings.sharePasswordHash,
       falhas: meetings.sharePasswordFailures, ultimaFalhaEm: meetings.sharePasswordFailedAt, bloqueadoAte: meetings.sharePasswordLockedUntil,
+      trashedAt: meetings.trashedAt,
     }).from(meetings).where(eq(meetings.id, achado.id)).limit(1).for("update");
-    if (!linha || linha.shareToken !== token || linha.status !== "ready" || linha.hash === null) return { tipo: "nenhum" as const };
+    // A reunião na lixeira (H7d) não tem link: a senha nem é conferida.
+    if (!linha || linha.shareToken !== token || linha.status !== "ready" || linha.hash === null || estaNaLixeira(linha.trashedAt)) return { tipo: "nenhum" as const };
     const [conta] = await tx.select({ ativa: users.isActive }).from(users).where(eq(users.openId, linha.ownerId)).limit(1);
     if (!conta?.ativa) return { tipo: "nenhum" as const };
     const antes: EstadoDoFreio = { falhas: linha.falhas, ultimaFalhaEm: linha.ultimaFalhaEm, bloqueadoAte: linha.bloqueadoAte };

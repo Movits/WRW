@@ -291,8 +291,12 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
       identificadorDaUsuaria: autenticador.identificadorDaConta,
     });
     expect(gravada.chavePublica.length).toBeGreaterThan(50);
-    // O identificador da conta no aparelho não é o id nem o e-mail.
-    expect(gravada.identificadorDaUsuaria).not.toContain(String(conta.id));
+    // O identificador da conta no aparelho não é o id nem o e-mail: é o HMAC do id
+    // (32 bytes em base64url). Um dígito do id pode aparecer nele por acaso (com o
+    // id 8, o banco do zero do CI dá "…cm8g…"), então a prova é o formato e a
+    // igualdade, e não a substring.
+    expect(gravada.identificadorDaUsuaria).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(gravada.identificadorDaUsuaria).not.toBe(String(conta.id));
     expect(gravada.identificadorDaUsuaria).not.toContain(conta.email!);
     expect(await auditoriaDe(conta.id, "PASSKEY_REGISTERED")).toMatchObject([{
       resource: "auth",

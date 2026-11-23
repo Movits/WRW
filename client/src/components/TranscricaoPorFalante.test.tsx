@@ -256,3 +256,66 @@ describe("TranscricaoPorFalante — vozes, horários e ouvir só uma voz (D2)", 
     expect(screen.queryByRole("button", { name: /Ouvir só a voz/ })).not.toBeInTheDocument();
   });
 });
+
+describe("TranscricaoPorFalante — a edição da dona (H18)", () => {
+  const originais = new Map([[1, { texto: "O frete fica para quinta.", falante: "F1" }]]);
+  const edicao = (editando: boolean, extra: Partial<{ aoSalvarTrecho: ReturnType<typeof vi.fn>; aoRestaurar: ReturnType<typeof vi.fn> }> = {}) => ({
+    originais, editando, aoSalvarTrecho: extra.aoSalvarTrecho ?? vi.fn(async () => true), aoRestaurar: extra.aoRestaurar ?? vi.fn(async () => undefined),
+  });
+
+  it("sem a edição (o link aberto), nenhum botão nem marca de editado", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} />);
+    expect(screen.queryByRole("button", { name: /Editar o trecho/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Editado por você")).not.toBeInTheDocument();
+  });
+
+  it("fora da edição, só a marca no trecho mudado; na edição, o botão em cada fala (nunca no trecho que não chegou), o original e a voz de antes", () => {
+    const { rerender } = render(<TranscricaoPorFalante segmentos={FALAS} edicao={edicao(false)} />);
+    expect(screen.getAllByText("Editado por você")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Editar o trecho/ })).not.toBeInTheDocument();
+    rerender(<TranscricaoPorFalante segmentos={FALAS} edicao={edicao(true)} />);
+    expect(screen.getAllByRole("button", { name: /Editar o trecho de/ }).map(b => b.getAttribute("aria-label"))).toEqual([
+      "Editar o trecho de 00:00", "Editar o trecho de 01:00", "Editar o trecho de 20:00",
+    ]);
+    // O original da IA, com a voz de antes, porque ela mudou.
+    const original = screen.getByText("O frete fica para quinta.");
+    expect(original.closest("p")).toHaveTextContent("Falante 1: O frete fica para quinta.");
+  });
+
+  it("salvar manda só o que mudou, pela posição do trecho; Esc fecha sem mandar nada", async () => {
+    const aoSalvarTrecho = vi.fn(async () => true);
+    render(<TranscricaoPorFalante segmentos={FALAS} edicao={edicao(true, { aoSalvarTrecho })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 20:00" }));
+    fireEvent.keyDown(screen.getByLabelText("Texto do trecho"), { key: "Escape" });
+    expect(screen.queryByLabelText("Texto do trecho")).not.toBeInTheDocument();
+    // O foco volta ao "Editar" do trecho.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Editar o trecho de 20:00" })).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 20:00" }));
+    // Sem mudança, salvar só fecha.
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
+    expect(aoSalvarTrecho).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 20:00" }));
+    fireEvent.change(screen.getByLabelText("Voz"), { target: { value: "F2" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
+    expect(aoSalvarTrecho).toHaveBeenCalledWith(3, { falante: "F2" });
+    // O texto vazio não sai.
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 00:00" }));
+    fireEvent.change(screen.getByLabelText("Texto do trecho"), { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Salvar" })).toBeDisabled();
+  });
+
+  it("a recusa mantém o formulário aberto; voltar ao original pede pela posição", async () => {
+    const aoSalvarTrecho = vi.fn(async () => false);
+    const aoRestaurar = vi.fn(async () => undefined);
+    render(<TranscricaoPorFalante segmentos={FALAS} edicao={edicao(true, { aoSalvarTrecho, aoRestaurar })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 01:00" }));
+    fireEvent.change(screen.getByLabelText("Texto do trecho"), { target: { value: "O frete fica para segunda." } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Salvar" })); });
+    expect(aoSalvarTrecho).toHaveBeenCalledWith(1, { texto: "O frete fica para segunda." });
+    expect(screen.getByLabelText("Texto do trecho")).toHaveValue("O frete fica para segunda.");
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Voltar o trecho de 01:00 ao original" })); });
+    expect(aoRestaurar).toHaveBeenCalledWith(1);
+  });
+});
