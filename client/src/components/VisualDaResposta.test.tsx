@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { VisualDaResposta } from "./VisualDaResposta";
 import type { GraficoDaResposta, TabelaDaResposta } from "@shared/resposta-visual";
@@ -122,5 +122,42 @@ describe("as linhas", () => {
     expect(dica).toHaveTextContent("abril");
     expect(dica).toHaveTextContent("14");
     expect(dica).toHaveTextContent("12");
+  });
+  /** Um ResizeObserver falso que diz que a caixa tem `largura` px, como o navegador mediria. */
+  function caixaCom(largura: number) {
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly aviso: ResizeObserverCallback) {}
+      observe(alvo: Element) { this.aviso([{ target: alvo, contentRect: { width: largura } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      unobserve() {}
+      disconnect() {}
+    });
+  }
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("no celular, o viewBox tem a largura medida da caixa: 1 unidade = 1 px, e os rótulos dos eixos ficam com 11 px (antes, ~6 px)", () => {
+    caixaCom(261);
+    const { container } = render(<VisualDaResposta visual={LINHAS} comVozes={comVozes} />);
+    const svg = container.querySelector("svg[role=img]")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 261 220");
+    // O tamanho na tela é font-size × (largura da caixa ÷ largura do viewBox).
+    const textos = Array.from(svg.querySelectorAll("text"));
+    expect(textos.length).toBeGreaterThan(0);
+    for (const texto of textos) expect(Number(texto.getAttribute("font-size")) * (261 / 261)).toBe(11);
+    // Os pontos cabem na caixa estreita.
+    const xs = Array.from(svg.querySelectorAll("circle")).map(c => Number(c.getAttribute("cx")));
+    expect(Math.max(...xs)).toBeLessThanOrEqual(261);
+  });
+
+  it("na caixa estreita, com muitos pontos, o eixo de baixo pula nomes para não se encavalarem", () => {
+    caixaCom(300);
+    const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    const ano: GraficoDaResposta = { ...LINHAS, rotulos: meses, series: [{ nome: "Pedidos", valores: meses.map((_, i) => i) }] };
+    const { container } = render(<VisualDaResposta visual={ano} comVozes={comVozes} />);
+    const embaixo = Array.from(container.querySelectorAll("svg[role=img] text")).filter(t => t.getAttribute("text-anchor") === "middle");
+    const xs = embaixo.map(t => Number(t.getAttribute("x")));
+    // Cada nome com ao menos ~72 px até o vizinho, também o último, que sempre aparece.
+    expect(embaixo.at(-1)).toHaveTextContent("dez");
+    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(72);
+    expect(embaixo.length).toBeLessThan(12);
   });
 });

@@ -124,6 +124,19 @@ describe("Perguntar a várias reuniões — a escolha", () => {
     expect(chamadas("perguntar")).toEqual([{ meetingIds: [IDS[0], IDS[2]], idioma: "pt-BR", pergunta: "O que ficou combinado?", fuso: fusoDoAparelho() }]);
   });
 
+  it("uma a uma: a linha da estimativa já ocupa o seu lugar antes da escolha; marcar a primeira não empurra o campo da pergunta", async () => {
+    const { container } = abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Uma a uma" }));
+    const linha = container.querySelector("[data-estimativa]");
+    expect(linha).not.toBeNull();
+    expect(linha).toHaveTextContent("");
+    expect(linha!.classList.contains("min-h-4")).toBe(true);
+    fireEvent.click(within(screen.getByRole("list", { name: "Uma a uma" })).getByRole("checkbox", { name: /Frete/ }));
+    // O mesmo nó, agora com o texto: nada novo entra acima do campo.
+    expect(container.querySelector("[data-estimativa]")).toBe(linha);
+    expect(linha).toHaveTextContent("Cerca de 0,5 h de fala.");
+  });
+
   it("o filtro pelo título reduz a lista", async () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Uma a uma" }));

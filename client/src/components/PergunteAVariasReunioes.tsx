@@ -182,12 +182,13 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
           <p className="text-xs text-white/55">{t("meetings.multiAsk.selected", { n: escolhidas.length, max: REUNIOES_POR_PERGUNTA_MAX })}</p>
         </div>
       )}
-      {selecionadas.length > 0 && (
-        <p className="text-xs text-white/55">
-          {t("meetings.multiAsk.estimate", { horas: horasDeFala(caracteres).toLocaleString(i18n.language) })}
-          {caracteres > LIMITE_DA_LEITURA_DA_IA && <span className="mt-1 block text-amber-200/90">{t("meetings.multiAsk.overLimit")}</span>}
-        </p>
-      )}
+      {/* A linha da estimativa ocupa o seu lugar mesmo vazia: ao marcar a primeira
+          reunião, o texto aparece sem empurrar o campo da pergunta (um toque logo
+          depois de marcar cairia fora do campo, e o que se digitou se perderia). */}
+      <p data-estimativa="" aria-live="polite" className="min-h-4 text-xs leading-4 text-white/55">
+        {selecionadas.length > 0 && t("meetings.multiAsk.estimate", { horas: horasDeFala(caracteres).toLocaleString(i18n.language) })}
+        {selecionadas.length > 0 && caracteres > LIMITE_DA_LEITURA_DA_IA && <span className="mt-1 block text-amber-200/90">{t("meetings.multiAsk.overLimit")}</span>}
+      </p>
     </div>
   );
 

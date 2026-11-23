@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { BarChart3, Table2 } from "lucide-react";
 import { ehGrafico, type GraficoDaResposta, type TabelaDaResposta, type VisualDaResposta as Visual } from "@shared/resposta-visual";
@@ -158,10 +158,38 @@ function GraficoDeBarras({ grafico, comVozes }: { grafico: GraficoDaResposta; co
 }
 
 // O desenho das linhas, em unidades do viewBox; o SVG ocupa a largura da caixa.
-const LARGURA = 600;
+// A largura do viewBox é a largura medida da caixa (1 unidade = 1 px): assim os
+// rótulos dos eixos ficam com 11 px em qualquer tela. Com um viewBox fixo de
+// 600, a 375 px o SVG encolhia para ~261 px e os rótulos caíam para ~6 px.
+// LARGURA_PADRAO é só o valor antes da primeira medida (e no jsdom, que não mede).
+const LARGURA_PADRAO = 600;
+const LARGURA_MINIMA = 160;
+// O espaço que um rótulo do eixo de baixo pede (até 12 letras de 11 px).
+const ESPACO_DO_ROTULO = 72;
 const ALTURA = 220;
 const MARGEM = { topo: 12, base: 34, inicio: 52, fim: 16 };
 const COR_DO_FUNDO = "#1d1a18";
+
+/**
+ * A largura da caixa, em px, medida no desenho e a cada mudança de tamanho
+ * (girar o celular, abrir o painel). Sem medida (0 ou sem ResizeObserver),
+ * fica a LARGURA_PADRAO.
+ */
+function useLarguraDaCaixa<T extends Element>(): [RefObject<T | null>, number] {
+  const ref = useRef<T | null>(null);
+  const [largura, setLargura] = useState(LARGURA_PADRAO);
+  useLayoutEffect(() => {
+    const caixa = ref.current;
+    if (!caixa) return;
+    const medir = (medida: number) => { if (medida > 0) setLargura(Math.max(LARGURA_MINIMA, Math.round(medida))); };
+    medir(caixa.getBoundingClientRect().width);
+    if (typeof ResizeObserver === "undefined") return;
+    const observador = new ResizeObserver(entradas => { for (const entrada of entradas) medir(entrada.contentRect.width); });
+    observador.observe(caixa);
+    return () => observador.disconnect();
+  }, []);
+  return [ref, largura];
+}
 
 /**
  * As linhas, em SVG, da esquerda para a direita (a ordem do tempo, também no
@@ -171,32 +199,35 @@ const COR_DO_FUNDO = "#1d1a18";
 function GraficoDeLinhas({ grafico, comVozes }: { grafico: GraficoDaResposta; comVozes: ComVozes }) {
   const { t, i18n } = useTranslation();
   const [emFoco, setEmFoco] = useState<number | null>(null);
+  const [caixa, largura] = useLarguraDaCaixa<HTMLDivElement>();
   const { marcas, dominio } = marcasDoEixo(dominioComZero(grafico.series.flatMap(serie => serie.valores)));
-  const larguraUtil = LARGURA - MARGEM.inicio - MARGEM.fim;
+  const larguraUtil = largura - MARGEM.inicio - MARGEM.fim;
   const alturaUtil = ALTURA - MARGEM.topo - MARGEM.base;
   const pontos = grafico.rotulos.length;
   const x = (indice: number) => MARGEM.inicio + (pontos === 1 ? larguraUtil / 2 : (indice / (pontos - 1)) * larguraUtil);
   const y = (valor: number) => MARGEM.topo + (1 - posicaoNoDominio(valor, dominio)) * alturaUtil;
   const faixa = pontos === 1 ? larguraUtil : larguraUtil / (pontos - 1);
-  // Com muitos pontos, um nome sim e outro não, para não se encavalarem.
-  const pulo = pontos > 6 ? 2 : 1;
+  // Com muitos pontos, um nome sim e outro não, para não se encavalarem; na tela
+  // estreita, quantos forem precisos para cada nome ter o seu espaço.
+  const pulo = Math.max(pontos > 6 ? 2 : 1, Math.ceil(ESPACO_DO_ROTULO / Math.max(faixa, 1)));
   const curto = (texto: string) => (Array.from(texto).length > 12 ? `${Array.from(texto).slice(0, 11).join("")}…` : texto);
   const valor = (numero: number) => numeroComUnidade(numero, i18n.language, grafico.unidade);
   return (
     <div className="space-y-2">
       <LegendaDasSeries grafico={grafico} comVozes={comVozes} marca="linha" />
-      <div dir="ltr" className="relative">
-        <svg viewBox={`0 0 ${LARGURA} ${ALTURA}`} className="block h-auto w-full" role="img"
+      <div ref={caixa} dir="ltr" className="relative">
+        <svg viewBox={`0 0 ${largura} ${ALTURA}`} className="block h-auto w-full overflow-visible" role="img"
           aria-label={t("meetings.visual.chartLabel", { titulo: grafico.titulo ? comVozes(grafico.titulo) : grafico.eixo })}>
           {marcas.map(marca => (
             <g key={marca}>
-              <line x1={MARGEM.inicio} x2={LARGURA - MARGEM.fim} y1={y(marca)} y2={y(marca)} stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
+              <line x1={MARGEM.inicio} x2={largura - MARGEM.fim} y1={y(marca)} y2={y(marca)} stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
               <text x={MARGEM.inicio - 8} y={y(marca)} textAnchor="end" dominantBaseline="middle" fontSize={11} fill="rgba(255,255,255,0.5)" style={{ fontVariantNumeric: "tabular-nums" }}>
                 {numeroComUnidade(marca, i18n.language, "", true)}
               </text>
             </g>
           ))}
-          {grafico.rotulos.map((rotulo, i) => (i % pulo === 0 || i === pontos - 1) && (
+          {/* O último nome sempre aparece; o do pulo que cairia colado nele sai. */}
+          {grafico.rotulos.map((rotulo, i) => (i === pontos - 1 || (i % pulo === 0 && pontos - 1 - i >= pulo)) && (
             <text key={i} x={x(i)} y={ALTURA - MARGEM.base + 18} textAnchor="middle" fontSize={11} fill="rgba(255,255,255,0.55)">{curto(comVozes(rotulo))}</text>
           ))}
           {emFoco !== null && <line x1={x(emFoco)} x2={x(emFoco)} y1={MARGEM.topo} y2={ALTURA - MARGEM.base} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />}
@@ -216,7 +247,7 @@ function GraficoDeLinhas({ grafico, comVozes }: { grafico: GraficoDaResposta; co
         </svg>
         {emFoco !== null && (
           <div role="tooltip" className="pointer-events-none absolute top-0 z-10 rounded-md border border-white/15 bg-[#211e1b] px-2 py-1.5 text-[11px] shadow-lg"
-            style={{ left: `${(x(emFoco) / LARGURA) * 100}%`, transform: emFoco > pontos / 2 ? "translateX(-100%)" : "translateX(4px)" }}>
+            style={{ left: `${(x(emFoco) / largura) * 100}%`, transform: emFoco > pontos / 2 ? "translateX(-100%)" : "translateX(4px)" }}>
             <p dir="auto" className="mb-1 text-white/60">{comVozes(grafico.rotulos[emFoco])}</p>
             {grafico.series.map((serie, s) => (
               <p key={s} className="flex items-center gap-1.5 whitespace-nowrap">
