@@ -239,7 +239,7 @@ describe.skipIf(!temBanco)("O mapa mental editável (integração)", () => {
     await salvar(comEdicao, 1, EDITADO);
     for (const id of [semEdicao, comEdicao]) {
       await (await db()).update(meetingTranscripts).set({ editedAt: AGORA() + 1000, revision: 1 }).where(eq(meetingTranscripts.meetingId, id));
-      await resumoGuardado.refazerResumoDaDona(DONA, id, "general", () => undefined);
+      await resumoGuardado.refazerResumoDaDona(DONA, id, { modelo: "general" }, () => undefined);
     }
     gerarMapaMental.mockClear();
     // Uma rodada da fila pega um resumo por vez: roda até os dois ficarem prontos.
