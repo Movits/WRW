@@ -132,9 +132,9 @@ describe("os modelos do resumo (H4d)", () => {
     await rota.pedirResumo({ meetingId: ID, modelo: "sales" });
     await rota.pedirResumo({ meetingId: ID });
     await rota.refazerResumo({ meetingId: ID, modelo: "one_on_one" });
-    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(1, "dona-modelos", ID, expect.any(Function), "sales");
-    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(2, "dona-modelos", ID, expect.any(Function), undefined);
-    expect(servico.refazerResumoDaDona).toHaveBeenCalledWith("dona-modelos", ID, "one_on_one", expect.any(Function));
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(1, "dona-modelos", ID, expect.any(Function), { modelo: "sales", estilo: undefined, instrucoes: undefined });
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(2, "dona-modelos", ID, expect.any(Function), { modelo: undefined, estilo: undefined, instrucoes: undefined });
+    expect(servico.refazerResumoDaDona).toHaveBeenCalledWith("dona-modelos", ID, { modelo: "one_on_one", estilo: undefined, instrucoes: undefined }, expect.any(Function));
   });
 
   it("refazer gasta vaga do mesmo teto de pedidos à IA que pedir o resumo e perguntar", async () => {

@@ -302,9 +302,10 @@ sem ele).
   `server/ia-em-json.ts`, onde a função é obrigatória) passa a `funcao`, e não o id. A
   ordem é `LLM_MODEL_<FUNÇÃO>` > o padrão da função no código > `LLM_MODEL` > o padrão
   (`FUNCOES_DE_TEXTO`, em `_core/modelos-de-ia.ts`); o padrão da função só vale com o
-  `LLM_API_URL` na API do Gemini. Hoje são três, todas sem padrão próprio (seguem o
+  `LLM_API_URL` na API do Gemini. As três que a bancada mediu não têm padrão próprio (seguem o
   `LLM_MODEL`): a extração da reunião (`extracao`), o resumo guardado (`resumo`) e o
-  Pergunte (`pergunta`). O Lite que a bancada A de texto (16/11) indicou para a extração
+  Pergunte (`pergunta`). A quarta, a escolha do modelo do resumo (`escolha_do_modelo`, H4e,
+  `server/escolha-do-modelo.ts`), nasceu no `gemini-3.5-flash-lite`. O Lite que a bancada A de texto (16/11) indicou para a extração
   não devolveu as entidades de cargo, ativo, necessidade e oportunidade, que a tela usa:
   leia o `docs/deploy.md` antes de trocar. Chamada nova de texto sem função fica no
   `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example` (um

@@ -50,7 +50,13 @@ import { decidirTituloSugerido } from "../decidir-titulo-sugerido";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
-import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
+import {
+  ESTILOS_DO_RESUMO, ICONES_DOS_MODELOS, INSTRUCOES_DO_MODELO_MAX, INSTRUCOES_DO_PEDIDO_MAX, NOME_DO_MODELO_MAX, RESPOSTAS_DO_TAMANHO, escolhaDoTexto,
+} from "@shared/modelos-de-resumo";
+import {
+  apagarModeloProprio, criarModeloProprio, definirPedidoDoResumo, definirPreferencias, editarModeloProprio, modelosEPreferenciasDaDona,
+  refazeresQueRestam, responderTamanhoDoResumo,
+} from "../modelos-proprios";
 import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
 import { traduzirResumoDaDona } from "../traducao-do-resumo";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
@@ -270,6 +276,20 @@ export const tetoDaLegenda = criarTeto(LEGENDAS_POR_JANELA, JANELA_DA_LEGENDA_MS
 // auditoria a cada mudança: teto próprio por dona, de 200 edições a cada 10
 // minutos, em memória como os outros. Só conta a edição aceita; a recusa e o
 // pedido que não mudou nada devolvem a vaga.
+// Os modelos de resumo da dona e as preferências dela (H4e): sem IA, mas cada
+// mudança grava no banco. Teto próprio por dona, de 60 mudanças a cada 10
+// minutos, em memória como os outros.
+export const tetoDosModelosDeResumo = criarTeto(60, 10 * 60_000, "Muitas mudanças nos modelos de resumo em sequência. Aguarde alguns minutos e tente de novo.");
+
+// O texto do modelo no pedido (H4e): o código do pronto, "ia" ou "proprio:<id>".
+const escolhaNaEntrada = z.string().max(60).refine(valor => escolhaDoTexto(valor) !== null);
+const instrucoesDoPedidoNaEntrada = z.string().max(INSTRUCOES_DO_PEDIDO_MAX * 2).nullable().optional();
+const dadosDoModeloNaEntrada = z.object({
+  nome: z.string().trim().min(1).max(NOME_DO_MODELO_MAX * 2),
+  icone: z.enum(ICONES_DOS_MODELOS),
+  instrucoes: z.string().trim().min(1).max(INSTRUCOES_DO_MODELO_MAX * 2),
+});
+
 export const tetoDaEdicao = criarTeto(EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, RECUSAS_DA_EDICAO.demais);
 
 /** Devolve a vaga de um pedido que não foi aceito. */
@@ -575,17 +595,76 @@ export const meetingsRouter = router({
 
   // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
   // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
+  // H4e: o modelo também pode ser um da dona ("proprio:<id>") ou "ia" (a IA
+  // escolhe), com o estilo e as instruções do pedido.
   pedirResumo: procedimentoDaReuniao
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO).optional() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada.optional(), estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes })),
 
   // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
   // confirmados, os feitos e os que a dona escreveu ou editou (H4f) ficam, os
   // outros pendentes e ignorados são trocados. Gasta uma vaga do mesmo teto de
   // pedidos à IA.
+  // H4e: o refazer leva o modelo (pronto, da dona ou "ia"), o estilo e as
+  // instruções, e conta no teto de custo do refazer (REFAZERES_POR_DIA, no
+  // banco), além do teto de pedidos à IA. TOO_MANY_REQUESTS com o código.
   refazerResumo: procedimentoDaReuniao
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
-    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes }, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // Os modelos de resumo da própria dona e as preferências dela (H4e,
+  // server/modelos-proprios.ts): a lista, o padrão, o estilo, o ajuste do
+  // tamanho e quantos refazeres ainda cabem nas 24 h. Só dela.
+  modelosDeResumo: procedimentoDaReuniao.query(async ({ ctx }) => ({
+    ...(await modelosEPreferenciasDaDona(ctx.user.openId)),
+    refazeresQueRestam: await refazeresQueRestam(ctx.user.openId),
+  })),
+  // BAD_REQUEST com o código (MODELOS_DE_RESUMO_DEMAIS, o teto de 20) e
+  // CONFLICT (MODELO_DE_RESUMO_NOME_REPETIDO).
+  criarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada)
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return criarModeloProprio(ctx.user.openId, input);
+    }),
+  editarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada.extend({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return editarModeloProprio(ctx.user.openId, input.id, input);
+    }),
+  // Os resumos feitos com o modelo ficam no Geral, e o padrão que o citava volta ao Geral.
+  apagarModeloDeResumo: procedimentoDaReuniao
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return apagarModeloProprio(ctx.user.openId, input.id);
+    }),
+  definirPreferenciasDoResumo: procedimentoDaReuniao
+    .input(z.object({ padrao: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO) }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPreferencias(ctx.user.openId, input);
+    }),
+  // O pedido do resumo antes de gravar (H4e), na reunião que ainda não ficou
+  // pronta; null volta às preferências. PRECONDITION_FAILED com o código na
+  // reunião pronta (aí vale o "Refazer o resumo").
+  definirPedidoDoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      pedido: z.object({ modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO), instrucoes: instrucoesDoPedidoNaEntrada }).nullable(),
+    }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPedidoDoResumo(ctx.user.openId, input.meetingId, input.pedido ? { modelo: input.pedido.modelo, estilo: input.pedido.estilo, instrucoes: input.pedido.instrucoes ?? null } : null);
+    }),
+  // "O resumo teve o tamanho certo?" (H4e): a resposta ajusta os próximos resumos da dona; null desfaz.
+  responderTamanhoDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), resposta: z.enum(RESPOSTAS_DO_TAMANHO).nullable() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return responderTamanhoDoResumo(ctx.user.openId, input.meetingId, input.resposta);
+    }),
 
   // O mapa mental (H10), na linha do resumo guardado: a fila o gera logo
   // depois do resumo, numa chamada à parte (server/fila-do-resumo.ts). Pedir

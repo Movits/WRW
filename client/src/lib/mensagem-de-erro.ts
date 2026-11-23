@@ -26,6 +26,7 @@ import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
 import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
 import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
+import { RECUSAS_DOS_MODELOS } from "@shared/modelos-de-resumo";
 import {
   MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
   MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
@@ -153,6 +154,12 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DA_EDICAO.trecho]: "meetings.editTranscript.errorSegment",
   [RECUSAS_DA_EDICAO.vazio]: "meetings.editTranscript.errorEmpty",
   [RECUSAS_DA_EDICAO.demais]: "meetings.editTranscript.errorTooMany",
+  // Os modelos de resumo da dona e o teto do refazer (H4e, server/modelos-proprios.ts).
+  [RECUSAS_DOS_MODELOS.naoEncontrado]: "meetings.summary.myTemplates.errorNotFound",
+  [RECUSAS_DOS_MODELOS.demais]: "meetings.summary.myTemplates.errorTooMany",
+  [RECUSAS_DOS_MODELOS.nomeRepetido]: "meetings.summary.myTemplates.errorRepeated",
+  [RECUSAS_DOS_MODELOS.refazeresDemais]: "meetings.summary.errorRedoTooMany",
+  [RECUSAS_DOS_MODELOS.pedidoForaDeHora]: "meetings.summary.errorLate",
 };
 
 /**

@@ -6,7 +6,12 @@ import { exigirDb } from "./db";
 import { reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
-import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import {
+  ESTILO_DO_RESUMO_PADRAO, INSTRUCOES_DO_PEDIDO_MAX, MODELO_DE_RESUMO_PADRAO, escolhaComoTexto, escolhaDoTexto, estiloDoResumo, iconeDoModelo, modeloDeResumo,
+  type EscolhaDoModelo, type EstiloDoResumo, type RespostaDoTamanho,
+} from "@shared/modelos-de-resumo";
+import { modelosDeResumoProprios } from "../drizzle/schema";
+import { colunasDaEscolha, colunasDoPrimeiroResumo, normalizarInstrucoes, reservarRefazer, type ColunasDoPedido } from "./modelos-proprios";
 import { ITENS_DO_RESUMO_MAX, secaoTemAssunto, secaoTemResponsavel, type SecaoDoItem } from "@shared/item-do-resumo";
 import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
@@ -47,6 +52,13 @@ const COLUNAS_DO_RESUMO = {
   language: meetingSummaries.language,
   lastError: meetingSummaries.lastError,
   template: meetingSummaries.template,
+  // O pedido da dona (H4e): o modelo dela, "a IA escolhe", o estilo, as
+  // instruções e a resposta a "O resumo teve o tamanho certo?".
+  customTemplateId: meetingSummaries.customTemplateId,
+  aiTemplate: meetingSummaries.aiTemplate,
+  style: meetingSummaries.style,
+  instructions: meetingSummaries.instructions,
+  lengthFeedback: meetingSummaries.lengthFeedback,
   version: meetingSummaries.version,
   // Quando a fila gravou a versão de agora: a transcrição editada depois disso
   // (H18) faz a tela oferecer "Refazer o resumo".
@@ -133,8 +145,25 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
+  // O modelo da dona (H4e) pelo nome e pelo ícone de agora; apagado, o resumo
+  // fica no Geral (apagarModeloProprio já solta a coluna).
+  const [proprio] = linha?.customTemplateId
+    ? await db.select({ id: modelosDeResumoProprios.id, nome: modelosDeResumoProprios.nome, icone: modelosDeResumoProprios.icone }).from(modelosDeResumoProprios)
+      .where(and(eq(modelosDeResumoProprios.id, linha.customTemplateId), eq(modelosDeResumoProprios.ownerId, ownerId))).limit(1)
+    : [];
+  const modelo = linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null;
+  const escolha: EscolhaDoModelo | null = !linha ? null
+    : linha.aiTemplate === "pending" ? { tipo: "ia" }
+    : proprio ? { tipo: "proprio", id: proprio.id } : { tipo: "pronto", modelo: modelo ?? MODELO_DE_RESUMO_PADRAO };
   return {
-    estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
+    estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo,
+    modeloProprio: proprio ? { id: proprio.id, nome: proprio.nome, icone: iconeDoModelo(proprio.icone) ?? "📝" } : null,
+    // O texto da escolha, como a tela o usa no "Refazer o resumo".
+    escolha: escolha ? escolhaComoTexto(escolha) : null,
+    escolhidoPelaIA: linha?.aiTemplate === "chosen", iaVaiEscolher: linha?.aiTemplate === "pending",
+    estilo: linha ? estiloDoResumo(linha.style) ?? ESTILO_DO_RESUMO_PADRAO : null,
+    instrucoes: linha?.instructions ?? null,
+    tamanho: (linha?.lengthFeedback ?? null) as RespostaDoTamanho | null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
     tituloSugerido: tituloSugeridoNaTela(estado, linha, reuniao.title),
     transcricaoEditadaDepois: await transcricaoEditadaDepoisDoResumo(db, ownerId, meetingId, linha),
@@ -204,17 +233,26 @@ function tituloSugeridoNaTela(estado: EstadoDoResumo, linha: { suggestedTitle: s
  * mapa vem com ele.
  */
 export type AntesDeCriar = () => (() => void) | void;
-export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: { modelo?: ModeloDeResumo; refazer?: boolean; peloLink?: boolean } = {}) {
+export type PedidoDoResumoNaFila = {
+  /** O modelo, o estilo e as instruções (H4d e H4e); sem eles, o resumo novo nasce com o pedido de antes de gravar ou as preferências da dona. */
+  colunas?: ColunasDoPedido;
+  refazer?: boolean;
+  peloLink?: boolean;
+  /** O teto de custo do refazer (H4e), no banco: reserva a vaga e devolve como soltá-la. */
+  antesDeRefazer?: () => Promise<() => Promise<void>>;
+};
+export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: PedidoDoResumoNaFila = {}) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const agora = Date.now();
   if (!linha) {
+    const colunas = pedido.colunas ?? await colunasDoPrimeiroResumo(db, ownerId, meetingId);
     const soltarVaga = antesDeCriar();
     try {
       await db.insert(meetingSummaries).values({
-        id: crypto.randomUUID(), meetingId, ownerId, status: "pending", template: pedido.modelo ?? MODELO_DE_RESUMO_PADRAO, createdAt: agora, updatedAt: agora,
+        id: crypto.randomUUID(), meetingId, ownerId, status: "pending", ...colunas, createdAt: agora, updatedAt: agora,
       });
     } catch (erro) {
       // Outro pedido criou o trabalho entre a leitura e aqui (índice único por
@@ -227,15 +265,36 @@ export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId
     return;
   } else if (linha.status === "failed" || (pedido.refazer && linha.status === "ready")) {
     const soltarVaga = antesDeCriar();
+    // O teto de custo do refazer (H4e), contado no banco: a recusa devolve a
+    // vaga do teto em memória.
+    let soltarRefazer: (() => Promise<void>) | undefined;
+    if (pedido.refazer && pedido.antesDeRefazer) {
+      try {
+        soltarRefazer = await pedido.antesDeRefazer();
+      } catch (erro) {
+        soltarVaga?.();
+        throw erro;
+      }
+    }
     const r = await db.update(meetingSummaries).set({
-      status: "pending", ...(pedido.modelo ? { template: pedido.modelo } : {}),
+      status: "pending", ...(pedido.colunas ?? {}),
       attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, linha.status)));
-    // Outro pedido reabriu (ou refez) antes: a vaga volta.
-    if (!linhasAfetadas(r)) soltarVaga?.();
-  } else if (pedido.refazer && pedido.modelo && linha.status === "pending" && linha.template !== pedido.modelo) {
+    // Outro pedido reabriu (ou refez) antes: as vagas voltam.
+    if (!linhasAfetadas(r)) {
+      soltarVaga?.();
+      await soltarRefazer?.();
+    }
+  } else if (pedido.refazer && pedido.colunas && linha.status === "pending" && !mesmoPedido(linha, pedido.colunas)) {
     throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   }
+}
+
+/** O pedido na fila é o mesmo que chega (o pedido repetido não muda nada)? */
+function mesmoPedido(linha: { template: string; customTemplateId: string | null; aiTemplate: string | null; style: string; instructions: string | null }, colunas: ColunasDoPedido): boolean {
+  return linha.template === colunas.template && (linha.customTemplateId ?? null) === colunas.customTemplateId
+    && (linha.aiTemplate === "pending") === (colunas.aiTemplate === "pending")
+    && linha.style === colunas.style && (linha.instructions ?? null) === colunas.instructions;
 }
 
 /** O MySQL recusou por índice único (ER_DUP_ENTRY), no erro ou na causa dele (o drizzle embrulha o do driver). */
@@ -251,11 +310,29 @@ function ehChaveRepetida(erro: unknown): boolean {
  * pronta, no modelo que escolheu; sem modelo, o resumo novo é o Geral e o que
  * falhou reabre no modelo em que estava.
  */
-export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, modelo?: ModeloDeResumo) {
+export type PedidoDaDona = { modelo?: string; estilo?: EstiloDoResumo; instrucoes?: string | null };
+
+/**
+ * As colunas do pedido da tela (H4e): o modelo como texto (o código do pronto,
+ * "ia" ou "proprio:<id>"), o estilo e as instruções. O modelo da dona tem de
+ * ser dela.
+ */
+async function colunasDoPedidoDaDona(db: Banco, ownerId: string, pedido: PedidoDaDona & { modelo: string }): Promise<ColunasDoPedido> {
+  const escolha = escolhaDoTexto(pedido.modelo);
+  if (!escolha) throw new TRPCError({ code: "BAD_REQUEST", message: "Modelo inválido." });
+  return {
+    ...await colunasDaEscolha(db, ownerId, escolha),
+    style: pedido.estilo ?? ESTILO_DO_RESUMO_PADRAO,
+    instructions: normalizarInstrucoes(pedido.instrucoes, INSTRUCOES_DO_PEDIDO_MAX),
+  };
+}
+
+export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: PedidoDaDona = {}) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
-  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo });
+  const colunas = pedido.modelo ? await colunasDoPedidoDaDona(db, ownerId, { ...pedido, modelo: pedido.modelo }) : undefined;
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { colunas });
   return resumoGuardadoDaDona(ownerId, meetingId);
 }
 
@@ -266,11 +343,13 @@ export async function pedirResumoDaDona(ownerId: string, meetingId: string, ante
  * ficam; os outros pendentes e ignorados são trocados quando a fila gravar a
  * versão nova. Gasta uma vaga do teto, como pedir o resumo.
  */
-export async function refazerResumoDaDona(ownerId: string, meetingId: string, modelo: ModeloDeResumo, antesDeCriar: AntesDeCriar) {
+export async function refazerResumoDaDona(ownerId: string, meetingId: string, pedido: PedidoDaDona & { modelo: string }, antesDeCriar: AntesDeCriar) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
-  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo, refazer: true });
+  const colunas = await colunasDoPedidoDaDona(db, ownerId, pedido);
+  // H4e: o modelo, o estilo e as instruções do refazer, e o teto de custo dele.
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { colunas, refazer: true, antesDeRefazer: () => reservarRefazer(db, ownerId) });
   return resumoGuardadoDaDona(ownerId, meetingId);
 }
 

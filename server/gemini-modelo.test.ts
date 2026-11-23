@@ -37,6 +37,7 @@ const VARIAVEIS_DE_MODELO = [
   "LLM_MODEL_EXTRACAO",
   "LLM_MODEL_RESUMO",
   "LLM_MODEL_PERGUNTA",
+  "LLM_MODEL_ESCOLHA_DO_MODELO",
 ];
 
 let fetchFalso: ReturnType<typeof vi.fn>;
@@ -408,7 +409,20 @@ describe("texto por função: LLM_MODEL_<FUNÇÃO> > o padrão da função > LLM
       extracao: { variavel: "LLM_MODEL_EXTRACAO", padrao: null, nomeNoLog: "extração" },
       resumo: { variavel: "LLM_MODEL_RESUMO", padrao: null, nomeNoLog: "resumo" },
       pergunta: { variavel: "LLM_MODEL_PERGUNTA", padrao: null, nomeNoLog: "pergunta" },
+      // A escolha do modelo do resumo (H4e) é uma classificação curta e nasceu no Lite.
+      escolha_do_modelo: { variavel: "LLM_MODEL_ESCOLHA_DO_MODELO", padrao: "gemini-3.5-flash-lite", nomeNoLog: "escolha do modelo" },
     });
+  });
+
+  it("a escolha do modelo do resumo (H4e) vai ao Lite só na API do Gemini; fora dela, ao LLM_MODEL; a variável dela vence", async () => {
+    const { modeloDeTexto } = await modelosDeIa();
+    expect(modeloDeTexto("escolha_do_modelo")).toBe("gemini-3.5-flash");
+    vi.stubEnv("LLM_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(modeloDeTexto("escolha_do_modelo")).toBe("gemini-3.5-flash-lite");
+    // As três funções medidas seguem no LLM_MODEL na API do Gemini.
+    expect(modeloDeTexto("resumo")).toBe("gemini-3.5-flash");
+    vi.stubEnv("LLM_MODEL_ESCOLHA_DO_MODELO", "gemini-2.5-flash");
+    expect(modeloDeTexto("escolha_do_modelo")).toBe("gemini-2.5-flash");
   });
 
   it("sem variável: as três funções ficam no padrão, como o resto do texto", async () => {
@@ -621,7 +635,7 @@ describe("a linha [IA] do boot", () => {
     expect(linha).not.toContain(CHAVE_FALSA);
     expect(linha).not.toContain("chave-falsa-do-google-que-nao-aparece");
     expect(linha).toBe(
-      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash"
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash · escolha do modelo gemini-3.5-flash"
     );
   });
 
@@ -632,7 +646,7 @@ describe("a linha [IA] do boot", () => {
     const { linhaDosModelosDeIa } = await modelosDeIa();
 
     expect(linhaDosModelosDeIa()).toBe(
-      "[IA] áudio gemini-2.5-flash · reserva gemini-2.5-flash (igual ao áudio: não dispara) · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash"
+      "[IA] áudio gemini-2.5-flash · reserva gemini-2.5-flash (igual ao áudio: não dispara) · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo gemini-3.5-flash · pergunta gemini-3.5-flash · escolha do modelo gemini-3.5-flash"
     );
     expect(textoDosAvisos()).toContain('LLM_MODEL recusado ("gemini-flash-latest")');
   });
@@ -642,7 +656,7 @@ describe("a linha [IA] do boot", () => {
     const { linhaDosModelosDeIa } = await modelosDeIa();
 
     expect(linhaDosModelosDeIa()).toBe(
-      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-2.5-flash · extração gemini-2.5-flash · resumo gemini-2.5-flash · pergunta gemini-2.5-flash"
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-2.5-flash · extração gemini-2.5-flash · resumo gemini-2.5-flash · pergunta gemini-2.5-flash · escolha do modelo gemini-2.5-flash"
     );
   });
 
@@ -655,7 +669,7 @@ describe("a linha [IA] do boot", () => {
 
     const linha = linhaDosModelosDeIa();
     expect(linha).toBe(
-      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo (id de outro provedor, fora do log) · pergunta gemini-3.5-flash-lite"
+      "[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto gemini-3.5-flash · extração gemini-3.5-flash · resumo (id de outro provedor, fora do log) · pergunta gemini-3.5-flash-lite · escolha do modelo gemini-3.5-flash"
     );
     expect(linha).not.toContain(chaveComDigitos);
     expect(avisos).not.toHaveBeenCalled();
@@ -673,7 +687,7 @@ describe("a linha [IA] do boot", () => {
       expect(modeloDeTexto()).toBe(valor);
       const linha = linhaDosModelosDeIa();
       expect(linha).toBe(
-        `[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto ${fora} · extração ${fora} · resumo ${fora} · pergunta ${fora}`
+        `[IA] áudio gemini-3.5-flash · reserva gemini-3.5-flash-lite · texto ${fora} · extração ${fora} · resumo ${fora} · pergunta ${fora} · escolha do modelo ${fora}`
       );
       expect(linha).not.toContain(valor);
     }

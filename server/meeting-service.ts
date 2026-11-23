@@ -27,6 +27,7 @@ import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } fr
 import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { colunasDoPrimeiroResumo } from "./modelos-proprios";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
@@ -1214,8 +1215,11 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // linha que já existir fica como está, e a reunião não falha por causa dela
   // (nenhum caminho de hoje a cria antes: pedir o resumo exige a reunião
   // 'ready', e esta execução ainda está em 'processing').
+  // O modelo, o estilo e as instruções (H4e): o pedido feito antes de gravar
+  // ou, sem ele, as preferências da dona (server/modelos-proprios.ts).
+  const pedidoDoResumo = await colunasDoPrimeiroResumo(db, ownerId, meetingId);
   await db.insert(meetingSummaries).values({
-    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", createdAt: completedAt, updatedAt: completedAt,
+    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", ...pedidoDoResumo, createdAt: completedAt, updatedAt: completedAt,
   }).onDuplicateKeyUpdate({ set: { meetingId: sql`${meetingSummaries.meetingId}` } });
   // A releitura acima e este UPDATE não são atômicos: exclusão, reprocessamento
   // novo ou varredura podem ter entrado entre os dois. O WHERE com a ficha faz

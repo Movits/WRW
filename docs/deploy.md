@@ -160,6 +160,7 @@ código conseguia assinar uma sessão válida.
 | `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL`. Antes de pôr o `gemini-3.5-flash-lite` aqui, leia o parágrafo abaixo da tabela: ele não devolve todas as entidades da reunião |
 | `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião. O mapa mental, que sai da mesma fila logo depois do resumo, e a tradução do resumo não seguem esta variável: ficam no `LLM_MODEL` | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
+| `LLM_MODEL_ESCOLHA_DO_MODELO` | opcional: modelo do "a IA escolhe o modelo" do resumo (H4e), uma classificação curta | padrão próprio `gemini-3.5-flash-lite` quando o `LLM_API_URL` é a API do Gemini; fora dela, o `LLM_MODEL`; a mesma guarda; recusado, cai no degrau seguinte. `LLM_RACIOCINIO_ESCOLHA_DO_MODELO` é a variável do raciocínio dela, como as abaixo |
 | `LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA` | opcionais: quanto o modelo raciocina na extração da reunião, no resumo guardado e no Pergunte à reunião, cada função com a sua | sem valor (o padrão), o pedido sai sem o campo e o modelo raciocina no padrão dele, como sempre; `minimal`, `low`, `medium` ou `high` sobem como `reasoning_effort`; outro valor (inclusive `none`, que só desliga o raciocínio no Gemini 2.5) é recusado, avisa no log e não manda nada. Defina só depois de a bancada rodar o braço b, e só na função que usa o Flash: o Flash-Lite não raciocinou na bancada, e `low` pode fazê-lo raciocinar (não medido) |
 
 A transcrição e os embeddings (`server/gemini.ts`) não usam o `LLM_API_URL`:
@@ -169,12 +170,14 @@ sem ela, `GOOGLE_API_KEY`). Por isso o modelo do áudio só aceita o formato
 embeddings com a chave errada: chaves separadas ainda não existem no código.
 
 O texto tem um modelo por função, na ordem: a variável da função
-(`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO` ou `LLM_MODEL_PERGUNTA`) > o padrão
+(`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO`, `LLM_MODEL_PERGUNTA` ou
+`LLM_MODEL_ESCOLHA_DO_MODELO`) > o padrão
 da função no código, quando houver e o `LLM_API_URL` for a API do Gemini
 (`generativelanguage.googleapis.com`) > `LLM_MODEL` > o padrão. Variável
-recusada cai no degrau seguinte. Hoje nenhuma função tem padrão no código: sem
-variável, as três seguem o `LLM_MODEL`, e o deploy não troca o modelo de
-nenhuma. Ficam no `LLM_MODEL` as chamadas sem função: a tradução, o FAQ, a
+recusada cai no degrau seguinte. Das três funções que a bancada mediu, nenhuma
+tem padrão no código: sem variável, as três seguem o `LLM_MODEL`, e o deploy
+não troca o modelo de nenhuma. A escolha do modelo do resumo (H4e) tem o Lite
+como padrão. Ficam no `LLM_MODEL` as chamadas sem função: a tradução, o FAQ, a
 Memória, as recomendações e os complementos de contato, que não passam função
 nenhuma, e o mapa mental, a tradução do resumo guardado e o e-mail de retorno,
 que passam `funcao: null`. Quem chama sem função não lê nenhuma variável de

@@ -291,7 +291,7 @@ describe("a variável de cada função", () => {
 describe("a linha [IA] raciocínio do boot", () => {
   it("sem variável, as três no padrão do modelo", async () => {
     const { linhaDoRaciocinioDeIa } = await import("./_core/raciocinio-de-ia");
-    expect(linhaDoRaciocinioDeIa()).toBe("[IA] raciocínio · extração padrão do modelo · resumo padrão do modelo · pergunta padrão do modelo");
+    expect(linhaDoRaciocinioDeIa()).toBe("[IA] raciocínio · extração padrão do modelo · resumo padrão do modelo · pergunta padrão do modelo · escolha do modelo padrão do modelo");
   });
 
   it("mostra o nível que vale depois da guarda, sem o valor recusado que pode ser uma chave", async () => {
@@ -300,7 +300,7 @@ describe("a linha [IA] raciocínio do boot", () => {
     const { linhaDoRaciocinioDeIa } = await import("./_core/raciocinio-de-ia");
 
     const linha = linhaDoRaciocinioDeIa();
-    expect(linha).toBe("[IA] raciocínio · extração padrão do modelo · resumo low · pergunta padrão do modelo");
+    expect(linha).toBe("[IA] raciocínio · extração padrão do modelo · resumo low · pergunta padrão do modelo · escolha do modelo padrão do modelo");
     expect(linha).not.toContain(CHAVE_FALSA);
     expect(avisosDoRaciocinio()).toHaveLength(1);
   });
