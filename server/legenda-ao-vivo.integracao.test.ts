@@ -8,7 +8,8 @@ import { getDb } from "./db";
 import { auditLogs, meetings, users } from "../drizzle/schema";
 import { appRouter } from "./routers";
 import { iniciarReuniaoEmPartes } from "./fatias-de-reuniao";
-import { ACAO_LEGENDA_LIGADA } from "./legenda-ao-vivo";
+import { ACAO_LEGENDA_LIGADA, registrarLegendaLigada } from "./legenda-ao-vivo";
+import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { tetoDaLegenda } from "./routers/meetings";
 import { LEGENDAS_POR_JANELA, RECUSAS_DA_LEGENDA, TEXTO_DO_AVISO_DA_LEGENDA_MAX, VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 
@@ -96,6 +97,21 @@ describe.skipIf(!temBanco)("A legenda ao vivo, no banco (integração)", () => {
     await (await getDb())!.update(meetings).set({ status: "deleted" }).where(eq(meetings.id, id));
     await expect(rota().meetings.ligarLegendaAoVivo(pedido(id))).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(await provas(id)).toEqual([]);
+  });
+
+  it("a gravação que foi para a lixeira (por outro aparelho) é NOT_FOUND com o código da lixeira, sem nada gravado e sem gastar vaga; o serviço também a recusa sozinho", async () => {
+    const { id } = await iniciar();
+    criadas.push(id);
+    await (await getDb())!.update(meetings).set({ trashedAt: Date.now() }).where(eq(meetings.id, id));
+    // Pelo router: a guarda da lixeira (procedimentoDaReuniao) responde com o código que a tela traduz.
+    await expect(rota().meetings.ligarLegendaAoVivo(pedido(id))).rejects.toMatchObject({ code: "NOT_FOUND", message: RECUSAS_DA_LIXEIRA.naLixeira });
+    // Direto no serviço, sem a guarda: a consulta dele (reuniaoVisivel) também a deixa de fora.
+    await expect(registrarLegendaLigada(DONA, id, {
+      userId: ID_DA_DONA, ipAddress: "203.0.113.7", userAgent: undefined, versaoDoAviso: VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA, idioma: "pt-BR", textoExibido: TEXTO,
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await provas(id)).toEqual([]);
+    for (let i = 0; i < LEGENDAS_POR_JANELA; i++) tetoDaLegenda.reservar(DONA);
+    expect(() => tetoDaLegenda.reservar(DONA)).toThrow();
   });
 
   it.each(["uploading", "processing", "ready", "failed"] as const)("a reunião em %s já não grava: a recusa com o código, que a tela traduz, sem nada gravado", async status => {

@@ -9,6 +9,7 @@ import {
 } from "@/lib/legenda-ao-vivo";
 import { useLegendaAoVivo } from "@/hooks/useLegendaAoVivo";
 import { VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA } from "@shared/legenda-ao-vivo";
+import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, nomeDoIdiomaEm, type EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -68,10 +69,16 @@ const FRASE_DA_FALHA: Record<FalhaDaLegenda, (t: (chave: string, opcoes?: Record
   microfoneDaGravacao: t => t("meetings.caption.errors.recordingMicLost"),
 };
 
-/** A recusa do ligar no idioma da tela: a reunião que não existe mais tem a frase dela; o resto, a tabela das mensagens do servidor. */
+/**
+ * A recusa do ligar no idioma da tela: a reunião que não existe mais tem a
+ * frase dela; a que foi para a lixeira (por outro aparelho; a guarda da
+ * lixeira manda o código REUNIAO_NA_LIXEIRA) e o resto, a tabela das
+ * mensagens do servidor.
+ */
 function fraseDaRecusa(erro: unknown, t: (chave: string) => string): string {
   const codigo = (erro as { data?: { code?: unknown } } | null)?.data?.code;
-  if (codigo === "NOT_FOUND") return t("meetings.caption.errors.meetingGone");
+  const mensagem = (erro as { message?: unknown } | null)?.message;
+  if (codigo === "NOT_FOUND" && mensagem !== RECUSAS_DA_LIXEIRA.naLixeira) return t("meetings.caption.errors.meetingGone");
   return mensagemDeErroParaTela(erro, t);
 }
 

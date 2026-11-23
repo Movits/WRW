@@ -264,22 +264,28 @@ export function escolherOQueCabe<T extends { id: string; tamanho: number }>(orde
  * passadas: a primeira escolhe pelo tamanho que o banco mediu (sem carregar
  * transcrição nenhuma), a segunda pelo tamanho da entrada rotulada, que é o
  * que a IA lê (os rótulos somam letras); quem não coube na segunda fica de
- * fora com o motivo "limite".
+ * fora com o motivo "limite". A segunda leitura parte das reuniões visíveis
+ * (reuniaoVisivel): a que saiu de vista entre as duas (foi para a lixeira ou
+ * está sendo excluída) some da resposta, sem o título em "ficaram de fora"; a
+ * que ainda se vê mas saiu de 'ready' ou perdeu a transcrição fica de fora
+ * como "sem_transcricao".
  */
 async function lerAsQueCabem(db: Banco, ownerId: string, ordenadas: readonly ReuniaoEscolhida[]): Promise<{ lidas: ReuniaoLida[]; deFora: ReuniaoDeFora[] }> {
   const primeira = escolherOQueCabe(ordenadas.map(reuniao => ({ ...reuniao, tamanho: reuniao.caracteres })), LIMITE_DA_LEITURA_DA_IA);
   const deFora: ReuniaoDeFora[] = primeira.deFora.map(({ reuniao, motivo }) => ({ meetingId: reuniao.id, titulo: reuniao.titulo, motivo }));
   if (!primeira.entram.length) return { lidas: [], deFora };
-  const linhas = await db.select({ meetingId: meetingTranscripts.meetingId, transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments })
-    .from(meetingTranscripts)
-    .innerJoin(meetings, and(eq(meetings.id, meetingTranscripts.meetingId), eq(meetings.ownerId, ownerId)))
-    .where(and(eq(meetingTranscripts.ownerId, ownerId), inArray(meetingTranscripts.meetingId, primeira.entram.map(reuniao => reuniao.id)), eq(meetings.status, "ready"), reuniaoVisivel()));
+  const linhas = await db.select({ meetingId: meetings.id, status: meetings.status, transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments })
+    .from(meetings)
+    .leftJoin(meetingTranscripts, transcricaoDaDona(ownerId))
+    .where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, primeira.entram.map(reuniao => reuniao.id)), reuniaoVisivel()));
   const porId = new Map(linhas.map(linha => [linha.meetingId, linha]));
   const medidas = primeira.entram.flatMap(reuniao => {
     const linha = porId.get(reuniao.id);
-    const texto = linha?.transcript?.trim();
+    // Saiu de vista entre as duas leituras (a lixeira, a exclusão): some sem deixar o título.
+    if (!linha) return [];
+    const texto = linha.status === "ready" ? linha.transcript?.trim() : "";
     // Saiu de 'ready' ou perdeu a transcrição entre as duas leituras.
-    if (!linha || !texto) {
+    if (!texto) {
       deFora.push({ meetingId: reuniao.id, titulo: reuniao.titulo, motivo: "sem_transcricao" });
       return [];
     }
@@ -522,7 +528,11 @@ export async function perguntarAVariasReunioes(pedido: {
   const tamanhoDeTodas = prontas.reduce((total, reuniao) => total + reuniao.caracteres + FOLGA_DO_BLOCO, 0);
   let pelaMemoria = false;
   let ordenadas = [...prontas].sort(maisNovasPrimeiro);
-  if (tamanhoDeTodas * FOLGA_DOS_ROTULOS > LIMITE_DA_LEITURA_DA_IA) {
+  // A ordem só importa se ao menos duas cabem sozinhas: sem isso, o embedding
+  // da pergunta (que vem antes das vagas do teto e da linha das 24 h) seria
+  // um gasto à toa, e repetível sem limite pelo pedido que vai ser recusado.
+  const cabemSozinhas = prontas.filter(reuniao => reuniao.caracteres + FOLGA_DO_BLOCO <= LIMITE_DA_LEITURA_DA_IA).length;
+  if (tamanhoDeTodas * FOLGA_DOS_ROTULOS > LIMITE_DA_LEITURA_DA_IA && cabemSozinhas >= 2) {
     const notas = await relevanciaPelaMemoria(db, conta.openId, pergunta, prontas.map(reuniao => reuniao.id));
     if (notas) {
       pelaMemoria = true;

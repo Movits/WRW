@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
 import { RECUSAS_DA_LEGENDA, VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA } from "@shared/legenda-ao-vivo";
+import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { CHAVE_DO_TAMANHO_DA_LETRA, TAMANHOS_DA_LETRA } from "@/lib/legenda-ao-vivo";
 import { instalarReconhecimentoFalso } from "@/test/reconhecimento-falso";
 import { LegendaAoVivo } from "./LegendaAoVivo";
@@ -154,6 +155,7 @@ describe("LegendaAoVivo (G15b)", () => {
 
   it.each([
     ["a reunião que não existe mais", erroDoServidor("NOT_FOUND", "Reunião não encontrada."), "Esta reunião não existe mais."],
+    ["a gravação que foi para a lixeira por outro aparelho", erroDoServidor("NOT_FOUND", RECUSAS_DA_LIXEIRA.naLixeira), "Esta reunião está na lixeira."],
     ["a reunião que já não grava", erroDoServidor("PRECONDITION_FAILED", RECUSAS_DA_LEGENDA.foraDaGravacao), "A legenda só liga enquanto a reunião está gravando."],
     ["o teto", erroDoServidor("TOO_MANY_REQUESTS", RECUSAS_DA_LEGENDA.demais), "A legenda foi ligada muitas vezes em sequência. Aguarde alguns minutos e tente de novo."],
     ["o banco fora do ar", erroDoServidor("INTERNAL_SERVER_ERROR", MENSAGEM_BANCO_INDISPONIVEL), "Banco de dados indisponível; tente de novo em instantes"],

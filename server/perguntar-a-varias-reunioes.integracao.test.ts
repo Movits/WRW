@@ -47,6 +47,8 @@ async function db() { return (await getDb())!; }
 type OpcoesDaReuniao = {
   titulo?: string; falas?: Segmento[]; texto?: string; status?: "ready" | "processing" | "deleted"; etiquetas?: string[] | null;
   criadaEm?: number; nomes?: Record<string, string> | null; semTranscricao?: boolean;
+  /** Na lixeira (H7d): a hora em que foi para lá. */
+  naLixeira?: boolean;
 };
 
 async function reuniao(ownerId: string, opcoes: OpcoesDaReuniao = {}) {
@@ -56,6 +58,7 @@ async function reuniao(ownerId: string, opcoes: OpcoesDaReuniao = {}) {
   await banco.insert(meetings).values({
     id, ownerId, title: opcoes.titulo ?? "Reunião", status: opcoes.status ?? "ready", consentGranted: true, language: "pt-BR",
     origem: "gravacao", etiquetas: opcoes.etiquetas ?? null, speakerNames: opcoes.nomes ?? null, createdAt: criadaEm, updatedAt: criadaEm,
+    trashedAt: opcoes.naLixeira ? AGORA : null,
   });
   if (!opcoes.semTranscricao) {
     const falas = opcoes.falas ?? [];
@@ -340,6 +343,56 @@ describe.skipIf(!temBanco)("Pergunte a várias reuniões (integração)", () => 
     await expect(daDona().perguntar({ meetingIds: [r1], idioma: "pt-BR", pergunta: "De novo?" })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     const falha = (await linhasDaDona()).find(linha => linha.situacao === "falhou")!;
     await expect(daDona().avaliar({ perguntaId: falha.id, nota: "boa" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("a reunião na lixeira (H7d) fica fora de tudo: da lista, da escolha pela etiqueta e da escolha uma a uma (NOT_FOUND sem dizer qual), sem IA e sem linha", async () => {
+    const pronta = await reuniao(DONA, { titulo: "Pronta", falas: CONTRATO, etiquetas: ["Clientes"], criadaEm: AGORA - DIA });
+    const naLixeira = await reuniao(DONA, { titulo: "Na lixeira", falas: FRETE, etiquetas: ["Clientes"], naLixeira: true });
+    await reuniao(DONA, { titulo: "Só na lixeira", falas: FRETE, etiquetas: ["Arquivo"], naLixeira: true });
+    expect((await daDona().reunioes()).map(r => r.id)).toEqual([pronta]);
+
+    await expect(daDona().perguntar({ meetingIds: [pronta, naLixeira], idioma: "pt-BR", pergunta: "O que ficou combinado?" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND", message: RECUSAS_ENTRE_REUNIOES.naoEncontrada });
+    await expect(daDona().perguntar({ etiqueta: "Arquivo", idioma: "pt-BR", pergunta: "O que ficou combinado?" }))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_ENTRE_REUNIOES.semReuniao });
+    expect(duble.invokeLLM).not.toHaveBeenCalled();
+    expect(await linhasDaDona()).toEqual([]);
+
+    duble.invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    const resposta = await daDona().perguntar({ etiqueta: "Clientes", idioma: "pt-BR", pergunta: "O que os clientes pediram?" });
+    expect(resposta).toMatchObject({ escolhidas: 1, reunioes: [{ meetingId: pronta }], deFora: [] });
+    expect(mensagemDaIA()).not.toContain("Na lixeira");
+  });
+
+  it("a reunião que vai para a lixeira entre as duas leituras some da resposta: nem é lida nem aparece em 'ficaram de fora'", async () => {
+    // Três de 40% do teto: passam do teto juntas (a ordem é decidida), e cabem duas.
+    const terco = Math.floor(LIMITE_DA_LEITURA_DA_IA * 0.4);
+    const velha = await reuniao(DONA, { titulo: "Velha", falas: falasDoTamanho(terco, "velha"), criadaEm: AGORA - 3 * DIA });
+    const meio = await reuniao(DONA, { titulo: "Meio", falas: falasDoTamanho(terco, "meio"), criadaEm: AGORA - 2 * DIA });
+    const nova = await reuniao(DONA, { titulo: "Nova para a lixeira", falas: falasDoTamanho(terco, "nova"), criadaEm: AGORA - DIA });
+    // No meio da pergunta (entre a escolha e a leitura das transcrições), outro aparelho manda a mais nova à lixeira.
+    duble.embed.mockImplementation(async () => {
+      await (await db()).update(meetings).set({ trashedAt: Date.now() }).where(eq(meetings.id, nova));
+      throw new Error("sem embedding");
+    });
+    duble.invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    const resposta = await daDona().perguntar({ meetingIds: [velha, meio, nova], idioma: "pt-BR", pergunta: "O que ficou combinado?" });
+    expect(duble.embed).toHaveBeenCalledTimes(1);
+    expect(resposta.reunioes.map(r => r.meetingId)).toEqual([meio]);
+    expect(resposta.deFora).toEqual([{ meetingId: velha, titulo: "Velha", motivo: "limite" }]);
+    expect(JSON.stringify(resposta)).not.toContain("Nova para a lixeira");
+    expect(mensagemDaIA()).not.toContain("Nova para a lixeira");
+  });
+
+  it("sem nenhuma que caiba sozinha, a ordem da Memória não é pedida: a recusa sai sem chamar o embedding (que fica fora de todo teto)", async () => {
+    const grande = LIMITE_DA_LEITURA_DA_IA + 1_000;
+    const a = await reuniao(DONA, { titulo: "Grande A", texto: "a".repeat(grande) });
+    const b = await reuniao(DONA, { titulo: "Grande B", texto: "b".repeat(grande) });
+    duble.embed.mockResolvedValue(vetor(0));
+    await expect(daDona().perguntar({ meetingIds: [a, b], idioma: "pt-BR", pergunta: "O que ficou combinado?" }))
+      .rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE", message: RECUSAS_ENTRE_REUNIOES.longasDemais });
+    expect(duble.embed).not.toHaveBeenCalled();
+    expect(duble.invokeLLM).not.toHaveBeenCalled();
   });
 
   it("a escolha é uma das duas: ids e etiqueta juntos, ou nenhum, é BAD_REQUEST sem ler o banco", async () => {

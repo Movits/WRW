@@ -17,7 +17,9 @@ import { tetoDaIADaReuniao } from "./meetings";
  * avaliação da resposta. Num router à parte, e não em routers/meetings.ts:
  * nenhum procedimento daqui recebe UMA reunião pelo id, e quem consulta
  * reuniões passa pelo ponto único da regra de visibilidade
- * (server/reuniao-visivel.ts).
+ * (server/reuniao-visivel.ts). Sem a guarda da lixeira (procedimentoDaReuniao):
+ * o perguntar está na lista conferida de server/guarda-da-lixeira.test.ts, e
+ * a reunião na lixeira escolhida uma a uma sai como VARIAS_REUNIAO_NAO_ENCONTRADA.
  *
  * As recusas saem com o código tRPC e o código da tela
  * (RECUSAS_ENTRE_REUNIOES), que ela traduz; a IA fora do ar sai como

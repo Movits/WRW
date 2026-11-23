@@ -715,7 +715,7 @@ export const meetingsRouter = router({
   // que ela viu (no Chrome, o áudio costuma ir a um servidor do Google), e o
   // servidor a grava na auditoria (server/legenda-ao-vivo.ts): sem a linha, a
   // legenda não liga. Só na reunião dela que está gravando.
-  ligarLegendaAoVivo: protectedProcedure
+  ligarLegendaAoVivo: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
       concordanciaDasPessoas: z.literal(true),
