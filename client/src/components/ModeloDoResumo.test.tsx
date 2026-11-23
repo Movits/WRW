@@ -44,6 +44,10 @@ vi.mock("@/lib/trpc", () => ({
       pedirResumo: duble.registrar("pedirResumo"),
       refazerResumo: duble.registrar("refazerResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
     },

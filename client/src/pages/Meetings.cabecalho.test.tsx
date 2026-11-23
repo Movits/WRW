@@ -68,6 +68,10 @@ vi.mock("@/lib/trpc", () => ({
       conexoes: { useQuery: () => ({ data: undefined }) },
       pedirResumo: duble.mutacao(),
       decidirItemDoResumo: duble.mutacao(),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.mutacao(),
+      pedirComplemento: duble.mutacao(),
+      decidirComplemento: duble.mutacao(),
       confirmarItensDoResumo: duble.mutacao(),
       marcarAcaoFeita: duble.mutacao(),
       traduzirResumo: duble.mutacao(),

@@ -565,6 +565,8 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
       excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 5, status: "pending", escritoPelaDona: false,
       // A transcrição não foi editada pela dona (H18): o trecho vai como está.
       trechoForaDaTranscricao: false,
+      // Sem complemento pela busca (H4i): o link só levaria o confirmado.
+      complemento: null,
     }]);
     await expect(servico.resumoGuardadoPeloLink("x".repeat(32))).rejects.toMatchObject({ codigo: "NOT_FOUND" });
   });

@@ -62,7 +62,7 @@ vi.mock("@/lib/trpc", () => ({
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
       ...Object.fromEntries([
         "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
-        "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo",
+        "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "audioDoResumo", "pedirComplemento", "decidirComplemento",
         "marcarAcaoFeita", "traduzirResumo", "perguntar", "perguntarDuranteAGravacao", "rascunharEmailDeRetorno", "ligarLinkAberto",
         "desligarLinkAberto", "novaSenhaDoLink", "tirarSenhaDoLink", "mudarAudioDoLink", "mandarParaALixeira",
       ].map(nome => [nome, duble.mutacao(nome)])),

@@ -15,6 +15,8 @@ import {
 import { MeusModelosDeResumo } from "@/components/MeusModelosDeResumo";
 import { FormularioDoItemDoResumo } from "@/components/FormularioDoItemDoResumo";
 import { OuvirOResumo } from "@/components/OuvirOResumo";
+import { BaixarAudioDoResumo } from "@/components/BaixarAudioDoResumo";
+import { ComplementoDoItem } from "@/components/ComplementoDoItem";
 import { AvisoDeConferir, mensagemDoErroDaIA, TempoDoTrecho, Trecho } from "@/components/ReuniaoComIA";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { LANGUAGES } from "@/i18n";
@@ -27,6 +29,7 @@ import { rotuloDoIdioma } from "@/lib/idiomas-na-tela";
 import { ROTA_DAS_PROXIMAS_ACOES, viraProximaAcao } from "@shared/proximas-acoes";
 import { vozesCitadas } from "@shared/vozes-na-edicao";
 import { vozesNoTexto } from "@shared/vozes-no-texto";
+import { falasDoResumo as falasCompartilhadas, tituloDaSecaoNaFala } from "@shared/falas-do-resumo";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -136,18 +139,11 @@ type DoLink = {
 // A ordem do formato da cliente.
 const ORDEM_DAS_SECOES: readonly Secao[] = ["action", "focus", "task", "decision", "blocker", "question"];
 
-// Cada ramo chama t() com a chave literal, para o teste das chaves usadas
-// (server/i18n-chaves-usadas.test.ts) conferir que todas existem. O PDF da
-// reunião (H8, ImpressaoDaReuniao.tsx) usa os mesmos títulos, no idioma dela.
+// Os títulos moram em shared/falas-do-resumo.ts, que a voz do Gemini (H19b)
+// também lê no servidor. O PDF da reunião (H8, ImpressaoDaReuniao.tsx) usa os
+// mesmos títulos, no idioma dela.
 export function tituloDaSecao(t: TranslateFn, secao: Secao) {
-  switch (secao) {
-    case "action": return t("meetings.summary.actionsHeading");
-    case "focus": return t("meetings.summary.focusHeading");
-    case "task": return t("meetings.summary.tasksHeading");
-    case "decision": return t("meetings.summary.decisionsHeading");
-    case "blocker": return t("meetings.summary.blockersHeading");
-    case "question": return t("meetings.summary.openQuestionsHeading");
-  }
+  return tituloDaSecaoNaFala(t, secao);
 }
 
 const codigoDoErro = (erro: unknown) => (erro as { data?: { code?: string } } | null)?.data?.code;
@@ -182,33 +178,13 @@ function nomeDoIdiomaEm(lingua: string, codigo: string) {
   }
 }
 
-/**
- * O que "Ouvir o resumo" lê, fala por fala, com o `t` do idioma do resumo:
- * cada seção com o título e os itens, o responsável e o prazo. O item ainda
- * não conferido não pode soar como conferido: com todos pendentes, um aviso
- * no começo basta; com alguns, o aviso explica e cada pendente começa com
- * "Para conferir", o selo que a dona vê na tela. O resumo traduzido (H11)
- * começa dizendo que a IA o traduziu e de que idioma, como o aviso da tela.
- */
+// O que a voz lê (a do aparelho e a do Gemini, H19 e H19b) mora em
+// shared/falas-do-resumo.ts: as duas leem o mesmo texto. O complemento pela
+// busca (H4i) entra só confirmado.
 function falasDoResumo(t: TranslateFn, itens: ItemNaTela[], nomes: Readonly<Record<string, string>>, traduzidoDe: string | null = null): string[] {
-  const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => t("meetings.speakerLabel", { n: numero }));
-  const pendentes = itens.filter(item => item.status === "pending").length;
-  const todosPendentes = pendentes === itens.length;
-  const falas: string[] = [];
-  if (traduzidoDe) falas.push(t("meetings.summary.listenTranslated", { idioma: traduzidoDe }));
-  if (pendentes) falas.push(todosPendentes ? t("meetings.summary.listenNoneReviewed") : t("meetings.summary.listenSomeToReview"));
-  for (const secao of ORDEM_DAS_SECOES) {
-    const daSecao = itens.filter(item => item.section === secao);
-    if (!daSecao.length) continue;
-    falas.push(tituloDaSecao(t, secao));
-    for (const item of daSecao) {
-      if (item.status === "pending" && !todosPendentes) falas.push(t("meetings.summary.toReview"));
-      falas.push(item.subject ? `${comVozes(item.subject)}: ${comVozes(item.text)}` : comVozes(item.text));
-      if (item.assignee) falas.push(t("meetings.summary.assignee", { nome: comVozes(item.assignee) }));
-      if (item.due) falas.push(t("meetings.summary.due", { prazo: item.due }));
-    }
-  }
-  return falas;
+  return falasCompartilhadas(t, itens.map(item => ({
+    ...item, complemento: item.complemento?.situacao === "confirmed" ? { texto: item.complemento.texto } : null,
+  })), nomes, traduzidoDe);
 }
 
 const idDoItem = (id: string) => `item-do-resumo-${id}`;
@@ -477,7 +453,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           <h3 id={`secao-do-resumo-${secao}`} className="text-sm font-semibold text-amber-200">{tituloDaSecao(t, secao)}</h3>
           <ul className="mt-2 space-y-3">
             {daSecao.map((item, i) => <ItemDoResumo key={item.id ?? `${secao}-${i}`} item={item} peloLink={peloLink} documento={documento} comVozes={comVozes} idiomaDoTexto={idiomaDoTexto} idiomaDoTrecho={idiomaDoTrecho}
-              aoIrPara={props.aoIrPara} linkDoTempo={props.linkDoTempo} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura}
+              aoIrPara={props.aoIrPara} linkDoTempo={props.linkDoTempo} destacado={!!item.id && item.id === itemDestacado} decidindo={decidindo} somenteLeitura={somenteLeitura} reler={reler}
               aoDecidir={status => { if (item.id) decidir.mutate({ itemId: item.id, status }); }}
               aoMarcar={feito => { if (item.id) marcar.mutate({ itemId: item.id, feito, ...pedidoDaTela(t) }); }}
               formularioDeEdicao={!peloLink && !somenteLeitura && item.id ? fechar => formularioDoItem(item, fechar) : undefined}/>)}
@@ -544,6 +520,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         </button>}
         {/* "Ouvir o resumo" (H19), nas duas telas. */}
         {podeOuvir && <OuvirOResumo falas={falas} idioma={idiomaDoResumo}/>}
+        {/* "Baixar o áudio do resumo" (H19b), com a voz do Gemini: só a dona, sob demanda. */}
+        {podeOuvir && !peloLink && <BaixarAudioDoResumo meetingId={meetingId} idioma={idiomaDoResumo}/>}
       </div>}
     </div>
     {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={pedidoAtual} aoFechar={() => setRefazerAberto(false)}/>}
@@ -567,7 +545,9 @@ function BotaoDePedir({ aoClicar, pedindo, children }: { aoClicar: () => void; p
   </button>;
 }
 
-function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, linkDoTempo, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao }: {
+function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idiomaDoTrecho, aoIrPara, linkDoTempo, destacado, decidindo, somenteLeitura, aoDecidir, aoMarcar, formularioDeEdicao, reler }: {
+  /** Relê o resumo depois de pedir ou decidir o complemento (H4i). */
+  reler: () => unknown;
   item: ItemNaTela;
   peloLink: boolean;
   /** O item de um resumo de documento (H12): o trecho é do texto do documento. */
@@ -633,6 +613,10 @@ function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idio
       {item.assignee && <span dir="auto">{t("meetings.summary.assignee", { nome: comVozes(item.assignee) })}</span>}
       {item.due && <span dir="auto" lang={idiomaDoTexto}>{t("meetings.summary.due", { prazo: item.due })}</span>}
     </p>}
+    {/* O complemento pela busca na web (H4i): marcado "fora da reunião, a
+        conferir"; pelo link, só o confirmado. */}
+    <ComplementoDoItem itemId={item.id} complemento={item.complemento} peloLink={peloLink} podeMexer={!somenteLeitura && item.status !== "ignored"}
+      reler={reler} idiomaDoTexto={idiomaDoTexto}/>
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {/* Sem player (a gravação venceu ou não existe), o tempo é só
           informação: nada de botão desligado anunciando "Ouvir". O mesmo

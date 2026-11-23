@@ -75,6 +75,7 @@ import {
   resumoPorEmail,
   perguntasEntreReunioes,
   modelosDeResumoProprios, preferenciasDoResumo, resumosRefeitos,
+  resumoEmAudio, buscasDoComplemento,
 } from "../drizzle/schema";
 
 /**
@@ -191,6 +192,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: modelosDeResumoProprios, coluna: modelosDeResumoProprios.ownerId, origem: "openId" },
   { tabela: preferenciasDoResumo, coluna: preferenciasDoResumo.ownerId, origem: "openId" },
   { tabela: resumosRefeitos, coluna: resumosRefeitos.ownerId, origem: "openId" },
+  // O áudio do resumo com a voz do Gemini (H19b): a linha (o objeto sai antes, em
+  // chavesDeArquivosDaConta) e as buscas do complemento (H4i), só para o teto de 24 h.
+  { tabela: resumoEmAudio, coluna: resumoEmAudio.ownerId, origem: "openId" },
+  { tabela: buscasDoComplemento, coluna: buscasDoComplemento.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {
@@ -418,6 +423,10 @@ export async function chavesDeArquivosDaConta(
   const anexos = await db.select({ chave: meetingAttachments.storageKey })
     .from(meetingAttachments).where(eq(meetingAttachments.ownerId, chaves.openId));
   for (const anexo of anexos) guardar(chaveDoStorageDaDona("meetings", chaves.openId, anexo.chave));
+  // O áudio do resumo (H19b): voz sintética, montada pelo servidor sob meetings/<openId>/.
+  const audiosDoResumo = await db.select({ chave: resumoEmAudio.storageKey })
+    .from(resumoEmAudio).where(eq(resumoEmAudio.ownerId, chaves.openId));
+  for (const audio of audiosDoResumo) if (audio.chave) guardar(chaveDoStorageDaDona("meetings", chaves.openId, audio.chave));
 
   // SIVC e Deal Room indexam pelo id (int), não pelo openId: o prefixo é outro,
   // mas a prova de posse é a mesma — foi o servidor que montou a chave.

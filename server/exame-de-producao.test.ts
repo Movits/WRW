@@ -631,8 +631,12 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
     // 81: os 77, mais os modelos de resumo, as preferências e o teto do refazer (H4e, três
     // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
-    expect(paresDeUsuariaNoSchema).toHaveLength(81);
+    // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
+    // complemento (H4i, buscas_do_complemento.owner_id).
+    expect(paresDeUsuariaNoSchema).toHaveLength(83);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
     // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).

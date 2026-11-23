@@ -54,6 +54,10 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "modelos_de_resumo_proprios", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "preferencias_do_resumo", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "resumos_refeitos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O áudio do resumo (H19b) e as buscas do complemento (H4i), só para o teto de 24 h.
+  // O exame não gera áudio nem busca; a conta QA que fizer sai com o resto.
+  { tabela: "resumo_em_audio", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "buscas_do_complemento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as
