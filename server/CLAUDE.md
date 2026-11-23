@@ -397,10 +397,13 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   partes ainda no ar não vai (CONFLICT `LIXEIRA_GRAVANDO`). A reunião na lixeira sai de toda
   consulta: as entre reuniões (lista, busca, Memória, link aberto, filas, pendências,
   agenda, perfil do contato) filtram por `server/reuniao-visivel.ts`, e todo procedimento
-  de `routers/meetings.ts`, menos os cinco da lixeira, passa pela guarda
-  `procedimentoDaReuniao` (`server/guarda-da-lixeira.ts`, com a varredura do router em
-  `server/guarda-da-lixeira.test.ts`); a rota das partes também a recusa. Consulta nova de
-  reunião filtra por ali. Restaurar vale por 30 dias e devolve a reunião à pasta, com o
+  de `routers/meetings.ts`, menos os cinco da lixeira e o Excluir imediato
+  (`meetings.delete`, o do descarte da gravação, que tira a reunião de vez também da
+  lixeira), passa pela guarda `procedimentoDaReuniao` (`server/guarda-da-lixeira.ts`, com a
+  varredura do router em `server/guarda-da-lixeira.test.ts`). A rota das partes ACEITA a
+  parte atrasada da reunião em `uploading` que foi para a lixeira (a tela apagaria a única
+  cópia no 404): a fila não a transcreve enquanto ela está lá, e restaurar devolve a reunião
+  inteira. Consulta nova de reunião filtra por ali. Restaurar vale por 30 dias e devolve a reunião à pasta, com o
   link desligado; apagar de vez, esvaziar e o fim dos 30 dias (a varredura das gravações,
   `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. A lixeira não muda o prazo
   do áudio.
@@ -417,9 +420,11 @@ escreveu fica em `original_transcript` e `original_segments`: só a dona os lê 
 nunca os seleciona), e a conferência das pendências da extração (`ditosNaReuniao`) também.
 Cada mudança é uma transação que trava a reunião antes da transcrição (a ordem da fila do
 resumo), confere a revisão que a tela viu, apaga as traduções e grava
-`MEETING_TRANSCRIPT_EDITED`, sem fala. A fila descarta o resumo e o mapa escritos sobre
-uma revisão anterior; o resumo gravado antes da edição faz a tela oferecer "Refazer o
-resumo", que refaz também o mapa; o link manda vazio o trecho de item que não está mais na
+`MEETING_TRANSCRIPT_EDITED`, sem fala. O resumo e o mapa que a IA escreveu sobre uma
+revisão anterior (a dona editou durante a geração) são gravados como de outra versão, com a
+hora antes da edição, e não refeitos sozinhos: descartar e refazer a cada edição gastava a
+IA sem teto. O resumo de outra versão faz a tela oferecer "Refazer o resumo" (uma vaga do
+teto de IA), que refaz também o mapa; o link manda vazio o trecho de item que não está mais na
 transcrição, no resumo e na tradução dele (`trechosNaTranscricaoDeAgora`: leitura nova de
 item pelo link passa por ele). A junção (H17) remonta a transcrição pelo áudio: as
 correções não passam, e a tela avisa.

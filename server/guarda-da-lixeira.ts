@@ -10,7 +10,9 @@ import { protectedProcedure } from "./_core/trpc";
  * (H7d). A reunião na lixeira é "não encontrada" para todos eles, com a mesma
  * frase da reunião de outra conta, salvo os da própria lixeira (mandar,
  * restaurar e apagar de vez), que usam o protectedProcedure e se conferem
- * sozinhos (server/lixeira-de-reunioes.ts).
+ * sozinhos (server/lixeira-de-reunioes.ts), e o Excluir imediato
+ * (meetings.delete, o do descarte da gravação), que tira a reunião de vez
+ * esteja ela onde estiver.
  *
  * Lê o pedido CRU (a guarda vem antes do zod) atrás dos campos que apontam
  * para uma reunião: meetingId e meetingIds, itemId (o item do resumo), entityId

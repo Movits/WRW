@@ -28,9 +28,11 @@ export type CodigoDaRecusaDaLixeira = (typeof RECUSAS_DA_LIXEIRA)[keyof typeof R
 /**
  * A reunião pode ir para a lixeira, pelo que a lista sabe dela? Só a gravação
  * em partes ainda no ar não pode: o gravador continua mandando partes, e o
- * áudio que chegasse ficaria numa reunião que a dona mandou apagar. A gravação
+ * áudio novo iria para uma reunião que a dona mandou apagar. A gravação
  * abandonada sai do ar sozinha (a fila a encerra depois de horas sem parte), e
- * aí pode. O servidor confere de novo, com a linha travada.
+ * aí pode. Depois do fim ('uploading'), as partes que ficaram no aparelho já
+ * foram gravadas: a rota das partes as aceita na lixeira, e restaurar devolve
+ * a reunião inteira. O servidor confere de novo, com a linha travada.
  */
 export function podeIrParaALixeira(reuniao: { status: string; audioPipeline?: string | null }): boolean {
   if (reuniao.status === "deleted") return false;

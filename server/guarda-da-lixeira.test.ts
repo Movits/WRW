@@ -17,6 +17,7 @@ vi.mock("./db", async original => ({ ...(await original<typeof import("./db")>()
 
 const { idsDoPedido, procedimentoDaReuniao, recusarSeNaLixeira } = await import("./guarda-da-lixeira");
 const { appRouter } = await import("./routers");
+const { BancoIndisponivel } = await import("./banco-indisponivel");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const OUTRO = "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d";
@@ -64,22 +65,34 @@ describe("os campos que a guarda lê", () => {
 
   it("o banco fora do ar é erro, nunca 'passou': a guarda não engole a falha da consulta", async () => {
     await expect(recusarSeNaLixeira("dona-1", { meetingId: ID })).rejects.toThrow("este teste não usa banco");
+    // A queda de verdade, nas duas formas que ehErroDeBancoIndisponivel
+    // reconhece: sem DATABASE_URL (BancoIndisponivel) e a conexão recusada pelo
+    // driver (cause.code). Uma guarda que engolisse justo essas e deixasse o
+    // pedido passar ficaria verde com o erro genérico acima.
+    exigirDb.mockRejectedValueOnce(new BancoIndisponivel());
+    await expect(recusarSeNaLixeira("dona-1", { meetingId: ID })).rejects.toBeInstanceOf(BancoIndisponivel);
+    const recusada = Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3306"), { code: "ECONNREFUSED" }) });
+    exigirDb.mockRejectedValueOnce(recusada);
+    await expect(recusarSeNaLixeira("dona-1", { itemId: ID })).rejects.toBe(recusada);
   });
 });
 
 /**
  * Todo procedimento de server/routers/meetings.ts leva a guarda, menos os da
  * lixeira (são os únicos que veem a reunião de lá, e cada serviço confere
- * sozinho). A lista fechada pega o procedimento novo que esquecer a guarda.
+ * sozinho) e o Excluir imediato (o descarte da gravação tira a reunião de vez,
+ * também a que foi para a lixeira por outro aparelho). A lista fechada pega o
+ * procedimento novo que esquecer a guarda.
  */
 describe("a varredura do router: quem leva a guarda", () => {
   const DA_LIXEIRA = ["lixeira", "mandarParaALixeira", "restaurarDaLixeira", "apagarDeVez", "esvaziarLixeira"];
+  const EXCLUIR_IMEDIATO = "delete";
 
-  it("todo procedimento de meetings leva a guarda, fora os cinco da lixeira", () => {
+  it("todo procedimento de meetings leva a guarda, fora os cinco da lixeira e o Excluir imediato", () => {
     const deMeetings = procedimentos.filter(([caminho]) => caminho.startsWith("meetings."));
     expect(deMeetings.length).toBeGreaterThan(50);
     const semGuarda = deMeetings.filter(([, procedimento]) => !temGuarda(procedimento)).map(([caminho]) => caminho.slice("meetings.".length));
-    expect(semGuarda.sort()).toEqual([...DA_LIXEIRA].sort());
+    expect(semGuarda.sort()).toEqual([...DA_LIXEIRA, EXCLUIR_IMEDIATO].sort());
   });
 
   it("os da lixeira existem e apontam para a reunião só pela lista (mandar, restaurar e apagar de vez)", () => {

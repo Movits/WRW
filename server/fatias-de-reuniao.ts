@@ -2,7 +2,6 @@ import crypto from "crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
-import { estaNaLixeira } from "./reuniao-visivel";
 import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
@@ -91,14 +90,22 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
   const decisao = await db.transaction(async tx => {
     const [reuniao] = await tx.select({
       status: meetings.status, pipeline: meetings.audioPipeline, consentimento: meetings.consentGranted, esperadas: meetings.expectedSlices,
-      trashedAt: meetings.trashedAt,
     }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-    // Reunião de outra dona, reunião que não existe e a da lixeira (H7d)
-    // respondem igual: a dona mandou apagar a reunião, e o áudio que falta
-    // (o da retomada, depois do fim) não entra nela. A gravação ainda no ar não
-    // vai para a lixeira (podeIrParaALixeira), então isto só alcança as partes
-    // atrasadas da reunião em 'uploading'.
-    if (!reuniao || estaNaLixeira(reuniao.trashedAt)) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
+    // Reunião de outra dona e reunião que não existe respondem igual: a tela
+    // recebe SEM_REUNIAO (404) e apaga a cópia da parte, porque reenviar não
+    // muda nada.
+    //
+    // A reunião da LIXEIRA (H7d) aceita a parte atrasada: é exclusão adiada, e
+    // restaurar devolve a reunião como estava, com o áudio que já tinha sido
+    // gravado. A gravação ainda no ar não vai para a lixeira
+    // (podeIrParaALixeira), então isto só alcança a reunião em 'uploading',
+    // cujo fim já veio e cuja parte ficou no aparelho (a retomada a manda
+    // depois). Recusar aqui fazia a tela apagar a única cópia daquele trecho
+    // (o 404 é recusa definitiva para ela), e a reunião restaurada era montada
+    // com lacuna. Na lixeira, a fila não a transcreve (foraDaLixeira, em
+    // server/fila-de-transcricao.ts); apagar de vez, e o fim dos 30 dias,
+    // levam a parte com a reunião (deletePrivateMeeting).
+    if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
     if (reuniao.pipeline !== "slices" || !reuniao.consentimento || !["recording", "uploading"].includes(reuniao.status)) {
       throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
     }

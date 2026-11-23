@@ -20,7 +20,12 @@ import { createAuditLog } from "./security";
  *   procedimentos pelo id, server/guarda-da-lixeira.ts), e as filas não a
  *   pegam: o trabalho dela espera e volta se a dona a restaurar. O que já
  *   estava na IA termina e fica guardado nela, sem aparecer. Nada sai da
- *   reunião, e o updated_at (a ficha de quem a processa) não muda.
+ *   reunião, e o updated_at (a ficha de quem a processa) não muda. A parte
+ *   atrasada da gravação já encerrada ('uploading', a que a retomada do
+ *   aparelho manda depois) entra e espera com ela (server/fatias-de-reuniao.ts).
+ * - O **Excluir imediato** (meetings.delete, o do descarte da gravação) tira a
+ *   reunião de vez também da lixeira: é o único procedimento pelo id sem a
+ *   guarda, além dos da própria lixeira.
  * - **Restaurar**, dentro dos 30 dias (PRAZO_DA_LIXEIRA_MS), só apaga o
  *   trashed_at: a reunião volta como estava, na pasta dela (se a pasta ainda
  *   existe), com o link desligado. MEETINGS_RESTORED.

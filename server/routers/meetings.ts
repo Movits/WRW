@@ -1230,9 +1230,16 @@ export const meetingsRouter = router({
   esvaziarLixeira: protectedProcedure.mutation(({ ctx }) => esvaziarLixeira(ctx.user.openId, provaDaDona(ctx))),
 
   // O Excluir de sempre, imediato: o caminho do "Descartar" da gravação em
-  // curso (useGravacaoEmPartes, os descartes pendentes e a retomada). A tela
-  // da reunião pronta manda para a lixeira (mandarParaALixeira).
-  delete: procedimentoDaReuniao.input(z.object({ meetingId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+  // curso (useGravacaoEmPartes, os descartes pendentes e a retomada), do
+  // documento que não subiu e da gravação ainda no ar. A tela da reunião
+  // pronta manda para a lixeira (mandarParaALixeira).
+  //
+  // Sem a guarda da lixeira, de propósito: quem chama quer a reunião fora
+  // agora, e a que foi para a lixeira por outro aparelho no meio também sai
+  // (deletePrivateMeeting não olha o trashed_at). Com a guarda, o NOT_FOUND
+  // dela era lido pelo descarte pendente como "já saiu", e a gravação que a
+  // dona descartou ficava 30 dias restaurável na lixeira.
+  delete: protectedProcedure.input(z.object({ meetingId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const deleted = await deletePrivateMeeting(ctx.user.openId, input.meetingId);
     if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
     return { success: true };

@@ -596,4 +596,6 @@ export function religarParaTestes() {
   parada = false;
 }
 
-export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso };
+// montarUmaReuniao entra para o teste da tomada: a reunião que vai para a
+// lixeira entre a seleção (reunioesProntasParaMontar) e a tomada não é tomada.
+export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso, montarUmaReuniao };

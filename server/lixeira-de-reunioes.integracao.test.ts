@@ -11,19 +11,29 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 const apagarAudio = vi.hoisted(() => vi.fn(async (_chave: string) => {}));
 // A parte de áudio que chega (receberParte) sobe por aqui: o dublê diz se algo subiu.
 const subirAudio = vi.hoisted(() => vi.fn(async (_chave: string) => ({ key: "x", url: "/manus-storage/x" })));
+// E a fila de transcrição a lê de volta daqui (o áudio é sintético).
+const lerAudio = vi.hoisted(() => vi.fn(async (_chave: string) => Buffer.from("audio sintetico")));
 vi.mock("./storage", async original => ({
   ...(await original<typeof import("./storage")>()),
   storageApagarTodasAsVersoes: (...args: unknown[]) => apagarAudio(...(args as [string])),
   storagePut: (...args: unknown[]) => subirAudio(...(args as [string])),
+  storageGetBytes: (...args: unknown[]) => lerAudio(...(args as [string])),
 }));
 // A IA do resumo é dublê: o que se prova é que a fila não pega a reunião da lixeira.
 const gerarResumoDaReuniao = vi.hoisted(() => vi.fn());
 vi.mock("./resumo-da-reuniao", async original => ({ ...(await original<typeof import("./resumo-da-reuniao")>()), gerarResumoDaReuniao: (...a: unknown[]) => gerarResumoDaReuniao(...a) }));
+// A transcrição de cada parte e a extração da montagem também são dublês: a
+// parte atrasada que entrou na reunião da lixeira espera, e a fila só a
+// transcreve depois de restaurar.
+const transcreverFatia = vi.hoisted(() => vi.fn());
+vi.mock("./transcricao-de-fatia", async original => ({ ...(await original<typeof import("./transcricao-de-fatia")>()), transcreverFatia: (...a: unknown[]) => transcreverFatia(...a) }));
+const invokeLLM = vi.hoisted(() => vi.fn(async () => ({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] })));
+vi.mock("./_core/llm", async original => ({ ...(await original<typeof import("./_core/llm")>()), invokeLLM: (...a: unknown[]) => invokeLLM(...(a as [])) }));
 
 const { getDb } = await import("./db");
 const {
-  agendaReunioes, auditLogs, meetingAudioSlices, meetingDocuments, meetingFolders, meetingRecordings, meetings, meetingSummaries, meetingSummaryItems,
-  meetingTranscripts, networkSugestoes, platformNotifications, privateContacts, proximasAcoes, users,
+  agendaReunioes, auditLogs, meetingAudioSlices, meetingContactSuggestions, meetingDocuments, meetingEntities, meetingFolders, meetingRecordings, meetings,
+  meetingSummaries, meetingSummaryItems, meetingTranscripts, networkSugestoes, platformNotifications, privateContacts, proximasAcoes, users,
 } = await import("../drizzle/schema");
 const { appRouter } = await import("./routers");
 const lixeira = await import("./lixeira-de-reunioes");
@@ -108,6 +118,8 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     await apagarPelaChave(banco, agendaReunioes, inArray(agendaReunioes.ownerId, donas));
     await apagarPelaChave(banco, meetingSummaryItems, inArray(meetingSummaryItems.ownerId, donas));
     await apagarPelaChave(banco, meetingSummaries, inArray(meetingSummaries.ownerId, donas));
+    await apagarPelaChave(banco, meetingEntities, inArray(meetingEntities.ownerId, donas));
+    await apagarPelaChave(banco, meetingContactSuggestions, inArray(meetingContactSuggestions.ownerId, donas));
     await apagarPelaChave(banco, meetingRecordings, inArray(meetingRecordings.ownerId, donas));
     await apagarPelaChave(banco, meetingAudioSlices, inArray(meetingAudioSlices.ownerId, donas));
     await apagarPelaChave(banco, meetingDocuments, inArray(meetingDocuments.ownerId, donas));
@@ -170,15 +182,25 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     expect((await recusa(daDona().meetings.novaSenhaDoLink({ meetingId: id }))).code).toBe("NOT_FOUND");
   });
 
-  it("todo procedimento pelo id trata a reunião da lixeira como 'não encontrada': o item, a entidade, o link e os detalhes", async () => {
+  it("todo procedimento pelo id trata a reunião da lixeira como 'não encontrada': o item, a entidade, a pessoa sugerida, o link e os detalhes", async () => {
     const { id } = await reuniaoPronta(DONA);
+    // A outra reunião da junção é de verdade, da dona e fora da lixeira: com um
+    // id inventado, o NOT_FOUND viria dele, e não da lixeira.
+    const { id: viva } = await reuniaoPronta(DONA, { titulo: "Reunião viva da junção" });
     const banco = await db();
     const resumo = crypto.randomUUID();
     const item = crypto.randomUUID();
+    const entidade = crypto.randomUUID();
+    const pessoa = crypto.randomUUID();
     await banco.insert(meetingSummaries).values({ id: resumo, meetingId: id, ownerId: DONA, status: "ready", createdAt: AGORA, updatedAt: AGORA });
     await banco.insert(meetingSummaryItems).values({
       id: item, summaryId: resumo, meetingId: id, ownerId: DONA, section: "action", position: 0, text: "Mandar a proposta", excerpt: "mandar a proposta", status: "pending", createdAt: AGORA, updatedAt: AGORA,
     });
+    // A entidade e a pessoa sugerida entram só pelo id delas (entityId e
+    // suggestionId): a guarda acha a reunião pela linha de cada uma, e os
+    // serviços desses três procedimentos não olham a lixeira.
+    await banco.insert(meetingEntities).values({ id: entidade, meetingId: id, ownerId: DONA, entityType: "empresa", value: "Akme Exportadora", createdAt: AGORA, updatedAt: AGORA });
+    await banco.insert(meetingContactSuggestions).values({ id: pessoa, meetingId: id, ownerId: DONA, fullName: "Carla da Lixeira", createdAt: AGORA, updatedAt: AGORA });
     await daDona().meetings.mandarParaALixeira({ meetingIds: [id] });
 
     // Uma de cada vez (cada uma só começa quando a anterior foi recusada).
@@ -186,18 +208,24 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
       () => daDona().meetings.resumoGuardado({ meetingId: id }),
       () => daDona().meetings.atualizarDetalhes({ meetingId: id, titulo: "Outro título" }),
       () => daDona().meetings.decidirItemDoResumo({ itemId: item, status: "confirmed" }),
+      () => daDona().meetings.decideEntity({ entityId: entidade, status: "confirmed" }),
+      () => daDona().meetings.decideContactSuggestion({ suggestionId: pessoa, action: "create" }),
+      () => daDona().meetings.candidatosParaVincular({ suggestionId: pessoa }),
       () => daDona().meetings.ligarLinkAberto({ meetingId: id, autorizacaoDasPessoas: true, idioma: "pt-BR", textoExibido: "Confirmo." }),
       () => daDona().meetings.nomearFalante({ meetingId: id, falante: "F1", nome: "Ana" }),
       () => daDona().meetings.moverParaPasta({ meetingIds: [id], pastaId: null }),
-      () => daDona().meetings.juntar({ meetingIds: [id, crypto.randomUUID()] }),
-      () => daDona().meetings.delete({ meetingId: id }),
+      () => daDona().meetings.juntar({ meetingIds: [id, viva] }),
     ];
     for (const chamada of chamadas) expect((await recusa(chamada())).code).toBe("NOT_FOUND");
-    // Nada mudou nela.
+    // Nada mudou nela, nem no que nasceu dela, e nenhum contato nasceu da pessoa sugerida.
     const depois = await linha(id);
     expect(depois.title).toBe("Reunião da lixeira");
     expect(depois.shareToken).toBeNull();
     expect((await banco.select().from(meetingSummaryItems).where(eq(meetingSummaryItems.id, item)))[0].status).toBe("pending");
+    expect((await banco.select().from(meetingEntities).where(eq(meetingEntities.id, entidade)))[0].status).toBe("pending");
+    expect((await banco.select().from(meetingContactSuggestions).where(eq(meetingContactSuggestions.id, pessoa)))[0].status).toBe("pending");
+    expect(await banco.select().from(privateContacts).where(and(eq(privateContacts.ownerId, DONA), eq(privateContacts.fullName, "Carla da Lixeira")))).toEqual([]);
+    expect((await linha(viva)).status).toBe("ready");
   });
 
   it("a gravação em partes ainda no ar não vai para a lixeira (CONFLICT, com o código), e o pedido é todo ou nada", async () => {
@@ -375,27 +403,82 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     silencioAviso.mockRestore();
   });
 
-  it("a parte atrasada da reunião em 'uploading' que foi para a lixeira é recusada como 'não encontrada', e nada sobe ao bucket", async () => {
-    const { receberParte, RecusaDaParte } = await import("./fatias-de-reuniao");
+  it("a parte atrasada da reunião em 'uploading' que foi para a lixeira entra e espera com ela: a fila não a transcreve, e restaurada a reunião é montada inteira", async () => {
+    const { receberParte } = await import("./fatias-de-reuniao");
+    const filaDeTranscricao = await import("./fila-de-transcricao");
     const banco = await db();
     const id = crypto.randomUUID();
-    // O fim já veio (2 partes), e a segunda ainda está no aparelho (a retomada a manda depois).
+    // O fim já veio (2 partes): a primeira subiu e foi transcrita, e a segunda
+    // ficou no aparelho (rede ruim no fim), à espera da retomada. A tela só
+    // apaga a cópia do aparelho quando o servidor a guarda; a recusa (404) a
+    // apagaria, e este trecho se perderia.
     await banco.insert(meetings).values({
       id, ownerId: DONA, title: "Enviando as partes", status: "uploading", audioPipeline: "slices", expectedSlices: 2, consentGranted: true, consentAt: AGORA,
       language: "pt-BR", origem: "gravacao", createdAt: AGORA, updatedAt: AGORA,
     });
+    const chaveDaPrimeira = `meetings/${DONA}/${id}/partes/0000-primeira.wav`;
+    await banco.insert(meetingAudioSlices).values({
+      id: crypto.randomUUID(), meetingId: id, ownerId: DONA, seq: 0, status: "transcribed", storageKey: chaveDaPrimeira, storageUrl: `/manus-storage/${chaveDaPrimeira}`,
+      mimeType: "audio/wav", sizeBytes: 2044, sha256: "b".repeat(64), durationMs: 2000, offsetMs: 0, expiresAt: AGORA + 10 * DIA,
+      result: { segmentos: [{ inicio: 0.2, fim: 1.5, falante: "F1", texto: "Bom dia, vamos ao frete." }] }, createdAt: AGORA, updatedAt: AGORA,
+    });
     await daDona().meetings.mandarParaALixeira({ meetingIds: [id] });
     subirAudio.mockClear();
-    const parte = () => receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wavSintetico(2) });
-    const erro = await parte().then(() => null, e => e);
-    expect(erro).toBeInstanceOf(RecusaDaParte);
-    expect((erro as InstanceType<typeof RecusaDaParte>).codigo).toBe("SEM_REUNIAO");
-    expect(subirAudio).not.toHaveBeenCalled();
-    expect(await banco.select().from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, id))).toEqual([]);
-    // Restaurada, a mesma parte entra: a recusa era a lixeira.
-    await daDona().meetings.restaurarDaLixeira({ meetingIds: [id] });
-    await expect(parte()).resolves.toMatchObject({ seq: 1 });
+    transcreverFatia.mockReset();
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 2.3, fim: 3.8, falante: "F2", texto: "O contêiner sai na sexta." }], idioma: "pt-BR", modelo: "gemini-teste" });
+
+    // A retomada do aparelho manda a parte com a reunião na lixeira: ela entra.
+    await expect(receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wavSintetico(2) })).resolves.toEqual({ seq: 1, repetida: false });
     expect(subirAudio).toHaveBeenCalledTimes(1);
+    const partes = async () => (await banco.select({ seq: meetingAudioSlices.seq, status: meetingAudioSlices.status }).from(meetingAudioSlices)
+      .where(eq(meetingAudioSlices.meetingId, id)).orderBy(meetingAudioSlices.seq)).map(parte => `${parte.seq}:${parte.status}`);
+    expect(await partes()).toEqual(["0:transcribed", "1:received"]);
+
+    // Na lixeira, a fila não a transcreve nem monta a reunião: o áudio espera.
+    await filaDeTranscricao.rodarUmaVez({ ownerId: DONA });
+    expect(transcreverFatia).not.toHaveBeenCalled();
+    expect(await partes()).toEqual(["0:transcribed", "1:received"]);
+    expect((await linha(id)).status).toBe("uploading");
+
+    // Restaurada, a reunião volta como estava, com o trecho que estava no
+    // aparelho: a fila o transcreve e monta a reunião sem lacuna.
+    await daDona().meetings.restaurarDaLixeira({ meetingIds: [id] });
+    await filaDeTranscricao.rodarUmaVez({ ownerId: DONA });
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    await filaDeTranscricao.rodarUmaVez({ ownerId: DONA });
+    expect((await linha(id)).status).toBe("ready");
+    const [transcricao] = await banco.select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id));
+    expect(transcricao.transcript).toBe("Bom dia, vamos ao frete.\nO contêiner sai na sexta.");
+    expect(JSON.stringify(transcricao.segments)).not.toContain("lacuna");
+  });
+
+  it("o Excluir imediato (o descarte da gravação) tira de vez também a reunião que foi para a lixeira por outro aparelho, com o áudio", async () => {
+    const banco = await db();
+    const id = crypto.randomUUID();
+    await banco.insert(meetings).values({
+      id, ownerId: DONA, title: "Gravação descartada", status: "uploading", audioPipeline: "slices", expectedSlices: 1, consentGranted: true, consentAt: AGORA,
+      language: "pt-BR", origem: "gravacao", createdAt: AGORA, updatedAt: AGORA,
+    });
+    const chave = `meetings/${DONA}/${id}/partes/0000-descartada.wav`;
+    await banco.insert(meetingAudioSlices).values({
+      id: crypto.randomUUID(), meetingId: id, ownerId: DONA, seq: 0, status: "received", storageKey: chave, storageUrl: `/manus-storage/${chave}`,
+      mimeType: "audio/wav", sizeBytes: 2044, sha256: "c".repeat(64), durationMs: 2000, expiresAt: AGORA + 10 * DIA, createdAt: AGORA, updatedAt: AGORA,
+    });
+    // Outro aparelho a mandou para a lixeira; o descarte pendente do celular
+    // repete a exclusão depois. O NOT_FOUND da guarda era lido como "já saiu",
+    // e a gravação descartada ficava 30 dias restaurável.
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [id] });
+    apagarAudio.mockClear();
+    await expect(daDona().meetings.delete({ meetingId: id })).resolves.toEqual({ success: true });
+    expect(await linha(id)).toBeUndefined();
+    expect(await banco.select().from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, id))).toEqual([]);
+    expect(apagarAudio).toHaveBeenCalledWith(chave);
+    expect((await daDona().meetings.lixeira()).map(r => r.id)).not.toContain(id);
+    // A de outra conta continua "não encontrada", na lixeira ou fora dela.
+    const { id: daOutraConta } = await reuniaoPronta(OUTRA);
+    await daOutra().meetings.mandarParaALixeira({ meetingIds: [daOutraConta] });
+    expect((await recusa(daDona().meetings.delete({ meetingId: daOutraConta }))).code).toBe("NOT_FOUND");
+    expect(await linha(daOutraConta)).toBeDefined();
   });
 
   it("decidir a pendência da reunião na lixeira (a do contato e a do perfil) é 'não encontrada', e nada muda; restaurada, a decisão vale", async () => {
