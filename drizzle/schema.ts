@@ -1293,6 +1293,38 @@ export const meetingDocuments = mysqlTable("meeting_documents", {
   ownerExpiresIdx: index("meeting_documents_owner_expires_idx").on(table.ownerId, table.expiresAt),
 }));
 
+// As fotos e os desenhos à mão que a dona anexa ao resumo da reunião (H4g e
+// H4h do plano do gravador; HN-32 e HN-33 no app de referência da cliente).
+// A imagem chega já reduzida no aparelho (client/src/lib/reduzir-imagem.ts, a
+// régua da #149) e segue a regra dos arquivos da reunião: 30 dias contados do
+// envio (MEETING_AUDIO_TTL_MS), a varredura tira a vencida do bucket com todas
+// as versões, e a exclusão da reunião e a da conta também. A linha é o
+// ponteiro para o objeto: só sai depois dele, e fica (vencida) quando o bucket
+// recusa. O link aberto mostra a imagem só pela rota dele, que confere a senha
+// (H23). Nomes em inglês, como as irmãs meeting_*.
+export const meetingAttachments = mysqlTable("meeting_attachments", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // 'photo' (H4g): a foto escolhida ou tirada; 'drawing' (H4h): o desenho ou a
+  // escrita à mão da tela de desenho.
+  kind: mysqlEnum("kind", ["photo", "drawing"]).notNull(),
+  // A chave é montada pelo servidor (meetings/<openId>/<reunião>/anexo-...), e é
+  // ela que prova a posse na exclusão da conta. A url é o caminho do proxy
+  // autenticado (/manus-storage/...), nunca o endereço do bucket.
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  storageUrl: varchar("storage_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // A tela e o link leem os anexos da reunião, na ordem em que entraram.
+  meetingIdx: index("meeting_attachments_meeting_idx").on(table.meetingId, table.createdAt),
+  // A exclusão da conta acha os anexos pela dona; a varredura, pelo prazo.
+  ownerExpiresIdx: index("meeting_attachments_owner_expires_idx").on(table.ownerId, table.expiresAt),
+}));
+
 export const meetingTranscripts = mysqlTable("meeting_transcripts", {
   id: varchar("id", { length: 36 }).primaryKey(),
   meetingId: varchar("meeting_id", { length: 36 }).notNull().unique(),

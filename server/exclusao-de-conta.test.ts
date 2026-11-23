@@ -57,7 +57,7 @@ import {
 import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
 import { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import {
-  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingDocuments, meetingRecordings,
+  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAttachments, meetingAudioSlices, meetingDocuments, meetingRecordings,
   meetings, opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
   strategicGroups, users, googleAgendaConexoes,
 } from "../drizzle/schema";
@@ -111,7 +111,9 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // e o resumo por e-mail (H22, resumo_por_email.owner_id).
     // 77: as pastas das reuniões (H7d) somaram meeting_folders.owner_id, e o Pergunte
     // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
-    expect(PARES).toHaveLength(77);
+    // 78: as fotos e os desenhos do resumo (H4g e H4h) somaram meeting_attachments.owner_id.
+    expect(PARES).toHaveLength(78);
+    expect(PARES).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
@@ -890,6 +892,50 @@ describe("B8) o PDF da reunião de documento sai com a conta, e o que o bucket r
 
   it("a chave de outra dona não prova a posse e não vai ao bucket", async () => {
     linhasPorTabela.set(meetingDocuments, [{ id: "documento-2", chave: "meetings/open-OUTRA/r/documento-0000.pdf" }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
+  });
+});
+
+// ═══ B9) as fotos e os desenhos do resumo (H4g e H4h) seguem a regra do PDF ═══
+describe("B9) os anexos do resumo saem com a conta, e o que o bucket recusou fica só como ponteiro", () => {
+  const ANEXO = "meetings/open-7/reuniao-3/anexo-11111111-2222-4333-8444-555555555555.webp";
+  const delecaoDosAnexos = () => delecoes.filter(d => d.tabela === meetingAttachments);
+  const atualizacoesDosAnexos = () => atualizacoes.filter(a => a.tabela === meetingAttachments);
+  beforeEach(() => {
+    linhasPorTabela.set(meetingAttachments, [{ id: "anexo-1", chave: ANEXO }]);
+  });
+
+  it("a chave da imagem prova a posse e vai ao bucket com TODAS as versões", async () => {
+    await excluirConta(fakeDb, CONTA);
+    expect(bucketDublado.apagarTodasAsVersoes.mock.calls.map(([chave]) => chave)).toContain(ANEXO);
+    expect(bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave)).not.toContain(ANEXO);
+  });
+
+  it("sem falha, a linha sai pela dona e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(ANEXO);
+    expect(atualizacoesDosAnexos()).toEqual([]);
+    expect(renderizar(delecaoDosAnexos()[0].condicao)).toEqual({ sql: "`meeting_attachments`.`owner_id` = ?", params: ["open-7"] });
+  });
+
+  it("o bucket recusou a imagem: o DELETE a deixa de fora, e ela vence na hora como ponteiro", async () => {
+    bucketFalha.add(ANEXO);
+    const antes = Date.now();
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([ANEXO]);
+    expect(renderizar(delecaoDosAnexos()[0].condicao)).toEqual({
+      sql: "(`meeting_attachments`.`owner_id` = ? and `meeting_attachments`.`id` not in (?))",
+      params: ["open-7", "anexo-1"],
+    });
+    const [ponteiro] = atualizacoesDosAnexos();
+    expect(Object.keys(ponteiro.valores)).toEqual(["expiresAt"]);
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_attachments (ponteiro, UPDATE)");
+  });
+
+  it("a chave de outra dona não prova a posse e não vai ao bucket", async () => {
+    linhasPorTabela.set(meetingAttachments, [{ id: "anexo-2", chave: "meetings/open-OUTRA/r/anexo-0000.webp" }]);
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
   });

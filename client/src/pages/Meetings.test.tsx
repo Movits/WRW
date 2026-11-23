@@ -97,6 +97,8 @@ vi.mock("@/hooks/useGravacaoEmPartes", () => ({
 }));
 // O header lê sessão e notificações pelo tRPC real; não é o que está em teste.
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
+// As fotos e os desenhos do resumo (H4g e H4h) têm o teste deles (AnexosDoResumo.test.tsx): aqui, só onde entram.
+vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetingId?: string; comLinkAberto?: boolean }) => <div data-testid="anexos-do-resumo" data-reuniao={props.meetingId} data-link={String(!!props.comLinkAberto)}/> }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
@@ -1571,6 +1573,9 @@ describe("Detalhe da reunião — o resumo guardado e as perguntas pela IA (H4c)
     expect(duble.resumoGuardado).toHaveBeenCalledWith({ meetingId: REUNIAO.id }, expect.objectContaining({ enabled: true }));
     expect(screen.getByRole("heading", { name: "Resumo da reunião" })).toBeInTheDocument();
     expect(screen.getByText("Pergunte à reunião")).toBeInTheDocument();
+    // As fotos e os desenhos do resumo (H4g e H4h), da reunião aberta, sem link ligado.
+    expect(screen.getByTestId("anexos-do-resumo")).toHaveAttribute("data-reuniao", REUNIAO.id);
+    expect(screen.getByTestId("anexos-do-resumo")).toHaveAttribute("data-link", "false");
 
     fireEvent.click(screen.getByRole("button", { name: /Gerar resumo/ }));
 
