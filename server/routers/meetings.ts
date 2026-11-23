@@ -91,6 +91,8 @@ import { apagarPasta, criarPasta, editarPasta, listarPastas, moverParaPasta, Rec
 import { CORES_DA_PASTA, ICONES_DA_PASTA, NOME_DA_PASTA_MAX, REUNIOES_POR_ACAO_MAX } from "@shared/pastas-de-reunioes";
 import { apagarDeVez, esvaziarLixeira, listarLixeira, mandarParaALixeira, RecusaDaLixeira, restaurarDaLixeira, type ProvaDaLixeira } from "../lixeira-de-reunioes";
 import { REUNIOES_POR_EXCLUSAO_MAX } from "@shared/lixeira-de-reunioes";
+import { anexarAoResumo, anexosDaDona, apagarAnexo, RecusaDoAnexo } from "../anexos-do-resumo";
+import { ANEXO_BYTES_MAX, TIPOS_DE_ANEXO } from "@shared/anexos-do-resumo";
 
 // O que a dona pede ao editar a transcrição (H18): o zod barra a forma e o
 // tamanho; quem confere a posição do trecho, a voz e o texto vazio, e recusa
@@ -134,6 +136,16 @@ async function comRecusaDaLixeira<T>(trabalho: () => Promise<T>): Promise<T> {
     return await trabalho();
   } catch (erro) {
     if (erro instanceof RecusaDaLixeira) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
+/** As recusas dos anexos do resumo (H4g e H4h), pela mesma regra: o código tRPC e o código que a tela traduz. */
+async function comRecusaDoAnexo<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDoAnexo) throw new TRPCError({ code: erro.codigoTrpc, message: erro.codigo });
     throw erro;
   }
 }
@@ -1353,6 +1365,26 @@ export const meetingsRouter = router({
   // Uma rodada por pedido (até REUNIOES_POR_EXCLUSAO_MAX reuniões); `restam`
   // diz à tela se pede de novo.
   esvaziarLixeira: protectedProcedure.mutation(({ ctx }) => esvaziarLixeira(ctx.user.openId, provaDaDona(ctx))),
+
+  // As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts):
+  // a imagem chega em base64, já reduzida no aparelho; o servidor confere o
+  // conteúdo e tira os metadados. O teto do base64 é o do arquivo (10 MB) em
+  // base64, com folga para o cabeçalho "data:".
+  anexos: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => comRecusaDoAnexo(() => anexosDaDona(ctx.user.openId, input.meetingId))),
+
+  anexarAoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      tipo: z.enum(TIPOS_DE_ANEXO),
+      dataBase64: z.string().min(1).max(Math.ceil(ANEXO_BYTES_MAX / 3) * 4 + 100),
+    }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => anexarAoResumo(ctx.user.openId, input.meetingId, { tipo: input.tipo, dataBase64: input.dataBase64 }, provaDaDona(ctx)))),
+
+  apagarAnexo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), anexoId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => apagarAnexo(ctx.user.openId, input.meetingId, input.anexoId, provaDaDona(ctx)))),
 
   // O Excluir de sempre, imediato: o caminho do "Descartar" da gravação em
   // curso (useGravacaoEmPartes, os descartes pendentes e a retomada), do

@@ -16,8 +16,9 @@ compression, cabeçalhos de segurança, bloqueio de scanners, rate limit global,
 parsers, proxy de storage, tRPC em `/api/trpc` e, por fim, Vite em middleware (dev) ou
 estático de `dist/public` (prod). Não há proxy de dev: front e API na mesma origem.
 
-Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
-`meetings.submitRecording`, `contexts.uploadMedia`, `network.uploadPhoto`,
+Body parsers: 5 MB por padrão e 15 MB em SETE procedimentos de upload —
+`meetings.submitRecording`, `meetings.anexarAoResumo` (as fotos e os desenhos do resumo,
+H4g e H4h), `contexts.uploadMedia`, `network.uploadPhoto`,
 `network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
@@ -332,6 +333,11 @@ sem ele).
   com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
+  As fotos e os desenhos do resumo (H4g e H4h, `server/anexos-do-resumo.ts`, tabela
+  `meeting_attachments`) saem pelo link do mesmo jeito, por
+  `/reuniao-aberta/{token}/anexo/{id}`, com a senha do link; tirar o áudio do link não os
+  tira. Seguem a regra do PDF da reunião: 30 dias, a varredura, a exclusão da reunião e
+  da conta; o servidor confere o conteúdo e tira os metadados (o GPS do EXIF).
   Desde a H23 a dona tira o áudio do link (a consulta deixa de servi-lo) e põe uma senha
   de 6 dígitos: o link com senha só abre com o cookie HttpOnly de quem a acertou
   (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que

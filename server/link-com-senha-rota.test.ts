@@ -134,6 +134,8 @@ describe("todo procedimento que lê a reunião pelo token leva os cookies do ped
     pedirResumo: { token: TOKEN },
     mapaMental: { token: TOKEN },
     pedirMapa: { token: TOKEN },
+    // As fotos e os desenhos do resumo (H4g e H4h).
+    anexos: { token: TOKEN },
     traduzirResumo: { token: TOKEN, idioma: "en" },
     perguntar: { token: TOKEN, idioma: "pt-BR", pergunta: "Quem falou?" },
   };

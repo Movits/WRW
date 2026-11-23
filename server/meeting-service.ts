@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   contexts,
+  meetingAttachments,
   meetingAudioSlices,
   meetingContactSuggestions,
   meetingDocuments,
@@ -1881,6 +1882,7 @@ const retomadaDaVarredura = new Map<string, string>();
 const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
 const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
 const reuniaoDoDocumento = and(eq(meetings.id, meetingDocuments.meetingId), eq(meetings.ownerId, meetingDocuments.ownerId));
+const reuniaoDoAnexo = and(eq(meetings.id, meetingAttachments.meetingId), eq(meetings.ownerId, meetingAttachments.ownerId));
 
 /** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
 type TrechoDaVarredura = { depoisDe: string; ate?: string };
@@ -1948,6 +1950,29 @@ function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, 
 }
 
 /**
+ * As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts) que
+ * saem nesta passada: vencidos (a reunião em 'processing' não os usa: a IA não
+ * lê imagem) e, na hora, os da reunião que não existe ou está sendo excluída.
+ */
+function anexosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .leftJoin(meetings, reuniaoDoAnexo)
+    .where(and(
+      gt(meetingAttachments.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingAttachments.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingAttachments.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        lte(meetingAttachments.expiresAt, agora),
+      ),
+    ))
+    .orderBy(asc(meetingAttachments.id))
+    .limit(lote);
+}
+
+/**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
  * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
@@ -1965,7 +1990,9 @@ function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, 
  *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
  *   da exclusão;
  * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
- *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias.
+ *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias;
+ * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com o
+ *   mesmo prazo, em qualquer estado da reunião.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -2016,6 +2043,11 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "documentos",
       ler: (trecho: TrechoDaVarredura) => documentosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingDocuments).where(eq(meetingDocuments.id, id)),
+    },
+    {
+      nome: "anexos",
+      ler: (trecho: TrechoDaVarredura) => anexosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingAttachments).where(eq(meetingAttachments.id, id)),
     },
   ];
 
@@ -2204,6 +2236,11 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   const documentos = await db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
     .from(meetingDocuments)
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
+  // E as fotos e os desenhos do resumo (H4g e H4h), pela mesma regra: são da
+  // dona, e saem só com a reunião (o reprocesso não os toca).
+  const anexos = await db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .where(and(eq(meetingAttachments.meetingId, meetingId), eq(meetingAttachments.ownerId, ownerId)));
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
   // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
@@ -2227,10 +2264,12 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
   // ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos]);
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos, ...anexos]);
   const saiu = new Set(sairam);
   const documentosQueSairam = documentos.filter(documento => saiu.has(documento.id)).map(documento => documento.id);
   const documentosQueFicam = documentos.filter(documento => !saiu.has(documento.id)).map(documento => documento.id);
+  const anexosQueSairam = anexos.filter(anexo => saiu.has(anexo.id)).map(anexo => anexo.id);
+  const anexosQueFicam = anexos.filter(anexo => !saiu.has(anexo.id)).map(anexo => anexo.id);
 
   const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
   const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
@@ -2259,7 +2298,15 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   if (documentosQueSairam.length) {
     await db.delete(meetingDocuments).where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueSairam)));
   }
+  if (anexosQueSairam.length) {
+    await db.delete(meetingAttachments).where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueSairam)));
+  }
   const agora = now();
+  // A imagem que o bucket recusou fica como ponteiro, vencida, para a varredura.
+  if (anexosQueFicam.length) {
+    await db.update(meetingAttachments).set({ expiresAt: agora })
+      .where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueFicam)));
+  }
   if (gravacoesQueFicam.length) {
     await db.update(meetingRecordings).set({ expiresAt: agora })
       .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueFicam)));

@@ -160,6 +160,8 @@ describe("o appRouter inteiro", () => {
     "reuniaoAberta.traduzirResumo",
     // A senha do link (H23): quem a digita não tem conta.
     "reuniaoAberta.entrar",
+    // As fotos e os desenhos do resumo (H4g e H4h), pelo link.
+    "reuniaoAberta.anexos",
   ]);
   let caminhos: string[] = [];
 

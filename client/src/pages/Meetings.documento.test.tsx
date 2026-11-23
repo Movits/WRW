@@ -62,6 +62,8 @@ vi.mock("@/hooks/useGravacaoEmPartes", () => ({
   useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
 }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
+// As fotos e os desenhos do resumo (H4g e H4h) têm o teste deles (AnexosDoResumo.test.tsx): aqui, só onde entram.
+vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetingId?: string; comLinkAberto?: boolean }) => <div data-testid="anexos-do-resumo" data-reuniao={props.meetingId} data-link={String(!!props.comLinkAberto)}/> }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,

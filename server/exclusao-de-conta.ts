@@ -46,7 +46,8 @@
 //    prazo vencido e, na parte, sem a transcrição e fora da fila (ver
 //    `audiosQueFicaramNoBucket`). Sem a reunião, a varredura das gravações
 //    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo. O PDF da
-//    reunião de documento (meeting_documents, H12) segue a mesma regra.
+//    reunião de documento (meeting_documents, H12) segue a mesma regra, e as
+//    fotos e os desenhos do resumo (meeting_attachments, H4g e H4h) também.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -61,7 +62,7 @@ import {
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
-  enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
+  enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
   lembretes, meetingFolders, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
@@ -113,6 +114,8 @@ export type ContextoDaExclusao = {
   gravacoesQueFicam?: string[];
   /** Os PDFs das reuniões de documento (ids de meeting_documents) cujo objeto não saiu. */
   documentosQueFicam?: string[];
+  /** As fotos e os desenhos do resumo (ids de meeting_attachments, H4g e H4h) cujo objeto não saiu. */
+  anexosQueFicam?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -210,6 +213,13 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       ? notInArray(meetingDocuments.id, contexto.documentosQueFicam)
       : undefined),
     motivo: "o PDF da reunião de documento (H12) que não saiu do bucket fica como o único ponteiro para o objeto",
+  },
+  {
+    tabela: meetingAttachments, coluna: meetingAttachments.ownerId, origem: "openId",
+    filtro: (_chaves, contexto) => (contexto?.anexosQueFicam?.length
+      ? notInArray(meetingAttachments.id, contexto.anexosQueFicam)
+      : undefined),
+    motivo: "a foto ou o desenho do resumo (H4g e H4h) que não saiu do bucket fica como o único ponteiro para o objeto",
   },
   // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
   // (nome e e-mail de terceiros) que a dona marcou.
@@ -403,6 +413,12 @@ export async function chavesDeArquivosDaConta(
     .from(meetingDocuments).where(eq(meetingDocuments.ownerId, chaves.openId));
   for (const documento of documentos) guardar(chaveDoStorageDaDona("meetings", chaves.openId, documento.chave));
 
+  // As fotos e os desenhos do resumo (H4g e H4h): a chave também é montada pelo
+  // servidor sob meetings/<openId>/.
+  const anexos = await db.select({ chave: meetingAttachments.storageKey })
+    .from(meetingAttachments).where(eq(meetingAttachments.ownerId, chaves.openId));
+  for (const anexo of anexos) guardar(chaveDoStorageDaDona("meetings", chaves.openId, anexo.chave));
+
   // SIVC e Deal Room indexam pelo id (int), não pelo openId: o prefixo é outro,
   // mas a prova de posse é a mesma — foi o servidor que montou a chave.
   const documentosSivc = await db.select({ chave: sivcDocuments.fileKey })
@@ -470,9 +486,9 @@ async function audiosQueFicaramNoBucket(
   db: Db,
   chaves: ChavesDaConta,
   arquivosComFalha: string[],
-): Promise<{ fatias: string[]; gravacoes: string[]; documentos: string[] }> {
+): Promise<{ fatias: string[]; gravacoes: string[]; documentos: string[]; anexos: string[] }> {
   const audiosComFalha = new Set(arquivosComFalha.filter(chave => chave.startsWith("meetings/")));
-  if (!audiosComFalha.size) return { fatias: [], gravacoes: [], documentos: [] };
+  if (!audiosComFalha.size) return { fatias: [], gravacoes: [], documentos: [], anexos: [] };
   const ficou = (chave: string) => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, chave) ?? "");
   const partes = await db.select({ id: meetingAudioSlices.id, chave: meetingAudioSlices.storageKey })
     .from(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, chaves.openId));
@@ -480,10 +496,13 @@ async function audiosQueFicaramNoBucket(
     .from(meetingRecordings).where(eq(meetingRecordings.ownerId, chaves.openId));
   const documentos = await db.select({ id: meetingDocuments.id, chave: meetingDocuments.storageKey })
     .from(meetingDocuments).where(eq(meetingDocuments.ownerId, chaves.openId));
+  const anexos = await db.select({ id: meetingAttachments.id, chave: meetingAttachments.storageKey })
+    .from(meetingAttachments).where(eq(meetingAttachments.ownerId, chaves.openId));
   return {
     fatias: partes.filter(parte => ficou(parte.chave)).map(parte => parte.id),
     gravacoes: gravacoes.filter(gravacao => ficou(gravacao.chave)).map(gravacao => gravacao.id),
     documentos: documentos.filter(documento => ficou(documento.chave)).map(documento => documento.id),
+    anexos: anexos.filter(anexo => ficou(anexo.chave)).map(anexo => anexo.id),
   };
 }
 
@@ -526,6 +545,13 @@ async function deixarSoOPonteiroDasGravacoes(db: Db, chaves: ChavesDaConta, grav
 async function deixarSoOPonteiroDosDocumentos(db: Db, chaves: ChavesDaConta, documentosQueFicam: string[]): Promise<number> {
   const [resultado] = await db.update(meetingDocuments).set({ expiresAt: Date.now() })
     .where(and(eq(meetingDocuments.ownerId, chaves.openId), inArray(meetingDocuments.id, documentosQueFicam)));
+  return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+}
+
+/** A foto ou o desenho do resumo (H4g e H4h) que fica guarda só o ponteiro e vence na hora, como o PDF. */
+async function deixarSoOPonteiroDosAnexos(db: Db, chaves: ChavesDaConta, anexosQueFicam: string[]): Promise<number> {
+  const [resultado] = await db.update(meetingAttachments).set({ expiresAt: Date.now() })
+    .where(and(eq(meetingAttachments.ownerId, chaves.openId), inArray(meetingAttachments.id, anexosQueFicam)));
   return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
 }
 
@@ -626,7 +652,7 @@ export async function excluirConta(
   // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
   // essas linhas de fora.
   const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos };
+  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos };
   if (ficaram.fatias.length) {
     const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
@@ -638,6 +664,10 @@ export async function excluirConta(
   if (ficaram.documentos.length) {
     const linhas = await deixarSoOPonteiroDosDocumentos(db, chaves, ficaram.documentos);
     if (linhas > 0) passos.push({ nome: "meeting_documents (ponteiro, UPDATE)", linhas });
+  }
+  if (ficaram.anexos.length) {
+    const linhas = await deixarSoOPonteiroDosAnexos(db, chaves, ficaram.anexos);
+    if (linhas > 0) passos.push({ nome: "meeting_attachments (ponteiro, UPDATE)", linhas });
   }
 
   // A Google Agenda (H16b) antes do laço, enquanto a linha ainda guarda o

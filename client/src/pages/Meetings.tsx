@@ -17,6 +17,7 @@ import { VincularAContato } from "@/components/VincularAContato";
 import { ConexoesGeradasPelaReuniao } from "@/components/ConexoesDaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
+import { AnexosDoResumo } from "@/components/AnexosDoResumo";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
@@ -1486,6 +1487,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken} documento={ehDocumento}/>
+      {/* As fotos e os desenhos do resumo (H4g e H4h). */}
+      <AnexosDoResumo meetingId={meetingId} comLinkAberto={!!meeting.shareToken}/>
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { auditLogs, meetingAudioSlices, meetingRecordings, meetings } from "../drizzle/schema";
+import { auditLogs, meetingAttachments, meetingAudioSlices, meetingRecordings, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { foraDaLixeira } from "./reuniao-visivel";
 import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, apagarDerivadosDoAlvoDaJuncao, MAX_MEETING_AUDIO_BYTES } from "./meeting-service";
@@ -59,6 +59,11 @@ import { RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX, type CodigoDaRecusaDaJuncao
  * 6. A auditoria (MEETINGS_JOINED) vai na mesma transação, com a prova do
  *    aviso de gravação de cada reunião (a hora e a versão do aviso aceito):
  *    as linhas das outras saem, e o áudio delas segue na reunião que fica.
+ *
+ * 7. As fotos e os desenhos do resumo (H4g e H4h) das outras reuniões passam
+ *    para a que fica, como o áudio: só a linha muda de reunião, o objeto e o
+ *    prazo ficam. O teto de anexos por reunião vale para anexar, não aqui: a
+ *    junção nunca apaga o que a dona anexou.
  *
  * O prazo de cada áudio não muda (30 dias desde o envio dele): a junção nunca
  * guarda áudio além do prazo, e o áudio mais novo não vence antes por ter sido
@@ -409,6 +414,10 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       etiquetas: plano.etiquetas, ondeFoi: plano.ondeFoi, contactId: plano.contactId, contextId: plano.contextId,
     }).where(and(eq(meetings.id, alvo.id), eq(meetings.ownerId, ownerId)));
 
+    if (fontes.length) {
+      await tx.update(meetingAttachments).set({ meetingId: alvo.id })
+        .where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.meetingId, fontes.map(fonte => fonte.id))));
+    }
     for (const fonte of fontes) {
       await apagarDerivadosDaReuniaoJuntada(tx, ownerId, fonte.id);
       await tx.delete(meetings).where(and(eq(meetings.id, fonte.id), eq(meetings.ownerId, ownerId)));
