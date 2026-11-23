@@ -4,6 +4,7 @@ import { idiomaDaTranscricao } from "@shared/idioma-da-reuniao";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError } from "./gemini";
 import { extrairDadosDaReuniao, gravarResultadoDaReuniao, mensagemDaFalha, ReuniaoExcluidaDuranteProcessamento, ReuniaoTomadaPorOutraExecucao } from "./meeting-service";
 import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
@@ -147,6 +148,9 @@ async function partesProntasParaTranscrever(db: Banco, agora: number, escopo: Es
       lt(meetingAudioSlices.attempts, TENTATIVAS_POR_PARTE),
       eq(meetings.audioPipeline, "slices"),
       inArray(meetings.status, ["recording", "uploading"]),
+      // A reunião na lixeira (H7d) fica fora da fila: as partes dela esperam,
+      // e a fila as transcreve se a dona a restaurar.
+      foraDaLixeira(),
       daDona(meetingAudioSlices.ownerId, escopo),
     ))
     .orderBy(asc(meetingAudioSlices.createdAt), asc(meetingAudioSlices.seq))
@@ -389,6 +393,7 @@ async function reunioesProntasParaMontar(db: Banco, agora: number, escopo: Escop
       eq(meetings.audioPipeline, "slices"), eq(meetings.status, "uploading"),
       or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, agora)),
       lt(meetings.attempts, TENTATIVAS_POR_REUNIAO),
+      foraDaLixeira(),
       daDona(meetings.ownerId, escopo),
     ))
     .limit(10);
@@ -414,7 +419,7 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     attempts: sql`${meetings.attempts} + 1`,
   }).where(and(
     eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId), eq(meetings.status, "uploading"),
-    or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, ficha)),
+    or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, ficha)), foraDaLixeira(),
   ));
   if (!linhas(tomada)) {
     tokensVivos.delete(token);
@@ -591,4 +596,6 @@ export function religarParaTestes() {
   parada = false;
 }
 
-export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso };
+// montarUmaReuniao entra para o teste da tomada: a reunião que vai para a
+// lixeira entre a seleção (reunioesProntasParaMontar) e a tomada não é tomada.
+export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso, montarUmaReuniao };

@@ -170,8 +170,10 @@ describe("Meu Network Inteligente — os números do servidor", () => {
     // O limite por reunião é o da gravação em partes (G13b): em horas, não "720 min".
     expect(within(screen.getByText("Limite gratuito por reunião").parentElement!).getByText("12 h")).toBeInTheDocument();
     expect(screen.queryByText("720 min")).not.toBeInTheDocument();
-    // O arquivo enviado segue no envio único, com os 10 minutos dele.
-    expect(screen.getByText("Na gravação, que pede confirmação a cada hora. O arquivo de áudio enviado vai até 10 minutos.")).toBeInTheDocument();
+    // O arquivo enviado também vai em partes, até 12 h (H9a, H9b e H9c): a ajuda
+    // não fala mais dos 10 minutos do envio único, que saiu do gravador na G14.
+    expect(screen.getByText("Na gravação, que pede confirmação a cada hora, e no arquivo de áudio ou vídeo enviado.")).toBeInTheDocument();
+    expect(screen.queryByText(/10 minutos/)).not.toBeInTheDocument();
     expect(screen.getByText("Sem limite mensal")).toBeInTheDocument();
   });
 

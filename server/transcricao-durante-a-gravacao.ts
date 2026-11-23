@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { nomesDosFalantes } from "@shared/const";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista } from "./reuniao-visivel";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, type Segmento } from "./transcricao-de-fatia";
 
@@ -122,9 +123,10 @@ export function andamentoDasPartes(linhas: Awaited<ReturnType<typeof partesDaReu
  */
 export async function transcricaoDuranteAGravacao(ownerId: string, meetingId: string, desde: number): Promise<TranscricaoDaGravacao | null> {
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline, speakerNames: meetings.speakerNames })
+  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline, speakerNames: meetings.speakerNames, trashedAt: meetings.trashedAt })
     .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao || reuniao.status === "deleted") return null;
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!reuniao || reuniaoForaDeVista(reuniao)) return null;
   const agora = Date.now();
   const emPartes = reuniao.audioPipeline === "slices";
   const nomes = nomesDosFalantes(reuniao.speakerNames);

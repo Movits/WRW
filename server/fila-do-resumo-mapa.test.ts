@@ -22,8 +22,11 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 const banco = vi.hoisted(() => ({
   // Os trabalhos na fila: 'pending' é o resumo; 'ready', o mapa de um resumo pronto.
   trabalhos: [] as Array<{ id: string; meetingId: string; ownerId: string; status: string; updatedAt?: number }>,
-  transcricao: undefined as undefined | { id: string; texto: string; segmentos: unknown; idioma: string },
+  transcricao: undefined as undefined | { id: string; revisao: number; texto: string; segmentos: unknown; idioma: string },
   transcricaoAtual: "t-1",
+  // A revisão e a hora da última edição da transcrição que a gravação relê (H18).
+  revisaoAtual: 0,
+  editadaEm: null as number | null,
   tentativas: 1,
   reuniao: { status: "ready" },
   reservaNoBanco: true,
@@ -57,7 +60,7 @@ vi.mock("./db", async () => {
     }
     if (tabela === schema.meetingTranscripts) {
       if (chaves.includes("texto")) return banco.transcricao ? [banco.transcricao] : [];
-      return [{ id: banco.transcricaoAtual }];
+      return [{ id: banco.transcricaoAtual, revisao: banco.revisaoAtual, editadaEm: banco.editadaEm }];
     }
     // O aviso de reunião pronta no sino (H15), na transação da gravação do resumo: o título e a conta.
     if (tabela === schema.meetings) return chaves.includes("titulo") ? [{ titulo: "Reunião do mapa", contaId: 7 }] : [banco.reuniao];
@@ -101,7 +104,7 @@ const ultima = () => banco.updates.at(-1)!.set;
 
 beforeEach(() => {
   Object.assign(banco, {
-    trabalhos: [], transcricao: { id: "t-1", texto: TEXTO, segmentos: [], idioma: "pt-BR" }, transcricaoAtual: "t-1",
+    trabalhos: [], transcricao: { id: "t-1", revisao: 0, texto: TEXTO, segmentos: [], idioma: "pt-BR" }, transcricaoAtual: "t-1", revisaoAtual: 0, editadaEm: null,
     tentativas: 1, reuniao: { status: "ready" }, reservaNoBanco: true, esgotados: { resumo: [], mapa: [] }, updates: [],
   });
   ia.gerarResumoDaReuniao.mockReset().mockResolvedValue(RESUMO);
@@ -214,6 +217,38 @@ describe("o mapa mental na fila do resumo", () => {
     expect(banco.updates.some(u => "mindMap" in u.set)).toBe(false);
     expect(ultima()).toMatchObject({ lockToken: null, lockedUntil: null });
     expect(sqlDo(ultima().attempts).sql).toContain("greatest");
+  });
+
+  it("a dona editou a transcrição durante o mapa (H18): o mapa é gravado como de outra versão (a hora antes da edição), sem voltar à fila", async () => {
+    banco.trabalhos = [trabalho("ready")];
+    let editadaEm = 0;
+    ia.gerarMapaMental.mockImplementation(async () => { banco.revisaoAtual = 1; banco.editadaEm = editadaEm = Date.now(); return MAPA; });
+    await fila.rodarUmaVez();
+    const mapa = escritas().find(set => "mindMap" in set)!;
+    expect(mapa).toMatchObject({ mindMap: MAPA, mindMapStatus: "ready", lockToken: null, lockedUntil: null });
+    expect(mapa.mindMapGeneratedAt).toBe(editadaEm - 1);
+    // Nenhuma devolução da reserva: a tentativa não volta, e a fila não refaz o mapa sozinha.
+    expect(escritas().some(set => set.attempts !== undefined && typeof set.attempts === "object" && sqlDo(set.attempts).sql.includes("greatest"))).toBe(false);
+  });
+
+  it("a dona editou a transcrição durante o resumo (H18): o resumo é gravado como de outra versão, sem voltar à fila, e o mapa segue", async () => {
+    banco.trabalhos = [trabalho("pending")];
+    let editadaEm = 0;
+    ia.gerarResumoDaReuniao.mockImplementation(async () => { banco.revisaoAtual = 2; banco.editadaEm = editadaEm = Date.now(); return RESUMO; });
+    await fila.rodarUmaVez();
+    const resumo = escritas().find(set => set.status === "ready")!;
+    expect(resumo).toMatchObject({ status: "ready", attempts: 0, lockToken: null });
+    expect(resumo.generatedAt).toBe(editadaEm - 1);
+    expect(escritas().some(set => set.attempts !== undefined && typeof set.attempts === "object" && sqlDo(set.attempts).sql.includes("greatest"))).toBe(false);
+    expect(ia.gerarMapaMental).toHaveBeenCalledTimes(1);
+  });
+
+  it("a hora da versão: na revisão que a IA leu, agora; na revisão nova, um instante antes da última edição", () => {
+    expect(fila.horaDaVersao(5_000, 3, { revisao: 3, editadaEm: 4_000 })).toBe(5_000);
+    expect(fila.horaDaVersao(5_000, 3, { revisao: 4, editadaEm: 4_900 })).toBe(4_899);
+    // A edição com a hora depois da gravação (relógios de máquinas diferentes) não põe o resumo no futuro.
+    expect(fila.horaDaVersao(5_000, 3, { revisao: 4, editadaEm: 9_000 })).toBe(5_000);
+    expect(fila.horaDaVersao(5_000, 0, { revisao: 1, editadaEm: null })).toBe(5_000);
   });
 
   it("o desligamento durante o mapa devolve as reservas das duas fases, e o mapa não é gravado", async () => {

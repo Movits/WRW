@@ -5,8 +5,10 @@ import { nomesDosFalantes } from "@shared/const";
 import { ACAO_REUNIAO_EXPORTADA, MENSAGEM_EXPORTAR_SO_PRONTA, type FormatoDaExportacao } from "@shared/exportar-reuniao";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+import { transcricaoEstaEditada } from "./editar-transcricao";
 
 /**
  * Exportar a reunião (H8): o conteúdo do PDF que a dona baixa. Só em PDF por
@@ -22,7 +24,9 @@ import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
  * O que sai:
  * - o título, o emoji do resumo e a data da reunião;
  * - a transcrição com as falas, os tempos e os nomes que a dona deu às vozes
- *   (nomesDosFalantes); sem falas (o envio único de antes), o texto corrido;
+ *   (nomesDosFalantes); sem falas (o envio único de antes), o texto corrido.
+ *   É a versão que a dona vê: a que ela editou (H18) sai editada, com a marca
+ *   de que foi editada, e a da IA nunca sai;
  * - SÓ os itens do resumo que a dona confirmou (nada extraído por IA sai da
  *   WRW sem a conferência dela): nem os para conferir, nem os ignorados, nem o
  *   trecho, o tempo e a confiança de cada item.
@@ -64,8 +68,9 @@ export type ReuniaoExportada = {
   /**
    * Null sem transcrição. Com falas, o texto corrido não vai (as falas já são
    * o texto, e a resposta não dobra de tamanho); sem falas, vai só ele.
+   * `editada`: a dona corrigiu a transcrição (H18), e o PDF diz isso.
    */
-  transcricao: { texto: string | null; falas: FalaExportada[] } | null;
+  transcricao: { texto: string | null; falas: FalaExportada[]; editada: boolean } | null;
   exportadaEm: number;
 };
 
@@ -86,7 +91,7 @@ export async function exportarReuniao(ownerId: string, meetingId: string, pedido
       createdAt: meetings.createdAt,
       speakerNames: meetings.speakerNames,
     }).from(meetings)
-      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+      .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
       .limit(1);
     // Lançar aqui desfaz a transação: nada foi gravado ainda.
     if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
@@ -97,6 +102,7 @@ export async function exportarReuniao(ownerId: string, meetingId: string, pedido
       segments: meetingTranscripts.segments,
       language: meetingTranscripts.language,
       durationSeconds: meetingTranscripts.durationSeconds,
+      editada: transcricaoEstaEditada,
     }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId)))
       .limit(1);
@@ -136,6 +142,7 @@ export async function exportarReuniao(ownerId: string, meetingId: string, pedido
         itensConfirmados: itens.length,
         falas: falas.length,
         comTranscricao: !!transcricao,
+        transcricaoEditada: !!transcricao && !!Number(transcricao.editada),
       },
       // Os mesmos cortes do createAuditLog (server/security.ts).
       ipAddress: pedido.ipAddress.split(",")[0].trim().substring(0, 45),
@@ -153,7 +160,7 @@ export async function exportarReuniao(ownerId: string, meetingId: string, pedido
       duracaoSegundos: transcricao?.durationSeconds ?? null,
       nomes: nomesDosFalantes(reuniao.speakerNames),
       itens: itens.map(item => ({ ...item, feita: !!item.feita })),
-      transcricao: transcricao ? { texto: falas.length ? null : transcricao.transcript, falas } : null,
+      transcricao: transcricao ? { texto: falas.length ? null : transcricao.transcript, falas, editada: !!Number(transcricao.editada) } : null,
       exportadaEm: Date.now(),
     };
   });

@@ -556,6 +556,29 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     expect(aoIrPara).toHaveBeenCalledWith(200);
   });
 
+  it("o trecho que a dona tirou da transcrição (H18) vem vazio pelo link: o item fica, sem trecho, com o aviso de que quem gravou o corrigiu", () => {
+    const aviso = "O trecho da transcrição deste item foi corrigido por quem gravou a reunião.";
+    const itens = ITENS_DO_LINK.map(item => (item.text === "Não renovar com a transportadora antiga."
+      ? { ...item, excerpt: "", trechoForaDaTranscricao: true }
+      : { ...item, trechoForaDaTranscricao: false }));
+    const aoIrPara = vi.fn();
+    doLink(pronto(itens), aoIrPara);
+    const corrigido = itemDoTexto("Não renovar com a transportadora antiga.");
+    expect(within(corrigido).getByText(aviso)).toBeInTheDocument();
+    expect(corrigido.querySelector("details, q, blockquote")).toBeNull();
+    // O tempo do item continua: o "▶" leva ao ponto da gravação.
+    fireEvent.click(within(corrigido).getByRole("button", { name: "Ouvir a partir de 05:20" }));
+    expect(aoIrPara).toHaveBeenCalledWith(320);
+    // Só nele: os outros seguem com o trecho, sem o aviso.
+    expect(screen.getAllByText(aviso)).toHaveLength(1);
+    expect(within(itemDoTexto("A licença de exportação ainda não saiu.")).getByText("Trecho da transcrição")).toBeInTheDocument();
+  });
+
+  it("para a dona, a marca do link não aparece (ela vê o trecho da versão da IA)", () => {
+    daDona(pronto(ITENS.map(item => ({ ...item, trechoForaDaTranscricao: true }))));
+    expect(screen.queryByText(/foi corrigido por quem gravou a reunião/)).not.toBeInTheDocument();
+  });
+
   it("sem resumo: 'Pedir resumo' pede pelo token, nunca pela rota da dona; e relê o resumo do link", () => {
     doLink(comEstado("sem_resumo"));
     fireEvent.click(screen.getByRole("button", { name: /Pedir resumo/ }));

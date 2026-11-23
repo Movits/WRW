@@ -35,6 +35,7 @@ import { sendEmailBatch } from "./_core/email";
 import { participantesDe } from "./agenda-de-reunioes";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { estaNaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 import { montarEmailDoResumo, type ModeloDoEmailDoResumo } from "./email-do-resumo";
 import { ligarLinkAbertoNaTransacao, type EstadoDoLinkLigado } from "./link-aberto-da-reuniao";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
@@ -211,12 +212,13 @@ async function reuniaoTravada(tx: Transacao, ownerId: string, meetingId: string)
     status: meetings.status, titulo: meetings.title, idioma: meetings.language, token: meetings.shareToken,
     senhaDoLink: meetings.sharePasswordHash, audioDoLink: meetings.shareAudio,
     // De onde a reunião veio: a de documento e a de vídeo não têm gravação.
-    origem: meetings.origem, sourceUrl: meetings.sourceUrl,
+    origem: meetings.origem, sourceUrl: meetings.sourceUrl, trashedAt: meetings.trashedAt,
   })
     .from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)))
     .for("update");
-  if (!reuniao || reuniao.status === "deleted") throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída: nada sai dela.
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   return reuniao;
 }
 
@@ -600,7 +602,7 @@ export type EnvioNoPainel = {
 export async function painelDoResumoPorEmail(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   const [reuniao] = await db.select({ idioma: meetings.language, token: meetings.shareToken }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .limit(1);
   if (!reuniao) throw recusa("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const [conta] = await db.select({ email: users.email, nome: users.name, automatico: users.resumoPorEmailAutomatico }).from(users)
@@ -685,9 +687,10 @@ export async function envioAutomaticoDoResumo(ownerId: string, meetingId: string
         .from(users).where(eq(users.openId, ownerId)).for("update");
       const email = conta?.email?.trim();
       if (!conta || !ligado(conta.automatico) || !ligado(conta.ativa) || !email || !emailDoParticipanteValido(email)) return null;
-      const [reuniao] = await tx.select({ status: meetings.status, titulo: meetings.title, idioma: meetings.language }).from(meetings)
+      const [reuniao] = await tx.select({ status: meetings.status, titulo: meetings.title, idioma: meetings.language, trashedAt: meetings.trashedAt }).from(meetings)
         .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).for("update");
-      if (reuniao?.status !== "ready") return null;
+      // A reunião que foi para a lixeira (H7d) enquanto o resumo era escrito não manda e-mail.
+      if (reuniao?.status !== "ready" || estaNaLixeira(reuniao.trashedAt)) return null;
       const resumo = await temResumoGravado(tx, ownerId, meetingId);
       if (resumo?.versao !== 1) return null;
       const [jaMandado] = await tx.select({ id: resumoPorEmail.id }).from(resumoPorEmail)

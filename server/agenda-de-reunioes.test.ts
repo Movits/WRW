@@ -107,8 +107,9 @@ const operacoes = () => estado.operacoes as unknown as Operacao[];
 const daTabela = (tabela: unknown, tipo?: Operacao["tipo"]) => operacoes().filter(o => o.tabela === tabela && (!tipo || o.tipo === tipo));
 const fila = (tabela: unknown, ...respostas: Array<Array<Record<string, unknown>>>) => estado.linhasPorTabela.set(tabela, respostas);
 
+// A gravação ligada só vale fora da exclusão e da lixeira (H7d): a da lixeira aparece como "sem gravação".
 const JUNCAO_ESPERADA = {
-  sql: "(`meetings`.`id` = `agenda_reunioes`.`meeting_id` and `meetings`.`owner_id` = `agenda_reunioes`.`owner_id` and `meetings`.`status` <> ?)",
+  sql: "(`meetings`.`id` = `agenda_reunioes`.`meeting_id` and `meetings`.`owner_id` = `agenda_reunioes`.`owner_id` and (`meetings`.`status` <> ? and `meetings`.`trashed_at` is null))",
   params: ["deleted"],
 };
 const linhaDoBanco = (extra: Record<string, unknown> = {}) => ({
@@ -320,7 +321,7 @@ describe("ligarGravacaoNaAgenda", () => {
     await servico.ligarGravacaoNaAgenda("dona-1", ID, REUNIAO);
     const [leitura] = daTabela(schema.meetings, "select");
     expect({ sql: leitura.sql, params: leitura.params }).toEqual({
-      sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` <> ?)", params: [REUNIAO, "dona-1", "deleted"],
+      sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and (`meetings`.`status` <> ? and `meetings`.`trashed_at` is null))", params: [REUNIAO, "dona-1", "deleted"],
     });
     const [ligacao] = daTabela(schema.agendaReunioes, "update");
     expect(ligacao.valores).toMatchObject({ meetingId: REUNIAO });

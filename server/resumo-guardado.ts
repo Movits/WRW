@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, count, eq, max, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
 import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
@@ -11,6 +12,7 @@ import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
+import { transcricaoEstaEditada, trechosNaTranscricaoDeAgora } from "./editar-transcricao";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -46,6 +48,12 @@ const COLUNAS_DO_RESUMO = {
   lastError: meetingSummaries.lastError,
   template: meetingSummaries.template,
   version: meetingSummaries.version,
+  // Quando a fila gravou a versão de agora: a transcrição editada depois disso
+  // (H18) faz a tela oferecer "Refazer o resumo".
+  generatedAt: meetingSummaries.generatedAt,
+  // Se a transcrição que essa versão leu estava editada (nulo: de antes da H18,
+  // leu a da IA): voltar tudo ao original devolve a que ela leu.
+  transcriptEdited: meetingSummaries.transcriptEdited,
   // O título que a IA sugere (só para a dona; o link não o recebe).
   suggestedTitle: meetingSummaries.suggestedTitle,
   suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
@@ -73,13 +81,13 @@ function temVersaoAnterior(linha: { status: string; version: number } | undefine
 const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
 /**
- * A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental
+ * A reunião da dona, não apagada e fora da lixeira (H7d), ou NOT_FOUND. O mapa mental
  * (server/mapa-mental-guardado.ts) usa a mesma. `travar`: numa transação, a
  * linha fica presa até o fim dela, e o estado lido é o mais novo.
  */
 export async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
   const consulta = db.select({ status: meetings.status, title: meetings.title }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).limit(1);
   const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   return reuniao;
@@ -129,7 +137,36 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
     estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
     tituloSugerido: tituloSugeridoNaTela(estado, linha, reuniao.title),
+    transcricaoEditadaDepois: await transcricaoEditadaDepoisDoResumo(db, ownerId, meetingId, linha),
   };
+}
+
+/**
+ * A dona mudou a transcrição (H18) depois que a fila gravou a versão de agora
+ * do resumo: os itens e o mapa mental saíram da versão anterior, e a tela
+ * oferece "Refazer o resumo". Só com uma versão gravada e fora da fila: o
+ * resumo na fila (o primeiro, ou o refazer pedido) já vai ler a versão nova. A edição trava a reunião antes de
+ * pegar a hora, como a gravação do resumo: a que chega depois do resumo gravado
+ * tem sempre a hora maior (server/editar-transcricao.ts).
+ *
+ * Mudar depois do resumo não basta: a versão da IA é uma só. O resumo que leu
+ * a versão da IA (transcript_edited falso, ou nulo no resumo de antes da H18)
+ * diante da transcrição que voltou inteira a ela ("Voltar tudo ao original",
+ * ou o único trecho mudado de volta) leu o que está na tela: o aviso não sai,
+ * e a dona não gasta uma chamada à IA por nada. O resumo que leu uma versão
+ * editada continua de outra versão diante de qualquer mudança depois dele,
+ * mesmo a volta ao original.
+ */
+async function transcricaoEditadaDepoisDoResumo(
+  db: Executor, ownerId: string, meetingId: string,
+  linha: { status: string; version: number; generatedAt: number | null; transcriptEdited: boolean | null } | undefined,
+): Promise<boolean> {
+  // Na fila (o refazer pedido), a versão nova já vai ler a transcrição editada.
+  if (!linha || linha.status === "pending" || !linha.version || linha.generatedAt === null) return false;
+  const [transcricao] = await db.select({ editadaEm: meetingTranscripts.editedAt, editada: transcricaoEstaEditada }).from(meetingTranscripts)
+    .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  if (transcricao?.editadaEm == null || Number(transcricao.editadaEm) <= Number(linha.generatedAt)) return false;
+  return linha.transcriptEdited === true || Number(transcricao.editada) === 1;
 }
 
 /**
@@ -253,11 +290,11 @@ async function itemParaDecidir(db: Executor, ownerId: string, itemId: string) {
   const [onde] = await db.select({ summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
     .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
   if (!onde) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, onde.meetingId), eq(meetings.ownerId, ownerId))).for("update");
   const [resumo] = await db.select({ status: meetingSummaries.status }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, onde.summaryId), eq(meetingSummaries.ownerId, ownerId))).for("update");
-  if (!reuniao || !resumo || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  if (!reuniao || !resumo || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   if (!foraDaFila(resumo.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   const [item] = await db.select({
     id: meetingSummaryItems.id,
@@ -433,9 +470,9 @@ type Transacao = Parameters<Parameters<Banco["transaction"]>[0]>[0];
  * junto o que ela gravou: nunca sobra item de reunião apagada.
  */
 async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: string, naoAchou: string) {
-  const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await tx.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-  if (!reuniao || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
   const [resumo] = await tx.select({ id: meetingSummaries.id, status: meetingSummaries.status, version: meetingSummaries.version }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1).for("update");
   const versaoNaTela = !!resumo && (resumo.status === "ready" || (resumo.status === "failed" && temVersaoAnterior(resumo)));
@@ -547,6 +584,12 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  * `escritoPelaDona`, um sim ou não, sem a origem nem a hora da edição: quem
  * tem o link sabe que o texto é de quem gravou e não da IA, e que o trecho do
  * item editado é o da versão da IA.
+ *
+ * Com a transcrição editada pela dona (H18), o link mostra a versão editada e
+ * não pode expor a da IA: o trecho de cada item saiu da transcrição de quando
+ * o resumo foi escrito, e o que não aparece mais na transcrição de agora (a
+ * dona tirou ou corrigiu aquela fala) vai vazio. O item continua, com o tempo,
+ * e a marca `trechoForaDaTranscricao` diz à página que o trecho existia.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
@@ -570,7 +613,8 @@ export async function resumoGuardadoPeloLink(token: string) {
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  const itens = lidos.map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
+  const itens = (await trechosNaTranscricaoDeAgora(reuniao.ownerId, reuniao.id, lidos))
+    .map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
   return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 

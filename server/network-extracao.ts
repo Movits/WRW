@@ -5,6 +5,7 @@ import { tokensDoTermo } from "@shared/direcao-do-termo";
 import { lerDemandas } from "@shared/o-que-preciso";
 import { PALAVRAS_VAZIAS_DA_CITACAO } from "@shared/tipo-da-oferta";
 import { exigirDb } from "./db";
+import { semReuniaoNaLixeira } from "./reuniao-visivel";
 import { invokeLLM } from "./_core/llm";
 import { slugifyMatchTag } from "./match-service";
 
@@ -1057,13 +1058,16 @@ export async function gravarPendencias(db: BancoOuTransacao, entrada: {
 }): Promise<number> {
   // A mesma pendência não abre duas vezes: nem repetida na mesma leva, nem
   // igual a uma que o contato já tem aberta (a dona completou por texto duas
-  // vezes com a mesma frase, ou a pessoa da reunião foi vinculada a ele).
+  // vezes com a mesma frase, ou a pessoa da reunião foi vinculada a ele). A
+  // aberta de uma reunião na lixeira (H7d) não conta: a dona não a vê, e o
+  // fim da lixeira a apaga com a reunião; contada, ela engolia o item que a
+  // dona acabou de ditar, que sumia junto.
   const abertas = new Set<string>();
   if (entrada.linhas.length && entrada.contactId != null) {
     const linhasAbertas = await db.select({ campo: networkSugestoes.campo, valor: networkSugestoes.valor }).from(networkSugestoes)
       .where(and(
         eq(networkSugestoes.ownerId, entrada.ownerId), eq(networkSugestoes.contactId, entrada.contactId),
-        eq(networkSugestoes.status, "pendente"),
+        eq(networkSugestoes.status, "pendente"), semReuniaoNaLixeira(networkSugestoes.meetingId),
       ));
     for (const aberta of linhasAbertas) abertas.add(chaveDaPendencia(aberta.campo, aberta.valor));
   }
@@ -1151,11 +1155,13 @@ export async function identificacaoDoContato(db: Banco, ownerId: string, contato
 
 /**
  * Pendências abertas de um contato (ou de uma reunião), mais recentes primeiro.
- * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona.
+ * `alvo` (N5) separa as do contato das que vão ao perfil da própria dona. As
+ * da reunião que está na lixeira (H7d) somem até ela voltar: levam o trecho
+ * da fala dela.
  */
 export async function listarPendencias(ownerId: string, filtro: { contactId?: number; meetingId?: string; alvo?: "contato" | "perfil" }) {
   const db = await exigirDb();
-  const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")];
+  const condicoes = [eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"), semReuniaoNaLixeira(networkSugestoes.meetingId)];
   if (filtro.contactId !== undefined) condicoes.push(eq(networkSugestoes.contactId, filtro.contactId));
   if (filtro.meetingId !== undefined) condicoes.push(eq(networkSugestoes.meetingId, filtro.meetingId));
   if (filtro.alvo !== undefined) condicoes.push(eq(networkSugestoes.alvo, filtro.alvo));
@@ -1217,10 +1223,11 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
   const db = await exigirDb();
   // Só a pendência do CONTATO: a que vai ao perfil da dona (N5, alvo 'perfil')
   // é confirmada por server/reuniao-no-match.ts, e nunca vira dado de contato.
+  // A da reunião que está na lixeira (H7d) é "não encontrada", como some da lista.
   const [pendencia] = await db.select().from(networkSugestoes)
     .where(and(
       eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
-      eq(networkSugestoes.alvo, "contato"),
+      eq(networkSugestoes.alvo, "contato"), semReuniaoNaLixeira(networkSugestoes.meetingId),
     )).limit(1);
   if (!pendencia || pendencia.contactId === null) throw new PendenciaNaoEncontrada();
   const contactId = Number(pendencia.contactId);
@@ -1245,7 +1252,7 @@ export async function confirmarPendencia(ownerId: string, id: string, valorCorri
       .set({ status: "confirmada", valor, decididaEm: agora, updatedAt: agora })
       .where(and(
         eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
-        eq(networkSugestoes.alvo, "contato"),
+        eq(networkSugestoes.alvo, "contato"), semReuniaoNaLixeira(networkSugestoes.meetingId),
       ));
     if (!((tomada as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
 
@@ -1278,7 +1285,11 @@ export async function ignorarPendencia(ownerId: string, id: string) {
   const agora = Date.now();
   const [resultado] = await db.update(networkSugestoes)
     .set({ status: "ignorada", decididaEm: agora, updatedAt: agora })
-    .where(and(eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente")));
+    // A da reunião na lixeira (H7d) é "não encontrada": a decisão espera ela voltar.
+    .where(and(
+      eq(networkSugestoes.id, id), eq(networkSugestoes.ownerId, ownerId), eq(networkSugestoes.status, "pendente"),
+      semReuniaoNaLixeira(networkSugestoes.meetingId),
+    ));
   if (!((resultado as { affectedRows?: number } | undefined)?.affectedRows)) throw new PendenciaNaoEncontrada();
   return { ok: true as const };
 }
@@ -1415,13 +1426,19 @@ async function ignorarRepetidas(
  * Das linhas de cargo e empresa, só as que a transcrição da reunião diz como
  * estão escritas. Sem transcrição não há como conferir, e nenhuma fica: do
  * lado de não inventar. Posse no WHERE.
+ *
+ * A extração leu a transcrição como a IA a escreveu. Se a dona a editou
+ * (H18), essa versão fica guardada (original_transcript) e vale aqui, junto
+ * com a editada: o cargo que a IA ouviu continua sustentado depois que a dona
+ * corrigiu outra palavra do trecho, e o que só a correção dela diz também é
+ * dito (é a palavra dela). Os dois continuam pendentes, à espera dela.
  */
 async function ditosNaReuniao(db: BancoOuTransacao, ownerId: string, meetingId: string, linhas: PendenciaNova[]): Promise<PendenciaNova[]> {
   if (!linhas.length) return [];
-  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript }).from(meetingTranscripts)
+  const [transcricao] = await db.select({ texto: meetingTranscripts.transcript, original: meetingTranscripts.originalTranscript }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
-  const fonte = transcricao?.texto ?? "";
-  return linhas.filter(linha => expressaoEstaNaFonte(linha.valor, fonte));
+  const fontes = [transcricao?.texto ?? "", transcricao?.original ?? ""].filter(Boolean);
+  return linhas.filter(linha => fontes.some(fonte => expressaoEstaNaFonte(linha.valor, fonte)));
 }
 
 /**

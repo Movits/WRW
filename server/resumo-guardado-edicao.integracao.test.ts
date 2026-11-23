@@ -184,9 +184,9 @@ describe.skipIf(!temBanco)("Editar e acrescentar itens do resumo no banco (H4f, 
     await servico.acrescentarItemDoResumo(DONA, id, "action", NOVO);
     const visto = await servico.resumoGuardadoPeloLink(token);
     expect(visto.itens).toEqual([
-      { section: "action", subject: null, text: "{F2} avisa a transportadora hoje", assignee: "{F2}", due: "hoje", excerpt: "eu aviso a transportadora até sexta-feira", startSeconds: 5, status: "confirmed", escritoPelaDona: true },
-      { section: "decision", subject: null, text: "Não renovar com a transportadora", assignee: null, due: null, excerpt: "decidimos não renovar o contrato", startSeconds: 9, status: "pending", escritoPelaDona: false },
-      { section: "action", subject: null, text: "Ligar para o importador", assignee: null, due: "amanhã", excerpt: "", startSeconds: null, status: "confirmed", escritoPelaDona: true },
+      { section: "action", subject: null, text: "{F2} avisa a transportadora hoje", assignee: "{F2}", due: "hoje", excerpt: "eu aviso a transportadora até sexta-feira", startSeconds: 5, status: "confirmed", escritoPelaDona: true, trechoForaDaTranscricao: false },
+      { section: "decision", subject: null, text: "Não renovar com a transportadora", assignee: null, due: null, excerpt: "decidimos não renovar o contrato", startSeconds: 9, status: "pending", escritoPelaDona: false, trechoForaDaTranscricao: false },
+      { section: "action", subject: null, text: "Ligar para o importador", assignee: null, due: "amanhã", excerpt: "", startSeconds: null, status: "confirmed", escritoPelaDona: true, trechoForaDaTranscricao: false },
     ]);
   });
 

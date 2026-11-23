@@ -10,6 +10,7 @@ import {
 import { criarTeto } from "./assistente-de-texto";
 import { descreverErroDeBanco, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { foraDaLixeira, reuniaoForaDeVista } from "./reuniao-visivel";
 import {
   ArquivoForaDoTetoDoGeminiError, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError,
   GeminiSemTextoError, gerarComArquivoNoGemini, prazoEsgotadoNoGemini,
@@ -357,11 +358,13 @@ export async function iniciarDocumento(ownerId: string, entrada: {
 
 /** A reunião aceita este documento agora? Recusa, ou "repetido" quando o mesmo arquivo já chegou. */
 async function conferirAReuniao(db: Pick<Banco, "select">, ownerId: string, meetingId: string, sha256: string, travar: boolean) {
-  const consulta = db.select({ status: meetings.status, origem: meetings.origem, consentimento: meetings.consentGranted, language: meetings.language, updatedAt: meetings.updatedAt })
-    .from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  const consulta = db.select({
+    status: meetings.status, origem: meetings.origem, consentimento: meetings.consentGranted, language: meetings.language, updatedAt: meetings.updatedAt,
+    trashedAt: meetings.trashedAt,
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
   const [reuniao] = travar ? await consulta.for("update") : await consulta;
-  // Reunião de outra dona e reunião que não existe respondem igual.
-  if (!reuniao || reuniao.status === "deleted") throw new RecusaDoDocumento("SEM_REUNIAO", "Reunião não encontrada.");
+  // Reunião de outra dona, reunião que não existe e a da lixeira (H7d) respondem igual.
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDoDocumento("SEM_REUNIAO", "Reunião não encontrada.");
   const [existente] = await db.select({ sha256: meetingDocuments.sha256 }).from(meetingDocuments)
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId))).limit(1);
   if (existente) {
@@ -555,12 +558,15 @@ export async function processarDocumento(db: Banco, execucao: {
  */
 export async function lerDocumentoGuardado(ownerId: string, meetingId: string): Promise<Buffer | null> {
   const db = await exigirDb();
-  const [linha] = await db.select({ storageKey: meetingDocuments.storageKey, sizeBytes: meetingDocuments.sizeBytes, expiresAt: meetingDocuments.expiresAt, status: meetings.status })
+  const [linha] = await db.select({
+    storageKey: meetingDocuments.storageKey, sizeBytes: meetingDocuments.sizeBytes, expiresAt: meetingDocuments.expiresAt, status: meetings.status, trashedAt: meetings.trashedAt,
+  })
     .from(meetingDocuments)
     .innerJoin(meetings, and(eq(meetings.id, meetingDocuments.meetingId), eq(meetings.ownerId, meetingDocuments.ownerId)))
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)))
     .limit(1);
-  if (!linha || linha.status === "deleted" || linha.expiresAt <= Date.now()) return null;
+  // A da lixeira (H7d) não mostra o PDF, como a excluída.
+  if (!linha || reuniaoForaDeVista(linha) || linha.expiresAt <= Date.now()) return null;
   if (!(linha.sizeBytes > 0 && linha.sizeBytes <= DOCUMENTO_BYTES_MAX)) return null;
   const chave = chaveDoStorageDaDona("meetings", ownerId, linha.storageKey);
   if (!chave || !chave.startsWith(`meetings/${ownerId}/${meetingId}/`)) return null;
@@ -606,12 +612,16 @@ export async function iniciarReprocessamentoDoDocumento(db: Banco, reuniao: {
   if (!chave) throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_DOCUMENTO_PARA_REPROCESSAR);
 
   const ficha = fichaDaExecucao(reuniao.updatedAt);
+  // A reunião que foi para a lixeira (H7d) entre a leitura de quem chama e aqui
+  // não é tomada: a tomada repete a regra, como a do áudio (meeting-service.ts).
   const tomada = await db.update(meetings).set({ status: "processing", processingError: null, updatedAt: ficha })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "failed"), eq(meetings.consentGranted, true)));
+    .where(and(
+      eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.status, "failed"), eq(meetings.consentGranted, true), foraDaLixeira(),
+    ));
   if (!linhasAlcancadas(tomada)) {
-    const [agora] = await db.select({ status: meetings.status }).from(meetings)
+    const [agora] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
       .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-    if (!agora || agora.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (!agora || reuniaoForaDeVista(agora)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     throw new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
   }
 

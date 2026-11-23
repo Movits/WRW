@@ -335,7 +335,8 @@ describe("o aviso de reunião pronta", () => {
       : operacao.tabela === schema.platformNotifications ? [{ id: 41 }] : undefined;
     expect(await lembretes.avisarReuniaoPronta(db, DONA, REUNIAO, "pronto")).toBe(true);
     const [leitura] = de("select", schema.meetings);
-    expect(leitura.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ?)");
+    // A reunião na lixeira (H7d) não avisa: fica fora da leitura.
+    expect(leitura.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`trashed_at` is null)");
     expect(leitura.params).toEqual([REUNIAO, DONA, "ready"]);
     // O anterior é achado numa leitura sem trava e sai pela chave: o DELETE
     // pela conta travava o intervalo dela no índice e o vão até a vizinha.

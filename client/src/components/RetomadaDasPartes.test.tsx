@@ -105,7 +105,7 @@ describe("RetomadaDasPartes — sair da tela gravando com a última parte falhan
     render(<RetomadaDasPartes />);
     await andar();
     const aoFalhar = vi.fn();
-    const reunioes = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const reunioes = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     await andar();
     await act(async () => { await reunioes.result.current.iniciar(INICIO); });
     act(() => reunioes.result.current.receberParte(parteDoGravador(0, false)));
@@ -217,7 +217,7 @@ describe("RetomadaDasPartes — junto com a retomada de Reuniões e com outra ab
     let responder: (valor: unknown) => void = () => {};
     d.encerrar.mockImplementationOnce(() => new Promise(resolver => { responder = resolver; }));
     render(<RetomadaDasPartes />);
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await andar();
     await andar();
     expect(d.encerrar).toHaveBeenCalledTimes(1);

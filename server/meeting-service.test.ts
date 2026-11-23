@@ -17,6 +17,9 @@ const banco = vi.hoisted(() => ({
   leiturasDaTranscricao: 0,
   // Um reprocessamento trocou a transcrição enquanto o LLM traduzia: a releitura devolve outro id.
   transcricaoTrocada: false,
+  // A revisão da transcrição (H18); `revisaoNaReleitura` é a que a releitura acha (a dona editou no meio).
+  revisao: 0,
+  revisaoNaReleitura: null as number | null,
   // id, meeting_id, owner_id, language, translated_text, created_at, updated_at
   traducaoGuardada: null as unknown[] | null,
   // Outro pedido guardou a mesma tradução primeiro: o UNIQUE recusa o insert.
@@ -42,7 +45,13 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
       if (sql.includes("from `meeting_transcripts`")) {
         banco.leiturasDaTranscricao += 1;
         if (banco.transcricaoTrocada && banco.leiturasDaTranscricao > 1) return [[["tr-2"]], []];
-        return [[banco.transcricao], []];
+        // A linha fica no formato completo, e cada leitura escolhe as colunas
+        // dela, na ordem do select: a tradução lê id, texto, idioma e revisão
+        // (H18), e a releitura antes de guardar, id e revisão.
+        const colunas = ["id", "meeting_id", "owner_id", "transcript", "segments", "language", "duration_seconds", "created_at", "updated_at"];
+        const pedidas = sql.slice("select ".length, sql.indexOf(" from ")).split(",").map(coluna => coluna.trim().replace(/`/g, "").split(".").pop() ?? "");
+        const revisao = banco.leiturasDaTranscricao > 1 && banco.revisaoNaReleitura !== null ? banco.revisaoNaReleitura : banco.revisao;
+        return [[pedidas.map(coluna => (coluna === "revision" ? revisao : banco.transcricao[colunas.indexOf(coluna)]))], []];
       }
       if (sql.includes("from `meeting_transcript_translations`")) return [banco.traducaoGuardada ? [banco.traducaoGuardada] : [], []];
       if (sql.startsWith("select") && sql.includes("from `meetings`") && banco.nomesDaReuniao !== undefined) return [[[banco.nomesDaReuniao]], []];
@@ -128,6 +137,15 @@ describe("Assistente de Reuniões — validação de áudio", () => {
     expect(() => duracaoConferidaDoAudio(wavDe(3600))).toThrow(MENSAGEM_REUNIAO_LONGA_DEMAIS);
   });
 
+  // G14: a frase dizia "No modo atual, cada reunião pode ter no máximo 10
+  // minutos", e a reunião vai até 12 h desde a G13b. O teto é só do envio de um
+  // arquivo só, que sobra no recuo do corte (e num cliente de fora do app).
+  it("a recusa da duração diz que o teto de 10 minutos é do envio de um arquivo só, e não da reunião (G14)", () => {
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).not.toMatch(/cada reunião|No modo atual/);
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).toContain("10 minutos");
+    expect(MENSAGEM_REUNIAO_LONGA_DEMAIS).toContain("arquivo só");
+  });
+
   it("disponibiliza os dez idiomas do MMM para a tradução", () => {
     expect(MEETING_TRANSCRIPT_LANGUAGES).toEqual(["pt-BR", "en", "es", "fr", "de", "ar", "zh", "hi", "ja", "ru"]);
   });
@@ -144,6 +162,31 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     banco.leiturasDaTranscricao = 0;
     banco.transcricaoTrocada = false;
     banco.traducaoGuardada = null;
+    banco.revisao = 0;
+    banco.revisaoNaReleitura = null;
+  });
+
+  it("a dona editou a transcrição enquanto o LLM traduzia (H18): a tradução volta para quem pediu, mas NÃO vai para o cache", async () => {
+    banco.revisao = 3;
+    banco.revisaoNaReleitura = 4;
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Talk before the edit." } }] });
+
+    const r = await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+
+    expect(r).toEqual({ language: "en", text: "Talk before the edit.", cached: false });
+    expect(banco.consultas.some(c => c.sql.startsWith("insert"))).toBe(false);
+    // A releitura trava a transcrição: a edição que chega no meio espera a gravação, e a que veio antes já subiu a revisão.
+    const releitura = banco.consultas.filter(c => c.sql.includes("from `meeting_transcripts`")).at(-1)!;
+    expect(releitura.sql).toMatch(/for update$/);
+    expect(releitura.sql).toMatch(/`revision`/);
+  });
+
+  it("com a mesma revisão na releitura, a tradução vai para o cache", async () => {
+    banco.revisao = 3;
+    banco.revisaoNaReleitura = 3;
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Talk after the edit." } }] });
+    await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    expect(banco.consultas.filter(c => c.sql.startsWith("insert into `meeting_transcript_translations`"))).toHaveLength(1);
   });
 
   it("a extração roda dentro do submit síncrono: 45 s por tentativa e 60 s de orçamento", async () => {
@@ -174,8 +217,12 @@ describe("Assistente de Reuniões — tetos das chamadas de IA", () => {
     const chamada = invokeLLM.mock.calls[0][0] as { messages: Array<{ role: string; content: string }> };
     expect(chamada.messages.at(-1)).toEqual({ role: "user", content: "Fala longa da reunião." });
 
-    // A transcrição e o cache foram lidos pela dona, e a tradução gravada com ela.
-    for (const c of banco.consultas) expect(c.sql, c.sql).toMatch(/`owner_id`/);
+    // A transcrição e o cache foram lidos pela dona, e a tradução gravada com
+    // ela. O begin e o commit da gravação (H18: a releitura e o insert numa
+    // transação) não leem nada.
+    const leiturasEGravacoes = banco.consultas.filter(c => !["begin", "commit", "rollback"].includes(c.sql));
+    expect(leiturasEGravacoes.length).toBeGreaterThanOrEqual(3);
+    for (const c of leiturasEGravacoes) expect(c.sql, c.sql).toMatch(/`owner_id`/);
     const gravacao = banco.consultas.find(c => c.sql.startsWith("insert into `meeting_transcript_translations`"))!;
     expect(gravacao).toBeDefined();
     expect(gravacao.params).toEqual(expect.arrayContaining(["dona-1", "reuniao-1", "en", "Long talk from the meeting."]));
@@ -216,6 +263,8 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     invokeLLM.mockReset();
     banco.consultas = [];
     banco.leiturasDaTranscricao = 0;
+    banco.revisao = 0;
+    banco.revisaoNaReleitura = null;
     banco.transcricaoTrocada = false;
     banco.traducaoGuardada = null;
     banco.insertDuplicado = false;
@@ -237,6 +286,32 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     await expect(segundo).resolves.toEqual({ language: "en", text: "Long talk.", cached: false });
     expect(invokeLLM).toHaveBeenCalledTimes(1);
     expect(antes1.mock.calls.length + antes2.mock.calls.length).toBe(1);
+    expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
+  });
+
+  it("a tradução pedida depois de uma edição (H18) não espera a da revisão de antes: cada revisão vai à IA, e cada pedido recebe a sua", async () => {
+    let entregarAntiga!: (valor: unknown) => void;
+    let entregarNova!: (valor: unknown) => void;
+    invokeLLM
+      .mockReturnValueOnce(new Promise(pronto => { entregarAntiga = pronto; }))
+      .mockReturnValueOnce(new Promise(pronto => { entregarNova = pronto; }));
+    const antiga = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    let nova: ReturnType<typeof translatePrivateMeetingTranscript> | null = null;
+    try {
+      await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(1));
+      // A dona edita a transcrição enquanto a primeira tradução está na IA.
+      banco.revisao = 1;
+      nova = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+      await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(2));
+    } finally {
+      // As duas respostas chegam sempre: a espera em memória não sobra para os testes seguintes.
+      entregarNova?.({ choices: [{ message: { content: "Edited talk." } }] });
+      entregarAntiga({ choices: [{ message: { content: "Old talk." } }] });
+      await Promise.allSettled([antiga, nova]);
+    }
+    await expect(nova).resolves.toEqual({ language: "en", text: "Edited talk.", cached: false });
+    await expect(antiga).resolves.toEqual({ language: "en", text: "Old talk.", cached: false });
+    // Só a da revisão de agora vai para o cache.
     expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
   });
 
@@ -346,6 +421,8 @@ describe("Reunião longa em janelas (G8)", () => {
     invokeLLM.mockReset();
     banco.consultas = [];
     banco.leiturasDaTranscricao = 0;
+    banco.revisao = 0;
+    banco.revisaoNaReleitura = null;
     banco.transcricaoTrocada = false;
     banco.traducaoGuardada = null;
     banco.insertDuplicado = false;

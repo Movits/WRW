@@ -88,6 +88,15 @@ export function margemDoReprocesso(partes: number | null | undefined): number {
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
 
 /**
+ * A reunião que não é da dona, que não existe, que está sendo excluída ou que
+ * está na lixeira (H7d: a guarda dos procedimentos pelo id,
+ * server/guarda-da-lixeira.ts, devolve esta mesma frase). Compartilhada porque
+ * a tela a traduz (client/src/lib/mensagem-de-erro.ts): a reunião mandada para
+ * a lixeira em outra aba aparecia em português em qualquer idioma.
+ */
+export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+
+/**
  * As frases que a fila da gravação em partes (server/fila-de-transcricao.ts)
  * grava em `processing_error`: a gravação encerrada sem nenhuma parte, a
  * montagem que caiu em todas as tentativas e a reunião em que nenhuma parte
@@ -112,9 +121,12 @@ export const TITULO_DA_REUNIAO_MAX = 200;
 /**
  * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
  * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
- * os mesmos antes de enviar, para a dona ver o aviso no idioma dela. Valem até
- * a G14 tirar o envio único (docs/arquitetura/gravador-de-reunioes.md); a
- * gravação em partes tem o teto dela, logo abaixo.
+ * os mesmos antes de enviar. Desde a G14 o gravador não usa mais o envio
+ * único: a tela só o chama no recuo do corte (o arquivo curto de um formato
+ * que o corte reconhece, mas não lê), e o servidor ainda lê com eles a
+ * gravação inteira das reuniões antigas, no reprocesso e na junção
+ * (docs/arquitetura/gravador-de-reunioes.md). A gravação em partes, que é a de
+ * todas, tem o teto dela, logo abaixo.
  */
 export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
 export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;

@@ -26,7 +26,7 @@ const duble = vi.hoisted(() => ({
   // o padrão desde a G13b, retoma o que ficou no aparelho ao montar a página:
   // lê a conta e fala com o servidor por aqui.
   utils: {
-    meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+    meetings: { list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
     reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
     networkInteligente: { pendencias: { reset: vi.fn() } },
     auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
@@ -53,6 +53,9 @@ vi.mock("@/lib/trpc", () => ({
       decideContactSuggestion: duble.mutacao(),
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      mandarParaALixeira: duble.mutacao(),
       reprocess: duble.mutacao(),
       // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
       resumirVideoDoYoutube: duble.mutacao(),

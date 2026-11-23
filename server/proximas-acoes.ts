@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, privateContacts, proximasAcoes } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { estaNaLixeira, foraDaLixeira, reuniaoForaDeVista } from "./reuniao-visivel";
 import { agendarLembreteDaAcao, esquecerLembrete } from "./lembretes";
 import { destinoDaAcaoNaAgenda, estadoDaAcaoAoEscrever, type DestinoDaAcaoNaAgenda } from "@shared/acoes-na-agenda";
 import { MENSAGEM_RESUMO_SENDO_GERADO, nomesDosFalantes } from "@shared/const";
@@ -152,11 +153,12 @@ export async function garantirAcoesDosItensConfirmados(ex: Executor, ownerId: st
 /**
  * Trava a reunião da dona até o fim da transação e diz se ela está pronta.
  * A exclusão marca 'deleted' com um UPDATE nesta linha: espera quem a travou.
+ * A da lixeira (H7d) não conta como pronta: nada nasce dela até voltar.
  */
 export async function travarReuniaoPronta(ex: Executor, ownerId: string, meetingId: string): Promise<boolean> {
-  const [reuniao] = await ex.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await ex.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).for("update");
-  return reuniao?.status === "ready";
+  return reuniao?.status === "ready" && !reuniaoForaDeVista(reuniao);
 }
 
 /**
@@ -168,7 +170,7 @@ export async function garantirAcoesDaDona(ownerId: string): Promise<number> {
   const db = await exigirDb();
   const reunioes = await db.selectDistinct({ meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
     .innerJoin(meetings, and(
-      eq(meetings.id, meetingSummaryItems.meetingId), eq(meetings.ownerId, meetingSummaryItems.ownerId), eq(meetings.status, "ready"),
+      eq(meetings.id, meetingSummaryItems.meetingId), eq(meetings.ownerId, meetingSummaryItems.ownerId), eq(meetings.status, "ready"), foraDaLixeira(),
     ))
     .leftJoin(proximasAcoes, and(eq(proximasAcoes.itemId, meetingSummaryItems.id), eq(proximasAcoes.ownerId, meetingSummaryItems.ownerId)))
     .where(and(
@@ -390,6 +392,9 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
     // Quem escreveu o item (H4f): o da dona não volta a "para conferir" quando a ação é apagada.
     origemDoItem: meetingSummaryItems.origin,
     itemEditadoEm: meetingSummaryItems.editedAt,
+    // A reunião na lixeira (H7d): a ação fica, sem o atalho. No fim da lista,
+    // para as leituras que vêm em posição (os dublês dos testes) não mudarem.
+    reuniaoNaLixeira: meetings.trashedAt,
   }).from(proximasAcoes)
     // A reunião, o item e o contato só valem se ainda são da dona: o ponteiro
     // velho (excluído no meio de uma escrita) não traz nada de ninguém.
@@ -407,10 +412,14 @@ async function lerAcoes(db: Banco, ownerId: string, opcoes: { soAbertas: boolean
     .orderBy(asc(proximasAcoes.feita), sql`${proximasAcoes.prazo} is null`, asc(proximasAcoes.prazo), asc(proximasAcoes.createdAt), asc(proximasAcoes.id))
     .limit(opcoes.limite);
   return linhas.map(linha => {
-    const reuniaoViva = linha.meetingId !== null && linha.tituloDaReuniao !== null;
+    const reuniaoExiste = linha.meetingId !== null && linha.tituloDaReuniao !== null;
+    // A ação é da dona e fica na lista quando a reunião vai para a lixeira
+    // (H7d), como fica depois da exclusão, mas sem o atalho para a reunião, que
+    // agora é "não encontrada". Os nomes das vozes continuam: são da dona.
+    const reuniaoViva = reuniaoExiste && !estaNaLixeira(linha.reuniaoNaLixeira);
     // Os nomes das vozes só enquanto a ação está presa ao item da reunião viva:
     // solta, a numeração das vozes pode ser outra, e os nomes já estão no texto.
-    const presaAoItem = reuniaoViva && linha.itemVivo !== null;
+    const presaAoItem = reuniaoExiste && linha.itemVivo !== null;
     return {
       id: linha.id,
       texto: linha.texto,

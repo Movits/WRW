@@ -25,6 +25,10 @@ const { VarreduraInterrompida } = vi.hoisted(() => ({
 }));
 vi.mock("./meeting-service", () => ({ limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...args), VarreduraInterrompida }));
 vi.mock("./security", () => ({ createAuditLog: (...args: unknown[]) => createAuditLog(...(args as [])) }));
+// A lixeira vencida (H7d) corre no mesmo laço, depois do áudio; o que ela faz
+// no banco está em server/lixeira-de-reunioes.integracao.test.ts.
+const esvaziarLixeiraVencida = vi.hoisted(() => vi.fn());
+vi.mock("./lixeira-de-reunioes", () => ({ esvaziarLixeiraVencida: (...args: unknown[]) => esvaziarLixeiraVencida(...args) }));
 
 type Laco = typeof import("./varredura-de-gravacoes");
 let laco: Laco;
@@ -45,6 +49,8 @@ beforeEach(async () => {
   vi.resetModules();
   limparGravacoesVencidas.mockReset();
   limparGravacoesVencidas.mockResolvedValue({ encontradas: 0, apagadas: 0 });
+  esvaziarLixeiraVencida.mockReset();
+  esvaziarLixeiraVencida.mockResolvedValue({ encontradas: 0, apagadas: 0 });
   createAuditLog.mockClear();
   process.env.STORAGE_BUCKET = "bucket-de-teste";
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -188,6 +194,68 @@ describe("o laço da varredura das gravações", () => {
     laco.iniciarVarreduraDeGravacoes();
     await vi.advanceTimersByTimeAsync(3 * laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
     expect(limparGravacoesVencidas).not.toHaveBeenCalled();
+  });
+});
+
+describe("a lixeira vencida no mesmo laço (H7d)", () => {
+  it("cada passada exclui de vez a lixeira vencida depois do áudio, com o deveParar do laço", async () => {
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(limparGravacoesVencidas).toHaveBeenCalledTimes(1);
+    expect(esvaziarLixeiraVencida).toHaveBeenCalledTimes(1);
+    const [opcoes] = esvaziarLixeiraVencida.mock.calls[0] as [{ deveParar: () => boolean }];
+    expect(opcoes.deveParar()).toBe(false);
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(esvaziarLixeiraVencida).toHaveBeenCalledTimes(2);
+  });
+
+  it("a que excluiu algo vai para a auditoria (CRON_TRASH_PURGED, só as contagens) e para o log; a que não excluiu nada, não", async () => {
+    esvaziarLixeiraVencida.mockResolvedValueOnce({ encontradas: 3, apagadas: 2 });
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(createAuditLog).toHaveBeenCalledTimes(1);
+    expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      userId: null, action: "CRON_TRASH_PURGED", resource: "meetings", status: "success", details: { encontradas: 3, apagadas: 2, origem: "Boot" },
+    }));
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).toContain("2 de 3");
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(createAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem STORAGE_BUCKET a lixeira vence do mesmo jeito: a exclusão não depende do bucket", async () => {
+    delete process.env.STORAGE_BUCKET;
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(limparGravacoesVencidas).not.toHaveBeenCalled();
+    expect(esvaziarLixeiraVencida).toHaveBeenCalledTimes(1);
+  });
+
+  it("o erro da lixeira é log e não segura a passada seguinte; o erro do áudio não segura a lixeira", async () => {
+    esvaziarLixeiraVencida.mockRejectedValueOnce(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }));
+    limparGravacoesVencidas.mockResolvedValueOnce({ encontradas: 0, apagadas: 0 }).mockRejectedValueOnce(new Error("bucket fora"));
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("lixeira vencida");
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS);
+    expect(limparGravacoesVencidas).toHaveBeenCalledTimes(2);
+    expect(esvaziarLixeiraVencida).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("bucket fora");
+  });
+
+  it("no desligamento, o deveParar da lixeira vira verdadeiro: ela para entre uma reunião e outra", async () => {
+    let deveParar: () => boolean = () => false;
+    let terminar: () => void = () => {};
+    esvaziarLixeiraVencida.mockImplementationOnce((opcoes: { deveParar: () => boolean }) => {
+      deveParar = opcoes.deveParar;
+      return new Promise(resolver => { terminar = () => resolver({ encontradas: 0, apagadas: 0 }); });
+    });
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(deveParar()).toBe(false);
+    const parando = laco.pararVarreduraDeGravacoes(1_000);
+    expect(deveParar()).toBe(true);
+    terminar();
+    await expect(parando).resolves.toEqual({ emCurso: true, terminou: true });
   });
 });
 

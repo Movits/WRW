@@ -50,6 +50,8 @@ const ITEM = { secao: "action", assunto: null, texto: "{F2} manda a proposta", r
 function transacaoDublada(linhas: Linhas, insert: () => Promise<unknown> = async () => undefined) {
   const passos: string[] = [];
   const inserido: { tabela?: unknown; valores?: Record<string, unknown> } = {};
+  // As colunas que cada consulta pediu, pela tabela.
+  const colunas = new Map<unknown, string[]>();
   const resposta = (tabela: unknown) => {
     if (tabela === meetings) { passos.push("select meetings"); return linhas.reuniao ? [linhas.reuniao] : []; }
     if (tabela === meetingTranscripts) { passos.push("select meeting_transcripts"); return linhas.transcricao ? [linhas.transcricao] : []; }
@@ -58,9 +60,9 @@ function transacaoDublada(linhas: Linhas, insert: () => Promise<unknown> = async
     throw new Error("tabela que a exportação não lê");
   };
   const tx = {
-    select: () => ({
+    select: (campos?: Record<string, unknown>) => ({
       from: (tabela: unknown) => ({
-        where: () => ({
+        where: () => (colunas.set(tabela, Object.keys(campos ?? {})), {
           limit: async () => resposta(tabela),
           orderBy: async () => resposta(tabela),
         }),
@@ -91,7 +93,7 @@ function transacaoDublada(linhas: Linhas, insert: () => Promise<unknown> = async
       }
     },
   };
-  return { db, passos, inserido };
+  return { db, passos, inserido, colunas };
 }
 
 async function exportarCom(linhas: Linhas, insert?: () => Promise<unknown>, pedido = PEDIDO) {
@@ -133,7 +135,7 @@ describe("exportar: a leitura e a auditoria na mesma transação", () => {
       action: ACAO_REUNIAO_EXPORTADA,
       resource: "meetings",
       resourceId: "reuniao-1",
-      details: { formato: "pdf", idioma: "pt-BR", itensConfirmados: 2, falas: 3, comTranscricao: true },
+      details: { formato: "pdf", idioma: "pt-BR", itensConfirmados: 2, falas: 3, comTranscricao: true, transcricaoEditada: false },
       ipAddress: "198.51.100.23",
       userAgent: "u".repeat(500),
       status: "success",
@@ -174,6 +176,7 @@ describe("exportar: o que sai", () => {
       itens: [{ secao: "action", assunto: null, texto: "{F2} manda a proposta", responsavel: "{F2}", prazo: "sexta", feita: true }],
       transcricao: {
         texto: null,
+        editada: false,
         // O campo fora do contrato (a confiança) não sai.
         falas: [
           { inicio: 0, fim: 4, falante: "F1", texto: "Bom dia." },
@@ -188,7 +191,7 @@ describe("exportar: o que sai", () => {
   it("transcrição de antes, sem falas: vai o texto corrido", async () => {
     const r = await exportarCom({ reuniao: REUNIAO, transcricao: { ...TRANSCRICAO, segments: null } });
     const { dados } = r as { dados: Awaited<ReturnType<typeof exportarReuniao>> };
-    expect(dados.transcricao).toEqual({ texto: "texto corrido que não vai quando há falas", falas: [] });
+    expect(dados.transcricao).toEqual({ texto: "texto corrido que não vai quando há falas", falas: [], editada: false });
     // Sem resumo, nenhum item e nenhum emoji; a consulta dos itens nem roda.
     expect(dados.itens).toEqual([]);
     expect(dados.emoji).toBeNull();
@@ -206,9 +209,21 @@ describe("exportar: o que sai", () => {
     expect(await idiomaCom("it", "xx")).toBe("pt-BR");
   });
 
+  it("a transcrição que a dona editou (H18) sai editada, com a marca, e a auditoria diz isso; o texto da IA nem é lido", async () => {
+    // A coluna `editada` é o (original_transcript IS NOT NULL) da consulta: 1 no MySQL.
+    const r = await exportarCom({ reuniao: REUNIAO, transcricao: { ...TRANSCRICAO, editada: 1 }, resumo: { id: "resumo-1", emoji: null }, itens: [] });
+    const { dados } = r as { dados: Awaited<ReturnType<typeof exportarReuniao>> };
+    expect(dados.transcricao).toMatchObject({ editada: true, texto: null });
+    expect(r.inserido.valores?.details).toMatchObject({ transcricaoEditada: true, comTranscricao: true });
+    // Da transcrição, só a versão que a dona vê e o sim ou não da edição.
+    expect(r.colunas.get(meetingTranscripts)).toContain("editada");
+    expect(r.colunas.get(meetingTranscripts)).not.toEqual(expect.arrayContaining(["originalTranscript"]));
+    expect(r.colunas.get(meetingTranscripts)).not.toEqual(expect.arrayContaining(["originalSegments"]));
+  });
+
   it("sem transcrição: transcricao null e comTranscricao false na auditoria", async () => {
     const r = await exportarCom({ reuniao: REUNIAO });
     expect((r as { dados: { transcricao: unknown } }).dados.transcricao).toBeNull();
-    expect(r.inserido.valores?.details).toMatchObject({ comTranscricao: false, falas: 0, itensConfirmados: 0 });
+    expect(r.inserido.valores?.details).toMatchObject({ comTranscricao: false, falas: 0, itensConfirmados: 0, transcricaoEditada: false });
   });
 });

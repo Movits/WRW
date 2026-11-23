@@ -213,6 +213,17 @@ describe("do item do resumo à ação", () => {
     expect(de("insert", schema.proximasAcoes)).toHaveLength(1);
   });
 
+  it("garantirAcoesDaDona pula a reunião que foi para a lixeira entre a leitura e a trava (H7d): nada nasce dela até voltar", async () => {
+    estado.ler = operacao => {
+      if (operacao.tabela === schema.meetingSummaryItems && operacao.campos?.length === 1) return [{ meetingId: "reuniao-1" }, { meetingId: "reuniao-2" }];
+      if (operacao.tabela === schema.meetings) return [{ status: "ready", trashedAt: operacao.params[0] === "reuniao-1" ? null : 1_700_000_000_000 }];
+      if (operacao.tabela === schema.meetingSummaryItems) return [ITEM];
+      return [];
+    };
+    expect(await servico.garantirAcoesDaDona(DONA)).toBe(1);
+    expect(de("insert", schema.proximasAcoes)).toHaveLength(1);
+  });
+
   it("garantirAcoesDaDona sem reunião a completar não abre transação", async () => {
     expect(await servico.garantirAcoesDaDona(DONA)).toBe(0);
     expect(estado.transacoes).toBe(0);

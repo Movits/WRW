@@ -9,6 +9,7 @@ import {
   MENSAGEM_PARTES_SEM_TRANSCRICAO,
   MENSAGEM_PERFIL_MUDOU_NO_MEIO,
   MENSAGEM_RESUMO_CHEIO,
+  MENSAGEM_REUNIAO_NAO_ENCONTRADA,
   MENSAGEM_RESUMO_SENDO_GERADO,
   MENSAGEM_SO_ACAO_TEM_CAIXA,
   NOT_ADMIN_ERR_MSG,
@@ -23,6 +24,8 @@ import { RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
 import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
 import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
+import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
+import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import {
   MENSAGEM_RESUMO_POR_EMAIL_DEMAIS,
   MENSAGEM_RESUMO_POR_EMAIL_EMAIL_INVALIDO,
@@ -121,6 +124,11 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [MENSAGEM_PARTES_SEM_TRANSCRICAO]: "meetings.processingFailedNoTranscript",
   // O salvar do Meu Perfil que acharia as listas mudadas no meio (server/listas-do-perfil.ts).
   [MENSAGEM_PERFIL_MUDOU_NO_MEIO]: "profile.changedElsewhere",
+  // A reunião que saiu (outra aba a excluiu, ou é de outra conta).
+  [MENSAGEM_REUNIAO_NAO_ENCONTRADA]: "meetings.meetingNotFound",
+  // A reunião da dona que está na lixeira (H7d): a guarda da lixeira devolve
+  // este código a uns 50 procedimentos (server/guarda-da-lixeira.ts).
+  [RECUSAS_DA_LIXEIRA.naLixeira]: "meetings.trash.inTrash",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
   [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
   // Os detalhes da reunião (H7c): o contato ou o contexto que não é da dona, em
@@ -138,6 +146,13 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // As recusas do ligar da legenda ao vivo (G15b, server/legenda-ao-vivo.ts e o teto em routers/meetings.ts).
   [RECUSAS_DA_LEGENDA.foraDaGravacao]: "meetings.caption.errors.notRecording",
   [RECUSAS_DA_LEGENDA.demais]: "meetings.caption.errors.tooMany",
+  // As recusas da edição da transcrição (H18, server/editar-transcricao.ts).
+  [RECUSAS_DA_EDICAO.foraDoEstado]: "meetings.editTranscript.errorState",
+  [RECUSAS_DA_EDICAO.documento]: "meetings.editTranscript.errorDocument",
+  [RECUSAS_DA_EDICAO.mudou]: "meetings.editTranscript.errorChanged",
+  [RECUSAS_DA_EDICAO.trecho]: "meetings.editTranscript.errorSegment",
+  [RECUSAS_DA_EDICAO.vazio]: "meetings.editTranscript.errorEmpty",
+  [RECUSAS_DA_EDICAO.demais]: "meetings.editTranscript.errorTooMany",
 };
 
 /**

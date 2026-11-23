@@ -67,6 +67,9 @@ export const PLANO_DE_LIMPEZA = [
   // marcar sai com o resto.
   { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As pastas das reuniões (H7d): o exame não cria pasta, mas a conta QA que
+  // criar sai com o resto. Depois das reuniões, que apontam para elas.
+  { tabela: "meeting_folders", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_messages", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_sessions", coluna: "owner_id", chave: "openId", acao: "apagar" },

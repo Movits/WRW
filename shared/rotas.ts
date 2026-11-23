@@ -39,6 +39,18 @@ export function rotaDaReuniao(id: string, opcoes: { t?: number; q?: string; item
 }
 
 /**
+ * A lixeira das reuniões (H7d): a mesma página da lista, com `?lixeira=1`.
+ * Pela URL, e não por estado da tela: o voltar do celular sai da lixeira para
+ * a lista, e a lixeira abre mesmo quando a lista está vazia (todas as reuniões
+ * foram para lá).
+ */
+export const PARAMETRO_DA_LIXEIRA = "lixeira";
+
+export function rotaDaLixeira() {
+  return `${ROTA_DAS_REUNIOES}?${PARAMETRO_DA_LIXEIRA}=1`;
+}
+
+/**
  * A agenda de reuniões (H16a): as reuniões marcadas, com convite e .ics. O
  * "Gravar agora" de uma delas abre o gravador com `?agendada=<id>`: o título
  * vem preenchido, e a gravação fica ligada à reunião marcada (Meetings.tsx).

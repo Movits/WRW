@@ -63,7 +63,7 @@ import {
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
-  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetingFolders, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
@@ -209,6 +209,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
+  // As pastas das reuniões (H7d): o nome, o ícone e a cor que a dona escolheu.
+  // Depois das reuniões, que apontam para elas (as da lixeira saem junto, com
+  // o resto das reuniões da conta).
+  { tabela: meetingFolders, coluna: meetingFolders.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
   { tabela: enrichmentSessions, coluna: enrichmentSessions.ownerId, origem: "openId" },

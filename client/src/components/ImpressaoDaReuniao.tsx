@@ -90,6 +90,8 @@ export function DocumentoDaReuniao({ reuniao, t }: { reuniao: ReuniaoExportada; 
 
     <section>
       <h2>{t("meetings.transcriptTab")}</h2>
+      {/* H18: a transcrição que a dona corrigiu sai como ela a deixou, e o PDF diz isso. */}
+      {reuniao.transcricao?.editada && <p className="documento-da-reuniao__detalhe">{t("meetings.export.editedTranscript")}</p>}
       {falas.length > 0
         ? <ol>
           {falas.map((fala, posicao) => fala.lacuna

@@ -526,6 +526,165 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
   de `client/src/index.css`. Sem migração.
 
+## 21/11/2026 — o gravador sem o envio único, com o recuo do corte (G14, parte 1)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pelo pedido de fazer a G14 "pelo caminho
+  mais seguro e vetável". Decisão vetável pelo Roberto.
+- **O quê:** o gravador grava sempre em partes. Saíram o `?envioUnico=1` (a URL antiga
+  grava em partes, como o `?emPartes=1` da G9), a revisão antes de enviar ("Transcrever
+  áudio", "Descartar e gravar novamente") e os textos dos 10 minutos e 10 MB onde as
+  partes já cobrem o caso (a dica sob o relógio, o FAQ da Home e a ajuda do painel de
+  minutos). A gravação ganha em todas as URLs o que era só das partes: a cópia no
+  aparelho, a retomada, o aviso de hora, a entrega ao sair da tela e o Descartar com
+  confirmação.
+- **O que ficou, e por quê:**
+  - `meetings.submitRecording`, com os 10 minutos e 10 MB: é o recuo do corte do pacote
+    4b (o arquivo curto de um formato que o corte reconhece mas não lê, como o ALAC do
+    Gravador do iPhone, o AC-3 e o Vorbis no WebM). Sem ele, esse arquivo só receberia o
+    aviso de converter. A tela o marca com `recuoDoCorte: true`;
+  - a rota também fica para um cliente de fora do repositório, se houver (a pergunta ao
+    Roberto sobre o "app Expo" segue sem resposta, e o log de produção não foi lido):
+    cada chamada deixa uma linha `[Reuniões] envio único (submitRecording)`, com a marca
+    do recuo ou sem ela;
+  - os tetos do envio único seguem no servidor também porque o reprocesso e a junção
+    (H17) leem a gravação inteira das reuniões antigas com eles;
+  - o ditado e a voz do contato não usam o envio único da reunião: têm rotas próprias
+    (`assistenteTexto.transcrever`, 2 minutos e 3 MB, e
+    `networkInteligente.complementarPorVoz`) e não mudaram.
+- **Antes:** a G13b (15/11) fez das partes o padrão e deixou o `?envioUnico=1` como saída
+  de suporte até a G14. O desenho pedia, para tirar o envio único, uma semana de logs sem
+  `submitRecording`, nenhum cliente externo e a H9b pronta (pronta desde o pacote 4b).
+- **Por fazer (parte 2):** tirar a rota, ou levar o recuo do corte às partes (o arquivo
+  inteiro como uma parte só), depois de uma semana de log sem chamada sem a marca do
+  recuo e com o aval do Roberto.
+- **Onde:** `client/src/pages/Meetings.tsx` (`enviarPeloEnvioUnico` e `importarArquivo`),
+  `client/src/hooks/useGravacaoEmPartes.ts` (sem o modo inativo), `meetings.submitRecording`
+  em `server/routers/meetings.ts`, o FAQ em `server/routers/faq.ts` e
+  `networkPanel.minutesLimitHelp` nos 10 JSONs. Sem migração.
+
+## 22/11/2026 — a dona edita a transcrição, e o que a IA escreveu fica guardado (H18)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-23 e HN-27 do
+  app de referência da cliente, que entram pela regra da paridade). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** no detalhe da reunião pronta, "Editar a transcrição": o texto e a voz de um
+  trecho (com "Nova voz", o primeiro rótulo livre), localizar e substituir em todos os
+  trechos (o texto literal, com a contagem antes de trocar e a opção de diferenciar
+  maiúsculas) e voltar um trecho, ou tudo, ao que a IA escreveu. A transcrição sem falas
+  (a do envio único) se edita como um texto só; a do documento (PDF ou fotos), não.
+- **Como fica guardado:** `transcript` e `segments` passam a guardar a versão que a dona
+  vê, editada ou não, e todo leitor lê essa: o resumo refeito, o mapa, o Pergunte, a
+  busca, a Memória, a exportação, a tradução, o "ouvir só esta voz" e o link aberto. O que
+  a IA escreveu é copiado, na primeira edição, para `original_transcript` e
+  `original_segments`, e sai quando tudo volta ao original. `edited_at` e `revision` dizem
+  quando e quantas vezes a transcrição mudou: a tela manda a revisão que leu, e a edição
+  feita em outra aba é recusada, em vez de desfeita em silêncio.
+- **Regras:** só a dona, só a reunião pronta e fora da lixeira (H7d). Cada mudança é uma
+  transação que trava a reunião antes da transcrição (a ordem da fila do resumo), apaga as
+  traduções da transcrição e grava `MEETING_TRANSCRIPT_EDITED` com o tipo, as contagens e a
+  revisão, nunca a fala nem o termo procurado. Teto de 200 edições a cada 10 minutos por
+  dona.
+- **O resumo:** não se refaz sozinho (cada vez custa ~US$ 0,05 a 0,10 por hora de
+  reunião). A tela avisa que o resumo, o mapa e o que o link mostra deles são da versão
+  anterior e oferece "Refazer o resumo", que refaz também o mapa. O resumo e o mapa que a
+  IA escreveu sobre uma revisão anterior (a dona editou durante a geração) são gravados
+  assim mesmo, com a hora de antes da edição, e a tela os mostra como de outra versão. Na
+  primeira versão a fila os descartava e refazia; a revisão do pacote mostrou que cada
+  edição durante a geração jogava fora uma chamada paga e começava outra, sem gastar
+  tentativa nem vaga do teto de IA, sem limite. As pendências de cargo e empresa da
+  extração conferem nas duas versões: o que a IA ouviu e o que a dona corrigiu.
+- **O link aberto:** mostra a versão editada, com a frase "Transcrição revisada por quem
+  gravou a reunião", e nunca o texto da IA. O trecho de um item do resumo que não está mais
+  na transcrição editada vai vazio, com um aviso no item, também na tradução do resumo.
+- **Vetáveis:**
+  1. o resumo não se refaz sozinho depois da edição;
+  2. o link diz que a transcrição foi revisada e, no item, que o trecho foi corrigido;
+  3. o texto dos itens e o mapa seguem os de antes, também no link, até a dona refazer o
+     resumo (a tela avisa);
+  4. a junção (H17) remonta a transcrição pelo que a IA transcreveu de cada parte: as
+     correções não passam para a reunião juntada, e a tela avisa antes de juntar;
+  5. o teto de 200 edições a cada 10 minutos;
+  6. o trecho não fica vazio: para tirar uma fala inteira, a dona escreve, por exemplo,
+     "[removido]";
+  7. o resumo e o mapa escritos durante uma edição ficam como de outra versão, e não são
+     refeitos sozinhos: o primeiro resumo pode sair com o nome antes da correção, e a dona
+     toca "Refazer o resumo" quando terminar de corrigir. O envio automático do resumo por
+     e-mail (H22), se ligado, sai com essa versão.
+- **Conferência de tela (22/11):**
+  - "Voltar tudo ao original" (ou o único trecho mudado de volta) deixava o aviso
+    "Refazer o resumo" diante de um resumo escrito antes da edição, convidando a gastar
+    uma chamada à IA por nada: o aviso só comparava a hora da edição com a do resumo.
+    Agora o resumo grava se a transcrição que leu estava editada
+    (`meeting_summaries.transcript_edited`; nulo nos resumos de antes da H18, que leram a
+    da IA), e o aviso sai só quando a transcrição mudou depois dele e uma das duas (a que
+    ele leu ou a de agora) não é a da IA. O resumo que leu uma versão editada continua de
+    outra versão diante da volta ao original;
+  - na tradução, que é a vista padrão da reunião em outro idioma, "Editar a transcrição"
+    aparece, com a frase "A edição abre a transcrição no idioma original": o botão volta
+    ao original e abre a edição (antes, sumia sem dica);
+  - o trecho apagado inteiro mostra, sob o campo, a frase da recusa (o jeito de tirar uma
+    fala inteira), em vez de só deixar o "Salvar" cinza.
+- **Onde:** `server/editar-transcricao.ts`, `shared/editar-transcricao.ts` e
+  `meetings.editarTranscricao` em `server/routers/meetings.ts`; na tela,
+  `EditarTranscricao.tsx`, `FormularioDoTrecho.tsx` e `TranscricaoPorFalante.tsx`.
+  Migração só aditiva: quatro colunas novas em `meeting_transcripts` (na 0025 do pacote) e
+  `meeting_summaries.transcript_edited` (na 0026, à parte: as regras do repositório
+  recusam apagar ou editar à mão os arquivos de `drizzle/`, então a 0025 não foi refeita;
+  juntar as duas numa só pede quem tenha essa permissão, antes do merge).
+
+## 22/11/2026 — pastas e lixeira das reuniões, com exclusão adiada (H7d)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-67 do app de
+  referência da cliente: "Excluídas recentemente", com restaurar). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** pastas com nome, ícone e cor (listas fechadas), filtros por origem (Todas,
+  Gravadas, Importadas, YouTube e Pastas), seleção de várias reuniões para mover,
+  juntar (H17) e mandar para a lixeira. O "Excluir" da reunião manda para a lixeira; dentro
+  de 30 dias a dona restaura, e depois disso, ou no "Apagar de vez" e no "Esvaziar a
+  lixeira", a reunião sai pelo caminho de exclusão de sempre, com o áudio e os derivados.
+- **Regras:** a reunião na lixeira sai de toda consulta (a lista, a busca, a Memória, o
+  link aberto, as filas, as pendências, a agenda, o perfil do contato e cada procedimento
+  pelo id) e só aparece na lixeira da própria dona. Mandar para a lixeira desliga o link
+  aberto, com a senha, tira os avisos da reunião do sino e grava `MEETINGS_TRASHED`, na
+  mesma transação. A lixeira não muda o prazo do áudio (30 dias desde o envio). A gravação
+  em partes ainda no ar não vai para a lixeira.
+- **Revisão do pacote (22/11):** a parte da gravação que ficou no aparelho (o fim já
+  declarado, a reunião em `uploading`) era recusada com a reunião na lixeira, e a tela
+  apagava a única cópia: a reunião restaurada voltava com lacuna. Agora a rota das partes a
+  aceita, e ela espera com a reunião (a fila não a transcreve na lixeira). E o Excluir
+  imediato (`meetings.delete`, o do descarte da gravação) tira a reunião de vez também da
+  lixeira: o descarte pendente lia o "não encontrada" da lixeira como "já saiu", e a
+  gravação descartada ficava 30 dias restaurável.
+- **Vetáveis:**
+  1. o prazo de 30 dias na lixeira;
+  2. restaurar (e o "Desfazer" do aviso) não religa o link aberto: a dona liga de novo, e o
+     endereço é outro, então o link dos e-mails de resumo já mandados (H22) não volta a
+     abrir;
+  3. os avisos do sino que saíram não voltam ao restaurar;
+  4. a pendência, a gravação na agenda e o atalho da próxima ação somem enquanto a reunião
+     está na lixeira e voltam ao restaurar; a próxima ação fica, sem o atalho;
+  5. a reunião em processamento ou em `uploading` pode ir para a lixeira: o trabalho da
+     fila espera e volta ao restaurar; o que já estava na IA termina e fica guardado nela;
+  6. a parte atrasada da gravação já encerrada entra na reunião da lixeira (acima);
+  7. o Excluir imediato apaga também da lixeira, sem passar por ela;
+  8. até 50 pastas por dona, e uma pasta por reunião;
+  9. a reunião da dona que está na lixeira, pedida pelo id, é NOT_FOUND com o código
+     `REUNIAO_NA_LIXEIRA`, e não com a frase da reunião de outra conta: o detalhe aberto por
+     um favorito ou pelo histórico diz "Esta reunião está na lixeira", com Restaurar e o
+     caminho da lixeira (conferência de tela de 22/11). Não abre enumeração: a guarda lê
+     só as reuniões da própria dona, e o id de outra conta segue "não encontrada".
+- **Conferência de tela (22/11):** a fileira das vistas quebra em linhas no celular (a
+  375 px, "Pastas" ficava fora da tela, e com ela ativa nenhuma vista visível aparecia
+  marcada), e os títulos das janelas novas (lixeira, pastas, mover) e das antigas do mesmo
+  molde (o Excluir da gravação em partes no ar e o Juntar) ficam pequenos, como o
+  "Descartar esta gravação?": sem classe, o h3 herdava 30 px no celular e 36 px no
+  computador.
+- **Onde:** `server/lixeira-de-reunioes.ts`, `server/guarda-da-lixeira.ts`,
+  `server/reuniao-visivel.ts`, `server/pastas-de-reunioes.ts`, `shared/lixeira-de-reunioes.ts`
+  e `shared/pastas-de-reunioes.ts`; na tela, `ListaDeReunioes.tsx`, `PastasDeReunioes.tsx` e
+  `LixeiraDeReunioes.tsx`. Migração só aditiva (`meeting_folders`, `meetings.folder_id` e
+  `meetings.trashed_at`, na 0025 do pacote).
+
 ---
 
 ## Lições sem data registrada
