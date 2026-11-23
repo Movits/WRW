@@ -46,6 +46,7 @@ import { useNovaTentativa } from "@/hooks/useNovaTentativa";
 import { useTraducaoDoResumo } from "@/hooks/useTraducaoDoResumo";
 import { useTelaAcesa } from "@/hooks/useTelaAcesa";
 import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes";
+import { PedidoAntesDeGravar, type PedidoNaTela } from "@/components/ModeloDoResumo";
 import { useImportacaoEmPartes, type AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
 import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
 import type { CodigoDaRecusaDoCorte } from "@/lib/corte-comum";
@@ -295,6 +296,8 @@ export default function Meetings() {
   // estado trava o botão e o formulário na tela.
   const iniciandoAgora = useRef(false);
   const [iniciando, setIniciando] = useState(false);
+  // O pedido do resumo antes de gravar (H4e); null: os padrões da dona.
+  const [pedidoDoResumo, setPedidoDoResumo] = useState<PedidoNaTela | null>(null);
   // G15a: a reunião em partes da gravação em curso, para a tela mostrar o
   // texto das partes que a fila já transcreveu (e perguntar sobre ele).
   const [reuniaoDaGravacao, setReuniaoDaGravacao] = useState<string | null>(null);
@@ -524,6 +527,18 @@ export default function Meetings() {
     return null;
   }
 
+  /**
+   * O pedido do resumo escolhido antes de gravar (H4e) vai ao servidor quando
+   * a reunião nasce. Sem mexer, nada vai: valem os padrões da dona. A falha não
+   * para a gravação: o aviso diz que dá para refazer o resumo depois.
+   */
+  function mandarPedidoDoResumo(meetingId: string) {
+    if (!pedidoDoResumo) return;
+    const { modelo, estilo, instrucoes } = pedidoDoResumo;
+    utils.client.meetings.definirPedidoDoResumo.mutate({ meetingId, pedido: { modelo, estilo, instrucoes: instrucoes.trim() || null } })
+      .catch(() => toast.error(t("meetings.summary.beforeRecording.errorSaving")));
+  }
+
   async function startRecording() {
     // Um início por vez (G13b): em partes, o Iniciar espera o servidor criar a
     // reunião, e o duplo clique criava duas; o segundo começo falhava e apagava
@@ -586,6 +601,7 @@ export default function Meetings() {
       // que carregar depois liga esta gravação (aoCarregar, abaixo).
       else if (reuniao) {
         setReuniaoDaGravacao(reuniao);
+        mandarPedidoDoResumo(reuniao);
         const agendaId = agendaDaGravacao.current ?? agendaQueCarregou(agendadaNoInicio.current);
         if (agendaId) {
           agendaDaGravacao.current = agendaId;
@@ -679,6 +695,7 @@ export default function Meetings() {
       const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, origem: "arquivo" });
       reuniaoCriada = created.id;
       ligarAAgenda(agendaId, created.id);
+      mandarPedidoDoResumo(created.id);
       // A marca do recuo vai ao log do servidor: separa este envio do de um
       // cliente de fora do repositório, se houver (G14, docs/arquitetura/gravador-de-reunioes.md).
       await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado, recuoDoCorte: true });
@@ -812,6 +829,7 @@ export default function Meetings() {
         setTitle("");
         if (noGravadorAgora.current) navigate(rotaDaReuniao(meetingId), { replace: true });
       }}
+      pedidoDoResumo={<PedidoAntesDeGravar valor={pedidoDoResumo} aoMudar={setPedidoDoResumo} desligado={iniciando || recording}/>}
       daAgenda={agendada && naGravacao ? (
         // key: outra reunião da agenda lê e preenche de novo.
         <ReuniaoDaAgendaNoGravador key={agendada} id={agendada} tituloAtual={title} aoPreencherTitulo={setTitle}
@@ -866,7 +884,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; onDiscardRecording: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode; legendaAoVivo?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; onDiscardRecording: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; pedidoDoResumo?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode; legendaAoVivo?: React.ReactNode }) {
   const { t } = useTranslation();
   // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
   // fotos de um texto, com o aviso e a autorização do documento. O título e o
@@ -911,6 +929,8 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
             autorização são os dele (DocumentoParaResumir). */}
         {!noDocumento && <>
           <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
+          {/* O pedido do resumo antes de gravar (H4e). */}
+          {props.pedidoDoResumo}
           <label className="flex items-start gap-3 rounded-xl border border-white/10 p-4 cursor-pointer"><input type="checkbox" checked={props.consent} disabled={locked} onChange={e => props.setConsent(e.target.checked)} className="mt-1 accent-amber-400"/><span className="text-sm text-white/70">{t("meetings.consentCheckboxLabel")}</span></label>
         </>}
       </div>

@@ -1152,6 +1152,12 @@ export const meetings = mysqlTable("meetings", {
   // Ir e voltar da lixeira não mexe no updated_at, que é a ficha de quem
   // processa a reunião.
   trashedAt: bigint("trashed_at", { mode: "number" }),
+  // O pedido do resumo feito antes de gravar (H4e): o modelo (pronto, da dona
+  // ou "a IA escolhe"), o estilo e as instruções da dona para esta reunião.
+  // Nulo: o resumo nasce com as preferências dela (preferencias_do_resumo).
+  // Conferido de novo na hora de usar (server/modelos-proprios.ts): o modelo
+  // da dona apagado depois do pedido volta ao padrão dela.
+  summaryRequest: jsonCompat("summary_request"),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
@@ -1457,6 +1463,25 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   mindMapGeneratedAt: bigint("mind_map_generated_at", { mode: "number" }),
   // Código nosso, como o last_error.
   mindMapError: varchar("mind_map_error", { length: 40 }),
+  // O modelo da própria dona (H4e), quando o resumo saiu de um: o template
+  // fica 'general' (as seções e as quantidades do Geral) e a instrução dela
+  // entra no lugar da frase de contexto. Nulo: um modelo pronto. O modelo
+  // apagado solta os resumos que o usavam (server/modelos-proprios.ts).
+  customTemplateId: varchar("custom_template_id", { length: 36 }),
+  // "A IA escolhe o modelo" (H4e): 'pending' até a fila pedir a escolha ao
+  // modelo Lite, 'chosen' depois de gravar o resumo no modelo que ela
+  // escolheu. Nulo: quem escolheu foi a dona.
+  aiTemplate: varchar("ai_template", { length: 8, enum: ["pending", "chosen"] }),
+  // O estilo (H4e): conciso, equilibrado (o resumo de antes) ou detalhado.
+  style: varchar("style", { length: 10, enum: ["concise", "balanced", "detailed"] }).default("balanced").notNull(),
+  // As instruções da dona para este resumo (H4e: o pedido antes de gravar, o
+  // pedido e o "Refazer o resumo"), até 500 caracteres. Só da dona: o link
+  // aberto nunca as recebe.
+  instructions: varchar("instructions", { length: 500 }),
+  // "O resumo teve o tamanho certo?" (H4e): a resposta da dona a esta versão.
+  // Muda o ajuste dela (preferencias_do_resumo.length_adjust), que vale para
+  // os próximos resumos. O refazer a zera: a versão nova é outra.
+  lengthFeedback: varchar("length_feedback", { length: 8, enum: ["short", "right", "long"] }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1466,6 +1491,48 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
   // E o mapa pendente (H10) pelo estado dele, sem varrer os resumos prontos.
   mindMapStatusLockedIdx: index("meeting_summaries_mind_map_status_locked_idx").on(table.mindMapStatus, table.lockedUntil),
+}));
+
+// Os modelos de resumo da própria dona (H4e do plano do gravador, HN-35 do
+// HiNoter): o nome, o ícone (de uma lista fechada, shared/modelos-de-resumo.ts)
+// e as instruções que dizem à IA que tipo de reunião é e o que destacar. Só da
+// dona: toda consulta leva o owner_id, e o link aberto não recebe nada disto.
+// Até 20 por dona (MODELOS_PROPRIOS_MAX).
+export const modelosDeResumoProprios = mysqlTable("modelos_de_resumo_proprios", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  nome: varchar("nome", { length: 60 }).notNull(),
+  icone: varchar("icone", { length: 16 }).notNull(),
+  instrucoes: varchar("instrucoes", { length: 1500 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerIdx: index("modelos_de_resumo_proprios_owner_idx").on(table.ownerId, table.createdAt),
+}));
+
+// As preferências do resumo da dona (H4e): o modelo padrão (um pronto, 'ia'
+// para "a IA escolhe" ou 'proprio' com o id), o estilo padrão e o ajuste do
+// tamanho que as respostas a "O resumo teve o tamanho certo?" acumulam (de -2
+// a +2). Sem linha: o Geral, equilibrado, sem ajuste.
+export const preferenciasDoResumo = mysqlTable("preferencias_do_resumo", {
+  ownerId: varchar("owner_id", { length: 128 }).primaryKey(),
+  modeloPadrao: varchar("modelo_padrao", { length: 16 }).default("general").notNull(),
+  modeloProprioPadraoId: varchar("modelo_proprio_padrao_id", { length: 36 }),
+  estiloPadrao: varchar("estilo_padrao", { length: 10, enum: ["concise", "balanced", "detailed"] }).default("balanced").notNull(),
+  ajusteDoTamanho: int("ajuste_do_tamanho").default(0).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+// O teto de custo do "Refazer o resumo" (H4e): uma linha por refazer aceito,
+// SEM a reunião nem o conteúdo, só a dona e a hora. Conta as últimas 24 h
+// (REFAZERES_POR_DIA), no banco e não em memória, para o deploy não o zerar,
+// como o Pergunte a várias reuniões (perguntas_entre_reunioes).
+export const resumosRefeitos = mysqlTable("resumos_refeitos", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("resumos_refeitos_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
 // Cada item do resumo guardado. Nada extraído por IA entra sozinho

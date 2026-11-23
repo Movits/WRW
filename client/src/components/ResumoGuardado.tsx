@@ -9,7 +9,10 @@ import { trpc } from "@/lib/trpc";
 import { pedidoDaTela, useAvisosDaAgenda } from "@/components/AcaoNaAgenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
-import { EscolhaDoModelo, nomeDoModelo, PainelDeRefazer } from "@/components/ModeloDoResumo";
+import {
+  EscolhaDoModelo, nomeDaEscolha, nomeDoEstilo, PainelDeRefazer, PEDIDO_PADRAO, pedidoParaEnviar, PerguntaDoTamanho, useModelosDaDona, type PedidoNaTela,
+} from "@/components/ModeloDoResumo";
+import { MeusModelosDeResumo } from "@/components/MeusModelosDeResumo";
 import { FormularioDoItemDoResumo } from "@/components/FormularioDoItemDoResumo";
 import { OuvirOResumo } from "@/components/OuvirOResumo";
 import { AvisoDeConferir, mensagemDoErroDaIA, TempoDoTrecho, Trecho } from "@/components/ReuniaoComIA";
@@ -17,7 +20,7 @@ import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensag
 import { LANGUAGES } from "@/i18n";
 import { mensagemDaFalhaDaTraducao, type TraducaoDoResumoNaTela } from "@/hooks/useTraducaoDoResumo";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
-import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import { ESTILO_DO_RESUMO_PADRAO, MODELO_DE_RESUMO_PADRAO, estiloDoResumo } from "@shared/modelos-de-resumo";
 import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, idiomaFalado } from "@shared/idioma-da-reuniao";
 import { OpcaoDoIdiomaOriginal } from "@/components/SeletorDoIdiomaDaReuniao";
 import { rotuloDoIdioma } from "@/lib/idiomas-na-tela";
@@ -279,17 +282,35 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     onSuccess: (resultado, variaveis) => avisarDaAgenda(resultado, variaveis.feito), onError: aoFalharDecisao, onSettled: reler,
   });
   const pedir = peloLink ? pedirPeloLink : pedirDaDona;
-  // Sem modelo, o resumo que falhou reabre no modelo em que estava.
-  const pedirResumo = (modelo?: ModeloDeResumo) => {
+  // Sem modelo, o resumo que falhou reabre no modelo em que estava. Com o
+  // pedido (H4d e H4e), o modelo, o estilo e as instruções.
+  const pedirResumo = (pedido?: PedidoNaTela) => {
     if (peloLink) pedirPeloLink.mutate({ token });
-    else pedirDaDona.mutate(modelo ? { meetingId, modelo } : { meetingId });
+    else pedirDaDona.mutate(pedido ? { meetingId, ...pedidoParaEnviar(pedido) } : { meetingId });
   };
   // Uma decisão por vez: a próxima espera a releitura da anterior.
   const decidindo = decidir.isPending || confirmarTodos.isPending || marcar.isPending;
 
-  // O modelo do resumo (H4d) é só da dona: o link não o recebe.
-  const modeloAtual: ModeloDeResumo = (!peloLink ? (dados as ResumoDaDona | undefined)?.modelo : null) ?? MODELO_DE_RESUMO_PADRAO;
-  const [modeloDoPedido, setModeloDoPedido] = useState<ModeloDeResumo>(MODELO_DE_RESUMO_PADRAO);
+  // O modelo do resumo (H4d) é só da dona: o link não o recebe. H4e: o modelo
+  // pode ser um dela ou o que a IA escolheu, com o estilo e as instruções.
+  const daDona = !peloLink ? (dados as ResumoDaDona | undefined) : undefined;
+  const modelos = useModelosDaDona(!peloLink);
+  const proprios = modelos.data?.proprios ?? (daDona?.modeloProprio ? [{ ...daDona.modeloProprio, instrucoes: "" }] : []);
+  const escolhaAtual = daDona?.escolha ?? daDona?.modelo ?? MODELO_DE_RESUMO_PADRAO;
+  const pedidoAtual: PedidoNaTela = { modelo: escolhaAtual, estilo: estiloDoResumo(daDona?.estilo) ?? ESTILO_DO_RESUMO_PADRAO, instrucoes: daDona?.instrucoes ?? "" };
+  const nomeAtual = nomeDaEscolha(t, escolhaAtual, proprios);
+  const [modeloDoPedido, setModeloDoPedido] = useState<PedidoNaTela>(PEDIDO_PADRAO);
+  // O pedido começa no padrão da dona (H4e), até ela mexer.
+  const mexeuNoPedido = useRef(false);
+  const padraoModelo = modelos.data?.padrao;
+  const padraoEstilo = estiloDoResumo(modelos.data?.estilo);
+  useEffect(() => {
+    if (padraoModelo && padraoEstilo && !mexeuNoPedido.current) setModeloDoPedido({ ...PEDIDO_PADRAO, modelo: padraoModelo, estilo: padraoEstilo });
+  }, [padraoModelo, padraoEstilo]);
+  const [meusModelosAbertos, setMeusModelosAbertos] = useState(false);
+  // Os modelos da dona abrem onde ela escolhe um: antes de pedir e no resumo
+  // pronto ou que falhou; não enquanto a IA escreve.
+  const podeVerMeusModelos = !peloLink && (dados?.estado === "sem_resumo" || dados?.estado === "pronto" || dados?.estado === "falhou");
   const [refazerAberto, setRefazerAberto] = useState(false);
   const idDoPainelDeRefazer = useId();
   // Refazer o resumo pronto, ou o que falhou, em outro modelo; enquanto ele é
@@ -412,12 +433,14 @@ export function ResumoGuardado(props: DaDona | DoLink) {
     // A dona escolhe o modelo (H4d) antes de pedir.
     corpo = <div className="mt-4 space-y-3">
       <p className="text-sm text-white/60">{t("meetings.summary.noSummary")}</p>
-      <EscolhaDoModelo valor={modeloDoPedido} aoMudar={setModeloDoPedido} desligado={pedir.isPending}>
+      <EscolhaDoModelo valor={modeloDoPedido} aoMudar={pedido => { mexeuNoPedido.current = true; setModeloDoPedido(pedido); }} desligado={pedir.isPending} proprios={proprios}>
         <BotaoDePedir aoClicar={() => pedirResumo(modeloDoPedido)} pedindo={pedir.isPending}>{t("meetings.summary.generate")}</BotaoDePedir>
       </EscolhaDoModelo>
     </div>;
   } else if ((dados.estado === "pendente" || dados.estado === "gerando") && !versaoAnterior) {
-    corpo = <p role="status" className="mt-4 text-sm text-white/60"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.generating")}</p>;
+    corpo = <p role="status" className="mt-4 text-sm text-white/60"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.generating")}
+      {/* "A IA escolhe o modelo" (H4e): a escolha vem antes do resumo. */}
+      {daDona?.iaVaiEscolher && <span className="ml-2 text-xs text-amber-100/70">{t("meetings.summary.aiWillChoose")}</span>}</p>;
   } else if (dados.estado === "falhou" && !versaoAnterior) {
     corpo = <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-red-200">{t("meetings.summary.failed")}</p>
@@ -432,10 +455,10 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         {somenteLeitura && <Loader2 size={15} className="mr-2 inline animate-spin"/>}{t("meetings.summary.linkPreviousVersion")}
       </p>}
       {versaoAnterior && !peloLink && dados.estado !== "falhou" && <p role="status" className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
-        <Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.redoing", { modelo: nomeDoModelo(t, modeloAtual) })}
+        <Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.redoing", { modelo: nomeAtual })}
       </p>}
       {versaoAnterior && !peloLink && dados.estado === "falhou" && <div role="alert" className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-red-200">{t("meetings.summary.redoFailed", { modelo: nomeDoModelo(t, modeloAtual) })}</p>
+        <p className="text-sm text-red-200">{t("meetings.summary.redoFailed", { modelo: nomeAtual })}</p>
         <BotaoDePedir aoClicar={() => pedirResumo()} pedindo={pedir.isPending}>{t("meetings.summary.retry")}</BotaoDePedir>
       </div>}
       {!peloLink && !somenteLeitura && pendentes.length > 0 && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -469,6 +492,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
             className="inline-flex items-center gap-2 rounded-lg border border-dashed border-amber-300/40 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10">
             <Plus size={15}/> {t("meetings.summary.addItem")}
           </button>)}
+      {/* "O resumo teve o tamanho certo?" (H4e), só da dona e no resumo pronto. */}
+      {!peloLink && dados.estado === "pronto" && visiveis.length > 0 && <PerguntaDoTamanho meetingId={meetingId} resposta={daDona?.tamanho ?? null}/>}
       {!peloLink && ignorados.length > 0 && <div className="border-t border-white/10 pt-4">
         <button type="button" aria-expanded={verIgnorados} onClick={() => setVerIgnorados(aberta => !aberta)}
           className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white">
@@ -492,7 +517,7 @@ export function ResumoGuardado(props: DaDona | DoLink) {
   return <section aria-labelledby="resumo-guardado" className="rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <h2 id="resumo-guardado" className="inline-flex items-center gap-2 text-base font-semibold text-amber-100"><Sparkles size={16}/>{documento ? t("meetings.document.summaryTitle") : t("meetings.summary.title")}</h2>
-      {(comEscolhaDoIdioma || podeRefazer || podeOuvir) && <div className="flex flex-wrap items-center gap-3">
+      {(comEscolhaDoIdioma || podeRefazer || podeOuvir || podeVerMeusModelos) && <div className="flex flex-wrap items-center gap-3">
         {/* O idioma do resumo (H11): começa no da tela, e o original fica marcado. */}
         {traducao && comEscolhaDoIdioma && <label className="inline-flex items-center gap-2 text-xs text-amber-100/70">
           {t("meetings.summary.translation.language")}
@@ -503,16 +528,26 @@ export function ResumoGuardado(props: DaDona | DoLink) {
           </select>
         </label>}
         {/* O modelo (H4d) e o "Refazer como…", só da dona. */}
-        {podeRefazer && dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">{t("meetings.summary.currentTemplate", { modelo: nomeDoModelo(t, modeloAtual) })}</span>}
+        {podeRefazer && dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">
+          {t("meetings.summary.currentTemplate", { modelo: nomeAtual })}
+          {pedidoAtual.estilo !== ESTILO_DO_RESUMO_PADRAO && ` · ${nomeDoEstilo(t, pedidoAtual.estilo)}`}
+          {daDona?.escolhidoPelaIA && <span className="ml-2 rounded-full border border-amber-300/40 px-2 py-0.5">{t("meetings.summary.chosenByAi")}</span>}
+        </span>}
         {podeRefazer && <button type="button" aria-expanded={refazerAberto} aria-controls={refazerAberto ? idDoPainelDeRefazer : undefined} onClick={() => setRefazerAberto(aberto => !aberto)}
           className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-300/10">
           <RefreshCw size={13}/> {t("meetings.summary.redoAs")}
+        </button>}
+        {/* Os modelos da dona e o padrão (H4e), só da dona. */}
+        {podeVerMeusModelos && <button type="button" aria-expanded={meusModelosAbertos} onClick={() => setMeusModelosAbertos(aberto => !aberto)}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-white/70 hover:text-white">
+          {t("meetings.summary.myTemplates.open")}
         </button>}
         {/* "Ouvir o resumo" (H19), nas duas telas. */}
         {podeOuvir && <OuvirOResumo falas={falas} idioma={idiomaDoResumo}/>}
       </div>}
     </div>
-    {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={modeloAtual} aoFechar={() => setRefazerAberto(false)}/>}
+    {podeRefazer && refazerAberto && <PainelDeRefazer id={idDoPainelDeRefazer} meetingId={meetingId} atual={pedidoAtual} aoFechar={() => setRefazerAberto(false)}/>}
+    {podeVerMeusModelos && meusModelosAbertos && <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4"><MeusModelosDeResumo/></div>}
     {traducao?.estado === "traduzindo" && <p role="status" className="mt-3 text-xs text-amber-100/70"><Loader2 size={13} className="mr-1.5 inline animate-spin"/>{t("meetings.summary.translation.translating")}</p>}
     {traducao?.estado === "pronta" && <p className="mt-3 text-xs text-white/45">{t("meetings.summary.translation.notice", { idioma: nomeNaTela(traducao.idiomaOriginal, i18n.resolvedLanguage ?? i18n.language) })}</p>}
     {traducao?.estado === "erro" && <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-xs text-amber-200/80">

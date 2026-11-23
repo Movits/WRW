@@ -159,7 +159,9 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
     // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [] });
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [],
+      // Sem pedido nem preferências (H4e): o Geral equilibrado, sem ajuste nem instruções.
+      preferencias: { modeloProprio: null, estilo: "balanced", ajusteDoTamanho: 0, instrucoesDoPedido: null } });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);
     expect(resumo).toMatchObject({ estado: "pronto", emoji: "☕", idioma: "pt-BR", erro: null });
     expect(resumo.itens.map(i => [i.section, i.position, i.status, i.done, i.startSeconds, i.assignee])).toEqual([
@@ -378,7 +380,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
     await servico.decidirItemDoResumo(DONA, acao.id, "confirmed");
     const [proxima] = await (await db()).select().from(proximasAcoes).where(eq(proximasAcoes.ownerId, DONA));
     // "Refazer como Vendas": o resumo volta à fila com os itens ainda lá.
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     // A dona apaga a ação na lista enquanto a IA escreve a versão nova. A fila
     // já mandou o item como um dos que ficam, e a IA não o repete: devolvido a
     // "para conferir", ele sairia na gravação sem voltar no resumo novo.

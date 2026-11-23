@@ -45,11 +45,12 @@ export const MODELO_DE_AUDIO_RESERVA_PADRAO = "gemini-3.5-flash-lite";
 //   LLM_MODEL_<FUNÇÃO> > o padrão da função no código, se houver e se o texto
 //   for à API do Gemini > LLM_MODEL > MODELO_DE_TEXTO_PADRAO.
 // A variável recusada cai no degrau seguinte, e não direto no padrão fixo.
-// Hoje nenhuma função tem padrão no código: sem variável, as três seguem o
-// LLM_MODEL, e o deploy não troca o modelo de nenhuma.
+// Das funções que a bancada mediu, nenhuma tem padrão no código: sem
+// variável, as três seguem o LLM_MODEL, e o deploy não troca o modelo de
+// nenhuma. A escolha do modelo do resumo (H4e) nasceu no Lite.
 // Quem chama sem função (tradução, FAQ, Memória, recomendações, complementos
 // de contato...) fica no LLM_MODEL, como antes: a bancada não os mediu.
-export type FuncaoDeTexto = "extracao" | "resumo" | "pergunta";
+export type FuncaoDeTexto = "extracao" | "resumo" | "pergunta" | "escolha_do_modelo";
 
 type ModeloDaFuncao = {
   /** A variável que troca o modelo da função sem deploy. */
@@ -81,6 +82,12 @@ export const FUNCOES_DE_TEXTO: Readonly<Record<FuncaoDeTexto, ModeloDaFuncao>> =
   // (reunião de 1 h e perguntas sem resposta). Se ela passar,
   // LLM_MODEL_PERGUNTA o leva ao Lite sem deploy.
   pergunta: { variavel: "LLM_MODEL_PERGUNTA", padrao: null, nomeNoLog: "pergunta" },
+  // "A IA escolhe o modelo" do resumo (H4e): uma classificação curta (o começo
+  // da transcrição e a lista dos modelos, a resposta é um código), que não
+  // pede o Flash. Única função com padrão no código, o Lite: id concreto, o
+  // mesmo da reserva do áudio, e só quando o texto vai à API do Gemini (fora
+  // dela, o LLM_MODEL). Custa cerca de US$ 0,001 por resumo.
+  escolha_do_modelo: { variavel: "LLM_MODEL_ESCOLHA_DO_MODELO", padrao: "gemini-3.5-flash-lite", nomeNoLog: "escolha do modelo" },
 };
 
 // Áudio: "gemini-", o número de versão (3.5, 2.5, 3) e o resto em minúsculas,
