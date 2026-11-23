@@ -2,12 +2,57 @@
 // que é de fora (outros domínios, mailto:, tel:, WhatsApp) com o sistema. Os
 // recursos nativos (gravação em segundo plano, Face ID, push) entram em PRs
 // próprias; ver mobile/CLAUDE.md.
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  AppState,
+  BackHandler,
+  Linking,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { WebView, type WebViewNavigation } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import { lerMensagem, respostaDoMicrofone, scriptDaPonte } from './ponte';
+
+const ETIQUETA_DA_GRAVACAO = 'wrw-gravacao';
+const SCRIPT_DA_PONTE = scriptDaPonte(Platform.OS === 'android');
+
+/**
+ * No Android, a WebView só entrega o microfone se o app tiver a permissão do
+ * sistema. Pede aqui, antes de o site abrir o microfone; no iPhone, quem pede é
+ * a própria WebView, com o texto do NSMicrophoneUsageDescription.
+ */
+async function liberarMicrofone(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const permissao = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+  if (await PermissionsAndroid.check(permissao)) return true;
+  const resposta = await PermissionsAndroid.request(permissao, {
+    title: 'Microfone',
+    message: 'A WRW usa o microfone para gravar as suas reuniões e ditados, só quando você toca em gravar.',
+    buttonPositive: 'Permitir',
+    buttonNegative: 'Agora não',
+  });
+  if (resposta === PermissionsAndroid.RESULTS.GRANTED) return true;
+  if (resposta === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+    Alert.alert(
+      'Microfone bloqueado',
+      'Para gravar, libere o microfone da WRW nas configurações do celular.',
+      [
+        { text: 'Agora não', style: 'cancel' },
+        { text: 'Abrir configurações', onPress: () => void Linking.openSettings() },
+      ],
+    );
+  }
+  return false;
+}
 
 const ORIGEM = 'https://wrwglobal.org';
 const HOSTS_DA_WRW = new Set(['wrwglobal.org', 'www.wrwglobal.org']);
@@ -50,6 +95,79 @@ export default function App() {
     return () => assinatura.remove();
   }, [podeVoltar]);
 
+  // Gravação em andamento: a tela não apaga (no iPhone, a tela bloqueada para a
+  // gravação). No iPhone, a WebView também para de gravar em segundo plano: avisa
+  // ao começar e, se a pessoa saiu do app no meio, avisa ao voltar. A gravação
+  // com a tela bloqueada é a gravação nativa, em PR própria (mobile/CLAUDE.md).
+  const gravando = useRef(false);
+  const saiuGravando = useRef(false);
+  const avisouDoSegundoPlano = useRef(false);
+
+  useEffect(() => {
+    const assinatura = AppState.addEventListener('change', estado => {
+      if (estado === 'background' && gravando.current && Platform.OS === 'ios') {
+        saiuGravando.current = true;
+      }
+      if (estado === 'active' && saiuGravando.current) {
+        saiuGravando.current = false;
+        Alert.alert(
+          'A gravação parou enquanto você estava fora',
+          'No iPhone, a WRW ainda não grava em segundo plano. O trecho em que o app ficou fechado não foi gravado. Mantenha a WRW aberta até tocar em Parar.',
+        );
+      }
+    });
+    return () => assinatura.remove();
+  }, []);
+
+  useEffect(() => () => void deactivateKeepAwake(ETIQUETA_DA_GRAVACAO), []);
+
+  const aoMudarGravacao = useCallback((ativo: boolean) => {
+    if (ativo === gravando.current) return;
+    gravando.current = ativo;
+    if (!ativo) {
+      void deactivateKeepAwake(ETIQUETA_DA_GRAVACAO);
+      return;
+    }
+    activateKeepAwakeAsync(ETIQUETA_DA_GRAVACAO).catch(() => undefined);
+    if (Platform.OS === 'ios' && !avisouDoSegundoPlano.current) {
+      avisouDoSegundoPlano.current = true;
+      Alert.alert(
+        'Mantenha a WRW aberta',
+        'No iPhone, a gravação para se você sair do app ou bloquear a tela. A tela fica acesa sozinha até você tocar em Parar.',
+      );
+    }
+  }, []);
+
+  const aoReceberMensagem = useCallback(
+    (evento: WebViewMessageEvent) => {
+      const mensagem = lerMensagem(evento.nativeEvent.data);
+      if (!mensagem) return;
+      if (mensagem.tipo === 'log') {
+        // Vai para o terminal do `npx expo start`: é por aqui que se vê o que
+        // falhou no celular sem cabo nem inspetor.
+        console.log(`[site ${mensagem.nivel}] ${mensagem.texto}`);
+        return;
+      }
+      if (mensagem.tipo === 'gravando') {
+        aoMudarGravacao(mensagem.ativo);
+        return;
+      }
+      if (mensagem.tipo === 'microfone') {
+        console.log(`[app ${Platform.OS}] pedido de microfone ${mensagem.id}`);
+        liberarMicrofone()
+          .catch(erro => {
+            console.log(`[app ${Platform.OS}] falha ao pedir o microfone: ${String(erro)}`);
+            return false;
+          })
+          .then(liberado => {
+            console.log(`[app ${Platform.OS}] microfone ${mensagem.id}: ${liberado ? 'liberado' : 'negado'}`);
+            webview.current?.injectJavaScript(respostaDoMicrofone(mensagem.id, liberado));
+          });
+      }
+    },
+    [aoMudarGravacao],
+  );
+
   const aoNavegar = useCallback((estado: WebViewNavigation) => {
     setPodeVoltar(estado.canGoBack);
   }, []);
@@ -76,6 +194,14 @@ export default function App() {
           originWhitelist={['https://*', 'about:*', 'data:*', 'blob:*', 'mailto:*', 'tel:*']}
           onShouldStartLoadWithRequest={aoPedirCarga}
           onNavigationStateChange={aoNavegar}
+          injectedJavaScriptBeforeContentLoaded={SCRIPT_DA_PONTE}
+          // No Android, o script de antes do carregamento roda no onPageStarted e
+          // pode cair na página velha (T41, 23/11: nenhum log chegou). O de
+          // depois do carregamento garante a ponte; ela não se instala duas vezes.
+          injectedJavaScript={SCRIPT_DA_PONTE}
+          onMessage={aoReceberMensagem}
+          onLoadEnd={evento => console.log(`[app ${Platform.OS}] página carregada: ${evento.nativeEvent.url}`)}
+          webviewDebuggingEnabled={__DEV__}
           renderError={() => <TelaDeErro aoTentarDeNovo={() => webview.current?.reload()} />}
           applicationNameForUserAgent="WRWApp/1.0"
           sharedCookiesEnabled
