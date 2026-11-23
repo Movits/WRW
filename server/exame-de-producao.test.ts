@@ -629,7 +629,11 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // e o resumo por e-mail (H22, resumo_por_email.owner_id).
     // 77: as pastas das reuniões (H7d) somaram meeting_folders.owner_id, e o Pergunte
     // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
-    expect(paresDeUsuariaNoSchema).toHaveLength(77);
+    // 79: o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
+    // complemento (H4i, buscas_do_complemento.owner_id).
+    expect(paresDeUsuariaNoSchema).toHaveLength(79);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
