@@ -1518,6 +1518,20 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // item pendente tinha Ignorar: o Desfazer o devolve pendente.
   statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
   doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
+  // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
+  // dona pede, num item, que a IA complete uma referência dita pela metade (o
+  // número de uma lei, o nome de uma norma ou de uma empresa). O complemento
+  // vem de FORA da reunião: nasce pending, com a fonte (o endereço que a
+  // busca da Google devolveu), e só entra no resumo (o link, a Memória, o
+  // áudio) quando a dona o confirma; ignorar apaga as colunas. Um por item.
+  complementText: text("complement_text"),
+  complementSourceUrl: varchar("complement_source_url", { length: 2048 }),
+  complementSourceTitle: varchar("complement_source_title", { length: 300 }),
+  // As consultas que a busca fez (até 5, de até 200 caracteres): a tela as
+  // mostra, como pedem os termos da busca da Google no Gemini.
+  complementQueries: jsonCompat("complement_queries"),
+  complementStatus: varchar("complement_status", { length: 12, enum: ["pending", "confirmed"] }),
+  complementAt: bigint("complement_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1795,6 +1809,48 @@ export const perguntasEntreReunioes = mysqlTable("perguntas_entre_reunioes", {
 }, (table) => ({
   // O teto conta as linhas das últimas 24 h da dona.
   ownerCreatedIdx: index("perguntas_entre_reunioes_owner_created_idx").on(table.ownerId, table.createdAt),
+}));
+
+// O áudio do resumo com a voz do Gemini (H19b, server/resumo-em-audio.ts): a
+// dona pede "Baixar o áudio do resumo", e o servidor gera o MP3 uma vez por
+// texto do resumo (o hash do que a voz lê) e idioma, guarda no bucket sob
+// meetings/<openId>/ e serve de novo. Uma linha por geração, mesmo a que
+// falhou: o teto de 24 h conta aqui (e não em memória, para o deploy não
+// zerá-lo). Quando o texto muda, o objeto antigo sai e a linha fica sem a chave
+// (só para o teto); a exclusão da reunião tira os objetos; a da conta, as
+// linhas. Sem texto do resumo: só o hash dele.
+export const resumoEmAudio = mysqlTable("resumo_em_audio", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  language: varchar("language", { length: 12 }).notNull(),
+  textHash: varchar("text_hash", { length: 64 }).notNull(),
+  situacao: varchar("situacao", { length: 12, enum: ["pendente", "pronto", "falhou"] }).default("pendente").notNull(),
+  // Nula enquanto gera, na falha e depois que o objeto saiu.
+  storageKey: varchar("storage_key", { length: 512 }),
+  bytes: int("bytes"),
+  durationMs: int("duration_ms"),
+  modelo: varchar("modelo", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("resumo_em_audio_owner_created_idx").on(table.ownerId, table.createdAt),
+  meetingIdx: index("resumo_em_audio_meeting_idx").on(table.ownerId, table.meetingId),
+}));
+
+// As buscas na web do complemento (H4i, server/complemento-pela-busca.ts): uma
+// linha por busca que foi à IA, sem o conteúdo (nem o item, nem a resposta,
+// nem as consultas), para o teto de 24 h por dona, contado aqui para o deploy
+// não zerá-lo. O complemento mesmo mora no item (meeting_summary_items).
+export const buscasDoComplemento = mysqlTable("buscas_do_complemento", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  situacao: varchar("situacao", { length: 12, enum: ["pendente", "achou", "nao_achou", "falhou"] }).default("pendente").notNull(),
+  modelo: varchar("modelo", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("buscas_do_complemento_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
 // ============================================================

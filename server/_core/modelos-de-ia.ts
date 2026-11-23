@@ -1,3 +1,4 @@
+import { MODELO_DA_VOZ_DO_RESUMO_PADRAO } from "@shared/resumo-em-audio";
 // Os modelos de IA do servidor: lidos do ambiente na hora da chamada e
 // passados pela guarda do modelo concreto (regra do CLAUDE.md da raiz). Um
 // alias já apontou para um modelo de 20 requisições por dia e derrubou a IA
@@ -205,4 +206,20 @@ export function linhaDosModelosDeIa(): string {
     funcao => `${FUNCOES_DE_TEXTO[funcao].nomeNoLog} ${idNoLog(modeloDeTexto(funcao))}`
   );
   return [`[IA] áudio ${audio}`, `reserva ${reserva}${reservaDesligada}`, `texto ${idNoLog(modeloDeTexto())}`, ...porFuncao].join(" · ");
+}
+
+// A voz do Gemini do "Baixar o áudio do resumo" (H19b, server/resumo-em-audio.ts):
+// vai à API do Gemini com o id na URL, então passa pela guarda do áudio. O
+// padrão e o preço lido estão em shared/resumo-em-audio.ts.
+export function modeloDaVozDoResumo(): string {
+  return exigirModeloDeAudio(process.env.LLM_TTS_MODEL, MODELO_DA_VOZ_DO_RESUMO_PADRAO, "LLM_TTS_MODEL");
+}
+
+// A busca na web do complemento (H4i, server/complemento-pela-busca.ts): a
+// ferramenta google_search só existe na API do Gemini, com o id na URL, então
+// passa pela guarda do áudio (o formato fechado gemini-<versão>). Sem a
+// variável, o mesmo padrão do texto.
+export const MODELO_DA_BUSCA_PADRAO = MODELO_DE_TEXTO_PADRAO;
+export function modeloDaBusca(): string {
+  return exigirModeloDeAudio(process.env.LLM_MODEL_BUSCA, MODELO_DA_BUSCA_PADRAO, "LLM_MODEL_BUSCA");
 }

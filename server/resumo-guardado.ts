@@ -13,6 +13,38 @@ import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
 import { transcricaoEstaEditada, trechosNaTranscricaoDeAgora } from "./editar-transcricao";
+import { consultasDoComplemento, fonteDoComplemento } from "@shared/complemento-pela-busca";
+
+/** As colunas do complemento pela busca (H4i), lidas com o item. */
+const COLUNAS_DO_COMPLEMENTO = {
+  complementText: meetingSummaryItems.complementText,
+  complementSourceUrl: meetingSummaryItems.complementSourceUrl,
+  complementSourceTitle: meetingSummaryItems.complementSourceTitle,
+  complementQueries: meetingSummaryItems.complementQueries,
+  complementStatus: meetingSummaryItems.complementStatus,
+};
+type ColunasDoComplemento = {
+  complementText: string | null; complementSourceUrl: string | null; complementSourceTitle: string | null;
+  complementQueries: unknown; complementStatus: string | null;
+};
+export type ComplementoNaTela = { texto: string; fonte: string | null; titulo: string | null; consultas: string[]; situacao: "pending" | "confirmed" };
+
+/**
+ * O complemento pela busca (H4i) como a tela o recebe. A dona vê o que espera
+ * a decisão e o confirmado; o link aberto, só o confirmado (`soConfirmado`), sem
+ * as consultas. A fonte passa de novo pela conferência (só https).
+ */
+export function complementoNaTela(linha: ColunasDoComplemento, soConfirmado: boolean): ComplementoNaTela | null {
+  const situacao = linha.complementStatus === "confirmed" ? "confirmed" : linha.complementStatus === "pending" ? "pending" : null;
+  if (!situacao || !linha.complementText || (soConfirmado && situacao !== "confirmed")) return null;
+  return {
+    texto: linha.complementText,
+    fonte: fonteDoComplemento(linha.complementSourceUrl),
+    titulo: linha.complementSourceTitle,
+    consultas: soConfirmado ? [] : consultasDoComplemento(linha.complementQueries),
+    situacao,
+  };
+}
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -113,7 +145,7 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const estado = estadoDe(linha, Date.now());
-  const itens = linha
+  const lidos = linha
     ? await db.select({
       id: meetingSummaryItems.id,
       section: meetingSummaryItems.section,
@@ -129,10 +161,13 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       // Quem escreveu e se a dona editou (H4f): a tela marca o que é dela.
       origin: meetingSummaryItems.origin,
       editedAt: meetingSummaryItems.editedAt,
+      ...COLUNAS_DO_COMPLEMENTO,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
+  const itens = lidos.map(({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, ...item }) =>
+    ({ ...item, complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, false) }));
   return {
     estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
@@ -609,12 +644,17 @@ export async function resumoGuardadoPeloLink(token: string) {
       status: meetingSummaryItems.status,
       origin: meetingSummaryItems.origin,
       editedAt: meetingSummaryItems.editedAt,
+      ...COLUNAS_DO_COMPLEMENTO,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
+  // O complemento pela busca (H4i) só vai ao link confirmado pela dona.
   const itens = (await trechosNaTranscricaoDeAgora(reuniao.ownerId, reuniao.id, lidos))
-    .map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
+    .map(({ origin, editedAt, complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, ...item }) => ({
+      ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }),
+      complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, true),
+    }));
   return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 

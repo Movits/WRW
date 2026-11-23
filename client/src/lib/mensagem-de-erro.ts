@@ -20,6 +20,8 @@ import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@sh
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO, MENSAGEM_EMAIL_SEM_RESUMO_PRONTO } from "@shared/email-de-retorno";
 import { MENSAGEM_EXPORTACOES_DEMAIS, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
 import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
+import type { CodigoDaRecusaDoAudioDoResumo } from "@shared/resumo-em-audio";
+import type { CodigoDaRecusaDoComplemento } from "@shared/complemento-pela-busca";
 import { RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
 import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
@@ -304,4 +306,44 @@ const CAUSA_POR_FALHA_DO_DOCUMENTO: Record<CodigoDaFalhaDoDocumento, (t: Traduzi
 
 export function causaDaFalhaDoDocumento(codigo: string | null | undefined, t: Traduzir): string | null {
   return ehCodigoDaFalhaDoDocumento(codigo) ? CAUSA_POR_FALHA_DO_DOCUMENTO[codigo](t) : null;
+}
+
+/** O código que o servidor mandou como mensagem, se a tabela o conhece; o NOT_FOUND vira "não encontrada". */
+function porCodigo<C extends string>(erro: unknown, tabela: Record<C, (t: (chave: string) => string) => string>, t: (chave: string) => string, naoAchou: string, padrao: string): string {
+  if (erro && typeof erro === "object") {
+    const { message, data } = erro as { message?: unknown; data?: unknown };
+    const codigo = data && typeof data === "object" ? (data as { code?: unknown }).code : undefined;
+    if (typeof message === "string" && Object.prototype.hasOwnProperty.call(tabela, message)) return tabela[message as C](t);
+    if (codigo === "NOT_FOUND") return t(naoAchou);
+    if (typeof message === "string" && Object.prototype.hasOwnProperty.call(CHAVE_POR_MENSAGEM_DO_SERVIDOR, message)) return t(CHAVE_POR_MENSAGEM_DO_SERVIDOR[message]);
+  }
+  return t(padrao);
+}
+
+/**
+ * As recusas de "Baixar o áudio do resumo" (H19b, shared/resumo-em-audio.ts):
+ * o código vira o aviso no idioma da tela. Código novo lá não compila aqui sem o aviso.
+ */
+const AVISO_POR_RECUSA_DO_AUDIO_DO_RESUMO: Record<CodigoDaRecusaDoAudioDoResumo, (t: (chave: string) => string) => string> = {
+  AUDIO_DO_RESUMO_DEMAIS: t => t("meetings.summary.audioDownload.tooMany"),
+  AUDIO_DO_RESUMO_SEM_RESUMO: t => t("meetings.summary.audioDownload.noSummary"),
+  AUDIO_DO_RESUMO_TRADUZA_ANTES: t => t("meetings.summary.audioDownload.translateFirst"),
+  AUDIO_DO_RESUMO_LONGO: t => t("meetings.summary.audioDownload.tooLong"),
+  AUDIO_DO_RESUMO_IA_INDISPONIVEL: t => t("meetings.summary.audioDownload.aiUnavailable"),
+  AUDIO_DO_RESUMO_INDISPONIVEL: t => t("meetings.summary.audioDownload.unavailable"),
+};
+export function mensagemDaRecusaDoAudioDoResumo(erro: unknown, t: (chave: string) => string): string {
+  return porCodigo(erro, AVISO_POR_RECUSA_DO_AUDIO_DO_RESUMO, t, "meetings.meetingNotFound", "meetings.summary.audioDownload.error");
+}
+
+/** As recusas do complemento pela busca (H4i, shared/complemento-pela-busca.ts). */
+const AVISO_POR_RECUSA_DO_COMPLEMENTO: Record<CodigoDaRecusaDoComplemento, (t: (chave: string) => string) => string> = {
+  COMPLEMENTO_DEMAIS: t => t("meetings.summary.complement.tooMany"),
+  COMPLEMENTO_NAO_ACHADO: t => t("meetings.summary.complement.notFound"),
+  COMPLEMENTO_IA_INDISPONIVEL: t => t("meetings.summary.complement.aiUnavailable"),
+  COMPLEMENTO_ITEM_FORA_DO_RESUMO: t => t("meetings.summary.complement.outOfSummary"),
+  COMPLEMENTO_AUSENTE: t => t("meetings.summary.complement.missing"),
+};
+export function mensagemDaRecusaDoComplemento(erro: unknown, t: (chave: string) => string): string {
+  return porCodigo(erro, AVISO_POR_RECUSA_DO_COMPLEMENTO, t, "meetings.meetingNotFound", "meetings.summary.complement.error");
 }

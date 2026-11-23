@@ -425,3 +425,86 @@ export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: st
     tetoInlineBytes: TETO_INLINE_DO_AUDIO_BYTES,
   });
 }
+
+/**
+ * A voz do Gemini (H19b, server/resumo-em-audio.ts): o texto vira fala com um
+ * modelo de voz (TTS). A resposta é áudio cru, PCM de 16 bits, mono, na taxa
+ * que o tipo diz ("audio/L16;codec=pcm;rate=24000"); quem chama converte em
+ * MP3. Uma chamada por pedaço do texto, com as retentativas de sempre.
+ */
+export type FalaDoGemini = { pcm: Buffer; amostrasPorSegundo: number };
+
+type RespostaDaVoz = { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }> };
+
+export class GeminiSemAudioError extends Error {
+  constructor() {
+    super("O modelo de voz não devolveu áudio.");
+  }
+}
+
+/** A taxa do PCM pelo tipo que o Gemini manda; sem ela, 24 kHz (o que a documentação dá para os modelos de voz). */
+export function taxaDoPcm(tipo: string | undefined): number {
+  const taxa = Number(/rate=(\d+)/i.exec(tipo ?? "")?.[1]);
+  return Number.isInteger(taxa) && taxa >= 8_000 && taxa <= 48_000 ? taxa : 24_000;
+}
+
+export async function falarComGemini(texto: string, modelo: string, voz: string): Promise<FalaDoGemini> {
+  const resposta = await geminiPost<RespostaDaVoz>(`/models/${modelo}:generateContent`, {
+    contents: [{ role: "user", parts: [{ text: texto }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voz } } },
+    },
+  }, undefined, { timeoutMs: 60_000, orcamentoMs: 70_000 });
+  const partes = resposta.candidates?.[0]?.content?.parts ?? [];
+  const audio = partes.map(parte => parte.inlineData).filter(dado => dado?.data);
+  if (!audio.length) throw new GeminiSemAudioError();
+  const amostrasPorSegundo = taxaDoPcm(audio[0]?.mimeType);
+  const pcm = Buffer.concat(audio.map(dado => Buffer.from(dado!.data!, "base64")));
+  // Amostra de 16 bits: um byte solto no fim seria ruído.
+  return { pcm: pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm, amostrasPorSegundo };
+}
+
+/**
+ * A busca na web com o Gemini (H4i, server/complemento-pela-busca.ts): a
+ * ferramenta google_search ("Grounding with Google Search"). Devolve o texto e
+ * o que a busca usou: as consultas e as páginas (o endereço é o de
+ * redirecionamento da Google, que leva à página).
+ */
+export type RespostaDaBusca = { texto: string; consultas: string[]; fontes: Array<{ url: string; titulo: string | null }> };
+
+type RespostaComBusca = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+    groundingMetadata?: {
+      webSearchQueries?: unknown;
+      groundingChunks?: Array<{ web?: { uri?: unknown; title?: unknown } }>;
+      groundingSupports?: Array<{ groundingChunkIndices?: unknown }>;
+    };
+  }>;
+};
+
+export async function buscarComGemini(prompt: string, modelo: string): Promise<RespostaDaBusca> {
+  const resposta = await geminiPost<RespostaComBusca>(`/models/${modelo}:generateContent`, {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2_048, thinkingConfig: raciocinioBaixo(modelo) },
+  }, undefined, { timeoutMs: 45_000, orcamentoMs: 55_000 });
+  const candidato = resposta.candidates?.[0];
+  const texto = (candidato?.content?.parts ?? []).filter(parte => !parte.thought && typeof parte.text === "string").map(parte => parte.text).join("").trim();
+  const meta = candidato?.groundingMetadata;
+  const consultas = Array.isArray(meta?.webSearchQueries) ? meta.webSearchQueries.filter((q): q is string => typeof q === "string") : [];
+  const pedacos = meta?.groundingChunks ?? [];
+  // As páginas que sustentam o texto primeiro (groundingSupports), depois as outras.
+  const usados = new Set<number>();
+  for (const apoio of meta?.groundingSupports ?? []) {
+    if (Array.isArray(apoio.groundingChunkIndices)) for (const i of apoio.groundingChunkIndices) if (typeof i === "number") usados.add(i);
+  }
+  const ordem = [...Array.from(usados), ...pedacos.map((_p, i) => i).filter(i => !usados.has(i))];
+  const fontes: RespostaDaBusca["fontes"] = [];
+  for (const i of ordem) {
+    const web = pedacos[i]?.web;
+    if (web && typeof web.uri === "string") fontes.push({ url: web.uri, titulo: typeof web.title === "string" ? web.title : null });
+  }
+  return { texto, consultas, fontes };
+}

@@ -15,6 +15,7 @@ import {
   meetingSummaryTranslations,
   privateContacts,
   resumoPorEmail,
+  resumoEmAudio,
   userProfiles,
   users,
 } from "../drizzle/schema";
@@ -2201,6 +2202,13 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
     .from(meetingDocuments)
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
 
+  // O áudio do resumo com a voz do Gemini (H19b): voz sintética, sem fala de
+  // ninguém, mas lê o resumo da reunião, e sai com ela (só as linhas com o MP3 no bucket).
+  const audiosDoResumo = (await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .where(and(eq(resumoEmAudio.meetingId, meetingId), eq(resumoEmAudio.ownerId, ownerId), isNotNull(resumoEmAudio.storageKey))))
+    .filter((linha): linha is LinhaDeAudio => !!linha.storageKey);
+
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
   // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
   // sai com a reunião, também antes do bucket. A linha fica, sem ele, para o
@@ -2223,8 +2231,16 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
   // ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos]);
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos, ...audiosDoResumo]);
   const saiu = new Set(sairam);
+  // O MP3 do resumo que saiu perde a chave; a linha fica para o teto de 24 h da
+  // dona (como a do resumo por e-mail). O que o bucket recusou fica com a chave
+  // e aparece no log de tirarDoBucket.
+  const audiosDoResumoQueSairam = audiosDoResumo.filter(audio => saiu.has(audio.id)).map(audio => audio.id);
+  if (audiosDoResumoQueSairam.length) {
+    await db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() })
+      .where(and(eq(resumoEmAudio.ownerId, ownerId), inArray(resumoEmAudio.id, audiosDoResumoQueSairam)));
+  }
   const documentosQueSairam = documentos.filter(documento => saiu.has(documento.id)).map(documento => documento.id);
   const documentosQueFicam = documentos.filter(documento => !saiu.has(documento.id)).map(documento => documento.id);
 

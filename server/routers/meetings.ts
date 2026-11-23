@@ -34,6 +34,8 @@ import {
 import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
+import { audioDoResumoDaDona } from "../resumo-em-audio";
+import { decidirComplemento, pedirComplemento } from "../complemento-pela-busca";
 import {
   desligarLinkAberto,
   LinkAbertoRecusado,
@@ -668,6 +670,28 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { meetingId, secao, ...campos } = input;
       return { id: await acrescentarItemDoResumo(ctx.user.openId, meetingId, secao, campos) };
+    }),
+
+  // "Baixar o áudio do resumo" (H19b, server/resumo-em-audio.ts): o MP3 com a
+  // voz do Gemini, gerado uma vez por texto e idioma e servido de novo do bucket.
+  // O idioma é o do resumo ou o de uma tradução já pronta (H11).
+  audioDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.string().min(2).max(12).optional() }))
+    .mutation(async ({ ctx, input }) => audioDoResumoDaDona(ctx.user.openId, input.meetingId, input.idioma, {
+      userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+    })),
+
+  // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
+  // dona pede num item; o que a busca achar espera a decisão dela.
+  pedirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => pedirComplemento(ctx.user.openId, input.itemId)),
+
+  decidirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid(), decisao: z.enum(["confirmar", "descartar"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await decidirComplemento(ctx.user.openId, input.itemId, input.decisao);
+      return { ok: true as const };
     }),
 
   perguntar: procedimentoDaReuniao

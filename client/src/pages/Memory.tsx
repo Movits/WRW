@@ -12,7 +12,7 @@ import { destinoDaFonte } from "@/lib/destino-da-fonte";
 // exatamente o que a validação vai digitar, então a tela ensina pelo exemplo.
 const SUGGESTION_IDS = ["suggestion1", "suggestion2", "suggestion3", "suggestion4", "suggestion5", "suggestion6"] as const;
 
-const TYPE_KEYS: Record<string, string> = { contact: "memory.typeContact", context: "memory.typeContext", meeting: "memory.typeMeeting" };
+const TYPE_KEYS: Record<string, string> = { contact: "memory.typeContact", context: "memory.typeContext", meeting: "memory.typeMeeting", meeting_summary: "memory.typeMeetingSummary" };
 
 export default function Memory() {
   const { t, i18n } = useTranslation();
