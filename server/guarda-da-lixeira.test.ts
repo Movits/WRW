@@ -125,6 +125,7 @@ describe("a varredura do router: quem leva a guarda", () => {
     // O motivo de cada um: o serviço filtra a lixeira na consulta, ou o campo é de outra tabela.
     const CONFERIDOS: Record<string, string> = {
       "agenda.ligarGravacao": "ligarGravacaoNaAgenda só liga a gravação visível (reuniaoVisivel)",
+      "perguntasEntreReunioes.perguntar": "reunioesDaEscolha e lerAsQueCabem filtram por reuniaoVisivel; a da lixeira é VARIAS_REUNIAO_NAO_ENCONTRADA (perguntar-a-varias-reunioes.integracao.test.ts)",
       "networkInteligente.pendencias": "listarPendencias tira as da reunião na lixeira (semReuniaoNaLixeira)",
       "enrichment.confirmSuggestion": "suggestionId é da sugestão do enriquecimento (enrichment_suggestions), não da reunião",
       "enrichment.createSuggestedContext": "suggestionId é da sugestão do enriquecimento, não da reunião",

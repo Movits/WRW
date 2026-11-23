@@ -125,3 +125,61 @@ A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li 
   vídeo público de terceiros para uso próprio);
 - se a caixa do link aberto de uma reunião feita de vídeo (a frase do item 5, desde a
   conferência de tela de 20/11/2026) pede alguma ressalva além dessa.
+
+## Aviso da legenda ao vivo — versão `legenda-2026-11-22`
+
+A G15b mostra, durante a gravação, a legenda do que está sendo dito, com segundos de
+atraso, pelo reconhecimento de voz do PRÓPRIO navegador (a Web Speech API), sem custo. A
+legenda não separa quem fala, não fica guardada e não substitui a transcrição da reunião,
+que continua sendo a da IA, por partes. Decisão do Roberto de 16/11/2026: no Chrome, o
+reconhecimento costuma mandar o áudio a um servidor do Google, e a tela diz isso antes de
+ligar, com o texto para a Cris revisar.
+
+É outro aviso, com versão própria em `shared/legenda-ao-vivo.ts`
+(`VERSOES_DO_AVISO_DA_LEGENDA`). Ele aparece na primeira vez que a dona liga a legenda em
+cada gravação; desligar e ligar de novo na mesma gravação não pergunta outra vez. A mesma
+regra das versões vale aqui: mudou o que o aviso diz, versão nova no fim da lista.
+
+### O aviso, como aparece na tela (pt-BR, chaves `meetings.caption.notice*` e `meetings.caption.consentLabel`)
+
+> **Ligar a legenda ao vivo?**
+>
+> A legenda usa o reconhecimento de voz deste navegador, sem custo. No Chrome, ele costuma
+> mandar o áudio a um servidor do Google para virar texto; em outros navegadores, o áudio
+> pode ir ao servidor da empresa do navegador. Esse envio é feito pelo navegador, fora da
+> WRW, e segue as regras de privacidade dessa empresa.
+>
+> A legenda não separa quem fala e pode errar palavras.
+>
+> Ela não fica guardada: some ao desligar ou ao encerrar a gravação. A transcrição da
+> reunião continua sendo a da IA, que chega por partes.
+
+A caixa que a dona marca antes de ligar: "As pessoas desta reunião sabem que, com a
+legenda ligada, o áudio pode ir ao serviço de voz do navegador, e concordam."
+
+### O que o aviso cobre, ponto a ponto
+
+1. **Quem processa o áudio.** O reconhecimento é do navegador: no Chrome, o áudio vai a um
+   servidor do Google; no Edge, em geral, ao da Microsoft; no Safari, ao da Apple ou ao
+   próprio aparelho. A WRW não recebe esse áudio nem o texto da legenda, e não escolhe nem
+   contrata esse serviço: ele segue a política de privacidade da empresa do navegador. É
+   diferente do aviso de gravação, em que o áudio vai ao Gemini por API, pela WRW.
+2. **A concordância das pessoas.** A dona declara que as pessoas da reunião sabem do envio
+   ao serviço de voz do navegador e concordam. A declaração vai à auditoria
+   (`audit_logs`, ação `MEETING_LIVE_CAPTION_ON`) antes de a legenda ligar, com a versão do
+   aviso, o texto que ela viu, o idioma da tela, o hash do texto, o IP e o navegador. Sem
+   essa linha, a legenda não liga.
+3. **Sem guarda.** O texto da legenda fica só na tela, enquanto a gravação dura: some ao
+   desligar ou ao encerrar, e não vai ao servidor nem à reunião. Pausar a gravação para a
+   legenda (o áudio deixa de ir ao serviço do navegador) e continuar a religa.
+4. **Sem separar quem fala.** A legenda é um texto corrido, sem "Falante 1" nem nomes.
+5. **Onde aparece.** Só onde o navegador tem o reconhecimento de voz (no Firefox, o botão
+   não aparece). Até o teste num aparelho de verdade, também não aparece no celular nem no
+   tablet: no Android e no iPhone o reconhecimento pode disputar o microfone com a gravação.
+
+### Para a Cris decidir
+
+- se o aviso basta como está ou se deve citar a empresa de cada navegador pelo nome;
+- se a caixa da concordância das pessoas é necessária (ela é o caminho mais seguro; o
+  Roberto pode vetar) e se a frase serve;
+- se o aviso de gravação (`meetings.consentNotice`) deve mencionar a legenda opcional.

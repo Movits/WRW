@@ -23,6 +23,7 @@ import type { CodigoDaRecusaDoAudio } from "@shared/baixar-audio";
 import { RECUSAS_DOS_DETALHES } from "@shared/detalhes-da-reuniao";
 import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
+import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
 import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import {
@@ -142,6 +143,9 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DA_JUNCAO.semAudio]: "meetings.join.errorNoAudio",
   [RECUSAS_DA_JUNCAO.longaDemais]: "meetings.join.errorTooLong",
   [RECUSAS_DA_JUNCAO.demais]: "meetings.join.errorTooMany",
+  // As recusas do ligar da legenda ao vivo (G15b, server/legenda-ao-vivo.ts e o teto em routers/meetings.ts).
+  [RECUSAS_DA_LEGENDA.foraDaGravacao]: "meetings.caption.errors.notRecording",
+  [RECUSAS_DA_LEGENDA.demais]: "meetings.caption.errors.tooMany",
   // As recusas da edição da transcrição (H18, server/editar-transcricao.ts).
   [RECUSAS_DA_EDICAO.foraDoEstado]: "meetings.editTranscript.errorState",
   [RECUSAS_DA_EDICAO.documento]: "meetings.editTranscript.errorDocument",

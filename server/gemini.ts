@@ -129,13 +129,20 @@ export async function geminiPost<T>(path: string, body: unknown, tentativas = ES
   throw new GeminiIndisponivelError(ultimoStatus);
 }
 
-export async function embedWithGemini(text: string, taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY" | "SEMANTIC_SIMILARITY" = "RETRIEVAL_DOCUMENT") {
+// `opcoes` serve a quem tem pressa: a ordem da Memória na pergunta a várias
+// reuniões (server/perguntar-a-varias-reunioes.ts) faz uma tentativa curta e,
+// sem resposta, segue sem a ordem. Sem `opcoes`, as retentativas de sempre.
+export async function embedWithGemini(
+  text: string,
+  taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY" | "SEMANTIC_SIMILARITY" = "RETRIEVAL_DOCUMENT",
+  opcoes: { tentativas?: number; timeoutMs?: number } = {},
+) {
   const payload = await geminiPost<{ embedding?: { values?: number[] } }>(`/models/${EMBEDDING_MODEL}:embedContent`, {
     model: `models/${EMBEDDING_MODEL}`,
     taskType,
     outputDimensionality: 768,
     content: { parts: [{ text: text.slice(0, 20_000) }] },
-  });
+  }, opcoes.tentativas, opcoes.timeoutMs === undefined ? {} : { timeoutMs: opcoes.timeoutMs });
   const vector = payload.embedding?.values;
   if (!Array.isArray(vector) || vector.length !== 768) throw new Error("Gemini não retornou um embedding de 768 dimensões.");
   return vector;

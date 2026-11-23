@@ -20,6 +20,7 @@ import { TRPCClientError } from "@trpc/client";
 import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@shared/proximas-acoes";
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
+import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { mensagemDaRecusaDaParte, mensagemDaRecusaDoAudio, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
@@ -413,5 +414,40 @@ describe("mensagemDeErroParaTela — a recusa do interesse da Bronze (U3) no idi
     await i18n.changeLanguage("en");
     expect(traduzirMensagemDoServidor(MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO, c => i18n.t(c)))
       .toBe("Complete your profile to see the suggested connections and express interest in them.");
+  });
+});
+
+// As recusas do ligar da legenda ao vivo (G15b, server/legenda-ao-vivo.ts e o
+// teto em routers/meetings.ts): o servidor manda o CÓDIGO, e a tabela o traduz.
+describe("mensagemDeErroParaTela — as recusas da legenda ao vivo (G15b) no idioma da tela", () => {
+  const recusa = (codigo: string, mensagem: string) =>
+    TRPCClientError.from({ error: { code: -32012, message: mensagem, data: { code: codigo, httpStatus: 412 } } });
+  const CASOS: Array<[string, string, string, string]> = [
+    ["PRECONDITION_FAILED", RECUSAS_DA_LEGENDA.foraDaGravacao, "A legenda só liga enquanto a reunião está gravando.", "Captions can only be turned on while the meeting is recording."],
+    ["TOO_MANY_REQUESTS", RECUSAS_DA_LEGENDA.demais, "A legenda foi ligada muitas vezes em sequência. Aguarde alguns minutos e tente de novo.", "Captions were turned on too many times in a row. Wait a few minutes and try again."],
+  ];
+
+  afterEach(async () => {
+    await i18n.changeLanguage("pt-BR");
+  });
+
+  it.each(CASOS)("%s: em português sai a frase, nunca o código", (codigo, mensagem, emPortugues) => {
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emPortugues);
+  });
+
+  it.each(CASOS)("%s: em inglês sai traduzida", async (codigo, mensagem, _emPortugues, emIngles) => {
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(recusa(codigo, mensagem), c => i18n.t(c))).toBe(emIngles);
+  });
+
+  it("nos 10 idiomas, nenhuma frase é o código cru", async () => {
+    for (const idioma of CODIGOS) {
+      await i18n.changeLanguage(idioma);
+      for (const codigo of Object.values(RECUSAS_DA_LEGENDA)) {
+        const frase = traduzirMensagemDoServidor(codigo, c => i18n.t(c));
+        expect(frase).not.toBe(codigo);
+        expect(frase.trim()).not.toBe("");
+      }
+    }
   });
 });

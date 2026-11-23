@@ -75,6 +75,8 @@ import {
 } from "@shared/busca-de-reunioes";
 import { juntarReunioes, RecusaDaJuncao } from "../juntar-reunioes";
 import { JANELA_DA_JUNCAO_MS, JUNCOES_POR_JANELA, RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX } from "@shared/juntar-reunioes";
+import { registrarLegendaLigada } from "../legenda-ao-vivo";
+import { JANELA_DA_LEGENDA_MS, LEGENDAS_POR_JANELA, RECUSAS_DA_LEGENDA, TEXTO_DO_AVISO_DA_LEGENDA_MAX, VERSOES_DO_AVISO_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { editarTranscricao, RecusaDaEdicao } from "../editar-transcricao";
 import {
   EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, LOCALIZAR_MAX, RECUSAS_DA_EDICAO, SUBSTITUIR_POR_MAX, TEXTO_CORRIDO_MAX, TEXTO_DO_TRECHO_MAX,
@@ -259,6 +261,11 @@ export const tetoDaBusca = criarTeto(BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENS
 // 10 minutos. Só conta a junção que entrou; a recusa devolve a vaga.
 export const tetoDaJuncao = criarTeto(JUNCOES_POR_JANELA, JANELA_DA_JUNCAO_MS, RECUSAS_DA_JUNCAO.demais);
 
+// Ligar a legenda ao vivo (G15b) grava uma linha de auditoria a cada vez: teto
+// próprio por dona, de 30 a cada hora, em memória como os outros (a tela pede
+// uma vez por gravação). Só conta o ligar aceito; a recusa e a falha devolvem
+// a vaga. A recusa sai como código (RECUSAS_DA_LEGENDA), que a tela traduz.
+export const tetoDaLegenda = criarTeto(LEGENDAS_POR_JANELA, JANELA_DA_LEGENDA_MS, RECUSAS_DA_LEGENDA.demais);
 // Editar a transcrição (H18) regrava as falas da reunião e uma linha de
 // auditoria a cada mudança: teto próprio por dona, de 200 edições a cada 10
 // minutos, em memória como os outros. Só conta a edição aceita; a recusa e o
@@ -701,6 +708,38 @@ export const meetingsRouter = router({
       const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
       return comRecusaTraduzida(() => perguntarDuranteAGravacao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
         segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
+    }),
+
+  // G15b: a legenda ao vivo é do navegador da dona, e o texto dela nunca vem
+  // para cá. Antes de ligar, a tela manda a confirmação da dona, com o aviso
+  // que ela viu (no Chrome, o áudio costuma ir a um servidor do Google), e o
+  // servidor a grava na auditoria (server/legenda-ao-vivo.ts): sem a linha, a
+  // legenda não liga. Só na reunião dela que está gravando.
+  ligarLegendaAoVivo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      concordanciaDasPessoas: z.literal(true),
+      versaoDoAviso: z.enum(VERSOES_DO_AVISO_DA_LEGENDA),
+      // O idioma da tela em que o aviso apareceu, e o aviso como apareceu.
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      textoExibido: z.string().trim().min(1).max(TEXTO_DO_AVISO_DA_LEGENDA_MAX),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaLegenda.reservar(ctx.user.openId);
+      try {
+        await registrarLegendaLigada(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+          versaoDoAviso: input.versaoDoAviso,
+          idioma: input.idioma,
+          textoExibido: input.textoExibido,
+        });
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+      return { success: true } as const;
     }),
 
   // H20: o rascunho de um e-mail de retorno, escrito pela IA a partir dos itens

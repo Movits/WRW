@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft, FolderInput, FolderPlus, History, ListChecks, Loader2, MapPin, Merge, Milestone, MonitorPlay, Pencil, ScanText, Search, SlidersHorizontal, Tag, Trash2,
+  ArrowLeft, FolderInput, FolderPlus, History, ListChecks, Loader2, MapPin, Merge, MessagesSquare, Milestone, MonitorPlay, Pencil, ScanText, Search, SlidersHorizontal, Tag, Trash2,
   UserRound, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { JuntarReunioes } from "@/components/JuntarReunioes";
 import { avisoDaRecusaDaLixeira, restaurarComAviso } from "@/components/LixeiraDeReunioes";
+import { PergunteAVariasReunioes } from "@/components/PergunteAVariasReunioes";
 import { CLASSES_DA_COR, EditorDePasta, emLotes, EscolherPasta, IconeDaPastaNaTela, type PastaNaTela } from "@/components/PastasDeReunioes";
 import { guardarBuscaRecente, lerBuscasRecentes, limparBuscasRecentes } from "@/lib/buscas-recentes";
 import { rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
@@ -188,6 +189,8 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
   const [escolhidas, setEscolhidas] = useState<string[]>([]);
   const [confirmando, setConfirmando] = useState<"juntar" | "mover" | "lixeira" | null>(null);
   const [mandando, setMandando] = useState(false);
+  // H6c: o Pergunte a várias reuniões, num diálogo próprio (components/PergunteAVariasReunioes.tsx).
+  const [perguntando, setPerguntando] = useState(false);
   const campo = useRef<HTMLInputElement | null>(null);
   const termoParado = useTermoParado(termo.trim());
   const agora = useMemo(() => Date.now(), [filtros.periodo]);
@@ -350,6 +353,12 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
             <button type="button" onClick={() => setEscolhendo(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-sm text-white/70 hover:bg-white/5">
               <ListChecks size={15} aria-hidden="true" />{t("meetings.select.button")}
+            </button>
+          )}
+          {!escolhendo && reunioes.filter(reuniao => reuniao.status === "ready").length >= 2 && (
+            <button type="button" onClick={() => setPerguntando(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-sm text-white/70 hover:bg-white/5">
+              <MessagesSquare size={15} aria-hidden="true" />{t("meetings.multiAsk.button")}
             </button>
           )}
           <button type="button" onClick={() => aoAbrir(rotaDaLixeira())}
@@ -540,6 +549,9 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
         <JuntarReunioes reunioes={reunioesEscolhidas}
           aoFechar={() => setConfirmando(null)}
           aoJuntar={meetingId => { sairDaEscolha(); aoAbrir(rotaDaReuniao(meetingId)); }} />
+      )}
+      {perguntando && (
+        <PergunteAVariasReunioes aoFechar={() => setPerguntando(false)} aoAbrir={destino => { setPerguntando(false); aoAbrir(destino); }} />
       )}
       {confirmando === "mover" && (
         <EscolherPasta reunioes={idsEscolhidos} pastas={consultaDasPastas.isSuccess ? pastas : null}

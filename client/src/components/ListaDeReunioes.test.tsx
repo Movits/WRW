@@ -551,3 +551,30 @@ describe("ListaDeReunioes — as vistas por origem e as pastas (H7d)", () => {
     for (const botao of within(vistas).getAllByRole("button")) expect(botao.className).toContain("shrink-0");
   });
 });
+
+describe("ListaDeReunioes — perguntar a várias reuniões (H6c)", () => {
+  it("o botão abre o diálogo, que pede as reuniões que a dona pode perguntar; abrir uma fonte fecha o diálogo e abre a reunião", async () => {
+    rede.respostas["perguntasEntreReunioes.reunioes"] = [
+      { id: REUNIOES[0].id, titulo: REUNIOES[0].title, criadaEm: REUNIOES[0].createdAt, etiquetas: ["Clientes"], origem: "gravacao", caracteres: 1000 },
+      { id: REUNIOES[1].id, titulo: REUNIOES[1].title, criadaEm: REUNIOES[1].createdAt, etiquetas: ["Mentoria"], origem: "arquivo", caracteres: 1000 },
+    ];
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Perguntar a várias" }));
+    const dialogo = screen.getByRole("dialog", { name: "Perguntar a várias reuniões" });
+    expect(await within(dialogo).findByRole("list", { name: "Etiquetas das suas reuniões" })).toBeInTheDocument();
+    expect(rede.chamadas.filter(c => c.path === "perguntasEntreReunioes.reunioes")).toHaveLength(1);
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Fechar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("com menos de duas reuniões prontas, o botão não aparece", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const client = trpc.createClient({ links: [linkFalso() as never] });
+    render(<trpc.Provider client={client} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <ListaDeReunioes reunioes={[REUNIOES[0], REUNIOES[3]]} rotuloDoStatus={r => `status:${r.status}`} classeDoStatus={() => ""} aoAbrir={aoAbrir}/>
+      </QueryClientProvider>
+    </trpc.Provider>);
+    expect(screen.queryByRole("button", { name: "Perguntar a várias" })).not.toBeInTheDocument();
+  });
+});

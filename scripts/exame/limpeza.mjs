@@ -47,6 +47,9 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_summary_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // O resumo por e-mail (H22): o exame não manda e-mail, mas a conta QA que mandar sai com o resto.
   { tabela: "resumo_por_email", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O Pergunte a várias reuniões (H6c): uma linha por pergunta, sem o conteúdo. O exame
+  // não pergunta, mas a conta QA que perguntar sai com o resto.
+  { tabela: "perguntas_entre_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as
