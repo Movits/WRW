@@ -359,8 +359,11 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
         </div>
       </div>
 
-      {/* Os filtros por origem e as pastas (H7d), como no app de referência. Rolam de lado no celular. */}
-      <div role="group" aria-label={t("meetings.views.label")} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      {/* Os filtros por origem e as pastas (H7d), como no app de referência. Quebram em
+          mais de uma linha no celular: rolando de lado, a 375 px "Pastas" (a entrada das
+          pastas) ficava fora da tela, sem barra de rolagem no iPhone, e com ela ativa
+          nenhuma vista visível aparecia marcada. */}
+      <div role="group" aria-label={t("meetings.views.label")} className="flex flex-wrap gap-2">
         {VISTAS_DA_LISTA.map(opcao => (
           <button key={opcao} type="button" aria-pressed={vista === opcao} onClick={() => mudarDeVista(opcao)}
             className={`shrink-0 rounded-full border px-4 py-1.5 text-sm ${vista === opcao ? "border-amber-300/60 bg-amber-300/15 text-amber-100" : "border-white/15 text-white/65 hover:bg-white/5"}`}>
@@ -546,7 +549,7 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
       {confirmando === "lixeira" && (
         <div role="dialog" aria-modal="true" aria-labelledby="mandar-para-a-lixeira-titulo" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#211e1b] p-6 shadow-2xl">
-            <h3 id="mandar-para-a-lixeira-titulo" className="mb-2 font-bold text-white">{t("meetings.trash.moveConfirmTitle")}</h3>
+            <h3 id="mandar-para-a-lixeira-titulo" className="mb-2 text-base font-bold text-white">{t("meetings.trash.moveConfirmTitle")}</h3>
             <p className="mb-2 text-xs text-white/50">{t("meetings.select.selected", { n: reunioesEscolhidas.length })}</p>
             <p className="mb-6 text-sm text-white/55">{t("meetings.trash.moveConfirmTextMany")}</p>
             <div className="flex gap-3">

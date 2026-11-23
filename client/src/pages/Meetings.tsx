@@ -60,7 +60,7 @@ import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { erroDoYoutubeSeRepete, idDoVideoDaReuniao, linkDoYoutubeNoSegundo, VIDEOS_DO_YOUTUBE_POR_DIA } from "@shared/youtube";
 import { ResumoDoYoutube } from "@/components/ResumoDoYoutube";
 import { ListaDeReunioes } from "@/components/ListaDeReunioes";
-import { avisoDaRecusaDaLixeira, LixeiraDeReunioes, restaurarComAviso } from "@/components/LixeiraDeReunioes";
+import { avisoDaRecusaDaLixeira, ehReuniaoNaLixeira, LixeiraDeReunioes, restaurarComAviso, ReuniaoNaLixeira } from "@/components/LixeiraDeReunioes";
 import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
 import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
@@ -824,7 +824,8 @@ export default function Meetings() {
   ) : screen === "detail" && reuniaoAberta ? (
     // key: ir de uma reunião direto a outra não herda a aba nem a tradução.
     // Excluir sai com replace: o voltar não reabre a reunião que deixou de existir.
-    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })} etiquetasSugeridas={etiquetasDaDona(meetings ?? [], i18n.language)} />
+    <MeetingDetail key={reuniaoAberta.id} meetingId={reuniaoAberta.id} onBack={() => navigate(ROTA_DAS_REUNIOES)} aoExcluir={() => navigate(ROTA_DAS_REUNIOES, { replace: true })}
+      aoAbrirALixeira={() => navigate(rotaDaLixeira())} etiquetasSugeridas={etiquetasDaDona(meetings ?? [], i18n.language)} />
   ) : naLixeira ? (
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto"><LixeiraDeReunioes aoVoltar={() => navigate(ROTA_DAS_REUNIOES)}/></div>
@@ -962,7 +963,7 @@ function DescartarGravacao({ aberta, aoAbrirOuFechar, aoDescartar }: { aberta: b
   );
 }
 
-function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { meetingId: string; onBack: () => void; aoExcluir: () => void; etiquetasSugeridas?: string[] }) {
+function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiquetasSugeridas }: { meetingId: string; onBack: () => void; aoExcluir: () => void; aoAbrirALixeira: () => void; etiquetasSugeridas?: string[] }) {
   const utils = trpc.useUtils();
   const { t, i18n } = useTranslation();
   // Em processamento (inclusive um reprocessamento em segundo plano), o detalhe
@@ -1233,6 +1234,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   // Reunião que não existe (excluída, de outra dona) e link cortado são
   // definitivos: um aviso no idioma da tela, sem "tentar de novo". A frase do
   // servidor vem em português, e a do zod em JSON.
+  // A reunião da própria dona que está na lixeira (H7d) não é "não
+  // encontrada": a guarda devolve o código dela, e a tela diz que está na
+  // lixeira, com o restaurar ali mesmo.
+  if (isError && ehReuniaoNaLixeira(error)) return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
+    <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
+    <ReuniaoNaLixeira meetingId={meetingId} aoAbrirALixeira={aoAbrirALixeira}/>
+  </div></main>;
   if (isError && (linkDeReuniaoInvalido(error) || reuniaoNaoExiste(error))) return <main className="min-h-screen p-4 md:p-8 text-white bg-transparent"><div className="max-w-5xl mx-auto">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white mb-6"><ArrowLeft size={16}/> {t("meetings.allMeetings")}</button>
     <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-sm text-white/70">{reuniaoNaoExiste(error) ? t("meetings.meetingNotFound") : t("meetings.invalidMeetingLink")}</div>
@@ -1309,8 +1317,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
   // H18: a dona edita a transcrição da reunião pronta, vendo o original (a
   // tradução é só para ler). O documento não se edita. Os trechos que ela já
-  // mudou levam a marca "editado", com o original da IA, pela posição.
-  const podeEditarATranscricao = meeting.status === "ready" && !ehDocumento && !!transcript && translationLanguage === idiomaOriginal;
+  // mudou levam a marca "editado", com o original da IA, pela posição. Na
+  // tradução, que é a vista padrão da reunião em outro idioma, a barra mostra
+  // "Editar a transcrição" com a frase de que a edição abre o original: o botão
+  // volta ao original e abre a edição (antes, ele sumia sem nenhuma dica).
+  const transcricaoEditavel = meeting.status === "ready" && !ehDocumento && !!transcript;
+  const naTraducaoDaTranscricao = translationLanguage !== idiomaOriginal;
+  const podeEditarATranscricao = transcricaoEditavel && !naTraducaoDaTranscricao;
   const editandoATranscricao = editandoTranscricao && podeEditarATranscricao;
   const edicaoLida = transcript?.edicao ?? EDICAO_VAZIA;
   const originaisDaEdicao = new Map(edicaoLida.originais.map(original => [original.indice, { texto: original.texto, falante: original.falante }]));
@@ -1493,8 +1506,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
         </div>
         {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)} focoDepois={seletorDaTraducao}/>}
         {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
-        {podeEditarATranscricao && <BarraDaEdicao edicao={edicaoLida} textos={textosDaEdicao} editando={editandoATranscricao}
-          aoMudarEditando={setEditandoTranscricao} comLinkAberto={!!meeting.shareToken} editar={edicaoDaTranscricao.editar} salvando={edicaoDaTranscricao.salvando}/>}
+        {transcricaoEditavel && <BarraDaEdicao edicao={edicaoLida} textos={textosDaEdicao} editando={editandoATranscricao} naTraducao={naTraducaoDaTranscricao}
+          aoMudarEditando={editando => {
+            // Na tradução, editar volta ao original: a dona edita o que foi falado.
+            if (editando && naTraducaoDaTranscricao) setTranslationLanguage(idiomaOriginal);
+            setEditandoTranscricao(editando);
+          }} comLinkAberto={!!meeting.shareToken} editar={edicaoDaTranscricao.editar} salvando={edicaoDaTranscricao.salvando}/>}
         {traducaoLonga.aguardando ? <div role="status" className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{t("meetings.translatingLongStatus")}</div> : translateTranscript.isPending ? <div className="text-white/55"><Loader2 className="inline animate-spin me-2" size={16}/>{ehDocumento ? t("meetings.document.translatingStatus") : t("meetings.translatingStatus")}</div> : <>
           {tiposPresentes.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/40">{t("meetings.highlightsLabel")}</span>
@@ -1571,7 +1588,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
     {confirmarExclusao && vaiParaALixeira && (
       <div role="dialog" aria-modal="true" aria-labelledby="confirmar-exclusao-reuniao" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
         <div className="bg-[#211e1b] border border-white/15 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-          <h3 id="confirmar-exclusao-reuniao" className="font-bold text-white mb-2">{t("meetings.trash.moveConfirmTitleOne")}</h3>
+          <h3 id="confirmar-exclusao-reuniao" className="text-base font-bold text-white mb-2">{t("meetings.trash.moveConfirmTitleOne")}</h3>
           <p className="text-sm text-white/50 mb-6">{t("meetings.trash.moveConfirmTextOne")}</p>
           <div className="flex gap-3">
             <button type="button" onClick={() => setConfirmarExclusao(false)} disabled={excluindo} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8 disabled:opacity-50">
@@ -1587,7 +1604,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, etiquetasSugeridas }: { m
     {confirmarExclusao && !vaiParaALixeira && (
       <div role="dialog" aria-modal="true" aria-labelledby="confirmar-exclusao-reuniao" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
         <div className="bg-[#211e1b] border border-white/15 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-          <h3 id="confirmar-exclusao-reuniao" className="font-bold text-white mb-2">{t("meetings.deleteConfirmTitle")}</h3>
+          <h3 id="confirmar-exclusao-reuniao" className="text-base font-bold text-white mb-2">{t("meetings.deleteConfirmTitle")}</h3>
           <p className="text-sm text-white/50 mb-6">{t("meetings.deleteConfirmText")}</p>
           <div className="flex gap-3">
             <button type="button" onClick={() => setConfirmarExclusao(false)} disabled={excluindo} className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm text-white/60 hover:bg-white/8 disabled:opacity-50">

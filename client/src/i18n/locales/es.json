@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "Editar la transcripción",
+      "editsInOriginal": "La edición abre la transcripción en el idioma original.",
       "title": "Editar la transcripción",
       "done": "Terminar",
       "saving": "Guardando…",
@@ -2379,7 +2380,9 @@
       "cancel": "Cancelar",
       "error": "No se pudo enviar a la papelera. Inténtalo de nuevo.",
       "errorRecording": "Una grabación todavía está en curso: termina la grabación antes de enviarla a la papelera.",
-      "errorExpired": "Esta reunión superó los 30 días en la papelera y se está eliminando para siempre."
+      "errorExpired": "Esta reunión superó los 30 días en la papelera y se está eliminando para siempre.",
+      "inTrash": "Esta reunión está en la papelera.",
+      "inTrashHelp": "Se queda en la papelera 30 días desde que llegó a ella. Hasta entonces se puede restaurar; después, se elimina para siempre."
     }
   },
   "connections": {

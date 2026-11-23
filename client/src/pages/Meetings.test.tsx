@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { LANGUAGES } from "@/i18n";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import Meetings from "./Meetings";
 import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
@@ -301,6 +302,9 @@ describe("Detalhe da reunião — excluir manda para a lixeira, com confirmaçã
     fireEvent.click(botaoExcluir());
 
     expect(tituloDoModal()).toBeInTheDocument();
+    // O título é pequeno, como o do "Descartar esta gravação?": o h3 sem classe
+    // herdava 36 px no computador e quebrava em três linhas na janela estreita.
+    esperarTituloPequeno(screen.getByRole("dialog", { name: "Mandar esta reunião para a lixeira?" }));
     // o texto diz o que muda (a lista, a busca e o link aberto) e o prazo para restaurar
     expect(screen.getByText(/sai da lista, da busca e do link aberto \(que é desligado\) e fica na lixeira por 30 dias/)).toBeInTheDocument();
     expect(duble.mutacoes.mandarParaALixeira?.mutate).not.toHaveBeenCalled();
@@ -366,6 +370,7 @@ describe("Detalhe da reunião — excluir manda para a lixeira, com confirmaçã
 
     expect(tituloDoModal()).not.toBeInTheDocument();
     expect(tituloDaExclusaoNaHora()).toBeInTheDocument();
+    esperarTituloPequeno(screen.getByRole("dialog", { name: "Excluir esta reunião?" }));
     // o texto nomeia tudo que some, e o que fica: as próximas ações confirmadas (H5a), soltas da reunião
     expect(screen.getByText(/áudio, a transcrição, as traduções e as sugestões de contato/)).toBeInTheDocument();
     expect(screen.getByText(/As próximas ações que você confirmou ficam na sua lista, sem o trecho da reunião\./)).toBeInTheDocument();

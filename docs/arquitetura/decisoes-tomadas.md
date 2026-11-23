@@ -610,10 +610,27 @@ gravado não se renomeia" no CLAUDE.md da raiz).
      refeitos sozinhos: o primeiro resumo pode sair com o nome antes da correção, e a dona
      toca "Refazer o resumo" quando terminar de corrigir. O envio automático do resumo por
      e-mail (H22), se ligado, sai com essa versão.
+- **Conferência de tela (22/11):**
+  - "Voltar tudo ao original" (ou o único trecho mudado de volta) deixava o aviso
+    "Refazer o resumo" diante de um resumo escrito antes da edição, convidando a gastar
+    uma chamada à IA por nada: o aviso só comparava a hora da edição com a do resumo.
+    Agora o resumo grava se a transcrição que leu estava editada
+    (`meeting_summaries.transcript_edited`; nulo nos resumos de antes da H18, que leram a
+    da IA), e o aviso sai só quando a transcrição mudou depois dele e uma das duas (a que
+    ele leu ou a de agora) não é a da IA. O resumo que leu uma versão editada continua de
+    outra versão diante da volta ao original;
+  - na tradução, que é a vista padrão da reunião em outro idioma, "Editar a transcrição"
+    aparece, com a frase "A edição abre a transcrição no idioma original": o botão volta
+    ao original e abre a edição (antes, sumia sem dica);
+  - o trecho apagado inteiro mostra, sob o campo, a frase da recusa (o jeito de tirar uma
+    fala inteira), em vez de só deixar o "Salvar" cinza.
 - **Onde:** `server/editar-transcricao.ts`, `shared/editar-transcricao.ts` e
   `meetings.editarTranscricao` em `server/routers/meetings.ts`; na tela,
   `EditarTranscricao.tsx`, `FormularioDoTrecho.tsx` e `TranscricaoPorFalante.tsx`.
-  Migração só aditiva: quatro colunas novas em `meeting_transcripts`.
+  Migração só aditiva: quatro colunas novas em `meeting_transcripts` (na 0025 do pacote) e
+  `meeting_summaries.transcript_edited` (na 0026, à parte: as regras do repositório
+  recusam apagar ou editar à mão os arquivos de `drizzle/`, então a 0025 não foi refeita;
+  juntar as duas numa só pede quem tenha essa permissão, antes do merge).
 
 ## 22/11/2026 — pastas e lixeira das reuniões, com exclusão adiada (H7d)
 
@@ -650,7 +667,18 @@ gravado não se renomeia" no CLAUDE.md da raiz).
      fila espera e volta ao restaurar; o que já estava na IA termina e fica guardado nela;
   6. a parte atrasada da gravação já encerrada entra na reunião da lixeira (acima);
   7. o Excluir imediato apaga também da lixeira, sem passar por ela;
-  8. até 50 pastas por dona, e uma pasta por reunião.
+  8. até 50 pastas por dona, e uma pasta por reunião;
+  9. a reunião da dona que está na lixeira, pedida pelo id, é NOT_FOUND com o código
+     `REUNIAO_NA_LIXEIRA`, e não com a frase da reunião de outra conta: o detalhe aberto por
+     um favorito ou pelo histórico diz "Esta reunião está na lixeira", com Restaurar e o
+     caminho da lixeira (conferência de tela de 22/11). Não abre enumeração: a guarda lê
+     só as reuniões da própria dona, e o id de outra conta segue "não encontrada".
+- **Conferência de tela (22/11):** a fileira das vistas quebra em linhas no celular (a
+  375 px, "Pastas" ficava fora da tela, e com ela ativa nenhuma vista visível aparecia
+  marcada), e os títulos das janelas novas (lixeira, pastas, mover) e das antigas do mesmo
+  molde (o Excluir da gravação em partes no ar e o Juntar) ficam pequenos, como o
+  "Descartar esta gravação?": sem classe, o h3 herdava 30 px no celular e 36 px no
+  computador.
 - **Onde:** `server/lixeira-de-reunioes.ts`, `server/guarda-da-lixeira.ts`,
   `server/reuniao-visivel.ts`, `server/pastas-de-reunioes.ts`, `shared/lixeira-de-reunioes.ts`
   e `shared/pastas-de-reunioes.ts`; na tela, `ListaDeReunioes.tsx`, `PastasDeReunioes.tsx` e

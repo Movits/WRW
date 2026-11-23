@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "Edit the transcript",
+      "editsInOriginal": "Editing opens the transcript in its original language.",
       "title": "Edit the transcript",
       "done": "Done",
       "saving": "Saving…",
@@ -2379,7 +2380,9 @@
       "cancel": "Cancel",
       "error": "Could not move to the trash. Try again.",
       "errorRecording": "A recording is still in progress: stop the recording before moving it to the trash.",
-      "errorExpired": "This meeting has been in the trash for more than 30 days and is being deleted for good."
+      "errorExpired": "This meeting has been in the trash for more than 30 days and is being deleted for good.",
+      "inTrash": "This meeting is in the trash.",
+      "inTrashHelp": "It stays in the trash for 30 days after it was moved there. Until then you can restore it; after that, it is deleted for good."
     }
   },
   "connections": {

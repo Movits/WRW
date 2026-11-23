@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "Modifier la transcription",
+      "editsInOriginal": "La modification ouvre la transcription dans sa langue d'origine.",
       "title": "Modifier la transcription",
       "done": "Terminer",
       "saving": "Enregistrement…",
@@ -2379,7 +2380,9 @@
       "cancel": "Annuler",
       "error": "Impossible de mettre à la corbeille. Réessayez.",
       "errorRecording": "Un enregistrement est encore en cours : arrêtez l'enregistrement avant de le mettre à la corbeille.",
-      "errorExpired": "Cette réunion est dans la corbeille depuis plus de 30 jours et est en cours de suppression définitive."
+      "errorExpired": "Cette réunion est dans la corbeille depuis plus de 30 jours et est en cours de suppression définitive.",
+      "inTrash": "Cette réunion est dans la corbeille.",
+      "inTrashHelp": "Elle reste dans la corbeille 30 jours après y avoir été mise. D'ici là, vous pouvez la restaurer ; ensuite, elle est supprimée définitivement."
     }
   },
   "connections": {

@@ -1430,6 +1430,13 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   // sozinhos.
   version: int("version").default(0).notNull(),
   generatedAt: bigint("generated_at", { mode: "number" }),
+  // A transcrição que a versão de agora leu estava editada pela dona (H18)? A
+  // fila grava junto com o generated_at. A dona que volta tudo ao original (ou
+  // o único trecho que mudou) devolve a transcrição que um resumo escrito sobre
+  // a versão da IA leu: ele não é de outra versão, e a tela não oferece
+  // "Refazer o resumo" (server/resumo-guardado.ts). Nulo: o resumo é de antes
+  // da edição existir, quando só havia a versão da IA.
+  transcriptEdited: boolean("transcript_edited"),
   // Controle da fila do resumo; fica no servidor.
   attempts: int("attempts").default(0).notNull(),
   lockedUntil: bigint("locked_until", { mode: "number" }),

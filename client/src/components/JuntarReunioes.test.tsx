@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
 import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import { JuntarReunioes } from "./JuntarReunioes";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -65,6 +66,7 @@ describe("JuntarReunioes", () => {
   it("abre na ordem cronológica, com a primeira marcada como a que fica", () => {
     abrir();
     expect(ordemNaTela()).toEqual(["Parte 1 da reunião", "Parte 2 da reunião", "Parte 3 da reunião"]);
+    esperarTituloPequeno(screen.getByRole("dialog"));
     expect(within(screen.getByRole("dialog")).getByText("Fica")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Subir: Parte 1 da reunião" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Descer: Parte 3 da reunião" })).toBeDisabled();

@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "Editar a transcrição",
+      "editsInOriginal": "A edição abre a transcrição no idioma original.",
       "title": "Editar a transcrição",
       "done": "Concluir",
       "saving": "Salvando…",
@@ -2379,7 +2380,9 @@
       "cancel": "Cancelar",
       "error": "Não foi possível mandar para a lixeira. Tente de novo.",
       "errorRecording": "Uma gravação ainda está em andamento: encerre a gravação antes de mandá-la para a lixeira.",
-      "errorExpired": "Esta reunião passou dos 30 dias na lixeira e está sendo apagada de vez."
+      "errorExpired": "Esta reunião passou dos 30 dias na lixeira e está sendo apagada de vez.",
+      "inTrash": "Esta reunião está na lixeira.",
+      "inTrashHelp": "Ela fica na lixeira por 30 dias desde que foi para lá. Até lá, dá para restaurar; depois, é apagada de vez."
     }
   },
   "connections": {

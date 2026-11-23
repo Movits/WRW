@@ -1,18 +1,23 @@
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { meetingContactSuggestions, meetingEntities, meetings, meetingSummaryItems } from "../drizzle/schema";
+import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { exigirDb } from "./db";
-import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { protectedProcedure } from "./_core/trpc";
 
 /**
  * A guarda da lixeira nos procedimentos que leem ou mexem numa reunião pelo id
- * (H7d). A reunião na lixeira é "não encontrada" para todos eles, com a mesma
- * frase da reunião de outra conta, salvo os da própria lixeira (mandar,
- * restaurar e apagar de vez), que usam o protectedProcedure e se conferem
- * sozinhos (server/lixeira-de-reunioes.ts), e o Excluir imediato
- * (meetings.delete, o do descarte da gravação), que tira a reunião de vez
- * esteja ela onde estiver.
+ * (H7d). A reunião na lixeira é "não encontrada" (NOT_FOUND) para todos eles,
+ * salvo os da própria lixeira (mandar, restaurar e apagar de vez), que usam o
+ * protectedProcedure e se conferem sozinhos (server/lixeira-de-reunioes.ts), e
+ * o Excluir imediato (meetings.delete, o do descarte da gravação), que tira a
+ * reunião de vez esteja ela onde estiver.
+ *
+ * A mensagem é o código REUNIAO_NA_LIXEIRA, e não a frase da reunião de outra
+ * conta: a dona que abre pelo favorito ou pelo histórico uma reunião dela que
+ * está na lixeira lê "Esta reunião está na lixeira", com o restaurar. Não abre
+ * enumeração: a guarda só lê as reuniões da própria dona, e o id de outra
+ * conta passa por ela sem achar nada e leva a frase do serviço, como sempre.
  *
  * Lê o pedido CRU (a guarda vem antes do zod) atrás dos campos que apontam
  * para uma reunião: meetingId e meetingIds, itemId (o item do resumo), entityId
@@ -49,12 +54,12 @@ export function idsDoPedido(pedido: unknown) {
   return { reunioes: Array.from(reunioes), itemId: umId(campos.itemId), entityId: umId(campos.entityId), suggestionId: umId(campos.suggestionId) };
 }
 
-const naLixeira = () => new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
+const naLixeira = () => new TRPCError({ code: "NOT_FOUND", message: RECUSAS_DA_LIXEIRA.naLixeira });
 
 /**
- * Recusa (NOT_FOUND) o pedido que aponta para uma reunião da dona que está na
- * lixeira. A reunião de outra conta não é lida aqui: o serviço a recusa como
- * sempre, com a frase dele.
+ * Recusa (NOT_FOUND, com o código REUNIAO_NA_LIXEIRA) o pedido que aponta para
+ * uma reunião da dona que está na lixeira. A reunião de outra conta não é lida
+ * aqui: o serviço a recusa como sempre, com a frase dele.
  */
 export async function recusarSeNaLixeira(ownerId: string, pedido: unknown): Promise<void> {
   const { reunioes, itemId, entityId, suggestionId } = idsDoPedido(pedido);

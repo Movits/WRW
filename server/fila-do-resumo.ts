@@ -7,6 +7,7 @@ import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resu
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { transcricaoEstaEditada } from "./editar-transcricao";
 import { foraDaLixeira } from "./reuniao-visivel";
 import { FalhaDaIA } from "./ia-em-json";
 import { avisarReuniaoPronta } from "./lembretes";
@@ -254,9 +255,13 @@ export function horaDaVersao(agora: number, revisaoLida: number, atual: { revisa
 /** A fase do resumo; true quando ele foi gravado (e o mapa vem em seguida). */
 async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   // A versão que a dona vê, editada ou não (H18), com a revisão: o resumo
-  // escrito sobre uma revisão anterior é gravado como de outra versão.
+  // escrito sobre uma revisão anterior é gravado como de outra versão. E se ela
+  // está editada (a coluna da versão da IA preenchida, sem ler esse texto): o
+  // resumo grava a marca (transcript_edited), e a tela sabe se ele leu a versão
+  // da IA (server/resumo-guardado.ts).
   const [transcricao] = await db.select({
     id: meetingTranscripts.id, revisao: meetingTranscripts.revision, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
+    editada: transcricaoEstaEditada,
   }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao) {
@@ -301,7 +306,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const agora = Date.now();
   let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
   try {
-    resultado = await gravarResumo(db, alvo, token, transcricao, idioma, resumo, agora);
+    resultado = await gravarResumo(db, alvo, token, { id: transcricao.id, revisao: transcricao.revisao, editada: Number(transcricao.editada) === 1 }, idioma, resumo, agora);
   } catch (erro) {
     // A IA já respondeu e o banco recusou (queda, deadlock): conta como falha
     // passageira, com espera, em vez de prender a linha até a reserva vencer.
@@ -333,7 +338,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
-  transcricao: { id: string; revisao: number }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+  transcricao: { id: string; revisao: number; editada: boolean }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     // A reunião travada até o fim: a exclusão (que marca 'deleted' antes de
@@ -410,6 +415,10 @@ async function gravarResumo(
       // ela já decidiu (sugestaoDoResumoNovo).
       ...sugestaoDoResumoNovo(ainda, resumo.titulo ?? null),
       version: sql`${meetingSummaries.version} + 1`, generatedAt: geradoEm,
+      // A transcrição que a IA leu estava editada (H18)? É a da leitura do
+      // começo, como a revisão do horaDaVersao: a edição no meio da geração não
+      // muda o que a IA leu.
+      transcriptEdited: transcricao.editada,
       // A IA devolveu itens e a conferência tirou todos: fica registrado, e a
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,

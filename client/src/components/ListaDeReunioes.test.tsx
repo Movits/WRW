@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { MENSAGEM_BUSCAS_DEMAIS } from "@shared/busca-de-reunioes";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import { ListaDeReunioes, type ReuniaoDaLista } from "./ListaDeReunioes";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -309,6 +310,7 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     fireEvent.click(caixaDe("Contrato em PDF"));
     fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mover para pasta" }));
     const janela = await screen.findByRole("dialog", { name: "Mover para qual pasta?" });
+    esperarTituloPequeno(janela);
     fireEvent.click(await within(janela).findByRole("button", { name: /Clientes/ }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Reuniões movidas para a pasta."));
     expect(rede.chamadas.filter(c => c.path === "meetings.moverParaPasta")).toEqual([
@@ -340,6 +342,7 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     fireEvent.click(caixaDe("Palestra no YouTube"));
     fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mandar para a lixeira" }));
     const confirmacao = screen.getByRole("dialog", { name: "Mandar para a lixeira?" });
+    esperarTituloPequeno(confirmacao);
     expect(within(confirmacao).getByText(/ficam na lixeira por 30 dias/)).toBeInTheDocument();
     expect(rede.chamadas.some(c => c.path === "meetings.mandarParaALixeira")).toBe(false);
     fireEvent.click(within(confirmacao).getByRole("button", { name: "Mandar para a lixeira" }));
@@ -535,10 +538,16 @@ describe("ListaDeReunioes — as vistas por origem e as pastas (H7d)", () => {
     expect(screen.getByRole("button", { name: /Tentar novamente/ })).toBeInTheDocument();
   });
 
-  it("a 375 px, as vistas rolam de lado sem quebrar a página", () => {
+  it("a 375 px, as vistas quebram em linhas, e não rolam de lado: 'Pastas' e a vista marcada ficam sempre na tela", () => {
     abrir();
     const vistas = screen.getByRole("group", { name: "Filtrar as reuniões por origem" });
-    expect(vistas.className).toContain("overflow-x-auto");
+    // As cinco medem 464 px numa largura de 345 px: rolando de lado, "Pastas"
+    // ficava fora da tela (sem barra de rolagem no iPhone), e com ela ativa
+    // nenhuma vista visível aparecia marcada. Quebrando, nenhuma fica de fora.
+    expect(vistas.className.split(/\s+/)).toContain("flex-wrap");
+    expect(vistas.className).not.toMatch(/overflow-x-(auto|scroll)/);
+    expect(within(vistas).getAllByRole("button").map(botao => botao.textContent)).toEqual(["Todas", "Gravadas", "Importadas", "YouTube", "Pastas"]);
+    // O chip não encolhe nem quebra o próprio rótulo.
     for (const botao of within(vistas).getAllByRole("button")) expect(botao.className).toContain("shrink-0");
   });
 });

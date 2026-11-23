@@ -453,6 +453,58 @@ describe.skipIf(!temBanco)("Editar a transcrição (integração)", () => {
     expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(false);
   });
 
+  it("voltar tudo ao original devolve a transcrição que o resumo leu: o aviso de outra versão sai sem refazer nada (o resumo de antes da H18 e o que a fila grava sobre a versão da IA)", async () => {
+    // O resumo de antes da edição existir: sem a marca (nula), leu a versão da IA.
+    const antigo = await reuniaoPronta();
+    await resumoDeAntesDaEdicao(antigo);
+    await editar(antigo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glenda" });
+    expect((await daDona().meetings.resumoGuardado({ meetingId: antigo.meetingId })).transcricaoEditadaDepois).toBe(true);
+    await editar(antigo, 1, { tipo: "restaurarTudo" });
+    // A volta grava a hora dela (depois do resumo), mas a transcrição é a da IA de novo.
+    const [resumoAntigo] = await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, antigo.meetingId));
+    const voltou = await transcricaoDe(antigo.meetingId);
+    expect(voltou).toMatchObject({ transcript: TEXTO, originalTranscript: null, revision: 2 });
+    expect(Number(voltou.editedAt)).toBeGreaterThan(Number(resumoAntigo.generatedAt));
+    expect(resumoAntigo.transcriptEdited).toBeNull();
+    expect((await daDona().meetings.resumoGuardado({ meetingId: antigo.meetingId })).transcricaoEditadaDepois).toBe(false);
+
+    // O resumo que a fila escreve sobre a versão da IA grava a marca falsa; o
+    // único trecho mudado, de volta ao original, também tira o aviso.
+    const alvo = await reuniaoPronta();
+    const banco = await db();
+    await banco.insert(meetingSummaries).values({ id: crypto.randomUUID(), meetingId: alvo.meetingId, ownerId: DONA, transcriptId: alvo.transcricaoId, status: "pending", createdAt: AGORA(), updatedAt: AGORA() });
+    gerarResumoDaReuniao.mockResolvedValue({ emoji: null, titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 });
+    gerarMapaMental.mockResolvedValue({ ramos: [{ rotulo: "Glenta", folhas: [] }, { rotulo: "Proposta", folhas: [] }] });
+    await fila.rodarUmaVez({ ownerId: DONA });
+    const [daFila] = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, alvo.meetingId));
+    expect(daFila).toMatchObject({ status: "ready", version: 1, transcriptEdited: false });
+    await editar(alvo, 0, { tipo: "texto", indice: 0, texto: "Bom dia, aqui é a Glenda, diretora da Akme." });
+    expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(true);
+    await editar(alvo, 1, { tipo: "restaurar", indice: 0 });
+    expect((await transcricaoDe(alvo.meetingId)).originalTranscript).toBeNull();
+    expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(false);
+    // Nada foi pedido à IA além do primeiro resumo e do mapa dele.
+    expect(gerarResumoDaReuniao).toHaveBeenCalledTimes(1);
+  });
+
+  it("o resumo escrito sobre a versão editada continua de outra versão quando a dona volta tudo ao original", async () => {
+    const alvo = await reuniaoPronta();
+    const banco = await db();
+    await editar(alvo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glenda" });
+    await banco.insert(meetingSummaries).values({ id: crypto.randomUUID(), meetingId: alvo.meetingId, ownerId: DONA, transcriptId: alvo.transcricaoId, status: "pending", createdAt: AGORA(), updatedAt: AGORA() });
+    gerarResumoDaReuniao.mockResolvedValue({ emoji: null, titulo: null, modelo: "gemini-teste-1", itens: [], recebidos: 0 });
+    gerarMapaMental.mockResolvedValue({ ramos: [{ rotulo: "Glenda", folhas: [] }, { rotulo: "Proposta", folhas: [] }] });
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect(gerarResumoDaReuniao.mock.calls[0][0].transcricao).toContain("Glenda");
+    const [gravado] = await banco.select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, alvo.meetingId));
+    expect(gravado).toMatchObject({ status: "ready", transcriptEdited: true });
+    expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(false);
+    // A transcrição volta ao que a IA escreveu ("Glenta"): o resumo leu "Glenda", e é de outra versão.
+    await editar(alvo, 1, { tipo: "restaurarTudo" });
+    expect((await transcricaoDe(alvo.meetingId)).originalTranscript).toBeNull();
+    expect((await daDona().meetings.resumoGuardado({ meetingId: alvo.meetingId })).transcricaoEditadaDepois).toBe(true);
+  });
+
   it("a busca entre reuniões e a exportação leem a versão editada; a exportação diz que foi editada", async () => {
     const alvo = await reuniaoPronta();
     await editar(alvo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glendalina" });

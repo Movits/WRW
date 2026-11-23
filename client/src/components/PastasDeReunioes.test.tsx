@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import { PASTAS_POR_DONA_MAX } from "@shared/pastas-de-reunioes";
 import { EditorDePasta, emLotes, EscolherPasta, IconeDaPastaNaTela, type PastaNaTela } from "./PastasDeReunioes";
 
@@ -65,6 +66,7 @@ describe("EditorDePasta — criar (H7d)", () => {
     const aoFechar = vi.fn();
     montar(<EditorDePasta aoFechar={aoFechar} aoCriar={aoCriar}/>);
     const janela = screen.getByRole("dialog", { name: "Nova pasta" });
+    esperarTituloPequeno(janela);
     const criar = within(janela).getByRole("button", { name: "Criar pasta" });
     expect(criar).toBeDisabled();
     fireEvent.change(within(janela).getByRole("textbox", { name: "Nome" }), { target: { value: "    " } });
@@ -107,6 +109,7 @@ describe("EditorDePasta — editar e apagar (H7d)", () => {
     const aoFechar = vi.fn();
     montar(<EditorDePasta pasta={CLIENTES} aoFechar={aoFechar}/>);
     const janela = screen.getByRole("dialog", { name: "Editar a pasta" });
+    esperarTituloPequeno(janela);
     expect(within(janela).getByRole("textbox", { name: "Nome" })).toHaveValue("Clientes");
     expect(within(janela).getByRole("button", { name: "Maleta" })).toHaveAttribute("aria-pressed", "true");
     expect(within(janela).getByRole("button", { name: "Azul" })).toHaveAttribute("aria-pressed", "true");
@@ -123,6 +126,7 @@ describe("EditorDePasta — editar e apagar (H7d)", () => {
     montar(<EditorDePasta pasta={CLIENTES} aoFechar={vi.fn()} aoApagar={aoApagar}/>);
     fireEvent.click(screen.getByRole("button", { name: "Apagar a pasta" }));
     const confirmacao = screen.getByRole("dialog", { name: "Apagar a pasta “Clientes”?" });
+    esperarTituloPequeno(confirmacao);
     expect(within(confirmacao).getByText(/As reuniões desta pasta não são apagadas/)).toBeInTheDocument();
     expect(chamadasDe("meetings.apagarPasta")).toEqual([]);
     fireEvent.click(within(confirmacao).getByRole("button", { name: "Apagar a pasta" }));

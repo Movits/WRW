@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
+import { esperarTituloPequeno } from "@/test/titulo-da-janela";
 import { LixeiraDeReunioes } from "./LixeiraDeReunioes";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -103,6 +104,7 @@ describe("LixeiraDeReunioes (H7d)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Apagar de vez: Reunião antiga" }));
     let confirmacao = screen.getByRole("dialog", { name: "Apagar esta reunião de vez?" });
+    esperarTituloPequeno(confirmacao);
     expect(within(confirmacao).getByText("Reunião antiga")).toBeInTheDocument();
     expect(within(confirmacao).getByText(/Não dá para desfazer/)).toBeInTheDocument();
     fireEvent.click(within(confirmacao).getByRole("button", { name: "Cancelar" }));
@@ -132,6 +134,7 @@ describe("LixeiraDeReunioes (H7d)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Esvaziar a lixeira" }));
     const confirmacao = screen.getByRole("dialog", { name: "Esvaziar a lixeira?" });
+    esperarTituloPequeno(confirmacao);
     expect(within(confirmacao).getByText(/Todas as reuniões da lixeira são apagadas para sempre/)).toBeInTheDocument();
     expect(chamadasDe("meetings.esvaziarLixeira")).toEqual([]);
     fireEvent.click(within(confirmacao).getByRole("button", { name: "Esvaziar" }));

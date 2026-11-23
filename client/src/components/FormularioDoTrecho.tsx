@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Loader2 } from "lucide-react";
 import { proximaVozLivre, TEXTO_DO_TRECHO_MAX } from "@shared/editar-transcricao";
@@ -25,6 +25,10 @@ function vozesEmOrdem(vozes: readonly string[], doTrecho: string): string[] {
  * O formulário de um trecho: o texto e a voz. "Nova voz" é o primeiro rótulo
  * livre (a pessoa que a IA juntou a outra voz). Salva só o que mudou; o trecho
  * não fica vazio. Esc cancela, como no nome da voz.
+ *
+ * Com o campo vazio, o "Salvar" para antes do servidor, e a frase da recusa
+ * dele (errorEmpty, com o jeito de tirar uma fala inteira) aparece sob o campo:
+ * só o botão cinza não dizia por quê.
  */
 export function FormularioDoTrecho({ texto, falante, vozes, rotulo, aoSalvar, aoFechar }: {
   texto: string;
@@ -38,6 +42,8 @@ export function FormularioDoTrecho({ texto, falante, vozes, rotulo, aoSalvar, ao
   const [novoTexto, setNovoTexto] = useState(texto);
   const [novaVoz, setNovaVoz] = useState(falante);
   const [salvando, setSalvando] = useState(false);
+  const idDoAvisoDeVazio = useId();
+  const vazio = !novoTexto.trim();
   const opcoes = vozesEmOrdem(vozes, falante);
   const livre = proximaVozLivre(opcoes);
 
@@ -60,8 +66,10 @@ export function FormularioDoTrecho({ texto, falante, vozes, rotulo, aoSalvar, ao
     className="mt-2 space-y-3 rounded-xl border border-amber-300/30 bg-black/20 p-3">
     <label className={ROTULO}>{t("meetings.editTranscript.segmentText")}
       <textarea autoFocus required value={novoTexto} onChange={evento => setNovoTexto(evento.target.value)} maxLength={TEXTO_DO_TRECHO_MAX}
+        aria-invalid={vazio || undefined} aria-describedby={vazio ? idDoAvisoDeVazio : undefined}
         rows={Math.min(10, Math.max(3, Math.ceil(texto.length / 70)))} dir="auto" className={`${CAMPO} resize-y leading-6`}/>
     </label>
+    {vazio && <p id={idDoAvisoDeVazio} role="status" className="text-xs text-amber-200/90">{t("meetings.editTranscript.errorEmpty")}</p>}
     {falante && <label className={ROTULO}>{t("meetings.editTranscript.segmentVoice")}
       <select value={novaVoz} onChange={evento => setNovaVoz(evento.target.value)} className={`${CAMPO} bg-[#211e1b]`}>
         {opcoes.map(voz => <option key={voz} value={voz} className="bg-white text-[#322C26]">{rotulo(voz)}</option>)}
@@ -69,7 +77,7 @@ export function FormularioDoTrecho({ texto, falante, vozes, rotulo, aoSalvar, ao
       </select>
     </label>}
     <div className="flex flex-wrap items-center gap-2">
-      <button type="submit" disabled={salvando || !novoTexto.trim()} className={BOTAO_PRINCIPAL}>
+      <button type="submit" disabled={salvando || vazio} className={BOTAO_PRINCIPAL}>
         {salvando ? <Loader2 size={14} className="animate-spin" aria-hidden/> : <Check size={14} aria-hidden/>} {t("meetings.editTranscript.save")}
       </button>
       <button type="button" onClick={aoFechar} disabled={salvando} className={BOTAO_SECUNDARIO}>{t("meetings.editTranscript.cancel")}</button>

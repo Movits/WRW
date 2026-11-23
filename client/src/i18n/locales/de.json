@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "Transkript bearbeiten",
+      "editsInOriginal": "Zum Bearbeiten wird das Transkript in der Originalsprache geöffnet.",
       "title": "Transkript bearbeiten",
       "done": "Fertig",
       "saving": "Wird gespeichert…",
@@ -2379,7 +2380,9 @@
       "cancel": "Abbrechen",
       "error": "Verschieben in den Papierkorb nicht möglich. Versuchen Sie es erneut.",
       "errorRecording": "Eine Aufnahme läuft noch: Beenden Sie die Aufnahme, bevor Sie sie in den Papierkorb verschieben.",
-      "errorExpired": "Dieses Meeting ist seit mehr als 30 Tagen im Papierkorb und wird gerade endgültig gelöscht."
+      "errorExpired": "Dieses Meeting ist seit mehr als 30 Tagen im Papierkorb und wird gerade endgültig gelöscht.",
+      "inTrash": "Dieses Meeting ist im Papierkorb.",
+      "inTrashHelp": "Es bleibt 30 Tage lang im Papierkorb, nachdem es dorthin verschoben wurde. Bis dahin können Sie es wiederherstellen; danach wird es endgültig gelöscht."
     }
   },
   "connections": {

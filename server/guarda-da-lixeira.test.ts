@@ -18,6 +18,13 @@ vi.mock("./db", async original => ({ ...(await original<typeof import("./db")>()
 const { idsDoPedido, procedimentoDaReuniao, recusarSeNaLixeira } = await import("./guarda-da-lixeira");
 const { appRouter } = await import("./routers");
 const { BancoIndisponivel } = await import("./banco-indisponivel");
+const { RECUSAS_DA_LIXEIRA } = await import("@shared/lixeira-de-reunioes");
+
+/** Um banco de mentira cuja consulta da guarda acha `linhas` (a cadeia select → from → [innerJoin] → where → limit). */
+function bancoQueAcha(linhas: Array<{ id: string }>) {
+  const cadeia = { from: () => cadeia, innerJoin: () => cadeia, where: () => cadeia, limit: async () => linhas };
+  return { select: () => cadeia };
+}
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const OUTRO = "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d";
@@ -74,6 +81,18 @@ describe("os campos que a guarda lê", () => {
     const recusada = Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3306"), { code: "ECONNREFUSED" }) });
     exigirDb.mockRejectedValueOnce(recusada);
     await expect(recusarSeNaLixeira("dona-1", { itemId: ID })).rejects.toBe(recusada);
+  });
+
+  it("a reunião da dona na lixeira é NOT_FOUND com o código dela (REUNIAO_NA_LIXEIRA), para a tela dizer que está na lixeira; sem nada achado, passa", async () => {
+    // Pelo id da reunião e pelo id de um item (o mesmo código, venha por onde vier).
+    for (const pedido of [{ meetingId: ID }, { itemId: ID }, { meetingIds: [OUTRO, ID] }]) {
+      exigirDb.mockResolvedValueOnce(bancoQueAcha([{ id: ID }]) as never);
+      await expect(recusarSeNaLixeira("dona-1", pedido)).rejects.toMatchObject({ code: "NOT_FOUND", message: RECUSAS_DA_LIXEIRA.naLixeira });
+    }
+    // Nada na lixeira da dona (a reunião está fora dela, ou é de outra conta): a
+    // guarda deixa passar, e o serviço responde com a frase de sempre.
+    exigirDb.mockResolvedValueOnce(bancoQueAcha([]) as never);
+    await expect(recusarSeNaLixeira("dona-1", { meetingId: ID })).resolves.toBeUndefined();
   });
 });
 

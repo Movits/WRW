@@ -86,7 +86,7 @@ export function JuntarReunioes({ reunioes, aoFechar, aoJuntar }: {
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="juntar-reunioes-titulo" className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-white/15 bg-[#211e1b] p-5 shadow-2xl sm:rounded-2xl sm:p-6">
-        <h3 id="juntar-reunioes-titulo" className="flex items-center gap-2 font-bold text-white"><Merge size={18} aria-hidden="true" />{t("meetings.join.title", { n: ordem.length })}</h3>
+        <h3 id="juntar-reunioes-titulo" className="flex items-center gap-2 text-base font-bold text-white"><Merge size={18} aria-hidden="true" />{t("meetings.join.title", { n: ordem.length })}</h3>
         <p className="mt-2 text-sm text-white/60">{t("meetings.join.orderHint")}</p>
         <ol className="mt-4 space-y-2">
           {ordem.map((reuniao, indice) => (

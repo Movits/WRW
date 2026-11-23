@@ -2165,6 +2165,7 @@
     },
     "editTranscript": {
       "start": "编辑转写",
+      "editsInOriginal": "编辑时会以原文语言打开转写。",
       "title": "编辑转写",
       "done": "完成",
       "saving": "正在保存…",
@@ -2379,7 +2380,9 @@
       "cancel": "取消",
       "error": "无法移到回收站，请重试。",
       "errorRecording": "仍有录音正在进行：请先结束录音，再将其移到回收站。",
-      "errorExpired": "此会议已在回收站中超过 30 天，正在被永久删除。"
+      "errorExpired": "此会议已在回收站中超过 30 天，正在被永久删除。",
+      "inTrash": "此会议在回收站中。",
+      "inTrashHelp": "它移到回收站后会保留 30 天。在此期间可以恢复；之后将被永久删除。"
     }
   },
   "connections": {

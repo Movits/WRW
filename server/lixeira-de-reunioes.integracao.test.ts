@@ -155,7 +155,9 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     expect((await banco.select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id))).length).toBe(1);
     expect((await daDona().meetings.list()).map(r => r.id)).not.toContain(id);
     expect((await buscarNasReunioes(DONA, "exportação", {})).resultados.map(r => r.meetingId)).not.toContain(id);
-    expect((await recusa(daDona().meetings.get({ meetingId: id }))).code).toBe("NOT_FOUND");
+    // O detalhe, para a dona, diz que está na lixeira (o código, que a tela
+    // traduz e com que oferece restaurar), e não que a reunião não existe.
+    expect(await recusa(daDona().meetings.get({ meetingId: id }))).toMatchObject({ code: "NOT_FOUND", message: RECUSAS_DA_LIXEIRA.naLixeira });
     expect((await recusa(publico().reuniaoAberta.ver({ token: token! }))).code).toBe("NOT_FOUND");
     expect(await banco.select().from(platformNotifications).where(and(eq(platformNotifications.userId, contaDaDona), eq(platformNotifications.actionUrl, rotaDaReuniao(id))))).toEqual([]);
     // A lixeira da dona a mostra, com a hora em que foi para lá.
@@ -262,6 +264,14 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     await daOutra().meetings.mandarParaALixeira({ meetingIds: [daOutraConta] });
     expect((await daDona().meetings.lixeira()).map(r => r.id)).not.toContain(daOutraConta);
     expect((await recusa(daDona().meetings.restaurarDaLixeira({ meetingIds: [daOutraConta] }))).code).toBe("NOT_FOUND");
+    // O código da lixeira é só da dona: pelo detalhe, a reunião de outra conta
+    // que está na lixeira dela é "não encontrada", com a frase de sempre, como a
+    // que não existe. Nada diz a ninguém que aquele id existe nem onde está.
+    const naoExiste = crypto.randomUUID();
+    for (const alvo of [daOutraConta, naoExiste]) {
+      expect(await recusa(daDona().meetings.get({ meetingId: alvo }))).toMatchObject({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+    }
+    expect(await recusa(daOutra().meetings.get({ meetingId: daOutraConta }))).toMatchObject({ code: "NOT_FOUND", message: RECUSAS_DA_LIXEIRA.naLixeira });
   });
 
   it("restaurar devolve a reunião como estava, na pasta dela e com o link desligado; mandar de novo não recomeça o prazo de quem já estava lá", async () => {

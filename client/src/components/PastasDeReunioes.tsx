@@ -79,12 +79,16 @@ export function avisoDaRecusaDaPasta(erro: unknown, t: (chave: string, opcoes?: 
   return padrao;
 }
 
-/** A janela de baixo no celular e centrada no computador, como a da junção. */
+/**
+ * A janela de baixo no celular e centrada no computador, como a da junção. O
+ * título leva o tamanho dele: sem classe, o h3 herdava o global (30 px no
+ * celular e 36 px no computador), como o "Descartar esta gravação?" não herda.
+ */
 function Janela({ titulo, idDoTitulo, children }: { titulo: string; idDoTitulo: string; children: React.ReactNode }) {
   return (
     <div role="dialog" aria-modal="true" aria-labelledby={idDoTitulo} className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-white/15 bg-[#211e1b] p-5 shadow-2xl sm:rounded-2xl sm:p-6">
-        <h3 id={idDoTitulo} className="font-bold text-white">{titulo}</h3>
+        <h3 id={idDoTitulo} className="text-base font-bold text-white">{titulo}</h3>
         {children}
       </div>
     </div>

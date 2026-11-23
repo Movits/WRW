@@ -244,4 +244,45 @@ describe("Reuniões — editar a transcrição (H18)", () => {
     abrirATranscricao();
     expect(screen.queryByText(/Você editou a transcrição depois deste resumo/)).not.toBeInTheDocument();
   });
+
+  it("na tradução (a reunião em inglês, com a tela em português), 'Editar a transcrição' aparece e diz que abre o original; tocar nele volta ao original com a edição aberta", () => {
+    duble.get.mockReturnValue(detalhe({ transcript: { ...transcricao({}), language: "en" } }));
+    abrirATranscricao();
+    // A vista padrão é a tradução para o idioma da tela: o seletor não está no original.
+    const seletor = screen.getByLabelText("Idioma de destino") as HTMLSelectElement;
+    expect(seletor.value).toBe("pt-BR");
+    const editar = screen.getByRole("button", { name: "Editar a transcrição" });
+    expect(editar).toHaveAccessibleDescription("A edição abre a transcrição no idioma original.");
+    // Na tradução, nenhum trecho se edita (o texto traduzido é só para ler).
+    expect(screen.queryByRole("button", { name: "Concluir" })).not.toBeInTheDocument();
+
+    fireEvent.click(editar);
+    expect(seletor.value).toBe("en");
+    expect(screen.getByRole("button", { name: "Concluir" })).toBeInTheDocument();
+    expect(screen.queryByText("A edição abre a transcrição no idioma original.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 00:04" }));
+    expect(screen.getByRole("form", { name: "Editar" })).toBeInTheDocument();
+  });
+
+  it("o trecho apagado inteiro: o 'Salvar' para e a frase sob o campo diz por quê, com o jeito de tirar uma fala inteira", () => {
+    abrirATranscricao();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a transcrição" }));
+    fireEvent.click(screen.getByRole("button", { name: "Editar o trecho de 00:04" }));
+    const formulario = screen.getByRole("form", { name: "Editar" });
+    const campo = within(formulario).getByLabelText("Texto do trecho");
+    const frase = "O trecho não pode ficar vazio. Para tirar uma fala inteira, escreva, por exemplo, [removido].";
+    expect(within(formulario).queryByText(frase)).not.toBeInTheDocument();
+
+    fireEvent.change(campo, { target: { value: "   " } });
+    expect(within(formulario).getByRole("button", { name: "Salvar" })).toBeDisabled();
+    expect(within(formulario).getByText(frase)).toBeInTheDocument();
+    expect(campo).toHaveAccessibleDescription(frase);
+    expect(campo).toHaveAttribute("aria-invalid", "true");
+
+    // O jeito que a frase ensina vale: o "Salvar" volta, e a frase sai.
+    fireEvent.change(campo, { target: { value: "[removido]" } });
+    expect(within(formulario).getByRole("button", { name: "Salvar" })).toBeEnabled();
+    expect(within(formulario).queryByText(frase)).not.toBeInTheDocument();
+    expect(campo).not.toHaveAttribute("aria-invalid");
+  });
 });

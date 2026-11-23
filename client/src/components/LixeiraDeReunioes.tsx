@@ -21,6 +21,7 @@ import { diasRestantesNaLixeira, RECUSAS_DA_LIXEIRA, type CodigoDaRecusaDaLixeir
 const AVISO_POR_RECUSA: Record<CodigoDaRecusaDaLixeira, (t: (chave: string) => string) => string> = {
   [RECUSAS_DA_LIXEIRA.gravando]: t => t("meetings.trash.errorRecording"),
   [RECUSAS_DA_LIXEIRA.vencida]: t => t("meetings.trash.errorExpired"),
+  [RECUSAS_DA_LIXEIRA.naLixeira]: t => t("meetings.trash.inTrash"),
 };
 
 /** O aviso de cada recusa da lixeira (o código do servidor), no idioma da tela. */
@@ -54,6 +55,50 @@ export async function restaurarComAviso(utils: Utilidades, ids: readonly string[
     toast.error(avisoDaRecusaDaLixeira(erro, t, t("meetings.trash.restoreError")));
   }
   await Promise.all([utils.meetings.list.invalidate(), utils.meetings.pastas.invalidate(), utils.meetings.lixeira.invalidate()]);
+}
+
+/** A recusa da guarda da lixeira (H7d): a reunião pedida é da dona e está na lixeira. */
+export function ehReuniaoNaLixeira(erro: unknown): boolean {
+  const { message, data } = (erro ?? {}) as { message?: unknown; data?: { code?: unknown } };
+  return data?.code === "NOT_FOUND" && message === RECUSAS_DA_LIXEIRA.naLixeira;
+}
+
+/**
+ * O detalhe de uma reunião da dona que está na lixeira (aberto por um favorito,
+ * pelo histórico ou por outra aba que a mandou para lá): diz isso, e não "não
+ * encontrada", com o restaurar ali mesmo e o caminho da lixeira. Restaurada, a
+ * reunião abre aqui (o detalhe é relido). A recusa do restaurar (passou dos 30
+ * dias) sai no aviso traduzido.
+ */
+export function ReuniaoNaLixeira({ meetingId, aoAbrirALixeira }: { meetingId: string; aoAbrirALixeira: () => void }) {
+  const { t } = useTranslation();
+  const utils = trpc.useUtils();
+  const [restaurando, setRestaurando] = useState(false);
+  const restaurar = async () => {
+    setRestaurando(true);
+    try {
+      await restaurarComAviso(utils, [meetingId], t);
+      await utils.meetings.get.invalidate({ meetingId });
+    } finally {
+      setRestaurando(false);
+    }
+  };
+  return (
+    <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-sm text-white/70">
+      <p className="flex items-center gap-2 font-semibold text-white"><Trash2 size={16} aria-hidden="true" className="shrink-0 text-white/60" />{t("meetings.trash.inTrash")}</p>
+      <p className="mt-2">{t("meetings.trash.inTrashHelp")}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={() => void restaurar()} disabled={restaurando}
+          className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-300/10 disabled:opacity-50">
+          {restaurando ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <RotateCcw size={15} aria-hidden="true" />}{t("meetings.trash.restore")}
+        </button>
+        <button type="button" onClick={aoAbrirALixeira}
+          className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5">
+          <Trash2 size={15} aria-hidden="true" />{t("meetings.trash.open")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 type Confirmacao = { tipo: "apagar"; id: string; titulo: string } | { tipo: "esvaziar" } | null;
@@ -149,7 +194,7 @@ export function LixeiraDeReunioes({ aoVoltar }: { aoVoltar: () => void }) {
       {confirmacao && (
         <div role="dialog" aria-modal="true" aria-labelledby="confirmar-lixeira-titulo" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#211e1b] p-6 shadow-2xl">
-            <h3 id="confirmar-lixeira-titulo" className="mb-2 font-bold text-white">
+            <h3 id="confirmar-lixeira-titulo" className="mb-2 text-base font-bold text-white">
               {confirmacao.tipo === "esvaziar" ? t("meetings.trash.emptyConfirmTitle") : t("meetings.trash.deleteForeverConfirmTitle")}
             </h3>
             {confirmacao.tipo === "apagar" && <p dir="auto" className="mb-2 break-words text-sm font-semibold text-white/80">{confirmacao.titulo}</p>}

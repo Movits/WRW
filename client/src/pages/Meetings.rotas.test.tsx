@@ -48,7 +48,10 @@ const duble = vi.hoisted(() => {
       // A gravação em partes, o padrão desde a G13b: ao montar, a página retoma
       // o que ficou no aparelho, e para isso lê a conta e fala com o servidor.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() },
+        // O restaurar do detalhe da reunião que está na lixeira (H7d).
+        restaurarDaLixeira: { mutate: vi.fn() },
+        // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
     },
     // O envio de cada parte da gravação em partes (a rota binária, fora do tRPC).
@@ -266,6 +269,35 @@ describe("Reuniões — a URL escolhe a tela", () => {
     fireEvent.click(screen.getByRole("button", { name: /Voltar às reuniões/ }));
     expect(window.location.search).toBe("");
     expect(await screen.findByRole("button", { name: /Nova reunião/ })).toBeInTheDocument();
+  });
+
+  it("a reunião da dona que está na lixeira, aberta pelo endereço (favorito ou histórico): a tela diz que está na lixeira, restaura ali mesmo e leva à lixeira", async () => {
+    // A guarda da lixeira devolve NOT_FOUND com o código dela (server/guarda-da-lixeira.ts).
+    duble.get.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: { message: "REUNIAO_NA_LIXEIRA", data: { code: "NOT_FOUND" } }, refetch: vi.fn() });
+    duble.utils.client.meetings.restaurarDaLixeira.mutate.mockResolvedValue({ restauradas: 1 });
+    abrirEm(`/meetings/${VINICOLA}`);
+    const aviso = screen.getByRole("alert");
+    expect(aviso).toHaveTextContent("Esta reunião está na lixeira.");
+    expect(aviso).toHaveTextContent("Ela fica na lixeira por 30 dias desde que foi para lá.");
+    expect(aviso).not.toHaveTextContent("Reunião não encontrada");
+
+    await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Restaurar" })); });
+    expect(duble.utils.client.meetings.restaurarDaLixeira.mutate).toHaveBeenCalledWith({ meetingIds: [VINICOLA] });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Reunião restaurada."));
+    // Restaurada, a reunião abre aqui mesmo: o detalhe é relido.
+    await waitFor(() => expect(duble.utils.meetings.get.invalidate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
+
+    // O outro caminho: a lixeira, pelo endereço dela.
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Lixeira" }));
+    expect(window.location.search).toBe("?lixeira=1");
+    expect(await screen.findByRole("heading", { name: "Lixeira" })).toBeInTheDocument();
+  });
+
+  it("a reunião que não existe, ou de outra conta, continua 'não encontrada', sem o restaurar", () => {
+    duble.get.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: { message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } }, refetch: vi.fn() });
+    abrirEm(`/meetings/${VINICOLA}`);
+    expect(screen.getByRole("alert")).toHaveTextContent("Reunião não encontrada. Ela pode ter sido excluída, ou o link é de outra conta.");
+    expect(screen.queryByRole("button", { name: "Restaurar" })).not.toBeInTheDocument();
   });
 });
 

@@ -132,8 +132,14 @@ function dataDaEdicao(ms: number, idioma: string): string {
  * o link aberto passa a mostrar a versão editada), localizar e substituir em
  * todos os trechos, com a contagem antes de trocar, e "Voltar tudo ao
  * original", que pede confirmação.
+ *
+ * Na tradução (`naTraducao`), a edição não abre ali: a dona edita o que foi
+ * falado, no idioma original. A barra fica fechada, com o botão e a frase que
+ * diz isso; o botão volta ao original e abre a edição (quem chama, em
+ * aoMudarEditando). Sem ela, o botão sumia na tradução, que é a vista padrão da
+ * reunião em outro idioma, sem nenhuma dica.
  */
-export function BarraDaEdicao({ edicao, textos, editando, aoMudarEditando, comLinkAberto, editar, salvando }: {
+export function BarraDaEdicao({ edicao, textos, editando, aoMudarEditando, comLinkAberto, editar, salvando, naTraducao = false }: {
   edicao: EdicaoNaTela;
   /** Os textos em que a substituição procura: os dos trechos, ou o texto corrido. */
   textos: readonly string[];
@@ -142,6 +148,8 @@ export function BarraDaEdicao({ edicao, textos, editando, aoMudarEditando, comLi
   comLinkAberto: boolean;
   editar: (operacao: OperacaoDaEdicao) => Promise<EdicaoFeitaNaTela | null>;
   salvando: boolean;
+  /** A transcrição na tela é a tradução: o botão abre a edição no original. */
+  naTraducao?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const prefixo = useId();
@@ -172,11 +180,12 @@ export function BarraDaEdicao({ edicao, textos, editando, aoMudarEditando, comLi
     if (feita?.mudou) toast.success(t("meetings.editTranscript.restoredAll"));
   }
 
-  if (!editando) {
+  if (!editando || naTraducao) {
     return <div className="mb-4 flex flex-wrap items-center gap-3">
-      <button type="button" onClick={() => aoMudarEditando(true)} className={BOTAO_SECUNDARIO}>
+      <button type="button" onClick={() => aoMudarEditando(true)} aria-describedby={naTraducao ? `${prefixo}-no-original` : undefined} className={BOTAO_SECUNDARIO}>
         <PencilLine size={14} aria-hidden/> {t("meetings.editTranscript.start")}
       </button>
+      {naTraducao && <span id={`${prefixo}-no-original`} className="text-xs text-white/50">{t("meetings.editTranscript.editsInOriginal")}</span>}
       {edicao.editada && edicao.editadaEm !== null && <span className="text-xs text-white/50">{t("meetings.editTranscript.editedOn", { data: dataDaEdicao(edicao.editadaEm, i18n.language) })}</span>}
     </div>;
   }

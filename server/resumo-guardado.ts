@@ -12,7 +12,7 @@ import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
-import { trechosNaTranscricaoDeAgora } from "./editar-transcricao";
+import { transcricaoEstaEditada, trechosNaTranscricaoDeAgora } from "./editar-transcricao";
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -51,6 +51,9 @@ const COLUNAS_DO_RESUMO = {
   // Quando a fila gravou a versão de agora: a transcrição editada depois disso
   // (H18) faz a tela oferecer "Refazer o resumo".
   generatedAt: meetingSummaries.generatedAt,
+  // Se a transcrição que essa versão leu estava editada (nulo: de antes da H18,
+  // leu a da IA): voltar tudo ao original devolve a que ela leu.
+  transcriptEdited: meetingSummaries.transcriptEdited,
   // O título que a IA sugere (só para a dona; o link não o recebe).
   suggestedTitle: meetingSummaries.suggestedTitle,
   suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
@@ -145,13 +148,25 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * resumo na fila (o primeiro, ou o refazer pedido) já vai ler a versão nova. A edição trava a reunião antes de
  * pegar a hora, como a gravação do resumo: a que chega depois do resumo gravado
  * tem sempre a hora maior (server/editar-transcricao.ts).
+ *
+ * Mudar depois do resumo não basta: a versão da IA é uma só. O resumo que leu
+ * a versão da IA (transcript_edited falso, ou nulo no resumo de antes da H18)
+ * diante da transcrição que voltou inteira a ela ("Voltar tudo ao original",
+ * ou o único trecho mudado de volta) leu o que está na tela: o aviso não sai,
+ * e a dona não gasta uma chamada à IA por nada. O resumo que leu uma versão
+ * editada continua de outra versão diante de qualquer mudança depois dele,
+ * mesmo a volta ao original.
  */
-async function transcricaoEditadaDepoisDoResumo(db: Executor, ownerId: string, meetingId: string, linha: { status: string; version: number; generatedAt: number | null } | undefined): Promise<boolean> {
+async function transcricaoEditadaDepoisDoResumo(
+  db: Executor, ownerId: string, meetingId: string,
+  linha: { status: string; version: number; generatedAt: number | null; transcriptEdited: boolean | null } | undefined,
+): Promise<boolean> {
   // Na fila (o refazer pedido), a versão nova já vai ler a transcrição editada.
   if (!linha || linha.status === "pending" || !linha.version || linha.generatedAt === null) return false;
-  const [transcricao] = await db.select({ editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
+  const [transcricao] = await db.select({ editadaEm: meetingTranscripts.editedAt, editada: transcricaoEstaEditada }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
-  return transcricao?.editadaEm != null && Number(transcricao.editadaEm) > Number(linha.generatedAt);
+  if (transcricao?.editadaEm == null || Number(transcricao.editadaEm) <= Number(linha.generatedAt)) return false;
+  return linha.transcriptEdited === true || Number(transcricao.editada) === 1;
 }
 
 /**

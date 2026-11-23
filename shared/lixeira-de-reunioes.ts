@@ -17,11 +17,17 @@ const DIA_MS = 24 * 60 * 60 * 1000;
  * As recusas da lixeira, como CÓDIGO (a tela traduz):
  * - GRAVANDO: a gravação em partes ainda está no ar (o gravador manda partes);
  *   a dona encerra a gravação antes;
- * - VENCIDA: passou o prazo, e a reunião está sendo excluída de vez (ou já saiu).
+ * - VENCIDA: passou o prazo, e a reunião está sendo excluída de vez (ou já saiu);
+ * - NA_LIXEIRA: a reunião da própria dona está na lixeira, e o pedido era para
+ *   ela (o detalhe aberto por um favorito ou pelo histórico, ou outra aba que a
+ *   mandou para lá). Vem com NOT_FOUND, e a tela diz que ela está na lixeira e
+ *   oferece restaurar. Só a dona o recebe: a guarda lê só as reuniões dela
+ *   (server/guarda-da-lixeira.ts), e a de outra conta continua "não encontrada".
  */
 export const RECUSAS_DA_LIXEIRA = {
   gravando: "LIXEIRA_GRAVANDO",
   vencida: "LIXEIRA_VENCIDA",
+  naLixeira: "REUNIAO_NA_LIXEIRA",
 } as const;
 export type CodigoDaRecusaDaLixeira = (typeof RECUSAS_DA_LIXEIRA)[keyof typeof RECUSAS_DA_LIXEIRA];
 
