@@ -44,7 +44,9 @@ const rede = {
 function linkFalso(): TRPCLink<never> {
   return () => ({ op }) => observable(observer => {
     rede.chamadas.push({ path: op.path, input: op.input });
-    const resposta = rede.respostas[op.path];
+    // A resposta pode depender do pedido (uma função do input): o lote que o servidor recusa.
+    const simulada = rede.respostas[op.path];
+    const resposta = typeof simulada === "function" ? (simulada as (input: unknown) => unknown)(op.input) : simulada;
     void Promise.resolve().then(() => {
       if (resposta === undefined) return observer.error(TRPCClientError.from(new Error(`rota não simulada: ${op.path}`)));
       if (resposta instanceof Error) return observer.error(resposta as never);
@@ -366,6 +368,38 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Uma gravação ainda está em andamento: encerre a gravação antes de mandá-la para a lixeira.", undefined));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
+  });
+
+  it("lixeira em lotes, com o segundo recusado: as que já foram saem da seleção, e o aviso de erro traz o Desfazer delas", async () => {
+    const muitas: ReuniaoDaLista[] = Array.from({ length: 51 }, (_v, i) => ({
+      id: `b2b2b2b2-0000-4000-8000-${String(i).padStart(12, "0")}`, title: `Reunião ${i + 1}`, createdAt: AGORA - i * 60_000, status: "ready", origem: "gravacao",
+    }));
+    // O primeiro lote (50) vai; o segundo (a 51ª) o servidor recusa: uma gravação começou noutra aba.
+    rede.respostas["meetings.mandarParaALixeira"] = (input: unknown) => (input as { meetingIds: string[] }).meetingIds.length === 50
+      ? { naLixeira: 50, linksDesligados: 0 }
+      : erroDoServidor("CONFLICT", "LIXEIRA_GRAVANDO");
+    rede.respostas["meetings.restaurarDaLixeira"] = { restauradas: 50 };
+    abrir("dona-1", muitas);
+    fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
+    fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Marcar todas" }));
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 51")).toBeInTheDocument();
+    fireEvent.click(within(barraDaSelecao()).getByRole("button", { name: "Mandar para a lixeira" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mandar para a lixeira" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const lotes = rede.chamadas.filter(c => c.path === "meetings.mandarParaALixeira").map(c => (c.input as { meetingIds: string[] }).meetingIds);
+    expect(lotes.map(lote => lote.length)).toEqual([50, 1]);
+    const [mensagem, opcoes] = vi.mocked(toast.error).mock.calls[0] as [string, { action: { label: string; onClick: () => void } }];
+    expect(mensagem).toBe("Uma gravação ainda está em andamento: encerre a gravação antes de mandá-la para a lixeira.");
+    expect(opcoes.action.label).toBe("Desfazer");
+    // Só a recusada continua marcada.
+    expect(within(barraDaSelecao()).getByText("Selecionadas: 1")).toBeInTheDocument();
+    expect(caixaDe("Reunião 51")).toBeChecked();
+    expect(caixaDe("Reunião 1")).not.toBeChecked();
+    // O Desfazer restaura as 50 que foram, e só elas.
+    await act(async () => { opcoes.action.onClick(); });
+    await waitFor(() => expect(rede.chamadas.some(c => c.path === "meetings.restaurarDaLixeira")).toBe(true));
+    expect(rede.chamadas.find(c => c.path === "meetings.restaurarDaLixeira")?.input).toEqual({ meetingIds: lotes[0] });
   });
 
   it("trocar de vista ou de pasta começa a seleção do zero: a lixeira leva só a que a dona marcou na pasta aberta", async () => {

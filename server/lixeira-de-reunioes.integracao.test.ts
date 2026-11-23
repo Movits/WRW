@@ -553,6 +553,30 @@ describe.skipIf(!temBanco)("Lixeira das reuniões (integração)", () => {
     await expect(daDona().networkInteligente.ignorarPendencia({ id: doPerfil })).resolves.toMatchObject({ ok: true, alvo: "perfil" });
   });
 
+  it("a reunião na lixeira some do perfil do contato e das contagens do painel (filtros sem a guarda, que entram pelo contato ou sem id), e volta ao restaurar", async () => {
+    const banco = await db();
+    await banco.insert(privateContacts).values({ ownerId: DONA, fullName: "Bruno do perfil", createdAt: AGORA, updatedAt: AGORA });
+    const [bruno] = await banco.select({ id: privateContacts.id }).from(privateContacts)
+      .where(and(eq(privateContacts.ownerId, DONA), eq(privateContacts.fullName, "Bruno do perfil")));
+    const { id } = await reuniaoPronta(DONA, { titulo: "Reunião com o Bruno", extra: { contactId: bruno.id } });
+    await banco.update(meetingTranscripts).set({ durationSeconds: 120 }).where(eq(meetingTranscripts.meetingId, id));
+    const reunioesDoPerfil = async () => (await daDona().networkInteligente.contato({ contactId: bruno.id })).reunioes.map(r => r.id);
+    const painel = async () => {
+      const { reunioes, minutos } = await daDona().networkInteligente.resumo();
+      return { total: reunioes.total, transcritas: reunioes.transcritas, segundos: minutos.segundosEmReunioesGuardadas };
+    };
+    expect(await reunioesDoPerfil()).toEqual([id]);
+    const antes = await painel();
+
+    await daDona().meetings.mandarParaALixeira({ meetingIds: [id] });
+    expect(await reunioesDoPerfil()).toEqual([]);
+    expect(await painel()).toEqual({ total: antes.total - 1, transcritas: antes.transcritas - 1, segundos: antes.segundos - 120 });
+
+    await daDona().meetings.restaurarDaLixeira({ meetingIds: [id] });
+    expect(await reunioesDoPerfil()).toEqual([id]);
+    expect(await painel()).toEqual(antes);
+  });
+
   it("a pendência escondida pela lixeira não engole a igual que a dona dita depois para o mesmo contato", async () => {
     const { gravarPendencias } = await import("./network-extracao");
     const banco = await db();

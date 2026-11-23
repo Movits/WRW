@@ -489,6 +489,25 @@ describe.skipIf(!temBanco)("Editar a transcrição (integração)", () => {
     expect(pendencias.map(p => `${p.campo}:${p.valor}`).sort()).toEqual(["cargo:diretora", "empresa:Acme", "empresa:Akme"]);
   });
 
+  it(`o pedido que não muda nada e o recusado devolvem a vaga do teto: depois de ${EDICOES_POR_JANELA} deles pelo router, a edição de verdade ainda entra`, async () => {
+    const alvo = await reuniaoPronta();
+    tetoDaEdicao.esquecer();
+    try {
+      // Um teto inteiro de pedidos sem mudança (o termo não está na transcrição)...
+      for (let i = 0; i < EDICOES_POR_JANELA; i++) {
+        await expect(editar(alvo, 0, { tipo: "substituir", localizar: "termo que não existe", substituirPor: "x" })).resolves.toMatchObject({ mudou: false });
+      }
+      await expect(editar(alvo, 0, { tipo: "substituir", localizar: "Glenta", substituirPor: "Glenda" })).resolves.toMatchObject({ mudou: true, revisao: 1 });
+      // ...e um teto inteiro de recusados (a revisão que a tela viu é outra).
+      for (let i = 0; i < EDICOES_POR_JANELA; i++) {
+        await expect(editar(alvo, 0, { tipo: "substituir", localizar: "Glenda", substituirPor: "Glenda Maria" })).rejects.toMatchObject({ code: "CONFLICT", message: RECUSAS_DA_EDICAO.mudou });
+      }
+      await expect(editar(alvo, 1, { tipo: "substituir", localizar: "Glenda", substituirPor: "Glenda Maria" })).resolves.toMatchObject({ mudou: true, revisao: 2 });
+    } finally {
+      tetoDaEdicao.esquecer();
+    }
+  }, 120_000);
+
   it("o teto de edições por dona: a 201ª em 10 minutos é recusada com o código", () => {
     const chave = `teto-${crypto.randomUUID()}`;
     for (let i = 0; i < EDICOES_POR_JANELA; i++) tetoDaEdicao.reservar(chave);

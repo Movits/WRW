@@ -289,6 +289,32 @@ describe("Tradução da transcrição — antesDeChamarAIA (teto do link aberto)
     expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
   });
 
+  it("a tradução pedida depois de uma edição (H18) não espera a da revisão de antes: cada revisão vai à IA, e cada pedido recebe a sua", async () => {
+    let entregarAntiga!: (valor: unknown) => void;
+    let entregarNova!: (valor: unknown) => void;
+    invokeLLM
+      .mockReturnValueOnce(new Promise(pronto => { entregarAntiga = pronto; }))
+      .mockReturnValueOnce(new Promise(pronto => { entregarNova = pronto; }));
+    const antiga = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+    let nova: ReturnType<typeof translatePrivateMeetingTranscript> | null = null;
+    try {
+      await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(1));
+      // A dona edita a transcrição enquanto a primeira tradução está na IA.
+      banco.revisao = 1;
+      nova = translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");
+      await vi.waitFor(() => expect(invokeLLM).toHaveBeenCalledTimes(2));
+    } finally {
+      // As duas respostas chegam sempre: a espera em memória não sobra para os testes seguintes.
+      entregarNova?.({ choices: [{ message: { content: "Edited talk." } }] });
+      entregarAntiga({ choices: [{ message: { content: "Old talk." } }] });
+      await Promise.allSettled([antiga, nova]);
+    }
+    await expect(nova).resolves.toEqual({ language: "en", text: "Edited talk.", cached: false });
+    await expect(antiga).resolves.toEqual({ language: "en", text: "Old talk.", cached: false });
+    // Só a da revisão de agora vai para o cache.
+    expect(banco.consultas.filter(c => c.sql.startsWith("insert"))).toHaveLength(1);
+  });
+
   it("terminada a primeira, um pedido novo vai à IA de novo (a espera não vira cache em memória)", async () => {
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: "Long talk." } }] });
     await translatePrivateMeetingTranscript("dona-1", "reuniao-1", "en");

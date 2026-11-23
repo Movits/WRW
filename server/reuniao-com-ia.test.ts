@@ -56,6 +56,8 @@ const banco = {
   segmentos: [] as unknown,
   // Os nomes que a dona deu às vozes (meetings.speaker_names).
   nomes: null as Record<string, string> | null,
+  // A hora em que a reunião foi para a lixeira (H7d); nula fora dela.
+  naLixeira: null as number | null,
   indisponivel: false,
   erroNaConsulta: null as Error | null,
   leituras: [] as Array<{ tabela: unknown; sql: string; params: unknown[]; campos: string[] }>,
@@ -85,7 +87,7 @@ vi.mock("./db", () => ({
           if (banco.erroNaConsulta) throw banco.erroNaConsulta;
           // Como o MySQL: a linha só volta se o WHERE pede a dona dela.
           if (!params.includes(banco.dona)) return [];
-          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes })] : [];
+          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes, trashedAt: banco.naLixeira })] : [];
           if (tabela === schema.meetingTranscripts) {
             return banco.transcricao === null ? [] : [soOPedido(campos, { transcript: banco.transcricao, segments: banco.segmentos })];
           }
@@ -139,7 +141,7 @@ beforeEach(() => {
   logInfo.mockClear();
   logAviso.mockClear();
   Object.assign(banco, {
-    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null,
+    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null, naLixeira: null,
     indisponivel: false, erroNaConsulta: null, leituras: [],
   });
 });
@@ -198,6 +200,13 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
 
   it("reunião de outra dona: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
     await expect(perguntar("outra-dona")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(banco.leituras).toHaveLength(1);
+    expect(invokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("a reunião que foi para a lixeira depois da guarda (H7d) é 'não encontrada' na leitura do serviço: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
+    banco.naLixeira = Date.now();
+    await expect(perguntar()).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(banco.leituras).toHaveLength(1);
     expect(invokeLLM).not.toHaveBeenCalled();
   });

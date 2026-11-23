@@ -221,6 +221,24 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     expect(chavesExpurgadas()).toEqual([storagePut.mock.calls.at(-1)![0]]);
   });
 
+  it("a reunião na lixeira (H7d): o PDF guardado não volta, e o documento novo é recusado como 'não encontrada' (rotas Express, fora da guarda do tRPC)", async () => {
+    const id = await documentoPronto();
+    const banco = await db();
+    await banco.update(meetings).set({ trashedAt: Date.now() }).where(eq(meetings.id, id));
+    storageGetBytes.mockClear();
+    expect(await lerDocumentoGuardado(DONA, id)).toBeNull();
+    expect(storageGetBytes).not.toHaveBeenCalled();
+
+    const { id: aEspera } = await iniciarDocumento(DONA, { title: "D", language: "pt-BR", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem: "pdf" });
+    await banco.update(meetings).set({ trashedAt: Date.now() }).where(eq(meetings.id, aEspera));
+    storagePut.mockClear();
+    const recusa = await receberDocumento({ ownerId: DONA, meetingId: aEspera, bytes: pdf("na lixeira") }).catch(erro => erro);
+    expect(recusa).toBeInstanceOf(RecusaDoDocumento);
+    expect(recusa.codigo).toBe("SEM_REUNIAO");
+    expect(storagePut).not.toHaveBeenCalled();
+    expect(await documentoDe(aEspera)).toBeUndefined();
+  });
+
   it("a falha grava o código (nunca frase), e o reprocesso relê o PDF guardado", async () => {
     gerarComArquivoNoGemini.mockRejectedValueOnce(new GeminiIndisponivelError(503));
     const id = await documentoPronto();
