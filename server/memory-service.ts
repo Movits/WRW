@@ -663,7 +663,7 @@ export async function answerFromMemory(query: string, hits: SearchHit[]) {
     response = await invokeLLM({
       max_tokens: 700,
       messages: [
-        { role: "system", content: "Você é a Memória Inteligente da WRW (Women Rocking the World). Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante." },
+        { role: "system", content: "Você é a Memória Inteligente da MarquesaMatch. Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante." },
         { role: "user", content: `Pergunta: ${query}
 
 Contexto privado:

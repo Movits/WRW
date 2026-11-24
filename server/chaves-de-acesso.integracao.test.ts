@@ -354,7 +354,7 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
     const opcoes = await chamar.opcoesDeCadastro();
     expect(opcoes.excludeCredentials?.map(c => c.id)).toEqual([autenticador.credencialId]);
     expect(opcoes.user.id).toBe(autenticador.identificadorDaConta);
-    expect(opcoes.rp).toEqual({ name: "WRW", id: RP_ID });
+    expect(opcoes.rp).toEqual({ name: "MarquesaMatch", id: RP_ID });
     expect(opcoes.authenticatorSelection).toMatchObject({ residentKey: "required", userVerification: "required" });
 
     await expect(chamar.cadastrar({ resposta: autenticador.criar(opcoes) })).rejects.toMatchObject({
@@ -780,7 +780,7 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
 
       expect(dubles.sendEmail).toHaveBeenCalledTimes(1);
       const [aviso] = dubles.sendEmail.mock.calls[0];
-      expect(aviso).toMatchObject({ to: conta.email, subject: "Nova chave de acesso na sua conta WRW" });
+      expect(aviso).toMatchObject({ to: conta.email, subject: "Nova chave de acesso na sua conta MarquesaMatch" });
       expect(aviso.text).toContain(`Olá, ${conta.name}.`);
       expect(aviso.text).toContain('com o nome "iPhone da dona"');
       expect(aviso.text).toContain("redefina a sua senha");

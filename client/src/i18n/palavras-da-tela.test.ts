@@ -40,8 +40,9 @@ function texto(idioma: string, chave: string): string {
   return achado[1];
 }
 
-// Os dois nomes próprios da plataforma. Saem do texto antes da conferência.
-const NOMES_PROPRIOS = /\b(?:business|smart)[\s-]*match(?:es)?\b/gi;
+// Os nomes próprios da plataforma: Business Match, Smart Match e a marca
+// MarquesaMatch (nome visível desde 23/11/2026). Saem do texto antes da conferência.
+const NOMES_PROPRIOS = /\b(?:(?:business|smart)[\s-]*match(?:es)?|MarquesaMatch)\b/gi;
 const PALAVRA_PROIBIDA = /match/i;
 
 /**

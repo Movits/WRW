@@ -50,7 +50,7 @@ async function ligarComAviso() {
   fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
   const aviso = await screen.findByRole("alertdialog");
   fireEvent.click(within(aviso).getByRole("checkbox"));
-  await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ligar a legenda" })); });
+  await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ativar legenda" })); });
   return aviso;
 }
 
@@ -76,12 +76,12 @@ describe("LegendaAoVivo (G15b)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
     const aviso = await screen.findByRole("alertdialog");
     expect(within(aviso).getByText("Ligar a legenda ao vivo?")).toBeInTheDocument();
-    expect(aviso).toHaveTextContent("No Chrome, ele costuma mandar o áudio a um servidor do Google para virar texto");
+    expect(aviso).toHaveTextContent("No Google Chrome, o áudio pode ser enviado aos servidores do Google para ser convertido em texto");
     expect(aviso).toHaveTextContent("A legenda não separa quem fala");
-    expect(aviso).toHaveTextContent("Ela não fica guardada");
+    expect(aviso).toHaveTextContent("A legenda não é guardada pela MarquesaMatch e desaparece ao fim da reunião");
     expect(aviso).toHaveTextContent("A transcrição da reunião continua sendo a da IA");
     // Sem a caixa marcada, não liga.
-    const confirmar = within(aviso).getByRole("button", { name: "Ligar a legenda" });
+    const confirmar = within(aviso).getByRole("button", { name: "Ativar legenda" });
     expect(confirmar).toBeDisabled();
     expect(falso.criados).toHaveLength(0);
     expect(duble.ligar).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe("LegendaAoVivo (G15b)", () => {
     const pedido = duble.ligar.mock.calls[0][0];
     expect(pedido).toMatchObject({ meetingId: ID, concordanciaDasPessoas: true, versaoDoAviso: VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA, idioma: "pt-BR" });
     expect(pedido.textoExibido).toContain("Ligar a legenda ao vivo?");
-    expect(pedido.textoExibido).toContain("servidor do Google");
+    expect(pedido.textoExibido).toContain("servidores do Google");
     expect(pedido.textoExibido).toContain("As pessoas desta reunião sabem");
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(falso.criados).toHaveLength(1);
@@ -174,7 +174,7 @@ describe("LegendaAoVivo (G15b)", () => {
     desenhar();
     fireEvent.click(screen.getByRole("button", { name: "Turn on captions" }));
     const aviso = await screen.findByRole("alertdialog");
-    expect(aviso).toHaveTextContent("In Chrome, it usually sends the audio to a Google server");
+    expect(aviso).toHaveTextContent("In Google Chrome, the audio may be sent to Google's servers");
     fireEvent.click(within(aviso).getByRole("checkbox"));
     await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Turn on captions" })); });
     expect(within(aviso).getByRole("alert")).toHaveTextContent("Captions can only be turned on while the meeting is recording.");
@@ -231,7 +231,7 @@ describe("LegendaAoVivo (G15b)", () => {
     desenhar({ idioma: "ar" });
     fireEvent.click(screen.getByRole("button", { name: "تشغيل التسميات التوضيحية" }));
     const aviso = await screen.findByRole("alertdialog");
-    expect(aviso).toHaveTextContent("في Chrome، يُرسَل الصوت عادةً إلى خادم تابع لـ Google");
+    expect(aviso).toHaveTextContent("في Google Chrome، قد يُرسَل الصوت إلى خوادم Google");
     fireEvent.click(within(aviso).getByRole("checkbox"));
     await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "تشغيل التسميات التوضيحية" })); });
     expect(falso.atual().lang).toBe("ar-SA");
@@ -246,7 +246,7 @@ describe("LegendaAoVivo (G15b)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
     const aviso = await screen.findByRole("alertdialog");
     fireEvent.click(within(aviso).getByRole("checkbox"));
-    fireEvent.click(within(aviso).getByRole("button", { name: "Ligar a legenda" }));
+    fireEvent.click(within(aviso).getByRole("button", { name: "Ativar legenda" }));
     expect(duble.ligar).toHaveBeenCalledTimes(1);
     unmount();
     await act(async () => { responder({ success: true }); });

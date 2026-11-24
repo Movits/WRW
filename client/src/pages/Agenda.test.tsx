@@ -503,12 +503,12 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     expect(duble.mutacao("atualizar").mutate).toHaveBeenCalledWith(expect.objectContaining({ id: ID, googleConvites: true }));
   });
 
-  it("salvou na WRW e a Google falhou: o aviso de sempre e outro com o porquê", async () => {
+  it("salvou na MarquesaMatch e a Google falhou: o aviso de sempre e outro com o porquê", async () => {
     render(<Agenda/>);
     fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
     await act(async () => { await duble.mutacao("criar").opcoes.onSuccess?.({ id: ID, naGoogle: "falhou", motivo: "revogada" }, {}); });
     expect(toast.success).toHaveBeenCalledWith("Reunião marcada.");
-    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", expect.anything());
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na MarquesaMatch, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", expect.anything());
     // Deu certo na Google, ou nada foi tentado: só o aviso de sempre.
     vi.mocked(toast.warning).mockClear();
     await act(async () => { await duble.mutacao("atualizar").opcoes.onSuccess?.({ id: ID, naGoogle: "ok" }, {}); });
@@ -521,7 +521,7 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: true, naGoogle: "falhou", motivo: "google" }, { id: ID }); });
     expect(toast.success).toHaveBeenCalledWith("Reunião tirada da agenda.");
     const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, { action: { label: string; onClick: () => void } }];
-    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
+    expect(texto).toBe("A reunião saiu da agenda da MarquesaMatch, mas continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
     expect(opcoes.action.label).toBe("Tentar de novo");
     opcoes.action.onClick();
     expect(duble.mutacao("tirarDaGoogle").mutate).toHaveBeenCalledWith({ id: ID, avisarConvidados: true });
@@ -531,7 +531,7 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     render(<Agenda/>);
     await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "revogada" }, { id: ID }); });
     const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, Record<string, unknown>];
-    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. Se quiser, apague o evento por lá.");
+    expect(texto).toBe("A reunião saiu da agenda da MarquesaMatch, mas continua na sua Google Agenda. Se quiser, apague o evento por lá.");
     expect(opcoes).not.toHaveProperty("action");
   });
 
@@ -540,14 +540,14 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "ok" }, { id: ID }); });
     expect(toast.success).toHaveBeenCalledWith("A reunião está na sua Google Agenda.");
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "falhou", motivo: "nao-conectada" }, { id: ID }); });
-    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Conecte a Google Agenda no Perfil.", expect.anything());
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na MarquesaMatch, mas não foi para a sua Google Agenda. Conecte a Google Agenda no Perfil.", expect.anything());
     expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalledTimes(2);
   });
 
-  it("Tentar de novo na reunião que já acabou e não está na Google: o aviso de que ela fica só na WRW, nunca 'está na sua Google Agenda'", async () => {
+  it("Tentar de novo na reunião que já acabou e não está na Google: o aviso de que ela fica só na MarquesaMatch, nunca 'está na sua Google Agenda'", async () => {
     render(<Agenda/>);
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: null }, { id: ID }); });
-    expect(toast.info).toHaveBeenCalledWith("Esta reunião já aconteceu e fica só na agenda da WRW.");
+    expect(toast.info).toHaveBeenCalledWith("Esta reunião já aconteceu e fica só na agenda da MarquesaMatch.");
     expect(toast.success).not.toHaveBeenCalled();
     expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalled();
   });

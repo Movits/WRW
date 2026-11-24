@@ -7,7 +7,7 @@ import { TempoDoTrecho } from "./ReuniaoComIA";
 import { TranscricaoPorFalante, type SegmentoDaTela } from "./TranscricaoPorFalante";
 
 /**
- * A reunião que veio de um vídeo do YouTube (H13) não tem player: a CSP da WRW
+ * A reunião que veio de um vídeo do YouTube (H13) não tem player: a CSP da MarquesaMatch
  * não deixa embutir o YouTube (frame-src 'none'), e o "▶" de cada fala, item do
  * resumo e citação do Pergunte é um link para o vídeo naquele segundo, numa aba
  * nova. O endereço sai da regra de shared/youtube.ts (provada em
@@ -50,7 +50,7 @@ describe("VideoDoYoutube: o vídeo no lugar da gravação", () => {
     expect(link).toHaveAttribute("href", CANONICA);
     abreEmAbaNova(link);
     expect(screen.getByText("A transcrição cobre só os primeiros 60 minutos do vídeo.")).toBeInTheDocument();
-    expect(screen.getByText(/A WRW não guarda o vídeo, só o link dele/)).toBeInTheDocument();
+    expect(screen.getByText(/A MarquesaMatch não guarda o vídeo, só o link dele/)).toBeInTheDocument();
     // Nenhum player: nem áudio, nem vídeo, nem frame (a CSP barraria o embed).
     expect(document.querySelector("audio, video, iframe")).toBeNull();
   });
@@ -59,7 +59,7 @@ describe("VideoDoYoutube: o vídeo no lugar da gravação", () => {
     render(<VideoDoYoutube id={ID} peloLink/>);
     expect(screen.getByRole("link", { name: /Abrir o vídeo no YouTube/ })).toHaveAttribute("href", CANONICA);
     expect(screen.getByText("A transcrição cobre só os primeiros 60 minutos do vídeo.")).toBeInTheDocument();
-    expect(screen.queryByText(/A WRW não guarda o vídeo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A MarquesaMatch não guarda o vídeo/)).not.toBeInTheDocument();
   });
 });
 

@@ -242,6 +242,6 @@ describe("PresidentPanel — abas no celular (print de 16/09, 360 px)", () => {
     // O quadrado da coroa não encolhe, e a legenda decorativa só aparece a partir de 640 px.
     const grupo = titulo.parentElement!.parentElement as HTMLElement;
     expect(grupo.firstElementChild).toHaveClass("shrink-0", "w-8", "h-8");
-    expect(screen.getByText("WRW · Backoffice Institucional")).toHaveClass("hidden", "sm:block");
+    expect(screen.getByText("MarquesaMatch · Backoffice Institucional")).toHaveClass("hidden", "sm:block");
   });
 });

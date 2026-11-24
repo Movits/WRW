@@ -137,7 +137,7 @@ export function montarEmailDoResumo(dados: {
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;border:1px solid #e6ddd6;">
           <tr>
             <td style="padding:24px 32px;border-bottom:1px solid #eee6e0;text-align:${alinhamento};">
-              <span style="font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#1a120c;">WRW</span>
+              <span style="font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#1a120c;">MarquesaMatch</span>
             </td>
           </tr>
           <tr>

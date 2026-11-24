@@ -241,7 +241,7 @@ describe("Reunião aberta pelo link", () => {
     duble.ver.mockReturnValue(emErro("NOT_FOUND"));
     abrir();
     expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
-    expect(screen.getByRole("link", { name: "Conhecer a WRW" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Conhecer a MarquesaMatch" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("button", { name: /Tentar/ })).not.toBeInTheDocument();
     expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
     expect(duble.opcoesDaConsulta!.retry(0, { data: { code: "BAD_REQUEST" } })).toBe(false);
@@ -1037,7 +1037,7 @@ describe("Reunião aberta pelo link — o vídeo do YouTube (H13)", () => {
     expect(link).toHaveAttribute("href", DO_VIDEO);
     expect(link).toHaveAttribute("target", "_blank");
     // O aviso de privacidade é da conta da dona: pelo link, não aparece.
-    expect(screen.queryByText(/A WRW não guarda o vídeo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A MarquesaMatch não guarda o vídeo/)).not.toBeInTheDocument();
     expect(container.querySelector("audio, video, iframe")).toBeNull();
     expect(screen.queryByText(i18n.t("meetings.recordingExpiredNotice"))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t("meetings.noRecordingStored"))).not.toBeInTheDocument();

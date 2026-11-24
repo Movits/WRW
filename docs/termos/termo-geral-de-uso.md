@@ -1,8 +1,8 @@
-# TERMO GERAL DE USO, PROTEÇÃO DE DADOS E INTERMEDIAÇÃO DIGITAL DA PLATAFORMA WRW
+# TERMO GERAL DE USO, PROTEÇÃO DE DADOS E INTERMEDIAÇÃO DIGITAL DA PLATAFORMA MARQUESAMATCH
 
 ## 1. IDENTIFICAÇÃO DAS PARTES
 
-1.1. Este instrumento (“Termo”) regula, de forma unificada, o acesso e a utilização da plataforma digital WOMEN ROCKING THE WORLD — WRW (“PLATAFORMA”), de titularidade da GK Gestão Administrativa e de Negócios LTDA, sociedade empresária limitada, inscrita no CNPJ sob o nº 62.982.808/0001-79, Inscrição Estadual nº 08.433.860/001-01, com sede em Brasília/DF, que atuará como CONTROLADORA dos dados pessoais nos tratamentos em que determinar as finalidades e os meios de tratamento, podendo atuar como OPERADORA quando realizar tratamento em nome de terceiro, conforme a legislação aplicável.
+1.1. Este instrumento (“Termo”) regula, de forma unificada, o acesso e a utilização da plataforma digital MARQUESAMATCH (“PLATAFORMA”), de titularidade da GK Gestão Administrativa e de Negócios LTDA, sociedade empresária limitada, inscrita no CNPJ sob o nº 62.982.808/0001-79, Inscrição Estadual nº 08.433.860/001-01, com sede em Brasília/DF, que atuará como CONTROLADORA dos dados pessoais nos tratamentos em que determinar as finalidades e os meios de tratamento, podendo atuar como OPERADORA quando realizar tratamento em nome de terceiro, conforme a legislação aplicável.
 
 1.2. A PLATAFORMA disponibiliza ambiente digital integrado destinado à aproximação, ao contato, à interação e ao desenvolvimento de relacionamentos entre pessoas físicas e jurídicas que apresentem interesses negociais, empresariais, profissionais, institucionais, comerciais, de investimento ou de cooperação potencialmente compatíveis.
 

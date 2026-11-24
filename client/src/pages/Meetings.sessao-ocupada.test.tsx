@@ -314,7 +314,7 @@ describe("Reuniões — o que ocupa a sessão", () => {
     expect(motivoDaOcupacao()).toBe("enviando");
     // Sem duração legível, o envio para antes do servidor: a ocupação sai junto.
     await act(async () => { entregarDuracao(null); });
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa ALAC, que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa ALAC, que a MarquesaMatch ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(sessaoOcupada()).toBe(false);
   });
 
@@ -580,7 +580,7 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
       fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
       const aviso = await screen.findByRole("alertdialog");
       fireEvent.click(within(aviso).getByRole("checkbox"));
-      await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ligar a legenda" })); });
+      await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ativar legenda" })); });
       expect(ligar).toHaveBeenCalledWith(expect.objectContaining({ meetingId: VINICOLA, concordanciaDasPessoas: true }));
       expect(falso.atual()).toMatchObject({ lang: "pt-BR", emCurso: true });
       falso.resultados(["Bom dia, Bia, vamos falar da feira."]);
