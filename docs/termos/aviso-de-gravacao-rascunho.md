@@ -126,6 +126,27 @@ A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li 
 - se a caixa do link aberto de uma reunião feita de vídeo (a frase do item 5, desde a
   conferência de tela de 20/11/2026) pede alguma ressalva além dessa.
 
+## Aviso da legenda ao vivo — versão `legenda-2026-11-23` (texto da Cris)
+
+A Cris mandou o texto da legenda em 23/11/2026, já com o nome MarquesaMatch. A chave
+`meetings.caption.noticeBrowser` passou a ser o texto dela, e a primeira frase de
+`meetings.caption.noticeNotSaved` saiu, porque o texto dela já diz que a legenda não fica
+guardada. O botão de confirmar passou a "Ativar legenda" (o "Agora não" já existia). A
+caixa de concordância das pessoas e a frase de que a legenda não separa quem fala
+continuam. A versão anterior, abaixo, segue aceita para a aba aberta antes do deploy.
+
+> **Ligar a legenda ao vivo?**
+>
+> A legenda ao vivo usa o reconhecimento de voz do navegador. No Google Chrome, o áudio
+> pode ser enviado aos servidores do Google para ser convertido em texto. A legenda não é
+> guardada pela MarquesaMatch e desaparece ao fim da reunião.
+>
+> A legenda não separa quem fala e pode errar palavras.
+>
+> A transcrição da reunião continua sendo a da IA, que chega por partes.
+
+Botões: [Ativar legenda] [Agora não].
+
 ## Aviso da legenda ao vivo — versão `legenda-2026-11-22`
 
 A G15b mostra, durante a gravação, a legenda do que está sendo dito, com segundos de

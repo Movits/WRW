@@ -19,11 +19,11 @@
  * versão NOVA no fim da lista e troque a VIGENTE: as anteriores seguem aceitas,
  * para a aba aberta antes do deploy, e a prova guarda a que veio, com o texto.
  */
-export const VERSOES_DO_AVISO_DA_LEGENDA = ["legenda-2026-11-22"] as const;
+export const VERSOES_DO_AVISO_DA_LEGENDA = ["legenda-2026-11-22", "legenda-2026-11-23"] as const;
 
 export type VersaoDoAvisoDaLegenda = (typeof VERSOES_DO_AVISO_DA_LEGENDA)[number];
 
-export const VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA: VersaoDoAvisoDaLegenda = "legenda-2026-11-22";
+export const VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA: VersaoDoAvisoDaLegenda = "legenda-2026-11-23";
 
 /** O teto do texto do aviso que a tela manda para a prova (o aviso inteiro, com a caixa, em qualquer dos 10 idiomas). */
 export const TEXTO_DO_AVISO_DA_LEGENDA_MAX = 3000;

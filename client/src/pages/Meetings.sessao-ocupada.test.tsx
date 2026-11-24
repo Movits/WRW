@@ -580,7 +580,7 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
       fireEvent.click(screen.getByRole("button", { name: "Ligar a legenda" }));
       const aviso = await screen.findByRole("alertdialog");
       fireEvent.click(within(aviso).getByRole("checkbox"));
-      await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ligar a legenda" })); });
+      await act(async () => { fireEvent.click(within(aviso).getByRole("button", { name: "Ativar legenda" })); });
       expect(ligar).toHaveBeenCalledWith(expect.objectContaining({ meetingId: VINICOLA, concordanciaDasPessoas: true }));
       expect(falso.atual()).toMatchObject({ lang: "pt-BR", emCurso: true });
       falso.resultados(["Bom dia, Bia, vamos falar da feira."]);
