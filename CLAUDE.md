@@ -6,10 +6,13 @@ para docs/arquitetura/decisoes-tomadas.md. Teto: 170 linhas. -->
 
 ## O projeto
 
-**WRW — Women Rocking the World**: CRM de networking em que cada usuária mantém uma base
+**MarquesaMatch**: CRM de networking em que cada usuária mantém uma base
 privada de contatos e a IA cruza o que cada contato **possui** com o que cada contato
-**procura** para gerar oportunidades. Produção em wrwglobal.org. O nome anterior, MMM
-(Mulheres que Movem o Mundo), segue em nomes de infraestrutura e em dados gravados. Todo o
+**procura** para gerar oportunidades. Produção em wrwglobal.org. O nome mais antigo, MMM
+(Mulheres que Movem o Mundo), segue em nomes de infraestrutura e em dados gravados.
+Desde 23/11/2026 o nome visível é MarquesaMatch (decisão da cliente); o anterior, WRW
+(Women Rocking the World), segue com o MMM em infraestrutura, domínio, artes da logo e
+dados gravados. Todo o
 texto do repositório (docs, commits, PRs, comentários) é em português do Brasil. Commit e
 PR dizem o que mudou, por quê e como verificar, em português claro.
 
