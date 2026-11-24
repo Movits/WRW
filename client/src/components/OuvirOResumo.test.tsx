@@ -204,6 +204,21 @@ describe("Ouvir o resumo — ler, pausar, continuar e parar", () => {
   });
 });
 
+describe("Ouvir o resumo — de onde vem o áudio", () => {
+  it("com a voz do aparelho, diz que o áudio é dela, não da IA (texto da Cris de 23/11, ajustado à voz local)", () => {
+    instalarSinteseFalsa({ vozes: VOZES });
+    ouvir();
+    expect(screen.getByText("Áudio gerado pela voz do próprio aparelho.")).toBeInTheDocument();
+    expect(screen.queryByText(/IA da Google/)).not.toBeInTheDocument();
+  });
+
+  it("sem voz para o idioma, só a explicação aparece", () => {
+    instalarSinteseFalsa({ vozes: VOZES });
+    render(<OuvirOResumo falas={FALAS} idioma="ja"/>);
+    expect(screen.queryByText("Áudio gerado pela voz do próprio aparelho.")).not.toBeInTheDocument();
+  });
+});
+
 describe("Ouvir o resumo — sem voz para o idioma, o botão explica", () => {
   it("sem voz do idioma do resumo: o botão fica desligado, mas focável, e explica com o nome do idioma; clicar não lê", () => {
     const voz = instalarSinteseFalsa({ vozes: VOZES });

@@ -98,14 +98,14 @@ describe("conectar", () => {
     expect(screen.queryByRole("button", { name: /Desconectar/ })).not.toBeInTheDocument();
   });
 
-  it("antes de autorizar, o subtítulo e a nota de privacidade dizem tudo em que a MarquesaMatch mexe: as reuniões e as próximas ações com prazo (H5c)", () => {
+  it("antes de autorizar, o subtítulo diz em que a MarquesaMatch mexe (H5c) e a nota de privacidade é o texto da Cris (23/11)", () => {
     duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
     render(<ConexaoGoogleAgenda />);
     expect(screen.getByText(
       "Conecte a sua conta Google para a MarquesaMatch pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",
     )).toBeInTheDocument();
     expect(screen.getByText(
-      "A MarquesaMatch só mexe nos eventos das reuniões que você marcar na agenda de reuniões da MarquesaMatch e das suas próximas ações com prazo. Você pode desconectar quando quiser.",
+      "Ao conectar a Google Agenda, a MarquesaMatch poderá consultar e criar eventos para agendar reuniões. Nenhum outro dado da conta Google é acessado, e a agenda pode ser desconectada a qualquer momento.",
     )).toBeInTheDocument();
   });
 
