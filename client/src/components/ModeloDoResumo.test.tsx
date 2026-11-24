@@ -259,7 +259,7 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
     expect(screen.getByText("Reservar a sala de reunião")).toBeInTheDocument();
     expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(2);
     // Nenhum botão de decidir: só o "Ouvir o resumo" (H19), que lê a versão que está na tela.
-    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir resumo · áudio gerado pela IA da Google"]);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
@@ -271,7 +271,7 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
     expect(screen.queryByText(/Não foi possível/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     // Só o "Ouvir o resumo" (H19): a versão anterior segue valendo e se ouve.
-    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir resumo · áudio gerado pela IA da Google"]);
     unmount();
     // Também quando a versão anterior não tem item para mostrar.
     doLink(doLinkCom("falhou", [], true));

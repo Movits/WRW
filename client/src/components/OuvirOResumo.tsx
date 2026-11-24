@@ -244,6 +244,9 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
   };
   const [Icone, rotulo] = leitura.estado === "lendo" ? [Pause, t("meetings.summary.listenPause")]
     : leitura.estado === "pausada" ? [Play, t("meetings.summary.listenResume")]
+    // O rótulo é o texto da Cris, "Ouvir resumo · áudio gerado pela IA da
+    // Google" (decisão do Roberto de 24/11/2026: a voz por IA da Google entra
+    // no app em outro pacote). A leitura de hoje segue com a voz do aparelho.
     : [Volume2, t("meetings.summary.listen")];
 
   return <div className="flex flex-col items-start gap-1 sm:items-end">
@@ -259,10 +262,6 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
       </button>}
     </div>
     {aviso && <p id={idDoAviso} className="max-w-xs text-xs text-white/50 sm:text-end">{aviso}</p>}
-    {/* De onde vem o áudio, junto do botão (pedido da Cris de 23/11/2026). O
-        texto dela, "áudio gerado pela IA da Google", não vale aqui: a voz é só
-        a do próprio aparelho (escolherVoz), sem IA nem servidor. */}
-    {!aviso && voz && <p className="max-w-xs text-xs text-white/50 sm:text-end">{t("meetings.summary.listenDeviceVoice")}</p>}
     {leitura.falhou && <p role="alert" className="max-w-xs text-xs text-red-200 sm:text-end">{t("meetings.summary.listenError")}</p>}
   </div>;
 }
