@@ -70,6 +70,7 @@ async function linhaTravada(tx: Tx, ownerId: string, meetingId: string) {
     mindMapEdited: meetingSummaries.mindMapEdited,
     mindMapRevision: meetingSummaries.mindMapRevision,
     mindMapStyle: meetingSummaries.mindMapStyle,
+    mindMapPreviousStyle: meetingSummaries.mindMapPreviousStyle,
   }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).for("update");
   return linha;
@@ -170,7 +171,11 @@ export async function refazerMapaNoEstilo(
 
       const agora = Date.now();
       const revisao = Number(linha.mindMapRevision) + 1;
+      // O estilo do mapa que segue à vista até o novo chegar: o do mapa pronto,
+      // ou, se o refazer anterior falhou, o do mapa de antes dele.
+      const estiloAVista = linha.mindMapStatus === "failed" && linha.mindMapPreviousStyle ? linha.mindMapPreviousStyle : linha.mindMapStyle ?? "overview";
       await tx.update(meetingSummaries).set({
+        mindMapPreviousStyle: estiloAVista,
         mindMapStyle: pedido.estilo, mindMapStatus: "pending", mindMapError: null,
         attempts: 0, lockedUntil: null, lockToken: null, mindMapRevision: revisao, updatedAt: agora,
       }).where(and(
@@ -179,7 +184,7 @@ export async function refazerMapaNoEstilo(
       ));
       await tx.insert(auditLogs).values(auditoria(prova, ACAO_MAPA_REFEITO, meetingId, {
         estilo: pedido.estilo,
-        estiloAnterior: linha.mindMapStyle ?? "overview",
+        estiloAnterior: estiloAVista,
         tinhaEdicao: conferirMapaMental(linha.mindMapEdited) !== null,
         revisao,
       }));

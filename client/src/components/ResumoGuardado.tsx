@@ -507,7 +507,8 @@ export function ResumoGuardado(props: DaDona | DoLink) {
         {podeRefazer && dados?.estado === "pronto" && <span className="text-xs text-amber-100/70">
           {t("meetings.summary.currentTemplate", { modelo: nomeAtual })}
           {pedidoAtual.estilo !== ESTILO_DO_RESUMO_PADRAO && ` · ${nomeDoEstilo(t, pedidoAtual.estilo)}`}
-          {daDona?.escolhidoPelaIA && <span className="ml-2 rounded-full border border-amber-300/40 px-2 py-0.5">{t("meetings.summary.chosenByAi")}</span>}
+          {/* Lógica (ms-2) e sem quebra: em árabe, a 375 px, a pílula quebrava em duas linhas e colava no estilo (conferência de tela). */}
+          {daDona?.escolhidoPelaIA && <span className="ms-2 inline-block whitespace-nowrap rounded-full border border-amber-300/40 px-2 py-0.5">{t("meetings.summary.chosenByAi")}</span>}
         </span>}
         {podeRefazer && <button type="button" aria-expanded={refazerAberto} aria-controls={refazerAberto ? idDoPainelDeRefazer : undefined} onClick={() => setRefazerAberto(aberto => !aberto)}
           className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-300/10">

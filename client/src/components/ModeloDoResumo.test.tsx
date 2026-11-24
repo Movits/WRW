@@ -306,6 +306,9 @@ describe("Modelos do resumo — H4e no resumo da dona", () => {
     daDona(comH4e({ escolha: "proprio:1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d", modeloProprio: { id: "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d", nome: "Entrevista", icone: "🎤" }, estilo: "detailed", escolhidoPelaIA: true }));
     expect(screen.getByText(/Modelo: 🎤 Entrevista · Detalhado/)).toBeInTheDocument();
     expect(screen.getByText("Escolhido pela IA")).toBeInTheDocument();
+    // A pílula não quebra e se afasta pelo lado lógico: em árabe, a 375 px, ela colava no estilo (conferência de tela).
+    expect(screen.getByText("Escolhido pela IA")).toHaveClass("whitespace-nowrap", "ms-2");
+    expect(screen.getByText("Escolhido pela IA")).not.toHaveClass("ml-2");
   });
 
   it("a pergunta do tamanho aparece no resumo pronto da dona, e nunca pelo link", () => {

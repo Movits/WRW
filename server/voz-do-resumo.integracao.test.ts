@@ -277,7 +277,7 @@ describe.skipIf(!temBanco)("O grupo voz no banco (H19b e H4i, integração)", ()
       const pelaLink = (await resumo.resumoGuardadoPeloLink(token)).itens.find(item => item.text.startsWith("Seguir"));
       expect(pelaLink?.complemento).toEqual({ texto: "Lei nº 14.133/2021", fonte: "https://fonte.example/lei", titulo: "fonte.example", consultas: [], situacao: "confirmed" });
       // E o áudio do resumo o lê, anunciado como de fora da reunião.
-      expect((await audio.textoDoAudioDoResumo(DONA, id)).texto).toContain("Complemento de fora da reunião, a conferir: Lei nº 14.133/2021");
+      expect((await audio.textoDoAudioDoResumo(DONA, id)).texto).toContain("Complemento de fora da reunião, confirmado: Lei nº 14.133/2021");
     });
 
     it("descartar apaga o complemento; decidir sem complemento é recusado", async () => {

@@ -537,6 +537,15 @@ describe("Mapa mental — editar, estilos, zoom, tela cheia e baixar (H10b)", ()
     expect(screen.getByRole("button", { name: "Diminuir o mapa" })).toBeDisabled();
   });
 
+  it("o zoom vale só para a árvore: os botões de abrir e recolher os ramos ficam fora dele (conferência de tela)", () => {
+    daDona(pronto());
+    const zoom = screen.getByTestId("zoom-do-mapa");
+    expect(within(zoom).getByTestId("arvore-do-mapa")).toBeInTheDocument();
+    expect(within(zoom).queryByRole("button", { name: /Abrir todos/ })).toBeNull();
+    expect(within(zoom).queryByRole("button", { name: /Recolher todos/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Abrir todos/ })).toBeInTheDocument();
+  });
+
   it("a tela cheia abre por cima da página com a barra e a árvore, e o Esc fecha", () => {
     doLink(pronto());
     fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
@@ -545,6 +554,18 @@ describe("Mapa mental — editar, estilos, zoom, tela cheia e baixar (H10b)", ()
     expect(within(camada).getByRole("button", { name: "Sair da tela cheia" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("a tela cheia vai para o body, fora do contexto de empilhamento da página, e o Sair da tela cheia fecha (conferência de tela)", () => {
+    const { container } = daDona(pronto());
+    fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
+    const camada = screen.getByRole("dialog", { name: "Mapa mental da reunião" });
+    // Dentro da página, o menu do app (sticky, z-40) ficava por cima da barra.
+    expect(camada.parentElement).toBe(document.body);
+    expect(container.contains(camada)).toBe(false);
+    fireEvent.click(within(camada).getByRole("button", { name: "Sair da tela cheia" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Tela cheia" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("editar: renomear, descer, acrescentar e apagar na cópia; salvar manda o mapa e a revisão que a tela viu", () => {
@@ -617,11 +638,15 @@ describe("Mapa mental — editar, estilos, zoom, tela cheia e baixar (H10b)", ()
   });
 
   it("refazendo: o mapa de antes à vista com o aviso, e editar e refazer travados; o refazer que falhou oferece tentar de novo", () => {
-    const { unmount } = daDona(comEdicao({ refazendo: true }, { estilo: "timeline" }));
+    // O servidor manda o estilo do mapa guardado (o de antes) e, à parte, o pedido.
+    const { unmount } = daDona(comEdicao({ refazendo: true, estiloPedido: "timeline" }, { estilo: "concept" }));
     expect(screen.getByRole("status")).toHaveTextContent("A IA está refazendo o mapa no estilo Linha do tempo.");
     expect(screen.getByRole("button", { name: "Editar" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Refazer em outro estilo" })).toBeDisabled();
-    expect(arvore()).toHaveAttribute("data-estilo", "timeline");
+    // O mapa de antes, no estilo dele, até o novo chegar (conferência de tela).
+    expect(arvore()).toHaveAttribute("data-estilo", "concept");
+    expect(screen.getByText("Estilo: Conceito")).toBeInTheDocument();
+    expect(screen.queryByText("Estilo: Linha do tempo")).toBeNull();
     unmount();
     daDona(comEdicao({ erroDoRefazer: "IA_INDISPONIVEL" }));
     const alerta = screen.getByRole("alert");

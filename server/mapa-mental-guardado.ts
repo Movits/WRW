@@ -76,6 +76,7 @@ const COLUNAS_DO_MAPA = {
   mindMapEditedAt: meetingSummaries.mindMapEditedAt,
   mindMapRevision: meetingSummaries.mindMapRevision,
   mindMapStyle: meetingSummaries.mindMapStyle,
+  mindMapPreviousStyle: meetingSummaries.mindMapPreviousStyle,
 };
 
 /**
@@ -90,6 +91,8 @@ export type EdicaoDoMapa = {
   editadoEm: number | null;
   refazendo: boolean;
   erroDoRefazer: string | null;
+  /** O estilo pedido no refazer em curso ou que falhou; o mapa à vista segue no `estilo` de antes. */
+  estiloPedido?: EstiloDoMapa;
 };
 
 async function linhaDoMapa(db: Banco, ownerId: string, meetingId: string) {
@@ -136,7 +139,13 @@ function paraATela(linha: Awaited<ReturnType<typeof linhaDoMapa>>, agora: number
     // com o aviso do refazer. Sem mapa guardado, é a H10 de sempre.
     if (visivel && linha?.mindMapStatus !== "ready" && linha?.mindMapStatus != null) {
       const refazendo = estado === "pendente" || estado === "gerando";
-      return { estado: "pronto", idioma, erro: null, mapa: visivel, versaoAnterior, ...comEstilo, ...edicao(refazendo, refazendo ? null : erro ?? "ERRO") };
+      // O mapa à vista é o de antes: desenhado no estilo dele, e não no pedido
+      // (conferência de tela do pacote Resumo e mapa a mais).
+      const estiloAVista = linha.mindMapPreviousStyle ? estiloDoMapa(linha.mindMapPreviousStyle) : estilo;
+      const comEstiloAVista = estiloAVista === "overview" ? {} : { estilo: estiloAVista };
+      const { edicao: daEdicao } = edicao(refazendo, refazendo ? null : erro ?? "ERRO");
+      return { estado: "pronto", idioma, erro: null, mapa: visivel, versaoAnterior, ...comEstiloAVista,
+        ...(daEdicao ? { edicao: estiloAVista !== estilo ? { ...daEdicao, estiloPedido: estilo } : daEdicao } : {}) };
     }
     return { estado, idioma, erro, mapa: null, versaoAnterior, ...comEstilo };
   }

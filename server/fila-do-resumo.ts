@@ -581,6 +581,8 @@ async function gravarMapa(
       // a edição sai). A edição de antes não vale sobre ele, e a revisão sobe:
       // a aba que ainda edita o mapa velho é recusada.
       mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: sql`${meetingSummaries.mindMapRevision} + 1`,
+      // O mapa novo chegou: o estilo do mapa de antes não vale mais (ver mindMapPreviousStyle).
+      mindMapPreviousStyle: null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";

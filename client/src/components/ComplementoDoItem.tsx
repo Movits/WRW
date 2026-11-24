@@ -93,13 +93,17 @@ function ComplementoDaDona({ itemId, complemento, reler, idiomaDoTexto }: Props 
   </CartaoDoComplemento>;
 }
 
-/** O complemento, marcado "fora da reunião, a conferir", com a fonte; as consultas só para a dona. */
+/** O complemento, marcado "fora da reunião, a conferir" (ou confirmado), com a fonte; as consultas só para a dona. */
 function CartaoDoComplemento({ complemento, peloLink, idiomaDoTexto, children }: { complemento: ComplementoNaTela; peloLink: boolean; idiomaDoTexto?: string; children?: ReactNode }) {
   const { t } = useTranslation();
   const fonte = nomeDaFonte(complemento);
   const pendente = complemento.situacao === "pending";
+  // O confirmado deixa de dizer "a conferir" (conferência de tela); pelo link,
+  // quem lê não é a dona. Textos para a Cris revisar.
+  const marca = pendente ? t("meetings.summary.complement.mark")
+    : peloLink ? t("meetings.summary.complement.markConfirmedLink") : t("meetings.summary.complement.markConfirmed");
   return <div className={`mt-2 rounded-lg border p-3 text-xs ${pendente ? "border-sky-300/40 bg-sky-300/[0.08]" : "border-sky-300/20 bg-sky-300/[0.04]"}`}>
-    <p className="inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-sky-200/90"><Globe size={12} aria-hidden/> {t("meetings.summary.complement.mark")}</p>
+    <p className="inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-sky-200/90"><Globe size={12} aria-hidden/> {marca}</p>
     <p dir="auto" lang={idiomaDoTexto} className="mt-1 text-sm text-white/85">{complemento.texto}</p>
     {complemento.fonte && <a href={complemento.fonte} target="_blank" rel="noopener noreferrer nofollow"
       className="mt-1 inline-flex items-center gap-1 break-all text-sky-200 hover:text-sky-100">

@@ -749,7 +749,12 @@ export default function Meetings() {
       const resultado = await importacao.importar(
         file,
         { title: title.trim(), language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO },
-        meetingId => ligarAAgenda(agendaNoClique ?? agendaQueCarregou(agendadaNoClique), meetingId),
+        // A reunião nasce aqui: vai para a agenda e leva o pedido do resumo
+        // escolhido antes de enviar (H4e), como na gravação.
+        meetingId => {
+          ligarAAgenda(agendaNoClique ?? agendaQueCarregou(agendadaNoClique), meetingId);
+          mandarPedidoDoResumo(meetingId);
+        },
       );
       if (resultado.tipo === "recusada") {
         const tipoDoEnvioUnico = supportedAudioMime(file);

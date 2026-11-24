@@ -1529,6 +1529,10 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   // O estilo do mapa (H10b): o que a dona pediu no "Refazer em outro estilo",
   // que a IA segue e a tela desenha. Nulo: a visão geral da H10.
   mindMapStyle: varchar("mind_map_style", { length: 16, enum: ["overview", "hierarchical", "timeline", "concept"] }),
+  // O estilo do mapa que segue à vista enquanto o "Refazer em outro estilo"
+  // está na fila ou depois que ele falhou: mindMapStyle já é o pedido, e o
+  // mapa guardado ainda é o de antes. A fila o limpa ao gravar o mapa novo.
+  mindMapPreviousStyle: varchar("mind_map_previous_style", { length: 16, enum: ["overview", "hierarchical", "timeline", "concept"] }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({

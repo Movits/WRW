@@ -77,6 +77,14 @@ export function BaixarAudioDoResumo({ meetingId, idioma, titulo }: { meetingId: 
     baixar.reset();
     setAberto(false);
   };
+  // Trocar o idioma do resumo fecha o painel: o "Salvar o áudio" do idioma de
+  // antes e uma espera em curso não valem para o idioma novo (conferência de tela).
+  const idiomaDoPainel = useRef(idioma);
+  useEffect(() => {
+    if (idiomaDoPainel.current === idioma) return;
+    idiomaDoPainel.current = idioma;
+    if (aberto) fechar();
+  }, [idioma]);
 
   if (!aberto) {
     return <button type="button" onClick={() => setAberto(true)}

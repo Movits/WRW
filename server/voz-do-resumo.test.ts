@@ -39,7 +39,7 @@ describe("falasDoResumo (as duas vozes leem o mesmo texto)", () => {
 
   it("o complemento confirmado entra anunciado como de fora da reunião; sem ele, nada", () => {
     const falas = falasDoResumo(tPt, [item({ complemento: { texto: "Lei 14.133/2021" } })], {});
-    expect(falas.at(-1)).toBe("Complemento de fora da reunião, a conferir: Lei 14.133/2021");
+    expect(falas.at(-1)).toBe("Complemento de fora da reunião, confirmado: Lei 14.133/2021");
     expect(falasDoResumo(tPt, [item({ complemento: null })], {})).not.toContain(expect.stringContaining("fora da reunião"));
   });
 

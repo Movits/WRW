@@ -204,7 +204,9 @@ describe.skipIf(!temBanco)("O mapa mental editável (integração)", () => {
     expect(soltar).not.toHaveBeenCalled();
     expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "pending", mindMapStyle: "timeline", mindMapEdited: EDITADO });
     const durante = await guardado.mapaMentalDaDona(DONA, id);
-    expect(durante).toMatchObject({ estado: "pronto", mapa: EDITADO, estilo: "timeline", edicao: { refazendo: true, editado: true, erroDoRefazer: null } });
+    // O mapa à vista é o de antes, no estilo dele (a visão geral); o pedido vai à parte (conferência de tela).
+    expect(durante).toMatchObject({ estado: "pronto", mapa: EDITADO, edicao: { refazendo: true, editado: true, erroDoRefazer: null, estiloPedido: "timeline" } });
+    expect(durante.estilo).toBeUndefined();
     await expect(salvar(id, 3, MAPA)).rejects.toMatchObject({ codigoTrpc: "CONFLICT", message: RECUSAS_DO_MAPA.refazendo });
     await expect(refazer(id, 3, "concept")).rejects.toMatchObject({ message: RECUSAS_DO_MAPA.refazendo });
     expect(soltar).toHaveBeenCalledTimes(1);
@@ -214,8 +216,10 @@ describe.skipIf(!temBanco)("O mapa mental editável (integração)", () => {
     gerarMapaMental.mockResolvedValue(LINHA_DO_TEMPO);
     await rodar();
     expect(gerarMapaMental).toHaveBeenLastCalledWith({ transcricao: TEXTO, idioma: "pt-BR", estilo: "timeline" });
-    expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMap: LINHA_DO_TEMPO, mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: 4 });
-    expect(await guardado.mapaMentalDaDona(DONA, id)).toMatchObject({ estado: "pronto", mapa: LINHA_DO_TEMPO, estilo: "timeline", edicao: { editado: false, refazendo: false } });
+    expect(await linhaDoResumo(id)).toMatchObject({ mindMapStatus: "ready", mindMap: LINHA_DO_TEMPO, mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: 4, mindMapPreviousStyle: null });
+    const depois = await guardado.mapaMentalDaDona(DONA, id);
+    expect(depois).toMatchObject({ estado: "pronto", mapa: LINHA_DO_TEMPO, estilo: "timeline", edicao: { editado: false, refazendo: false } });
+    expect(depois.edicao?.estiloPedido).toBeUndefined();
   });
 
   it("o refazer que falha deixa o mapa de antes à vista, com o erro; pedir de novo o refaz no mesmo estilo", async () => {
@@ -223,7 +227,9 @@ describe.skipIf(!temBanco)("O mapa mental editável (integração)", () => {
     await refazer(id, 1, "concept");
     gerarMapaMental.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA", "cortada"));
     await rodar();
-    expect(await guardado.mapaMentalDaDona(DONA, id)).toMatchObject({ estado: "pronto", mapa: MAPA, estilo: "concept", edicao: { refazendo: false, erroDoRefazer: "RESPOSTA_CORTADA" } });
+    const falhou = await guardado.mapaMentalDaDona(DONA, id);
+    expect(falhou).toMatchObject({ estado: "pronto", mapa: MAPA, edicao: { refazendo: false, erroDoRefazer: "RESPOSTA_CORTADA", estiloPedido: "concept" } });
+    expect(falhou.estilo).toBeUndefined();
     // Editar o mapa de antes continua possível: ele não está na fila.
     expect((await salvar(id, 2, EDITADO)).mudou).toBe(true);
     gerarMapaMental.mockResolvedValue(LINHA_DO_TEMPO);
@@ -231,6 +237,25 @@ describe.skipIf(!temBanco)("O mapa mental editável (integração)", () => {
     await rodar();
     expect(gerarMapaMental).toHaveBeenLastCalledWith(expect.objectContaining({ estilo: "concept" }));
     expect((await linhaDoResumo(id)).mindMap).toEqual(LINHA_DO_TEMPO);
+  });
+
+  it("o mapa de antes segue no estilo dele durante o refazer, também no link e depois de um refazer que falhou", async () => {
+    const token = crypto.randomBytes(24).toString("base64url");
+    const id = await reuniaoComMapa({ shareToken: token });
+    gerarMapaMental.mockResolvedValue(LINHA_DO_TEMPO);
+    await refazer(id, 1, "timeline");
+    await rodar();
+    // Pronto em linha do tempo; agora em conceito, que falha: o de linha do tempo segue à vista.
+    await refazer(id, Number((await linhaDoResumo(id)).mindMapRevision), "concept");
+    expect(await guardado.mapaMentalPeloLink(token)).toMatchObject({ estado: "pronto", mapa: LINHA_DO_TEMPO, estilo: "timeline" });
+    gerarMapaMental.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA", "cortada"));
+    await rodar();
+    expect(await guardado.mapaMentalDaDona(DONA, id)).toMatchObject({ mapa: LINHA_DO_TEMPO, estilo: "timeline", edicao: { erroDoRefazer: "RESPOSTA_CORTADA", estiloPedido: "concept" } });
+    // Refazer de novo depois da falha: o mapa à vista ainda é o de linha do tempo.
+    await refazer(id, Number((await linhaDoResumo(id)).mindMapRevision), "hierarchical");
+    expect(await guardado.mapaMentalDaDona(DONA, id)).toMatchObject({ mapa: LINHA_DO_TEMPO, estilo: "timeline", edicao: { refazendo: true, estiloPedido: "hierarchical" } });
+    const auditorias = await auditoriasDe(id, ACAO_MAPA_REFEITO);
+    expect(auditorias.map(a => (a.details as { estiloAnterior: string }).estiloAnterior)).toEqual(expect.arrayContaining(["overview", "timeline"]));
   });
 
   it("o resumo refeito sobre a transcrição editada refaz o mapa da IA, mas não apaga o que a dona editou", async () => {

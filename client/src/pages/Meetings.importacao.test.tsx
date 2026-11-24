@@ -58,7 +58,7 @@ const duble = vi.hoisted(() => {
       agenda: { listar: { invalidate: vi.fn(async () => undefined) } },
       auth: { me: { getData: vi.fn(), fetch: vi.fn() } },
       client: {
-        meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        meetings: { iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } },
         agenda: { ligarGravacao: { mutate: vi.fn() } },
       },
@@ -165,6 +165,7 @@ beforeEach(() => {
   duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-envio-unico" });
   duble.mutacao("submitRecording").mutateAsync.mockResolvedValue({ success: true });
   duble.utils.client.agenda.ligarGravacao.mutate.mockResolvedValue({ ok: true });
+  duble.utils.client.meetings.definirPedidoDoResumo.mutate.mockReset().mockResolvedValue({ pedido: null });
   iniciarGravacao().mockResolvedValue({ id: VINICOLA });
   encerrarGravacao().mockResolvedValue({ partes: 3 });
   excluir().mockResolvedValue({ success: true });
@@ -382,6 +383,25 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     enviar(arquivoMp3(), "");
     await waitFor(() => expect(duble.utils.client.agenda.ligarGravacao.mutate).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
     await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalled());
+  });
+
+  it("o pedido do resumo escolhido antes de enviar (H4e) vai com a reunião que o arquivo cria; sem mexer, nada vai", async () => {
+    abrir("/gravar");
+    fireEvent.click(screen.getByText("Resumo desta reunião", { exact: false }));
+    fireEvent.click(screen.getByRole("radio", { name: "Detalhado" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Instruções para a IA (opcional)" }), { target: { value: "Destaque os prazos" } });
+    enviar(arquivoMp3());
+    await waitFor(() => expect(duble.utils.client.meetings.definirPedidoDoResumo.mutate).toHaveBeenCalledWith({
+      meetingId: VINICOLA, pedido: expect.objectContaining({ estilo: "detailed", instrucoes: "Destaque os prazos" }),
+    }));
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalled());
+  });
+
+  it("sem mexer no pedido do resumo, o arquivo enviado não o manda", async () => {
+    abrir("/gravar");
+    enviar(arquivoMp3());
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalled());
+    expect(duble.utils.client.meetings.definirPedidoDoResumo.mutate).not.toHaveBeenCalled();
   });
 
   // G14: o ?envioUnico=1, a saída de suporte da G13b, saiu. A URL antiga que

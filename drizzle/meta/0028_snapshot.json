@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "d093bb38-bba5-42ed-bff8-61482626cf17",
+  "id": "41fb8a2f-b7da-4b98-9543-7834e7de3a36",
   "prevId": "0e3c1c48-6b5e-4601-8c58-dcf6f81c274b",
   "tables": {
     "agenda_reunioes": {
@@ -4577,6 +4577,13 @@
         },
         "mind_map_style": {
           "name": "mind_map_style",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mind_map_previous_style": {
+          "name": "mind_map_previous_style",
           "type": "varchar(16)",
           "primaryKey": false,
           "notNull": false,

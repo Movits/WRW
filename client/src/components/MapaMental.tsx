@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslation } from "react-i18next";
 import { ChevronsDownUp, ChevronsUpDown, Download, Loader2, Maximize2, Minimize2, Minus, Network, Pencil, Plus, RotateCcw, Sparkles, Wand2, ZoomIn, ZoomOut } from "lucide-react";
@@ -309,7 +310,7 @@ function fraseDoErroDoMapa(t: (chave: string) => string, erro: unknown): string 
   return mensagemDoErroDaIA(t, erro, t("meetings.mindMap.requestError"), false);
 }
 
-type EdicaoNaTela = { revisao: number; editado: boolean; editadoEm: number | null; refazendo: boolean; erroDoRefazer: string | null };
+type EdicaoNaTela = { revisao: number; editado: boolean; editadoEm: number | null; refazendo: boolean; erroDoRefazer: string | null; estiloPedido?: EstiloDoMapa };
 
 /**
  * O mapa pronto (H10b): a barra (zoom, tela cheia e, para a dona, baixar,
@@ -393,9 +394,8 @@ function MapaPronto({ raiz, emoji, mapa, idioma, idiomaDoMapa, estilo, edicao, t
     </>}
   </div>;
 
-  const arvore = <div style={{ zoom: ZOOMS[zoom] }} data-testid="zoom-do-mapa">
-    <ArvoreDoMapa raiz={raiz} emoji={emoji} mapa={mapa} idioma={idioma} traduzir={traduzir} ramoExtra={ramoExtra} estilo={estilo}/>
-  </div>;
+  // O zoom vale só para a árvore: os botões de abrir e recolher os ramos ficam no tamanho da barra.
+  const arvore = <ArvoreDoMapa raiz={raiz} emoji={emoji} mapa={mapa} idioma={idioma} traduzir={traduzir} ramoExtra={ramoExtra} estilo={estilo} zoom={ZOOMS[zoom]}/>;
 
   return <div className="space-y-3">
     {estilo !== "overview" && <p className="text-xs text-white/50">{t("meetings.mindMap.currentStyle", { estilo: nomeDoEstilo(t, estilo) })}</p>}
@@ -411,7 +411,7 @@ function MapaPronto({ raiz, emoji, mapa, idioma, idiomaDoMapa, estilo, edicao, t
       </div>
       {acoes.editando.error ? <p role="alert" className="mt-2 text-red-200">{mensagemDeErroParaTela(acoes.editando.error, t)}</p> : null}
     </div>}
-    {refazendo && <p role="status" className={`${AVISO} border-amber-300/25 bg-amber-300/10 text-amber-100`}><Loader2 size={14} className="me-2 inline animate-spin"/>{t("meetings.mindMap.redo.running", { estilo: nomeDoEstilo(t, estilo) })}</p>}
+    {refazendo && <p role="status" className={`${AVISO} border-amber-300/25 bg-amber-300/10 text-amber-100`}><Loader2 size={14} className="me-2 inline animate-spin"/>{t("meetings.mindMap.redo.running", { estilo: nomeDoEstilo(t, edicao?.estiloPedido ?? estilo) })}</p>}
     {edicao?.erroDoRefazer && <div role="alert" className={`${AVISO} flex flex-wrap items-center justify-between gap-3 border-red-400/20 bg-red-400/10 text-red-200`}>
       <span>{t("meetings.mindMap.redo.failed")}</span>
       {acoes && <BotaoDePedir aoClicar={aoPedirDeNovo} pedindo={pedindoDeNovo}>{t("meetings.mindMap.retry")}</BotaoDePedir>}
@@ -436,11 +436,14 @@ function MapaPronto({ raiz, emoji, mapa, idioma, idiomaDoMapa, estilo, edicao, t
       </div>
     </fieldset>}
     {falhaDoArquivo && <p role="alert" className="text-sm text-red-200">{t("meetings.mindMap.downloadError")}</p>}
+    {/* A tela cheia vai para o body: dentro da página, um ancestral com
+        contexto de empilhamento deixava o menu do app (sticky, z-40) por cima
+        da barra, e no celular, sem Esc, não havia como sair. */}
     {telaCheia
-      ? <div role="dialog" aria-modal="true" aria-label={t("meetings.mindMap.title")} className="fixed inset-0 z-50 overflow-auto bg-[#120d0a] p-4">
+      ? createPortal(<div role="dialog" aria-modal="true" aria-label={t("meetings.mindMap.title")} className="fixed inset-0 z-[60] overflow-auto bg-[#120d0a] p-4">
           <div className="mb-3">{barra}</div>
           {arvore}
-        </div>
+        </div>, document.body)
       : <>{barra}{arvore}</>}
   </div>;
 }
@@ -476,7 +479,7 @@ function direcaoDoMapa(idioma: string | null): "ltr" | "rtl" | undefined {
   return escritoDaDireitaParaAEsquerda(idioma) ? "rtl" : "ltr";
 }
 
-export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, estilo = "overview" }: {
+export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, estilo = "overview", zoom = 1 }: {
   raiz: string; emoji?: string | null; mapa: MapaMental; idioma: string | null;
   /** O rótulo no idioma da tradução do resumo (H11); sem ela, o próprio rótulo. */
   traduzir?: (rotulo: string) => string;
@@ -487,6 +490,8 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, e
   ramoExtra?: RamoDasConexoes | null;
   /** O estilo (H10b): a visão geral é a árvore abaixo; os outros, ArvoreEmOutroEstilo. */
   estilo?: EstiloDoMapa;
+  /** O zoom da barra (H10b): só a árvore cresce, não os botões de abrir e recolher. */
+  zoom?: number;
 }) {
   const { t } = useTranslation();
   // O ramo extra entra no fim, marcado: o rótulo dele não passa pela tradução do resumo.
@@ -502,8 +507,8 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, e
   const temFolhas = ramos.some(ramo => ramo.folhas.length > 0);
   const codigo = idiomaFalado(idioma);
   if (estilo !== "overview") {
-    return <ArvoreEmOutroEstilo raiz={raiz} emoji={emoji} ramos={ramos.map(ramo => ({ ...ramo, rotulo: rotulo(ramo.rotulo, ramo.extra), folhas: ramo.folhas.map(folha => ({ rotulo: rotulo(folha.rotulo, ramo.extra), filhos: folha.filhos.map(filho => rotulo(filho, ramo.extra)) })) }))}
-      estilo={estilo} dir={direcaoDoMapa(idioma)} lang={codigo ?? undefined}/>;
+    return <div style={{ zoom }} data-testid="zoom-do-mapa"><ArvoreEmOutroEstilo raiz={raiz} emoji={emoji} ramos={ramos.map(ramo => ({ ...ramo, rotulo: rotulo(ramo.rotulo, ramo.extra), folhas: ramo.folhas.map(folha => ({ rotulo: rotulo(folha.rotulo, ramo.extra), filhos: folha.filhos.map(filho => rotulo(filho, ramo.extra)) })) }))}
+      estilo={estilo} dir={direcaoDoMapa(idioma)} lang={codigo ?? undefined}/></div>;
   }
 
   return <div>
@@ -511,6 +516,7 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, e
       <button type="button" onClick={() => todos(true)} className={BOTAO_PEQUENO}><ChevronsUpDown size={14} aria-hidden="true"/>{t("meetings.mindMap.expandAll")}</button>
       <button type="button" onClick={() => todos(false)} className={BOTAO_PEQUENO}><ChevronsDownUp size={14} aria-hidden="true"/>{t("meetings.mindMap.collapseAll")}</button>
     </div>}
+    <div style={{ zoom }} data-testid="zoom-do-mapa">
     <div dir={direcaoDoMapa(idioma)} lang={codigo ?? undefined} data-testid="arvore-do-mapa" className="overflow-x-auto pb-2">
       <div className="md:flex md:w-max md:items-center">
         <p className="inline-flex max-w-full items-center gap-2 rounded-2xl bg-[#c98f70] px-4 py-2.5 text-sm font-bold text-[#1a120c] md:max-w-[13rem] md:shrink-0">
@@ -542,6 +548,7 @@ export function ArvoreDoMapa({ raiz, emoji, mapa, idioma, traduzir, ramoExtra, e
           })}
         </ul>
       </div>
+    </div>
     </div>
   </div>;
 }

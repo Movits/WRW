@@ -97,6 +97,35 @@ describe("BaixarAudioDoResumo (H19b)", () => {
     }
   });
 
+  it("trocar o idioma do resumo fecha o painel: sem o Salvar do idioma de antes, e a espera em curso não pede de novo", () => {
+    vi.useFakeTimers();
+    try {
+      Object.assign(URL, { createObjectURL: vi.fn(() => "blob:mp3"), revokeObjectURL: vi.fn() });
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      const { rerender } = render(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="pt-BR"/>);
+      fireEvent.click(screen.getByRole("button", { name: /Baixar o áudio do resumo/ }));
+      act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.({ estado: "pronto", mp3Base64: btoa("ID3"), idioma: "pt-BR", titulo: "Reunião da voz", reaproveitado: false }); });
+      expect(screen.getByRole("link", { name: /Salvar o áudio/ })).toBeTruthy();
+      rerender(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="en"/>);
+      expect(screen.queryByRole("link", { name: /Salvar o áudio/ })).toBeNull();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mp3");
+      // De volta ao botão: o Gerar agora pede no idioma novo.
+      fireEvent.click(screen.getByRole("button", { name: /Baixar o áudio do resumo/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Gerar e baixar/ }));
+      const { mutate } = duble.mutacoes.audioDoResumo;
+      expect(mutate).toHaveBeenLastCalledWith({ meetingId: REUNIAO, idioma: "en" });
+      // A espera em curso, com o idioma trocado no meio, não pede de novo.
+      act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.({ estado: "gerando", idioma: "en", titulo: "Reunião da voz" }); });
+      const antes = mutate.mock.calls.length;
+      rerender(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="es"/>);
+      act(() => { vi.advanceTimersByTime(ESPERA_ENTRE_PEDIDOS_MS * 3); });
+      expect(mutate).toHaveBeenCalledTimes(antes);
+      expect(screen.getByRole("button", { name: /Baixar o áudio do resumo/ })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a recusa do teto vira o aviso traduzido", () => {
     render(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="pt-BR"/>);
     fireEvent.click(screen.getByRole("button", { name: /Baixar o áudio do resumo/ }));
@@ -133,15 +162,19 @@ describe("ComplementoDoItem (H4i)", () => {
     expect(duble.mutacoes.decidirComplemento.mutate).toHaveBeenLastCalledWith({ itemId: ITEM, decisao: "descartar" });
   });
 
-  it("o confirmado não oferece Usar de novo, só Descartar", () => {
+  it("o confirmado não oferece Usar de novo, só Descartar, e deixa de dizer 'a conferir'", () => {
     render(<ComplementoDoItem itemId={ITEM} complemento={{ ...PENDENTE, situacao: "confirmed" }} peloLink={false} podeMexer reler={vi.fn()}/>);
+    expect(screen.getByText(/Fora da reunião, confirmado por você/)).toBeTruthy();
+    expect(screen.queryByText(/a conferir/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Usar o complemento/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Descartar/ })).toBeTruthy();
   });
 
   it("pelo link: só leitura, sem botões nem consultas; sem complemento, nada", () => {
     const { container, rerender } = render(<ComplementoDoItem complemento={{ ...PENDENTE, situacao: "confirmed", consultas: [] }} peloLink podeMexer={false} reler={vi.fn()}/>);
-    expect(screen.getByText(/Fora da reunião, a conferir/)).toBeTruthy();
+    // Pelo link, o confirmado sem o "por você": quem lê não é a dona.
+    expect(screen.getByText(/Fora da reunião, confirmado$/)).toBeTruthy();
+    expect(screen.queryByText(/a conferir|por você/)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
     expect(duble.mutacoes.pedirComplemento).toBeUndefined();
     rerender(<ComplementoDoItem complemento={null} peloLink podeMexer={false} reler={vi.fn()}/>);
