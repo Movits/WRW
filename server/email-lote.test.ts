@@ -47,7 +47,7 @@ describe("sendEmailBatch: o lote da Resend do resumo por e-mail", () => {
     expect(lote).toHaveBeenCalledTimes(1);
     expect(enviados(0)).toEqual(["a@exemplo.com", "c@exemplo.org"]);
     // Cada item com um destinatário só e o remetente com a marca.
-    expect(lote.mock.calls[0][0][0]).toEqual({ from: "WRW <no-reply@exemplo.test>", to: "a@exemplo.com", subject: "Assunto do resumo", html: "<p>corpo</p>", text: "corpo" });
+    expect(lote.mock.calls[0][0][0]).toEqual({ from: "MarquesaMatch <no-reply@exemplo.test>", to: "a@exemplo.com", subject: "Assunto do resumo", html: "<p>corpo</p>", text: "corpo" });
   });
 
   it("só .invalid: nenhuma chamada, todos false", async () => {

@@ -17,6 +17,32 @@ anteriores a 14/11/2026 ficam com a versão nula.
 O português é o texto de referência. Os outros 9 idiomas são tradução e precisam de
 revisão de tradução.
 
+## Versão 2026-11-23 (frase da Cris sobre o acesso da administração)
+
+A Cris mandou em 23/11/2026 o texto da revisão das gravações pela administração, e o
+Roberto decidiu no mesmo dia que entra como está, como compromisso: o registro do motivo
+antes de cada acesso é da administração. A frase dela vai ao fim do aviso curto de
+`meetings.consentNotice`, nos 10 idiomas; o resto do aviso é o da versão 2026-11-14,
+abaixo, que segue aceita para a aba aberta antes do deploy.
+
+> Somente grave com o consentimento de todas as pessoas. O áudio é transcrito pela IA do
+> Google (Gemini), que pode processá-lo fora do Brasil e separar as falas por pessoa. O
+> áudio fica na sua conta por 30 dias, e a transcrição até você excluir a reunião. Só
+> você acessa, a menos que ligue o link de compartilhamento da reunião (o que pede nova
+> autorização de quem falou). A administração da MarquesaMatch só acessa gravações por
+> motivo justificado, registrado antes do acesso, e a organizadora é informada da data de
+> cada consulta.
+
+### Para a Cris e o Roberto
+
+- "Só você acessa" e a frase nova convivem: a frase nova é a exceção da administração.
+  Se a Cris preferir, a frase anterior pode passar a "Fora a administração (abaixo), só
+  você acessa".
+- O app ainda não tem a tela de acesso da administração às gravações, nem o registro do
+  motivo, nem o aviso da data à organizadora: hoje a administração não abre gravações pelo
+  app. Quando esse acesso entrar, ele precisa cumprir a frase (motivo registrado antes,
+  data visível para a organizadora).
+
 ## Versão 2026-11-14
 
 ### O aviso curto, como aparece na tela (pt-BR)
@@ -125,6 +151,27 @@ A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li 
   vídeo público de terceiros para uso próprio);
 - se a caixa do link aberto de uma reunião feita de vídeo (a frase do item 5, desde a
   conferência de tela de 20/11/2026) pede alguma ressalva além dessa.
+
+## Aviso da legenda ao vivo — versão `legenda-2026-11-23` (texto da Cris)
+
+A Cris mandou o texto da legenda em 23/11/2026, já com o nome MarquesaMatch. A chave
+`meetings.caption.noticeBrowser` passou a ser o texto dela, e a primeira frase de
+`meetings.caption.noticeNotSaved` saiu, porque o texto dela já diz que a legenda não fica
+guardada. O botão de confirmar passou a "Ativar legenda" (o "Agora não" já existia). A
+caixa de concordância das pessoas e a frase de que a legenda não separa quem fala
+continuam. A versão anterior, abaixo, segue aceita para a aba aberta antes do deploy.
+
+> **Ligar a legenda ao vivo?**
+>
+> A legenda ao vivo usa o reconhecimento de voz do navegador. No Google Chrome, o áudio
+> pode ser enviado aos servidores do Google para ser convertido em texto. A legenda não é
+> guardada pela MarquesaMatch e desaparece ao fim da reunião.
+>
+> A legenda não separa quem fala e pode errar palavras.
+>
+> A transcrição da reunião continua sendo a da IA, que chega por partes.
+
+Botões: [Ativar legenda] [Agora não].
 
 ## Aviso da legenda ao vivo — versão `legenda-2026-11-22`
 

@@ -515,7 +515,7 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
   }
 
   if (newHighScore && ownerEmail) {
-    const sent = await sendEmail({ to: ownerEmail, subject: `${newHighScore} nova(s) oportunidade(s) de conexão na WRW`, text: `Encontramos ${newHighScore} oportunidade(s) de conexão privada(s) com score de 70 ou mais na sua rede. Abra o painel de Conexões Inteligentes para revisar.`, html: `<p>Encontramos <strong>${newHighScore}</strong> oportunidade(s) de conexão privada(s) com score de 70 ou mais na sua rede WRW.</p><p>Abra o painel de Conexões Inteligentes para revisar.</p>` });
+    const sent = await sendEmail({ to: ownerEmail, subject: `${newHighScore} nova(s) oportunidade(s) de conexão na MarquesaMatch`, text: `Encontramos ${newHighScore} oportunidade(s) de conexão privada(s) com score de 70 ou mais na sua rede. Abra o painel de Conexões Inteligentes para revisar.`, html: `<p>Encontramos <strong>${newHighScore}</strong> oportunidade(s) de conexão privada(s) com score de 70 ou mais na sua rede MarquesaMatch.</p><p>Abra o painel de Conexões Inteligentes para revisar.</p>` });
     // O carimbo só alcança o que a usuária ainda vai decidir: linha aceita ou
     // dispensada não foi anunciada neste e-mail, e carimbá-la apagaria o rastro
     // de quando (e se) ela foi notificada de verdade.

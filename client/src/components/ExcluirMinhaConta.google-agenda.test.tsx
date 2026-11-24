@@ -6,7 +6,7 @@ import { ExcluirMinhaConta } from "./ExcluirMinhaConta";
 /**
  * A exclusão da conta com a Google Agenda conectada (H16b). A exclusão revoga o
  * token na Google antes de apagar a conexão; quando a Google não confirma, a
- * conta sai assim mesmo, e a WRW segue em "Apps de terceiros" da conta Google
+ * conta sai assim mesmo, e a MarquesaMatch segue em "Apps de terceiros" da conta Google
  * da dona, com permissão na agenda, até ela tirar. O servidor devolve
  * `googleNaoConfirmou` (server/routers/conta.ts), e a tela avisa como no
  * desconectar do Perfil.
@@ -62,7 +62,7 @@ describe("Excluir minha conta — a Google Agenda que a Google não confirmou", 
     excluirAConta();
     expect(toast.success).toHaveBeenCalledWith("Sua conta e seus dados foram excluídos.");
     expect(toast.warning).toHaveBeenCalledWith(
-      "A conexão com a Google Agenda saiu junto com a conta, mas a Google não confirmou que tirou o acesso da WRW. Se quiser, tire esse acesso nas configurações da sua conta Google.",
+      "A conexão com a Google Agenda saiu junto com a conta, mas a Google não confirmou que tirou o acesso da MarquesaMatch. Se quiser, tire esse acesso nas configurações da sua conta Google.",
       { duration: 15000 },
     );
     expect(duble.navegou).toEqual(["/"]);
