@@ -9,6 +9,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { CHAMADAS_POR_LOTE_MAX } from "@shared/lote-do-trpc";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotaDoAnexoDoLink } from "../anexos-do-resumo";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
 import { registrarAssetLinks } from "../assetlinks";
 import { appRouter } from "../routers";
@@ -233,6 +234,8 @@ async function startServer() {
   // sem este recorte, o limite global de 5 MB devolveria 413 para qualquer
   // arquivo acima de ~3,7 MB — antes de o tRPC sequer validar.
   app.use("/api/trpc/contexts.uploadMedia", express.json({ limit: "15mb" }));
+  // As fotos e os desenhos do resumo da reunião (H4g e H4h), até 10 MB de imagem.
+  app.use("/api/trpc/meetings.anexarAoResumo", express.json({ limit: "15mb" }));
 
   // Mesmo caso para foto e cartão de visita do contato (etapa 1, até 10 MB em
   // Base64 — MAX_CONTACT_IMAGE_BYTES em contact-media.ts): sem este recorte,
@@ -256,6 +259,8 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // As fotos e os desenhos do resumo pelo link aberto (H4g e H4h), com a mesma senha.
+  registrarRotaDoAnexoDoLink(app);
   // O download do áudio da reunião (H8c): só com a ficha de uso único que
   // meetings.baixarAudio emitiu para a sessão da dona; o arquivo é convertido
   // pelo ffmpeg enquanto sai (server/_core/rota-do-audio-baixado.ts).

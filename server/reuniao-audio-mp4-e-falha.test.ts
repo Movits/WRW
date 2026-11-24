@@ -158,6 +158,11 @@ vi.mock("./_core/llm", () => ({
 // duracao-do-audio.test.ts com contêineres de verdade) é dublada.
 let duracaoMedida: number | null = 30;
 vi.mock("./duracao-do-audio", () => ({ medirDuracaoDoAudio: () => duracaoMedida }));
+// O pedido do primeiro resumo (H4e) lê meetings e as preferências da dona;
+// é provado em modelos-proprios.integracao.test.ts. Aqui ele é dublado para
+// que as leituras de meetings contadas sejam só as do processamento.
+const PEDIDO_DO_PRIMEIRO_RESUMO = { template: "general", customTemplateId: null, aiTemplate: null, style: "concise", instructions: "foco em prazos" };
+vi.mock("./modelos-proprios", () => ({ colunasDoPrimeiroResumo: vi.fn(async () => PEDIDO_DO_PRIMEIRO_RESUMO) }));
 
 const { decodeMeetingAudio, processMeetingRecording, LIMITE_SUGESTAO, LIMITE_VALOR_NORMALIZADO, ReuniaoForaDoEstado, ReuniaoTomadaPorOutraExecucao, MENSAGEM_DURACAO_ILEGIVEL, MENSAGEM_REUNIAO_LONGA_DEMAIS } = await import("./meeting-service");
 const { MENSAGEM_ERRO_DE_CONSULTA } = await import("./banco-indisponivel");
@@ -286,6 +291,8 @@ describe("processMeetingRecording — áudio recusado vira reunião com falha, n
     const [transcricao] = valoresDe(schema.meetingTranscripts);
     expect(valoresDe(schema.meetingSummaries)).toEqual([expect.objectContaining({
       meetingId: "reuniao-1", ownerId: "dona-1", status: "pending", transcriptId: transcricao.id,
+      // O modelo, o estilo e as instruções do pedido (H4e) entram na linha.
+      ...PEDIDO_DO_PRIMEIRO_RESUMO,
     })]);
     expect(String(transcricao.id)).toMatch(/^[0-9a-f-]{36}$/);
     // Idempotente: no conflito com a linha que já existir (índice único da

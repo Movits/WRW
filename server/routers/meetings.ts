@@ -35,6 +35,8 @@ import {
 import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
+import { audioDoResumoDaDona } from "../resumo-em-audio";
+import { decidirComplemento, pedirComplemento } from "../complemento-pela-busca";
 import {
   desligarLinkAberto,
   LinkAbertoRecusado,
@@ -51,8 +53,18 @@ import { decidirTituloSugerido } from "../decidir-titulo-sugerido";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
-import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
+import {
+  ESTILOS_DO_RESUMO, ICONES_DOS_MODELOS, INSTRUCOES_DO_MODELO_MAX, INSTRUCOES_DO_PEDIDO_MAX, NOME_DO_MODELO_MAX, RECUSAS_DOS_MODELOS, RESPOSTAS_DO_TAMANHO, escolhaDoTexto,
+} from "@shared/modelos-de-resumo";
+import {
+  apagarModeloProprio, criarModeloProprio, definirPedidoDoResumo, definirPreferencias, editarModeloProprio, modelosEPreferenciasDaDona,
+  refazeresQueRestam, responderTamanhoDoResumo,
+} from "../modelos-proprios";
 import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
+import { mudarMapaDaDona, RecusaDoMapa, refazerMapaNoEstilo } from "../mapa-mental-edicao";
+import {
+  EDICOES_DO_MAPA_POR_JANELA, ESTILOS_DO_MAPA, JANELA_DA_EDICAO_DO_MAPA_MS, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA, REFAZERES_DO_MAPA_POR_JANELA,
+} from "@shared/mapa-mental-edicao";
 import { traduzirResumoDaDona } from "../traducao-do-resumo";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
@@ -86,6 +98,8 @@ import { apagarPasta, criarPasta, editarPasta, listarPastas, moverParaPasta, Rec
 import { CORES_DA_PASTA, ICONES_DA_PASTA, NOME_DA_PASTA_MAX, REUNIOES_POR_ACAO_MAX } from "@shared/pastas-de-reunioes";
 import { apagarDeVez, esvaziarLixeira, listarLixeira, mandarParaALixeira, RecusaDaLixeira, restaurarDaLixeira, type ProvaDaLixeira } from "../lixeira-de-reunioes";
 import { REUNIOES_POR_EXCLUSAO_MAX } from "@shared/lixeira-de-reunioes";
+import { anexarAoResumo, anexosDaDona, apagarAnexo, RecusaDoAnexo } from "../anexos-do-resumo";
+import { ANEXO_BYTES_MAX, TIPOS_DE_ANEXO } from "@shared/anexos-do-resumo";
 
 // O que a dona pede ao editar a transcrição (H18): o zod barra a forma e o
 // tamanho; quem confere a posição do trecho, a voz e o texto vazio, e recusa
@@ -129,6 +143,16 @@ async function comRecusaDaLixeira<T>(trabalho: () => Promise<T>): Promise<T> {
     return await trabalho();
   } catch (erro) {
     if (erro instanceof RecusaDaLixeira) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
+/** As recusas dos anexos do resumo (H4g e H4h), pela mesma regra: o código tRPC e o código que a tela traduz. */
+async function comRecusaDoAnexo<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDoAnexo) throw new TRPCError({ code: erro.codigoTrpc, message: erro.codigo });
     throw erro;
   }
 }
@@ -271,7 +295,48 @@ export const tetoDaLegenda = criarTeto(LEGENDAS_POR_JANELA, JANELA_DA_LEGENDA_MS
 // auditoria a cada mudança: teto próprio por dona, de 200 edições a cada 10
 // minutos, em memória como os outros. Só conta a edição aceita; a recusa e o
 // pedido que não mudou nada devolvem a vaga.
+// Os modelos de resumo da dona e as preferências dela (H4e): sem IA, mas cada
+// mudança grava no banco. Teto próprio por dona, de 60 mudanças a cada 10
+// minutos, em memória como os outros.
+export const tetoDosModelosDeResumo = criarTeto(60, 10 * 60_000, RECUSAS_DOS_MODELOS.mudancasDemais);
+
+// O texto do modelo no pedido (H4e): o código do pronto, "ia" ou "proprio:<id>".
+const escolhaNaEntrada = z.string().max(60).refine(valor => escolhaDoTexto(valor) !== null);
+const instrucoesDoPedidoNaEntrada = z.string().max(INSTRUCOES_DO_PEDIDO_MAX * 2).nullable().optional();
+const dadosDoModeloNaEntrada = z.object({
+  nome: z.string().trim().min(1).max(NOME_DO_MODELO_MAX * 2),
+  icone: z.enum(ICONES_DOS_MODELOS),
+  instrucoes: z.string().trim().min(1).max(INSTRUCOES_DO_MODELO_MAX * 2),
+});
+
 export const tetoDaEdicao = criarTeto(EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, RECUSAS_DA_EDICAO.demais);
+
+// O mapa mental editável (H10b): o teto das edições (cada uma regrava o mapa e
+// uma linha de auditoria) e o de custo do "Refazer em outro estilo" (cada um
+// manda a transcrição inteira à IA), este além do teto comum de pedidos à IA.
+export const tetoDaEdicaoDoMapa = criarTeto(EDICOES_DO_MAPA_POR_JANELA, JANELA_DA_EDICAO_DO_MAPA_MS, RECUSAS_DO_MAPA.edicoesDemais);
+export const tetoDoRefazerDoMapa = criarTeto(REFAZERES_DO_MAPA_POR_JANELA, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA.refazeresDemais);
+
+// A forma do mapa que a dona salva: o zod barra só o tamanho do pedido, com
+// folga; as quantidades e os rótulos são conferidos com o código traduzível
+// em conferirMapaEditado (shared/mapa-mental-edicao.ts).
+const rotuloDoMapaNoPedido = z.string().max(400);
+const mapaNoPedido = z.object({
+  ramos: z.array(z.object({
+    rotulo: rotuloDoMapaNoPedido,
+    folhas: z.array(z.object({ rotulo: rotuloDoMapaNoPedido, filhos: z.array(rotuloDoMapaNoPedido).max(20) })).max(40),
+  })).max(40),
+});
+
+/** A recusa do mapa vira o erro do tRPC com o código que a tela traduz. */
+async function comRecusaDoMapa<T>(fazer: () => Promise<T>): Promise<T> {
+  try {
+    return await fazer();
+  } catch (erro) {
+    if (erro instanceof RecusaDoMapa) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
 
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
@@ -576,17 +641,76 @@ export const meetingsRouter = router({
 
   // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
   // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
+  // H4e: o modelo também pode ser um da dona ("proprio:<id>") ou "ia" (a IA
+  // escolhe), com o estilo e as instruções do pedido.
   pedirResumo: procedimentoDaReuniao
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO).optional() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada.optional(), estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes })),
 
   // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
   // confirmados, os feitos e os que a dona escreveu ou editou (H4f) ficam, os
   // outros pendentes e ignorados são trocados. Gasta uma vaga do mesmo teto de
   // pedidos à IA.
+  // H4e: o refazer leva o modelo (pronto, da dona ou "ia"), o estilo e as
+  // instruções, e conta no teto de custo do refazer (REFAZERES_POR_DIA, no
+  // banco), além do teto de pedidos à IA. TOO_MANY_REQUESTS com o código.
   refazerResumo: procedimentoDaReuniao
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
-    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes }, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // Os modelos de resumo da própria dona e as preferências dela (H4e,
+  // server/modelos-proprios.ts): a lista, o padrão, o estilo, o ajuste do
+  // tamanho e quantos refazeres ainda cabem nas 24 h. Só dela.
+  modelosDeResumo: procedimentoDaReuniao.query(async ({ ctx }) => ({
+    ...(await modelosEPreferenciasDaDona(ctx.user.openId)),
+    refazeresQueRestam: await refazeresQueRestam(ctx.user.openId),
+  })),
+  // BAD_REQUEST com o código (MODELOS_DE_RESUMO_DEMAIS, o teto de 20) e
+  // CONFLICT (MODELO_DE_RESUMO_NOME_REPETIDO).
+  criarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada)
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return criarModeloProprio(ctx.user.openId, input);
+    }),
+  editarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada.extend({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return editarModeloProprio(ctx.user.openId, input.id, input);
+    }),
+  // Os resumos feitos com o modelo ficam no Geral, e o padrão que o citava volta ao Geral.
+  apagarModeloDeResumo: procedimentoDaReuniao
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return apagarModeloProprio(ctx.user.openId, input.id);
+    }),
+  definirPreferenciasDoResumo: procedimentoDaReuniao
+    .input(z.object({ padrao: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO) }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPreferencias(ctx.user.openId, input);
+    }),
+  // O pedido do resumo antes de gravar (H4e), na reunião que ainda não ficou
+  // pronta; null volta às preferências. PRECONDITION_FAILED com o código na
+  // reunião pronta (aí vale o "Refazer o resumo").
+  definirPedidoDoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      pedido: z.object({ modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO), instrucoes: instrucoesDoPedidoNaEntrada }).nullable(),
+    }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPedidoDoResumo(ctx.user.openId, input.meetingId, input.pedido ? { modelo: input.pedido.modelo, estilo: input.pedido.estilo, instrucoes: input.pedido.instrucoes ?? null } : null);
+    }),
+  // "O resumo teve o tamanho certo?" (H4e): a resposta ajusta os próximos resumos da dona; null desfaz.
+  responderTamanhoDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), resposta: z.enum(RESPOSTAS_DO_TAMANHO).nullable() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return responderTamanhoDoResumo(ctx.user.openId, input.meetingId, input.resposta);
+    }),
 
   // O mapa mental (H10), na linha do resumo guardado: a fila o gera logo
   // depois do resumo, numa chamada à parte (server/fila-do-resumo.ts). Pedir
@@ -599,6 +723,49 @@ export const meetingsRouter = router({
   pedirMapa: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(({ ctx, input }) => pedirMapaDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // H10b: a dona salva o mapa que editou (renomeou, arrastou, acrescentou ou
+  // apagou ramos), ou volta ao da IA. Sem IA; a revisão que a tela viu vai
+  // junto, e a de outra aba é recusada (server/mapa-mental-edicao.ts).
+  editarMapa: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      revisao: z.number().int().min(0),
+      operacao: z.discriminatedUnion("tipo", [
+        z.object({ tipo: z.literal("salvar"), mapa: mapaNoPedido }),
+        z.object({ tipo: z.literal("voltar") }),
+      ]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaEdicaoDoMapa.reservar(ctx.user.openId);
+      try {
+        const feito = await comRecusaDoMapa(() => mudarMapaDaDona(ctx.user.openId, input.meetingId,
+          input.operacao.tipo === "salvar" ? { tipo: "salvar", revisao: input.revisao, mapa: input.operacao.mapa } : { tipo: "voltar", revisao: input.revisao },
+          { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] }));
+        if (!feito.mudou) soltarVaga();
+        return feito;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H10b: "Refazer em outro estilo". O mapa volta à fila no estilo pedido, com
+  // o de agora à vista até o novo chegar. Gasta uma vaga do teto comum de
+  // pedidos à IA e uma do teto do refazer; o pedido recusado devolve as duas.
+  refazerMapa: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), revisao: z.number().int().min(0), estilo: z.enum(ESTILOS_DO_MAPA) }))
+    .mutation(({ ctx, input }) => comRecusaDoMapa(() => refazerMapaNoEstilo(ctx.user.openId, input.meetingId,
+      { revisao: input.revisao, estilo: input.estilo },
+      { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+      () => {
+        // Confere os dois antes de gastar: a recusa de um não deixa a vaga do outro gasta.
+        tetoDoRefazerDoMapa.conferir(ctx.user.openId);
+        tetoDaIADaReuniao.conferir(ctx.user.openId);
+        const soltarRefazer = tetoDoRefazerDoMapa.reservar(ctx.user.openId);
+        const soltarIA = tetoDaIADaReuniao.reservar(ctx.user.openId);
+        return () => { soltarRefazer(); soltarIA(); };
+      }))),
 
   // Desconfirmar apaga a próxima ação do item (H5a), e o evento dela sai da
   // Google Agenda depois (H5c, server/acoes-na-google.ts): o token vem antes da
@@ -669,6 +836,28 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { meetingId, secao, ...campos } = input;
       return { id: await acrescentarItemDoResumo(ctx.user.openId, meetingId, secao, campos) };
+    }),
+
+  // "Baixar o áudio do resumo" (H19b, server/resumo-em-audio.ts): o MP3 com a
+  // voz do Gemini, gerado uma vez por texto e idioma e servido de novo do bucket.
+  // O idioma é o do resumo ou o de uma tradução já pronta (H11).
+  audioDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.string().min(2).max(12).optional() }))
+    .mutation(async ({ ctx, input }) => audioDoResumoDaDona(ctx.user.openId, input.meetingId, input.idioma, {
+      userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+    })),
+
+  // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
+  // dona pede num item; o que a busca achar espera a decisão dela.
+  pedirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => pedirComplemento(ctx.user.openId, input.itemId)),
+
+  decidirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid(), decisao: z.enum(["confirmar", "descartar"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await decidirComplemento(ctx.user.openId, input.itemId, input.decisao);
+      return { ok: true as const };
     }),
 
   perguntar: procedimentoDaReuniao
@@ -1278,6 +1467,26 @@ export const meetingsRouter = router({
   // Uma rodada por pedido (até REUNIOES_POR_EXCLUSAO_MAX reuniões); `restam`
   // diz à tela se pede de novo.
   esvaziarLixeira: protectedProcedure.mutation(({ ctx }) => esvaziarLixeira(ctx.user.openId, provaDaDona(ctx))),
+
+  // As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts):
+  // a imagem chega em base64, já reduzida no aparelho; o servidor confere o
+  // conteúdo e tira os metadados. O teto do base64 é o do arquivo (10 MB) em
+  // base64, com folga para o cabeçalho "data:".
+  anexos: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => comRecusaDoAnexo(() => anexosDaDona(ctx.user.openId, input.meetingId))),
+
+  anexarAoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      tipo: z.enum(TIPOS_DE_ANEXO),
+      dataBase64: z.string().min(1).max(Math.ceil(ANEXO_BYTES_MAX / 3) * 4 + 100),
+    }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => anexarAoResumo(ctx.user.openId, input.meetingId, { tipo: input.tipo, dataBase64: input.dataBase64 }, provaDaDona(ctx)))),
+
+  apagarAnexo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), anexoId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => apagarAnexo(ctx.user.openId, input.meetingId, input.anexoId, provaDaDona(ctx)))),
 
   // O Excluir de sempre, imediato: o caminho do "Descartar" da gravação em
   // curso (useGravacaoEmPartes, os descartes pendentes e a retomada), do

@@ -18,6 +18,7 @@ import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao } from "@s
 import { OpcaoDoIdiomaOriginal } from "@/components/SeletorDoIdiomaDaReuniao";
 import { PergunteAReuniao } from "@/components/ReuniaoComIA";
 import { ResumoGuardado } from "@/components/ResumoGuardado";
+import { AnexosDoResumo } from "@/components/AnexosDoResumo";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { SenhaDoLinkAberto } from "@/components/SenhaDoLinkAberto";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
@@ -180,8 +181,11 @@ export default function ReuniaoAberta() {
   // Com a senha certa, a reunião se relê, e o que recusou com a entrada
   // vencida pede de novo. A tradução da transcrição é pedida aqui: o efeito que
   // a pede não roda sozinho, porque nada nas dependências dele mudou.
+  const utils = trpc.useUtils();
   const depoisDaSenha = () => {
     void refetch();
+    // As fotos e os desenhos do resumo (H4g e H4h) pedem a entrada também.
+    void utils.reuniaoAberta.anexos.invalidate({ token });
     if (pedeSenha(resumoGuardado.error)) void resumoGuardado.refetch();
     if (pedeSenha(traduzir.error)) {
       if (temTranscricao && idiomaDaTraducao !== idiomaDoOriginal) pedirTraducao();
@@ -247,6 +251,8 @@ export default function ReuniaoAberta() {
     {aba === "summary" && <>
       {temTextoParaResumir && <div className="mt-6 space-y-4">
         <ResumoGuardado token={token} consulta={resumoGuardado} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo} documento={ehDocumento}/>
+        {/* As fotos e os desenhos que a dona anexou ao resumo (H4g e H4h), pela rota do link. */}
+        <AnexosDoResumo token={token} aoPedirSenha={pedirASenhaDeNovo}/>
         {/* Os nomes só trocam o rótulo na tela: a pergunta vai à IA sem eles. */}
         <PergunteAReuniao token={token} nomes={nomes} aoIrPara={partes.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} documento={ehDocumento} aoPedirSenha={pedirASenhaDeNovo}/>
       </div>}

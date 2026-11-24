@@ -50,6 +50,14 @@ export const PLANO_DE_LIMPEZA = [
   // O Pergunte a várias reuniões (H6c): uma linha por pergunta, sem o conteúdo. O exame
   // não pergunta, mas a conta QA que perguntar sai com o resto.
   { tabela: "perguntas_entre_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).
+  { tabela: "modelos_de_resumo_proprios", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "preferencias_do_resumo", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "resumos_refeitos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O áudio do resumo (H19b) e as buscas do complemento (H4i), só para o teto de 24 h.
+  // O exame não gera áudio nem busca; a conta QA que fizer sai com o resto.
+  { tabela: "resumo_em_audio", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "buscas_do_complemento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Partes do áudio da gravação em partes. O exame não grava reunião, então as
@@ -63,6 +71,10 @@ export const PLANO_DE_LIMPEZA = [
   // contas QA não têm linha nem objeto no bucket; se passar a enviar, vale o
   // mesmo aviso das partes acima: a linha só sai depois do objeto.
   { tabela: "meeting_documents", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As fotos e os desenhos do resumo (H4g e H4h). O exame não anexa imagem, então as
+  // contas QA não têm linha nem objeto no bucket; se passar a anexar, vale o mesmo
+  // aviso das partes acima: a linha só sai depois do objeto.
+  { tabela: "meeting_attachments", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
   // marcar sai com o resto.
   { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },

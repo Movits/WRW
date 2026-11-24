@@ -14,6 +14,7 @@ import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
 import { mapaMentalPeloLink, pedirMapaPeloLink } from "../mapa-mental-guardado";
 import { traduzirResumoPeloLink } from "../traducao-do-resumo";
+import { anexosPeloLink } from "../anexos-do-resumo";
 import { comRecusaTraduzida, segundaVagaDaPerguntaLonga } from "./meetings";
 
 /**
@@ -137,6 +138,12 @@ export const reuniaoAbertaRouter = router({
   pedirResumo: procedimentoDoLink
     .input(z.object({ token: tokenDoLink }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
+
+  // As fotos e os desenhos do resumo (H4g e H4h), só leitura: o id, o tipo e
+  // o endereço pela rota do link, que confere a entrada a cada imagem.
+  anexos: procedimentoDoLink
+    .input(z.object({ token: tokenDoLink }))
+    .query(({ input }) => comRecusaTraduzida(() => anexosPeloLink(input.token))),
 
   // O mapa mental (H10), só leitura, como o resumo. Pedir o mapa que a
   // reunião ainda não tem (ou que falhou) gasta uma vaga dos dois tetos;

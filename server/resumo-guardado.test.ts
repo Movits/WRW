@@ -19,6 +19,8 @@ const estado = vi.hoisted(() => ({
   // O que o serviço mandou gravar, para os testes dos modelos (H4d).
   inseridos: [] as Array<Record<string, unknown>>,
   atualizados: [] as Array<Record<string, unknown>>,
+  refazeresNoDia: 0,
+  vagasDoRefazerDevolvidas: 0,
 }));
 
 vi.mock("./db", async () => {
@@ -30,13 +32,17 @@ vi.mock("./db", async () => {
         const linhas = () => tabela === schema.meetings ? [{ status: "ready" }]
           : tabela === schema.meetingTranscripts ? [{ id: "transcricao-1" }]
           : tabela === schema.meetingSummaries ? (estado.resumo ? [estado.resumo] : [])
+          // O teto do refazer (H4e) conta as linhas das últimas 24 h.
+          : tabela === schema.resumosRefeitos ? [{ n: estado.refazeresNoDia }]
           : [];
         const fim = { limit: async () => linhas(), orderBy: async () => [], then: (ok: (v: unknown) => unknown) => Promise.resolve(linhas()).then(ok) };
         return { where: () => fim };
       } }),
       insert: () => ({ values: async (valores: Record<string, unknown>) => { estado.inseridos.push(valores); if (estado.erroNoInsert) throw estado.erroNoInsert; } }),
       update: () => ({ set: (campos: Record<string, unknown>) => { estado.atualizados.push(campos); return { where: async () => [{ affectedRows: estado.linhasNoUpdate }] }; } }),
-      // Sem delete: pedir ou refazer o resumo nunca apaga item (quem troca os itens é a fila).
+      // Pedir ou refazer o resumo nunca apaga item (quem troca os itens é a fila):
+      // o único delete é o da vaga do teto do refazer (H4e) que volta.
+      delete: (tabela: unknown) => { if (tabela !== schema.resumosRefeitos) throw new Error("delete fora do teto do refazer"); estado.vagasDoRefazerDevolvidas++; return { where: async () => [{ affectedRows: 1 }] }; },
     }),
   };
 });
@@ -52,10 +58,11 @@ const {
   confirmarItensDoResumo, decidirItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona, resumoGuardadoPeloLink,
 } = await import("./resumo-guardado");
 const { MENSAGEM_RESUMO_SENDO_GERADO } = await import("@shared/const");
+const { RECUSAS_DOS_MODELOS, REFAZERES_POR_DIA } = await import("@shared/modelos-de-resumo");
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 
 beforeEach(() => {
-  Object.assign(estado, { resumo: undefined, erroNoInsert: null, linhasNoUpdate: 1, banco: null, inseridos: [], atualizados: [] });
+  Object.assign(estado, { resumo: undefined, erroNoInsert: null, linhasNoUpdate: 1, banco: null, inseridos: [], atualizados: [], refazeresNoDia: 0, vagasDoRefazerDevolvidas: 0 });
 });
 
 describe("pedido de resumo que perde a corrida", () => {
@@ -293,17 +300,20 @@ describe("decidir no resumo trava a reunião e o resumo numa transação, antes 
 });
 
 describe("os modelos do resumo (H4d): pedir e refazer", () => {
-  const resumo = (status: string, template: string) => ({ id: "resumo-1", status, lockedUntil: null, lockToken: null, emoji: null, language: null, lastError: null, template });
+  const resumo = (status: string, template: string) => ({
+    id: "resumo-1", status, lockedUntil: null, lockToken: null, emoji: null, language: null, lastError: null, template,
+    customTemplateId: null, aiTemplate: null, style: "balanced", instructions: null,
+  });
 
   it("pedir com modelo: o resumo novo nasce nele; sem modelo, no Geral", async () => {
-    await pedirResumoDaDona("dona-1", ID, () => undefined, "sales");
+    await pedirResumoDaDona("dona-1", ID, () => undefined, { modelo: "sales" });
     await pedirResumoDaDona("dona-1", ID, () => undefined);
     expect(estado.inseridos.map(linha => [linha.status, linha.template])).toEqual([["pending", "sales"], ["pending", "general"]]);
   });
 
   it("o que falhou reabre no modelo pedido; sem modelo, fica no de antes", async () => {
     estado.resumo = resumo("failed", "networking");
-    await pedirResumoDaDona("dona-1", ID, () => undefined, "sales");
+    await pedirResumoDaDona("dona-1", ID, () => undefined, { modelo: "sales" });
     await pedirResumoDaDona("dona-1", ID, () => undefined);
     expect(estado.atualizados[0]).toMatchObject({ status: "pending", template: "sales", attempts: 0, lastError: null, lockToken: null, lockedUntil: null });
     expect(estado.atualizados[1]).toMatchObject({ status: "pending" });
@@ -313,7 +323,7 @@ describe("os modelos do resumo (H4d): pedir e refazer", () => {
   it("pedir não refaz o resumo pronto, nem com outro modelo: nem chama o teto", async () => {
     estado.resumo = resumo("ready", "general");
     const teto = vi.fn();
-    await pedirResumoDaDona("dona-1", ID, teto, "sales");
+    await pedirResumoDaDona("dona-1", ID, teto, { modelo: "sales" });
     expect(teto).not.toHaveBeenCalled();
     expect(estado.atualizados).toEqual([]);
   });
@@ -322,7 +332,7 @@ describe("os modelos do resumo (H4d): pedir e refazer", () => {
     estado.resumo = resumo("ready", "general");
     const soltar = vi.fn();
     const teto = vi.fn(() => soltar);
-    await refazerResumoDaDona("dona-1", ID, "mentoring", teto);
+    await refazerResumoDaDona("dona-1", ID, { modelo: "mentoring" }, teto);
     expect(teto).toHaveBeenCalledTimes(1);
     expect(soltar).not.toHaveBeenCalled();
     expect(estado.atualizados).toEqual([expect.objectContaining({ status: "pending", template: "mentoring", attempts: 0, lastError: null, lockToken: null, lockedUntil: null })]);
@@ -332,7 +342,7 @@ describe("os modelos do resumo (H4d): pedir e refazer", () => {
 
   it("refazer o que falhou também vale, no modelo pedido", async () => {
     estado.resumo = resumo("failed", "general");
-    await refazerResumoDaDona("dona-1", ID, "one_on_one", () => undefined);
+    await refazerResumoDaDona("dona-1", ID, { modelo: "one_on_one" }, () => undefined);
     expect(estado.atualizados).toEqual([expect.objectContaining({ status: "pending", template: "one_on_one" })]);
   });
 
@@ -340,21 +350,61 @@ describe("os modelos do resumo (H4d): pedir e refazer", () => {
     estado.resumo = resumo("ready", "general");
     estado.linhasNoUpdate = 0;
     const soltar = vi.fn();
-    await refazerResumoDaDona("dona-1", ID, "sales", () => soltar);
+    await refazerResumoDaDona("dona-1", ID, { modelo: "sales" }, () => soltar);
     expect(soltar).toHaveBeenCalledTimes(1);
+    // A vaga do teto do refazer (H4e) também volta.
+    expect(estado.vagasDoRefazerDevolvidas).toBe(1);
+  });
+
+  it("H4e: o teto de custo do refazer, no banco: cheio, recusa com o código e devolve a vaga do teto em memória; abaixo dele, grava a linha", async () => {
+    estado.resumo = resumo("ready", "general");
+    estado.refazeresNoDia = REFAZERES_POR_DIA;
+    const soltar = vi.fn();
+    await expect(refazerResumoDaDona("dona-1", ID, { modelo: "sales" }, () => soltar)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS", message: RECUSAS_DOS_MODELOS.refazeresDemais });
+    expect(soltar).toHaveBeenCalledTimes(1);
+    expect(estado.atualizados).toEqual([]);
+    estado.refazeresNoDia = REFAZERES_POR_DIA - 1;
+    await refazerResumoDaDona("dona-1", ID, { modelo: "sales" }, () => undefined);
+    expect(estado.inseridos).toEqual([expect.objectContaining({ ownerId: "dona-1", createdAt: expect.any(Number) })]);
+    expect(estado.atualizados).toHaveLength(1);
+  });
+
+  it("H4e: pedir de novo o resumo que falhou (sem refazer) não conta no teto do refazer", async () => {
+    estado.resumo = resumo("failed", "general");
+    estado.refazeresNoDia = REFAZERES_POR_DIA;
+    await pedirResumoDaDona("dona-1", ID, () => undefined);
+    expect(estado.atualizados).toHaveLength(1);
+    expect(estado.inseridos).toEqual([]);
+  });
+
+  it("H4e: o refazer leva o estilo e as instruções (aparadas); na fila, outro estilo ou outras instruções são conflito", async () => {
+    estado.resumo = resumo("ready", "general");
+    await refazerResumoDaDona("dona-1", ID, { modelo: "general", estilo: "detailed", instrucoes: "  Destaque os prazos.  " }, () => undefined);
+    expect(estado.atualizados[0]).toMatchObject({ template: "general", customTemplateId: null, aiTemplate: null, style: "detailed", instructions: "Destaque os prazos." });
+    estado.resumo = { ...resumo("pending", "general"), style: "detailed", instructions: "Destaque os prazos." };
+    await refazerResumoDaDona("dona-1", ID, { modelo: "general", estilo: "detailed", instrucoes: "Destaque os prazos." }, () => undefined);
+    await expect(refazerResumoDaDona("dona-1", ID, { modelo: "general", estilo: "concise", instrucoes: "Destaque os prazos." }, () => undefined)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(refazerResumoDaDona("dona-1", ID, { modelo: "general", estilo: "detailed" }, () => undefined)).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("H4e: 'a IA escolhe' vai à fila como Geral com a escolha pendente; modelo que não existe é BAD_REQUEST", async () => {
+    estado.resumo = resumo("ready", "sales");
+    await refazerResumoDaDona("dona-1", ID, { modelo: "ia" }, () => undefined);
+    expect(estado.atualizados[0]).toMatchObject({ template: "general", customTemplateId: null, aiTemplate: "pending" });
+    await expect(refazerResumoDaDona("dona-1", ID, { modelo: "vendas" }, () => undefined)).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("refazer o que ainda está na fila: no mesmo modelo não muda nada nem gasta vaga; em outro é conflito", async () => {
     estado.resumo = resumo("pending", "sales");
     const teto = vi.fn();
-    await refazerResumoDaDona("dona-1", ID, "sales", teto);
-    await expect(refazerResumoDaDona("dona-1", ID, "general", teto)).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
+    await refazerResumoDaDona("dona-1", ID, { modelo: "sales" }, teto);
+    await expect(refazerResumoDaDona("dona-1", ID, { modelo: "general" }, teto)).rejects.toMatchObject({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
     expect(teto).not.toHaveBeenCalled();
     expect(estado.atualizados).toEqual([]);
   });
 
   it("refazer sem resumo nenhum cria o trabalho no modelo pedido", async () => {
-    await refazerResumoDaDona("dona-1", ID, "networking", () => undefined);
+    await refazerResumoDaDona("dona-1", ID, { modelo: "networking" }, () => undefined);
     expect(estado.inseridos).toEqual([expect.objectContaining({ status: "pending", template: "networking" })]);
   });
 });

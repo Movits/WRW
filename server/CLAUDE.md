@@ -16,8 +16,9 @@ compression, cabeçalhos de segurança, bloqueio de scanners, rate limit global,
 parsers, proxy de storage, tRPC em `/api/trpc` e, por fim, Vite em middleware (dev) ou
 estático de `dist/public` (prod). Não há proxy de dev: front e API na mesma origem.
 
-Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
-`meetings.submitRecording`, `contexts.uploadMedia`, `network.uploadPhoto`,
+Body parsers: 5 MB por padrão e 15 MB em SETE procedimentos de upload —
+`meetings.submitRecording`, `meetings.anexarAoResumo` (as fotos e os desenhos do resumo,
+H4g e H4h), `contexts.uploadMedia`, `network.uploadPhoto`,
 `network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
@@ -302,9 +303,10 @@ sem ele).
   `server/ia-em-json.ts`, onde a função é obrigatória) passa a `funcao`, e não o id. A
   ordem é `LLM_MODEL_<FUNÇÃO>` > o padrão da função no código > `LLM_MODEL` > o padrão
   (`FUNCOES_DE_TEXTO`, em `_core/modelos-de-ia.ts`); o padrão da função só vale com o
-  `LLM_API_URL` na API do Gemini. Hoje são três, todas sem padrão próprio (seguem o
+  `LLM_API_URL` na API do Gemini. As três que a bancada mediu não têm padrão próprio (seguem o
   `LLM_MODEL`): a extração da reunião (`extracao`), o resumo guardado (`resumo`) e o
-  Pergunte (`pergunta`). O Lite que a bancada A de texto (16/11) indicou para a extração
+  Pergunte (`pergunta`). A quarta, a escolha do modelo do resumo (`escolha_do_modelo`, H4e,
+  `server/escolha-do-modelo.ts`), nasceu no `gemini-3.5-flash-lite`. O Lite que a bancada A de texto (16/11) indicou para a extração
   não devolveu as entidades de cargo, ativo, necessidade e oportunidade, que a tela usa:
   leia o `docs/deploy.md` antes de trocar. Chamada nova de texto sem função fica no
   `LLM_MODEL`; função nova entra na tabela, no `docs/deploy.md` e no `.env.example` (um
@@ -331,6 +333,11 @@ sem ele).
   com link aberto (decisão do Roberto de 12/11/2026, "por enquanto"): sai por
   `/reuniao-aberta/{token}/audio`, sem sessão, só enquanto a dona mantém o link ligado
   (`server/link-aberto-da-reuniao.ts`; procedimentos públicos em `routers/reuniaoAberta.ts`).
+  As fotos e os desenhos do resumo (H4g e H4h, `server/anexos-do-resumo.ts`, tabela
+  `meeting_attachments`) saem pelo link do mesmo jeito, por
+  `/reuniao-aberta/{token}/anexo/{id}`, com a senha do link; tirar o áudio do link não os
+  tira. Seguem a regra do PDF da reunião: 30 dias, a varredura, a exclusão da reunião e
+  da conta; o servidor confere o conteúdo e tira os metadados (o GPS do EXIF).
   Desde a H23 a dona tira o áudio do link (a consulta deixa de servi-lo) e põe uma senha
   de 6 dígitos: o link com senha só abre com o cookie HttpOnly de quem a acertou
   (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que
@@ -441,6 +448,18 @@ refazer. O link manda vazio o trecho de item que não está mais na
 transcrição, no resumo e na tradução dele (`trechosNaTranscricaoDeAgora`: leitura nova de
 item pelo link passa por ele). A junção (H17) remonta a transcrição pelo áudio: as
 correções não passam, e a tela avisa.
+
+## O mapa mental editável (H10b)
+
+`server/mapa-mental-edicao.ts` e `shared/mapa-mental-edicao.ts`: a dona renomeia, arrasta,
+acrescenta e apaga ramos, volta ao mapa da IA e pede "Refazer em outro estilo" (visão
+geral, hierárquico, linha do tempo, conceito). O mapa da IA fica em `mind_map` (só a fila
+grava); o da dona em `mind_map_edited`, e a tela, o link e a tradução leem o que vale
+(`mapaQueVale`). A edição confere as regras da H10 sem podar (código traduzido), confere a
+`mind_map_revision` e grava `MEETING_MIND_MAP_EDITED` na transação, sem rótulos. O refazer
+põe o mapa na fila no estilo (`mind_map_style`), com o de antes à vista até o novo chegar, e
+gasta uma vaga do teto comum de IA e uma do teto do refazer (6 por hora); o mapa novo da
+fila substitui a edição. O resumo refeito não refaz sozinho o mapa que a dona editou.
 
 ## O Pergunte a várias reuniões e a resposta visual (H6c e H6d)
 

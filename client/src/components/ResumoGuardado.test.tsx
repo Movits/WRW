@@ -41,9 +41,16 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       pedirResumo: duble.registrar("pedirResumo"),
       refazerResumo: duble.registrar("refazerResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       // As do formulário do item (H4f), que só monta quando a dona o abre.

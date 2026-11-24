@@ -110,7 +110,11 @@ describe.skipIf(!temBanco)("O mapa mental na fila do resumo (integração)", () 
     expect(gerarMapaMental).toHaveBeenCalledWith({ transcricao: TEXTO, idioma: "pt-BR" });
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, mindMapStatus: "ready", mindMapError: null });
     expect(Number((await linhaDoResumo(id)).mindMapGeneratedAt)).toBeGreaterThan(0);
-    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false });
+    // H10b: o mapa gravado pela fila sobe a revisão do mapa, que a edição confere.
+    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({
+      estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false,
+      edicao: { revisao: 1, editado: false, editadoEm: null, refazendo: false, erroDoRefazer: null },
+    });
     expect((await resumoGuardado.resumoGuardadoDaDona(DONA, id)).estado).toBe("pronto");
   });
 

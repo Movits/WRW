@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { meetingSummaries, meetingTranscripts } from "../drizzle/schema";
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
+import { estiloDoMapa, mapaQueVale, type EstiloDoMapa } from "@shared/mapa-mental-edicao";
 import { exigirDb } from "./db";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
@@ -71,6 +72,27 @@ const COLUNAS_DO_MAPA = {
   mindMapStatus: meetingSummaries.mindMapStatus,
   mindMapError: meetingSummaries.mindMapError,
   version: meetingSummaries.version,
+  mindMapEdited: meetingSummaries.mindMapEdited,
+  mindMapEditedAt: meetingSummaries.mindMapEditedAt,
+  mindMapRevision: meetingSummaries.mindMapRevision,
+  mindMapStyle: meetingSummaries.mindMapStyle,
+  mindMapPreviousStyle: meetingSummaries.mindMapPreviousStyle,
+};
+
+/**
+ * O que só a dona recebe sobre a edição do mapa (H10b): a revisão (que ela
+ * manda de volta ao editar ou refazer), se está editado e desde quando, e o
+ * refazer em curso ou que falhou (com o mapa de antes à vista). Sai só quando
+ * há o que dizer: sem edição, sem refazer e na revisão 0, o mapa é o da H10.
+ */
+export type EdicaoDoMapa = {
+  revisao: number;
+  editado: boolean;
+  editadoEm: number | null;
+  refazendo: boolean;
+  erroDoRefazer: string | null;
+  /** O estilo pedido no refazer em curso ou que falhou; o mapa à vista segue no `estilo` de antes. */
+  estiloPedido?: EstiloDoMapa;
 };
 
 async function linhaDoMapa(db: Banco, ownerId: string, meetingId: string) {
@@ -91,16 +113,49 @@ async function linhaDoMapa(db: Banco, ownerId: string, meetingId: string) {
  * a do link troca o "Tentar de novo", que não reabre o refazer da dona, pelo
  * aviso de que ela pediu uma nova versão.
  */
-function paraATela(linha: Awaited<ReturnType<typeof linhaDoMapa>>, agora: number): {
+export type MapaNaTela = {
   estado: EstadoDoMapa; idioma: string | null; erro: string | null; mapa: MapaMental | null; versaoAnterior: boolean;
-} {
+  /** O estilo do mapa (H10b); ausente na visão geral da H10. */
+  estilo?: EstiloDoMapa;
+  /** Só para a dona (H10b): ver EdicaoDoMapa. */
+  edicao?: EdicaoDoMapa;
+};
+
+function paraATela(linha: Awaited<ReturnType<typeof linhaDoMapa>>, agora: number): MapaNaTela {
   const { estado, erro } = estadoDoMapa(linha, agora);
   const idioma = linha?.language ?? null;
   const versaoAnterior = !!linha && linha.status !== "ready" && Number(linha.version) > 0;
-  if (estado !== "pronto") return { estado, idioma, erro, mapa: null, versaoAnterior };
-  const mapa = conferirMapaMental(linha?.mindMap);
-  if (!mapa) return { estado: "falhou", idioma, erro: "MAPA_INVALIDO", mapa: null, versaoAnterior };
-  return { estado, idioma, erro: null, mapa, versaoAnterior };
+  const estilo = estiloDoMapa(linha?.mindMapStyle);
+  const comEstilo = estilo === "overview" ? {} : { estilo };
+  const visivel = mapaQueVale(linha);
+  const revisao = Number(linha?.mindMapRevision ?? 0);
+  const editado = !!linha && conferirMapaMental(linha.mindMapEdited) !== null;
+  const edicao = (refazendo: boolean, erroDoRefazer: string | null) => revisao > 0 || editado || refazendo || erroDoRefazer
+    ? { edicao: { revisao, editado, editadoEm: editado && linha?.mindMapEditedAt != null ? Number(linha.mindMapEditedAt) : null, refazendo, erroDoRefazer } }
+    : {};
+  if (estado !== "pronto") {
+    // H10b: o mapa da IA refeito em outro estilo, na fila ou que falhou, com o
+    // mapa de antes (o da IA ou o editado) ainda guardado: ele segue à vista,
+    // com o aviso do refazer. Sem mapa guardado, é a H10 de sempre.
+    if (visivel && linha?.mindMapStatus !== "ready" && linha?.mindMapStatus != null) {
+      const refazendo = estado === "pendente" || estado === "gerando";
+      // O mapa à vista é o de antes: desenhado no estilo dele, e não no pedido
+      // (conferência de tela do pacote Resumo e mapa a mais).
+      const estiloAVista = linha.mindMapPreviousStyle ? estiloDoMapa(linha.mindMapPreviousStyle) : estilo;
+      const comEstiloAVista = estiloAVista === "overview" ? {} : { estilo: estiloAVista };
+      const { edicao: daEdicao } = edicao(refazendo, refazendo ? null : erro ?? "ERRO");
+      return { estado: "pronto", idioma, erro: null, mapa: visivel, versaoAnterior, ...comEstiloAVista,
+        ...(daEdicao ? { edicao: estiloAVista !== estilo ? { ...daEdicao, estiloPedido: estilo } : daEdicao } : {}) };
+    }
+    return { estado, idioma, erro, mapa: null, versaoAnterior, ...comEstilo };
+  }
+  if (!visivel) return { estado: "falhou", idioma, erro: "MAPA_INVALIDO", mapa: null, versaoAnterior, ...comEstilo };
+  return { estado, idioma, erro: null, mapa: visivel, versaoAnterior, ...comEstilo, ...edicao(false, null) };
+}
+
+/** O link aberto não recebe nada da edição: só o mapa que vale e o estilo. */
+function semEdicao({ edicao: _edicao, ...resto }: MapaNaTela): MapaNaTela {
+  return resto;
 }
 
 /** O mapa mental da reunião para a dona. */
@@ -171,7 +226,7 @@ export async function pedirMapaDaDona(ownerId: string, meetingId: string, antesD
 export async function mapaMentalPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
   const db = await exigirDb();
-  return paraATela(await linhaDoMapa(db, reuniao.ownerId, reuniao.id), Date.now());
+  return semEdicao(paraATela(await linhaDoMapa(db, reuniao.ownerId, reuniao.id), Date.now()));
 }
 
 /** Quem tem o link pede o mapa que a reunião ainda não tem (ou que falhou). */

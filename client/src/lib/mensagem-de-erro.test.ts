@@ -21,6 +21,7 @@ import { MENSAGEM_ACAO_NAO_ENCONTRADA, MENSAGEM_CONTATO_FORA_DA_REDE } from "@sh
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
 import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
+import { RECUSAS_DOS_MODELOS } from "@shared/modelos-de-resumo";
 import { mensagemDaRecusaDaParte, mensagemDaRecusaDoAudio, mensagemDeErroParaTela, traduzirMensagemDoServidor } from "./mensagem-de-erro";
 
 /**
@@ -449,5 +450,16 @@ describe("mensagemDeErroParaTela — as recusas da legenda ao vivo (G15b) no idi
         expect(frase.trim()).not.toBe("");
       }
     }
+  });
+});
+
+describe("mensagemDeErroParaTela — o teto de mudanças nos modelos de resumo (H4e) no idioma da tela", () => {
+  afterEach(async () => { await i18n.changeLanguage("pt-BR"); });
+  const erro = { message: RECUSAS_DOS_MODELOS.mudancasDemais, data: { code: "TOO_MANY_REQUESTS" } };
+
+  it("em português e em inglês sai a frase traduzida, e não o código cru", async () => {
+    expect(mensagemDeErroParaTela(erro, i18n.t)).toMatch(/Muitas mudanças nos modelos de resumo/);
+    await i18n.changeLanguage("en");
+    expect(mensagemDeErroParaTela(erro, i18n.t)).toMatch(/Too many changes to the summary templates/);
   });
 });

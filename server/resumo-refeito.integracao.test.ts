@@ -135,7 +135,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("pedir com modelo: a reunião ganha o resumo no modelo escolhido, e a IA o recebe", async () => {
     const id = await reuniaoPronta();
-    const pedido = await servico.pedirResumoDaDona(DONA, id, vaga, "mentoring");
+    const pedido = await servico.pedirResumoDaDona(DONA, id, vaga, { modelo: "mentoring" });
     expect(pedido).toMatchObject({ estado: "pendente", modelo: "mentoring", itens: [] });
     expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", template: "mentoring" });
     await rodar();
@@ -145,7 +145,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("refazer como Vendas: os confirmados e os feitos ficam (renumerados); os pendentes e os ignorados são trocados; o que repete um que ficou não entra", async () => {
     const { id, antes } = await resumoDecidido();
-    const pedido = await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    const pedido = await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     expect(vaga).toHaveBeenCalledTimes(1);
     expect(pedido).toMatchObject({ estado: "pendente", modelo: "sales" });
     // Até a versão nova ser gravada, a anterior fica inteira, para a tela mostrar.
@@ -183,7 +183,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     const { id, antes } = await resumoDecidido();
     const token = await tokenDe(id);
     expect(await servico.resumoGuardadoPeloLink(token)).toMatchObject({ estado: "pronto", versaoAnterior: false });
-    await servico.refazerResumoDaDona(DONA, id, "networking", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "networking" }, vaga);
     await expect(servico.decidirItemDoResumo(DONA, antes["Ligar para o despachante"].id, "confirmed")).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(servico.marcarAcaoFeita(DONA, antes["Avisar a transportadora"].id, true)).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(servico.confirmarItensDoResumo(DONA, id)).rejects.toMatchObject({ code: "CONFLICT" });
@@ -203,7 +203,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
   it("o refazer falhou: o link segue com a versão anterior e não o reabre; a dona volta a decidir, e o 'Tentar de novo' guarda o que ela confirmou", async () => {
     const { id, antes } = await resumoDecidido();
     const token = await tokenDe(id);
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
     await rodar();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "failed", template: "sales", version: 1 });
@@ -263,7 +263,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
   it("a versão nova falhou: a anterior fica inteira; tentar de novo refaz no mesmo modelo", async () => {
     const { id } = await resumoDecidido();
     const antes = await itensDe(id);
-    await servico.refazerResumoDaDona(DONA, id, "networking", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "networking" }, vaga);
     gerarResumoDaReuniao.mockRejectedValue(new FalhaDaIA("RESPOSTA_CORTADA"));
     await rodar();
 
@@ -288,17 +288,17 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("refazer de novo o que já está na fila: no mesmo modelo nada muda nem gasta vaga; em outro, é conflito", async () => {
     const { id } = await resumoDecidido();
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     expect(vaga).toHaveBeenCalledTimes(1);
-    await expect(servico.refazerResumoDaDona(DONA, id, "mentoring", vaga)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(servico.refazerResumoDaDona(DONA, id, { modelo: "mentoring" }, vaga)).rejects.toMatchObject({ code: "CONFLICT" });
     expect(vaga).toHaveBeenCalledTimes(1);
     expect(await linhaDoResumo(id)).toMatchObject({ status: "pending", template: "sales" });
   });
 
   it("refazer no mesmo modelo dá uma versão nova, guardando o que a dona decidiu", async () => {
     const { id } = await resumoDecidido();
-    await servico.refazerResumoDaDona(DONA, id, "general", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "general" }, vaga);
     await rodar();
     // O Geral de novo traz as mesmas ações: as que ficaram não se repetem; as outras voltam pendentes.
     expect((await itensDe(id)).map(linha => [linha.text, linha.status])).toEqual([
@@ -313,9 +313,9 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("só a dona refaz, e só a reunião pronta", async () => {
     const { id } = await resumoDecidido();
-    await expect(servico.refazerResumoDaDona(OUTRA, id, "sales", vaga)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(servico.refazerResumoDaDona(OUTRA, id, { modelo: "sales" }, vaga)).rejects.toMatchObject({ code: "NOT_FOUND" });
     await (await db()).update(meetings).set({ status: "processing" }).where(eq(meetings.id, id));
-    await expect(servico.refazerResumoDaDona(DONA, id, "sales", vaga)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     expect(vaga).not.toHaveBeenCalled();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "general" });
   });
@@ -325,7 +325,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     const antes = await linhaDoResumo(id);
     expect(antes).toMatchObject({ mindMapStatus: "ready" });
     gerarMapaMental.mockClear();
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     gerarResumoDaReuniao.mockResolvedValue(VENDAS);
     await rodar();
     const depois = await linhaDoResumo(id);
@@ -339,7 +339,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     await (await db()).update(meetingSummaries).set({ mindMap: null, mindMapStatus: "failed", mindMapError: "MAPA_INVALIDO", mindMapGeneratedAt: null })
       .where(eq(meetingSummaries.meetingId, id));
     gerarMapaMental.mockClear();
-    await servico.refazerResumoDaDona(DONA, id, "mentoring", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "mentoring" }, vaga);
     await rodar();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "mentoring", mindMapStatus: "ready", mindMapError: null });
     expect(gerarMapaMental).toHaveBeenCalledTimes(1);
@@ -354,7 +354,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     await servico.editarItemDoResumo(DONA, editado, { texto: "Ligar para o despachante amanhã", assunto: null, responsavel: null, prazo: null });
     await servico.decidirItemDoResumo(DONA, editado, "ignored");
 
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     gerarResumoDaReuniao.mockResolvedValue(VENDAS);
     await rodar();
 
@@ -385,7 +385,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("no refazer que falhou, a dona também edita e acrescenta sobre a versão anterior (H4f); enquanto ele está na fila, não", async () => {
     const { id, antes } = await resumoDecidido();
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     const campos = { texto: "Ligar para o despachante hoje", assunto: null, responsavel: null, prazo: null };
     await expect(servico.editarItemDoResumo(DONA, antes["Ligar para o despachante"].id, campos)).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(servico.acrescentarItemDoResumo(DONA, id, "action", campos)).rejects.toMatchObject({ code: "CONFLICT" });
@@ -406,7 +406,7 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
 
   it("o teto que recusa impede o refazer: o resumo pronto fica como estava", async () => {
     const { id } = await resumoDecidido();
-    await expect(servico.refazerResumoDaDona(DONA, id, "sales", () => { throw new Error("teto"); })).rejects.toThrow("teto");
+    await expect(servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, () => { throw new Error("teto"); })).rejects.toThrow("teto");
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "general", version: 1 });
   });
 });

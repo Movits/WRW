@@ -28,6 +28,9 @@ type OpcoesDoResumo = {
 };
 
 const duble = vi.hoisted(() => ({
+  // As fotos e os desenhos do resumo (H4g e H4h) pela rota do link.
+  anexos: [] as Array<{ id: string; tipo: string; url: string }>,
+  entradaDosAnexos: null as unknown,
   ver: vi.fn(),
   opcoesDaConsulta: null as OpcoesDaConsulta | null,
   resumoGuardado: vi.fn(),
@@ -51,7 +54,7 @@ const duble = vi.hoisted(() => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     // A tradução do resumo relê o resumo quando o servidor diz que ele mudou.
-    useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } } }),
+    useUtils: () => ({ reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() }, anexos: { invalidate: vi.fn() } } }),
     // O "Pergunte à reunião" de verdade pede as três mutações de pergunta a
     // cada render (a da dona, a da gravação em curso, G15a, e a do link); a
     // tradução do resumo da dona nunca é chamada aqui.
@@ -68,6 +71,7 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
       traduzir: { useMutation: () => duble.traduzir },
+      anexos: { useQuery: (entrada: unknown) => { duble.entradaDosAnexos = entrada; return { data: duble.anexos, error: null }; } },
       entrar: { useMutation: () => duble.entrar },
       traduzirResumo: { useMutation: () => duble.traduzirResumo },
       resumoGuardado: {
@@ -152,6 +156,8 @@ function abrirNaTranscricao() {
 }
 
 beforeEach(() => {
+  duble.anexos = [];
+  duble.entradaDosAnexos = null;
   duble.ver.mockReset();
   duble.opcoesDaConsulta = null;
   duble.opcoesDoResumo = null;
@@ -190,6 +196,16 @@ describe("Reunião aberta pelo link", () => {
     expect(screen.queryByRole("button", { name: /Baixar PDF/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Baixar o áudio/ })).not.toBeInTheDocument();
     expect(container.querySelector('a[download], a[href*="baixar-audio"]')).toBeNull();
+  });
+
+  it("as fotos e os desenhos do resumo (H4g e H4h) aparecem na aba Resumo, pela rota do link, sem botão de tirar", () => {
+    duble.ver.mockReturnValue(pronta());
+    duble.anexos = [{ id: "a1", tipo: "photo", url: `/reuniao-aberta/${TOKEN}/anexo/a1` }, { id: "a2", tipo: "drawing", url: `/reuniao-aberta/${TOKEN}/anexo/a2` }];
+    abrir();
+    expect(duble.entradaDosAnexos).toEqual({ token: TOKEN });
+    expect(screen.getByAltText("Foto 1")).toHaveAttribute("src", `/reuniao-aberta/${TOKEN}/anexo/a1`);
+    expect(screen.getByAltText("Desenho 2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Tirar / })).not.toBeInTheDocument();
   });
 
   it("abre na aba Resumo, como no app de referência; a Transcrição fica na outra aba", () => {

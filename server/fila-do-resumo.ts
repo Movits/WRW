@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { idiomaFalado, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
 import { sugestaoDoResumoNovo } from "@shared/titulo-sugerido";
-import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
+import { ESTILO_DO_RESUMO_PADRAO, MODELO_DE_RESUMO_PADRAO, estiloDoResumo, modeloDeResumo, type EscolhaDoModelo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
@@ -15,6 +15,8 @@ import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarMapaMental } from "./mapa-mental";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
+import { escolherModeloDoResumo } from "./escolha-do-modelo";
+import { contextoDaGeracao } from "./modelos-proprios";
 import { numeracaoDoResumoRefeito } from "./resumo-refeito";
 import { envioAutomaticoDoResumo } from "./resumo-por-email";
 
@@ -71,7 +73,16 @@ function codigoDoErro(erro: unknown): string {
 // As duas fases do trabalho de uma linha: o resumo, e depois o mapa mental.
 // O modelo do resumo (H4d) vai junto: a fase do resumo escreve nele.
 type Fase = "resumo" | "mapa";
-type Alvo = { id: string; meetingId: string; ownerId: string; template: string };
+// O pedido da dona (H4e) também: o modelo dela, "a IA escolhe", o estilo e as instruções.
+type Alvo = {
+  id: string; meetingId: string; ownerId: string; template: string;
+  customTemplateId: string | null; aiTemplate: string | null; style: string; instructions: string | null;
+};
+const COLUNAS_DO_ALVO = {
+  id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template,
+  customTemplateId: meetingSummaries.customTemplateId, aiTemplate: meetingSummaries.aiTemplate, style: meetingSummaries.style, instructions: meetingSummaries.instructions,
+  updatedAt: meetingSummaries.updatedAt,
+};
 
 /** A linha que é trabalho da fase: o resumo pendente, ou o mapa pendente de um resumo pronto. */
 function naFila(fase: Fase) {
@@ -123,7 +134,7 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
  * a fila o faz se a dona a restaurar.
  */
 async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) {
-  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template, updatedAt: meetingSummaries.updatedAt })
+  const [alvo] = await db.select(COLUNAS_DO_ALVO)
     .from(meetingSummaries)
     .innerJoin(meetings, and(eq(meetings.id, meetingSummaries.meetingId), eq(meetings.ownerId, meetingSummaries.ownerId)))
     .innerJoin(users, eq(users.openId, meetingSummaries.ownerId))
@@ -138,7 +149,7 @@ async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) 
     ))
     .orderBy(asc(meetingSummaries.updatedAt))
     .limit(1);
-  return alvo ? { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, updatedAt: Number(alvo.updatedAt), fase } : undefined;
+  return alvo ? { ...alvo, updatedAt: Number(alvo.updatedAt), fase } : undefined;
 }
 
 /**
@@ -151,7 +162,10 @@ async function proximoTrabalho(db: Banco, agora: number, escopo: Escopo): Promis
   const resumo = await maisAntigo(db, agora, escopo, "resumo");
   const mapa = await maisAntigo(db, agora, escopo, "mapa");
   const alvo = resumo && mapa ? (mapa.updatedAt < resumo.updatedAt ? mapa : resumo) : resumo ?? mapa;
-  return alvo && { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, fase: alvo.fase };
+  if (!alvo) return undefined;
+  const { updatedAt: _ordem, ...trabalho } = alvo;
+  void _ordem;
+  return trabalho;
 }
 
 async function reservar(db: Banco, id: string, agora: number, fase: Fase): Promise<string | null> {
@@ -284,11 +298,32 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const itensQueFicam = itensAtuais.filter(item => itemQueFica(item) && item.status !== "ignored")
     .map(({ section, subject, text }) => ({ section, subject, text }));
 
+  // O pedido da dona (H4e): o modelo dela, o ajuste do tamanho que as
+  // respostas a "O resumo teve o tamanho certo?" acumularam e, com "a IA
+  // escolhe", a escolha pelo modelo Lite. A escolha que falha não derruba o
+  // resumo: ele sai no Geral, e a tela diz que a IA escolheu.
+  const contexto = await contextoDaGeracao(db, alvo.ownerId, alvo);
+  let modelo: ModeloDeResumo = modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO;
+  let modeloProprio = contexto.modeloProprio;
+  let escolhaDaIA: { template: ModeloDeResumo; customTemplateId: string | null } | null = null;
+  if (alvo.aiTemplate === "pending") {
+    const escolha = await escolhaPelaIA(transcricao.texto, contexto.proprios);
+    modelo = escolha.tipo === "pronto" ? escolha.modelo : MODELO_DE_RESUMO_PADRAO;
+    modeloProprio = escolha.tipo === "proprio" ? contexto.proprios.find(proprio => proprio.id === escolha.id) ?? null : null;
+    escolhaDaIA = { template: modelo, customTemplateId: modeloProprio?.id ?? null };
+  }
+
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
     resumo = await gerarResumoDaReuniao({
       transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma,
-      modelo: modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO, itensQueFicam,
+      modelo, itensQueFicam,
+      preferencias: {
+        modeloProprio: modeloProprio ? { nome: modeloProprio.nome, instrucoes: modeloProprio.instrucoes } : null,
+        estilo: estiloDoResumo(alvo.style) ?? ESTILO_DO_RESUMO_PADRAO,
+        ajusteDoTamanho: contexto.ajusteDoTamanho,
+        instrucoesDoPedido: alvo.instructions,
+      },
     });
   } catch (erro) {
     // Resposta cortada no teto de saída se repetiria com a mesma entrada: é
@@ -306,7 +341,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const agora = Date.now();
   let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
   try {
-    resultado = await gravarResumo(db, alvo, token, { id: transcricao.id, revisao: transcricao.revisao, editada: Number(transcricao.editada) === 1 }, idioma, resumo, agora);
+    resultado = await gravarResumo(db, alvo, token, { id: transcricao.id, revisao: transcricao.revisao, editada: Number(transcricao.editada) === 1 }, idioma, resumo, agora, escolhaDaIA);
   } catch (erro) {
     // A IA já respondeu e o banco recusou (queda, deadlock): conta como falha
     // passageira, com espera, em vez de prender a linha até a reserva vencer.
@@ -328,6 +363,21 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
 }
 
 /**
+ * "A IA escolhe o modelo" (H4e): a escolha do modelo Lite, ou o Geral quando
+ * ela falha ou devolve um código que não é da lista. Só o código vai ao log.
+ */
+export async function escolhaPelaIA(transcricao: string, proprios: Parameters<typeof escolherModeloDoResumo>[0]["proprios"]): Promise<EscolhaDoModelo> {
+  try {
+    const escolha = await escolherModeloDoResumo({ transcricao, proprios });
+    if (escolha) return escolha;
+    console.warn("[Resumo] a escolha do modelo pela IA não veio da lista; fica o Geral.");
+  } catch (erro) {
+    console.warn("[Resumo] a escolha do modelo pela IA falhou; fica o Geral:", erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.name : typeof erro);
+  }
+  return { tipo: "pronto", modelo: MODELO_DE_RESUMO_PADRAO };
+}
+
+/**
  * Grava os itens e marca o resumo como pronto, numa transação. A reunião fica
  * travada até o fim: a exclusão (que marca 'deleted' antes de apagar) espera
  * esta transação, e o que ela gravar sai junto. No resumo refeito (H4d), os
@@ -339,6 +389,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
   transcricao: { id: string; revisao: number; editada: boolean }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+  escolhaDaIA: { template: ModeloDeResumo; customTemplateId: string | null } | null = null,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     // A reunião travada até o fim: a exclusão (que marca 'deleted' antes de
@@ -347,7 +398,7 @@ async function gravarResumo(
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
     const [ainda] = await tx.select({
       id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap,
-      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt,
+      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt, mindMapEdited: meetingSummaries.mindMapEdited,
       suggestedTitle: meetingSummaries.suggestedTitle, suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
     }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
@@ -415,6 +466,11 @@ async function gravarResumo(
       // ela já decidiu (sugestaoDoResumoNovo).
       ...sugestaoDoResumoNovo(ainda, resumo.titulo ?? null),
       version: sql`${meetingSummaries.version} + 1`, generatedAt: geradoEm,
+      // O modelo que a IA escolheu (H4e) fica gravado, e a tela diz que foi
+      // ela. A resposta a "O resumo teve o tamanho certo?" era da versão
+      // anterior: a nova começa sem ela.
+      ...(escolhaDaIA ? { template: escolhaDaIA.template, customTemplateId: escolhaDaIA.customTemplateId, aiTemplate: "chosen" as const } : {}),
+      lengthFeedback: null,
       // A transcrição que a IA leu estava editada (H18)? É a da leitura do
       // começo, como a revisão do horaDaVersao: a edição no meio da geração não
       // muda o que a IA leu.
@@ -426,8 +482,11 @@ async function gravarResumo(
       // e com as tentativas dele. O mapa pronto que ainda passa na conferência
       // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
       // que ele saiu. O mapa gravado antes de a dona editar a transcrição
-      // (H18) é de outra versão, e é refeito com o resumo.
-      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm)
+      // (H18) é de outra versão, e é refeito com o resumo. O mapa que a dona
+      // editou (H10b) fica como está, em qualquer estado: refazê-lo sozinho
+      // apagaria o trabalho dela, e ela pode pedir o "Refazer pela IA".
+      ...(conferirMapaMental(ainda.mindMapEdited)
+        || (ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm))
         ? {}
         : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
       attempts: 0,
@@ -454,10 +513,15 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
   const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O estilo que a dona pediu no "Refazer em outro estilo" (H10b); nulo é a
+  // visão geral da H10, e o pedido vai como sempre foi.
+  const [daLinha] = await db.select({ estilo: meetingSummaries.mindMapStyle }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.ownerId, alvo.ownerId))).limit(1);
+  const estilo = daLinha?.estilo ?? null;
 
   let mapa: MapaMental | null;
   try {
-    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma });
+    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma, ...(estilo ? { estilo } : {}) });
   } catch (erro) {
     const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
     console.error(`[Mapa] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
@@ -512,6 +576,13 @@ async function gravarMapa(
     const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     const r = await tx.update(meetingSummaries).set({
       mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: geradoEm, mindMapError: null,
+      // H10b: o mapa novo da IA é o que a dona pediu (o primeiro, o que tinha
+      // falhado ou o "Refazer em outro estilo", que ela confirmou sabendo que
+      // a edição sai). A edição de antes não vale sobre ele, e a revisão sobe:
+      // a aba que ainda edita o mapa velho é recusada.
+      mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: sql`${meetingSummaries.mindMapRevision} + 1`,
+      // O mapa novo chegou: o estilo do mapa de antes não vale mais (ver mindMapPreviousStyle).
+      mindMapPreviousStyle: null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";

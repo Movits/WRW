@@ -629,9 +629,20 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // e o resumo por e-mail (H22, resumo_por_email.owner_id).
     // 77: as pastas das reuniões (H7d) somaram meeting_folders.owner_id, e o Pergunte
     // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
-    expect(paresDeUsuariaNoSchema).toHaveLength(77);
+    // 81: os 77, mais os modelos de resumo, as preferências e o teto do refazer (H4e, três
+    // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
+    // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
+    // complemento (H4i, buscas_do_complemento.owner_id).
+    expect(paresDeUsuariaNoSchema).toHaveLength(83);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
+    // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "modelos_de_resumo_proprios", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "preferencias_do_resumo", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumos_refeitos", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });

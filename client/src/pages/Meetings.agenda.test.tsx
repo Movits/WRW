@@ -56,7 +56,7 @@ const duble = vi.hoisted(() => {
       agenda: { listar: { invalidate: vi.fn(async () => undefined) } },
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
       client: {
-        meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        meetings: { iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } },
         agenda: { ligarGravacao: { mutate: vi.fn() } },
       },
@@ -90,6 +90,9 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     auth: { logout: duble.registrar("logout") },
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
       create: duble.registrar("create"),
@@ -110,6 +113,10 @@ vi.mock("@/lib/trpc", () => ({
       conexoes: { useQuery: () => ({ data: undefined }) },
       pedirResumo: duble.registrar("pedirResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       // A tradução do resumo (H11) e o e-mail de retorno (H20), do pacote do
@@ -185,6 +192,7 @@ beforeEach(() => {
   duble.mutacao("submitRecording").mutateAsync.mockResolvedValue({ success: true });
   ligar().mockReset().mockResolvedValue({ ok: true });
   duble.utils.client.meetings.iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
+  duble.utils.client.meetings.definirPedidoDoResumo.mutate.mockReset().mockResolvedValue({ pedido: null });
   duble.utils.client.meetings.encerrarGravacao.mutate.mockReset().mockResolvedValue({ partes: 1 });
   duble.utils.client.meetings.delete.mutate.mockReset().mockResolvedValue({ success: true });
   duble.enviarParte.mockReset().mockResolvedValue({ tipo: "recebida" });
@@ -277,6 +285,28 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
     expect(duble.utils.client.meetings.iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia" }));
+  });
+
+  it("o pedido do resumo antes de gravar (H4e): sem mexer, nada vai; escolhido, vai com a reunião que nasce no Iniciar", async () => {
+    abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    fireEvent.click(screen.getByText("Resumo desta reunião", { exact: false }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Modelo do resumo" }), { target: { value: "sales" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Conciso" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    await waitFor(() => expect(duble.utils.client.meetings.definirPedidoDoResumo.mutate).toHaveBeenCalledWith({
+      meetingId: VINICOLA, pedido: { modelo: "sales", estilo: "concise", instrucoes: null },
+    }));
+  });
+
+  it("sem mexer no pedido do resumo, o Iniciar não o manda: valem os padrões da dona", async () => {
+    abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
+    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    await waitFor(() => expect(ligar()).toHaveBeenCalled());
+    expect(duble.utils.client.meetings.definirPedidoDoResumo.mutate).not.toHaveBeenCalled();
   });
 
   it("gravação em partes com o microfone negado: a reunião vazia sai e nada é ligado", async () => {

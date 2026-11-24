@@ -38,9 +38,16 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       pedirResumo: duble.registrar("pedirResumo"),
       refazerResumo: duble.registrar("refazerResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
     },
@@ -88,7 +95,7 @@ describe("Modelos do resumo — escolher antes de gerar", () => {
   it("sem resumo: o seletor traz os cinco modelos (o Geral marcado, com a descrição) e o 'Gerar resumo' pede no escolhido", () => {
     daDona(daDonaCom("sem_resumo", null));
     const seletor = screen.getByRole("combobox", { name: "Modelo do resumo" });
-    expect(within(seletor).getAllByRole("option").map(opcao => opcao.textContent)).toEqual(["Geral", "Networking", "Mentoria", "Vendas", "1:1"]);
+    expect(within(seletor).getAllByRole("option").map(opcao => opcao.textContent)).toEqual(["Geral", "Networking", "Mentoria", "Vendas", "1:1", "A IA escolhe o modelo"]);
     expect(seletor).toHaveValue("general");
     expect(seletor).toHaveAccessibleDescription(/O formato padrão: ações, foco, tarefas por assunto/);
     fireEvent.change(seletor, { target: { value: "sales" } });
@@ -117,7 +124,7 @@ describe("Modelos do resumo — 'Refazer como…'", () => {
     abrirRefazer();
     expect(botao).toHaveAttribute("aria-expanded", "true");
     expect(document.getElementById(botao.getAttribute("aria-controls")!)).toContainElement(screen.getByRole("radio", { name: "Vendas" }));
-    expect(screen.getAllByRole("radio").map(radio => radio.getAttribute("value"))).toEqual(["general", "networking", "mentoring", "sales", "one_on_one"]);
+    expect(screen.getAllByRole("radio").map(radio => radio.getAttribute("value"))).toEqual(["general", "networking", "mentoring", "sales", "one_on_one", "ia", "concise", "balanced", "detailed"]);
     expect(screen.getByRole("radio", { name: "Vendas" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Networking" })).toHaveAccessibleDescription(/Quem é quem, o que cada pessoa oferece e procura/);
     // Fica também o que a dona escreveu ou editou (H4f), mesmo ignorado: é o que a fila guarda.
@@ -286,8 +293,35 @@ describe("Modelos do resumo — no idioma da tela", () => {
     daDona(daDonaCom("pronto", "one_on_one", ITENS));
     expect(screen.getByText("Template: 1:1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Redo as…" }));
-    expect(screen.getAllByRole("radio").map(radio => radio.labels?.[0]?.textContent)).toEqual(["General", "Networking", "Mentoring", "Sales", "1:1"]);
+    expect(screen.getAllByRole("radio").map(radio => radio.labels?.[0]?.textContent)).toEqual(["General", "Networking", "Mentoring", "Sales", "1:1", "AI picks the template", "Concise", "Balanced", "Detailed"]);
     expect(screen.getByText(/Items you confirmed, actions marked as done and items you wrote or edited stay, even if ignored\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Redo summary/ })).toBeInTheDocument();
+  });
+});
+
+describe("Modelos do resumo — H4e no resumo da dona", () => {
+  const comH4e = (extra: Record<string, unknown>) => consulta({ estado: "pronto", emoji: null, idioma: "pt-BR", modelo: "general", erro: null, versaoAnterior: false, itens: ITENS, ...extra });
+
+  it("o modelo da dona pelo nome, o estilo fora do equilibrado e a marca de que a IA escolheu", () => {
+    daDona(comH4e({ escolha: "proprio:1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d", modeloProprio: { id: "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d", nome: "Entrevista", icone: "🎤" }, estilo: "detailed", escolhidoPelaIA: true }));
+    expect(screen.getByText(/Modelo: 🎤 Entrevista · Detalhado/)).toBeInTheDocument();
+    expect(screen.getByText("Escolhido pela IA")).toBeInTheDocument();
+    // A pílula não quebra e se afasta pelo lado lógico: em árabe, a 375 px, ela colava no estilo (conferência de tela).
+    expect(screen.getByText("Escolhido pela IA")).toHaveClass("whitespace-nowrap", "ms-2");
+    expect(screen.getByText("Escolhido pela IA")).not.toHaveClass("ml-2");
+  });
+
+  it("a pergunta do tamanho aparece no resumo pronto da dona, e nunca pelo link", () => {
+    const { unmount } = daDona(comH4e({ tamanho: null }));
+    expect(screen.getByText("O resumo teve o tamanho certo?")).toBeInTheDocument();
+    unmount();
+    doLink(consulta({ estado: "pronto", emoji: null, itens: ITENS_DO_LINK }));
+    expect(screen.queryByText("O resumo teve o tamanho certo?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Meus modelos" })).not.toBeInTheDocument();
+  });
+
+  it("enquanto a IA vai escolher o modelo, a tela diz isso", () => {
+    daDona(consulta({ estado: "pendente", emoji: null, idioma: "pt-BR", modelo: "general", erro: null, versaoAnterior: false, itens: [], iaVaiEscolher: true, escolha: "ia" }));
+    expect(screen.getByText("A IA vai escolher o modelo")).toBeInTheDocument();
   });
 });

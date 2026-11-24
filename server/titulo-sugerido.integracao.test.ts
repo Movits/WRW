@@ -135,7 +135,7 @@ describe.skipIf(!temBanco)("O título sugerido pela IA e o idioma do resumo (int
   it("com o resumo sendo refeito, a sugestão da versão anterior não aparece nem se aplica (CONFLICT)", async () => {
     const id = await comResumoPronto("Preparação do aplicativo para as lojas");
     gerarResumoDaReuniao.mockResolvedValue(resumoCom("Lançamento nas lojas"));
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     // A fila ainda não rodou: o resumo não está pronto.
     expect((await linhaDoResumo(id)).status).not.toBe("ready");
     expect((await servico.resumoGuardadoDaDona(DONA, id)).tituloSugerido).toBeNull();
@@ -173,12 +173,12 @@ describe.skipIf(!temBanco)("O título sugerido pela IA e o idioma do resumo (int
     const id = await comResumoPronto("Preparação do aplicativo para as lojas");
     await decidirTituloSugerido(DONA, id, false);
     gerarResumoDaReuniao.mockResolvedValue(resumoCom("Preparação do aplicativo para as lojas"));
-    await servico.refazerResumoDaDona(DONA, id, "sales", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
     await rodar();
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", template: "sales", suggestedTitleStatus: "ignored" });
     expect((await servico.resumoGuardadoDaDona(DONA, id)).tituloSugerido).toBeNull();
     gerarResumoDaReuniao.mockResolvedValue(resumoCom("Lançamento nas lojas"));
-    await servico.refazerResumoDaDona(DONA, id, "networking", vaga);
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "networking" }, vaga);
     await rodar();
     expect((await servico.resumoGuardadoDaDona(DONA, id)).tituloSugerido).toBe("Lançamento nas lojas");
   });

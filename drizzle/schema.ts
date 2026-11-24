@@ -1152,6 +1152,12 @@ export const meetings = mysqlTable("meetings", {
   // Ir e voltar da lixeira não mexe no updated_at, que é a ficha de quem
   // processa a reunião.
   trashedAt: bigint("trashed_at", { mode: "number" }),
+  // O pedido do resumo feito antes de gravar (H4e): o modelo (pronto, da dona
+  // ou "a IA escolhe"), o estilo e as instruções da dona para esta reunião.
+  // Nulo: o resumo nasce com as preferências dela (preferencias_do_resumo).
+  // Conferido de novo na hora de usar (server/modelos-proprios.ts): o modelo
+  // da dona apagado depois do pedido volta ao padrão dela.
+  summaryRequest: jsonCompat("summary_request"),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
@@ -1291,6 +1297,38 @@ export const meetingDocuments = mysqlTable("meeting_documents", {
   meetingUnique: uniqueIndex("meeting_documents_meeting_unique").on(table.meetingId),
   // A exclusão da conta acha os documentos pela dona; a varredura, pelo prazo.
   ownerExpiresIdx: index("meeting_documents_owner_expires_idx").on(table.ownerId, table.expiresAt),
+}));
+
+// As fotos e os desenhos à mão que a dona anexa ao resumo da reunião (H4g e
+// H4h do plano do gravador; HN-32 e HN-33 no app de referência da cliente).
+// A imagem chega já reduzida no aparelho (client/src/lib/reduzir-imagem.ts, a
+// régua da #149) e segue a regra dos arquivos da reunião: 30 dias contados do
+// envio (MEETING_AUDIO_TTL_MS), a varredura tira a vencida do bucket com todas
+// as versões, e a exclusão da reunião e a da conta também. A linha é o
+// ponteiro para o objeto: só sai depois dele, e fica (vencida) quando o bucket
+// recusa. O link aberto mostra a imagem só pela rota dele, que confere a senha
+// (H23). Nomes em inglês, como as irmãs meeting_*.
+export const meetingAttachments = mysqlTable("meeting_attachments", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  // 'photo' (H4g): a foto escolhida ou tirada; 'drawing' (H4h): o desenho ou a
+  // escrita à mão da tela de desenho.
+  kind: mysqlEnum("kind", ["photo", "drawing"]).notNull(),
+  // A chave é montada pelo servidor (meetings/<openId>/<reunião>/anexo-...), e é
+  // ela que prova a posse na exclusão da conta. A url é o caminho do proxy
+  // autenticado (/manus-storage/...), nunca o endereço do bucket.
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  storageUrl: varchar("storage_url", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // A tela e o link leem os anexos da reunião, na ordem em que entraram.
+  meetingIdx: index("meeting_attachments_meeting_idx").on(table.meetingId, table.createdAt),
+  // A exclusão da conta acha os anexos pela dona; a varredura, pelo prazo.
+  ownerExpiresIdx: index("meeting_attachments_owner_expires_idx").on(table.ownerId, table.expiresAt),
 }));
 
 export const meetingTranscripts = mysqlTable("meeting_transcripts", {
@@ -1457,6 +1495,44 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   mindMapGeneratedAt: bigint("mind_map_generated_at", { mode: "number" }),
   // Código nosso, como o last_error.
   mindMapError: varchar("mind_map_error", { length: 40 }),
+  // O modelo da própria dona (H4e), quando o resumo saiu de um: o template
+  // fica 'general' (as seções e as quantidades do Geral) e a instrução dela
+  // entra no lugar da frase de contexto. Nulo: um modelo pronto. O modelo
+  // apagado solta os resumos que o usavam (server/modelos-proprios.ts).
+  customTemplateId: varchar("custom_template_id", { length: 36 }),
+  // "A IA escolhe o modelo" (H4e): 'pending' até a fila pedir a escolha ao
+  // modelo Lite, 'chosen' depois de gravar o resumo no modelo que ela
+  // escolheu. Nulo: quem escolheu foi a dona.
+  aiTemplate: varchar("ai_template", { length: 8, enum: ["pending", "chosen"] }),
+  // O estilo (H4e): conciso, equilibrado (o resumo de antes) ou detalhado.
+  style: varchar("style", { length: 10, enum: ["concise", "balanced", "detailed"] }).default("balanced").notNull(),
+  // As instruções da dona para este resumo (H4e: o pedido antes de gravar, o
+  // pedido e o "Refazer o resumo"), até 500 caracteres. Só da dona: o link
+  // aberto nunca as recebe.
+  instructions: varchar("instructions", { length: 500 }),
+  // "O resumo teve o tamanho certo?" (H4e): a resposta da dona a esta versão.
+  // Muda o ajuste dela (preferencias_do_resumo.length_adjust), que vale para
+  // os próximos resumos. O refazer a zera: a versão nova é outra.
+  lengthFeedback: varchar("length_feedback", { length: 8, enum: ["short", "right", "long"] }),
+  // O mapa que a dona editou (H10b; HN-40 do app de referência da cliente):
+  // ramos renomeados, arrastados, acrescentados ou apagados. A versão da IA
+  // continua em `mind_map`, como a transcrição da IA fica em
+  // `original_transcript` na H18; a tela e o link mostram esta quando existe.
+  // Passa pela mesma conferência (shared/mapa-mental-edicao.ts). Nulo: o mapa
+  // está como a IA o escreveu.
+  mindMapEdited: jsonCompat("mind_map_edited"),
+  mindMapEditedAt: bigint("mind_map_edited_at", { mode: "number" }),
+  // Sobe a cada mudança no mapa (editar, voltar ao da IA, refazer, o mapa novo
+  // que a fila grava): a tela manda a revisão que viu, e a mudança de outra
+  // aba é recusada em vez de desfeita em silêncio.
+  mindMapRevision: int("mind_map_revision").default(0).notNull(),
+  // O estilo do mapa (H10b): o que a dona pediu no "Refazer em outro estilo",
+  // que a IA segue e a tela desenha. Nulo: a visão geral da H10.
+  mindMapStyle: varchar("mind_map_style", { length: 16, enum: ["overview", "hierarchical", "timeline", "concept"] }),
+  // O estilo do mapa que segue à vista enquanto o "Refazer em outro estilo"
+  // está na fila ou depois que ele falhou: mindMapStyle já é o pedido, e o
+  // mapa guardado ainda é o de antes. A fila o limpa ao gravar o mapa novo.
+  mindMapPreviousStyle: varchar("mind_map_previous_style", { length: 16, enum: ["overview", "hierarchical", "timeline", "concept"] }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1466,6 +1542,48 @@ export const meetingSummaries = mysqlTable("meeting_summaries", {
   statusLockedIdx: index("meeting_summaries_status_locked_idx").on(table.status, table.lockedUntil),
   // E o mapa pendente (H10) pelo estado dele, sem varrer os resumos prontos.
   mindMapStatusLockedIdx: index("meeting_summaries_mind_map_status_locked_idx").on(table.mindMapStatus, table.lockedUntil),
+}));
+
+// Os modelos de resumo da própria dona (H4e do plano do gravador, HN-35 do
+// HiNoter): o nome, o ícone (de uma lista fechada, shared/modelos-de-resumo.ts)
+// e as instruções que dizem à IA que tipo de reunião é e o que destacar. Só da
+// dona: toda consulta leva o owner_id, e o link aberto não recebe nada disto.
+// Até 20 por dona (MODELOS_PROPRIOS_MAX).
+export const modelosDeResumoProprios = mysqlTable("modelos_de_resumo_proprios", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  nome: varchar("nome", { length: 60 }).notNull(),
+  icone: varchar("icone", { length: 16 }).notNull(),
+  instrucoes: varchar("instrucoes", { length: 1500 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerIdx: index("modelos_de_resumo_proprios_owner_idx").on(table.ownerId, table.createdAt),
+}));
+
+// As preferências do resumo da dona (H4e): o modelo padrão (um pronto, 'ia'
+// para "a IA escolhe" ou 'proprio' com o id), o estilo padrão e o ajuste do
+// tamanho que as respostas a "O resumo teve o tamanho certo?" acumulam (de -2
+// a +2). Sem linha: o Geral, equilibrado, sem ajuste.
+export const preferenciasDoResumo = mysqlTable("preferencias_do_resumo", {
+  ownerId: varchar("owner_id", { length: 128 }).primaryKey(),
+  modeloPadrao: varchar("modelo_padrao", { length: 16 }).default("general").notNull(),
+  modeloProprioPadraoId: varchar("modelo_proprio_padrao_id", { length: 36 }),
+  estiloPadrao: varchar("estilo_padrao", { length: 10, enum: ["concise", "balanced", "detailed"] }).default("balanced").notNull(),
+  ajusteDoTamanho: int("ajuste_do_tamanho").default(0).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+// O teto de custo do "Refazer o resumo" (H4e): uma linha por refazer aceito,
+// SEM a reunião nem o conteúdo, só a dona e a hora. Conta as últimas 24 h
+// (REFAZERES_POR_DIA), no banco e não em memória, para o deploy não o zerar,
+// como o Pergunte a várias reuniões (perguntas_entre_reunioes).
+export const resumosRefeitos = mysqlTable("resumos_refeitos", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("resumos_refeitos_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
 // Cada item do resumo guardado. Nada extraído por IA entra sozinho
@@ -1518,6 +1636,20 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // item pendente tinha Ignorar: o Desfazer o devolve pendente.
   statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
   doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
+  // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
+  // dona pede, num item, que a IA complete uma referência dita pela metade (o
+  // número de uma lei, o nome de uma norma ou de uma empresa). O complemento
+  // vem de FORA da reunião: nasce pending, com a fonte (o endereço que a
+  // busca da Google devolveu), e só entra no resumo (o link, a Memória, o
+  // áudio) quando a dona o confirma; ignorar apaga as colunas. Um por item.
+  complementText: text("complement_text"),
+  complementSourceUrl: varchar("complement_source_url", { length: 2048 }),
+  complementSourceTitle: varchar("complement_source_title", { length: 300 }),
+  // As consultas que a busca fez (até 5, de até 200 caracteres): a tela as
+  // mostra, como pedem os termos da busca da Google no Gemini.
+  complementQueries: jsonCompat("complement_queries"),
+  complementStatus: varchar("complement_status", { length: 12, enum: ["pending", "confirmed"] }),
+  complementAt: bigint("complement_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1795,6 +1927,48 @@ export const perguntasEntreReunioes = mysqlTable("perguntas_entre_reunioes", {
 }, (table) => ({
   // O teto conta as linhas das últimas 24 h da dona.
   ownerCreatedIdx: index("perguntas_entre_reunioes_owner_created_idx").on(table.ownerId, table.createdAt),
+}));
+
+// O áudio do resumo com a voz do Gemini (H19b, server/resumo-em-audio.ts): a
+// dona pede "Baixar o áudio do resumo", e o servidor gera o MP3 uma vez por
+// texto do resumo (o hash do que a voz lê) e idioma, guarda no bucket sob
+// meetings/<openId>/ e serve de novo. Uma linha por geração, mesmo a que
+// falhou: o teto de 24 h conta aqui (e não em memória, para o deploy não
+// zerá-lo). Quando o texto muda, o objeto antigo sai e a linha fica sem a chave
+// (só para o teto); a exclusão da reunião tira os objetos; a da conta, as
+// linhas. Sem texto do resumo: só o hash dele.
+export const resumoEmAudio = mysqlTable("resumo_em_audio", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  language: varchar("language", { length: 12 }).notNull(),
+  textHash: varchar("text_hash", { length: 64 }).notNull(),
+  situacao: varchar("situacao", { length: 12, enum: ["pendente", "pronto", "falhou"] }).default("pendente").notNull(),
+  // Nula enquanto gera, na falha e depois que o objeto saiu.
+  storageKey: varchar("storage_key", { length: 512 }),
+  bytes: int("bytes"),
+  durationMs: int("duration_ms"),
+  modelo: varchar("modelo", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("resumo_em_audio_owner_created_idx").on(table.ownerId, table.createdAt),
+  meetingIdx: index("resumo_em_audio_meeting_idx").on(table.ownerId, table.meetingId),
+}));
+
+// As buscas na web do complemento (H4i, server/complemento-pela-busca.ts): uma
+// linha por busca que foi à IA, sem o conteúdo (nem o item, nem a resposta,
+// nem as consultas), para o teto de 24 h por dona, contado aqui para o deploy
+// não zerá-lo. O complemento mesmo mora no item (meeting_summary_items).
+export const buscasDoComplemento = mysqlTable("buscas_do_complemento", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  situacao: varchar("situacao", { length: 12, enum: ["pendente", "achou", "nao_achou", "falhou"] }).default("pendente").notNull(),
+  modelo: varchar("modelo", { length: 80 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("buscas_do_complemento_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
 // ============================================================

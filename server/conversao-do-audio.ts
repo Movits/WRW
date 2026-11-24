@@ -456,3 +456,58 @@ async function esperarNoMaximo(promessa: Promise<unknown>, ms: number): Promise<
     clearTimeout(relogio);
   }
 }
+
+/** O tamanho máximo do MP3 do resumo (H19b): 20 min a 64 kbps é ~9,6 MB. */
+export const MP3_DO_RESUMO_MAX_BYTES = 16 * 1024 * 1024;
+/** O prazo do ffmpeg que codifica o áudio do resumo. */
+export const PRAZO_DO_MP3_DO_RESUMO_MS = 120_000;
+
+/** O ffmpeg que recebe o PCM da voz do Gemini, na taxa dele, e escreve o MP3 (a taxa do arquivo é a do áudio da reunião). */
+export function argumentosDoMp3DaVoz(amostrasPorSegundo: number): string[] {
+  const taxa = `${BITS_POR_SEGUNDO_DO_AUDIO / 1000}k`;
+  return [
+    "-hide_banner", "-loglevel", "error",
+    "-f", "s16le", "-ar", String(amostrasPorSegundo), "-ac", "1", "-i", "pipe:0",
+    "-c:a", "libmp3lame", "-b:a", taxa, "-ar", String(AMOSTRAS_POR_SEGUNDO_DO_AUDIO), "-id3v2_version", "0", "-f", "mp3", "pipe:1",
+  ];
+}
+
+/**
+ * O áudio do resumo com a voz do Gemini (H19b, server/resumo-em-audio.ts): o
+ * PCM cru que o modelo de voz devolve (o mesmo PCM de 16 bits mono que este
+ * módulo emenda) vira MP3 pelo mesmo ffmpeg contido (só o PATH no ambiente,
+ * como nobody com o servidor como root, prioridade baixa). O texto é nosso, e
+ * não arquivo de usuária, mas o caminho é o mesmo. Devolve o MP3 inteiro: o
+ * arquivo é pequeno e vai ao bucket. Lança se o ffmpeg falhar, passar do prazo
+ * ou do tamanho.
+ */
+export async function codificarVozEmMp3(
+  pcm: Buffer, amostrasPorSegundo: number,
+  deps: Pick<DependenciasDaConversao, "ffmpeg" | "avisar" | "aoIniciar" | "prioridade" | "usuario" | "spawn"> & { prazoMs?: number } = {},
+): Promise<Buffer> {
+  if (!pcm.length) throw new Error("Sem áudio para codificar.");
+  const avisar = deps.avisar ?? (mensagem => console.error(mensagem));
+  const controle = new AbortController();
+  const prazo = setTimeout(() => controle.abort(new Error("O ffmpeg passou do prazo do áudio do resumo.")), deps.prazoMs ?? PRAZO_DO_MP3_DO_RESUMO_MS);
+  try {
+    const processo = await iniciarFfmpeg(deps.ffmpeg ?? "ffmpeg", argumentosDoMp3DaVoz(amostrasPorSegundo), controle.signal, {
+      avisar, aoIniciar: deps.aoIniciar, prioridade: deps.prioridade, usuario: deps.usuario, spawn: deps.spawn,
+    });
+    const pedacos: Buffer[] = [];
+    let total = 0;
+    processo.filho.stdout?.on("data", (pedaco: Buffer) => {
+      total += pedaco.length;
+      if (total > MP3_DO_RESUMO_MAX_BYTES) controle.abort(new Error("O MP3 do resumo passou do tamanho máximo."));
+      else pedacos.push(pedaco);
+    });
+    processo.filho.stdin?.end(pcm);
+    const { codigo, sinal } = await processo.fim;
+    if (controle.signal.aborted) throw controle.signal.reason instanceof Error ? controle.signal.reason : new Error("O ffmpeg foi interrompido.");
+    if (codigo !== 0) throw new Error(`O ffmpeg saiu com ${codigo ?? sinal}: ${processo.erros().slice(0, 300)}`);
+    const mp3 = Buffer.concat(pedacos);
+    if (!mp3.length) throw new Error("O ffmpeg não escreveu o MP3.");
+    return mp3;
+  } finally {
+    clearTimeout(prazo);
+  }
+}

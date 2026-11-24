@@ -44,11 +44,16 @@ const duble = vi.hoisted(() => {
 });
 
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
+// As fotos e os desenhos do resumo (H4g e H4h) têm o teste deles (AnexosDoResumo.test.tsx): aqui, só onde entram.
+vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetingId?: string; comLinkAberto?: boolean }) => <div data-testid="anexos-do-resumo" data-reuniao={props.meetingId} data-link={String(!!props.comLinkAberto)}/> }));
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
@@ -57,7 +62,7 @@ vi.mock("@/lib/trpc", () => ({
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
       ...Object.fromEntries([
         "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
-        "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo",
+        "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "audioDoResumo", "pedirComplemento", "decidirComplemento",
         "marcarAcaoFeita", "traduzirResumo", "perguntar", "perguntarDuranteAGravacao", "rascunharEmailDeRetorno", "ligarLinkAberto",
         "desligarLinkAberto", "novaSenhaDoLink", "tirarSenhaDoLink", "mudarAudioDoLink", "mandarParaALixeira",
       ].map(nome => [nome, duble.mutacao(nome)])),

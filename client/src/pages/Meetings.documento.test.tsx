@@ -62,10 +62,15 @@ vi.mock("@/hooks/useGravacaoEmPartes", () => ({
   useGravacaoEmPartes: () => ({ iniciar: vi.fn(), cancelar: vi.fn(), descartar: vi.fn(), receberParte: vi.fn(), enviando: false }),
 }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
+// As fotos e os desenhos do resumo (H4g e H4h) têm o teste deles (AnexosDoResumo.test.tsx): aqui, só onde entram.
+vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetingId?: string; comLinkAberto?: boolean }) => <div data-testid="anexos-do-resumo" data-reuniao={props.meetingId} data-link={String(!!props.comLinkAberto)}/> }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
       create: duble.registrar("create"),
@@ -87,6 +92,10 @@ vi.mock("@/lib/trpc", () => ({
       candidatosParaVincular: { useQuery: (...args: unknown[]) => duble.candidatos(...args) },
       pedirResumo: duble.registrar("pedirResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       traduzirResumo: duble.registrar("traduzirResumo"),

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   contexts,
+  meetingAttachments,
   meetingAudioSlices,
   meetingContactSuggestions,
   meetingDocuments,
@@ -15,6 +16,7 @@ import {
   meetingSummaryTranslations,
   privateContacts,
   resumoPorEmail,
+  resumoEmAudio,
   userProfiles,
   users,
 } from "../drizzle/schema";
@@ -27,6 +29,7 @@ import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } fr
 import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { colunasDoPrimeiroResumo } from "./modelos-proprios";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
@@ -1214,8 +1217,11 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // linha que já existir fica como está, e a reunião não falha por causa dela
   // (nenhum caminho de hoje a cria antes: pedir o resumo exige a reunião
   // 'ready', e esta execução ainda está em 'processing').
+  // O modelo, o estilo e as instruções (H4e): o pedido feito antes de gravar
+  // ou, sem ele, as preferências da dona (server/modelos-proprios.ts).
+  const pedidoDoResumo = await colunasDoPrimeiroResumo(db, ownerId, meetingId);
   await db.insert(meetingSummaries).values({
-    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", createdAt: completedAt, updatedAt: completedAt,
+    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", ...pedidoDoResumo, createdAt: completedAt, updatedAt: completedAt,
   }).onDuplicateKeyUpdate({ set: { meetingId: sql`${meetingSummaries.meetingId}` } });
   // A releitura acima e este UPDATE não são atômicos: exclusão, reprocessamento
   // novo ou varredura podem ter entrado entre os dois. O WHERE com a ficha faz
@@ -1894,6 +1900,7 @@ const retomadaDaVarredura = new Map<string, string>();
 const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
 const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
 const reuniaoDoDocumento = and(eq(meetings.id, meetingDocuments.meetingId), eq(meetings.ownerId, meetingDocuments.ownerId));
+const reuniaoDoAnexo = and(eq(meetings.id, meetingAttachments.meetingId), eq(meetings.ownerId, meetingAttachments.ownerId));
 
 /** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
 type TrechoDaVarredura = { depoisDe: string; ate?: string };
@@ -1961,6 +1968,55 @@ function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, 
 }
 
 /**
+ * As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts) que
+ * saem nesta passada: vencidos (a reunião em 'processing' não os usa: a IA não
+ * lê imagem) e, na hora, os da reunião que não existe ou está sendo excluída.
+ */
+function anexosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .leftJoin(meetings, reuniaoDoAnexo)
+    .where(and(
+      gt(meetingAttachments.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingAttachments.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingAttachments.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        lte(meetingAttachments.expiresAt, agora),
+      ),
+    ))
+    .orderBy(asc(meetingAttachments.id))
+    .limit(lote);
+}
+
+const reuniaoDoAudioDoResumo = and(eq(meetings.id, resumoEmAudio.meetingId), eq(meetings.ownerId, resumoEmAudio.ownerId));
+
+/**
+ * Os MP3 do resumo (H19b, resumo_em_audio) que saem nesta passada: só os da
+ * reunião que não existe mais ou está sendo excluída. É o que a junção (H17)
+ * deixa das reuniões que saem (ela não espera o bucket dentro da transação) e o
+ * que o bucket recusou na exclusão da reunião. O MP3 da reunião no ar não vence:
+ * ele sai quando o texto do resumo muda ou com a reunião.
+ */
+async function audiosDoResumoQueSaem(db: Banco, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  const linhas = await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .leftJoin(meetings, reuniaoDoAudioDoResumo)
+    .where(and(
+      gt(resumoEmAudio.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(resumoEmAudio.id, trecho.ate) : undefined,
+      ownerId ? eq(resumoEmAudio.ownerId, ownerId) : undefined,
+      isNotNull(resumoEmAudio.storageKey),
+      or(isNull(meetings.id), eq(meetings.status, "deleted")),
+    ))
+    .orderBy(asc(resumoEmAudio.id))
+    .limit(lote);
+  // A chave não é nula pelo filtro; o tipo da coluna não sabe disso.
+  return linhas.map(linha => ({ id: linha.id, storageKey: linha.storageKey ?? "" }));
+}
+
+/**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
  * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
@@ -1978,7 +2034,12 @@ function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, 
  *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
  *   da exclusão;
  * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
- *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias.
+ *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias;
+ * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com o
+ *   mesmo prazo, em qualquer estado da reunião;
+ * - o MP3 do resumo (H19b, resumo_em_audio) da reunião que não existe mais ou
+ *   está sendo excluída (a junção e a recusa do bucket na exclusão): sai o
+ *   objeto, e a linha fica sem a chave, para o teto.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -2029,6 +2090,18 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "documentos",
       ler: (trecho: TrechoDaVarredura) => documentosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingDocuments).where(eq(meetingDocuments.id, id)),
+    },
+    {
+      nome: "anexos",
+      ler: (trecho: TrechoDaVarredura) => anexosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingAttachments).where(eq(meetingAttachments.id, id)),
+    },
+    {
+      // A linha do MP3 do resumo fica, sem a chave, para o teto de 24 h da dona
+      // (como na exclusão da reunião): aqui só a chave sai.
+      nome: "audiosDoResumo",
+      ler: (trecho: TrechoDaVarredura) => audiosDoResumoQueSaem(db, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() }).where(eq(resumoEmAudio.id, id)),
     },
   ];
 
@@ -2217,6 +2290,18 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   const documentos = await db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
     .from(meetingDocuments)
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
+  // E as fotos e os desenhos do resumo (H4g e H4h), pela mesma regra: são da
+  // dona, e saem só com a reunião (o reprocesso não os toca).
+  const anexos = await db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .where(and(eq(meetingAttachments.meetingId, meetingId), eq(meetingAttachments.ownerId, ownerId)));
+
+  // O áudio do resumo com a voz do Gemini (H19b): voz sintética, sem fala de
+  // ninguém, mas lê o resumo da reunião, e sai com ela (só as linhas com o MP3 no bucket).
+  const audiosDoResumo = (await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .where(and(eq(resumoEmAudio.meetingId, meetingId), eq(resumoEmAudio.ownerId, ownerId), isNotNull(resumoEmAudio.storageKey))))
+    .filter((linha): linha is LinhaDeAudio => !!linha.storageKey);
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
   // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
@@ -2240,10 +2325,20 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
   // ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos]);
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos, ...anexos, ...audiosDoResumo]);
   const saiu = new Set(sairam);
+  // O MP3 do resumo que saiu perde a chave; a linha fica para o teto de 24 h da
+  // dona (como a do resumo por e-mail). O que o bucket recusou fica com a chave,
+  // aparece no log de tirarDoBucket e a varredura tenta de novo.
+  const audiosDoResumoQueSairam = audiosDoResumo.filter(audio => saiu.has(audio.id)).map(audio => audio.id);
+  if (audiosDoResumoQueSairam.length) {
+    await db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() })
+      .where(and(eq(resumoEmAudio.ownerId, ownerId), inArray(resumoEmAudio.id, audiosDoResumoQueSairam)));
+  }
   const documentosQueSairam = documentos.filter(documento => saiu.has(documento.id)).map(documento => documento.id);
   const documentosQueFicam = documentos.filter(documento => !saiu.has(documento.id)).map(documento => documento.id);
+  const anexosQueSairam = anexos.filter(anexo => saiu.has(anexo.id)).map(anexo => anexo.id);
+  const anexosQueFicam = anexos.filter(anexo => !saiu.has(anexo.id)).map(anexo => anexo.id);
 
   const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
   const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
@@ -2272,7 +2367,15 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   if (documentosQueSairam.length) {
     await db.delete(meetingDocuments).where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueSairam)));
   }
+  if (anexosQueSairam.length) {
+    await db.delete(meetingAttachments).where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueSairam)));
+  }
   const agora = now();
+  // A imagem que o bucket recusou fica como ponteiro, vencida, para a varredura.
+  if (anexosQueFicam.length) {
+    await db.update(meetingAttachments).set({ expiresAt: agora })
+      .where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueFicam)));
+  }
   if (gravacoesQueFicam.length) {
     await db.update(meetingRecordings).set({ expiresAt: agora })
       .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueFicam)));
@@ -2326,7 +2429,8 @@ async function apagarDerivadosSemGravacao(db: BancoOuTransacao, ownerId: string,
  * as próximas ações se soltam com os nomes resolvidos), os avisos dela no sino
  * e o ponteiro da agenda. O áudio NÃO sai: as partes e a gravação foram para a
  * reunião que fica, na mesma transação, antes desta chamada. Sem bucket aqui:
- * a transação não espera o expurgo.
+ * a transação não espera o expurgo. O MP3 do resumo dela (H19b) fica com a chave, e a
+ * varredura (limparGravacoesVencidas) o tira, porque a reunião não existe mais.
  */
 export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
   await apagarDerivadosSemGravacao(tx, ownerId, meetingId, true);

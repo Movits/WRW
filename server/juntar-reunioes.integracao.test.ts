@@ -31,8 +31,8 @@ vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) 
 
 const { getDb } = await import("./db");
 const {
-  agendaReunioes, auditLogs, meetingAudioSlices, meetingRecordings, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts,
-  platformNotifications, proximasAcoes, users,
+  agendaReunioes, auditLogs, meetingAttachments, meetingAudioSlices, meetingRecordings, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts,
+  platformNotifications, proximasAcoes, resumoEmAudio, users,
 } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
 const { appRouter } = await import("./routers");
@@ -132,7 +132,7 @@ const partesDe = async (id: string) => (await db()).select().from(meetingAudioSl
 async function limpar() {
   const banco = await db();
   const donas = [DONA, OUTRA];
-  for (const tabela of [meetingSummaryItems, meetingSummaries, meetingTranscripts, meetingAudioSlices, meetingRecordings, proximasAcoes, agendaReunioes] as const) {
+  for (const tabela of [resumoEmAudio, meetingAttachments, meetingSummaryItems, meetingSummaries, meetingTranscripts, meetingAudioSlices, meetingRecordings, proximasAcoes, agendaReunioes] as const) {
     await apagarPelaChave(banco, tabela, inArray(tabela.ownerId, donas));
   }
   await apagarPelaChave(banco, meetings, inArray(meetings.ownerId, donas));
@@ -380,6 +380,38 @@ describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
     expect(Number(velha.expiresAt)).toBeLessThanOrEqual(AGORA());
     await limparGravacoesVencidas({ ownerId: DONA });
     expect(storageApagarTodasAsVersoes.mock.calls.map(chamada => chamada[0])).toContain(`meetings/${DONA}/${a.id}/recording-antiga.webm`);
+  });
+
+  it("as fotos e os desenhos do resumo (H4g e H4h) das outras reuniões passam para a que fica, com a chave e o prazo de antes", async () => {
+    const banco = await db();
+    const a = await emPartes(DONA, [[fala(1, "F1", "x")]]);
+    const b = await emPartes(DONA, [[fala(1, "F1", "y")]]);
+    const anexo = { id: crypto.randomUUID(), ownerId: DONA, kind: "photo" as const, mimeType: "image/webp", sizeBytes: 10, expiresAt: AGORA() + 60_000, createdAt: AGORA() };
+    const chave = `meetings/${DONA}/${b.id}/anexo-${anexo.id}.webp`;
+    await banco.insert(meetingAttachments).values({ ...anexo, meetingId: b.id, storageKey: chave, storageUrl: `/manus-storage/${chave}` });
+    await juntar([a.id, b.id]);
+    const [depois] = await banco.select().from(meetingAttachments).where(eq(meetingAttachments.id, anexo.id));
+    expect(depois).toMatchObject({ meetingId: a.id, storageKey: chave, expiresAt: anexo.expiresAt });
+  });
+
+  it("o MP3 do resumo (H19b) da reunião que sai: a junção não espera o bucket, e a varredura o tira; a linha fica sem a chave", async () => {
+    const banco = await db();
+    const a = await emPartes(DONA, [[fala(1, "F1", "x")]]);
+    const b = await emPartes(DONA, [[fala(1, "F1", "y")]]);
+    const audioDe = (meetingId: string) => ({
+      id: crypto.randomUUID(), ownerId: DONA, meetingId, language: "pt-BR", textHash: "h".repeat(64), situacao: "pronto" as const,
+      storageKey: `meetings/${DONA}/resumo-em-audio/${meetingId}.mp3`, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    const daQueSai = audioDe(b.id);
+    const daQueFica = audioDe(a.id);
+    await banco.insert(resumoEmAudio).values([daQueSai, daQueFica]);
+    await juntar([a.id, b.id]);
+    await limparGravacoesVencidas({ ownerId: DONA });
+    const tiradas = storageApagarTodasAsVersoes.mock.calls.map(chamada => chamada[0]);
+    expect(tiradas).toContain(daQueSai.storageKey);
+    expect(tiradas).not.toContain(daQueFica.storageKey);
+    const [depois] = await banco.select().from(resumoEmAudio).where(eq(resumoEmAudio.id, daQueSai.id));
+    expect(depois.storageKey).toBeNull();
   });
 
   it("o link com senha (H23) sai desligado de vez: sem token, sem a senha e com o freio zerado", async () => {

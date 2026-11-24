@@ -10,6 +10,8 @@ import type { NextFunction, Request, Response } from "express";
 // devolvia 413 cru antes de o tRPC validar. Achado da revisão de 05/09 (PR #59).
 export const PROCEDIMENTOS_COM_ARQUIVO = new Set([
   "meetings.submitRecording",
+  // As fotos e os desenhos do resumo (H4g e H4h).
+  "meetings.anexarAoResumo",
   "contexts.uploadMedia",
   "network.uploadPhoto",
   "network.uploadCard",
