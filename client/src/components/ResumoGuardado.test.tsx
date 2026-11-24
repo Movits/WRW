@@ -238,7 +238,7 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     // depende dela.
     doLink(pronto(ITENS_DO_LINK));
     expect(screen.getByText("03:20")).toBeInTheDocument();
-    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Ouvir o resumo" })]);
+    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })]);
   });
 
   it("o trecho fica aberto nos pendentes e recolhível nos outros", () => {
@@ -329,7 +329,7 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     expect(screen.getAllByText("Escrito ou editado por quem gravou a reunião")).toHaveLength(2);
     expect(screen.queryByText(/ por você$/)).not.toBeInTheDocument();
     // Nenhum botão da dona: o único botão do link é o "Ouvir o resumo" (H19).
-    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir resumo · áudio gerado pela IA da Google"]);
   });
 
   it("com o link ligado, editar e acrescentar avisam que o que a dona salva aparece para quem tem o link; sem link, não", () => {
@@ -551,7 +551,7 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     expect(screen.queryByText(/Escrito pela IA/)).not.toBeInTheDocument();
     const botoes = screen.getAllByRole("button");
     expect(botoes.length).toBeGreaterThan(1);
-    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^(Ouvir a partir de |Ouvir o resumo$)/);
+    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^(Ouvir a partir de |Ouvir resumo · áudio gerado pela IA da Google$)/);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 03:20" }));
     expect(aoIrPara).toHaveBeenCalledWith(200);
   });
@@ -828,7 +828,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
   // O tocar, pausar e continuar estão em OuvirOResumo.test.tsx; aqui, o que o
   // resumo manda ler, em que idioma e quando o botão aparece.
   const VOZES = [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }];
-  const ouvir = () => fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+  const ouvir = () => fireEvent.click(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" }));
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -945,7 +945,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     expect(voz.lerAteOFim()).toContain("Carla envia a proposta revisada");
     unmount();
     const tela = daDona(anterior("pendente"));
-    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).toBeInTheDocument();
     tela.unmount();
     doLink(consulta({ estado: "falhou", emoji: "☕", idioma: "pt-BR", versaoAnterior: true, itens: ITENS_DO_LINK }));
     ouvir();
@@ -957,11 +957,11 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     const soIgnorados = ITENS.filter(item => item.status === "ignored");
     for (const c of [consulta(undefined), comEstado("sem_resumo"), comEstado("pendente"), comEstado("gerando"), comEstado("falhou"), pronto([]), pronto(soIgnorados)]) {
       const { unmount } = daDona(c);
-      expect(screen.queryByRole("button", { name: "Ouvir o resumo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).not.toBeInTheDocument();
       unmount();
     }
     doLink(pronto(ITENS_DO_LINK));
-    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).toBeInTheDocument();
   });
 
   it("o resumo que volta a ser gerado no meio da leitura cala a voz", () => {
@@ -999,7 +999,7 @@ describe("Resumo guardado — a tradução com o ouvir e o editar (pacote P2)", 
   it("ouvir o resumo traduzido: a voz, os títulos e os rótulos vão no idioma da tradução, que é o texto à vista", () => {
     const voz = instalarSinteseFalsa({ vozes: [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }] });
     render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto(ITENS.filter(item => item.id === "i-acao")) as never} nomes={{ F2: "Carla" }} traducao={traducaoPronta() as never}/>);
-    fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" }));
     expect(voz.lerAteOFim()).toEqual([
       // Como o aviso da tela: é uma tradução da IA, e o original é outro idioma.
       "This summary was translated by the AI.", "The original is in Portuguese.",
