@@ -34,6 +34,10 @@ diverge do código, vale o código.
   gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
   agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
   em 10/11, 12/11 e 15/11).
+- [arquitetura/sala-de-video.md](./arquitetura/sala-de-video.md): estudo de 24/11/2026
+  para o Roberto decidir a sala de vídeo dentro do app (opções, custo por hora de
+  reunião, o que muda no Render, gravação na fila de partes, quem entra, LGPD, app das
+  lojas e PRs). Nada dele está no código.
 
 ## Operação
 
