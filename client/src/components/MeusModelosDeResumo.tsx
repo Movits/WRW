@@ -37,9 +37,11 @@ function FormularioDoModelo({ inicial, aoFechar }: { inicial: Rascunho; aoFechar
   const id = useId();
   const [rascunho, setRascunho] = useState(inicial);
   const reler = () => utils.meetings.modelosDeResumo.invalidate();
+  // O resumo aberto mostra o nome e o ícone do modelo da dona: editado, relê.
+  const relerComOResumo = () => Promise.all([reler(), utils.meetings.resumoGuardado.invalidate()]);
   const aoDarCerto = () => { toast.success(t("meetings.summary.myTemplates.saved")); aoFechar(); };
   const criar = trpc.meetings.criarModeloDeResumo.useMutation({ onSuccess: aoDarCerto, onSettled: reler });
-  const editar = trpc.meetings.editarModeloDeResumo.useMutation({ onSuccess: aoDarCerto, onSettled: reler });
+  const editar = trpc.meetings.editarModeloDeResumo.useMutation({ onSuccess: aoDarCerto, onSettled: relerComOResumo });
   const salvando = criar.isPending || editar.isPending;
   const erro = criar.error ?? editar.error;
   const valido = rascunho.nome.trim().length > 0 && rascunho.instrucoes.trim().length > 0;
@@ -129,7 +131,8 @@ export function MeusModelosDeResumo() {
   const [editando, setEditando] = useState<Rascunho | null>(null);
   const apagar = trpc.meetings.apagarModeloDeResumo.useMutation({
     onError: erro => toast.error(mensagemDosModelos(t, erro)),
-    onSettled: () => utils.meetings.modelosDeResumo.invalidate(),
+    // O servidor troca para o Geral o resumo que usava o modelo apagado: o resumo aberto relê.
+    onSettled: () => Promise.all([utils.meetings.modelosDeResumo.invalidate(), utils.meetings.resumoGuardado.invalidate()]),
   });
   if (modelos.isError) return <p role="alert" className="text-sm text-red-200">{mensagemDeErroParaTela(modelos.error, t)}</p>;
   if (!modelos.data) return <p role="status" className="text-sm text-white/55"><Loader2 size={15} className="mr-2 inline animate-spin"/>{t("meetings.summary.loading")}</p>;

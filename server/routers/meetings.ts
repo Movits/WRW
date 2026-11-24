@@ -53,7 +53,7 @@ import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import {
-  ESTILOS_DO_RESUMO, ICONES_DOS_MODELOS, INSTRUCOES_DO_MODELO_MAX, INSTRUCOES_DO_PEDIDO_MAX, NOME_DO_MODELO_MAX, RESPOSTAS_DO_TAMANHO, escolhaDoTexto,
+  ESTILOS_DO_RESUMO, ICONES_DOS_MODELOS, INSTRUCOES_DO_MODELO_MAX, INSTRUCOES_DO_PEDIDO_MAX, NOME_DO_MODELO_MAX, RECUSAS_DOS_MODELOS, RESPOSTAS_DO_TAMANHO, escolhaDoTexto,
 } from "@shared/modelos-de-resumo";
 import {
   apagarModeloProprio, criarModeloProprio, definirPedidoDoResumo, definirPreferencias, editarModeloProprio, modelosEPreferenciasDaDona,
@@ -297,7 +297,7 @@ export const tetoDaLegenda = criarTeto(LEGENDAS_POR_JANELA, JANELA_DA_LEGENDA_MS
 // Os modelos de resumo da dona e as preferências dela (H4e): sem IA, mas cada
 // mudança grava no banco. Teto próprio por dona, de 60 mudanças a cada 10
 // minutos, em memória como os outros.
-export const tetoDosModelosDeResumo = criarTeto(60, 10 * 60_000, "Muitas mudanças nos modelos de resumo em sequência. Aguarde alguns minutos e tente de novo.");
+export const tetoDosModelosDeResumo = criarTeto(60, 10 * 60_000, RECUSAS_DOS_MODELOS.mudancasDemais);
 
 // O texto do modelo no pedido (H4e): o código do pronto, "ia" ou "proprio:<id>".
 const escolhaNaEntrada = z.string().max(60).refine(valor => escolhaDoTexto(valor) !== null);

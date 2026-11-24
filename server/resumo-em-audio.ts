@@ -47,6 +47,8 @@ import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
  * - Teto: AUDIOS_DO_RESUMO_POR_DIA gerações por dona em 24 h, contadas nas
  *   linhas de resumo_em_audio (a que falhou também). Um pedido igual em curso
  *   espera o primeiro, sem gerar duas vezes.
+ * - A resposta espera a geração até ESPERA_DA_RESPOSTA_DO_AUDIO_MS; depois diz
+ *   "gerando", a geração segue, e a tela pede de novo até o MP3 chegar.
  * - Cada download grava a auditoria MEETING_SUMMARY_AUDIO_DOWNLOADED (o arquivo
  *   sai da WRW) antes de devolver os bytes: sem a linha, nada sai.
  * - O texto do resumo vai à Google para virar voz (o mesmo provedor do resto da
@@ -157,6 +159,8 @@ export type DependenciasDoAudioDoResumo = {
   ler: (chave: string) => Promise<Buffer>;
   apagar: (chave: string) => Promise<void>;
   ffmpegDisponivel: () => Promise<boolean>;
+  /** Quanto a resposta espera a geração antes de dizer "gerando" (só os testes mudam). */
+  esperaDaRespostaMs?: number;
 };
 
 export async function dependenciasPadrao(): Promise<DependenciasDoAudioDoResumo> {
@@ -173,9 +177,28 @@ export async function dependenciasPadrao(): Promise<DependenciasDoAudioDoResumo>
 }
 
 export type PedidoDoAudioDoResumo = { userId: number; ipAddress: string; userAgent: string | undefined };
-export type AudioDoResumo = { mp3Base64: string; idioma: string; titulo: string; reaproveitado: boolean };
+/**
+ * "pronto" traz o MP3; "gerando" diz que a voz ainda está sendo gerada: a tela
+ * pede de novo em instantes, e o pedido igual espera a mesma geração (ou, se
+ * ela terminou, lê o MP3 guardado, sem IA e sem gastar o teto).
+ */
+export type AudioDoResumo =
+  | { estado: "pronto"; mp3Base64: string; idioma: string; titulo: string; reaproveitado: boolean }
+  | { estado: "gerando"; idioma: string; titulo: string };
 
-const emCurso = new Map<string, Promise<{ chave: string; bytes: Buffer; reaproveitado: boolean }>>();
+/**
+ * Quanto a resposta espera a geração. Um resumo longo vai à voz em vários
+ * pedaços, um de cada vez (até 70 s cada), e passaria dos ~100 s em que o proxy
+ * do Render e da Cloudflare cortam o pedido (a tela recebia um erro genérico e o
+ * servidor gerava assim mesmo). Abaixo disso, como a pergunta à reunião
+ * (server/reuniao-com-ia.ts), a resposta diz "gerando" e a geração segue.
+ */
+export const ESPERA_DA_RESPOSTA_DO_AUDIO_MS = 80_000;
+/** O resultado de uma geração que terminou sem ninguém esperando fica guardado este tempo, para o próximo pedido. */
+const GUARDA_DO_RESULTADO_MS = 10 * 60_000;
+
+type Gerado = { chave: string; bytes: Buffer; reaproveitado: boolean };
+const emCurso = new Map<string, Promise<Gerado>>();
 const DIA_MS = 24 * 60 * 60_000;
 
 async function gerarOuReaproveitar(ownerId: string, meetingId: string, texto: TextoDoAudio, deps: DependenciasDoAudioDoResumo) {
@@ -277,10 +300,31 @@ export async function audioDoResumoDaDona(
   const chaveDoPedido = `${ownerId}\n${meetingId}\n${texto.idioma}\n${hashDoAudio("", "", texto.idioma, texto.texto)}`;
   let promessa = emCurso.get(chaveDoPedido);
   if (!promessa) {
-    promessa = gerarOuReaproveitar(ownerId, meetingId, texto, usar).finally(() => emCurso.delete(chaveDoPedido));
-    emCurso.set(chaveDoPedido, promessa);
+    const nova = gerarOuReaproveitar(ownerId, meetingId, texto, usar);
+    promessa = nova;
+    emCurso.set(chaveDoPedido, nova);
+    // Terminada, a geração fica à espera do próximo pedido por um tempo (o
+    // pedido que a esperou até o fim a tira na hora, abaixo). O catch aqui
+    // também evita a rejeição sem ninguém escutando quando a resposta já saiu.
+    const esquecerDepois = () => { setTimeout(() => { if (emCurso.get(chaveDoPedido) === nova) emCurso.delete(chaveDoPedido); }, GUARDA_DO_RESULTADO_MS).unref?.(); };
+    nova.then(esquecerDepois, esquecerDepois);
   }
-  const { bytes, reaproveitado } = await promessa;
+  const AINDA = Symbol("ainda");
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const prazo = new Promise<typeof AINDA>(resolver => { relogio = setTimeout(() => resolver(AINDA), usar.esperaDaRespostaMs ?? ESPERA_DA_RESPOSTA_DO_AUDIO_MS); });
+  let resultado: Gerado | typeof AINDA;
+  try {
+    resultado = await Promise.race([promessa, prazo]);
+  } catch (erro) {
+    if (emCurso.get(chaveDoPedido) === promessa) emCurso.delete(chaveDoPedido);
+    throw erro;
+  } finally {
+    clearTimeout(relogio);
+  }
+  if (resultado === AINDA) return { estado: "gerando", idioma: texto.idioma, titulo: texto.titulo };
+  // Entregue: o próximo pedido relê o banco (o MP3 guardado, ou um texto novo).
+  if (emCurso.get(chaveDoPedido) === promessa) emCurso.delete(chaveDoPedido);
+  const { bytes, reaproveitado } = resultado;
   const db = await exigirDb();
   // Sem a linha da auditoria, nada sai: o insert lança e a resposta é o erro.
   await db.insert(auditLogs).values({
@@ -288,7 +332,7 @@ export async function audioDoResumoDaDona(
     details: { idioma: texto.idioma, bytes: bytes.length, reaproveitado, caracteres: texto.texto.length },
     ipAddress: pedido.ipAddress, userAgent: pedido.userAgent ?? null, status: "success", riskLevel: "low",
   });
-  return { mp3Base64: bytes.toString("base64"), idioma: texto.idioma, titulo: texto.titulo, reaproveitado };
+  return { estado: "pronto", mp3Base64: bytes.toString("base64"), idioma: texto.idioma, titulo: texto.titulo, reaproveitado };
 }
 
 /** Só para os testes: o mapa dos pedidos em curso é estado de módulo. */

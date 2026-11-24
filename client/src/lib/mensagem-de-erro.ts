@@ -163,6 +163,7 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DOS_MODELOS.nomeRepetido]: "meetings.summary.myTemplates.errorRepeated",
   [RECUSAS_DOS_MODELOS.refazeresDemais]: "meetings.summary.errorRedoTooMany",
   [RECUSAS_DOS_MODELOS.pedidoForaDeHora]: "meetings.summary.errorLate",
+  [RECUSAS_DOS_MODELOS.mudancasDemais]: "meetings.summary.myTemplates.errorTooManyChanges",
   // O mapa mental editável (H10b, server/mapa-mental-edicao.ts e os tetos em routers/meetings.ts).
   [RECUSAS_DO_MAPA.mudou]: "meetings.mindMap.edit.errorChanged",
   [RECUSAS_DO_MAPA.semMapa]: "meetings.mindMap.edit.errorNoMap",

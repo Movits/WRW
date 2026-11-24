@@ -17,7 +17,7 @@ import { MapaMentalDaReuniao } from "./MapaMental";
 type Opcoes = { onSettled?: () => unknown };
 type OpcoesDaConsulta = {
   retry: (tentativas: number, erro: unknown) => boolean;
-  refetchInterval: (consulta: { state: { data?: { estado: string }; error: unknown } }) => number | false;
+  refetchInterval: (consulta: { state: { data?: { estado: string; edicao?: { refazendo?: boolean } }; error: unknown } }) => number | false;
   refetchOnWindowFocus?: boolean;
 };
 const duble = vi.hoisted(() => {
@@ -343,6 +343,11 @@ describe("Mapa mental — os estados", () => {
     expect(com("gerando")).toBe(5_000);
     for (const estado of ["pronto", "falhou", "sem_mapa", undefined]) expect(com(estado)).toBe(false);
     expect(com("pendente", { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    // H10b: o refazer chega como "pronto" com o mapa de antes; sem repetir, o aviso ficava preso.
+    const refazendo = (refazendo: boolean, error: unknown = null) => refetchInterval({ state: { data: { estado: "pronto", edicao: { refazendo } }, error } });
+    expect(refazendo(true)).toBe(5_000);
+    expect(refazendo(false)).toBe(false);
+    expect(refazendo(true, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
     expect(retry(0, { data: { code: "NOT_FOUND" } })).toBe(false);
     expect(retry(0, { data: { code: "BAD_REQUEST" } })).toBe(false);
     expect(retry(2, { data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(true);

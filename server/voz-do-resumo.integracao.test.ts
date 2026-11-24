@@ -27,7 +27,7 @@ const { auditLogs, buscasDoComplemento, meetings, meetingSummaries, meetingSumma
 const audio = await import("./resumo-em-audio");
 const complemento = await import("./complemento-pela-busca");
 const resumo = await import("./resumo-guardado");
-const { deletePrivateMeeting } = await import("./meeting-service");
+const { deletePrivateMeeting, limparGravacoesVencidas } = await import("./meeting-service");
 const { AUDIOS_DO_RESUMO_POR_DIA, RECUSAS_DO_AUDIO_DO_RESUMO, ACAO_AUDIO_DO_RESUMO_BAIXADO } = await import("@shared/resumo-em-audio");
 const { BUSCAS_DO_COMPLEMENTO_POR_DIA, RECUSAS_DO_COMPLEMENTO } = await import("@shared/complemento-pela-busca");
 
@@ -118,7 +118,8 @@ describe.skipIf(!temBanco)("O grupo voz no banco (H19b e H4i, integração)", ()
       const { deps } = dependencias();
       const primeiro = await audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, deps);
       const segundo = await audio.audioDoResumoDaDona(DONA, id, "pt-BR", PEDIDO, deps);
-      expect(primeiro.reaproveitado).toBe(false);
+      expect(primeiro).toMatchObject({ estado: "pronto", reaproveitado: false });
+      if (primeiro.estado !== "pronto") throw new Error("esperava o MP3");
       expect(segundo).toMatchObject({ reaproveitado: true, mp3Base64: primeiro.mp3Base64 });
       expect(Buffer.from(primeiro.mp3Base64, "base64").subarray(0, 4).toString()).toBe("MP3:");
       expect(deps.falar).toHaveBeenCalledTimes(1);
@@ -163,6 +164,43 @@ describe.skipIf(!temBanco)("O grupo voz no banco (H19b e H4i, integração)", ()
       expect(deps.falar).toHaveBeenCalledTimes(1);
     });
 
+    it("o resumo longo não prende a resposta: passado o prazo, diz 'gerando', a geração segue, e o pedido seguinte recebe o MP3 sem gerar de novo", async () => {
+      const { id } = await reuniaoComResumo();
+      const { deps } = dependencias();
+      let soltar!: () => void;
+      const voz = new Promise<void>(resolver => { soltar = resolver; });
+      const falarDeVerdade = deps.falar.getMockImplementation()!;
+      deps.falar.mockImplementation(async (...args: Parameters<typeof falarDeVerdade>) => { await voz; return falarDeVerdade(...args); });
+      const comPrazo = { ...deps, esperaDaRespostaMs: 20 };
+      await expect(audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, comPrazo)).resolves.toEqual({ estado: "gerando", idioma: "pt-BR", titulo: "Reunião da voz" });
+      // Ainda gerando: o pedido igual espera a mesma geração, sem outra chamada à IA.
+      await expect(audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, comPrazo)).resolves.toMatchObject({ estado: "gerando" });
+      soltar();
+      await vi.waitFor(async () => expect((await linhasDeAudio(id)).map(linha => linha.situacao)).toEqual(["pronto"]));
+      const pronto = await audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, comPrazo);
+      expect(pronto).toMatchObject({ estado: "pronto", reaproveitado: false });
+      expect(deps.falar).toHaveBeenCalledTimes(1);
+      expect(await linhasDeAudio(id)).toHaveLength(1);
+      const auditorias = await (await db()).select().from(auditLogs).where(and(eq(auditLogs.userId, USUARIA), eq(auditLogs.action, ACAO_AUDIO_DO_RESUMO_BAIXADO)));
+      expect(auditorias).toHaveLength(1);
+    });
+
+    it("a geração que falha depois do prazo: o pedido seguinte recebe o erro, sem gerar de novo nem gastar outra vaga", async () => {
+      const { id } = await reuniaoComResumo();
+      const { deps } = dependencias();
+      let falhar!: () => void;
+      const voz = new Promise<void>((_resolver, rejeitar) => { falhar = () => rejeitar(new Error("503")); });
+      deps.falar.mockImplementation(async () => { await voz; throw new Error("inalcançável"); });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const comPrazo = { ...deps, esperaDaRespostaMs: 20 };
+      await expect(audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, comPrazo)).resolves.toMatchObject({ estado: "gerando" });
+      falhar();
+      await vi.waitFor(async () => expect((await linhasDeAudio(id)).map(linha => linha.situacao)).toEqual(["falhou"]));
+      await expect(audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, comPrazo)).rejects.toMatchObject({ message: RECUSAS_DO_AUDIO_DO_RESUMO.ia });
+      expect(deps.falar).toHaveBeenCalledTimes(1);
+      expect(await linhasDeAudio(id)).toHaveLength(1);
+    });
+
     it("a IA que falha: a linha fica 'falhou', o erro sai como código e nada é guardado", async () => {
       const { id } = await reuniaoComResumo();
       const { deps } = dependencias();
@@ -191,6 +229,30 @@ describe.skipIf(!temBanco)("O grupo voz no banco (H19b e H4i, integração)", ()
       await deletePrivateMeeting(DONA, id);
       expect(storageApagarTodasAsVersoes).toHaveBeenCalledWith(linha.storageKey);
       expect((await linhasDeAudio(id)).map(l => l.storageKey)).toEqual([null]);
+    });
+
+    it("o MP3 que o bucket recusou na exclusão fica com a chave, e a varredura o tira depois; o da reunião no ar fica", async () => {
+      const { id } = await reuniaoComResumo();
+      const { id: noAr } = await reuniaoComResumo();
+      const { deps } = dependencias();
+      await audio.audioDoResumoDaDona(DONA, id, undefined, PEDIDO, deps);
+      await audio.audioDoResumoDaDona(DONA, noAr, undefined, PEDIDO, deps);
+      const [linha] = await linhasDeAudio(id);
+      const [doNoAr] = await linhasDeAudio(noAr);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      storageApagarTodasAsVersoes.mockRejectedValue(new Error("bucket fora"));
+      await deletePrivateMeeting(DONA, id);
+      expect((await linhasDeAudio(id)).map(l => l.storageKey)).toEqual([linha.storageKey]);
+
+      storageApagarTodasAsVersoes.mockReset();
+      storageApagarTodasAsVersoes.mockResolvedValue(undefined);
+      await limparGravacoesVencidas({ ownerId: DONA });
+      const tiradas = storageApagarTodasAsVersoes.mock.calls.map(chamada => chamada[0]);
+      expect(tiradas).toContain(linha.storageKey);
+      expect(tiradas).not.toContain(doNoAr.storageKey);
+      expect((await linhasDeAudio(id)).map(l => l.storageKey)).toEqual([null]);
+      expect((await linhasDeAudio(noAr)).map(l => l.storageKey)).toEqual([doNoAr.storageKey]);
     });
   });
 

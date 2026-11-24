@@ -134,5 +134,7 @@ export const RECUSAS_DOS_MODELOS = {
   nomeRepetido: "MODELO_DE_RESUMO_NOME_REPETIDO",
   refazeresDemais: "REFAZERES_DO_RESUMO_DEMAIS",
   pedidoForaDeHora: "PEDIDO_DO_RESUMO_FORA_DE_HORA",
+  /** O teto de mudanças nos modelos e nas preferências (tetoDosModelosDeResumo, routers/meetings.ts). */
+  mudancasDemais: "MODELOS_DE_RESUMO_MUDANCAS_DEMAIS",
 } as const;
 export type CodigoDaRecusaDosModelos = (typeof RECUSAS_DOS_MODELOS)[keyof typeof RECUSAS_DOS_MODELOS];

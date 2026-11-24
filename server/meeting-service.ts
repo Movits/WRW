@@ -1973,6 +1973,32 @@ function anexosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
     .limit(lote);
 }
 
+const reuniaoDoAudioDoResumo = and(eq(meetings.id, resumoEmAudio.meetingId), eq(meetings.ownerId, resumoEmAudio.ownerId));
+
+/**
+ * Os MP3 do resumo (H19b, resumo_em_audio) que saem nesta passada: só os da
+ * reunião que não existe mais ou está sendo excluída. É o que a junção (H17)
+ * deixa das reuniões que saem (ela não espera o bucket dentro da transação) e o
+ * que o bucket recusou na exclusão da reunião. O MP3 da reunião no ar não vence:
+ * ele sai quando o texto do resumo muda ou com a reunião.
+ */
+async function audiosDoResumoQueSaem(db: Banco, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  const linhas = await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .leftJoin(meetings, reuniaoDoAudioDoResumo)
+    .where(and(
+      gt(resumoEmAudio.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(resumoEmAudio.id, trecho.ate) : undefined,
+      ownerId ? eq(resumoEmAudio.ownerId, ownerId) : undefined,
+      isNotNull(resumoEmAudio.storageKey),
+      or(isNull(meetings.id), eq(meetings.status, "deleted")),
+    ))
+    .orderBy(asc(resumoEmAudio.id))
+    .limit(lote);
+  // A chave não é nula pelo filtro; o tipo da coluna não sabe disso.
+  return linhas.map(linha => ({ id: linha.id, storageKey: linha.storageKey ?? "" }));
+}
+
 /**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
@@ -1993,7 +2019,10 @@ function anexosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
  * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
  *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias;
  * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com o
- *   mesmo prazo, em qualquer estado da reunião.
+ *   mesmo prazo, em qualquer estado da reunião;
+ * - o MP3 do resumo (H19b, resumo_em_audio) da reunião que não existe mais ou
+ *   está sendo excluída (a junção e a recusa do bucket na exclusão): sai o
+ *   objeto, e a linha fica sem a chave, para o teto.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -2049,6 +2078,13 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "anexos",
       ler: (trecho: TrechoDaVarredura) => anexosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingAttachments).where(eq(meetingAttachments.id, id)),
+    },
+    {
+      // A linha do MP3 do resumo fica, sem a chave, para o teto de 24 h da dona
+      // (como na exclusão da reunião): aqui só a chave sai.
+      nome: "audiosDoResumo",
+      ler: (trecho: TrechoDaVarredura) => audiosDoResumoQueSaem(db, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() }).where(eq(resumoEmAudio.id, id)),
     },
   ];
 
@@ -2275,8 +2311,8 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos, ...anexos, ...audiosDoResumo]);
   const saiu = new Set(sairam);
   // O MP3 do resumo que saiu perde a chave; a linha fica para o teto de 24 h da
-  // dona (como a do resumo por e-mail). O que o bucket recusou fica com a chave
-  // e aparece no log de tirarDoBucket.
+  // dona (como a do resumo por e-mail). O que o bucket recusou fica com a chave,
+  // aparece no log de tirarDoBucket e a varredura tenta de novo.
   const audiosDoResumoQueSairam = audiosDoResumo.filter(audio => saiu.has(audio.id)).map(audio => audio.id);
   if (audiosDoResumoQueSairam.length) {
     await db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() })
@@ -2376,7 +2412,8 @@ async function apagarDerivadosSemGravacao(db: BancoOuTransacao, ownerId: string,
  * as próximas ações se soltam com os nomes resolvidos), os avisos dela no sino
  * e o ponteiro da agenda. O áudio NÃO sai: as partes e a gravação foram para a
  * reunião que fica, na mesma transação, antes desta chamada. Sem bucket aqui:
- * a transação não espera o expurgo.
+ * a transação não espera o expurgo. O MP3 do resumo dela (H19b) fica com a chave, e a
+ * varredura (limparGravacoesVencidas) o tira, porque a reunião não existe mais.
  */
 export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
   await apagarDerivadosSemGravacao(tx, ownerId, meetingId, true);

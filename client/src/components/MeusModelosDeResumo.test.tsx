@@ -148,6 +148,12 @@ describe("Meus modelos de resumo (H4e)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apagar Entrevista" }));
     expect(mutacao("apagar").mutate).toHaveBeenCalledWith({ id: PROPRIO.id });
     confirmar.mockRestore();
+    // O resumo aberto que usava o modelo relê (o servidor o trocou para o Geral; o editado mudou de nome).
+    duble.utils.meetings.resumoGuardado.invalidate.mockClear();
+    void mutacao("apagar").opcoes.onSettled?.();
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledTimes(1);
+    void mutacao("editar").opcoes.onSettled?.();
+    expect(duble.utils.meetings.resumoGuardado.invalidate).toHaveBeenCalledTimes(2);
   });
 
   it("o padrão: o modelo (também o da dona ou 'A IA escolhe') e o estilo, salvos juntos", () => {

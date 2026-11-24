@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
-import { BaixarAudioDoResumo } from "./BaixarAudioDoResumo";
+import { BaixarAudioDoResumo, ESPERA_ENTRE_PEDIDOS_MS } from "./BaixarAudioDoResumo";
 import { ComplementoDoItem, type ComplementoNaTela } from "./ComplementoDoItem";
 
 /**
@@ -59,11 +59,42 @@ describe("BaixarAudioDoResumo (H19b)", () => {
     const clique = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="pt-BR"/>);
     fireEvent.click(screen.getByRole("button", { name: /Baixar o áudio do resumo/ }));
-    duble.mutacoes.audioDoResumo.opcoes.onSuccess?.({ mp3Base64: btoa("ID3"), idioma: "pt-BR", titulo: "Reunião da voz", reaproveitado: false });
+    act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.({ estado: "pronto", mp3Base64: btoa("ID3"), idioma: "pt-BR", titulo: "Reunião da voz", reaproveitado: false }); });
     expect(criar).toHaveBeenCalledTimes(1);
     expect(clique).toHaveBeenCalledTimes(1);
     const link = clique.mock.instances[0] as unknown as HTMLAnchorElement;
     expect(link.download).toMatch(/Reunião da voz.*pt-BR.*\.mp3$/);
+    // O download começa longe do toque (o Safari do iPhone pode ignorá-lo): o link fica à vista.
+    const salvar = screen.getByRole("link", { name: /Salvar o áudio/ });
+    expect(salvar.getAttribute("href")).toBe("blob:mp3");
+    expect(salvar.getAttribute("download")).toBe(link.download);
+  });
+
+  it("o servidor ainda gera (resumo longo): a tela segue em 'Gerando' e pede de novo em 5 s, até o MP3 chegar; cancelar para de pedir", () => {
+    vi.useFakeTimers();
+    try {
+      render(<BaixarAudioDoResumo meetingId={REUNIAO} idioma="pt-BR"/>);
+      fireEvent.click(screen.getByRole("button", { name: /Baixar o áudio do resumo/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Gerar e baixar/ }));
+      const { mutate } = duble.mutacoes.audioDoResumo;
+      expect(mutate).toHaveBeenCalledTimes(1);
+      const gerando = { estado: "gerando", idioma: "pt-BR", titulo: "Reunião da voz" };
+      act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.(gerando); });
+      expect(screen.getByRole("button", { name: /Gerando o áudio/ })).toHaveProperty("disabled", true);
+      act(() => { vi.advanceTimersByTime(ESPERA_ENTRE_PEDIDOS_MS); });
+      expect(mutate).toHaveBeenCalledTimes(2);
+      expect(mutate).toHaveBeenLastCalledWith({ meetingId: REUNIAO, idioma: "pt-BR" });
+      act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.(gerando); });
+      fireEvent.click(screen.getByRole("button", { name: /Cancelar/ }));
+      act(() => { vi.advanceTimersByTime(ESPERA_ENTRE_PEDIDOS_MS * 3); });
+      expect(mutate).toHaveBeenCalledTimes(2);
+      // A resposta que chega depois de cancelar não pede de novo.
+      act(() => { duble.mutacoes.audioDoResumo.opcoes.onSuccess?.(gerando); });
+      act(() => { vi.advanceTimersByTime(ESPERA_ENTRE_PEDIDOS_MS * 3); });
+      expect(mutate).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a recusa do teto vira o aviso traduzido", () => {

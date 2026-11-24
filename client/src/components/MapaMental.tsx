@@ -88,7 +88,10 @@ const pedeSenha = (erro: unknown) => codigoDoErro(erro) === "UNAUTHORIZED";
 const erroDefinitivo = (erro: unknown) => codigoDoErro(erro) === "NOT_FOUND" || codigoDoErro(erro) === "BAD_REQUEST" || pedeSenha(erro);
 // Para em qualquer erro, não só no definitivo: perguntar a cada 5 s não cura
 // um 500. A releitura que dá certo limpa o erro e religa a repetição.
-const esperaDaConsulta = (estado: string | undefined, erro: unknown) => (estado === "pendente" || estado === "gerando") && !erro ? 5_000 : false;
+// O refazer em outro estilo (H10b) chega como "pronto", com o mapa de antes à
+// vista e edicao.refazendo: a consulta segue perguntando até o mapa novo sair.
+const esperaDaConsulta = (dados: { estado?: string; edicao?: { refazendo?: boolean } } | undefined, erro: unknown) =>
+  (dados?.estado === "pendente" || dados?.estado === "gerando" || dados?.edicao?.refazendo === true) && !erro ? 5_000 : false;
 
 export function MapaMentalDaReuniao(props: Props) {
   const extras: DoCorpo = { titulo: props.titulo, emoji: props.emoji ?? null, traducao: props.traducao, aoMudarRotulos: props.aoMudarRotulos, documento: !!props.documento };
@@ -102,7 +105,7 @@ function MapaDaDona({ meetingId, ...extras }: { meetingId: string } & DoCorpo) {
   const utils = trpc.useUtils();
   const consulta = trpc.meetings.mapaMental.useQuery({ meetingId }, {
     retry: (tentativas, erro) => !erroDefinitivo(erro) && tentativas < 3,
-    refetchInterval: atual => esperaDaConsulta(atual.state.data?.estado, atual.state.error),
+    refetchInterval: atual => esperaDaConsulta(atual.state.data, atual.state.error),
   });
   // N5: as pessoas da reunião, com o que têm e precisam e as conexões que
   // nasceram delas, num ramo à parte, montado aqui (sem IA nem tradução).
@@ -149,7 +152,7 @@ function MapaDoLink({ token, aoPedirSenha, ...extras }: { token: string; aoPedir
   const consulta = trpc.reuniaoAberta.mapaMental.useQuery({ token }, {
     retry: (tentativas, erro) => !erroDefinitivo(erro) && tentativas < 3,
     refetchOnWindowFocus: false,
-    refetchInterval: atual => esperaDaConsulta(atual.state.data?.estado, atual.state.error),
+    refetchInterval: atual => esperaDaConsulta(atual.state.data, atual.state.error),
   });
   const pedir = trpc.reuniaoAberta.pedirMapa.useMutation({
     onSettled: () => Promise.all([utils.reuniaoAberta.mapaMental.invalidate({ token }), utils.reuniaoAberta.resumoGuardado.invalidate({ token })]),

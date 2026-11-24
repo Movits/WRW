@@ -80,7 +80,8 @@ describe("rotas dos modelos de resumo (H4e)", () => {
   it("as mudanças gastam o teto próprio, por dona; a lista não gasta", async () => {
     const rota = daDona("dona-teto");
     for (let i = 0; i < 60; i++) await rota.responderTamanhoDoResumo({ meetingId: ID, resposta: "right" });
-    await expect(rota.criarModeloDeResumo({ nome: "X", icone: "🎤", instrucoes: "Y" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    // A recusa sai como código, que a tela traduz (client/src/lib/mensagem-de-erro.ts), e não como frase em português.
+    await expect(rota.criarModeloDeResumo({ nome: "X", icone: "🎤", instrucoes: "Y" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS", message: "MODELOS_DE_RESUMO_MUDANCAS_DEMAIS" });
     await expect(rota.modelosDeResumo()).resolves.toBeDefined();
     await expect(daDona("outra").criarModeloDeResumo({ nome: "X", icone: "🎤", instrucoes: "Y" })).resolves.toEqual({ id: "m1" });
   });
