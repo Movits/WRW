@@ -30,6 +30,7 @@ import {
   ReuniaoTomadaPorOutraExecucao,
   translatePrivateMeetingTranscript,
   nomearFalante,
+  NomesSoComReuniaoPronta,
 } from "../meeting-service";
 import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
@@ -1302,7 +1303,10 @@ export const meetingsRouter = router({
   nomearFalante: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), falante: z.string().regex(FORMATO_DO_FALANTE), nome: z.string().max(NOME_DO_FALANTE_MAX * 2) }))
     .mutation(async ({ ctx, input }) => {
-      const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome);
+      const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome).catch(erro => {
+        if (erro instanceof NomesSoComReuniaoPronta) throw new TRPCError({ code: "CONFLICT", message: erro.message });
+        throw erro;
+      });
       if (!nomes) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
       return { nomes };
     }),
