@@ -268,7 +268,7 @@ describe("O detalhe da reunião de documento", () => {
 
   it("compartilhar: o painel diz que o link mostra o texto e o resumo, nunca o arquivo, e a prova guarda a frase do documento", () => {
     abrirDetalhe();
-    expect(screen.getByText("Quem receber o link lê o texto do documento e pede à IA o resumo e respostas sobre ele, sem precisar de conta na WRW. O arquivo não sai pelo link. Excluir e reprocessar continuam só com você.")).toBeInTheDocument();
+    expect(screen.getByText("Quem receber o link lê o texto do documento e pede à IA o resumo e respostas sobre ele, sem precisar de conta na MarquesaMatch. O arquivo não sai pelo link. Excluir e reprocessar continuam só com você.")).toBeInTheDocument();
     expect(screen.queryByText(/ouve a gravação/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Compartilhar" }));
     const frase = "Confirmo que posso compartilhar este documento e autorizo que quem receber o link leia o texto lido dele e o resumo, sem o arquivo.";
@@ -289,8 +289,8 @@ describe("O detalhe da reunião de documento", () => {
     abrirDetalhe();
     fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
     const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
-    expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Proposta da feira”, feito na WRW.")).toBeInTheDocument();
-    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.")).toBeInTheDocument();
+    expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Proposta da feira”, feito na MarquesaMatch.")).toBeInTheDocument();
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.")).toBeInTheDocument();
     expect(painel.textContent).not.toMatch(/gravaç|gravad|gravou|todas as pessoas que falaram/i);
     const frase = "Confirmo que posso compartilhar este documento e autorizo que quem receber o link leia o texto lido dele e o resumo, sem o arquivo.";
     fireEvent.click(within(painel).getByRole("checkbox", { name: /Para mim/ }));

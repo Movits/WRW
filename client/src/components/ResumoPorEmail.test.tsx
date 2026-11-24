@@ -294,12 +294,12 @@ describe("a prévia do e-mail", () => {
     abrir();
     expect(screen.getByText("O e-mail tem um texto fixo e vai em English, o idioma da reunião.")).toBeInTheDocument();
     expect(screen.getByText("Glenda shared a meeting summary with you")).toBeInTheDocument();
-    expect(screen.getByText("Glenda shared with you the summary of the meeting “Reunião com a Apex”, recorded on WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Glenda shared with you the summary of the meeting “Reunião com a Apex”, recorded on MarquesaMatch.")).toBeInTheDocument();
   });
 
   // Pacote 4d: a prévia segue a senha e o áudio do link (H23), como o servidor.
   const COM_AUDIO = /ouve a gravação enquanto ela estiver guardada/;
-  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.";
   const PEDE_A_SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
   const AVISO_DA_SENHA = "O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.";
   // O aviso de encaminhamento da prévia, como o do e-mail (server/email-do-resumo.ts).
@@ -367,8 +367,8 @@ describe("a reunião sem gravação: o documento e o vídeo do YouTube", () => {
     ["do vídeo do YouTube", { youtube: true }, "meetings.youtube.shareAuthorization"],
   ] as const;
   const GRAVACAO = /gravaç|gravad|gravou|todas as pessoas que falaram/i;
-  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na WRW.";
-  const ABERTURA = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na WRW.";
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.";
+  const ABERTURA = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na MarquesaMatch.";
 
   it.each(SEM_GRAVACAO)("o link desligado %s: a caixa e a prova são a frase da origem, como no Compartilhar, nunca a da gravação", (_caso, origem, chave) => {
     abrir({ linkLigado: false, ...origem });
@@ -395,24 +395,24 @@ describe("a reunião sem gravação: o documento e o vídeo do YouTube", () => {
   it.each(SEM_GRAVACAO)("conta sem nome e link com senha %s: a prévia pede a senha a quem compartilhou o resumo, nunca a quem gravou", (_caso, origem) => {
     duble.painel.mockReturnValue(consulta({ nomeDaDona: null }));
     abrir({ linkComSenha: true, ...origem });
-    expect(screen.getByText("Você recebeu o resumo de “Reunião com a Apex”, feito na WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Você recebeu o resumo de “Reunião com a Apex”, feito na MarquesaMatch.")).toBeInTheDocument();
     expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.")).toBeInTheDocument();
-    expect(screen.getByText("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela WRW. Se não esperava por ele, pode ignorá-lo.")).toBeInTheDocument();
+    expect(screen.getByText("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela MarquesaMatch. Se não esperava por ele, pode ignorá-lo.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(GRAVACAO);
   });
 
   it("a prévia segue o idioma da reunião também sem gravação", () => {
     duble.painel.mockReturnValue(consulta({ idioma: "en" }));
     abrir({ documento: true });
-    expect(screen.getByText("Glenda shared with you the summary of “Reunião com a Apex”, made on WRW.")).toBeInTheDocument();
-    expect(screen.queryByText(/recorded on WRW/)).not.toBeInTheDocument();
+    expect(screen.getByText("Glenda shared with you the summary of “Reunião com a Apex”, made on MarquesaMatch.")).toBeInTheDocument();
+    expect(screen.queryByText(/recorded on MarquesaMatch/)).not.toBeInTheDocument();
   });
 
   it("a reunião gravada continua com a caixa e a prévia da gravação", () => {
     abrir({ linkLigado: false });
     expect(screen.getByRole("checkbox", { name: i18n.t("meetings.share.authorization") })).toBeInTheDocument();
     expect(screen.getByText(/ouve a gravação enquanto ela estiver guardada/)).toBeInTheDocument();
-    expect(screen.getByText("Glenda compartilhou com você o resumo da reunião “Reunião com a Apex”, gravada na WRW.")).toBeInTheDocument();
+    expect(screen.getByText("Glenda compartilhou com você o resumo da reunião “Reunião com a Apex”, gravada na MarquesaMatch.")).toBeInTheDocument();
   });
 });
 

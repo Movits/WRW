@@ -21,7 +21,7 @@ const UA = {
   cascaDasLojas: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WRWApp/1.0",
 };
 
-const TITULO = "Instale a WRW como app";
+const TITULO = "Instale a MarquesaMatch como app";
 
 function ambiente(userAgent: string, extra: Partial<AmbienteDoNavegador> = {}): AmbienteDoNavegador {
   return { userAgent, maxTouchPoints: 0, abertoComoApp: false, ...extra };
@@ -124,7 +124,7 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
 
   it("no Samsung Internet (ou outro navegador do Android), manda abrir no Chrome; com o pedido, o botão vale", () => {
     montar(ambiente(UA.samsung, { maxTouchPoints: 5 }));
-    expect(screen.getByText("Para instalar a WRW como app, abra esta página no Chrome.")).toBeInTheDocument();
+    expect(screen.getByText("Para instalar a MarquesaMatch como app, abra esta página no Chrome.")).toBeInTheDocument();
     expect(passos()).toEqual([]);
     act(() => {
       window.dispatchEvent(pedidoDoNavegador("accepted").evento);
@@ -134,7 +134,7 @@ describe("Dica de instalação — o caminho de cada aparelho", () => {
 
   it("no Firefox do computador, indica um navegador que instala, sem dizer que ele não instala", () => {
     montar(ambiente(UA.windowsFirefox));
-    expect(screen.getByText("Para instalar a WRW como app, abra esta página no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
+    expect(screen.getByText("Para instalar a MarquesaMatch como app, abra esta página no Chrome, no Edge ou no Safari.")).toBeInTheDocument();
   });
 
   it("sem o ambiente dado (como no gravador), aberta como app pelo display-mode, a dica não aparece e marca o aparelho", () => {

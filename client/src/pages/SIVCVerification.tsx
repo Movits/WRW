@@ -327,7 +327,7 @@ export default function SIVCVerification() {
               <p>Ao iniciar a verificação, você concorda que:</p>
               <p>1. Os documentos enviados serão processados por IA para extração e validação de informações.</p>
               <p>2. Seus dados serão armazenados de forma segura e criptografada, conforme a LGPD (Lei 13.709/2018).</p>
-              <p>3. As informações verificadas serão usadas exclusivamente para classificação dentro do ecossistema WRW.</p>
+              <p>3. As informações verificadas serão usadas exclusivamente para classificação dentro do ecossistema MarquesaMatch.</p>
               <p>4. Você pode solicitar a exclusão dos seus dados a qualquer momento.</p>
               <p>5. Documentos com informações falsas resultarão em suspensão imediata da conta.</p>
             </div>
@@ -339,7 +339,7 @@ export default function SIVCVerification() {
                 className="mt-0.5 accent-amber-500"
               />
               <span className="text-sm text-zinc-300">
-                Li e concordo com os termos de consentimento para verificação de identidade no ecossistema WRW.
+                Li e concordo com os termos de consentimento para verificação de identidade no ecossistema MarquesaMatch.
               </span>
             </label>
           </div>
@@ -473,7 +473,7 @@ export default function SIVCVerification() {
             <div className="text-xs text-zinc-500 space-y-1">
               <p>A análise dos documentos é feita por IA e pode levar até 2 minutos por documento.</p>
               <p>O score é atualizado automaticamente à medida que os documentos são processados.</p>
-              <p>Documentos com inconsistências serão sinalizados para revisão manual pela equipe WRW.</p>
+              <p>Documentos com inconsistências serão sinalizados para revisão manual pela equipe MarquesaMatch.</p>
             </div>
           </div>
         </div>

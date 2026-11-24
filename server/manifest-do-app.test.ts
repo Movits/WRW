@@ -9,7 +9,7 @@ import { montarDiretivasCsp } from "./_core/csp";
 /**
  * O APP INSTALÁVEL (PWA).
  *
- * O manifest (client/public/manifest.webmanifest) põe a WRW na tela inicial do
+ * O manifest (client/public/manifest.webmanifest) põe a MarquesaMatch na tela inicial do
  * celular como app e a abre direto no gravador, o link que a cliente pediu
  * como primeira tela (20/10/2026). JSON não tem comentário, então as regras
  * dele ficam aqui:
@@ -127,7 +127,7 @@ describe("o manifest do app instalável", () => {
   });
 
   it("leva só a marca, sem atalho nem texto para traduzir", () => {
-    expect(manifest.short_name).toBe("WRW");
+    expect(manifest.short_name).toBe("MarquesaMatch");
     expect(manifest.name).toBe(indexHtml.match(/<title>([^<]+)<\/title>/)?.[1]);
     for (const campo of [
       "shortcuts",

@@ -314,7 +314,7 @@ describe("Reuniões — o que ocupa a sessão", () => {
     expect(motivoDaOcupacao()).toBe("enviando");
     // Sem duração legível, o envio para antes do servidor: a ocupação sai junto.
     await act(async () => { entregarDuracao(null); });
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa ALAC, que a WRW ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa ALAC, que a MarquesaMatch ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(sessaoOcupada()).toBe(false);
   });
 

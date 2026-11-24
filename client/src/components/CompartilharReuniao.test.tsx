@@ -242,14 +242,14 @@ describe("com link: copiar, WhatsApp, e-mail e desligar", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião com a Ana" token={TOKEN}/>);
     expect(screen.getByRole("heading", { name: "Compartilhada por link" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Link da reunião" })).toHaveValue(endereco);
-    const mensagem = `Reunião “Reunião com a Ana” na WRW: ${endereco}`;
+    const mensagem = `Reunião “Reunião com a Ana” na MarquesaMatch: ${endereco}`;
     const whatsapp = screen.getByRole("link", { name: /WhatsApp/ });
     expect(new URL(whatsapp.getAttribute("href")!).searchParams.get("text")).toBe(mensagem);
     expect(whatsapp).toHaveAttribute("target", "_blank");
     expect(whatsapp).toHaveAttribute("rel", expect.stringContaining("noopener"));
     const email = screen.getByRole("link", { name: /E-mail/ }).getAttribute("href")!;
     const parametros = new URLSearchParams(email.slice("mailto:?".length));
-    expect(parametros.get("subject")).toBe("Reunião “Reunião com a Ana” na WRW");
+    expect(parametros.get("subject")).toBe("Reunião “Reunião com a Ana” na MarquesaMatch");
     expect(parametros.get("body")).toBe(mensagem);
   });
 
@@ -484,12 +484,12 @@ describe("o que o link mostra do resumo (H4f)", () => {
  */
 describe("a senha e o áudio do link (H23)", () => {
   const endereco = `${window.location.origin}/r/${TOKEN}`;
-  const textoPronto = (senha: string) => `Reunião “Reunião com a Ana” na WRW: ${endereco}\nSenha: ${senha}`;
+  const textoPronto = (senha: string) => `Reunião “Reunião com a Ana” na MarquesaMatch: ${endereco}\nSenha: ${senha}`;
 
   it("ligar sem a senha e sem o áudio: as duas escolhas vão ao servidor", () => {
     render(<CompartilharReuniao meetingId={ID} titulo="Reunião" token={null}/>);
     fireEvent.click(screen.getByRole("button", { name: /Compartilhar/ }));
-    expect(screen.getByRole("checkbox", { name: "Proteger o link com uma senha de 6 dígitos, que a WRW cria para você" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Proteger o link com uma senha de 6 dígitos, que a MarquesaMatch cria para você" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Incluir o áudio da reunião no link" })).toBeChecked();
     fireEvent.click(screen.getByRole("checkbox", { name: /autorizaram/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /senha de 6 dígitos/ }));
@@ -605,7 +605,7 @@ describe("a senha e o áudio do link (H23)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pôr senha" }));
     expect(duble.mutacoes.novaSenha.mutate).toHaveBeenCalledWith({ meetingId: ID });
     act(() => duble.mutacoes.novaSenha.opcoes.onSuccess?.({ senha: "246801" }));
-    expect(screen.getByRole("textbox", { name: "Texto pronto para mandar" })).toHaveValue(`Reunião “Reunião” na WRW: ${endereco}\nSenha: 246801`);
+    expect(screen.getByRole("textbox", { name: "Texto pronto para mandar" })).toHaveValue(`Reunião “Reunião” na MarquesaMatch: ${endereco}\nSenha: 246801`);
     const atualizar = duble.setData.mock.calls.at(-1)![1] as (anterior: unknown) => unknown;
     expect(atualizar({ meeting: { id: ID, linkComSenha: false } })).toEqual({ meeting: { id: ID, linkComSenha: true } });
     expect(toast.success).toHaveBeenCalledWith("Senha criada.");

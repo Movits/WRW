@@ -37,7 +37,7 @@ class ErrorBoundary extends Component<Props, State> {
           <div className="relative max-w-md w-full text-center">
             {/* Logo */}
             <a href="/">
-              <span className="inline-block text-2xl font-black tracking-tight mb-10 cursor-pointer text-white">WRW</span>
+              <span className="inline-block text-2xl font-black tracking-tight mb-10 cursor-pointer text-white">MarquesaMatch</span>
             </a>
 
             {/* Icon */}
