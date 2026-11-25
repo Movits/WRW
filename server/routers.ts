@@ -34,6 +34,7 @@ import { equipesRouter } from "./routers/equipes";
 import { googleAgendaRouter } from "./routers/googleAgenda";
 import { perguntasEntreReunioesRouter } from "./routers/perguntasEntreReunioes";
 import { consultaDeReunioesRouter } from "./routers/consultaDeReunioes";
+import { perfilDeVozRouter } from "./routers/perfilDeVoz";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -85,6 +86,8 @@ export const appRouter = router({
   equipes: equipesRouter,
   // A consulta das reuniões pela administração (R1a): só admin e presidente, com motivo e auditoria.
   consultaDeReunioes: consultaDeReunioesRouter,
+  // O perfil de voz da dona (H3d): gravar, ouvir, regravar e desligar, com o consentimento próprio.
+  perfilDeVoz: perfilDeVozRouter,
 });
 
 export type AppRouter = typeof appRouter;

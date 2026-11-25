@@ -1098,6 +1098,12 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
    * que fica, e a montagem os mantém.
    */
   zerarNomes?: boolean;
+  /**
+   * As vozes ligadas às contas (H3c) que a montagem grava ao promover: a voz
+   * da dona reconhecida pela amostra do perfil de voz (H3d), já somada às
+   * que havia. Ausente: a coluna fica como está (ou zerada, com zerarNomes).
+   */
+  contasDasVozes?: Record<string, string>;
 }) {
   const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
   const zerarNomes = execucao.zerarNomes ?? execucao.limparAntes;
@@ -1232,7 +1238,10 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // a execução dona da reunião limpa antes de gravar o resultado dela.
   // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
   // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(zerarNomes ? VOZES_ZERADAS : {}) })
+  const promovida = await db.update(meetings).set({
+    status: "ready", processingError: null, updatedAt: completedAt, ...(zerarNomes ? VOZES_ZERADAS : {}),
+    ...(execucao.contasDasVozes ? { speakerAccounts: execucao.contasDasVozes } : {}),
+  })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),

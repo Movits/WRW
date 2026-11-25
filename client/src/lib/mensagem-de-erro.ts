@@ -30,6 +30,7 @@ import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
 import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
 import { RECUSAS_DOS_PARTICIPANTES } from "@shared/participantes-da-reuniao";
 import { RECUSAS_DAS_VOZES } from "@shared/vozes-da-reuniao";
+import { RECUSAS_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { RECUSAS_DA_EQUIPE } from "@shared/espacos-de-equipe";
 import { RECUSAS_DOS_MODELOS } from "@shared/modelos-de-resumo";
 import { RECUSAS_DO_MAPA } from "@shared/mapa-mental-edicao";
@@ -169,6 +170,12 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [RECUSAS_DA_EQUIPE.tarefasDemais]: "teams.errTooManyTasks",
   [RECUSAS_DA_EQUIPE.prazoInvalido]: "teams.errDueInvalid",
   [RECUSAS_DA_EQUIPE.agendaNaoEncontrada]: "teams.errAgendaNotFound",
+  // O perfil de voz (H3d): os códigos de shared/perfil-de-voz.ts.
+  [RECUSAS_DO_PERFIL_DE_VOZ.consentimentoPedido]: "perfilDeVoz.erros.consentimentoPedido",
+  [RECUSAS_DO_PERFIL_DE_VOZ.amostraInvalida]: "perfilDeVoz.erros.amostraInvalida",
+  [RECUSAS_DO_PERFIL_DE_VOZ.semPerfil]: "perfilDeVoz.erros.semPerfil",
+  [RECUSAS_DO_PERFIL_DE_VOZ.demais]: "perfilDeVoz.erros.demais",
+  [RECUSAS_DO_PERFIL_DE_VOZ.bucket]: "perfilDeVoz.erros.bucket",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
   [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
   // Os detalhes da reunião (H7c): o contato ou o contexto que não é da dona, em

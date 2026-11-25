@@ -19,7 +19,7 @@ const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users, voiceProfiles } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
 const { GeminiIndisponivelError } = await import("./gemini");
@@ -75,6 +75,7 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
     await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
     await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     await banco.delete(users).where(eq(users.openId, DONA));
   });
   beforeEach(async () => {
@@ -84,6 +85,7 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
     await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
     await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     fila.religarParaTestes();
     transcreverFatia.mockReset();
     storageGetBytes.mockReset();
@@ -92,6 +94,60 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] });
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  // ── O perfil de voz da dona (H3d) ──────────────────────────────────────────
+  const AMOSTRA = Buffer.from("amostra-da-voz-da-dona");
+  async function perfilDeVoz() {
+    await (await db()).insert(voiceProfiles).values({
+      id: crypto.randomUUID(), ownerId: DONA, storageKey: `perfis-de-voz/${DONA}/amostra.webm`, mimeType: "audio/webm", bytes: AMOSTRA.length,
+      durationMs: 30_000, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    storageGetBytes.mockImplementation(async (chave: string) => (chave.startsWith("perfis-de-voz/") ? AMOSTRA : Buffer.from("audio")));
+  }
+
+  it("H3d: com o perfil de voz, cada parte leva a amostra, e a montagem liga a voz da dona à conta dela", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0);
+    await parte(id, 1);
+    transcreverFatia.mockImplementation(async ({ inicioSegundos }: { inicioSegundos: number }) => ({
+      segmentos: [
+        { inicio: inicioSegundos + 1, fim: inicioSegundos + 2, falante: "F1", texto: "fala da dona" },
+        { inicio: inicioSegundos + 3, fim: inicioSegundos + 4, falante: "F2", texto: "fala de outra pessoa" },
+      ], idioma: "pt-BR", modelo: "gemini-teste",
+    }));
+    await rodar();
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    for (const [pedido] of transcreverFatia.mock.calls) expect(pedido.amostraDaVoz).toEqual({ audio: AMOSTRA, mimeType: "audio/webm" });
+    expect((await partesDe(id)).every(p => (p.result as { vozDaDona?: boolean }).vozDaDona === true)).toBe(true);
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    expect(r.speakerAccounts).toEqual({ F1: "owner" });
+  });
+
+  it("H3d: sem perfil, a parte vai sem a amostra e nenhuma voz é ligada", async () => {
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    expect((await reuniaoDe(id)).speakerAccounts).toBeNull();
+  });
+
+  it("H3d: o perfil gravado no meio da reunião não entra nas partes seguintes (o F1 de antes pode ser outra pessoa)", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await perfilDeVoz();
+    await parte(id, 1);
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    expect(transcreverFatia.mock.calls[1][0].amostraDaVoz).toBeUndefined();
   });
 
   it("transcreve na ordem: a parte 1 espera a 0, e leva o contexto e o início dela", async () => {

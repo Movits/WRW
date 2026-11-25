@@ -211,6 +211,13 @@
       "when": 1795578182361,
       "tag": "0029_pacote-6",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1795629057734,
+      "tag": "0030_perfil-de-voz",
+      "breakpoints": true
     }
   ]
 }

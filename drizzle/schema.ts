@@ -2442,3 +2442,49 @@ export const consents = mysqlTable("consents", {
 
 export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type Consent = typeof consents.$inferSelect;
+
+// O perfil de voz da dona (H3d do desenho de 16/11; HN-24 da auditoria,
+// aprovado pelo Roberto em 24/11/2026; server/perfil-de-voz.ts): um trecho
+// curto da voz dela (cerca de 30 s, lendo um texto na tela), guardado no bucket
+// sob perfis-de-voz/<openId>/, que vai junto no pedido de transcrição de cada
+// parte das reuniões dela, para a IA rotular a fala dela com a conta dela.
+// É dado biométrico (LGPD art. 11): só existe com o consentimento próprio
+// (voice_profile_consents), separado do aceite dos Termos. Uma linha por dona.
+// Desligar o perfil e excluir a conta apagam o objeto (com todas as versões) e
+// a linha, de vez: não há "desativado". O áudio nunca sai pelo proxy
+// /manus-storage, pelo link aberto, para as participantes nem para a consulta
+// da administração (R1a): só a dona o ouve, pelo procedimento perfilDeVoz.ouvir.
+export const voiceProfiles = mysqlTable("voice_profiles", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  storageKey: varchar("storage_key", { length: 512 }).notNull(),
+  mimeType: varchar("mime_type", { length: 32 }).notNull(),
+  bytes: int("bytes").notNull(),
+  durationMs: int("duration_ms").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerUnique: uniqueIndex("voice_profiles_owner_unique").on(table.ownerId),
+}));
+
+// O registro de cada consentimento ao perfil de voz e de cada revogação
+// (pontos técnicos da Cris para o H3d): data e hora, a versão do texto, o
+// idioma e o texto que a dona viu, com o hash. Sem a voz. Sobrevive à exclusão
+// do perfil e à da conta (a prova de que houve consentimento e de quando ele
+// acabou; ver server/exclusao-de-conta.ts). "origem" diz quem revogou: a dona
+// (desligar) ou a exclusão da conta. Nunca UPDATE: uma linha por evento.
+export const voiceProfileConsents = mysqlTable("voice_profile_consents", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  evento: varchar("evento", { length: 12, enum: ["consentiu", "revogou"] }).notNull(),
+  origem: varchar("origem", { length: 20, enum: ["dona", "exclusao_da_conta"] }).notNull(),
+  versaoDoTexto: varchar("versao_do_texto", { length: 40 }).notNull(),
+  idioma: varchar("idioma", { length: 12 }),
+  textoExibido: text("texto_exibido"),
+  textoHash: varchar("texto_hash", { length: 64 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 500 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerCreatedIdx: index("voice_profile_consents_owner_created_idx").on(table.ownerId, table.createdAt),
+}));

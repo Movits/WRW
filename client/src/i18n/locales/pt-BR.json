@@ -3244,6 +3244,42 @@
       }
     }
   },
+  "perfilDeVoz": {
+    "title": "Perfil de voz",
+    "subtitle": "Para as suas reuniões reconhecerem a sua voz e mostrarem o seu nome nas suas falas.",
+    "intro": "Grave cerca de {{segundos}} segundos da sua voz lendo o texto abaixo em voz alta. Nas próximas reuniões que você gravar, a sua fala sai com o seu nome, e não \"Falante 1\". Se o reconhecimento errar, você corrige em \"Quem é cada voz\", como já faz hoje.",
+    "readAloud": "Leia em voz alta",
+    "textToRead": "Bom dia. Esta é a minha voz, gravada para a Marquesa Global Match me reconhecer nas reuniões. Eu falo no meu ritmo de sempre, como numa conversa de trabalho. Hoje vou contar o que fiz nesta semana, quais são os próximos passos e com quem preciso conversar. Números, nomes e datas também aparecem: dois mil e vinte e seis, quinze de março, trinta e sete pessoas. Obrigada por ouvir.",
+    "consent": "Autorizo a Marquesa Global Match a criar um perfil da minha voz para me identificar nas transcrições e resumos das reuniões.",
+    "consentSupport": "O perfil de voz é um dado biométrico. É usado apenas para esse fim, não é obrigatório para usar a plataforma e pode ser desligado a qualquer momento. Ao desligar, o perfil é excluído.",
+    "needsConsent": "Para gravar, marque a autorização acima.",
+    "record": "Gravar a minha voz",
+    "stop": "Parar e salvar",
+    "saving": "Salvando...",
+    "cancel": "Cancelar",
+    "listen": "Ouvir",
+    "rerecord": "Regravar",
+    "turnOff": "Desligar e excluir",
+    "turnOffConfirm": "Desligar o perfil de voz exclui a gravação da sua voz de vez. As reuniões que você gravar daqui em diante não vão mais reconhecer a sua voz sozinhas. Desligar?",
+    "turnOffYes": "Sim, desligar e excluir",
+    "turningOff": "Excluindo...",
+    "active": "Perfil de voz ligado (gravado em {{data}}).",
+    "howItWorks": "As próximas reuniões que você gravar mostram a sua fala com o seu nome. Se errar, corrija em \"Quem é cada voz\".",
+    "tooShort": "A gravação ficou curta. Leia o texto inteiro: são pelo menos {{segundos}} segundos.",
+    "micError": "Não foi possível usar o microfone. Confira a permissão do navegador e tente de novo.",
+    "unsupported": "Este navegador não grava áudio. Tente pelo Chrome, Edge ou Safari atualizados.",
+    "toast": {
+      "saved": "Perfil de voz salvo.",
+      "deleted": "Perfil de voz desligado e excluído."
+    },
+    "erros": {
+      "consentimentoPedido": "Para criar o perfil de voz, marque a autorização.",
+      "amostraInvalida": "A gravação não pôde ser usada. Grave de novo, lendo o texto inteiro (até 1 minuto).",
+      "semPerfil": "Não há perfil de voz gravado.",
+      "demais": "Muitas gravações em pouco tempo. Tente de novo daqui a uma hora.",
+      "bucket": "Não conseguimos concluir agora. Nada mudou; tente de novo em instantes."
+    }
+  },
   "googleAgenda": {
     "title": "Google Agenda",
     "subtitle": "Conecte a sua conta Google para a Marquesa Global Match pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",

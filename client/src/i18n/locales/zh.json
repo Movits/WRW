@@ -3244,6 +3244,42 @@
       }
     }
   },
+  "perfilDeVoz": {
+    "title": "声音档案",
+    "subtitle": "让你的会议识别你的声音，并在你的发言上显示你的名字。",
+    "intro": "朗读下面的文字，录下大约 {{segundos}} 秒的声音。之后你录制的会议中，你的发言会显示你的名字，而不是“发言人 1”。如果识别出错，你可以像现在一样在“每个声音是谁”中更正。",
+    "readAloud": "请朗读",
+    "textToRead": "早上好。这是我的声音，录下来是为了让 Marquesa Global Match 在会议中认出我。我按平时的语速说话，就像在工作交流中一样。今天我会讲讲这周做了什么、接下来的步骤是什么，以及需要和谁沟通。也会出现数字、名字和日期：二零二六年，三月十五日，三十七个人。谢谢收听。",
+    "consent": "我授权 Marquesa Global Match 创建我的声音档案，以便在会议的转写和摘要中识别我。",
+    "consentSupport": "声音档案属于生物识别数据。它仅用于此目的，使用平台并不需要它，并且可以随时关闭。关闭后，档案将被删除。",
+    "needsConsent": "如需录制，请勾选上面的授权。",
+    "record": "录制我的声音",
+    "stop": "停止并保存",
+    "saving": "正在保存...",
+    "cancel": "取消",
+    "listen": "收听",
+    "rerecord": "重新录制",
+    "turnOff": "关闭并删除",
+    "turnOffConfirm": "关闭声音档案会永久删除你的声音录音。从现在起你录制的会议将不再自动识别你的声音。确定关闭吗？",
+    "turnOffYes": "是的，关闭并删除",
+    "turningOff": "正在删除...",
+    "active": "声音档案已开启（录制于 {{data}}）。",
+    "howItWorks": "之后你录制的会议会用你的名字显示你的发言。如有错误，请在“每个声音是谁”中更正。",
+    "tooShort": "录音太短。请读完整段文字：至少 {{segundos}} 秒。",
+    "micError": "无法使用麦克风。请检查浏览器权限后重试。",
+    "unsupported": "此浏览器无法录音。请使用最新版的 Chrome、Edge 或 Safari。",
+    "toast": {
+      "saved": "声音档案已保存。",
+      "deleted": "声音档案已关闭并删除。"
+    },
+    "erros": {
+      "consentimentoPedido": "如需创建声音档案，请勾选授权。",
+      "amostraInvalida": "无法使用这段录音。请重新录制并读完整段文字（最长 1 分钟）。",
+      "semPerfil": "没有已录制的声音档案。",
+      "demais": "短时间内录制次数过多。请一小时后再试。",
+      "bucket": "暂时无法完成。没有任何更改；请稍后再试。"
+    }
+  },
   "googleAgenda": {
     "title": "Google 日历",
     "subtitle": "关联您的 Google 账号，Marquesa Global Match 就能把您安排的会议和有截止日期的后续行动添加到您的 Google 日历。",

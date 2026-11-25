@@ -637,7 +637,9 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // meeting_participants.userId).
     // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
     // userId, e meeting_folder_tasks.owner_id.
-    expect(paresDeUsuariaNoSchema).toHaveLength(89);
+    // 91: os 89, mais o perfil de voz (H3d): voice_profiles.owner_id e
+    // voice_profile_consents.owner_id.
+    expect(paresDeUsuariaNoSchema).toHaveLength(91);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });

@@ -48,6 +48,13 @@
 //    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo. O PDF da
 //    reunião de documento (meeting_documents, H12) segue a mesma regra, e as
 //    fotos e os desenhos do resumo (meeting_attachments, H4g e H4h) também.
+// 7. O perfil de voz (H3d, server/perfil-de-voz.ts) é dado biométrico: a
+//    amostra sai do bucket com TODAS as versões, como o áudio de reunião, e a
+//    linha sai no plano. Antes, a exclusão registra a revogação do
+//    consentimento (origem "exclusao_da_conta") em voice_profile_consents, que
+//    FICA: é a prova de que houve consentimento e de quando ele acabou, sem a
+//    voz. Se o bucket recusar, a chave vai para `arquivosComFalha` (log e
+//    auditoria, como os outros arquivos) e a linha sai assim mesmo.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -56,6 +63,7 @@ import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 // Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
 import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
+import { PREFIXO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
@@ -77,6 +85,7 @@ import {
   modelosDeResumoProprios, preferenciasDoResumo, resumosRefeitos,
   resumoEmAudio, buscasDoComplemento,
   meetingParticipants, meetingFolderMembers, meetingFolderTasks,
+  voiceProfiles,
 } from "../drizzle/schema";
 
 /**
@@ -202,6 +211,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // O áudio do resumo com a voz do Gemini (H19b): a linha (o objeto sai antes, em
   // chavesDeArquivosDaConta) e as buscas do complemento (H4i), só para o teto de 24 h.
   { tabela: resumoEmAudio, coluna: resumoEmAudio.ownerId, origem: "openId" },
+  {
+    tabela: voiceProfiles, coluna: voiceProfiles.ownerId, origem: "openId",
+    motivo: "o perfil de voz (H3d), dado biométrico: a amostra já saiu do bucket com todas as versões, e a revogação já foi registrada",
+  },
   { tabela: buscasDoComplemento, coluna: buscasDoComplemento.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
@@ -351,6 +364,7 @@ export const ATORES_SECUNDARIOS_PRESERVADOS = [
   { tabela: "security_events", coluna: "resolvedBy", motivo: "quem tratou o evento de segurança de OUTRA" },
   { tabela: "enrichment_suggestions", coluna: "actionedBy", motivo: "sempre a própria dona; a linha sai pelo owner_id" },
   { tabela: "strategic_groups", coluna: "memberIds", motivo: "array JSON: a conta sai da lista com UPDATE (tirarDosGruposAlheios), não com DELETE" },
+  { tabela: "voice_profile_consents", coluna: "owner_id", motivo: "o registro dos consentimentos e das revogações do perfil de voz (H3d, pontos técnicos da Cris): sem a voz, fica como prova; a exclusão grava antes a revogação dela" },
 ] as const;
 
 /** Nome legível do passo, para o relatório e para o teste. */
@@ -450,6 +464,10 @@ export async function chavesDeArquivosDaConta(
   const audiosDoResumo = await db.select({ chave: resumoEmAudio.storageKey })
     .from(resumoEmAudio).where(eq(resumoEmAudio.ownerId, chaves.openId));
   for (const audio of audiosDoResumo) if (audio.chave) guardar(chaveDoStorageDaDona("meetings", chaves.openId, audio.chave));
+  // A amostra do perfil de voz (H3d): montada pelo servidor sob perfis-de-voz/<openId>/.
+  const perfisDeVoz = await db.select({ chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  for (const perfil of perfisDeVoz) guardar(chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave));
 
   // SIVC e Deal Room indexam pelo id (int), não pelo openId: o prefixo é outro,
   // mas a prova de posse é a mesma — foi o servidor que montou a chave.
@@ -610,6 +628,7 @@ export async function excluirConta(
   opcoes: {
     apagarArquivo?: (chave: string) => Promise<void>;
     revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
+    registrarRevogacaoDaVoz?: (ownerId: string) => Promise<boolean>;
   } = {},
 ): Promise<RelatorioDeExclusao> {
   // O apagador do bucket só é montado quando o teste não injeta o próprio, e
@@ -620,8 +639,13 @@ export async function excluirConta(
   // DELETE simples.
   const apagarArquivo = opcoes.apagarArquivo ?? await (async () => {
     const bucket = await import("./storage");
-    return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
+    // O áudio de reunião e a amostra do perfil de voz (H3d) saem com todas as versões.
+    const comVersoes = (chave: string) => chave.startsWith("meetings/") || chave.startsWith(`${PREFIXO_DO_PERFIL_DE_VOZ}/`);
+    return (chave: string) => (comVersoes(chave) ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
   })();
+  // Import tardio, como o do bucket: o módulo do perfil de voz traz o banco.
+  const registrarRevogacaoDaVoz = opcoes.registrarRevogacaoDaVoz
+    ?? (async (ownerId: string) => (await import("./perfil-de-voz")).registrarRevogacaoNaExclusao(db, ownerId));
   // Import tardio, como o do bucket: o módulo da Google Agenda só entra quando
   // a exclusão roda de verdade, e o teste injeta o próprio revogador.
   const revogarGoogle = opcoes.revogarGoogle
@@ -721,6 +745,10 @@ export async function excluirConta(
       erro instanceof Error ? erro.message : erro,
     );
   }
+
+  // A revogação do consentimento ao perfil de voz (H3d), antes de a linha do
+  // perfil sair no plano: o registro fica (regra 7 no topo).
+  if (await registrarRevogacaoDaVoz(chaves.openId)) passos.push({ nome: "voice_profile_consents (revogação, INSERT)", linhas: 1 });
 
   for (const passo of PLANO_DE_EXCLUSAO) {
     const valores = valoresDaOrigem(chaves, passo.origem);
