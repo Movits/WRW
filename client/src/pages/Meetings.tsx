@@ -25,7 +25,7 @@ import { CompartilharReuniao } from "@/components/CompartilharReuniao";
 import { ParticipantesDaReuniao } from "@/components/ParticipantesDaReuniao";
 import { CompartilhadasComigo } from "@/components/CompartilhadasComigo";
 import { EquipesComigo } from "@/components/EquipesComigo";
-import { nomesComJuntadas } from "@shared/vozes-no-texto";
+import { falasComJuntadas, nomesComJuntadas } from "@shared/vozes-no-texto";
 import { ResumoPorEmail } from "@/components/ResumoPorEmail";
 import { ExportarReuniao, nomeDoArquivo } from "@/components/ExportarReuniao";
 import { BaixarAudioDaReuniao } from "@/components/BaixarAudioDaReuniao";
@@ -1374,6 +1374,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   const naTraducaoDaTranscricao = translationLanguage !== idiomaOriginal;
   const podeEditarATranscricao = transcricaoEditavel && !naTraducaoDaTranscricao;
   const editandoATranscricao = editandoTranscricao && podeEditarATranscricao;
+  // As falas com a voz juntada trocada pela principal (H3c), como na tela da
+  // participante e na consulta da administração: o tempo de fala e o "ouvir só
+  // esta voz" somam as duas. Na edição, as vozes de verdade: o trecho mostra e
+  // troca a voz que está gravada nele.
+  const falasDasVozes = editandoATranscricao ? falas : falasComJuntadas(falas, vozesDaDona.juntadas);
   const edicaoLida = transcript?.edicao ?? EDICAO_VAZIA;
   const originaisDaEdicao = new Map(edicaoLida.originais.map(original => [original.indice, { texto: original.texto, falante: original.falante }]));
   // Onde a substituição procura: os textos dos trechos, ou o texto corrido.
@@ -1580,7 +1585,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
             : mostraFalas
             ? <>
               {/* Outro ?q para a mesma reunião remonta a busca com o termo novo. */}
-              <TranscricaoPorFalante key={termoPedido} segmentos={falas} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
+              <TranscricaoPorFalante key={termoPedido} segmentos={falasDasVozes} termoInicial={termoPedido} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}
                 soAVoz={soAVoz} aoOuvirSoAVoz={partesParaOuvir.length ? voz => player.current?.ouvirSoAVoz(voz) : undefined}
                 edicao={podeEditarATranscricao ? {
                   originais: originaisDaEdicao, editando: editandoATranscricao, aoSalvarTrecho: salvarTrecho,
@@ -1680,7 +1685,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         usuária não tem o que reportar. */}
     <BarraDoPlayer ref={definirPlayer} partes={partesParaOuvir}
       aviso={falhaNoAudio ? t("meetings.audioLoadError") : null}
-      falas={falas} soAVoz={soAVoz} rotuloDaVoz={soAVoz ? rotuloDaVoz(soAVoz) : undefined} aoMudarSoAVoz={setSoAVoz}
+      falas={falasDasVozes} soAVoz={soAVoz} rotuloDaVoz={soAVoz ? rotuloDaVoz(soAVoz) : undefined} aoMudarSoAVoz={setSoAVoz}
       aoFalhar={() => setFalhaNoAudio(true)} aoCarregar={() => setFalhaNoAudio(false)}/>
   </main>;
 }

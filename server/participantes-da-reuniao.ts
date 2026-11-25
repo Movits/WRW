@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { auditLogs, connections, meetingParticipants, meetings, userProfiles, users } from "../drizzle/schema";
 import { CONTA_DA_DONA, contasDasVozes, NOME_DO_FALANTE_MAX } from "@shared/const";
 import {
@@ -44,6 +44,8 @@ export type AutorizacaoDasPessoas = { idioma: string; textoExibido: string };
 export type Conta = { id: number; openId: string };
 
 export const ACAO_PARTICIPANTES_AUTORIZADAS = "MEETING_PARTICIPANTS_AUTHORIZED";
+/** A auditoria da junção de reuniões (H17, server/juntar-reunioes.ts). */
+const ACAO_DA_JUNCAO = "MEETINGS_JOINED";
 export const ACAO_CONVITE_CRIADO = "MEETING_PARTICIPANT_INVITED";
 export const ACAO_CONVITE_CANCELADO = "MEETING_PARTICIPANT_INVITE_CANCELED";
 export const ACAO_PARTICIPANTE_ENTROU = "MEETING_PARTICIPANT_JOINED";
@@ -168,12 +170,23 @@ async function limparConvitesVencidos(ex: BancoOuTransacao, ownerId: string, mee
   ));
 }
 
-/** A dona já confirmou, nesta reunião, que as pessoas que falaram autorizaram compartilhar com as participantes? */
+/**
+ * A dona já confirmou, nesta reunião, que as pessoas que falaram autorizaram
+ * compartilhar com as participantes? A confirmação vale para o conteúdo que a
+ * reunião tinha: depois de uma junção (MEETINGS_JOINED, H17), que traz o áudio
+ * e as falas de outras reuniões, só a confirmação posterior vale (o id da
+ * auditoria cresce com o tempo).
+ */
 async function jaAutorizou(ex: BancoOuTransacao, donaId: number, meetingId: string): Promise<boolean> {
   const [linha] = await ex.select({ id: auditLogs.id }).from(auditLogs)
     .where(and(eq(auditLogs.action, ACAO_PARTICIPANTES_AUTORIZADAS), eq(auditLogs.resource, "meetings"), eq(auditLogs.resourceId, meetingId), eq(auditLogs.userId, donaId)))
+    .orderBy(desc(auditLogs.id))
     .limit(1);
-  return !!linha;
+  if (!linha) return false;
+  const [juncao] = await ex.select({ id: auditLogs.id }).from(auditLogs)
+    .where(and(eq(auditLogs.action, ACAO_DA_JUNCAO), eq(auditLogs.resourceId, meetingId), gt(auditLogs.id, linha.id)))
+    .limit(1);
+  return !juncao;
 }
 
 /**

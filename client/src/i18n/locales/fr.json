@@ -2479,6 +2479,7 @@
       "moveDown": "Descendre : {{titulo}}",
       "warningSummary": "La transcription est raccordée, et l'IA refait le résumé, la carte mentale et les personnes suggérées. Ce que vous avez déjà confirmé dans votre réseau y reste.",
       "warningLink": "Le lien ouvert de ces réunions est désactivé. Pour partager la réunion fusionnée, réactivez le lien.",
+      "warningPeople": "Les participantes invitées à la première réunion ne voient plus la réunion fusionnée, et celle-ci quitte l’espace d’équipe où elle se trouvait. Pour la partager à nouveau, invitez-les de nouveau.",
       "warningAudio": "L'audio de chaque enregistrement est conservé jusqu'à sa propre échéance : 30 jours après l'envoi.",
       "warningOld": "Les réunions enregistrées en un seul fichier (avant l'enregistrement par parties) sont transcrites à nouveau, et les noms des voix de celles-ci et des suivantes sont retirés.",
       "warningEdits": "Les corrections faites à la main dans la transcription ne passent pas à la réunion fusionnée : la transcription est reconstituée à partir de l'audio.",

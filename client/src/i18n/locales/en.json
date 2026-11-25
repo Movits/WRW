@@ -2479,6 +2479,7 @@
       "moveDown": "Move down: {{titulo}}",
       "warningSummary": "The transcript is joined, and the summary, the mind map and the suggested people are redone by the AI. What you have already confirmed in your network stays there.",
       "warningLink": "The open link of these meetings is turned off. To share the merged meeting, turn the link on again.",
+      "warningPeople": "Participants invited to the first meeting can no longer see the merged meeting, and it leaves the team space it was in. To share it again, invite them again.",
       "warningAudio": "The audio of each recording is kept until its own deadline: 30 days from upload.",
       "warningOld": "Meetings recorded as a single file (before recording in parts) are transcribed again, and the voice names of those and of the following ones are removed.",
       "warningEdits": "Corrections made by hand in the transcript do not carry over to the joined meeting: the transcript is assembled again from the audio.",

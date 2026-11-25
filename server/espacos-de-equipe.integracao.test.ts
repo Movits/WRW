@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { getDb } from "./db";
 import {
-  agendaReunioes, auditLogs, connections, meetingFolderMembers, meetingFolders, meetingFolderTasks, meetings, userProfiles, users,
+  agendaReunioes, auditLogs, connections, meetingFolderMembers, meetingFolders, meetingFolderTasks, meetingParticipants, meetings, userProfiles, users,
 } from "../drizzle/schema";
 import { credencialDaParticipante } from "@shared/participantes-da-reuniao";
 import { MEMBRAS_POR_EQUIPE_MAX, RECUSAS_DA_EQUIPE } from "@shared/espacos-de-equipe";
@@ -196,6 +196,30 @@ describe.skipIf(!temBanco)("Espaços de equipe (integração)", () => {
     expect(await recusa(lerComo(ana, NA_OUTRA_PASTA))).toBeInstanceOf(LinkAbertoRecusado);
     expect(await recusa(lerComo(clara, NA_PASTA))).toBeInstanceOf(LinkAbertoRecusado);
     expect(await recusa(reunioesDaEquipe(clara, PASTA))).toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("a membra vê os nomes que a dona deu e o da dona, mas não o da conta de uma participante ligada a uma voz (H3c)", async () => {
+    const db = (await getDb())!;
+    // A Clara não é da equipe: é participante da reunião (R1b), e a dona liga a voz F2 à conta dela.
+    const participacao = crypto.randomUUID();
+    await db.insert(meetingParticipants).values({
+      id: participacao, meetingId: NA_PASTA, ownerId: DONA, userId: clara.id, status: "active", source: "connection",
+      invitedAt: AGORA, acceptedAt: AGORA, createdAt: AGORA, updatedAt: AGORA,
+    });
+    await db.update(meetings).set({ speakerAccounts: { F1: "owner", F2: participacao }, speakerNames: { F2: "Nome livre de antes", F3: "Caio" } })
+      .where(eq(meetings.id, NA_PASTA));
+    try {
+      const daMembra = await lerComo(ana, NA_PASTA) as { vozes: Record<string, string> };
+      expect(daMembra.vozes.F2).toBeUndefined();
+      expect(JSON.stringify(daMembra)).not.toContain(NOME_DA_CLARA);
+      expect(daMembra.vozes).toMatchObject({ F1: expect.any(String), F3: "Caio" });
+      // A participante segue vendo o nome dela, como aceitou.
+      const daParticipante = await lerComo(clara, NA_PASTA) as { vozes: Record<string, string> };
+      expect(daParticipante.vozes).toMatchObject({ F2: NOME_DA_CLARA, F3: "Caio" });
+    } finally {
+      await db.delete(meetingParticipants).where(eq(meetingParticipants.id, participacao));
+      await db.update(meetings).set({ speakerAccounts: null, speakerNames: null }).where(eq(meetings.id, NA_PASTA));
+    }
   });
 
   it("a reunião que sai da pasta, vai para a lixeira ou é de dona desativada deixa de abrir na hora", async () => {

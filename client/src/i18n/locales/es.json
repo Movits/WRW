@@ -2479,6 +2479,7 @@
       "moveDown": "Bajar: {{titulo}}",
       "warningSummary": "La transcripción se une, y la IA rehace el resumen, el mapa mental y las personas sugeridas. Lo que ya confirmaste en tu red sigue allí.",
       "warningLink": "El enlace abierto de estas reuniones se desactiva. Si quieres compartir la reunión unida, actívalo de nuevo.",
+      "warningPeople": "Las participantes invitadas a la primera reunión dejan de ver la reunión unida, y esta sale del espacio de equipo en el que estaba. Para compartirla de nuevo, invítalas otra vez.",
       "warningAudio": "El audio de cada grabación se guarda hasta su propio plazo: 30 días desde el envío.",
       "warningOld": "Las reuniones grabadas en un solo archivo (antes de la grabación por partes) se transcriben de nuevo, y se quitan los nombres de las voces de esas reuniones y de las siguientes.",
       "warningEdits": "Las correcciones hechas a mano en la transcripción no pasan a la reunión unida: la transcripción se arma de nuevo a partir del audio.",

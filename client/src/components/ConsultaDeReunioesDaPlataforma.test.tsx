@@ -70,6 +70,20 @@ describe("Reuniões — a lista", () => {
     expect(screen.getByText("Gravada antes do aviso")).toBeInTheDocument();
   });
 
+  it("o status da reunião sai em português, e não o valor cru do banco", () => {
+    duble.lista = { data: { reunioes: [reuniao(), reuniao({ id: "c", titulo: "Em andamento", status: "processing" })], proxima: null } };
+    render(<ConsultaDeReunioesDaPlataforma />);
+    expect(screen.getByText(/Ana Dona · Pronta/)).toBeInTheDocument();
+    expect(screen.getByText(/Ana Dona · Processando/)).toBeInTheDocument();
+    expect(screen.queryByText(/· ready/)).not.toBeInTheDocument();
+  });
+
+  it("no celular, o campo de busca ocupa a linha inteira (o Buscar e o filtro descem), e volta à linha deles a partir de sm", () => {
+    duble.lista = { data: { reunioes: [], proxima: null } };
+    render(<ConsultaDeReunioesDaPlataforma />);
+    expect(screen.getByLabelText("Buscar reuniões")).toHaveClass("basis-full", "sm:basis-auto");
+  });
+
   it("a busca e o filtro vão como entrada da consulta (o filtro é do servidor)", () => {
     duble.lista = { data: { reunioes: [], proxima: null } };
     render(<ConsultaDeReunioesDaPlataforma />);
@@ -143,5 +157,18 @@ describe("Reuniões — a reunião aberta", () => {
     fireEvent.click(screen.getByRole("button", { name: /Voltar à lista/ }));
     fireEvent.click(screen.getByRole("button", { name: /Consultar/ }));
     expect(screen.getByRole("button", { name: "Registrar e abrir" })).toBeDisabled();
+  });
+
+  it("a voz que a dona juntou a outra (H3c) aparece como a principal, no resumo e na transcrição", async () => {
+    duble.lista = { data: { reunioes: [reuniao()], proxima: null } };
+    render(<ConsultaDeReunioesDaPlataforma />);
+    fireEvent.click(screen.getByRole("button", { name: /Consultar/ }));
+    const { act } = await import("react");
+    const resumo = { ...ABERTA.resumo, itens: [{ ...ABERTA.resumo.itens[0], text: "{F2} decidiu fechar o contrato." }] };
+    act(() => duble.aoAbrir!({ ...ABERTA, resumo, juntadas: { F2: "F1" } }));
+    expect(screen.getByText("Ana decidiu fechar o contrato.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Transcrição" }));
+    expect(screen.getAllByText("Ana:")).toHaveLength(2);
+    expect(screen.queryByText("Falante 2:")).not.toBeInTheDocument();
   });
 });

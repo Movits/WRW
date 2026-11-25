@@ -2479,6 +2479,7 @@
       "moveDown": "Nach unten: {{titulo}}",
       "warningSummary": "Das Transkript wird zusammengefügt, und die KI erstellt Zusammenfassung, Mindmap und vorgeschlagene Personen neu. Was Sie in Ihrem Netzwerk schon bestätigt haben, bleibt erhalten.",
       "warningLink": "Der offene Link dieser Meetings wird deaktiviert. Wenn Sie das zusammengeführte Meeting teilen möchten, aktivieren Sie den Link erneut.",
+      "warningPeople": "Die zur ersten Besprechung eingeladenen Teilnehmerinnen sehen die zusammengeführte Besprechung nicht mehr, und sie verlässt den Teambereich, in dem sie war. Um sie erneut zu teilen, laden Sie sie noch einmal ein.",
       "warningAudio": "Das Audio jeder Aufnahme bleibt bis zu ihrer eigenen Frist gespeichert: 30 Tage nach dem Hochladen.",
       "warningOld": "Meetings, die als eine einzige Datei aufgenommen wurden (vor der Aufnahme in Teilen), werden neu transkribiert, und die Namen der Stimmen dieser und der folgenden Meetings werden entfernt.",
       "warningEdits": "Von Hand vorgenommene Korrekturen im Transkript werden nicht in das zusammengeführte Meeting übernommen: Das Transkript wird aus dem Audio neu zusammengesetzt.",

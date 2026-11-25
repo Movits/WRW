@@ -1502,6 +1502,30 @@ describe("Detalhe da reunião — durante a gravação e ouvir só uma voz (G15a
     expect(within(barra).queryByText(/Ouvindo só/)).not.toBeInTheDocument();
     expect(within(document.querySelector("ol")!).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
   });
+
+  it("H3c: a voz juntada pela dona soma com a principal no tempo de fala e no ouvir só esta voz", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const segments = [
+      { inicio: 0, fim: 25, falante: "F1", texto: "Bom dia a todas." },
+      { inicio: 25, fim: 75, falante: "F2", texto: "Vamos fechar o contrato." },
+      { inicio: 75, fim: 100, falante: "F3", texto: "O frete fica para sexta." },
+    ];
+    abrirDetalhe({ status: "ready", vozes: { nomes: { F2: "Participante Teste" }, juntadas: { F3: "F2" } } } as never,
+      { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments }, recording: GRAVACAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    const tempo = screen.getByText("Tempo de fala").parentElement!;
+    // Uma linha só para a voz 2, com os 75 s dela e da voz 3 juntos (75%), e não 50% e 25%.
+    expect(within(tempo).getAllByText("Participante Teste")).toHaveLength(1);
+    expect(within(tempo).getByText(/· 75%/)).toBeInTheDocument();
+    expect(within(tempo).queryByText(/· 50%/)).not.toBeInTheDocument();
+    expect(within(tempo).queryByText("Falante 3")).not.toBeInTheDocument();
+    // Ouvir só a voz dela mostra as falas das duas vozes juntadas.
+    fireEvent.click(within(tempo).getByRole("button", { name: "Ouvir só a voz de Participante Teste" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
+    expect(within(falas).getByText("O frete fica para sexta.")).toBeInTheDocument();
+    expect(within(falas).queryByText("Bom dia a todas.")).not.toBeInTheDocument();
+  });
 });
 
 describe("Detalhe da reunião — pendências de Tenho/Preciso na aba Contatos", () => {

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, isNotNull, lt, or, sql, type SQL } from "drizzle-orm";
-import { nomesDosFalantes } from "@shared/const";
+import { nomesDosFalantes, vozesJuntadas } from "@shared/const";
 import { avisoPreveOAcesso } from "@shared/aviso-de-gravacao";
 import { padraoDoLike } from "@shared/busca-de-reunioes";
 import {
@@ -189,7 +189,7 @@ export async function versoesDasJuntadas(leitor: Leitor, meetingId: string): Pro
 /** O que a transação confere da reunião antes de gravar a consulta: nada do conteúdo. */
 type PortaDaReuniao = {
   id: string; ownerId: string; title: string; createdAt: number; status: string; language: string;
-  audioPipeline: string; origem: string | null; speakerNames: unknown; donaNome: string | null; donaPerfil: string | null;
+  audioPipeline: string; origem: string | null; speakerNames: unknown; speakerMerges: unknown; donaNome: string | null; donaPerfil: string | null;
 };
 
 /**
@@ -202,6 +202,7 @@ export async function registrarConsulta(tx: Pick<Transacao, "select" | "insert">
   const [reuniao] = await tx.select({
     id: meetings.id, ownerId: meetings.ownerId, title: meetings.title, createdAt: meetings.createdAt, status: meetings.status,
     language: meetings.language, audioPipeline: meetings.audioPipeline, origem: meetings.origem, speakerNames: meetings.speakerNames,
+    speakerMerges: meetings.speakerMerges,
     versaoDoAviso: meetings.consentNoticeVersion,
     donaId: users.id, donaNome: users.name, donaPerfil: userProfiles.displayName,
   }).from(meetings)
@@ -264,7 +265,13 @@ export async function abrirReuniaoNaConsulta(quem: QuemConsulta, meetingId: stri
       ? { texto: transcricao.texto, idioma: transcricao.idioma, segmentos: segmentosDoContrato(transcricao.segmentos), editada: !!Number(transcricao.editada) }
       : null,
     resumo,
+    // Os nomes que a dona deu às vozes e as vozes que ela juntou (H3c, "F3 é
+    // a mesma pessoa que F1"), para a fala não ficar com outra voz. Os nomes
+    // das contas ligadas às vozes (speaker_accounts) não saem: a participante
+    // aceitou aparecer para a dona, as participantes e o link, não para a
+    // administração.
     vozes: nomesDosFalantes(porta.speakerNames),
+    juntadas: vozesJuntadas(porta.speakerMerges),
     gravacao: recording
       ? {
           mimeType: recording.mimeType, durationSeconds: recording.durationSeconds, expiresAt: recording.expiresAt,
@@ -318,12 +325,14 @@ export function enderecoDoAudioDaConsulta(meetingId: string): string {
  * uma linha MEETING_ADMIN_READ desta conta para esta reunião nos últimos 60
  * minutos (a hora conta no relógio do banco, onde a linha foi gravada), e a
  * reunião ainda visível. Vencida a hora, a tela abre a consulta de novo, com
- * outro motivo e outra linha.
+ * outro motivo e outra linha. O aviso de gravação é conferido de novo a cada
+ * pedido, como em registrarConsulta: a dona pode juntar à reunião, dentro da
+ * hora, uma reunião gravada antes do aviso, e o áudio dela fica fechado.
  */
 export async function chaveDoAudioDaConsulta(adminId: number, meetingId: string, parte: number | undefined, db?: Banco): Promise<string | null> {
   if (!FORMATO_DO_ID.test(meetingId)) return null;
   const banco = db ?? await exigirDb();
-  const [reuniao] = await banco.select({ ownerId: meetings.ownerId, audioPipeline: meetings.audioPipeline }).from(meetings)
+  const [reuniao] = await banco.select({ ownerId: meetings.ownerId, audioPipeline: meetings.audioPipeline, versaoDoAviso: meetings.consentNoticeVersion }).from(meetings)
     .innerJoin(auditLogs, and(
       eq(auditLogs.resourceId, meetings.id),
       eq(auditLogs.action, ACAO_CONSULTA_DA_ADMINISTRACAO),
@@ -332,7 +341,9 @@ export async function chaveDoAudioDaConsulta(adminId: number, meetingId: string,
     ))
     .where(and(eq(meetings.id, meetingId), reuniaoVisivel()))
     .limit(1);
-  if (!reuniao) return null;
+  if (!reuniao || !avisoPreveOAcesso(reuniao.versaoDoAviso)) return null;
+  const dasJuntadas = await versoesDasJuntadas(banco, meetingId);
+  if (dasJuntadas === null || dasJuntadas.some(versao => !avisoPreveOAcesso(versao))) return null;
   const agora = Date.now();
   if (reuniao.audioPipeline === "slices") {
     const [linha] = await banco.select({ storageKey: meetingAudioSlices.storageKey, expiresAt: meetingAudioSlices.expiresAt, status: meetingAudioSlices.status })

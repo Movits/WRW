@@ -69,7 +69,7 @@ describe.skipIf(!temBanco)("Consulta da administração no banco (integração)"
     adminId = contas.find(conta => conta.openId === ADMIN)!.id;
     donaId = contas.find(conta => conta.openId === DONA)!.id;
     await db.insert(meetings).values([
-      { ...reuniao(NOVA), speakerNames: { F1: "Ana" } as never },
+      { ...reuniao(NOVA), speakerNames: { F1: "Ana" } as never, speakerMerges: { F2: "F1" } as never },
       reuniao(ANTIGA, { consentNoticeVersion: "2026-11-14", createdAt: AGORA - 1000 }),
       reuniao(NA_LIXEIRA, { trashedAt: AGORA }),
       reuniao(EXCLUIDA, { status: "deleted" }),
@@ -96,7 +96,7 @@ describe.skipIf(!temBanco)("Consulta da administração no banco (integração)"
   it("abre a reunião de outra conta com a transcrição, o resumo, as vozes e o áudio pela rota da consulta, e grava o motivo", async () => {
     const vista = await abrirReuniaoNaConsulta(quem(), NOVA, MOTIVO);
     expect(vista).toMatchObject({
-      titulo: `Consulta ${MARCA} ${NOVA.slice(0, 4)}`, dona: `Dona ${MARCA}`, vozes: { F1: "Ana" },
+      titulo: `Consulta ${MARCA} ${NOVA.slice(0, 4)}`, dona: `Dona ${MARCA}`, vozes: { F1: "Ana" }, juntadas: { F2: "F1" },
       transcricao: { texto: "Combinamos a entrega na sexta.", idioma: "pt-BR", segmentos: [] },
       resumo: { estado: expect.any(String), itens: [] },
       gravacao: { durationSeconds: 90, partes: [{ seq: 0, url: `/consulta-da-administracao/${NOVA}/audio` }] },
@@ -142,6 +142,18 @@ describe.skipIf(!temBanco)("Consulta da administração no banco (integração)"
     } finally {
       await db.update(meetings).set({ trashedAt: null }).where(eq(meetings.id, NOVA));
     }
+    // A dona junta à reunião, dentro da hora, uma gravada antes do aviso: o passe não serve mais o áudio.
+    const juntada = crypto.randomUUID();
+    await db.insert(auditLogs).values({
+      userId: donaId, action: "MEETINGS_JOINED", resource: "meetings", resourceId: NOVA, status: "success", riskLevel: "low",
+      details: { juntadas: [juntada], avisosDeGravacao: [{ id: NOVA, consentNoticeVersion: "2026-11-23" }, { id: juntada, consentNoticeVersion: "2026-11-14" }] },
+    });
+    try {
+      expect(await chaveDoAudioDaConsulta(adminId, NOVA, undefined)).toBeNull();
+    } finally {
+      await db.delete(auditLogs).where(and(eq(auditLogs.userId, donaId), eq(auditLogs.action, "MEETINGS_JOINED"), eq(auditLogs.resourceId, NOVA)));
+    }
+    expect(await chaveDoAudioDaConsulta(adminId, NOVA, undefined)).toBe(CHAVE);
   });
 
   it("a lista acha pela busca (título, nome ou e-mail da dona, com % escapado), tira as invisíveis e grava as donas", async () => {

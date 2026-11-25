@@ -33,6 +33,9 @@ type BancoOuTransacao = Banco | Transacao;
 
 const recusa = (code: TRPCError["code"], message: string) => new TRPCError({ code, message });
 
+/** Quem lê: com os nomes ou não (H3b) e, com eles, se as contas das participantes resolvem (padrão: sim). */
+export type OpcoesDasVozes = { comNomes: boolean; contasDasParticipantes?: boolean };
+
 /** O que a tela usa para mostrar as vozes: os nomes (já com as contas) e as juntadas. */
 export type VozesParaQuemLe = { nomes: Record<string, string>; juntadas: Record<string, string> };
 
@@ -43,23 +46,33 @@ export type VozesParaQuemLe = { nomes: Record<string, string>; juntadas: Record<
  * voz juntada com o nome, ou o rótulo, da principal.
  *
  * `comNomes` falso (o link ligado com a confirmação antiga, H3b) devolve os
- * nomes vazios e só as juntadas.
+ * nomes vazios e só as juntadas. `contasDasParticipantes` falso (a membra da
+ * equipe, R2) resolve só a conta da dona: a voz ligada à conta de uma
+ * participante fica sem nome ("Falante n"), nem o livre de antes da ligação.
  */
 export async function vozesParaQuemLe(
   ex: BancoOuTransacao,
   reuniao: { id: string; ownerId: string; speakerNames: unknown; speakerAccounts: unknown; speakerMerges: unknown },
-  opcoes: { comNomes: boolean },
+  opcoes: OpcoesDasVozes,
 ): Promise<VozesParaQuemLe> {
   const juntadas = vozesJuntadas(reuniao.speakerMerges);
   if (!opcoes.comNomes) return { nomes: {}, juntadas };
   const nomes = nomesDosFalantes(reuniao.speakerNames);
-  const contas = contasDasVozes(reuniao.speakerAccounts);
+  let contas = contasDasVozes(reuniao.speakerAccounts);
+  if (opcoes.contasDasParticipantes === false) {
+    const soDaDona: Record<string, string> = {};
+    for (const [voz, conta] of Object.entries(contas)) {
+      if (conta === CONTA_DA_DONA) soDaDona[voz] = conta;
+      else delete nomes[voz];
+    }
+    contas = soDaDona;
+  }
   if (Object.keys(contas).length) Object.assign(nomes, await nomesDasContasDasVozes(ex, reuniao, contas));
   return { nomes, juntadas };
 }
 
 /** As vozes da reunião pelo id, lidas pela própria consulta (o link e a participante). */
-export async function vozesDaReuniao(ex: BancoOuTransacao, reuniao: { id: string; ownerId: string }, opcoes: { comNomes: boolean }): Promise<VozesParaQuemLe> {
+export async function vozesDaReuniao(ex: BancoOuTransacao, reuniao: { id: string; ownerId: string }, opcoes: OpcoesDasVozes): Promise<VozesParaQuemLe> {
   const [linha] = await ex.select({ speakerNames: meetings.speakerNames, speakerAccounts: meetings.speakerAccounts, speakerMerges: meetings.speakerMerges })
     .from(meetings).where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId))).limit(1);
   if (!linha) return { nomes: {}, juntadas: {} };

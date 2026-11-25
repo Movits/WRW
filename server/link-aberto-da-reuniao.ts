@@ -442,7 +442,7 @@ async function reuniaoDoLink(token: string) {
   if (reuniao.sharePasswordHash !== null && !entradaValida(token, reuniao.sharePasswordHash, cookiesDoPedido())) return "senha" as const;
   return {
     id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
-    comAudio: reuniao.shareAudio === true, participante: false,
+    comAudio: reuniao.shareAudio === true, participante: false, membraDaEquipe: false,
     // A reunião que nasceu de um documento (H12): o link mostra o texto e o
     // resumo, como a transcrição de sempre, e NUNCA o arquivo, que é só da dona.
     documento: ehReuniaoDeDocumento(reuniao.origem),
@@ -465,11 +465,14 @@ async function leituraDaParticipante(meetingId: string) {
   if (!leitora) return null;
   // A membra da equipe (R2) lê as reuniões da pasta pela mesma credencial:
   // a participação vem primeiro, e sem ela vale a equipe ativa da pasta.
-  const reuniao = await reuniaoDaParticipante(leitora, meetingId) ?? await reuniaoDaMembra(leitora, meetingId);
+  const daParticipante = await reuniaoDaParticipante(leitora, meetingId);
+  const reuniao = daParticipante ?? await reuniaoDaMembra(leitora, meetingId);
   if (!reuniao) return null;
   return {
     id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
-    comAudio: true, participante: true,
+    // A membra da equipe lê como a participante, mas os nomes das contas das
+    // participantes (H3c) não saem para ela (vozesDoLink, abaixo).
+    comAudio: true, participante: true, membraDaEquipe: !daParticipante,
     documento: ehReuniaoDeDocumento(reuniao.origem),
     videoDoYoutube: idDoVideoDaReuniao(reuniao),
   };
@@ -508,13 +511,16 @@ export async function exigirReuniaoDoLink(token: string) {
  * aparado e cortado em 60 caracteres, e o par inválido da coluna (JSON livre)
  * cai. Nada além do mapa: nem o nome da dona, nem conta, nem id.
  */
-async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { id: string; ownerId: string; participante: boolean }) {
+async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { id: string; ownerId: string; participante: boolean; membraDaEquipe: boolean }) {
   // A participante (R1b) vê os nomes sempre, como a dona: ela aceitou entrar
   // com o aviso de que os nomes das vozes aparecem. Os nomes das contas
-  // ligadas às vozes (H3c) entram nos dois casos; as juntadas, sem dado
-  // pessoal, saem sempre.
+  // ligadas às vozes (H3c) entram para a participante e no link com os nomes;
+  // as juntadas, sem dado pessoal, saem sempre. A membra da equipe (R2) vê os
+  // nomes que a dona deu e o da dona, mas NUNCA o da conta de uma
+  // participante: a participante aceitou aparecer para a dona, para as outras
+  // participantes e para o link aberto, não para a equipe da pasta.
   const comNomes = reuniao.participante || await linkMostraOsNomes(db, reuniao.id);
-  return vozesDaReuniao(db, reuniao, { comNomes });
+  return vozesDaReuniao(db, reuniao, { comNomes, contasDasParticipantes: !reuniao.membraDaEquipe });
 }
 
 /**

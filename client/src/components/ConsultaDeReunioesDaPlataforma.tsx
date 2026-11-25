@@ -10,7 +10,7 @@ import {
   ROTULO_DO_MOTIVO,
   type MotivoDaConsulta,
 } from "@shared/consulta-da-administracao";
-import { vozesNoTexto } from "@shared/vozes-no-texto";
+import { falasComJuntadas, nomesComJuntadas, vozesNoTexto } from "@shared/vozes-no-texto";
 import { trpc } from "@/lib/trpc";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,13 @@ type ReuniaoNaLista = Saida["listar"]["reunioes"][number];
 type ReuniaoAberta = Saida["abrir"];
 
 const data = (momento: number) => new Date(momento).toLocaleDateString("pt-BR");
+// O status da reunião (meetings.status) como o resto do painel fala; um valor
+// que ainda não esteja aqui sai como veio, em vez de sumir.
+const ROTULO_DO_STATUS: Record<string, string> = {
+  draft: "Rascunho", recording: "Gravando", uploading: "Enviando", processing: "Processando",
+  ready: "Pronta", failed: "Falhou", deleted: "Na lixeira",
+};
+const rotuloDoStatus = (status: string) => ROTULO_DO_STATUS[status] ?? status;
 const rotuloDaVoz = (numero: number) => `Falante ${numero}`;
 
 const ROTULO_DA_SECAO: Record<string, string> = {
@@ -105,7 +112,10 @@ function ModalDoMotivo({ reuniao, aoFechar, aoAbrir }: {
 /** A reunião aberta, só para ler: resumo, transcrição e áudio. */
 function ReuniaoNaConsulta({ reuniao, aoVoltar }: { reuniao: ReuniaoAberta; aoVoltar: () => void }) {
   const [aba, setAba] = useState<"resumo" | "transcricao">("resumo");
-  const nomes = reuniao.vozes;
+  // As vozes juntadas pela dona (H3c) aparecem como a principal, como na tela dela.
+  const juntadas = reuniao.juntadas ?? {};
+  const nomes = nomesComJuntadas(reuniao.vozes, juntadas, rotuloDaVoz);
+  const falas = reuniao.transcricao ? falasComJuntadas(reuniao.transcricao.segmentos, juntadas) : [];
   const voz = (falante: string) => nomes[falante]?.trim() || (/^F\d+$/.test(falante) ? rotuloDaVoz(Number(falante.slice(1))) : falante);
   return (
     <section aria-label="Reunião em consulta" className="space-y-4">
@@ -150,9 +160,9 @@ function ReuniaoNaConsulta({ reuniao, aoVoltar }: { reuniao: ReuniaoAberta; aoVo
       )}
       {aba === "transcricao" && (
         reuniao.transcricao ? (
-          reuniao.transcricao.segmentos.length ? (
+          falas.length ? (
             <ol className="space-y-2 text-sm">
-              {reuniao.transcricao.segmentos.map((fala, i) => (
+              {falas.map((fala, i) => (
                 <li key={i}><span className="font-semibold text-white/80">{voz(fala.falante)}:</span> <span className="text-white/70">{fala.texto}</span></li>
               ))}
             </ol>
@@ -186,7 +196,7 @@ export function ConsultaDeReunioesDaPlataforma() {
       </div>
       <form className="flex flex-wrap gap-2 items-center" onSubmit={evento => { evento.preventDefault(); setPaginas([undefined]); setBuscaAplicada(busca.trim()); }}>
         <input value={busca} onChange={evento => setBusca(evento.target.value)} maxLength={120} placeholder="Título, nome ou e-mail da dona"
-          aria-label="Buscar reuniões" className="min-w-0 flex-1 rounded-lg bg-[#151312] border border-white/15 px-3 py-2 text-sm" />
+          aria-label="Buscar reuniões" className="min-w-0 basis-full sm:basis-auto flex-1 rounded-lg bg-[#151312] border border-white/15 px-3 py-2 text-sm" />
         <Button type="submit" variant="outline" className="border-white/15">Buscar</Button>
         <label className="flex items-center gap-2 text-sm text-white/60">
           <input type="checkbox" checked={comLinkAberto} onChange={evento => { setPaginas([undefined]); setComLinkAberto(evento.target.checked); }} />
@@ -202,7 +212,7 @@ export function ConsultaDeReunioesDaPlataforma() {
               <li key={reuniao.id} className="rounded-xl border border-white/8 bg-white/[0.02] p-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate">{reuniao.titulo}</p>
-                  <p className="text-xs text-white/50">{data(reuniao.criadaEm)} · {reuniao.dona ?? "Conta sem nome"} · {reuniao.status}
+                  <p className="text-xs text-white/50">{data(reuniao.criadaEm)} · {reuniao.dona ?? "Conta sem nome"} · {rotuloDoStatus(reuniao.status)}
                     {reuniao.linkLigado && <span className="inline-flex items-center gap-1 ml-2"><Link2 size={11} aria-hidden="true" /> link aberto</span>}
                   </p>
                 </div>

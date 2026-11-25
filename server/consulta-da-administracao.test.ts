@@ -35,7 +35,7 @@ const QUEM = { userId: 7, ipAddress: "203.0.113.9, 10.0.0.1", userAgent: "vitest
 const MOTIVO = { motivo: "apuracao_de_denuncia" as const, complemento: "Denúncia recebida pelo canal oficial em 24/11." };
 const PORTA = {
   id: ID, ownerId: "dona-x", title: "Reunião", createdAt: 1_700_000_000_000, status: "ready", language: "pt-BR",
-  audioPipeline: "single", origem: "gravacao", speakerNames: { F1: "Ana" }, versaoDoAviso: "2026-11-23",
+  audioPipeline: "single", origem: "gravacao", speakerNames: { F1: "Ana" }, speakerMerges: null, versaoDoAviso: "2026-11-23",
   donaId: 42, donaNome: "Dona Nome", donaPerfil: null,
 };
 
@@ -169,7 +169,7 @@ describe("abrir: a auditoria antes da leitura, na mesma transação", () => {
     const { banco } = bancoQueRegistra({ meetings: [PORTA], audit: [[]], transcricao: [{ texto: "Oi", idioma: "pt-BR", segmentos: [{ inicio: 0, fim: 1, falante: "F1", texto: "Oi", extra: "x" }], editada: 0 }] });
     const vista = await abrirReuniaoNaConsulta(QUEM, ID, MOTIVO, banco as never);
     expect(Object.keys(vista).sort()).toEqual([
-      "criadaEm", "dona", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "idioma", "origem", "passeDoAudioAte", "resumo", "status", "titulo", "transcricao", "vozes",
+      "criadaEm", "dona", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "idioma", "juntadas", "origem", "passeDoAudioAte", "resumo", "status", "titulo", "transcricao", "vozes",
     ]);
     const texto = JSON.stringify(vista);
     // O openId da dona e a chave do bucket não saem: o áudio vai pela rota da consulta.
