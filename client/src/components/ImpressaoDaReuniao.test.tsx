@@ -88,7 +88,7 @@ describe("O PDF da reunião em pt-BR", () => {
   });
 
   it("o rodapé diz de onde e quando o PDF saiu", () => {
-    expect(documento()).toHaveTextContent("Exportado da MarquesaMatch em 16 de novembro de 2026");
+    expect(documento()).toHaveTextContent("Exportado da Marquesa Global Match em 16 de novembro de 2026");
   });
 
   it("sem item confirmado, o resumo não aparece; a transcrição sem falas sai como texto corrido", () => {
@@ -138,7 +138,7 @@ describe("O PDF da reunião em árabe, com a tela em pt-BR", () => {
     expect(within(falas[0]).getByText("00:00")).toHaveAttribute("dir", "ltr");
     expect(falas[1]).toHaveTextContent("مقطع لم يُستلم");
     expect(artigo.querySelector("header")).toHaveTextContent("نوفمبر");
-    expect(artigo.querySelector("footer")).toHaveTextContent(/^تم التصدير من MarquesaMatch في .*نوفمبر/);
+    expect(artigo.querySelector("footer")).toHaveTextContent(/^تم التصدير من Marquesa Global Match في .*نوفمبر/);
   });
 });
 

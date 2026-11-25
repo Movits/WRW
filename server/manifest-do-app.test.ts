@@ -9,7 +9,7 @@ import { montarDiretivasCsp } from "./_core/csp";
 /**
  * O APP INSTALÁVEL (PWA).
  *
- * O manifest (client/public/manifest.webmanifest) põe a MarquesaMatch na tela inicial do
+ * O manifest (client/public/manifest.webmanifest) põe a Marquesa Global Match na tela inicial do
  * celular como app e a abre direto no gravador, o link que a cliente pediu
  * como primeira tela (20/10/2026). JSON não tem comentário, então as regras
  * dele ficam aqui:
@@ -127,7 +127,13 @@ describe("o manifest do app instalável", () => {
   });
 
   it("leva só a marca, sem atalho nem texto para traduzir", () => {
-    expect(manifest.short_name).toBe("MarquesaMatch");
+    // O nome inteiro (Marquesa Global Match, decisão da cliente de 24/11/2026)
+    // vai no name e no <title>; o short_name é o que aparece embaixo do ícone
+    // na tela inicial, onde o Android e o iOS cortam o que passa de uns 12
+    // caracteres ("Marquesa Gl..."). Por isso só "Marquesa".
+    expect(manifest.short_name).toBe("Marquesa");
+    expect(String(manifest.short_name).length).toBeLessThanOrEqual(12);
+    expect(manifest.name).toBe("Marquesa Global Match");
     expect(manifest.name).toBe(indexHtml.match(/<title>([^<]+)<\/title>/)?.[1]);
     for (const campo of [
       "shortcuts",

@@ -1,5 +1,6 @@
 import { NOME_DO_FALANTE_MAX } from "@shared/const";
 import { textoTemFala } from "@shared/fala-na-transcricao";
+import { primeiraFalaComOTermo, temOTermo, trechosDoTermo } from "@shared/busca-de-reunioes";
 import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Headphones, Pencil, Play, RotateCcw, Search } from "lucide-react";
@@ -65,16 +66,18 @@ export function tempoDeFala(segmentos: SegmentoDaTela[]) {
 
 const numeroDoFalante = (falante: string) => Number(falante.replace(/^F/, "")) || 0;
 
+// O termo destacado sem acento e sem caixa, a régua da busca do servidor
+// (trechosDoTermo): "reuniao" destaca "Reunião".
 function comDestaque(texto: string, termo: string) {
   if (!termo) return texto;
+  const trechos = trechosDoTermo(texto, termo);
+  if (!trechos.length) return texto;
   const partes: Array<string | ReactElement> = [];
-  const baixo = texto.toLocaleLowerCase();
-  const alvo = termo.toLocaleLowerCase();
   let de = 0;
-  for (let i = baixo.indexOf(alvo); i >= 0; i = baixo.indexOf(alvo, de)) {
-    partes.push(texto.slice(de, i));
-    partes.push(<mark key={i} className="rounded bg-amber-300/40 px-0.5 text-white">{texto.slice(i, i + termo.length)}</mark>);
-    de = i + termo.length;
+  for (const [inicio, fim] of trechos) {
+    partes.push(texto.slice(de, inicio));
+    partes.push(<mark key={inicio} className="rounded bg-amber-300/40 px-0.5 text-white">{texto.slice(inicio, fim)}</mark>);
+    de = fim;
   }
   partes.push(texto.slice(de));
   return partes;
@@ -139,14 +142,22 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
     : null;
   const [termo, setTermo] = useState(termoInicial);
   const busca = termo.trim();
+  // O termo do link (?q, o resultado da busca entre as reuniões) abre a
+  // transcrição INTEIRA no ponto: a primeira fala com o termo, rolada até a
+  // vista e marcada, com o termo destacado em todas. A lista só filtra quando
+  // quem lê mexe na busca. Antes (defeito 1 do teste manual T50, 23/11), o
+  // link só filtrava, e a reunião abria sem ir ao trecho encontrado.
+  const [filtrar, setFiltrar] = useState(!termoInicial.trim());
+  const falaDoLink = useMemo(() => primeiraFalaComOTermo(segmentos, termoInicial), [segmentos, termoInicial]);
+  const jaRolouAteOLink = useRef(false);
   // D2: mostrar ou esconder as vozes e os horários, como quem lê deixou da última vez.
   const [comVozes, setComVozes] = useState(() => mostraGuardado(CHAVE_DAS_VOZES_NA_TRANSCRICAO));
   const [comHorarios, setComHorarios] = useState(() => mostraGuardado(CHAVE_DOS_HORARIOS_NA_TRANSCRICAO));
   // Cada trecho com a posição dele em `segmentos` (a que a edição manda ao servidor).
   const visiveis = useMemo(() => segmentos.map((s, indice) => ({ s, indice })).filter(({ s }) => {
     if (soAVoz && (s.lacuna || s.falante !== soAVoz)) return false;
-    return !busca || (!s.lacuna && s.texto.toLocaleLowerCase().includes(busca.toLocaleLowerCase()));
-  }), [segmentos, busca, soAVoz]);
+    return !busca || !filtrar || (!s.lacuna && temOTermo(s.texto, busca));
+  }), [segmentos, busca, soAVoz, filtrar]);
   // H18: as vozes que a lista do trecho oferece (todas as da transcrição), o
   // trecho aberto para editar e o foco que volta ao "Editar" dele ao fechar.
   const vozesDaTranscricao = useMemo(() => Array.from(new Set(segmentos.filter(s => !s.lacuna && s.falante).map(s => s.falante))), [segmentos]);
@@ -159,6 +170,14 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
     document.getElementById(`${idDosTrechos}-${focarNoTrecho.current}`)?.focus();
     focarNoTrecho.current = null;
   }, [trechoAberto, idDosTrechos]);
+  useEffect(() => {
+    if (filtrar || falaDoLink < 0 || jaRolouAteOLink.current) return;
+    const fala = document.getElementById(`${idDosTrechos}-fala-${falaDoLink}`);
+    if (!fala) return;
+    jaRolouAteOLink.current = true;
+    // jsdom não tem scrollIntoView; o navegador tem.
+    fala.scrollIntoView?.({ block: "center" });
+  }, [filtrar, falaDoLink, idDosTrechos, visiveis]);
   const vozes = useMemo(() => tempoDeFala(segmentos), [segmentos]);
   const rotulo = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: numeroDoFalante(falante) });
   // A voz cujo nome está sendo editado, e o texto do campo.
@@ -228,7 +247,7 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
         <input
           type="search"
           value={termo}
-          onChange={e => setTermo(e.target.value)}
+          onChange={e => { setTermo(e.target.value); setFiltrar(true); }}
           placeholder={t("meetings.searchTranscriptPlaceholder")}
           aria-label={t("meetings.searchTranscriptPlaceholder")}
           className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35"
@@ -246,14 +265,17 @@ export function TranscricaoPorFalante({ segmentos, aoIrPara, linkDoTempo, termoI
           </button>
         ))}
       </div>
-      {busca && !visiveis.length && <p className="text-sm text-white/45">{t("meetings.searchNoResults")}</p>}
+      {busca && (filtrar ? !visiveis.length : falaDoLink < 0) && <p className="text-sm text-white/45">{t("meetings.searchNoResults")}</p>}
       <ol className="space-y-3">
         {visiveis.map(({ s, indice }) => s.lacuna ? (
           <li key={`l${indice}`} className="rounded-lg border border-dashed border-white/15 px-3 py-2 text-sm italic text-white/45">
             {comHorarios && <>{mmss(s.inicio)}–{mmss(s.fim)} · </>}{t("meetings.gapLabel")}
           </li>
         ) : (
-          <li key={`${s.inicio}-${indice}`} className="flex gap-3">
+          <li key={`${s.inicio}-${indice}`} id={`${idDosTrechos}-fala-${indice}`}
+            data-fala-do-link={!filtrar && indice === falaDoLink ? "" : undefined}
+            aria-current={!filtrar && indice === falaDoLink ? "location" : undefined}
+            className={`flex gap-3${!filtrar && indice === falaDoLink ? " -mx-2 rounded-lg bg-amber-300/10 px-2 py-1 ring-1 ring-amber-300/40" : ""}`}>
             {/* D2: com os horários escondidos, o ▶ de cada fala continua, só com o ícone (o tempo vai no
                 nome e na dica): é ele que leva o player, ou o vídeo do YouTube, até o trecho. Sem player
                 nem vídeo, não há para onde ir, e nada aparece. */}

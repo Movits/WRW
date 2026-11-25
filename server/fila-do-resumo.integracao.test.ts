@@ -159,7 +159,7 @@ describe.skipIf(!temBanco)("Fila do resumo guardado no banco (integração)", ()
 
     // O primeiro resumo, no modelo padrão e sem item que fique (os modelos e o
     // refazer da H4d estão em server/resumo-refeito.integracao.test.ts).
-    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [],
+    expect(gerarResumoDaReuniao).toHaveBeenCalledWith({ iniciosDeReuniao: [], transcricao: SEGMENTOS.map(s => s.texto).join("\n"), segmentos: SEGMENTOS, idioma: "pt-BR", modelo: "general", itensQueFicam: [],
       // Sem pedido nem preferências (H4e): o Geral equilibrado, sem ajuste nem instruções.
       preferencias: { modeloProprio: null, estilo: "balanced", ajusteDoTamanho: 0, instrucoesDoPedido: null } });
     const resumo = await servico.resumoGuardadoDaDona(DONA, id);

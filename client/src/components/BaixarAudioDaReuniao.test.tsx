@@ -133,7 +133,7 @@ describe("Baixar o áudio — o aviso vem antes", () => {
   it("o botão abre o aviso, com os dois formatos (MP3 marcado) e o tamanho aproximado; nada é pedido ainda", () => {
     abrir();
     fireEvent.click(botaoDaPagina());
-    expect(dialogo()).toHaveAccessibleDescription(/O arquivo leva a gravação inteira desta reunião, com a voz de todas as pessoas que falaram\. Depois de baixado, ele fica fora da MarquesaMatch e não é apagado aos 30 dias/);
+    expect(dialogo()).toHaveAccessibleDescription(/O arquivo leva a gravação inteira desta reunião, com a voz de todas as pessoas que falaram\. Depois de baixado, ele fica fora da Marquesa Global Match e não é apagado aos 30 dias/);
     expect(within(dialogo()).getByRole("radio", { name: "MP3: toca em qualquer aparelho" })).toBeChecked();
     expect(within(dialogo()).getByRole("radio", { name: "M4A: o mesmo tamanho, com som um pouco melhor" })).not.toBeChecked();
     // Uma hora a 64 kbps: 28,8 MB.

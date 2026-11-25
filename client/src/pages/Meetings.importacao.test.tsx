@@ -271,7 +271,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     // A parte que já subia termina; depois dela, a exclusão.
     await subir();
     await waitFor(() => expect(excluir()).toHaveBeenCalledWith({ meetingId: VINICOLA }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na MarquesaMatch."));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na Marquesa Global Match."));
     expect(duble.enviarParte).toHaveBeenCalledTimes(1);
     expect(encerrarGravacao()).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe("/gravar");
@@ -304,7 +304,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(await screen.findByText("Lendo o arquivo… 50%")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Andamento do envio do arquivo" })).toHaveAttribute("aria-valuenow", "50");
     fireEvent.click(screen.getByRole("button", { name: /Cancelar envio/ }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na MarquesaMatch."));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na Marquesa Global Match."));
     expect(iniciarGravacao()).not.toHaveBeenCalled();
     expect(excluir()).not.toHaveBeenCalled();
   });
@@ -312,7 +312,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
   it.each([
     ["passa de 12 h", { ok: false, codigo: "LONGO_DEMAIS" }, "Este áudio passa de 12 horas, o limite de uma reunião."],
     ["está danificado", { ok: false, codigo: "DANIFICADO", formato: "mp4" }, "Não foi possível ler este arquivo: ele parece incompleto ou danificado. Confira se ele abre no seu aparelho e envie de novo."],
-    ["não é áudio nem vídeo que se reconheça", { ok: false, codigo: "FORMATO_DESCONHECIDO" }, "Este arquivo não é um áudio ou vídeo que a MarquesaMatch reconheça. Envie MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC ou AAC."],
+    ["não é áudio nem vídeo que se reconheça", { ok: false, codigo: "FORMATO_DESCONHECIDO" }, "Este arquivo não é um áudio ou vídeo que a Marquesa Global Match reconheça. Envie MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC ou AAC."],
     ["é um vídeo sem áudio", { ok: false, codigo: "SEM_AUDIO", formato: "mp4" }, "Este vídeo não tem áudio para transcrever."],
     ["passaria de 200 partes", { ok: false, codigo: "MUITAS_PARTES", formato: "wav" }, "Este arquivo é grande demais para uma reunião. Converta-o para MP3 ou M4A, que ocupam menos, e envie de novo."],
   ] as const)("o arquivo que %s é recusado antes de a reunião nascer", async (_caso, corte, aviso) => {
@@ -470,7 +470,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     duble.duracao.mockResolvedValue(segundos);
     abrir();
     enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa Vorbis (WebM), que a MarquesaMatch ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa Vorbis (WebM), que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
     expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
@@ -482,7 +482,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
     abrir();
     enviar(new File([new Uint8Array(11 * 1024 * 1024)], "conversa.ogg", { type: "audio/ogg" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo junta mais de uma gravação ou traz um áudio que a MarquesaMatch ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo junta mais de uma gravação ou traz um áudio que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(vi.mocked(toast.error).mock.calls.flat().join(" ")).not.toContain("?");
     expect(iniciarGravacao()).not.toHaveBeenCalled();
   });
@@ -494,7 +494,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", detalhe: formato });
     abrir();
     enviar(arquivo);
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`Este arquivo usa ${formato}, que a MarquesaMatch ainda não lê. Converta-o para MP3 ou M4A e envie de novo.`));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`Este arquivo usa ${formato}, que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo.`));
     expect(iniciarGravacao()).not.toHaveBeenCalled();
     expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
@@ -673,7 +673,7 @@ describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do p
     expect(await screen.findByText("Cancelando o envio…")).toBeInTheDocument();
     await subir();
     await waitFor(() => expect(excluir()).toHaveBeenCalledWith({ meetingId: VINICOLA }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na MarquesaMatch."));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Envio cancelado. Nada deste arquivo ficou na Marquesa Global Match."));
     expect(duble.enviarParte).toHaveBeenCalledTimes(1);
     expect(iniciarGravacao()).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("button", { name: /Enviar arquivo de áudio/ })).toBeInTheDocument());
@@ -712,7 +712,7 @@ describe("Reuniões — o recuo do corte pelo envio único (o que a G14 manteve)
     await waitFor(() => expect(duble.duracao).toHaveBeenCalled());
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toBeDisabled();
-    expect(screen.queryByRole("region", { name: "Instale a MarquesaMatch como app" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Instale a Marquesa Global Match como app" })).not.toBeInTheDocument();
     expect(document.querySelector("section[aria-labelledby]")).toHaveStyle({ visibility: "hidden" });
     await act(async () => { entregarDuracao(30); });
     // Com a reunião sendo criada, também não: a autorização não se desmarca no meio.
@@ -724,7 +724,7 @@ describe("Reuniões — o recuo do corte pelo envio único (o que a G14 manteve)
       meetingId: "reuniao-do-arquivo", mimeType: "audio/m4a", durationSeconds: 30, recuoDoCorte: true,
     })));
     await formularioDestravado();
-    expect(screen.getByRole("region", { name: "Instale a MarquesaMatch como app" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Instale a Marquesa Global Match como app" })).toBeInTheDocument();
     expect(iniciarGravacao()).not.toHaveBeenCalled();
   });
 

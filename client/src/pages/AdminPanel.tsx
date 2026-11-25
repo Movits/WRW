@@ -231,7 +231,7 @@ export default function AdminPanel() {
                 style={playfairStyle}
                 className="text-xl font-bold text-white hover:text-[#C98F70] transition-colors"
               >
-                MarquesaMatch
+                Marquesa Global Match
               </button>
               <p className="text-xs text-gray-400 truncate">Painel Administrativo Seguro</p>
             </div>

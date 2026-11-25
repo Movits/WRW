@@ -754,7 +754,7 @@ export async function answerFromMemory(query: string, hits: SearchHit[]) {
     response = await invokeLLM({
       max_tokens: 700,
       messages: [
-        { role: "system", content: "Você é a Memória Inteligente da MarquesaMatch. Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante. Uma fonte \"Resumo confirmado\" é o resumo da reunião conferido pela dona: cite-a pelo número dela como as outras. O que vier marcado \"de fora da reunião\" veio de uma busca na web, não da reunião: diga isso ao usá-lo." },
+        { role: "system", content: "Você é a Memória Inteligente da Marquesa Global Match. Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante. Uma fonte \"Resumo confirmado\" é o resumo da reunião conferido pela dona: cite-a pelo número dela como as outras. O que vier marcado \"de fora da reunião\" veio de uma busca na web, não da reunião: diga isso ao usá-lo." },
         { role: "user", content: `Pergunta: ${query}
 
 Contexto privado:

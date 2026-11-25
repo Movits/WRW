@@ -63,6 +63,16 @@ export const ENTRADA_LONGA_DA_PERGUNTA = 100_000;
 const TEMPO_DA_REUNIAO_CURTA = { timeoutMs: 45_000, orcamentoMs: 60_000 };
 const TEMPO_DA_REUNIAO_LONGA = { timeoutMs: 80_000, orcamentoMs: 85_000 };
 export const CITACOES_NO_MAXIMO = 3;
+/**
+ * O tamanho da resposta, em letras. Era 1.000, com "no máximo 3 frases" para
+ * toda pergunta: a sugestão "Ações e responsáveis" (H6b), que pede TODAS as
+ * ações da reunião, saía cortada nas primeiras (defeito 3 do teste manual T50,
+ * 23/11). A transcrição já ia inteira; o corte era o da resposta. 4.000 letras
+ * cabem umas 30 ações de uma linha.
+ */
+export const RESPOSTA_DA_PERGUNTA_MAX = 4_000;
+/** A regra da pergunta que pede uma lista: a reunião inteira, um item por linha (defeito 3 do T50). */
+export const REGRA_DA_LISTA = "Quando a pergunta pede uma lista (todas as ações, com os responsáveis e os prazos; as decisões; os termos citados), leia a transcrição inteira, do começo ao fim, e liste cada item numa linha própria, começando por \"- \", sem parar nos primeiros e sem juntar dois itens numa linha: nesse caso, o limite de 3 frases não vale.";
 
 export const MENSAGEM_SEM_TRANSCRICAO = "Esta reunião ainda não tem transcrição pronta para a IA ler.";
 export const MENSAGEM_IA_INDISPONIVEL = "O serviço de IA não respondeu agora. Tente de novo em instantes.";
@@ -176,7 +186,7 @@ const SCHEMA_DA_RESPOSTA = {
   type: "object",
   properties: {
     respondida: { type: "boolean" },
-    resposta: { type: "string", maxLength: 1000 },
+    resposta: { type: "string", maxLength: RESPOSTA_DA_PERGUNTA_MAX },
     citacoes: {
       type: "array",
       items: {
@@ -209,6 +219,7 @@ function instrucoes(rotulada: boolean, emAndamento = false): string {
       ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). As vozes não têm nome: para dizer quem falou, quando o nome não foi dito na reunião, escreva o rótulo exatamente assim, entre chaves (\"{F2} disse que o frete fica para sexta\"). Nunca invente um nome para uma voz."
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
     "Responda no idioma pedido no fim da mensagem, em no máximo 3 frases.",
+    REGRA_DA_LISTA,
     `Se a transcrição responde, devolva respondida = true, a resposta e de 1 a ${CITACOES_NO_MAXIMO} citações que a sustentam. Em cada citação, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala.`,
     "Se a transcrição não responde, devolva respondida = false, com a resposta vazia e nenhuma citação.",
     // H6d: a tabela ou o gráfico, quando a pergunta pede.
@@ -339,7 +350,7 @@ async function responderPelaTranscricao(
     tempoDaPergunta(entrada.texto.length),
   );
   if (dados.respondida !== true) return naoRespondida("ia_disse_que_nao");
-  const resposta = texto(dados.resposta, 1000);
+  const resposta = texto(dados.resposta, RESPOSTA_DA_PERGUNTA_MAX);
   if (!resposta) return naoRespondida("resposta_vazia");
   // Resposta sem trecho que a transcrição sustente, ou que cita uma voz que a
   // reunião não tem, não vai para a tela: vale como não respondida. A voz
