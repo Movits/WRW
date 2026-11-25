@@ -14,6 +14,7 @@ import { ROTA_DA_AGENDA, ROTA_DAS_REUNIOES } from "@shared/rotas";
 import { BrandMark } from "@/components/BrandLogo";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
+import { rotasNaBarraDoApp } from "@/lib/barra-do-app";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
 import { LANGUAGES } from "@/i18n";
@@ -81,6 +82,36 @@ function LangSelectorMini() {
   );
 }
 
+/**
+ * As telas do Menu, sem as que o app das lojas já mostra na barra de baixo
+ * (lib/barra-do-app.ts). Monta só com o menu aberto (o conteúdo do Radix
+ * desmonta ao fechar), então lê a lista do app na hora: no Android ela pode
+ * chegar depois de o cabeçalho montar.
+ */
+function ItensDoMenu({ itens }: { itens: ReturnType<typeof getMenuItems> }) {
+  const naBarra = rotasNaBarraDoApp();
+  return (
+    <>
+      {itens.filter(item => !naBarra.includes(item.href)).map(item => (
+        <DropdownMenuItem key={item.href} asChild
+          className="rounded-xl px-3 py-2.5 cursor-pointer focus:bg-white/[0.07] focus:text-white data-[highlighted]:bg-white/[0.07]">
+          <Link href={item.href}>
+            <span className="flex items-center gap-3 w-full">
+              <span className="w-9 h-9 rounded-lg bg-white/[0.05] border border-white/[0.06] flex items-center justify-center shrink-0">
+                <item.icon className="w-4 h-4 text-white/70" />
+              </span>
+              <span className="flex flex-col min-w-0">
+                <span className="text-sm font-medium text-white leading-tight">{item.label}</span>
+                <span className="text-[11px] text-white/35 leading-tight truncate">{item.desc}</span>
+              </span>
+            </span>
+          </Link>
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
+}
+
 export function GlobalMenu() {
   const { user, logout } = useAuth();
   const [, navigate] = useLocation();
@@ -126,22 +157,7 @@ export function GlobalMenu() {
         <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-widest text-white/35 px-3 pt-2 pb-1">
           {t("appHeader.navigation")}
         </DropdownMenuLabel>
-        {itens.map(item => (
-          <DropdownMenuItem key={item.href} asChild
-            className="rounded-xl px-3 py-2.5 cursor-pointer focus:bg-white/[0.07] focus:text-white data-[highlighted]:bg-white/[0.07]">
-            <Link href={item.href}>
-              <span className="flex items-center gap-3 w-full">
-                <span className="w-9 h-9 rounded-lg bg-white/[0.05] border border-white/[0.06] flex items-center justify-center shrink-0">
-                  <item.icon className="w-4 h-4 text-white/70" />
-                </span>
-                <span className="flex flex-col min-w-0">
-                  <span className="text-sm font-medium text-white leading-tight">{item.label}</span>
-                  <span className="text-[11px] text-white/35 leading-tight truncate">{item.desc}</span>
-                </span>
-              </span>
-            </Link>
-          </DropdownMenuItem>
-        ))}
+        <ItensDoMenu itens={itens} />
         {(user?.role === "president" || user?.role === "gold" || user?.role === "admin" || user?.isDistributor === true) && (
           <>
             <DropdownMenuSeparator className="bg-white/[0.07] my-2" />
