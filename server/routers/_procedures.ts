@@ -37,3 +37,14 @@ export const distribuidorProcedure = protectedProcedure.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
+
+// A conta de uma ENTIDADE (a base das associações, N1): também um PODER
+// (`users.isEntidade`), não um nível. A flag só abre a porta; o procedimento
+// ainda lê a linha de `entidades` da própria conta (`entidadeDaConta`), e sem
+// ela responde FORBIDDEN. Conta da equipe nunca vira entidade (criarEntidade).
+export const entidadeProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.isEntidade !== true) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "ENTIDADE_NAO_ENCONTRADA" });
+  }
+  return next({ ctx });
+});

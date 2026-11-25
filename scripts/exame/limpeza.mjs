@@ -98,7 +98,13 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "conexoes_registradas", coluna: "id", chave: "conexao", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "consumo_de_minutos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A base das associações (N1): o exame não cria entidade, mas a conta QA não pode deixar rastro.
+  { tabela: "pedidos_pela_entidade", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "importacao_documentos_vistos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "importacoes_de_entidade", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "entidade_membros", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "private_contacts", coluna: "ownerId", chave: "openId", acao: "apagar" },
+  { tabela: "entidades", coluna: "owner_id", chave: "openId", acao: "apagar" },
 
   // ── oportunidade do exame: chave opp ────────────────────────────────────
   { tabela: "president_validations", coluna: "opportunityId", chave: "opp", acao: "apagar" },
@@ -117,6 +123,7 @@ export const PLANO_DE_LIMPEZA = [
   // resto (a revogação na Google fica com a exclusão de conta, não com o exame).
   { tabela: "google_agenda_conexoes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "pedidos_pela_entidade", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "assinaturas_de_minutos", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_documents", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_consents", coluna: "userId", chave: "id", acao: "apagar" },

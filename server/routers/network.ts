@@ -15,6 +15,7 @@ import {
   ALLOWED_CONTACT_IMAGE_TYPES, decodeContactImage, extensionForContactImage,
 } from "../contact-media";
 import { aiMatchSuggestions, contactAssets, contactNeeds } from "../../drizzle/schema";
+import { ERROS_DA_ENTIDADE } from "../../shared/entidades";
 
 // Caminho do proxy (/manus-storage/contacts/{openId}/...), não uma URL http
 // completa — por isso os dois campos abaixo usam `.max(512)` simples, não
@@ -102,6 +103,17 @@ async function removerItemDaAgenda(
 }
 
 // ─── Minha Rede de Relacionamentos (Base Particular de Contatos) ──────────────
+/**
+ * A conta de entidade (N1) guarda associados que não escolheram aparecer: o
+ * contato dela nunca vai a "ouro" nem a "publico", que expõem nome, cidade e
+ * cartão a outras contas (docs/arquitetura/entidades.md, seção 1).
+ */
+function recusarNivelAbertoNaEntidade(usuaria: { isEntidade?: boolean }, nivel: string | undefined) {
+  if (usuaria.isEntidade === true && nivel !== undefined && nivel !== "privado") {
+    throw new TRPCError({ code: "FORBIDDEN", message: ERROS_DA_ENTIDADE.soPrivado });
+  }
+}
+
 export const networkRouter = router({
   create: protectedProcedure
     .input(z.object({
@@ -124,6 +136,7 @@ export const networkRouter = router({
       nivelVisibilidade: z.enum(["privado", "ouro", "publico"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      recusarNivelAbertoNaEntidade(ctx.user, input.nivelVisibilidade);
       const id = await createPrivateContact(ctx.user.openId, input);
       return { id };
     }),
@@ -233,6 +246,7 @@ export const networkRouter = router({
       nivelVisibilidade: z.enum(["privado", "ouro", "publico"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      recusarNivelAbertoNaEntidade(ctx.user, input.nivelVisibilidade);
       const { id, ...data } = input;
       // Buscado ANTES do update: é a única chance de saber qual era a imagem
       // velha, para tirá-la do bucket se a troca for confirmada.

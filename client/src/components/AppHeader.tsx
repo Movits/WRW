@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowLeft, Briefcase, Brain, CalendarDays, ChevronDown, Crown, LogOut,
   MapPin, Menu as MenuIcon, Mic, Network, ShieldCheck, Sparkles, Users,
+  Building2,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -155,6 +156,26 @@ export function GlobalMenu() {
                   <span className="flex flex-col min-w-0">
                     <span className="text-sm font-semibold text-amber-300 leading-tight">{t("appHeader.goldPanel")}</span>
                     <span className="text-[11px] text-amber-200/40 leading-tight truncate">{t("appHeader.goldPanelDesc")}</span>
+                  </span>
+                </span>
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
+        {/* A conta de entidade (a base das associações, N1): o painel dos associados. */}
+        {user?.isEntidade === true && (
+          <>
+            <DropdownMenuSeparator className="bg-white/[0.07] my-2" />
+            <DropdownMenuItem asChild
+              className="rounded-xl px-3 py-2.5 cursor-pointer focus:bg-white/[0.07] data-[highlighted]:bg-white/[0.07]">
+              <Link href="/entidade">
+                <span className="flex items-center gap-3 w-full">
+                  <span className="w-9 h-9 rounded-lg bg-white/[0.05] border border-white/[0.06] flex items-center justify-center shrink-0">
+                    <Building2 className="w-4 h-4 text-[#efcba8]" />
+                  </span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium text-white leading-tight">{t("appHeader.entityPanel")}</span>
+                    <span className="text-[11px] text-white/35 leading-tight truncate">{t("appHeader.entityPanelDesc")}</span>
                   </span>
                 </span>
               </Link>

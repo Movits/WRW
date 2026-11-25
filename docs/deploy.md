@@ -140,6 +140,15 @@ O repositório já tem `Dockerfile`, então o Railway não precisa adivinhar nad
 cofre for cifrado com o `JWT_SECRET` e um dia esse segredo for rotacionado por
 motivo de segurança, o conteúdo do cofre se torna ilegível.
 
+A base das associações (N1, `docs/arquitetura/entidades.md`) EXIGE a
+`VAULT_ENCRYPTION_KEY` com 32 caracteres ou mais e uma chave própria,
+`ENTIDADES_HMAC_KEY` (32 ou mais; `openssl rand -base64 48`): o HMAC do CNPJ dos
+associados, que acha o repetido sem guardar o número em claro. Sem as duas, o
+servidor sobe, mas a importação e a lista do painel da entidade recusam com
+`ENTIDADES_CHAVES_AUSENTES`. Não troque a `ENTIDADES_HMAC_KEY` depois da primeira
+carga: os repetidos deixariam de ser achados (e a troca da `VAULT_ENCRYPTION_KEY`
+torna ilegíveis os documentos e contatos guardados).
+
 A recusa é proposital, em `server/_core/env.ts`. A versão do Manus caía para
 um valor padrão embutido no código, o que significa que qualquer pessoa com o
 código conseguia assinar uma sessão válida.

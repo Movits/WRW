@@ -85,4 +85,23 @@ describe("AppHeader — o menu global fala o idioma da usuária", () => {
     expect(screen.queryByText("Menu")).not.toBeInTheDocument();
     expect(screen.getByTitle("我的资料")).toBeInTheDocument();
   });
+
+  it("a conta de entidade (N1) vê o Painel da entidade; a conta comum não", async () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: { id: 2, name: "Associação", role: "silver", isEntidade: true },
+      loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    const { unmount } = render(<AppHeader title="Rede" />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /menu/i }), { key: "Enter" });
+    expect((await screen.findByText("Painel da entidade")).closest("a")).toHaveAttribute("href", "/entidade");
+    unmount();
+    vi.mocked(useAuth).mockReturnValue({
+      user: { id: 3, name: "Prata", role: "silver" },
+      loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    render(<AppHeader title="Rede" />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /menu/i }), { key: "Enter" });
+    await screen.findByText("Navegação");
+    expect(screen.queryByText("Painel da entidade")).not.toBeInTheDocument();
+  });
 });

@@ -204,6 +204,13 @@
       "when": 1795487823478,
       "tag": "0028_pacote-resumo-mapa",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1795604515792,
+      "tag": "0029_pacote-associacoes",
+      "breakpoints": true
     }
   ]
 }

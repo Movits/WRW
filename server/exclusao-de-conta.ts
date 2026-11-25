@@ -58,7 +58,7 @@ import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
@@ -249,7 +249,18 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: networkSugestoes, coluna: networkSugestoes.ownerId, origem: "openId" },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.ownerId, origem: "openId" },
   { tabela: consumoDeMinutos, coluna: consumoDeMinutos.ownerId, origem: "openId" },
+  // A base das associações (N1): a conta de entidade leva os associados, as
+  // importações e os HMACs vistos; a linha da entidade sai depois dos contatos.
+  // N2: os pedidos de contato que chegaram à conta da entidade.
+  { tabela: pedidosPelaEntidade, coluna: pedidosPelaEntidade.ownerId, origem: "openId" },
+  { tabela: importacaoDocumentosVistos, coluna: importacaoDocumentosVistos.ownerId, origem: "openId" },
+  { tabela: importacoesDeEntidade, coluna: importacoesDeEntidade.ownerId, origem: "openId" },
+  {
+    tabela: entidadeMembros, coluna: entidadeMembros.ownerId, origem: "openId",
+    motivo: "documento e contatos cifrados dos associados; a lista de bloqueio do removido sai junto (pendência e do Dr. Ronei)",
+  },
   { tabela: privateContacts, coluna: privateContacts.ownerId, origem: "openId" },
+  { tabela: entidades, coluna: entidades.ownerId, origem: "openId" },
 
   // ── módulo institucional: chave id ────────────────────────────────────────
   { tabela: consents, coluna: consents.userId, origem: "id" },
@@ -258,6 +269,8 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
   },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
+  // N2: os pedidos de contato que esta conta fez a uma entidade (levam o nome dela).
+  { tabela: pedidosPelaEntidade, coluna: pedidosPelaEntidade.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
   { tabela: sivcConsents, coluna: sivcConsents.userId, origem: "id" },
@@ -715,6 +728,14 @@ export async function excluirConta(
 
   const gruposAlterados = await tirarDosGruposAlheios(db, conta.id);
   if (gruposAlterados > 0) passos.push({ nome: "strategic_groups.memberIds (UPDATE)", linhas: gruposAlterados });
+
+  // A conta que nasceu da ativação de um cadastro importado (N3): o associado é
+  // da ENTIDADE e fica com ela, como `ativado` (a reimportação não o recria),
+  // mas sem apontar para a conta que deixou de existir.
+  const [desligados] = await db.update(entidadeMembros).set({ ativadoUserId: null })
+    .where(eq(entidadeMembros.ativadoUserId, conta.id));
+  const linhasDesligadas = Number((desligados as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+  if (linhasDesligadas > 0) passos.push({ nome: "entidade_membros.ativado_user_id (UPDATE)", linhas: linhasDesligadas });
 
   // Notificação que a oportunidade dela gerou em conta de TERCEIRA (alerta de
   // compatibilidade, aprovação): a chave é a URL, não a usuária. Sem isso, a

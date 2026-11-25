@@ -115,7 +115,12 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
     // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
     // complemento (H4i, buscas_do_complemento.owner_id).
-    expect(PARES).toHaveLength(83);
+    // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
+    // importacoes_de_entidade e importacao_documentos_vistos, todas por owner_id.
+    // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
+    expect(PARES).toHaveLength(89);
+    expect(PARES).toContainEqual({ tabela: "entidade_membros", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "entidades", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });

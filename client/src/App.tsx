@@ -38,6 +38,9 @@ const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork
 const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
 const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
 const Agenda = lazy(() => import("./pages/Agenda"));
+const PainelDaEntidade = lazy(() => import("./pages/PainelDaEntidade"));
+const ConviteDaEntidade = lazy(() => import("./pages/ConviteDaEntidade"));
+const AtivarCadastro = lazy(() => import("./pages/AtivarCadastro"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -128,6 +131,13 @@ function Router() {
         {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
             caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
         <Route path="/r/:token" component={ReuniaoAberta} />
+
+        {/* O convite de uma entidade ao app (a base das associações, N1): público, sem conta. */}
+        <Route path="/convite/:token" component={ConviteDaEntidade} />
+
+        {/* A ativação do cadastro importado (N3): o link de uso único que a entidade
+            distribui; público, sem conta. O caminho é ROTA_DA_ATIVACAO, de shared/entidades.ts. */}
+        <Route path="/ativar/:token" component={AtivarCadastro} />
 
         {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra
@@ -254,6 +264,14 @@ function Router() {
         {/* A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora",
             que abre o /gravar com a reunião marcada. O caminho é
             ROTA_DA_AGENDA, de shared/rotas.ts. */}
+        {/* O painel da entidade (a base das associações, N1): só a conta com o poder
+            de entidade; o servidor recusa as outras (entidadeProcedure). */}
+        <Route path="/entidade">
+          <TelaAutenticada>
+            <PainelDaEntidade />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/agenda">
           <TelaAutenticada>
             <Agenda />

@@ -34,6 +34,10 @@ diverge do código, vale o código.
   gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
   agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
   em 10/11, 12/11 e 15/11).
+- [arquitetura/entidades.md](./arquitetura/entidades.md): a base das associações
+  (DOC-4): a entidade como conta, o ID interno de cada associado, o CNPJ só em HMAC e
+  cifrado, a CNAE só como oferta, o convênio, a importação de 30 mil cadastros e as
+  pendências de LGPD do Dr. Ronei (decisões de 22/11/2026; o código é a N1).
 
 ## Operação
 

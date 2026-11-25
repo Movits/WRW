@@ -26,6 +26,8 @@ import {
   trancarANotaEntreMembras, type ConexaoParaQuemPergunta,
 } from "../network-registro";
 import { createAuditLog } from "../security";
+import { anotarConexoesComEntidade, contatoPeloPedido, pedirContatoPelaEntidade } from "../pedidos-pela-entidade";
+import { MENSAGEM_DO_PEDIDO_MAX } from "@shared/pedidos-pela-entidade";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import { hasValidConsent } from "./consent";
 
@@ -172,7 +174,9 @@ export const networkInteligenteRouter = router({
     // U3: a nota das conexões entre membras (PLATFORM_MATCH) não vai a quem ainda não vê a lista das conexões
     // sugeridas (a Bronze, inclusive a que tem o poder de distribuidora: o poder não é nível). A contagem não lê nota.
     const visiveis: ConexaoParaQuemPergunta[] = veAsConexoesSugeridas(ctx.user.role) ? lista : trancarANotaEntreMembras(lista);
-    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: visiveis.slice(0, 50) };
+    // N2: o lado que é associado de uma entidade sai como "membro da entidade X", com o pedido de contato.
+    const anotadas = await anotarConexoesComEntidade(ctx.user, visiveis.slice(0, 50));
+    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: anotadas };
   }),
 
   avancarConexao: protectedProcedure
@@ -201,6 +205,26 @@ export const networkInteligenteRouter = router({
       return procurarConexoesNaRedeGlobal(ctx.user, { contactId: input?.contactId });
     }),
 
+  // N2: pedir o contato do associado do outro lado de uma conexão pela entidade
+  // dele. O nome de quem pede vai à entidade (a tela avisa e pede a ciência).
+  pedirContatoPelaEntidade: protectedProcedure
+    .input(z.object({
+      conexaoId: z.string().uuid(),
+      mensagem: z.string().max(MENSAGEM_DO_PEDIDO_MAX).optional(),
+      cienteDoNome: z.literal(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!(await termoDoSmartMatch(ctx.user.id))) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "SMART_MATCH_CONSENT_REQUIRED" });
+      }
+      return pedirContatoPelaEntidade(ctx.user, { conexaoId: input.conexaoId, mensagem: input.mensagem });
+    }),
+
+  // N2: no "aceito", o nome da empresa e o canal que ela escolheu, com auditoria.
+  contatoPeloPedido: protectedProcedure
+    .input(z.object({ pedidoId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => contatoPeloPedido(ctx.user, input.pedidoId)),
+
   // Itens 20 e 22: o perfil do contato e a memória de relacionamento.
   contato: protectedProcedure
     .input(z.object({ contactId: z.number().int().positive() }))
@@ -208,7 +232,8 @@ export const networkInteligenteRouter = router({
       const termoSmartMatch = await termoDoSmartMatch(ctx.user.id);
       const perfil = await perfilDoContato(ctx.user, input.contactId, { termoSmartMatch });
       if (!perfil) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado na sua rede." });
-      return perfil;
+      if (!perfil.conexoes.termoAceito) return perfil;
+      return { ...perfil, conexoes: { ...perfil.conexoes, lista: await anotarConexoesComEntidade(ctx.user, perfil.conexoes.lista) } };
     }),
 
   // Itens 14 e 26: "Disponibilizar este contato para oportunidades da rede",

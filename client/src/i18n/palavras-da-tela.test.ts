@@ -41,8 +41,9 @@ function texto(idioma: string, chave: string): string {
 }
 
 // Os nomes próprios da plataforma: Business Match, Smart Match e a marca
-// MarquesaMatch (nome visível desde 23/11/2026). Saem do texto antes da conferência.
-const NOMES_PROPRIOS = /\b(?:(?:business|smart)[\s-]*match(?:es)?|MarquesaMatch)\b/gi;
+// MarquesaMatch (nome visível desde 23/11/2026), que passa a se escrever Marquesa Global
+// Match (a base das associações, N1, já usa o nome novo). Saem do texto antes da conferência.
+const NOMES_PROPRIOS = /\b(?:(?:business|smart)[\s-]*match(?:es)?|MarquesaMatch|Marquesa\s+Global\s+Match)\b/gi;
 const PALAVRA_PROIBIDA = /match/i;
 
 /**

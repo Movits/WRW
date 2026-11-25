@@ -162,6 +162,10 @@ describe("o appRouter inteiro", () => {
     "reuniaoAberta.entrar",
     // As fotos e os desenhos do resumo (H4g e H4h), pelo link.
     "reuniaoAberta.anexos",
+    // O convite da entidade ao app (N1): quem abre o link ainda não tem conta.
+    "conviteDeEntidade.ver",
+    // A ativação do cadastro importado (N3): quem abre o link ainda não tem conta.
+    "ativacaoDeCadastro.ver", "ativacaoDeCadastro.ativar",
   ]);
   let caminhos: string[] = [];
 

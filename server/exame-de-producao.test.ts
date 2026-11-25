@@ -633,7 +633,10 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
     // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
     // complemento (H4i, buscas_do_complemento.owner_id).
-    expect(paresDeUsuariaNoSchema).toHaveLength(83);
+    // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
+    // importacoes_de_entidade e importacao_documentos_vistos (owner_id).
+    // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
+    expect(paresDeUsuariaNoSchema).toHaveLength(89);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });

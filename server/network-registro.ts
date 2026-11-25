@@ -373,7 +373,7 @@ export const MOTIVO_SEM_AUTORIZACAO_DO_OUTRO_LADO =
  * lado da lista. Devolve os ids das linhas de participante ainda autorizadas.
  * Só colunas não pessoais de private_contacts e users.
  */
-async function participantesAindaAutorizados(db: Banco, alheios: Array<typeof conexoesParticipantes.$inferSelect>): Promise<Set<number>> {
+export async function participantesAindaAutorizados(db: Banco, alheios: Array<typeof conexoesParticipantes.$inferSelect>): Promise<Set<number>> {
   if (!alheios.length) return new Set();
   const unicos = <T>(valores: T[]) => Array.from(new Set(valores));
   const contatoIds = unicos(alheios.filter(p => p.tipo === "contato" && p.contactId != null).map(p => Number(p.contactId)));

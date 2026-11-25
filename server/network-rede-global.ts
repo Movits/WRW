@@ -154,7 +154,11 @@ export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; soment
     .where(and(inArray(users.openId, Array.from(new Set(linhas.map(l => l.ownerId)))), eq(users.isActive, true)));
   const { usersComConsentimento } = await import("./routers/consent");
   const autorizadas = await usersComConsentimento(donas.map(d => d.id), "termo_smart_match");
-  const donaAutorizada = new Set(donas.filter(d => autorizadas.has(d.id)).map(d => d.openId));
+  // A conta de entidade (a base das associações, N1) só cruza com o convênio vigente: encerrado, os associados
+  // saem do cruzamento na leitura seguinte, sem apagar nada (docs/arquitetura/entidades.md, seção 3).
+  const { entidadesSemConvenio } = await import("./entidades");
+  const semConvenio = await entidadesSemConvenio(db, donas.map(d => d.openId));
+  const donaAutorizada = new Set(donas.filter(d => autorizadas.has(d.id) && !semConvenio.has(d.openId)).map(d => d.openId));
   const validas = linhas.filter(l => donaAutorizada.has(l.ownerId));
 
   const { tenho, preciso } = await itensDosContatos(db, validas.map(l => Number(l.id)));

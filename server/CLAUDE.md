@@ -178,6 +178,34 @@ item, com modal ("poderia precisar", "talvez a gente precise", "pode ser que") o
 ("se a gente precisar"); a menção sem verbo não sustenta a hipótese, e "eventualmente
 precisamos" é declarada. Forma nova entra com teste negativo e positivo.
 
+## A base das associações (N1, `server/entidades.ts`)
+
+A entidade (federação, associação, sindicato) é UMA conta com o poder `users.isEntidade`
+(`entidadeProcedure`, como o distribuidor) e uma linha em `entidades`; cada associado é um
+contato da rede dela, com o código anônimo, e uma linha em `entidade_membros` com o CNPJ só
+em HMAC (`ENTIDADES_HMAC_KEY`) e cifrado, os contatos cifrados e as CNAEs (que NUNCA viram
+necessidade). A carga vem da planilha lida no aparelho, em blocos de 500 com transação, e
+só com o convênio vigente; o cruzamento global tira as entidades sem convênio
+(`entidadesSemConvenio`). Desenho, decisões e limites (o teto de 1000 da rede global e o
+motor privado quadrático: não carregar base real antes da N4b, o índice) em
+`docs/arquitetura/entidades.md`. A ativação do cadastro importado (N3,
+`server/entidades-ativacao.ts`) é um link por associado, de uso único e com validade, só em
+hash; ativar cria a conta com só o que a pessoa confirmou, marca o associado `ativado` e tira o
+contato da entidade da rede global, numa transação com a auditoria (seção 9a do desenho).
+
+**A CNAE como oferta (N4, `server/cnae.ts`):** a tabela da
+CNAE 2.3 do IBGE (`server/cnae/cnae-2-3.json`, com fonte e data) vira item de "o que tem" com
+`contact_assets.origem = 'cnae'`, sem categoria, sem a cláusula "exceto" e sem as subclasses
+residuais; nunca vira necessidade (`contact_needs` não tem a coluna). O match só nasce de uma
+necessidade declarada, pelas regras de sempre. Tabela nova: `refazerOfertasDaCnae`.
+
+**O pedido de contato pela entidade (N2, `server/pedidos-pela-entidade.ts`):** na conexão
+da rede global com um associado, quem está do outro lado vê só "membro da entidade X" (o
+nome com a autorização do convênio) e pede o contato; a entidade encaminha à empresa e
+registra o aceite com o canal. O telefone e o e-mail saem decifrados só no aceito, a quem
+pediu, com a auditoria na transação. A anotação das conexões é uma leitura à parte
+(`anotarConexoesComEntidade`), fora de `listarConexoesDaSolicitante`. Seção 12 do desenho.
+
 ## Acesso a dados: banco fora do ar é erro
 
 `server/db.ts` é a camada única (usuárias, oportunidades, Ouro, segurança, matches, rede
