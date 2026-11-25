@@ -1,14 +1,32 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
-import { voiceProfileConsents, voiceProfiles } from "../drizzle/schema";
+import { users, voiceProfileConsents, voiceProfiles } from "../drizzle/schema";
 import { RECUSAS_DO_PERFIL_DE_VOZ, VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
-import {
+import { UNAUTHED_ERR_MSG } from "@shared/const";
+
+// O bucket da varredura das gravações (limparGravacoesVencidas), que não
+// recebe o bucket por parâmetro: um dublê que a prova liga e desliga.
+const bucketDaVarredura = vi.hoisted(() => ({ recusar: false, apagadas: [] as string[] }));
+vi.mock("./storage", async original => ({
+  ...(await original<typeof import("./storage")>()),
+  storageApagarTodasAsVersoes: async (chave: string) => {
+    if (bucketDaVarredura.recusar) throw new Error("o B2 recusou");
+    bucketDaVarredura.apagadas.push(chave);
+  },
+}));
+
+const {
   amostraDaVozDaDona, desligarPerfilDeVoz, estadoDoPerfilDeVoz, gravarPerfilDeVoz, ouvirPerfilDeVoz, registrarRevogacaoNaExclusao,
-  zerarTetoDaAmostraParaTestes, type BucketDoPerfil,
-} from "./perfil-de-voz";
-import { ObjetoAusenteNoStorageError } from "./storage";
+  zerarTetoDaAmostraParaTestes,
+} = await import("./perfil-de-voz");
+type BucketDoPerfil = import("./perfil-de-voz").BucketDoPerfil;
+const { ObjetoAusenteNoStorageError } = await import("./storage");
+const { limparGravacoesVencidas } = await import("./meeting-service");
+const { excluirConta } = await import("./exclusao-de-conta");
 
 /**
  * O perfil de voz (H3d) contra um banco real DE TESTE (sem DATABASE_URL_TESTES,
@@ -21,13 +39,19 @@ import { ObjetoAusenteNoStorageError } from "./storage";
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-voz-${crypto.randomUUID()}`;
 const OUTRA = `teste-voz-outra-${crypto.randomUUID()}`;
+// Uma conta que a prova exclui de verdade, e um openId que nunca teve conta.
+const EXCLUIDA = `teste-voz-excluida-${crypto.randomUUID()}`;
+const SEM_CONTA = `teste-voz-sem-conta-${crypto.randomUUID()}`;
+const TODAS = [DONA, OUTRA, EXCLUIDA, SEM_CONTA];
 const QUEM = { ipAddress: "203.0.113.7", userAgent: "vitest-perfil-de-voz" };
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(200, 7)]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from("ftypM4A "), Buffer.alloc(200, 9)]);
+// O texto como a tela o manda (client/src/components/PerfilDeVoz.tsx): o servidor confere o hash dele.
+const LOCALE = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, "../client/src/i18n/locales/pt-BR.json"), "utf8")).perfilDeVoz;
 const CONSENTIMENTO = {
   versaoDoTexto: VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ,
   idioma: "pt-BR",
-  textoExibido: "Autorizo a Marquesa Global Match a criar um perfil da minha voz para me identificar nas transcrições e resumos das reuniões.",
+  textoExibido: `${LOCALE.consent}\n${LOCALE.consentSupport}`,
 };
 const amostra = (bytes = WEBM, mimeType = "audio/webm") => ({ audioBase64: bytes.toString("base64"), mimeType, duracaoMs: 30_000 });
 
@@ -68,8 +92,13 @@ async function recusa(promessa: Promise<unknown>) {
 describe.skipIf(!temBanco)("Perfil de voz (integração)", () => {
   beforeEach(async () => {
     const banco = await db();
-    await banco.delete(voiceProfiles).where(inArray(voiceProfiles.ownerId, [DONA, OUTRA]));
-    await banco.delete(voiceProfileConsents).where(inArray(voiceProfileConsents.ownerId, [DONA, OUTRA]));
+    await banco.delete(voiceProfiles).where(inArray(voiceProfiles.ownerId, TODAS));
+    await banco.delete(voiceProfileConsents).where(inArray(voiceProfileConsents.ownerId, TODAS));
+    await banco.delete(users).where(inArray(users.openId, TODAS));
+    // Só grava quem tem conta (a exclusão da conta pode passar no meio).
+    await banco.insert(users).values([{ openId: DONA }, { openId: OUTRA }]);
+    bucketDaVarredura.recusar = false;
+    bucketDaVarredura.apagadas = [];
     zerarTetoDaAmostraParaTestes();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -77,8 +106,9 @@ describe.skipIf(!temBanco)("Perfil de voz (integração)", () => {
   afterAll(async () => {
     const banco = await getDb();
     if (!banco) return;
-    await banco.delete(voiceProfiles).where(inArray(voiceProfiles.ownerId, [DONA, OUTRA]));
-    await banco.delete(voiceProfileConsents).where(inArray(voiceProfileConsents.ownerId, [DONA, OUTRA]));
+    await banco.delete(voiceProfiles).where(inArray(voiceProfiles.ownerId, TODAS));
+    await banco.delete(voiceProfileConsents).where(inArray(voiceProfileConsents.ownerId, TODAS));
+    await banco.delete(users).where(inArray(users.openId, TODAS));
   });
 
   it("sem a caixa marcada, o perfil não nasce e nada vai ao bucket", async () => {
@@ -173,5 +203,67 @@ describe.skipIf(!temBanco)("Perfil de voz (integração)", () => {
     await gravarPerfilDeVoz(DONA, { ...amostra(), consentimento: CONSENTIMENTO }, QUEM, bucket);
     expect(await registrarRevogacaoNaExclusao(await db(), DONA)).toBe(true);
     expect((await registroDe(DONA)).map(r => [r.evento, r.origem])).toEqual([["consentiu", "dona"], ["revogou", "exclusao_da_conta"]]);
+    // A exclusão que caiu antes de tirar o perfil e roda de novo não registra outra revogação.
+    expect(await registrarRevogacaoNaExclusao(await db(), DONA)).toBe(false);
+    expect((await registroDe(DONA)).map(r => r.evento)).toEqual(["consentiu", "revogou"]);
+  });
+
+  it("o texto do consentimento que não é o da versão é recusado, e nada vai ao registro", async () => {
+    const { bucket, objetos } = bucketDeTeste();
+    const erro = await recusa(gravarPerfilDeVoz(DONA, { ...amostra(), consentimento: { ...CONSENTIMENTO, textoExibido: "Autorizo o que a requisição inventou." } }, QUEM, bucket));
+    expect(erro).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DO_PERFIL_DE_VOZ.consentimentoPedido });
+    expect(objetos.size).toBe(0);
+    expect(await perfilDe(DONA)).toBeUndefined();
+    expect(await registroDe(DONA)).toEqual([]);
+  });
+
+  it("sem a conta (a exclusão passou no meio), a gravação é recusada, nada nasce, e a amostra nova sai do bucket", async () => {
+    const { bucket, objetos, apagados } = bucketDeTeste();
+    const erro = await recusa(gravarPerfilDeVoz(SEM_CONTA, { ...amostra(), consentimento: CONSENTIMENTO }, QUEM, bucket));
+    expect(erro).toMatchObject({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+    expect(await perfilDe(SEM_CONTA)).toBeUndefined();
+    expect(await registroDe(SEM_CONTA)).toEqual([]);
+    expect(apagados).toHaveLength(1);
+    expect(objetos.size).toBe(0);
+  });
+
+  it("a exclusão da conta com o bucket recusando SÓ a amostra: a linha fica como ponteiro, e a varredura tenta de novo e só então a tira", async () => {
+    const banco = await db();
+    await banco.insert(users).values({ openId: EXCLUIDA });
+    const [conta] = await banco.select({ id: users.id }).from(users).where(eq(users.openId, EXCLUIDA));
+    const { bucket } = bucketDeTeste();
+    await gravarPerfilDeVoz(EXCLUIDA, { ...amostra(), consentimento: CONSENTIMENTO }, QUEM, bucket);
+    const chave = (await perfilDe(EXCLUIDA)).storageKey;
+
+    const relatorio = await excluirConta(banco, { id: conta.id, openId: EXCLUIDA, email: null }, {
+      apagarArquivo: async alvo => { if (alvo.startsWith("perfis-de-voz/")) throw new Error("o B2 recusou"); },
+      revogarGoogle: async () => "sem-conexao",
+    });
+    expect(relatorio.arquivosComFalha).toEqual([chave]);
+    expect((await banco.select().from(users).where(eq(users.openId, EXCLUIDA)))).toEqual([]);
+    // A linha ficou: é o único ponteiro para a voz. A revogação foi registrada.
+    expect((await perfilDe(EXCLUIDA))?.storageKey).toBe(chave);
+    expect((await registroDe(EXCLUIDA)).map(r => [r.evento, r.origem])).toEqual([["consentiu", "dona"], ["revogou", "exclusao_da_conta"]]);
+
+    // A varredura acha o perfil sem a conta; com o bucket recusando, a linha fica.
+    bucketDaVarredura.recusar = true;
+    await limparGravacoesVencidas({ ownerId: EXCLUIDA });
+    expect((await perfilDe(EXCLUIDA))?.storageKey).toBe(chave);
+    // Com o bucket de volta, a amostra sai com todas as versões, e só então a linha.
+    bucketDaVarredura.recusar = false;
+    const passada = await limparGravacoesVencidas({ ownerId: EXCLUIDA });
+    expect(bucketDaVarredura.apagadas).toEqual([chave]);
+    expect(passada.apagadas).toBe(1);
+    expect(await perfilDe(EXCLUIDA)).toBeUndefined();
+    // O registro fica.
+    expect((await registroDe(EXCLUIDA)).map(r => r.evento)).toEqual(["consentiu", "revogou"]);
+  });
+
+  it("a varredura não toca no perfil de quem tem conta", async () => {
+    const { bucket } = bucketDeTeste();
+    await gravarPerfilDeVoz(DONA, { ...amostra(), consentimento: CONSENTIMENTO }, QUEM, bucket);
+    await limparGravacoesVencidas({ ownerId: DONA });
+    expect(bucketDaVarredura.apagadas).toEqual([]);
+    expect(await perfilDe(DONA)).toBeDefined();
   });
 });

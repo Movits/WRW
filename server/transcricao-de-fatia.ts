@@ -95,21 +95,41 @@ export function parteUsouAVozDaDona(result: unknown): boolean {
   return !!result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>)[MARCA_DA_VOZ_DA_DONA] === true;
 }
 
+/** A parte guardada tem fala (fora da lacuna) com o rótulo fixo da voz da dona? */
+function parteTemORotuloDaDona(result: unknown): boolean {
+  const segmentos = (result as { segmentos?: unknown } | null)?.segmentos;
+  return Array.isArray(segmentos) && segmentos.some(segmento => {
+    const s = segmento as Partial<Segmento> | null;
+    return !!s && !s.lacuna && s.falante === ROTULO_DA_VOZ_DA_DONA;
+  });
+}
+
 /**
  * As vozes ligadas às contas (H3c) depois da montagem: com alguma parte
  * transcrita com a amostra e a voz da dona nas falas, o rótulo fixo dela fica
  * ligado à conta dela ("owner"), sem tirar o que já estava ligado (a ligação
  * da própria dona vence). null: nada a mudar. A dona corrige no "Quem é cada
  * voz" como sempre: a IA pode errar.
+ *
+ * Só liga se TODA parte transcrita que tem o rótulo fixo nas falas foi
+ * transcrita com a amostra: numa reunião juntada (H17), o F1 de uma parte sem
+ * a amostra é outra pessoa, e ligá-lo à dona juntaria as duas. E não liga o
+ * rótulo a que a dona deu um nome livre (`nomes`): foi ela quem soltou a conta
+ * ao nomear a voz (o nome da conta venceria o dela na tela), e a montagem de
+ * depois (o reprocesso, a junção) não a desfaz.
  */
 export function contasComAVozDaDona(
   partes: ReadonlyArray<{ status: string; result: unknown }>,
   segmentos: ReadonlyArray<Segmento>,
   atuais: Record<string, string>,
+  nomes: Record<string, string> = {},
 ): Record<string, string> | null {
-  if (!partes.some(parte => parte.status === "transcribed" && parteUsouAVozDaDona(parte.result))) return null;
+  const transcritas = partes.filter(parte => parte.status === "transcribed");
+  if (!transcritas.some(parte => parteUsouAVozDaDona(parte.result))) return null;
+  if (transcritas.some(parte => parteTemORotuloDaDona(parte.result) && !parteUsouAVozDaDona(parte.result))) return null;
   if (!segmentos.some(segmento => !segmento.lacuna && segmento.falante === ROTULO_DA_VOZ_DA_DONA)) return null;
   if (ROTULO_DA_VOZ_DA_DONA in atuais) return null;
+  if (nomes[ROTULO_DA_VOZ_DA_DONA]?.trim()) return null;
   return { ...atuais, [ROTULO_DA_VOZ_DA_DONA]: CONTA_DA_DONA };
 }
 
@@ -275,8 +295,11 @@ export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos:
   if (input.idioma === IDIOMA_AUTOMATICO) linhas.push(`${proximaRegra++}) ${REGRA_DO_IDIOMA_DA_FALA}`);
   if (input.vozDaDona) linhas.push(`${proximaRegra++}) ${regraDaVozDaDona()}`);
   if (input.anterior && (input.anterior.falantes.length || input.anterior.ultimasFalas.length)) {
-    const vozes = input.anterior.falantes.map(falante => (input.vozDaDona && falante === ROTULO_DA_VOZ_DA_DONA ? `${falante} (a dona)` : falante));
-    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${vozes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
+    // Só os rótulos na lista: "F1 (a dona)" ali o modelo copiaria como rótulo
+    // (FALANTE_VALIDO o recusa). Quem é a dona vai numa frase à parte.
+    const vozes = input.anterior.falantes;
+    const qualEADona = input.vozDaDona && vozes.includes(ROTULO_DA_VOZ_DA_DONA) ? ` O rótulo "${ROTULO_DA_VOZ_DA_DONA}" é a dona.` : "";
+    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${vozes.join(", ") || "nenhuma"}.${qualEADona} Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
     // Sem o tempo: o da fala anterior é absoluto (passa dos 600 s), e a regra 2
     // pede o tempo DENTRO do trecho; um exemplo com [10:23] ensinaria o modelo
     // a devolver tempos que o teto da parte achataria.
@@ -393,12 +416,12 @@ export class TemposForaDaParteError extends Error {
  * nulo) está fora do formato, o que é diferente do texto vazio (silêncio): se
  * todos vieram assim, é erro, e não parte em silêncio.
  */
-export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): Segmento[] {
-  return normalizarComContagens(bruto, inicioSegundos, duracaoSegundos).segmentos;
+export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number, comAmostra = false): Segmento[] {
+  return normalizarComContagens(bruto, inicioSegundos, duracaoSegundos, comAmostra).segmentos;
 }
 
 /** O mesmo que normalizarSegmentos, com as contagens das falas cujo início não deu para usar. */
-function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): { segmentos: Segmento[]; tempos: TemposDaParte } {
+function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoSegundos: number, comAmostra = false): { segmentos: Segmento[]; tempos: TemposDaParte } {
   const itens = (bruto as { segmentos?: unknown })?.segmentos;
   if (!Array.isArray(itens)) throw new Error("A transcrição da parte veio sem a lista de falas.");
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
@@ -426,7 +449,11 @@ function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoS
   const emSegundos = (t: TempoLido | null) => (t === null ? null : t.numero ? leitura.ler(t.segundos) : t.segundos);
 
   const segmentos: Segmento[] = [];
-  let ultimoFalante = "F1";
+  // A fala sem rótulo válido fica com o falante anterior; a primeira da parte,
+  // com o primeiro rótulo. Com a amostra (H3d), o primeiro é a dona, que a
+  // montagem liga à conta dela: o recurso passa a ser o primeiro das outras
+  // vozes (errar para menos, como na regra da voz da dona).
+  let ultimoFalante = comAmostra ? "F2" : "F1";
   let inicioAnterior = 0;
   let rotulosTrocados = 0;
   let semTempo = 0;
@@ -514,7 +541,7 @@ export async function transcreverFatia(input: {
   } catch (erro) {
     throw new Error("A transcrição da parte veio num formato inválido.", { cause: erro });
   }
-  const { segmentos, tempos } = normalizarComContagens(bruto, input.inicioSegundos, input.duracaoSegundos);
+  const { segmentos, tempos } = normalizarComContagens(bruto, input.inicioSegundos, input.duracaoSegundos, !!input.amostraDaVoz);
   if (!temposDegradados(tempos)) return { segmentos, idioma, modelo };
   if (!input.ultimaTentativa) throw new TemposForaDaParteError(tempos);
   console.warn(`[Transcrição] parte aceita na última tentativa com ${tempos.presasNoFim + tempos.semTempo} de ${tempos.total} falas com o tempo fora dela ou ilegível`);

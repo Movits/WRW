@@ -2,11 +2,12 @@ import crypto from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import {
-  DURACAO_MAXIMA_DA_AMOSTRA_MS, DURACAO_MINIMA_DA_AMOSTRA_MS, GRAVACOES_DA_AMOSTRA_POR_JANELA, JANELA_DA_AMOSTRA_MS,
+  DURACAO_MAXIMA_DA_AMOSTRA_MS, DURACAO_MINIMA_DA_AMOSTRA_MS, GRAVACOES_DA_AMOSTRA_POR_JANELA, HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ, JANELA_DA_AMOSTRA_MS,
   PREFIXO_DO_PERFIL_DE_VOZ, RECUSAS_DO_PERFIL_DE_VOZ, TAMANHO_MAXIMO_DA_AMOSTRA, TEXTO_DO_CONSENTIMENTO_DE_VOZ_MAX,
   TIPOS_DA_AMOSTRA, VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ, type TipoDaAmostra, type VersaoDoTextoDoPerfilDeVoz,
 } from "@shared/perfil-de-voz";
-import { voiceProfileConsents, voiceProfiles } from "../drizzle/schema";
+import { UNAUTHED_ERR_MSG } from "@shared/const";
+import { users, voiceProfileConsents, voiceProfiles } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { ObjetoAusenteNoStorageError, storageApagarTodasAsVersoes, storageGetBytes, storagePut } from "./storage";
 
@@ -115,13 +116,20 @@ export function decodificarAmostra(input: { audioBase64: string; mimeType: strin
   return { bytes, tipo, duracaoMs: Math.min(Math.round(input.duracaoMs), DURACAO_MAXIMA_DA_AMOSTRA_MS) };
 }
 
-/** O consentimento que a tela mandou serve? A versão tem de ser uma que o servidor conhece, e o texto não pode faltar. */
+const sha256 = (texto: string) => crypto.createHash("sha256").update(texto).digest("hex");
+
+/**
+ * O consentimento que a tela mandou serve? A versão tem de ser uma que o
+ * servidor conhece, e o texto exibido tem de ser o daquela versão no idioma
+ * informado (HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ): o registro só guarda o texto
+ * que a Cris aprovou, nunca um que a requisição inventou.
+ */
 export function consentimentoValido(consentimento: ConsentimentoDoPerfilDeVoz | undefined): consentimento is ConsentimentoDoPerfilDeVoz & { versaoDoTexto: VersaoDoTextoDoPerfilDeVoz } {
-  return !!consentimento
-    && (VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ as readonly string[]).includes(consentimento.versaoDoTexto)
-    && !!consentimento.textoExibido.trim()
-    && consentimento.textoExibido.length <= TEXTO_DO_CONSENTIMENTO_DE_VOZ_MAX
-    && !!consentimento.idioma.trim();
+  if (!consentimento) return false;
+  if (!(VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ as readonly string[]).includes(consentimento.versaoDoTexto)) return false;
+  if (!consentimento.textoExibido.trim() || consentimento.textoExibido.length > TEXTO_DO_CONSENTIMENTO_DE_VOZ_MAX) return false;
+  const esperado = HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ[consentimento.versaoDoTexto as VersaoDoTextoDoPerfilDeVoz];
+  return Object.hasOwn(esperado, consentimento.idioma) && esperado[consentimento.idioma] === sha256(consentimento.textoExibido);
 }
 
 /** A linha do registro de um consentimento ou de uma revogação. */
@@ -137,7 +145,7 @@ function linhaDoRegistro(ownerId: string, evento: "consentiu" | "revogou", orige
     versaoDoTexto: dados.versaoDoTexto.slice(0, 40),
     idioma: dados.idioma ? dados.idioma.slice(0, 12) : null,
     textoExibido: texto,
-    textoHash: texto ? crypto.createHash("sha256").update(texto).digest("hex") : null,
+    textoHash: texto ? sha256(texto) : null,
     // Os mesmos cortes do createAuditLog (server/security.ts).
     ipAddress: dados.quem ? dados.quem.ipAddress.substring(0, 45) : null,
     userAgent: dados.quem?.userAgent ? dados.quem.userAgent.substring(0, 500) : null,
@@ -188,8 +196,20 @@ export function chaveDaAmostra(ownerId: string, tipo: TipoDaAmostra): string {
  * confirmar, a transação desfaz e o perfil fica com a antiga.
  *
  * Ordem: a amostra nova sobe primeiro (fora da transação); a transação trava a
- * linha da dona, confere o consentimento, apaga a antiga e grava. Qualquer
- * falha depois do upload tira a nova do bucket (melhor esforço).
+ * conta e a linha da dona, confere o consentimento, apaga a antiga e grava.
+ * Qualquer falha depois do upload tira a nova do bucket (melhor esforço).
+ *
+ * A conta travada (FOR UPDATE) fecha a corrida com a exclusão da conta: sem a
+ * linha de users, nada nasce; com ela travada, o DELETE da conta espera o
+ * commit, e o perfil que nascer depois de a exclusão ler as chaves fica para a
+ * varredura (regra 7 de server/exclusao-de-conta.ts), que o acha sem a conta.
+ *
+ * A antiga sai do bucket DENTRO da transação, antes do commit, de propósito
+ * (regra da Cris): sai depois, com o bucket recusando, e a voz antiga ficaria
+ * no bucket sem ponteiro. O custo é o commit que falhar depois disso deixar a
+ * linha apontando para um objeto que já saiu: a dona vê o perfil ligado, o
+ * "ouvir" dá SEM_PERFIL e a fila segue sem a amostra (amostraDaVozDaDona) até
+ * ela regravar ou desligar.
  */
 export async function gravarPerfilDeVoz(
   ownerId: string,
@@ -214,6 +234,9 @@ export async function gravarPerfilDeVoz(
   const agora = Date.now();
   try {
     await db.transaction(async tx => {
+      // A conta que pede ainda existe? (a exclusão da conta pode ter passado no meio)
+      const [conta] = await tx.select({ id: users.id }).from(users).where(eq(users.openId, ownerId)).limit(1).for("update");
+      if (!conta) throw recusa("UNAUTHORIZED", UNAUTHED_ERR_MSG);
       const [atual] = await tx.select({ id: voiceProfiles.id, chave: voiceProfiles.storageKey }).from(voiceProfiles)
         .where(eq(voiceProfiles.ownerId, ownerId)).limit(1).for("update");
       if (atual) {
@@ -313,11 +336,22 @@ export async function amostraDaVozDaDona(db: Pick<Banco, "select">, ownerId: str
 /**
  * A revogação que a exclusão da conta registra antes de o perfil sair
  * (server/exclusao-de-conta.ts): a mesma linha do desligar, com a origem
- * "exclusao_da_conta". Sem perfil, nada.
+ * "exclusao_da_conta". Sem perfil, nada. Idempotente: se o último evento da
+ * dona já é uma revogação (a exclusão caiu entre este registro e o DELETE do
+ * perfil, e ela pediu de novo; ou o perfil ficou como ponteiro), não grava outra.
  */
 export async function registrarRevogacaoNaExclusao(db: Pick<Banco, "select" | "insert">, ownerId: string): Promise<boolean> {
   const [perfil] = await db.select({ id: voiceProfiles.id }).from(voiceProfiles).where(eq(voiceProfiles.ownerId, ownerId)).limit(1);
   if (!perfil) return false;
+  // Pela hora, e não pela ordem: o consentimento e a revogação podem cair no mesmo milissegundo.
+  const ultimaHora = async (evento: "consentiu" | "revogou") => {
+    const [linha] = await db.select({ quando: voiceProfileConsents.createdAt }).from(voiceProfileConsents)
+      .where(and(eq(voiceProfileConsents.ownerId, ownerId), eq(voiceProfileConsents.evento, evento)))
+      .orderBy(desc(voiceProfileConsents.createdAt)).limit(1);
+    return linha?.quando;
+  };
+  const revogou = await ultimaHora("revogou");
+  if (revogou !== undefined && revogou >= ((await ultimaHora("consentiu")) ?? 0)) return false;
   await db.insert(voiceProfileConsents).values(linhaDoRegistro(ownerId, "revogou", "exclusao_da_conta", {
     versaoDoTexto: await versaoDoUltimoConsentimento(db, ownerId), agora: Date.now(),
   }));

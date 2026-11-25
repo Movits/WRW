@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -14,10 +17,18 @@ vi.mock("./_core/env", () => ambiente);
 const { conteudoConfereComOTipo, consentimentoValido, decodificarAmostra, chaveDaAmostra, contarGravacaoDaAmostra, zerarTetoDaAmostraParaTestes } = await import("./perfil-de-voz");
 const { transcreverFatia, promptDaFatia, deslocarRotulosDasFalas, contasComAVozDaDona, parteUsouAVozDaDona, TEXTO_DA_AMOSTRA_DA_VOZ, TEXTO_DO_TRECHO_COM_AMOSTRA } = await import("./transcricao-de-fatia");
 const { podeBaixarChave } = await import("./_core/storageProxy");
+const { deslocarResultado } = await import("./juntar-reunioes");
 const {
-  DURACAO_MAXIMA_DA_AMOSTRA_MS, DURACAO_MINIMA_DA_AMOSTRA_MS, GRAVACOES_DA_AMOSTRA_POR_JANELA, RECUSAS_DO_PERFIL_DE_VOZ, TAMANHO_MAXIMO_DA_AMOSTRA,
-  VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ,
+  DURACAO_MAXIMA_DA_AMOSTRA_MS, DURACAO_MINIMA_DA_AMOSTRA_MS, GRAVACOES_DA_AMOSTRA_POR_JANELA, HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ, RECUSAS_DO_PERFIL_DE_VOZ,
+  TAMANHO_MAXIMO_DA_AMOSTRA, VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ,
 } = await import("@shared/perfil-de-voz");
+
+/** O texto do consentimento como a tela o manda (client/src/components/PerfilDeVoz.tsx), num idioma. */
+const PASTA_DOS_LOCALES = path.resolve(import.meta.dirname, "../client/src/i18n/locales");
+function textoDoConsentimento(idioma: string): string {
+  const { perfilDeVoz } = JSON.parse(fs.readFileSync(path.join(PASTA_DOS_LOCALES, `${idioma}.json`), "utf8"));
+  return `${perfilDeVoz.consent}\n${perfilDeVoz.consentSupport}`;
+}
 
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(60, 1)]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from("ftypM4A "), Buffer.alloc(60, 2)]);
@@ -77,15 +88,29 @@ describe("a amostra: tipo, conteúdo, tamanho e duração", () => {
 });
 
 describe("o consentimento que serve", () => {
-  const bom = { versaoDoTexto: VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ, idioma: "pt-BR", textoExibido: "Autorizo a Marquesa Global Match a criar um perfil da minha voz..." };
-  it("a versão que o servidor conhece, com o texto e o idioma", () => {
+  const bom = { versaoDoTexto: VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ, idioma: "pt-BR", textoExibido: textoDoConsentimento("pt-BR") };
+  it("a versão que o servidor conhece, com o texto dela no idioma da tela", () => {
     expect(consentimentoValido(bom)).toBe(true);
+    expect(consentimentoValido({ ...bom, idioma: "ja", textoExibido: textoDoConsentimento("ja") })).toBe(true);
+  });
+  it("a versão vigente aceita exatamente o texto dos 10 locales: mudou o texto, versão nova com os hashes novos", () => {
+    const idiomas = fs.readdirSync(PASTA_DOS_LOCALES).filter(nome => nome.endsWith(".json")).map(nome => nome.replace(/\.json$/, "")).sort();
+    expect(idiomas).toHaveLength(10);
+    const daVersao = HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ[VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ];
+    expect(Object.keys(daVersao).sort()).toEqual(idiomas);
+    for (const idioma of idiomas) {
+      expect(crypto.createHash("sha256").update(textoDoConsentimento(idioma)).digest("hex"), idioma).toBe(daVersao[idioma]);
+    }
   });
   it.each([
     ["sem consentimento", undefined],
     ["versão desconhecida", { ...bom, versaoDoTexto: "perfil-de-voz-1999-01-01" }],
     ["texto vazio", { ...bom, textoExibido: "  " }],
     ["sem idioma", { ...bom, idioma: "" }],
+    ["texto que não é o da versão", { ...bom, textoExibido: "Autorizo qualquer coisa." }],
+    ["o texto de outro idioma", { ...bom, textoExibido: textoDoConsentimento("en") }],
+    ["idioma que a tela não tem", { ...bom, idioma: "xx" }],
+    ["idioma herdado do Object", { ...bom, idioma: "constructor" }],
   ])("não serve: %s", (_nome, consentimento) => {
     expect(consentimentoValido(consentimento)).toBe(false);
   });
@@ -148,10 +173,27 @@ describe("a transcrição da parte com a amostra da voz da dona", () => {
     expect(partes[0].text).not.toContain("AMOSTRA");
   });
 
-  it("na parte seguinte, as vozes já identificadas dizem qual é a dona", () => {
+  it("na parte seguinte, as vozes já identificadas são só rótulos, e uma frase à parte diz qual é a dona", () => {
     const prompt = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, vozDaDona: true, anterior: { falantes: ["F1", "F2"], ultimasFalas: [] } });
-    expect(prompt).toContain("Vozes já identificadas: F1 (a dona), F2.");
-    expect(promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, anterior: { falantes: ["F1", "F2"], ultimasFalas: [] } })).toContain("Vozes já identificadas: F1, F2.");
+    expect(prompt).toContain('Vozes já identificadas: F1, F2. O rótulo "F1" é a dona.');
+    expect(prompt).not.toContain("F1 (a dona)");
+    const semAmostra = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, anterior: { falantes: ["F1", "F2"], ultimasFalas: [] } });
+    expect(semAmostra).toContain("Vozes já identificadas: F1, F2. Reconheça");
+    expect(semAmostra).not.toContain("é a dona");
+  });
+
+  it("com a amostra, a fala sem rótulo válido no começo da parte não cai no rótulo da dona", async () => {
+    const corpo = { segmentos: [{ inicio: "00:01", fim: "00:03", falante: "F1 (a dona)", texto: "Bom dia" }, { inicio: "00:04", fim: "00:06", falante: "F3", texto: "Oi" }] };
+    responder(corpo);
+    const comAmostra = await transcreverFatia({
+      audio: Buffer.from("trecho"), mimeType: "audio/mp4", idioma: "pt-BR", inicioSegundos: 0, duracaoSegundos: 600, ultimaTentativa: false,
+      amostraDaVoz: { audio: Buffer.from("amostra"), mimeType: "audio/webm" },
+    });
+    expect(comAmostra.segmentos.map(s => s.falante)).toEqual(["F2", "F3"]);
+    // Sem a amostra, como antes: o primeiro rótulo.
+    responder(corpo);
+    const semAmostra = await transcreverFatia({ audio: Buffer.from("trecho"), mimeType: "audio/mp4", idioma: "pt-BR", inicioSegundos: 0, duracaoSegundos: 600, ultimaTentativa: false });
+    expect(semAmostra.segmentos.map(s => s.falante)).toEqual(["F1", "F3"]);
   });
 });
 
@@ -175,5 +217,34 @@ describe("os rótulos da voz da dona", () => {
     expect(contasComAVozDaDona([{ status: "failed", result: { vozDaDona: true } }], [fala("F1")], {})).toBeNull();
     expect(contasComAVozDaDona(comAmostra, [fala("F2")], {})).toBeNull();
     expect(contasComAVozDaDona(comAmostra, [fala("F1")], { F1: "outra-participacao" })).toBeNull();
+  });
+
+  it("não liga o F1 quando a dona deu nome livre a ele (ela soltou a conta ao nomear)", () => {
+    const comAmostra = [{ status: "transcribed", result: { vozDaDona: true, segmentos: [fala("F1")] } }];
+    expect(contasComAVozDaDona(comAmostra, [fala("F1")], {}, { F1: "Ana" })).toBeNull();
+    // O nome de OUTRA voz não muda nada; nome em branco não conta.
+    expect(contasComAVozDaDona(comAmostra, [fala("F1")], {}, { F2: "Bia" })).toEqual({ F1: "owner" });
+    expect(contasComAVozDaDona(comAmostra, [fala("F1")], {}, { F1: "  " })).toEqual({ F1: "owner" });
+  });
+
+  it("não liga o F1 se alguma parte transcrita SEM a amostra também usa o F1 (outra pessoa, numa reunião juntada)", () => {
+    const marcada = { status: "transcribed", result: { vozDaDona: true, segmentos: [fala("F1"), fala("F2")] } };
+    const semMarcaComF1 = { status: "transcribed", result: { segmentos: [fala("F1")] } };
+    const semMarcaSemF1 = { status: "transcribed", result: { segmentos: [fala("F3")] } };
+    expect(contasComAVozDaDona([semMarcaComF1, marcada], [fala("F1"), fala("F1"), fala("F2")], {})).toBeNull();
+    // A parte sem a amostra que não usa o F1 (vozes deslocadas) não atrapalha.
+    expect(contasComAVozDaDona([semMarcaSemF1, marcada], [fala("F3"), fala("F1"), fala("F2")], {})).toEqual({ F1: "owner" });
+    // A parte que falhou não conta.
+    expect(contasComAVozDaDona([{ status: "failed", result: { segmentos: [fala("F1")] } }, marcada], [fala("F1")], {})).toEqual({ F1: "owner" });
+  });
+
+  it("na junção, a parte com os rótulos deslocados perde a marca da voz da dona; sem deslocar, a marca fica", () => {
+    const result = { vozDaDona: true, segmentos: [fala("F1"), fala("F2")], contexto: { falantes: ["F1", "F2"], ultimasFalas: [] } };
+    const deslocada = deslocarResultado(result, 2, 600) as Record<string, unknown>;
+    expect(parteUsouAVozDaDona(deslocada)).toBe(false);
+    expect((deslocada.segmentos as Array<{ falante: string }>).map(s => s.falante)).toEqual(["F3", "F4"]);
+    expect(parteUsouAVozDaDona(deslocarResultado(result, 0, 600))).toBe(true);
+    // O original não muda.
+    expect(result.vozDaDona).toBe(true);
   });
 });

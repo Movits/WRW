@@ -20,6 +20,7 @@ import {
   resumoEmAudio,
   userProfiles,
   users,
+  voiceProfiles,
 } from "../drizzle/schema";
 import { pareceSerADona } from "@shared/reuniao-no-match";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
@@ -2038,6 +2039,26 @@ async function audiosDoResumoQueSaem(db: Banco, trecho: TrechoDaVarredura, lote:
 }
 
 /**
+ * O perfil de voz (H3d) cuja conta não existe mais: é o ponteiro que a exclusão
+ * da conta deixou quando o bucket recusou a amostra, ou o perfil gravado depois
+ * de a exclusão ler as chaves (regra 7 de server/exclusao-de-conta.ts). A conta
+ * é a linha de users com o mesmo openId.
+ */
+async function perfisDeVozSemConta(db: Banco, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: voiceProfiles.id, storageKey: voiceProfiles.storageKey })
+    .from(voiceProfiles)
+    .leftJoin(users, eq(users.openId, voiceProfiles.ownerId))
+    .where(and(
+      gt(voiceProfiles.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(voiceProfiles.id, trecho.ate) : undefined,
+      ownerId ? eq(voiceProfiles.ownerId, ownerId) : undefined,
+      isNull(users.id),
+    ))
+    .orderBy(asc(voiceProfiles.id))
+    .limit(lote);
+}
+
+/**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
  * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
@@ -2060,7 +2081,9 @@ async function audiosDoResumoQueSaem(db: Banco, trecho: TrechoDaVarredura, lote:
  *   mesmo prazo, em qualquer estado da reunião;
  * - o MP3 do resumo (H19b, resumo_em_audio) da reunião que não existe mais ou
  *   está sendo excluída (a junção e a recusa do bucket na exclusão): sai o
- *   objeto, e a linha fica sem a chave, para o teto.
+ *   objeto, e a linha fica sem a chave, para o teto;
+ * - a amostra do perfil de voz (H3d, voice_profiles) cuja conta não existe
+ *   mais (o ponteiro que a exclusão da conta deixou): sai o objeto e a linha.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -2123,6 +2146,12 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "audiosDoResumo",
       ler: (trecho: TrechoDaVarredura) => audiosDoResumoQueSaem(db, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() }).where(eq(resumoEmAudio.id, id)),
+    },
+    {
+      // O perfil de voz sem a conta (H3d): o objeto sai com todas as versões e só então a linha.
+      nome: "perfisDeVoz",
+      ler: (trecho: TrechoDaVarredura) => perfisDeVozSemConta(db, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(voiceProfiles).where(eq(voiceProfiles.id, id)),
     },
   ];
 

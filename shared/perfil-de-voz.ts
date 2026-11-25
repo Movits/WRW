@@ -24,6 +24,31 @@ export type VersaoDoTextoDoPerfilDeVoz = (typeof VERSOES_DO_TEXTO_DO_PERFIL_DE_V
 
 export const VERSAO_VIGENTE_DO_TEXTO_DO_PERFIL_DE_VOZ: VersaoDoTextoDoPerfilDeVoz = "perfil-de-voz-2026-11-25";
 
+/**
+ * O texto do consentimento que cada versão aceita, por idioma da tela: o
+ * sha256 de `perfilDeVoz.consent` + "
+" + `perfilDeVoz.consentSupport`
+ * (o que a tela manda em `textoExibido`, client/src/components/PerfilDeVoz.tsx).
+ * O servidor recusa com CONSENTIMENTO_PEDIDO o texto que não bate: o registro
+ * guarda só o que a Cris aprovou para aquela versão. O teste
+ * (server/perfil-de-voz.test.ts) recalcula a versão VIGENTE a partir dos 10
+ * locales: mudou o texto, versão nova aqui, com os hashes novos.
+ */
+export const HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ: Record<VersaoDoTextoDoPerfilDeVoz, Readonly<Record<string, string>>> = {
+  "perfil-de-voz-2026-11-25": {
+    "pt-BR": "c66d61654b3e6d022a875f36febba606668ced0c541364fa067f8823045e54ad",
+    en: "ac447f6655517799bc20684b8ea1845e782e4fe54992041fdf5b3c08ad40bb18",
+    es: "feeab3359e6ac4b8a0c2499797436731b572f0e2ffd03a4f407185c753d6afc4",
+    fr: "0141e23ca16174166264ccc0e5b5773ca23786698ee8f3358ddd78debfc2528f",
+    ar: "ac2ecc94bc1d96625769f4e64a783b6c23cda9b299f533d61cee49348fceb559",
+    zh: "3ce4c56d1a0802a1d2d26e417f9d8e580e27b6f1962364220928d714f1328fed",
+    hi: "a084e7b7a171577fa361265021c97253a59c37be4ceb2edac7a20a5054c47285",
+    de: "ad6f654ac1ba951c0b169550938d407c294e9ef5e0714c36fa9f919b14fb0efb",
+    ja: "7a9e53f14fbd2b4510ded354bd2343c29e75960f71418cc3b1cd58ebec99c361",
+    ru: "f5c0fa1bc71b6ce662290b53402cd3c68923f8b2c1e8c171b9ff3fee55d3f6da",
+  },
+};
+
 /** O teto do texto exibido que a tela manda para o registro (a caixa e o texto de apoio, em qualquer dos 10 idiomas). */
 export const TEXTO_DO_CONSENTIMENTO_DE_VOZ_MAX = 2000;
 
@@ -60,7 +85,8 @@ export const ROTULO_DA_VOZ_DA_DONA = "F1";
 /**
  * As recusas, como CÓDIGO (a tela traduz):
  * - CONSENTIMENTO_PEDIDO: a primeira gravação sem a caixa marcada, ou com uma
- *   versão do texto que o servidor não conhece;
+ *   versão do texto que o servidor não conhece, ou com um texto que não é o
+ *   daquela versão no idioma da tela (HASHES_DO_TEXTO_DO_PERFIL_DE_VOZ);
  * - AMOSTRA_INVALIDA: formato, tamanho ou duração fora do aceito;
  * - SEM_PERFIL: ouvir ou desligar sem perfil gravado;
  * - DEMAIS: o teto de gravações por hora;

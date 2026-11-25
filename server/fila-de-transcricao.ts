@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
 import { idiomaDaTranscricao } from "@shared/idioma-da-reuniao";
-import { contasDasVozes } from "@shared/const";
+import { contasDasVozes, nomesDosFalantes } from "@shared/const";
 import { ROTULO_DA_VOZ_DA_DONA } from "@shared/perfil-de-voz";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { amostraDaVozDaDona } from "./perfil-de-voz";
@@ -311,11 +311,24 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
     const audio = await storageGetBytes(linha.storageKey, TAMANHO_MAXIMO_DA_PARTE);
     // O perfil de voz da dona (H3d, server/perfil-de-voz.ts): a amostra vai
     // junto, e a voz dela sai com o rótulo fixo. Sem perfil, como antes.
-    const amostra = vozDaDonaContinua ? await amostraDaVozDaDona(db, linha.ownerId) : null;
-    const transcrita = await comVagaDeIA(() => transcreverFatia({
+    let amostra = vozDaDonaContinua ? await amostraDaVozDaDona(db, linha.ownerId) : null;
+    const transcrever = (amostraDaVoz: typeof amostra) => comVagaDeIA(() => transcreverFatia({
       audio, mimeType: linha.mimeType, idioma: linha.idioma, inicioSegundos: inicioMs / 1000, duracaoSegundos: linha.durationMs / 1000, anterior,
-      ultimaTentativa, ...(amostra ? { amostraDaVoz: amostra } : {}),
+      ultimaTentativa, ...(amostraDaVoz ? { amostraDaVoz } : {}),
     }));
+    let transcrita: Awaited<ReturnType<typeof transcrever>>;
+    try {
+      transcrita = await transcrever(amostra);
+    } catch (erro) {
+      // A IA recusou o pedido com a amostra (uma amostra corrompida dá 400) ou
+      // cortou a resposta: a parte não paga pela amostra. Vai de novo, na mesma
+      // tentativa, sem ela, e fica sem a marca da voz da dona (as partes
+      // seguintes também seguem sem a amostra, e a montagem não liga o F1).
+      if (!amostra || !(erro instanceof GeminiRecusouChamadaError || erro instanceof GeminiRespostaCortadaError)) throw erro;
+      console.warn(`[Fila] a IA não aceitou a parte ${parte.seq} com a amostra da voz da dona (${codigoDoErro(erro)}); vai sem ela`);
+      amostra = null;
+      transcrita = await transcrever(null);
+    }
     const { modelo, tempos } = transcrita;
     // Outra conversa (a junção, H17): a IA rotulou as vozes do zero (F1, F2...),
     // e os rótulos vão para depois dos que as partes de antes já usam. Com a
@@ -460,10 +473,11 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const { segmentos, texto } = montarTranscricao(transcritas, Math.max(reuniao.esperadas ?? 0, ...partes.map(p => p.seq + 1)));
     // A frase é compartilhada (shared/const.ts): a tela a mostra no idioma da dona.
     if (!texto.trim()) throw new Error(MENSAGEM_PARTES_SEM_TRANSCRICAO);
-    const [r] = await db.select({ idioma: meetings.language, speakerAccounts: meetings.speakerAccounts }).from(meetings)
+    const [r] = await db.select({ idioma: meetings.language, speakerAccounts: meetings.speakerAccounts, speakerNames: meetings.speakerNames }).from(meetings)
       .where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId))).limit(1);
-    // A voz da dona reconhecida pela amostra (H3d) já sai ligada à conta dela.
-    const contasDasVozesNovas = contasComAVozDaDona(partes, segmentos, contasDasVozes(r?.speakerAccounts));
+    // A voz da dona reconhecida pela amostra (H3d) já sai ligada à conta dela,
+    // menos se a dona deu nome livre ao rótulo (ela soltou a conta).
+    const contasDasVozesNovas = contasComAVozDaDona(partes, segmentos, contasDasVozes(r?.speakerAccounts), nomesDosFalantes(r?.speakerNames));
     // A extração lê as falas com o rótulo da voz ("{F1}: fala"), a mesma
     // entrada do resumo: sem ele, a IA não via quem fala e chutava a presença
     // de quem fala sem dizer o próprio nome (revisão do pacote P2B). A

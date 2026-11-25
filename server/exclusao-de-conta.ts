@@ -54,7 +54,12 @@
 //    consentimento (origem "exclusao_da_conta") em voice_profile_consents, que
 //    FICA: é a prova de que houve consentimento e de quando ele acabou, sem a
 //    voz. Se o bucket recusar, a chave vai para `arquivosComFalha` (log e
-//    auditoria, como os outros arquivos) e a linha sai assim mesmo.
+//    auditoria, como os outros arquivos) e a linha FICA, como a do áudio na
+//    regra 6: é o único ponteiro para a voz. A linha só sai no plano quando a
+//    chave dela foi lida com as outras e saiu do bucket (`perfisQueSaem`); o
+//    perfil gravado ou regravado depois da leitura também fica. Sem a conta, a
+//    varredura das gravações (`limparGravacoesVencidas`, ramo "perfisDeVoz")
+//    o acha, tenta o bucket de novo e só então tira a linha.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -133,6 +138,11 @@ export type ContextoDaExclusao = {
   documentosQueFicam?: string[];
   /** As fotos e os desenhos do resumo (ids de meeting_attachments, H4g e H4h) cujo objeto não saiu. */
   anexosQueFicam?: string[];
+  /**
+   * Os perfis de voz (ids de voice_profiles, H3d) cuja amostra foi lida com as
+   * outras chaves e saiu do bucket: só essas linhas saem no plano (regra 7).
+   */
+  perfisQueSaem?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -213,7 +223,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: resumoEmAudio, coluna: resumoEmAudio.ownerId, origem: "openId" },
   {
     tabela: voiceProfiles, coluna: voiceProfiles.ownerId, origem: "openId",
-    motivo: "o perfil de voz (H3d), dado biométrico: a amostra já saiu do bucket com todas as versões, e a revogação já foi registrada",
+    // Só a linha cuja amostra saiu do bucket (regra 7): sem o contexto, nada
+    // a filtrar; com ele, a lista vazia não apaga nenhuma (inArray vazio é falso).
+    filtro: (_chaves, contexto) => (contexto?.perfisQueSaem ? inArray(voiceProfiles.id, contexto.perfisQueSaem) : undefined),
+    motivo: "o perfil de voz (H3d), dado biométrico: sai só a linha cuja amostra saiu do bucket com todas as versões; a que ficou é o único ponteiro para a voz, e a varredura a retenta",
   },
   { tabela: buscasDoComplemento, coluna: buscasDoComplemento.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
@@ -525,6 +538,25 @@ export async function tirarDosGruposAlheios(
 export const MOTIVO_DA_PARTE_QUE_FICOU = "conta excluída; o áudio desta parte não saiu do bucket";
 
 /**
+ * Os perfis de voz (H3d) que saem no plano: a chave da amostra estava entre as
+ * lidas antes do bucket (`arquivos`) e não falhou. O perfil cuja amostra o
+ * bucket recusou fica, e também o gravado (ou regravado) depois da leitura das
+ * chaves: a amostra dele não foi tentada, e a linha é o único ponteiro para ela.
+ * Sem a conta, a varredura das gravações tenta o bucket de novo (regra 7).
+ */
+async function perfisDeVozQueSaem(db: Db, chaves: ChavesDaConta, arquivos: string[], arquivosComFalha: string[]): Promise<string[]> {
+  const perfis = await db.select({ id: voiceProfiles.id, chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  if (!perfis.length) return [];
+  const tentadas = new Set(arquivos);
+  const falharam = new Set(arquivosComFalha);
+  return perfis.filter(perfil => {
+    const chave = chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave) ?? "";
+    return !!chave && tentadas.has(chave) && !falharam.has(chave);
+  }).map(perfil => perfil.id);
+}
+
+/**
  * O áudio de reunião cujo objeto NÃO saiu do bucket: os ids das partes
  * (meeting_audio_slices) e das gravações inteiras (meeting_recordings). Casa
  * pelo ID da linha, não pela chave: a chave de `arquivosComFalha` passou por
@@ -708,7 +740,11 @@ export async function excluirConta(
   // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
   // essas linhas de fora.
   const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos };
+  const perfisQueSaem = await perfisDeVozQueSaem(db, chaves, arquivos, arquivosComFalha);
+  const contexto: ContextoDaExclusao = {
+    fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos,
+    perfisQueSaem,
+  };
   if (ficaram.fatias.length) {
     const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });

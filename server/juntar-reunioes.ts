@@ -7,7 +7,7 @@ import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, apagarDer
 import { LINK_DESLIGADO } from "./link-aberto-da-reuniao";
 import { CAUSAS_DA_PARTE_SEM_AUDIO } from "./audio-guardado-das-partes";
 import { FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS } from "./fatias-de-reuniao";
-import { DURACAO_DA_FATIA_SEGUNDOS, MARCA_DE_OUTRA_REUNIAO, type Segmento } from "./transcricao-de-fatia";
+import { DURACAO_DA_FATIA_SEGUNDOS, MARCA_DA_VOZ_DA_DONA, MARCA_DE_OUTRA_REUNIAO, type Segmento } from "./transcricao-de-fatia";
 import { chaveDoStorageDaDona } from "./storage";
 import {
   GRAVACAO_EM_PARTES_SEGUNDOS_MAX, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, nomesDosFalantes, PARTES_POR_REUNIAO_MAX,
@@ -168,11 +168,18 @@ function deslocarSegmento(segmento: unknown, rotulos: number, segundos: number, 
  * das vozes deslocados em `rotulos` e os tempos em `segundos`. Com `idioma`
  * (o escolhido para a reunião de origem), a fala sem idioma passa a tê-lo. O
  * resto fica.
+ *
+ * Com os rótulos deslocados, a marca da voz da dona (MARCA_DA_VOZ_DA_DONA, H3d)
+ * sai: o rótulo fixo dela (F1) virou outro, e o F1 da reunião juntada é de
+ * outra parte, que pode ser outra pessoa. A montagem só liga o F1 à conta da
+ * dona com toda parte que o usa marcada (contasComAVozDaDona); a dona desta
+ * parte fica com o rótulo deslocado, e ela a liga no "Quem é cada voz".
  */
 export function deslocarResultado(result: unknown, rotulos: number, segundos: number, idioma?: string | null): unknown {
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
   const r = result as { segmentos?: unknown; contexto?: { falantes?: unknown; ultimasFalas?: unknown } };
   const saida: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+  if (rotulos) delete saida[MARCA_DA_VOZ_DA_DONA];
   if (Array.isArray(r.segmentos)) saida.segmentos = r.segmentos.map(segmento => deslocarSegmento(segmento, rotulos, segundos, idioma));
   if (r.contexto && typeof r.contexto === "object") {
     saida.contexto = {
