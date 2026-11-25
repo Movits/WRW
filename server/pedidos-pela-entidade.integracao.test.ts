@@ -188,6 +188,8 @@ describe.skipIf(!temBanco)("Pedido de contato pela entidade (integração)", () 
     const db = (await getDb())!;
     const [linha] = await db.select().from(pedidosPelaEntidade).where(eq(pedidosPelaEntidade.id, pedidoDaMembra));
     expect(linha.mensagem).not.toContain("99876");
+    // O contato sai inteiro, trocado pelo marcador: nada de "(2***********32" com o parêntese aberto.
+    expect(linha.mensagem).toBe("Quero comprar café. Meu fone: [•••]");
     const trilha = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "ENTIDADE_PEDIDO_CRIADO"), eq(auditLogs.resourceId, pedidoDaMembra)));
     expect(trilha).toHaveLength(1);
     const [conexao] = (await conexoesDe(MEMBRA)).filter(c => c.id === conexaoMembra);

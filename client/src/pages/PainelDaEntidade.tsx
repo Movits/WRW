@@ -8,7 +8,8 @@ import { PedidosDaEntidade } from "@/components/PedidosDaEntidade";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { lerPlanilha, PlanilhaIlegivel, sha256DoArquivo } from "@/lib/ler-planilha";
 import {
-  ehErroDaEntidade, linhaDaPlanilha, mapearCabecalho, planilhaDeLinks, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO,
+  ehErroDaEntidade, linhaDaPlanilha, linhasComProblema, mapearCabecalho, ordenarProblemas, passaDoTeto, planilhaDeLinks,
+  ASSOCIADOS_MAX_ATE_N4B, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO,
   type LinhaBruta, type ProblemaDaLinha,
 } from "@shared/entidades";
 
@@ -26,7 +27,11 @@ import {
 type Relatorio = {
   modo: "ensaio" | "aplicar"; total: number; processadas: number;
   criados: number; atualizados: number; recusados: number; comAviso: number;
+  /** Os documentos que ainda não estão na base: com a base de hoje, dizem se o teto estoura. */
+  novos: number;
   problemas: ProblemaDaLinha[]; concluido: boolean;
+  /** A recusa do servidor, traduzida: fica fixa no lugar do progresso, não só num aviso passageiro. */
+  erro?: string;
 };
 
 type Planilha = { nome: string; sha256: string; linhas: LinhaBruta[] };
@@ -80,7 +85,7 @@ export default function PainelDaEntidade() {
         )}
         <PedidosDaEntidade habilitado={dados.convenioVigente} />
         <Membros nomeDaEntidade={dados.nome} ativacaoHabilitada={dados.convenioVigente} />
-        <Importacao habilitada={dados.convenioVigente} />
+        <Importacao habilitada={dados.convenioVigente} base={dados.membros.importados + dados.membros.ativados} />
         <Ativacao habilitada={dados.convenioVigente} />
         <Convite habilitado={dados.convenioVigente} nome={dados.nome} />
       </div>
@@ -107,7 +112,8 @@ function Membros({ nomeDaEntidade, ativacaoHabilitada }: { nomeDaEntidade: strin
     <section aria-labelledby="titulo-membros" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="titulo-membros" className="text-lg font-semibold">{t("entidade.membros.titulo")}</h2>
-        <span className="text-sm text-white/50">{t("entidade.membros.total", { n: total })}</span>
+        {/* Durante a busca, o número é o da busca, não o tamanho da base. */}
+        <span className="text-sm text-white/50">{t(busca ? "entidade.membros.totalNaBusca" : "entidade.membros.total", { n: total })}</span>
       </div>
       <label className="relative block">
         <span className="sr-only">{t("entidade.membros.buscar")}</span>
@@ -171,11 +177,14 @@ function LinhaDoMembro({ membro, nomeDaEntidade, ativacaoHabilitada }: { membro:
   return (
     <li className="py-3 flex flex-col gap-1 md:flex-row md:flex-wrap md:items-center md:gap-4">
       <span className="font-mono text-xs text-[#efcba8] md:w-24 shrink-0">{membro.codigo}</span>
-      <span className="text-sm font-medium break-words md:flex-1 min-w-0">{membro.nome}</span>
+      <span className="text-sm font-medium break-words md:flex-1 min-w-0 md:min-w-48">{membro.nome}</span>
       <span className="font-mono text-xs text-white/60 md:w-44 shrink-0" dir="ltr">{membro.documento}</span>
       <span className="text-xs text-white/50 md:w-28 shrink-0">
         {t(`entidade.estados.${membro.estado}`)}{membro.disponivel ? ` · ${t("entidade.membros.naRede")}` : ""}
       </span>
+      {/* As duas colunas de ação têm largura fixa e existem mesmo vazias: sem isso, a
+          linha sem "Ver contato" ou sem "Link de ativação" empurra o documento e o estado. */}
+      <span data-coluna="contato" className="empty:hidden md:empty:block md:w-28 shrink-0 min-w-0">
       {membro.temContato && (
         contato.data ? (
           <span className="text-xs text-white/70 flex flex-wrap gap-x-3" dir="ltr">
@@ -189,6 +198,8 @@ function LinhaDoMembro({ membro, nomeDaEntidade, ativacaoHabilitada }: { membro:
           </button>
         )
       )}
+      </span>
+      <span data-coluna="ativacao" className="empty:hidden md:empty:block md:w-48 shrink-0 min-w-0">
       {membro.estado === "importado" && !gerado && (
         <span className="flex flex-wrap items-center gap-2">
           {membro.ativacaoValidaAte ? <span className="text-xs text-white/45">{t("entidade.ativacao.validoAte", { data: data(membro.ativacaoValidaAte) })}</span> : null}
@@ -198,6 +209,7 @@ function LinhaDoMembro({ membro, nomeDaEntidade, ativacaoHabilitada }: { membro:
           </button>
         </span>
       )}
+      </span>
       {gerado && (
         <div className="w-full space-y-2 rounded-lg bg-black/30 p-3">
           <p className="font-mono text-xs break-all" dir="ltr">{linkDeAtivacao(gerado.token)}</p>
@@ -213,8 +225,8 @@ function LinhaDoMembro({ membro, nomeDaEntidade, ativacaoHabilitada }: { membro:
 
 // ─── Importação ──────────────────────────────────────────────────────────────
 
-function Importacao({ habilitada }: { habilitada: boolean }) {
-  const { t } = useTranslation();
+function Importacao({ habilitada, base }: { habilitada: boolean; base: number }) {
+  const { t, i18n } = useTranslation();
   const traduzErro = useTraduzErro();
   const utils = trpc.useUtils();
   const entrada = useRef<HTMLInputElement>(null);
@@ -251,15 +263,15 @@ function Importacao({ habilitada }: { habilitada: boolean }) {
   async function rodar(modo: "ensaio" | "aplicar") {
     if (!planilha) return;
     setRodando(true);
-    const atual: Relatorio = { modo, total: planilha.linhas.length, processadas: 0, criados: 0, atualizados: 0, recusados: 0, comAviso: 0, problemas: [], concluido: false };
+    const atual: Relatorio = { modo, total: planilha.linhas.length, processadas: 0, criados: 0, atualizados: 0, recusados: 0, comAviso: 0, novos: 0, problemas: [], concluido: false };
     setRelatorio({ ...atual });
     try {
       const { importacaoId } = await iniciar.mutateAsync({ modo, arquivoSha256: planilha.sha256, totalLinhas: planilha.linhas.length });
       for (let inicio = 0; inicio < planilha.linhas.length; inicio += LINHAS_POR_BLOCO) {
         const r = await bloco.mutateAsync({ importacaoId, inicio, linhas: planilha.linhas.slice(inicio, inicio + LINHAS_POR_BLOCO) });
         atual.processadas += r.processadas; atual.criados += r.criados; atual.atualizados += r.atualizados;
-        atual.recusados += r.recusados; atual.comAviso += r.comAviso;
-        atual.problemas = [...atual.problemas, ...r.problemas].slice(0, PROBLEMAS_LISTADOS_MAX);
+        atual.recusados += r.recusados; atual.comAviso += r.comAviso; atual.novos += r.novos ?? 0;
+        atual.problemas = ordenarProblemas([...atual.problemas, ...r.problemas]).slice(0, PROBLEMAS_LISTADOS_MAX);
         setRelatorio({ ...atual });
       }
       await concluir.mutateAsync({ importacaoId });
@@ -271,12 +283,15 @@ function Importacao({ habilitada }: { habilitada: boolean }) {
         void utils.entidades.minha.invalidate();
       }
     } catch (e) {
-      toast.error(traduzErro(e));
+      atual.erro = traduzErro(e);
+      setRelatorio({ ...atual });
     } finally {
       setRodando(false);
     }
   }
 
+  // O ensaio já avisa que a base passaria do teto; o aplicar seria recusado no servidor.
+  const acimaDoTeto = Boolean(relatorio?.modo === "ensaio" && relatorio.concluido && passaDoTeto(base, relatorio.novos));
   const progresso = relatorio && relatorio.total ? Math.round((relatorio.processadas / relatorio.total) * 100) : 0;
   return (
     <section aria-labelledby="titulo-importar" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:p-6 space-y-4">
@@ -302,7 +317,7 @@ function Importacao({ habilitada }: { habilitada: boolean }) {
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm disabled:opacity-40">
               <Search className="w-4 h-4" />{t("entidade.importar.ensaio")}
             </button>
-            <button type="button" disabled={rodando || !(relatorio?.modo === "ensaio" && relatorio.concluido)} onClick={() => void rodar("aplicar")}
+            <button type="button" disabled={rodando || acimaDoTeto || !(relatorio?.modo === "ensaio" && relatorio.concluido)} onClick={() => void rodar("aplicar")}
               className="inline-flex items-center gap-2 rounded-xl bg-[#c98f70] text-black px-4 py-2 text-sm font-medium disabled:opacity-40">
               <Upload className="w-4 h-4" />{t("entidade.importar.aplicar")}
             </button>
@@ -312,9 +327,17 @@ function Importacao({ habilitada }: { habilitada: boolean }) {
       )}
       {relatorio && (
         <div className="space-y-2" aria-live="polite">
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progresso}>
+          {relatorio.erro && (
+            <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-100">{relatorio.erro}</p>
+          )}
+          {acimaDoTeto && (
+            <p role="alert" className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              {t("entidade.importar.tetoNoEnsaio", { max: ASSOCIADOS_MAX_ATE_N4B.toLocaleString(i18n.language), base, novos: relatorio.novos })}
+            </p>
+          )}
+          {!relatorio.erro && <div className="h-2 rounded-full bg-white/10 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progresso}>
             <div className="h-full bg-[#c98f70] transition-all" style={{ width: `${progresso}%` }} />
-          </div>
+          </div>}
           <p className="text-sm text-white/70">
             {t(relatorio.modo === "ensaio" ? "entidade.importar.relatorioEnsaio" : "entidade.importar.relatorioAplicar", {
               processadas: relatorio.processadas, total: relatorio.total, criados: relatorio.criados,
@@ -323,7 +346,7 @@ function Importacao({ habilitada }: { habilitada: boolean }) {
           </p>
           {relatorio.problemas.length > 0 && (
             <details className="text-sm">
-              <summary className="cursor-pointer text-white/70">{t("entidade.importar.problemas", { n: relatorio.problemas.length })}</summary>
+              <summary className="cursor-pointer text-white/70">{t("entidade.importar.problemas", { n: linhasComProblema(relatorio.problemas) })}</summary>
               <ul className="mt-2 max-h-64 overflow-y-auto space-y-1 text-xs text-white/60">
                 {relatorio.problemas.map((p, i) => (
                   <li key={`${p.linha}-${p.codigo}-${i}`}>

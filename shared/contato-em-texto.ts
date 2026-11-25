@@ -156,3 +156,20 @@ export function mascararContatosEmTexto(texto: string): string {
   }
   return resultado;
 }
+
+/** O marcador que toma o lugar do contato inteiro (sem idioma: a mensagem circula entre línguas). */
+export const MARCADOR_DE_CONTATO_OCULTO = "[•••]";
+
+/**
+ * Texto com cada contato trocado INTEIRO por um marcador, para mensagens que
+ * outra pessoa lê (o pedido pela entidade). A máscara do registro
+ * (`mascararTrecho`) deixa as pontas: "(61) 98888-7777" virava "(6***********77",
+ * com o parêntese aberto e três dígitos à mostra, o que na tela parece defeito.
+ */
+export function ocultarContatosEmTexto(texto: string, marcador = MARCADOR_DE_CONTATO_OCULTO): string {
+  // Os trechos maiores primeiro: um trecho contido em outro não deixa sobra.
+  const trechos = encontrarContatosEmTexto(texto).map(c => c.trecho).sort((a, b) => b.length - a.length);
+  let resultado = texto;
+  for (const trecho of trechos) resultado = resultado.split(trecho).join(marcador);
+  return resultado;
+}

@@ -227,4 +227,14 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     expect(within(dialogo).getByRole("button", { name: `Descartar ${referenciaDaConexao(PAR_A)}` })).toBeInTheDocument();
     expect(duble.mutate).not.toHaveBeenCalled();
   });
+
+  it("o selo do contato de outro network com a entidade é um bloco: quebra inteiro, com a borda em volta (375 px)", () => {
+    const c = conexao();
+    c.lados[1] = { ...c.lados[1], entidade: { nome: "Federação das Indústrias do Estado de Teste" } } as ConexaoNaTela["lados"][number];
+    const { container } = renderizar(c);
+    const selo = Array.from(container.querySelectorAll("[data-selo]")).find(el => el.textContent!.includes("Federação"))!;
+    expect(selo).toBeTruthy();
+    expect(selo.className).toContain("inline-block");
+    expect(selo.className).toContain("max-w-full");
+  });
 });

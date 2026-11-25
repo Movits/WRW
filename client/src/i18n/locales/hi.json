@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "सदस्य",
       "total": "कुल {{n}}",
+      "totalNaBusca": "खोज में {{n}} मिले",
       "buscar": "सदस्य खोजें",
       "buscarDica": "नाम, कोड (NW-...) या पूरे CNPJ से खोजें",
       "nadaNaBusca": "इस खोज में कुछ नहीं मिला।",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "परीक्षण: {{total}} में से {{processadas}} पंक्तियाँ · {{criados}} नई · {{atualizados}} अपडेट · {{recusados}} अस्वीकृत · {{comAviso}} चेतावनी के साथ",
       "relatorioAplicar": "आयात: {{total}} में से {{processadas}} पंक्तियाँ · {{criados}} नई · {{atualizados}} अपडेट · {{recusados}} अस्वीकृत · {{comAviso}} चेतावनी के साथ",
       "problemas": "{{n}} पंक्तियाँ अस्वीकृत या चेतावनी के साथ",
+      "tetoNoEnsaio": "आधार {{max}} सदस्यों से अधिक हो जाएगा: आज {{base}} हैं, और यह स्प्रेडशीट {{novos}} नए लाती है। फ़िलहाल आयात अस्वीकार हो जाएगा। आयात से पहले टीम से बात करें।",
       "linha": "पंक्ति {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "स्प्रेडशीट में \"{{coluna}}\" कॉलम है, जिसे WRW स्वीकार नहीं करता (पासवर्ड, CPF या जन्मतिथि)। कॉलम हटाकर फ़ाइल फिर से चुनें।",

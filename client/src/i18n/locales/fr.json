@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "Membres",
       "total": "{{n}} au total",
+      "totalNaBusca": "{{n}} trouvés dans la recherche",
       "buscar": "Rechercher des membres",
       "buscarDica": "Rechercher par nom, code (NW-...) ou CNPJ complet",
       "nadaNaBusca": "Aucun résultat pour cette recherche.",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "Essai : {{processadas}} sur {{total}} lignes · {{criados}} nouvelles · {{atualizados}} mises à jour · {{recusados}} refusées · {{comAviso}} avec avertissement",
       "relatorioAplicar": "Import : {{processadas}} sur {{total}} lignes · {{criados}} nouvelles · {{atualizados}} mises à jour · {{recusados}} refusées · {{comAviso}} avec avertissement",
       "problemas": "{{n}} lignes refusées ou avec avertissement",
+      "tetoNoEnsaio": "La base dépasserait {{max}} membres : il y en a {{base}} aujourd’hui, et ce tableau en apporte {{novos}} nouveaux. Pour l’instant, l’importation serait refusée. Parlez à l’équipe avant d’importer.",
       "linha": "Ligne {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "Le tableur contient la colonne « {{coluna}} », que WRW n'accepte pas (mot de passe, CPF ou date de naissance). Retirez la colonne et choisissez à nouveau le fichier.",

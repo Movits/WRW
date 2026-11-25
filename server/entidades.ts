@@ -13,7 +13,7 @@ import {
 } from "./entidades-cofre";
 import {
   ASSOCIADOS_MAX_ATE_N4B, DOCUMENTO_DO_PAIS, ERROS_DA_ENTIDADE, ITENS_POR_LADO_MAX, LINHAS_POR_BLOCO, LINHAS_POR_ARQUIVO_MAX, MEMBROS_POR_PAGINA,
-  convenioVigente, formatarDocumento, normalizarDocumento, validarLinha,
+  convenioVigente, formatarDocumento, normalizarDocumento, ordenarProblemas, validarLinha,
   type EstadoDoConvenio, type LinhaBruta, type LinhaValida, type ProblemaDaLinha, type TipoDeDocumento, type TipoDeEntidade,
 } from "../shared/entidades";
 
@@ -178,6 +178,8 @@ export async function iniciarImportacao(
 
 type ResultadoDoBloco = {
   processadas: number; criados: number; atualizados: number; recusados: number; comAviso: number;
+  /** Documentos que ainda não estão na base (sem os recriados): o ensaio soma para avisar do teto. */
+  novos: number;
   problemas: ProblemaDaLinha[];
 };
 
@@ -349,7 +351,7 @@ export async function processarBloco(
       comAviso: importacao.comAviso + linhasComAviso.size,
       porCodigo,
     }).where(eq(importacoesDeEntidade.id, importacao.id));
-    return { processadas: entrada.linhas.length, criados, atualizados, recusados, comAviso: linhasComAviso.size, problemas };
+    return { processadas: entrada.linhas.length, criados, atualizados, recusados, comAviso: linhasComAviso.size, novos: novas.length, problemas: ordenarProblemas(problemas) };
   });
 }
 

@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "Members",
       "total": "{{n}} in total",
+      "totalNaBusca": "{{n}} found in the search",
       "buscar": "Search members",
       "buscarDica": "Search by name, code (NW-...) or full CNPJ",
       "nadaNaBusca": "Nothing found for this search.",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "Dry run: {{processadas}} of {{total}} rows · {{criados}} new · {{atualizados}} updated · {{recusados}} rejected · {{comAviso}} with warnings",
       "relatorioAplicar": "Import: {{processadas}} of {{total}} rows · {{criados}} new · {{atualizados}} updated · {{recusados}} rejected · {{comAviso}} with warnings",
       "problemas": "{{n}} rows rejected or with warnings",
+      "tetoNoEnsaio": "The base would exceed {{max}} members: there are {{base}} today, and this spreadsheet brings {{novos}} new ones. For now, the import would be refused. Talk to the team before importing.",
       "linha": "Row {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "The spreadsheet has the column \"{{coluna}}\", which WRW does not accept (password, CPF or date of birth). Remove the column and choose the file again.",

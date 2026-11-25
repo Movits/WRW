@@ -287,6 +287,29 @@ export type RecusaDaLinha = (typeof RECUSAS_DA_LINHA)[number];
 export type AvisoDaLinha = (typeof AVISOS_DA_LINHA)[number];
 export type ProblemaDaLinha = { linha: number; codigo: RecusaDaLinha | AvisoDaLinha; primeira?: number };
 
+/**
+ * Os problemas do relatório em ordem de linha (o servidor acha os repetidos e
+ * os removidos depois da validação, e eles chegavam depois das linhas seguintes).
+ * A ordem entre as mensagens da mesma linha fica a de chegada.
+ */
+export function ordenarProblemas(problemas: ProblemaDaLinha[]): ProblemaDaLinha[] {
+  return problemas.map((p, i) => ({ p, i })).sort((a, b) => a.p.linha - b.p.linha || a.i - b.i).map(x => x.p);
+}
+
+/** Quantas LINHAS têm recusa ou aviso: uma linha pode ter várias mensagens. */
+export function linhasComProblema(problemas: ProblemaDaLinha[]): number {
+  return new Set(problemas.map(p => p.linha)).size;
+}
+
+/**
+ * A base passaria do teto (ASSOCIADOS_MAX_ATE_N4B) com os novos desta planilha?
+ * `base` é o que a entidade já tem fora os removidos; `novos`, os documentos que
+ * ainda não estão nela. O ensaio avisa com isto; o aplicar recusa no servidor.
+ */
+export function passaDoTeto(base: number, novos: number): boolean {
+  return base + novos > ASSOCIADOS_MAX_ATE_N4B;
+}
+
 export type LinhaValida = {
   linha: number;
   documento: { pais: string; tipo: TipoDeDocumento; valor: string };

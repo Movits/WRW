@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "الأعضاء",
       "total": "المجموع: {{n}}",
+      "totalNaBusca": "تم العثور على {{n}} في البحث",
       "buscar": "البحث في الأعضاء",
       "buscarDica": "ابحث بالاسم أو الرمز (NW-...) أو رقم CNPJ كاملًا",
       "nadaNaBusca": "لا نتائج لهذا البحث.",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "تجربة: {{processadas}} من {{total}} صفًا · {{criados}} جديد · {{atualizados}} محدَّث · {{recusados}} مرفوض · {{comAviso}} مع تنبيه",
       "relatorioAplicar": "استيراد: {{processadas}} من {{total}} صفًا · {{criados}} جديد · {{atualizados}} محدَّث · {{recusados}} مرفوض · {{comAviso}} مع تنبيه",
       "problemas": "{{n}} صفًا مرفوضًا أو مع تنبيه",
+      "tetoNoEnsaio": "ستتجاوز القاعدة {{max}} عضو: يوجد اليوم {{base}}، وهذا الجدول يضيف {{novos}} جديدًا. في الوقت الحالي سيُرفض الاستيراد. تحدّث مع الفريق قبل الاستيراد.",
       "linha": "الصف {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "يحتوي الجدول على العمود \"{{coluna}}\" الذي لا تقبله WRW (كلمة المرور أو CPF أو تاريخ الميلاد). احذف العمود واختر الملف مرة أخرى.",

@@ -73,7 +73,7 @@ beforeEach(() => {
   duble.convite.mockReturnValue(consulta(null));
   duble.pedidos.mockReturnValue(consulta({ total: 0, abertos: 0, pagina: 0, porPagina: 30, pedidos: [] }));
   duble.iniciar.mockResolvedValue({ importacaoId: 7 });
-  duble.bloco.mockImplementation(async ({ linhas }: { linhas: unknown[] }) => ({ processadas: linhas.length, criados: linhas.length, atualizados: 0, recusados: 0, comAviso: 0, problemas: [] }));
+  duble.bloco.mockImplementation(async ({ linhas }: { linhas: unknown[] }) => ({ processadas: linhas.length, criados: linhas.length, atualizados: 0, recusados: 0, comAviso: 0, novos: linhas.length, problemas: [] }));
   duble.concluir.mockResolvedValue({});
 });
 afterEach(async () => {
@@ -197,5 +197,71 @@ describe("PainelDaEntidade", () => {
     expect(texto).toContain("\"'=1+1\"");
     expect(texto).toContain(`${window.location.origin}/ativar/tok_B_ABCDEFGHIJKLMNOPQRSTU`);
     clique.mockRestore();
+  });
+
+  // ─── Conferência de tela (25/11) ───────────────────────────────────────────
+
+  it("as colunas de ação existem com largura fixa mesmo vazias: a linha sem contato não desalinha", () => {
+    render(<PainelDaEntidade />);
+    const semContato = screen.getByText("Empresa Dois").closest("li")!;
+    const comContato = screen.getByText("Empresa Um").closest("li")!;
+    for (const coluna of ["contato", "ativacao"]) {
+      const [a, b] = [semContato, comContato].map(linha => linha.querySelector(`[data-coluna="${coluna}"]`));
+      expect(a, coluna).not.toBeNull();
+      expect(a!.className).toMatch(/md:w-\d+/);
+      // A mesma largura nas duas linhas: o documento e o estado ficam no mesmo lugar.
+      expect(a!.className).toBe(b!.className);
+    }
+    expect(semContato.querySelector('[data-coluna="contato"]')).toBeEmptyDOMElement();
+  });
+
+  it("durante a busca, o contador diz que é o número da busca, não o tamanho da base", async () => {
+    render(<PainelDaEntidade />);
+    expect(screen.getByText("2 no total")).toBeInTheDocument();
+    duble.membros.mockReturnValue(consulta({ total: 0, pagina: 0, porPagina: 50, membros: [] }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "99.990.003" } });
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(screen.getByText("0 encontrados na busca")).toBeInTheDocument();
+    expect(screen.queryByText("0 no total")).toBeNull();
+  });
+
+  it("a recusa do aplicar (BASE_ACIMA_DO_TETO) fica fixa no lugar do progresso", async () => {
+    render(<PainelDaEntidade />);
+    const csv = "Razão Social;CNPJ\nEmpresa Um;11.222.333/0001-81\n";
+    fireEvent.change(document.getElementById("arquivo-da-entidade")!, { target: { files: [arquivo("base.csv", csv)] } });
+    await screen.findByText("base.csv: 1 linhas");
+    fireEvent.click(screen.getByRole("button", { name: "Conferir (ensaio)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Importar" })).toBeEnabled());
+    duble.iniciar.mockRejectedValueOnce({ message: "BASE_ACIMA_DO_TETO" });
+    fireEvent.click(screen.getByRole("button", { name: "Importar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("vai até 1.000 associados");
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("o ensaio já avisa que a base passaria de 1000, e o Importar fica desligado", async () => {
+    duble.minha.mockReturnValue(consulta({ ...MINHA, membros: { importados: 950, ativados: 40 } }));
+    duble.bloco.mockImplementation(async ({ linhas }: { linhas: unknown[] }) => ({ processadas: linhas.length, criados: 11, atualizados: 0, recusados: 0, comAviso: 0, novos: 11, problemas: [] }));
+    render(<PainelDaEntidade />);
+    const csv = "Razão Social;CNPJ\nEmpresa Um;11.222.333/0001-81\n";
+    fireEvent.change(document.getElementById("arquivo-da-entidade")!, { target: { files: [arquivo("base.csv", csv)] } });
+    await screen.findByText("base.csv: 1 linhas");
+    fireEvent.click(screen.getByRole("button", { name: "Conferir (ensaio)" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A base passaria de 1.000 associados: hoje são 990, e esta planilha traz 11 novos.");
+    expect(screen.getByRole("button", { name: "Importar" })).toBeDisabled();
+  });
+
+  it("o resumo conta linhas, não mensagens, e a lista sai em ordem de linha", async () => {
+    duble.bloco.mockImplementation(async ({ linhas }: { linhas: unknown[] }) => ({
+      processadas: linhas.length, criados: 0, atualizados: 0, recusados: 1, comAviso: 1, novos: 0,
+      problemas: [{ linha: 310, codigo: "UF_INVALIDA" }, { linha: 308, codigo: "TELEFONE_INVALIDO" }, { linha: 308, codigo: "EMAIL_INVALIDO" }, { linha: 307, codigo: "MEMBRO_REMOVIDO" }],
+    }));
+    render(<PainelDaEntidade />);
+    const csv = "Razão Social;CNPJ\nEmpresa Um;11.222.333/0001-81\n";
+    fireEvent.change(document.getElementById("arquivo-da-entidade")!, { target: { files: [arquivo("base.csv", csv)] } });
+    await screen.findByText("base.csv: 1 linhas");
+    fireEvent.click(screen.getByRole("button", { name: "Conferir (ensaio)" }));
+    const resumo = await screen.findByText("3 linhas com recusa ou aviso");
+    const itens = Array.from(resumo.closest("details")!.querySelectorAll("li")).map(li => li.textContent!.match(/\d+/)![0]);
+    expect(itens).toEqual(["307", "308", "308", "310"]);
   });
 });

@@ -114,7 +114,9 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
                 {lado.codigoAnonimo ?? "—"}
               </Link>
             ) : (
-              <span className={`rounded-md border px-2 py-0.5 ${lado.meu ? "border-[#c98f70]/30 bg-[#c98f70]/10 text-[#efcba8]" : "border-white/10 text-white/55"}`}>
+              // inline-block: com o nome da entidade o selo quebra em duas linhas (375 px), e a borda
+              // precisa envolver o bloco inteiro, não cada pedaço da linha.
+              <span data-selo className={`inline-block max-w-full break-words rounded-md border px-2 py-0.5 ${lado.meu ? "border-[#c98f70]/30 bg-[#c98f70]/10 text-[#efcba8]" : "border-white/10 text-white/55"}`}>
                 {lado.tipo === "contato"
                   ? t("networkInteligente.connections.contactSide", { codigo: lado.codigoAnonimo ?? "—" })
                     + (lado.entidade && !lado.meu

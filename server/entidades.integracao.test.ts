@@ -59,12 +59,14 @@ async function importar(openId: string, modo: "ensaio" | "aplicar", linhas: Arra
   const rota = rotaDe(openId, { isEntidade: true });
   const { importacaoId } = await rota.entidades.iniciarImportacao({ modo, arquivoSha256: "a".repeat(64), totalLinhas: linhas.length });
   const problemas: Array<{ linha: number; codigo: string; primeira?: number }> = [];
+  let novos = 0;
   for (let inicio = 0; inicio < linhas.length; inicio += bloco) {
     const r = await rota.entidades.importarBloco({ importacaoId, inicio, linhas: linhas.slice(inicio, inicio + bloco) });
     problemas.push(...r.problemas);
+    novos += r.novos;
   }
   const relatorio = await rota.entidades.concluirImportacao({ importacaoId });
-  return { importacaoId, relatorio, problemas };
+  return { importacaoId, relatorio, problemas, novos };
 }
 
 describe.skipIf(!temBanco)("Base das associações (integração)", () => {
@@ -131,8 +133,10 @@ describe.skipIf(!temBanco)("Base das associações (integração)", () => {
       { documento: "123", nome: "Inválida" },
       { documento: doc(1), nome: "Empresa Um de novo" },
     ];
-    const { relatorio, problemas } = await importar(CONTA_A, "ensaio", linhas);
+    const { relatorio, problemas, novos } = await importar(CONTA_A, "ensaio", linhas);
     expect(relatorio).toMatchObject({ modo: "ensaio", linhasProcessadas: 4, criados: 2, atualizados: 0, recusados: 2 });
+    // Os novos (o que ainda não está na base) vão à tela, que avisa do teto já no ensaio.
+    expect(novos).toBe(2);
     expect(problemas).toEqual(expect.arrayContaining([
       { linha: 4, codigo: "DOCUMENTO_INVALIDO" },
       { linha: 5, codigo: "REPETIDO_NO_ARQUIVO", primeira: 2 },
@@ -195,12 +199,13 @@ describe.skipIf(!temBanco)("Base das associações (integração)", () => {
       .where(and(eq(entidadeMembros.ownerId, CONTA_A), eq(entidadeMembros.cnaePrincipal, "1091102")));
     const [tres] = await db.select().from(entidadeMembros).where(and(eq(entidadeMembros.ownerId, CONTA_A), eq(entidadeMembros.estado, "importado")))
       .orderBy(entidadeMembros.id).limit(1);
-    const { relatorio, problemas } = await importar(CONTA_A, "aplicar", [
+    const { relatorio, problemas, novos } = await importar(CONTA_A, "aplicar", [
       { documento: doc(1), nome: "Empresa Um Ltda", o_que_tem: "Café especial" },
       { documento: doc(2), nome: "Empresa Dois" },
       { documento: doc(4), nome: "Empresa Quatro" },
     ]);
     expect(relatorio).toMatchObject({ criados: 1, atualizados: 1, recusados: 0 });
+    expect(novos).toBe(1);
     expect(problemas).toEqual(expect.arrayContaining([{ linha: 3, codigo: "MEMBRO_ATIVADO_NAO_ALTERADO" }]));
     const [contatoUm] = await db.select().from(privateContacts).where(eq(privateContacts.id, Number(tres.contactId)));
     expect(contatoUm.fullName).toBe("Empresa Um Ltda");

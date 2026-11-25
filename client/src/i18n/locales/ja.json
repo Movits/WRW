@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "会員",
       "total": "合計 {{n}} 件",
+      "totalNaBusca": "検索で {{n}} 件",
       "buscar": "会員を検索",
       "buscarDica": "名称、コード（NW-...）または CNPJ 全体で検索",
       "nadaNaBusca": "この検索では見つかりませんでした。",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "試行：{{total}} 行中 {{processadas}} 行 · 新規 {{criados}} · 更新 {{atualizados}} · 拒否 {{recusados}} · 注意あり {{comAviso}}",
       "relatorioAplicar": "インポート：{{total}} 行中 {{processadas}} 行 · 新規 {{criados}} · 更新 {{atualizados}} · 拒否 {{recusados}} · 注意あり {{comAviso}}",
       "problemas": "拒否または注意ありの行：{{n}}",
+      "tetoNoEnsaio": "会員数が {{max}} を超えます：現在 {{base}} 件、このシートで新規 {{novos}} 件。現時点ではインポートは拒否されます。インポートの前にチームにご相談ください。",
       "linha": "{{linha}} 行目",
       "arquivo": {
         "COLUNA_PROIBIDA": "表に「{{coluna}}」列があります。WRW はこの情報（パスワード、CPF、生年月日）を受け取りません。列を削除してからファイルを選び直してください。",

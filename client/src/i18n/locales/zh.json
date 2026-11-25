@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "会员",
       "total": "共 {{n}} 个",
+      "totalNaBusca": "搜索到 {{n}} 个",
       "buscar": "搜索会员",
       "buscarDica": "按名称、代码（NW-...）或完整 CNPJ 搜索",
       "nadaNaBusca": "未找到结果。",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "试运行：{{processadas}}/{{total}} 行 · 新增 {{criados}} · 更新 {{atualizados}} · 拒绝 {{recusados}} · 有提示 {{comAviso}}",
       "relatorioAplicar": "导入：{{processadas}}/{{total}} 行 · 新增 {{criados}} · 更新 {{atualizados}} · 拒绝 {{recusados}} · 有提示 {{comAviso}}",
       "problemas": "{{n}} 行被拒绝或有提示",
+      "tetoNoEnsaio": "会员库将超过 {{max}} 个：目前有 {{base}} 个，此表格带来 {{novos}} 个新会员。目前导入会被拒绝。导入前请先联系团队。",
       "linha": "第 {{linha}} 行",
       "arquivo": {
         "COLUNA_PROIBIDA": "表格中有“{{coluna}}”列，WRW 不接收此类数据（密码、CPF 或出生日期）。请删除该列后重新选择文件。",

@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "Associados",
       "total": "{{n}} no total",
+      "totalNaBusca": "{{n}} encontrados na busca",
       "buscar": "Buscar associados",
       "buscarDica": "Buscar por nome, código (NW-...) ou CNPJ completo",
       "nadaNaBusca": "Nada encontrado nesta busca.",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "Ensaio: {{processadas}} de {{total}} linhas · {{criados}} novas · {{atualizados}} atualizadas · {{recusados}} recusadas · {{comAviso}} com aviso",
       "relatorioAplicar": "Importação: {{processadas}} de {{total}} linhas · {{criados}} novas · {{atualizados}} atualizadas · {{recusados}} recusadas · {{comAviso}} com aviso",
       "problemas": "{{n}} linhas com recusa ou aviso",
+      "tetoNoEnsaio": "A base passaria de {{max}} associados: hoje são {{base}}, e esta planilha traz {{novos}} novos. Por enquanto, a importação seria recusada. Fale com a equipe antes de importar.",
       "linha": "Linha {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "A planilha tem a coluna \"{{coluna}}\", que a WRW não recebe (senha, CPF ou data de nascimento). Tire a coluna e escolha o arquivo de novo.",

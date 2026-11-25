@@ -4134,6 +4134,7 @@
     "membros": {
       "titulo": "Mitglieder",
       "total": "{{n}} insgesamt",
+      "totalNaBusca": "{{n}} in der Suche gefunden",
       "buscar": "Mitglieder suchen",
       "buscarDica": "Nach Name, Code (NW-...) oder vollständiger CNPJ suchen",
       "nadaNaBusca": "Für diese Suche nichts gefunden.",
@@ -4159,6 +4160,7 @@
       "relatorioEnsaio": "Probelauf: {{processadas}} von {{total}} Zeilen · {{criados}} neu · {{atualizados}} aktualisiert · {{recusados}} abgelehnt · {{comAviso}} mit Hinweis",
       "relatorioAplicar": "Import: {{processadas}} von {{total}} Zeilen · {{criados}} neu · {{atualizados}} aktualisiert · {{recusados}} abgelehnt · {{comAviso}} mit Hinweis",
       "problemas": "{{n}} Zeilen abgelehnt oder mit Hinweis",
+      "tetoNoEnsaio": "Die Basis würde {{max}} Mitglieder überschreiten: heute sind es {{base}}, und diese Tabelle bringt {{novos}} neue. Vorerst würde der Import abgelehnt. Sprechen Sie vor dem Import mit dem Team.",
       "linha": "Zeile {{linha}}",
       "arquivo": {
         "COLUNA_PROIBIDA": "Die Tabelle hat die Spalte „{{coluna}}“, die WRW nicht annimmt (Passwort, CPF oder Geburtsdatum). Entfernen Sie die Spalte und wählen Sie die Datei erneut.",

@@ -14,7 +14,7 @@ import {
   type LadoVisivel, type Solicitante,
 } from "./network-registro";
 import type { EntidadeDaConta } from "./entidades";
-import { mascararContatosEmTexto } from "../shared/contato-em-texto";
+import { mascararContatosEmTexto, ocultarContatosEmTexto } from "../shared/contato-em-texto";
 import { ERROS_DA_ENTIDADE, convenioVigente } from "../shared/entidades";
 import {
   ESTADOS_ABERTOS, MENSAGEM_DO_PEDIDO_MAX, PEDIDOS_POR_DIA_MAX, PEDIDOS_POR_PAGINA, PRAZO_DO_PEDIDO_MS,
@@ -173,7 +173,7 @@ export async function pedirContatoPelaEntidade(quem: Solicitante, entrada: { con
   // O associado ainda está na rede (SIM, termo do Smart Match da entidade, conta ativa), conferido agora.
   if (!(await participantesAindaAutorizados(db, [alvo])).has(alvo.id)) throw indisponivel();
 
-  const mensagem = entrada.mensagem?.trim() ? mascararContatosEmTexto(entrada.mensagem.trim()).slice(0, MENSAGEM_DO_PEDIDO_MAX) : null;
+  const mensagem = entrada.mensagem?.trim() ? ocultarContatosEmTexto(entrada.mensagem.trim()).slice(0, MENSAGEM_DO_PEDIDO_MAX) : null;
   const expiraEm = agora + PRAZO_DO_PEDIDO_MS;
   try {
     return await db.transaction(async tx => {
