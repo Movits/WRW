@@ -15,3 +15,18 @@ export const VERSOES_DO_AVISO_DE_GRAVACAO = ["2026-11-14", "2026-11-23"] as cons
 export type VersaoDoAvisoDeGravacao = (typeof VERSOES_DO_AVISO_DE_GRAVACAO)[number];
 
 export const VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO: VersaoDoAvisoDeGravacao = "2026-11-23";
+
+/**
+ * As versões do aviso que anunciam a consulta da administração (R1a, a frase
+ * da Cris de 23/11/2026: "só acessa gravações por motivo justificado,
+ * registrado antes do acesso, e a organizadora é informada da data de cada
+ * consulta"). Só a reunião gravada com uma delas pode ser consultada pela
+ * administração: a gravada antes, quando o aviso dizia "Só você acessa", fica
+ * FECHADA (server/consulta-da-administracao.ts). Versão nova do aviso que
+ * mantenha a consulta entra aqui também.
+ */
+export const VERSOES_QUE_PREVEEM_O_ACESSO: readonly string[] = ["2026-11-23"];
+
+export function avisoPreveOAcesso(versao: string | null | undefined): boolean {
+  return typeof versao === "string" && VERSOES_QUE_PREVEEM_O_ACESSO.includes(versao);
+}

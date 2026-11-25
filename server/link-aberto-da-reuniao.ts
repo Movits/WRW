@@ -1,8 +1,8 @@
 import crypto from "crypto";
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { nomesDosFalantes, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
-import { ROTA_DA_REUNIAO_ABERTA } from "@shared/rotas";
+import { ROTA_DA_REUNIAO_ABERTA, ROTA_DA_REUNIAO_COMPARTILHADA, ROTA_DAS_EQUIPES, ROTA_DO_CONVITE, ROTA_DO_CONVITE_DA_EQUIPE } from "@shared/rotas";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
 import { idDoVideoDaReuniao } from "@shared/youtube";
@@ -13,7 +13,12 @@ import { exigirDb } from "./db";
 import { transcricaoEstaEditada } from "./editar-transcricao";
 import { estaNaLixeira, foraDaLixeira, reuniaoForaDeVista } from "./reuniao-visivel";
 import { gravacaoParaOuvir } from "./meeting-service";
-import { comCookiesDoPedido, cookiesDoPedido, entradaValida, gerarSenhaDoLink, hashDaSenhaDoLink } from "./senha-do-link-aberto";
+import { comCookiesDoPedido, cookiesDoPedido, entradaValida, gerarSenhaDoLink, hashDaSenhaDoLink, leitoraDoPedido, type LeitoraDoLink } from "./senha-do-link-aberto";
+import { reuniaoDaCredencial } from "@shared/participantes-da-reuniao";
+import { reuniaoDaParticipante } from "./participantes-da-reuniao";
+import { reuniaoDaMembra } from "./espacos-de-equipe";
+import { vozesDaReuniao } from "./vozes-da-reuniao";
+import { leitoraDaRota } from "./leitora-do-link";
 import { storageGetSignedUrl } from "./storage";
 
 /**
@@ -399,6 +404,11 @@ export async function mudarAudioDoLink(ownerId: string, meetingId: string, inclu
  * recusa.
  */
 async function reuniaoDoLink(token: string) {
+  // A credencial da participante (R1b): a mesma leitura do link, aberta pela
+  // participação ativa da conta logada, e não pelo token. Sem sessão, ou sem
+  // participação, é o link que não existe.
+  const daParticipante = reuniaoDaCredencial(token);
+  if (daParticipante) return leituraDaParticipante(daParticipante);
   if (!FORMATO_DO_TOKEN.test(token)) return null;
   const db = await exigirDb();
   const [reuniao] = await db.select({
@@ -432,13 +442,35 @@ async function reuniaoDoLink(token: string) {
   if (reuniao.sharePasswordHash !== null && !entradaValida(token, reuniao.sharePasswordHash, cookiesDoPedido())) return "senha" as const;
   return {
     id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
-    comAudio: reuniao.shareAudio === true,
+    comAudio: reuniao.shareAudio === true, participante: false,
     // A reunião que nasceu de um documento (H12): o link mostra o texto e o
     // resumo, como a transcrição de sempre, e NUNCA o arquivo, que é só da dona.
     documento: ehReuniaoDeDocumento(reuniao.origem),
     // A reunião que veio de um vídeo do YouTube (H13): só o id do vídeo, que é
     // o que o "▶" precisa para abrir o vídeo no segundo da fala. O vídeo é
     // público (o Gemini só lê vídeo público), e a URL guardada não sai inteira.
+    videoDoYoutube: idDoVideoDaReuniao(reuniao),
+  };
+}
+
+/**
+ * A reunião que a participante lê (R1b), na forma da leitura do link: sempre
+ * com o áudio (a gravação é dela também, como a transcrição), e marcada como
+ * da participante, para os nomes das vozes não dependerem da confirmação do
+ * link. A participação é conferida a cada leitura: removida, saiu, reunião na
+ * lixeira ou dona desativada, e a próxima leitura já recusa.
+ */
+async function leituraDaParticipante(meetingId: string) {
+  const leitora = leitoraDoPedido();
+  if (!leitora) return null;
+  // A membra da equipe (R2) lê as reuniões da pasta pela mesma credencial:
+  // a participação vem primeiro, e sem ela vale a equipe ativa da pasta.
+  const reuniao = await reuniaoDaParticipante(leitora, meetingId) ?? await reuniaoDaMembra(leitora, meetingId);
+  if (!reuniao) return null;
+  return {
+    id: reuniao.id, ownerId: reuniao.ownerId, title: reuniao.title, createdAt: reuniao.createdAt, emPartes: reuniao.audioPipeline === "slices",
+    comAudio: true, participante: true,
+    documento: ehReuniaoDeDocumento(reuniao.origem),
     videoDoYoutube: idDoVideoDaReuniao(reuniao),
   };
 }
@@ -476,12 +508,13 @@ export async function exigirReuniaoDoLink(token: string) {
  * aparado e cortado em 60 caracteres, e o par inválido da coluna (JSON livre)
  * cai. Nada além do mapa: nem o nome da dona, nem conta, nem id.
  */
-async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { id: string; ownerId: string }): Promise<Record<string, string>> {
-  if (!(await linkMostraOsNomes(db, reuniao.id))) return {};
-  const [linha] = await db.select({ speakerNames: meetings.speakerNames }).from(meetings)
-    .where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId)))
-    .limit(1);
-  return nomesDosFalantes(linha?.speakerNames);
+async function vozesDoLink(db: Awaited<ReturnType<typeof exigirDb>>, reuniao: { id: string; ownerId: string; participante: boolean }) {
+  // A participante (R1b) vê os nomes sempre, como a dona: ela aceitou entrar
+  // com o aviso de que os nomes das vozes aparecem. Os nomes das contas
+  // ligadas às vozes (H3c) entram nos dois casos; as juntadas, sem dado
+  // pessoal, saem sempre.
+  const comNomes = reuniao.participante || await linkMostraOsNomes(db, reuniao.id);
+  return vozesDaReuniao(db, reuniao, { comNomes });
 }
 
 /**
@@ -513,7 +546,7 @@ export async function verReuniaoPeloLink(token: string) {
   const { recording, recordingExpired, recordingDeletionPending } = reuniao.documento || !reuniao.comAudio
     ? { recording: null, recordingExpired: false, recordingDeletionPending: false }
     : await gravacaoParaOuvir(db, reuniao.ownerId, reuniao.id, { createdAt: reuniao.createdAt, status: "ready", emPartes: reuniao.emPartes });
-  const vozes = await vozesDoLink(db, reuniao);
+  const { nomes: vozes, juntadas } = await vozesDoLink(db, reuniao);
   return {
     titulo: reuniao.title,
     criadaEm: reuniao.createdAt,
@@ -543,6 +576,12 @@ export async function verReuniaoPeloLink(token: string) {
     // O resumo guardado e a resposta da IA chegam com o rótulo ({F2}): a página
     // os troca pelo nome com este mesmo mapa. A IA nunca recebe os nomes.
     vozes,
+    // As vozes juntadas pela dona (H3c, { F3: "F1" }): a página mostra {F3}
+    // como a principal. Sem dado pessoal: sai também no link sem os nomes.
+    juntadas,
+    // A leitura da participante (R1b), e não do link: a página dela mostra a
+    // dona e o "Sair desta reunião".
+    participante: reuniao.participante,
     // O vídeo do YouTube de onde a reunião veio (H13), ou null: a página não
     // tem player (a CSP não deixa embutir o YouTube), e o "▶" de cada fala abre
     // o vídeo no segundo dela, numa aba nova.
@@ -593,13 +632,20 @@ export async function chaveDoAudioDoLink(token: string, parte?: number): Promise
  */
 export function registrarRotasDoLinkAberto(
   app: Express,
-  { acharChave, assinar }: { acharChave: (token: string, parte?: number) => Promise<string | null>; assinar: (chave: string) => Promise<string> } =
-    { acharChave: chaveDoAudioDoLink, assinar: storageGetSignedUrl },
+  { acharChave, assinar, lerLeitora = leitoraDaRota }: {
+    acharChave: (token: string, parte?: number) => Promise<string | null>; assinar: (chave: string) => Promise<string>;
+    lerLeitora?: (req: Request, token: string) => Promise<LeitoraDoLink | null>;
+  } = { acharChave: chaveDoAudioDoLink, assinar: storageGetSignedUrl },
 ) {
-  app.use(ROTA_DA_REUNIAO_ABERTA, (_req, res, next) => {
-    res.set("X-Robots-Tag", "noindex, nofollow");
-    next();
-  });
+  // O convite (R1b) e a reunião compartilhada com a participante ganham a
+  // mesma marca: o endereço do convite leva o token, e nenhum buscador o guarda.
+  // O convite da equipe e as páginas da equipe (R2) também.
+  for (const rota of [ROTA_DA_REUNIAO_ABERTA, ROTA_DO_CONVITE, ROTA_DA_REUNIAO_COMPARTILHADA, ROTA_DO_CONVITE_DA_EQUIPE, ROTA_DAS_EQUIPES]) {
+    app.use(rota, (_req, res, next) => {
+      res.set("X-Robots-Tag", "noindex, nofollow");
+      next();
+    });
+  }
 
   app.get(`${ROTA_DO_AUDIO_DO_LINK}/:token/audio`, async (req, res) => {
     res.set("Cache-Control", "no-store");
@@ -609,7 +655,10 @@ export function registrarRotasDoLinkAberto(
       // ?parte só vale como número inteiro pequeno; qualquer outra coisa é a primeira.
       const parte = /^\d{1,4}$/.test(String(req.query.parte ?? "")) ? Number(req.query.parte) : undefined;
       // Os cookies do pedido vão ao contexto: é por eles que o link com senha abre.
-      chave = await comCookiesDoPedido(req.headers.cookie, () => acharChave(String(req.params.token ?? ""), parte));
+      // A participante (R1b) abre o áudio pela sessão dela, com a credencial no endereço.
+      const token = String(req.params.token ?? "");
+      const leitora = await lerLeitora(req, token);
+      chave = await comCookiesDoPedido(req.headers.cookie, () => acharChave(token, parte), leitora);
     } catch (erro) {
       // Banco fora do ar não é "link desligado": 404 faria a página dizer que
       // a gravação sumiu. Fora do tRPC não há middleware que traduza.

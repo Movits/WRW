@@ -162,6 +162,8 @@ describe("o appRouter inteiro", () => {
     "reuniaoAberta.entrar",
     // As fotos e os desenhos do resumo (H4g e H4h), pelo link.
     "reuniaoAberta.anexos",
+    // Entrar com a conta Google (A8): o login e o cadastro perguntam se o botão aparece.
+    "contaGoogle.disponivel",
   ]);
   let caminhos: string[] = [];
 

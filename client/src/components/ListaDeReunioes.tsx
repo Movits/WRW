@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft, FolderInput, FolderPlus, History, ListChecks, Loader2, MapPin, Merge, MessagesSquare, Milestone, MonitorPlay, Pencil, ScanText, Search, SlidersHorizontal, Tag, Trash2,
-  UserRound, X,
+  UserRound, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -12,7 +12,7 @@ import { avisoDaRecusaDaLixeira, restaurarComAviso } from "@/components/LixeiraD
 import { PergunteAVariasReunioes } from "@/components/PergunteAVariasReunioes";
 import { CLASSES_DA_COR, EditorDePasta, emLotes, EscolherPasta, IconeDaPastaNaTela, type PastaNaTela } from "@/components/PastasDeReunioes";
 import { guardarBuscaRecente, lerBuscasRecentes, limparBuscasRecentes } from "@/lib/buscas-recentes";
-import { rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
+import { rotaDaEquipe, rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
 import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
 import { etiquetasDaDona, etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import {
@@ -437,6 +437,9 @@ export function ListaDeReunioes({ reunioes, rotuloDoStatus, classeDoStatus, aoAb
           </p>
           <button type="button" onClick={() => setEditor(pastaAberta)} aria-label={t("meetings.folders.edit", { nome: pastaAberta.nome })}
             className="rounded-lg border border-white/15 p-2 text-white/60 hover:bg-white/5 hover:text-white"><Pencil size={14} aria-hidden="true" /></button>
+          {/* O espaço de equipe da pasta (R2): convidar, tarefas e agenda da equipe. */}
+          <button type="button" onClick={() => aoAbrir(rotaDaEquipe(pastaAberta.id))}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"><Users size={14} aria-hidden="true" />{t("teams.openTeamButton")}</button>
         </div>
       )}
 

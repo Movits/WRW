@@ -23,6 +23,7 @@ import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { SenhaDoLinkAberto } from "@/components/SenhaDoLinkAberto";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { linkDoYoutubeNoSegundo } from "@shared/youtube";
+import { falasComJuntadas, nomesComJuntadas } from "@shared/vozes-no-texto";
 
 /**
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
@@ -82,16 +83,35 @@ function mensagemDaTraducao(t: TranslateFn, erro: unknown) {
   }
 }
 
-function Moldura({ children, comPlayer = false }: { children: React.ReactNode; comPlayer?: boolean }) {
+function Moldura({ children, comPlayer = false, semLogo = false }: { children: React.ReactNode; comPlayer?: boolean; semLogo?: boolean }) {
   // Com o player fixo no rodapé, o fim da página fica livre embaixo dele.
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${comPlayer ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
-    <a href="/" aria-label="MarquesaMatch" className="inline-block mb-8"><BrandLogo variante="lockup" className="w-36"/></a>
+    {/* Na leitura da participante (R1b) o cabeçalho do app já está em cima. */}
+    {!semLogo && <a href="/" aria-label="MarquesaMatch" className="inline-block mb-8"><BrandLogo variante="lockup" className="w-36"/></a>}
     {children}
   </div></main>;
 }
 
 export default function ReuniaoAberta() {
   const { token = "" } = useParams<{ token: string }>();
+  return <LeituraDaReuniao token={token}/>;
+}
+
+/**
+ * A leitura da reunião, pelo link aberto (o token) ou pela participante (R1b,
+ * a credencial "participante:<id>", com a sessão dela): as mesmas consultas e
+ * a mesma página. Na da participante, o cabeçalho diz quem compartilhou, quem
+ * mais participa, e tem o "Sair desta reunião" (`cabecalhoDaParticipante`).
+ * Os nomes das vozes já vêm com as contas ligadas (H3c), e as vozes juntadas
+ * pela dona aparecem como a principal, também no tempo de fala.
+ */
+export function LeituraDaReuniao({ token, cabecalhoDaParticipante, naoEncontrada }: {
+  token: string;
+  cabecalhoDaParticipante?: React.ReactNode;
+  /** A frase de quando a reunião não abre (a participante tem a dela, com o caminho de volta). */
+  naoEncontrada?: React.ReactNode;
+}) {
+  const daParticipante = !!cabecalhoDaParticipante;
   const { t, i18n } = useTranslation();
   const { data, isLoading, isError, error, refetch } = trpc.reuniaoAberta.ver.useQuery({ token }, {
     retry: (tentativas, erro) => !naoTentarDeNovo(erro) && tentativas < 3,
@@ -194,16 +214,16 @@ export default function ReuniaoAberta() {
     if (pedeSenha(traducaoDoResumo.erro)) traducaoDoResumo.tentarDeNovo();
   };
 
-  if (isError && linkNaoAbre(error)) return <Moldura>
-    <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
+  if (isError && linkNaoAbre(error)) return <Moldura semLogo={daParticipante}>
+    {naoEncontrada ?? <div role="alert" className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
       <p className="text-sm text-white/75">{t("meetings.openLink.notFound")}</p>
       <a href="/" className="mt-4 inline-block text-sm font-semibold text-amber-300 hover:text-amber-200">{t("meetings.openLink.goHome")}</a>
-    </div>
+    </div>}
   </Moldura>;
   if (isError && pedeSenha(error)) return <Moldura>
     <SenhaDoLinkAberto token={token} aoEntrar={depoisDaSenha}/>
   </Moldura>;
-  if (isError && !data) return <Moldura><ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()}/></Moldura>;
+  if (isError && !data) return <Moldura semLogo={daParticipante}><ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()}/></Moldura>;
   if (isLoading || !data) return <main className="min-h-screen grid place-items-center text-white"><Loader2 className="animate-spin"/></main>;
 
   const { titulo, criadaEm, transcricao, gravacao, gravacaoExpirada, gravacaoSaindo } = data;
@@ -219,13 +239,16 @@ export default function ReuniaoAberta() {
   const IconeDoTexto = ehDocumento ? ScanText : Clock3;
   // Os nomes das vozes, os mesmos no resumo, na pergunta e na transcrição. A
   // resposta de um servidor de antes da H3b não traz o campo: todas "Falante n".
-  const nomes = data.vozes ?? {};
+  // As vozes juntadas pela dona (H3c) aparecem como a principal: o nome dela
+  // ou "Falante n" da principal. O servidor de antes da H3c não traz o campo.
+  const juntadas = data.juntadas ?? {};
+  const nomes = nomesComJuntadas(data.vozes ?? {}, juntadas, n => t("meetings.speakerLabel", { n }));
   const partes = gravacao?.partes ?? (gravacao ? [{ seq: 0, url: gravacao.url, mimeType: gravacao.mimeType, inicioSegundos: 0, duracaoSegundos: gravacao.durationSeconds }] : []);
   // A reunião que veio de um vídeo do YouTube (H13): sem player, o "▶" de cada
   // fala abre o vídeo no segundo dela. O servidor de antes da H13 não traz o campo.
   const idDoVideo = data.videoDoYoutube ?? null;
   const linkDoTempo = idDoVideo ? (segundo: number) => linkDoYoutubeNoSegundo(idDoVideo, segundo) : undefined;
-  const falas = segmentosValidos(transcricao?.segmentos);
+  const falas = falasComJuntadas(segmentosValidos(transcricao?.segmentos), juntadas);
   // O nome da voz que toca sozinha (D2): o do `vozes` (H3b) ou "Falante n".
   const rotuloDaVoz = (falante: string) => nomes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const mostraFalas = falas.length > 0 && idiomaDaTraducao === idiomaDoOriginal;
@@ -237,13 +260,13 @@ export default function ReuniaoAberta() {
   // Como no detalhe da dona (T25): a tradução na tela, ou a espera pela da
   // reunião longa, ganha o aviso com o caminho para o original.
   const traducaoNaTela = !!transcricao && idiomaDaTraducao !== idiomaDoOriginal && (!!textoTraduzido || traducaoLonga.aguardando);
-  return <Moldura comPlayer={!!gravacao && partes.length > 0}>
-    <p className="text-amber-300 text-xs font-semibold">{t("meetings.openLink.eyebrow")}</p>
+  return <Moldura comPlayer={!!gravacao && partes.length > 0} semLogo={daParticipante}>
+    <p className="text-amber-300 text-xs font-semibold">{daParticipante ? t("meetings.participants.sharedEyebrow") : t("meetings.openLink.eyebrow")}</p>
     {/* O emoji do resumo antes do título, como no detalhe da dona. */}
     <h1 dir="auto" className="text-3xl font-bold mt-1">{temTextoParaResumir && resumoGuardado.data?.emoji && <span aria-hidden="true" className="mr-2">{resumoGuardado.data.emoji}</span>}{titulo}</h1>
     <p className="text-sm text-white/45 mt-2">{new Date(criadaEm).toLocaleString(i18n.language)}</p>
     {/* O documento e o vídeo não têm gravação: a frase deles vale com ou sem o áudio no link (H23). */}
-    <p className="mt-4 max-w-3xl text-sm text-white/60">{ehDocumento ? t("meetings.document.openLinkIntro") : idDoVideo ? t("meetings.youtube.linkIntro") : semAudio ? t("meetings.openLink.introWithoutAudio") : t("meetings.openLink.intro")}</p>
+    {daParticipante ? cabecalhoDaParticipante : <p className="mt-4 max-w-3xl text-sm text-white/60">{ehDocumento ? t("meetings.document.openLinkIntro") : idDoVideo ? t("meetings.youtube.linkIntro") : semAudio ? t("meetings.openLink.introWithoutAudio") : t("meetings.openLink.intro")}</p>}
 
     <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">{([["summary", t("meetings.summaryTab"), FileText], ["transcript", rotuloDoTexto, IconeDoTexto], ["mindmap", t("meetings.mindMapTab"), Network]] as const).map(([id, rotulo, Icone]) =>
       <button key={id} type="button" aria-pressed={aba === id} onClick={() => setAba(id)} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm border-b-2 ${aba === id ? "border-amber-300 text-amber-300" : "border-transparent text-white/50"}`}><Icone size={16}/>{rotulo}</button>)}</div>

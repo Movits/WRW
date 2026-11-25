@@ -51,6 +51,8 @@ vi.mock("wouter", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useLocation: () => ["/login", duble.navigate],
 }));
+// "Continuar com Google" (A8) tem o teste dele (components/ContinuarComGoogle.test.tsx).
+vi.mock("@/components/ContinuarComGoogle", () => ({ ContinuarComGoogle: () => null }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // O hook de verdade fala com o tRPC (auth.me); aqui ele devolve a sessão que cada caso pede.
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => duble.sessao }));

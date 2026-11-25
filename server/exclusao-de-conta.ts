@@ -58,7 +58,7 @@ import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
@@ -76,6 +76,7 @@ import {
   perguntasEntreReunioes,
   modelosDeResumoProprios, preferenciasDoResumo, resumosRefeitos,
   resumoEmAudio, buscasDoComplemento,
+  meetingParticipants, meetingFolderMembers, meetingFolderTasks,
 } from "../drizzle/schema";
 
 /**
@@ -84,8 +85,14 @@ import {
  */
 export type Db = Awaited<ReturnType<typeof exigirDb>>;
 
-/** As ações de auditoria que sobrevivem à exclusão (decisão do Roberto, 02/09/2026). */
-export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"] as const;
+/**
+ * As ações de auditoria que sobrevivem à exclusão (decisão do Roberto,
+ * 02/09/2026). Desde a R1a, também a lista e a consulta das reuniões pela
+ * administração (MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ): "quem viu as
+ * minhas reuniões?" segue com resposta depois que a conta de quem consultou
+ * sai. A cópia em scripts/exame/limpeza.mjs anda junto.
+ */
+export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"] as const;
 
 /**
  * Chaves da conta, e os ids que só existem depois de olhar o banco:
@@ -226,6 +233,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a foto ou o desenho do resumo (H4g e H4h) que não saiu do bucket fica como o único ponteiro para o objeto",
   },
+  // As participantes das reuniões da dona (R1b): as participações e os convites
+  // pendentes (só o hash do token). Antes das reuniões, que elas apontam.
+  { tabela: meetingParticipants, coluna: meetingParticipants.ownerId, origem: "openId" },
   // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
@@ -233,6 +243,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // As pastas das reuniões (H7d): o nome, o ícone e a cor que a dona escolheu.
   // Depois das reuniões, que apontam para elas (as da lixeira saem junto, com
   // o resto das reuniões da conta).
+  // Os espaços de equipe das pastas da dona (R2): as membras, os convites
+  // pendentes (só o hash do token) e as tarefas da equipe. Antes das pastas.
+  { tabela: meetingFolderMembers, coluna: meetingFolderMembers.ownerId, origem: "openId" },
+  { tabela: meetingFolderTasks, coluna: meetingFolderTasks.ownerId, origem: "openId" },
   { tabela: meetingFolders, coluna: meetingFolders.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
@@ -258,6 +272,12 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
   },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
+  // A conta como participante das reuniões de outras donas (R1b): ela sai de
+  // todas, e a voz que a dona tinha ligado a ela volta ao nome livre ou a
+  // "Falante n" (a leitura ignora a participação que não existe mais).
+  { tabela: meetingParticipants, coluna: meetingParticipants.userId, origem: "id" },
+  // A conta como membra das equipes de outras donas (R2): ela sai de todas.
+  { tabela: meetingFolderMembers, coluna: meetingFolderMembers.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
   { tabela: sivcConsents, coluna: sivcConsents.userId, origem: "id" },
@@ -276,6 +296,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // sem conta e vence em 5 minutos; sai pelo prazo.
   { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
   { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
+  // A conta Google ligada para entrar (A8): o sub e o e-mail dela. Nenhum token
+  // fica guardado, então não há o que revogar na Google.
+  { tabela: contasGoogle, coluna: contasGoogle.userId, origem: "id" },
   { tabela: trustedDevices, coluna: trustedDevices.userId, origem: "id" },
   { tabela: securityEvents, coluna: securityEvents.userId, origem: "id" },
   { tabela: sessions, coluna: sessions.userId, origem: "id" },
@@ -294,7 +317,7 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     filtro: () => sql`${auditLogs.action} NOT IN (${sql.join(
       ACOES_DE_AUDITORIA_PRESERVADAS.map(acao => sql`${acao}`), sql`, `,
     )})`,
-    motivo: "sai o ruído; ficam as duas ações que respondem 'quem viu meus contatos'",
+    motivo: "sai o ruído; ficam as ações que respondem 'quem viu meus contatos' e 'quem viu as minhas reuniões'",
   },
 
   // ── login_attempts guarda o e-mail em minúsculas, não o id ────────────────

@@ -410,7 +410,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
     // O link desligado como no "Desligar" da dona (LINK_DESLIGADO): sem token e sem a senha (H23).
     await tx.update(meetings).set({
       audioPipeline: "slices", status: "uploading", expectedSlices: plano.linhas, attempts: 0, lockToken: null, lockedUntil: null,
-      processingError: null, updatedAt: agora, speakerNames: plano.nomes, ...LINK_DESLIGADO,
+      processingError: null, updatedAt: agora, speakerNames: plano.nomes, speakerAccounts: null, speakerMerges: null, ...LINK_DESLIGADO,
       etiquetas: plano.etiquetas, ondeFoi: plano.ondeFoi, contactId: plano.contactId, contextId: plano.contextId,
     }).where(and(eq(meetings.id, alvo.id), eq(meetings.ownerId, ownerId)));
 

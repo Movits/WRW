@@ -288,9 +288,13 @@ function lerTokens(corpo: Record<string, unknown>, status: number, agora: number
   };
 }
 
-/** Troca o código da volta pelos tokens, com o verificador do PKCE. */
+/**
+ * Troca o código da volta pelos tokens, com o verificador do PKCE. Serve à
+ * Google Agenda e à entrada com o Google (A8, server/entrar-com-google.ts): as
+ * duas usam o mesmo cliente OAuth, cada uma com o seu URI de retorno.
+ */
 export async function trocarCodigo(
-  config: ConfiguracaoDaGoogleAgenda,
+  config: Pick<ConfiguracaoDaGoogleAgenda, "clientId" | "clientSecret" | "redirectUri">,
   dados: { codigo: string; verificador: string },
   buscar: Fetch = fetchGlobal,
   agora: number = Date.now(),

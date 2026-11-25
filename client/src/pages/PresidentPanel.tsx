@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import {
   Shield, Users, Star, CheckCircle, XCircle, Clock,
   AlertTriangle, BarChart3, Crown, UserCheck, Globe,
-  FileText, ChevronRight, Search, Award, Lock, Share2, Link2
+  FileText, ChevronRight, Search, Award, Lock, Share2, Link2, Mic
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,8 +19,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
 import { ConexoesRegistradasDaPlataforma } from "@/components/ConexoesRegistradasDaPlataforma";
+import { ConsultaDeReunioesDaPlataforma } from "@/components/ConsultaDeReunioesDaPlataforma";
 
-type Tab = "overview" | "gold" | "leaders" | "opportunities" | "compliance" | "conexoes" | "distribuicao";
+type Tab = "overview" | "gold" | "leaders" | "opportunities" | "compliance" | "conexoes" | "reunioes" | "distribuicao";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // A busca vai ao SERVIDOR (LIKE em nome e e-mail), com 300 ms de espera para
@@ -1344,7 +1345,12 @@ export default function PresidentPanel() {
     // plataformaProcedure em routers/networkInteligente.ts): Ouro sem cargo e
     // quem só distribui não veem a aba.
     ...(user.role === "admin" || user.role === "president"
-      ? [{ id: "conexoes" as const, label: "Conexões registradas", icon: Link2 }]
+      ? [
+          { id: "conexoes" as const, label: "Conexões registradas", icon: Link2 },
+          // A consulta das reuniões gravadas (R1a): só a staff, com motivo e
+          // auditoria (plataformaProcedure em routers/_procedures.ts).
+          { id: "reunioes" as const, label: "Reuniões", icon: Mic },
+        ]
       : []),
     abaDistribuicao,
   ] : [abaDistribuicao];
@@ -1428,6 +1434,7 @@ export default function PresidentPanel() {
         {abaAtiva === "opportunities" && <OpportunitiesTab />}
         {abaAtiva === "compliance" && <ComplianceTab />}
         {abaAtiva === "conexoes" && <ConexoesRegistradasDaPlataforma />}
+        {abaAtiva === "reunioes" && <ConsultaDeReunioesDaPlataforma />}
         {abaAtiva === "distribuicao" && <DistribuicaoTab podeGerir={ehOuro} souDistribuidor={souDistribuidor} />}
       </div>
     </div>

@@ -79,6 +79,8 @@ const COLUNAS = {
   lembreteMinutos: agendaReunioes.lembreteMinutos,
   google: agendaReunioes.google,
   googleConvites: agendaReunioes.googleConvites,
+  // A equipe (R2) em que a dona pôs a reunião, ou nula.
+  folderId: agendaReunioes.folderId,
   createdAt: agendaReunioes.createdAt,
   updatedAt: agendaReunioes.updatedAt,
   gravacaoId: meetings.id,
@@ -96,6 +98,7 @@ type Linha = {
   lembreteMinutos: number | null;
   google: string | null;
   googleConvites: unknown;
+  folderId: string | null;
   createdAt: number;
   updatedAt: number;
   gravacaoId: string | null;

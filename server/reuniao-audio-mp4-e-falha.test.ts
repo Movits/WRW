@@ -668,6 +668,8 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
       meeting_contact_suggestions: schema.meetingContactSuggestions, network_sugestoes: schema.networkSugestoes,
       meeting_entities: schema.meetingEntities, meeting_transcripts: schema.meetingTranscripts, meeting_transcript_translations: schema.meetingTranscriptTranslations,
       meeting_summary_translations: schema.meetingSummaryTranslations, meeting_summary_items: schema.meetingSummaryItems, meeting_summaries: schema.meetingSummaries,
+      // As participantes da reunião (R1b) saem com ela.
+      meeting_participants: schema.meetingParticipants,
     };
     for (const [nome, tabela] of Object.entries(derivadas)) {
       const delecao = delecoes.find(operacao => operacao.tabela === tabela);
@@ -716,7 +718,7 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     // A gravação desta execução sai depois do arquivo; sem partes, não há DELETE de partes.
     expect(tabelasApagadas()).toEqual([
       schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts,
-      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingRecordings,
+      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingParticipants, schema.meetingRecordings,
     ]);
     expect(apagarAudio).toHaveBeenCalledWith("k");
     expect(atualizacoes.map(a => a.status)).not.toContain("failed");

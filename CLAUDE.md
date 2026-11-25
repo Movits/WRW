@@ -146,7 +146,7 @@ faz parte do trabalho.
   `.env` de trabalho já apontou para produção e `pnpm test` chegou a promover uma usuária
   real. Falha na suíte é regressão, sem exceções toleradas.
 - **Ouro = Presidente = administradora** (pedido da cliente): as procedures de acesso aceitam
-  os três papéis, com QUATRO exceções em `server/CLAUDE.md` (rode o `grep` de lá antes de
+  os três papéis, com CINCO exceções em `server/CLAUDE.md` (rode o `grep` de lá antes de
   citar contagem). Distribuidor do Smart Match é um PODER, não um nível. Contas Ouro
   criadas só para teste voltam a Prata antes da entrega. `grantGoldAccess` grava `gold` por
   cima do papel e REBAIXA presidente ou admin (`server/CLAUDE.md`).

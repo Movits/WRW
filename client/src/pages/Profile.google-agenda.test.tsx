@@ -27,6 +27,7 @@ vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { name: "Ana",
 vi.mock("@/components/ExcluirMinhaConta", () => ({ ExcluirMinhaConta: () => <div data-testid="zona-de-risco" /> }));
 vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => <div data-testid="google-agenda" /> }));
 vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => <div data-testid="chaves-de-acesso" /> }));
+vi.mock("@/components/ContaGoogleNoPerfil", () => ({ ContaGoogleNoPerfil: () => <div data-testid="conta-google" /> }));
 vi.mock("@/components/QualificacaoDoPerfil", () => ({ QualificacaoDoPerfil: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -46,5 +47,16 @@ describe("Perfil — a seção da Google Agenda", () => {
     fireEvent.click(screen.getByRole("button", { name: /Editar perfil/ }));
     expect(screen.queryByTestId("google-agenda")).not.toBeInTheDocument();
     expect(screen.queryByTestId("zona-de-risco")).not.toBeInTheDocument();
+  });
+});
+
+describe("Perfil — a conta Google para entrar (A8)", () => {
+  it("aparece na leitura, depois das chaves de acesso e antes da zona de risco, e some na edição", () => {
+    render(<Profile />);
+    const secao = screen.getByTestId("conta-google");
+    expect(screen.getByTestId("chaves-de-acesso").compareDocumentPosition(secao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(secao.compareDocumentPosition(screen.getByTestId("zona-de-risco")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Editar perfil/ }));
+    expect(screen.queryByTestId("conta-google")).not.toBeInTheDocument();
   });
 });

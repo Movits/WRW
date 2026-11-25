@@ -160,11 +160,21 @@ export function entradaValida(token: string, hash: string, cabecalhoDeCookies: s
 // pela rota do áudio, em cinco módulos, e a senha é conferida no único ponto
 // por onde todos passam. Um caminho novo pelo link não tem como esquecer a
 // senha: sem o contexto, não há cookie, e o link com senha recusa.
-const pedidoDoLink = new AsyncLocalStorage<{ cookies: string | undefined }>();
+//
+// A conta logada do pedido (a leitora) vai pelo mesmo contexto: é ela que abre
+// a reunião pela credencial da participante (R1b, "participante:<id>"), e só
+// ela. O link de sempre não a usa.
+export type LeitoraDoLink = { id: number; openId: string };
+const pedidoDoLink = new AsyncLocalStorage<{ cookies: string | undefined; leitora: LeitoraDoLink | null }>();
 
-/** Roda o trabalho com os cookies do pedido à vista de reuniaoDoLink. */
-export function comCookiesDoPedido<T>(cookies: string | undefined, trabalho: () => T): T {
-  return pedidoDoLink.run({ cookies }, trabalho);
+/** Roda o trabalho com os cookies do pedido (e a conta logada, se houver) à vista de reuniaoDoLink. */
+export function comCookiesDoPedido<T>(cookies: string | undefined, trabalho: () => T, leitora: LeitoraDoLink | null = null): T {
+  return pedidoDoLink.run({ cookies, leitora }, trabalho);
+}
+
+/** A conta logada do pedido em curso, ou null (sem sessão, ou fora de um pedido do link). */
+export function leitoraDoPedido(): LeitoraDoLink | null {
+  return pedidoDoLink.getStore()?.leitora ?? null;
 }
 
 /** Os cookies do pedido em curso, ou undefined fora de um pedido do link. */

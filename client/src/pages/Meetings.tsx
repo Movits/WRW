@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { LANGUAGES } from "@/i18n";
 import { AppHeader } from "@/components/AppHeader";
+import { ConsultasDaAdministracao } from "@/components/ConsultasDaAdministracao";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { causaDaFalhaDoDocumento, mensagemDaRecusaDaParte, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { DocumentoParaResumir } from "@/components/DocumentoParaResumir";
@@ -21,6 +22,10 @@ import { AnexosDoResumo } from "@/components/AnexosDoResumo";
 import { MapaMentalDaReuniao } from "@/components/MapaMental";
 import { EmailDeRetorno, useGuardaDoEmailDeRetorno } from "@/components/EmailDeRetorno";
 import { CompartilharReuniao } from "@/components/CompartilharReuniao";
+import { ParticipantesDaReuniao } from "@/components/ParticipantesDaReuniao";
+import { CompartilhadasComigo } from "@/components/CompartilhadasComigo";
+import { EquipesComigo } from "@/components/EquipesComigo";
+import { nomesComJuntadas } from "@shared/vozes-no-texto";
 import { ResumoPorEmail } from "@/components/ResumoPorEmail";
 import { ExportarReuniao, nomeDoArquivo } from "@/components/ExportarReuniao";
 import { BaixarAudioDaReuniao } from "@/components/BaixarAudioDaReuniao";
@@ -874,6 +879,10 @@ export default function Meetings() {
           </div>
         </div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-100/80 mb-7"><CircleAlert size={17} className="inline mr-2"/>{t("meetings.consentNotice")}</div>
+        {/* Os convites e as reuniões que outras donas compartilharam com esta conta (R1b). */}
+        <CompartilhadasComigo/>
+        {/* Os convites para equipes e as equipes de outras donas de que esta conta é membra (R2). */}
+        <EquipesComigo/>
         {isLoading ? <div className="py-20 text-center text-white/45"><Loader2 className="animate-spin inline mr-2"/>{t("meetings.loadingList")}</div> : isError && !meetings ? <ErroDeConsulta erro={error} aoTentarDeNovo={() => refetch()} /> : !meetings?.length ? <div className="rounded-3xl border border-dashed border-white/15 px-6 py-20 text-center"><Mic className="mx-auto text-amber-300 mb-4" size={34}/><h2 className="font-semibold text-xl">{t("meetings.emptyTitle")}</h2><p className="text-white/45 mt-2">{t("meetings.emptySubtitle")}</p>{/* A lixeira (H7d) também com a lista vazia: todas as reuniões podem ter ido para lá. */}<button type="button" onClick={() => navigate(rotaDaLixeira())} className="mt-6 inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-sm text-white/70 hover:bg-white/5"><Trash2 size={15} aria-hidden="true"/>{t("meetings.trash.open")}</button></div> : <ListaDeReunioes reunioes={meetings} rotuloDoStatus={reuniao => statusLabel(t, reuniao.status, ehReuniaoDeDocumento(reuniao.origem))} classeDoStatus={statusClass} aoAbrir={destino => navigate(destino)}/>}
       </div>
     </main>
@@ -1302,8 +1311,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   // As falas com falante e tempo (a transcrição em partes); a de antes é texto corrido.
   const falas = segmentosValidos(transcript?.segments);
   const mostraFalas = falas.length > 0 && translationLanguage === idiomaOriginal;
-  // Os nomes que a dona deu às vozes, e o nome na tela da voz que toca sozinha (D2).
-  const nomesDasVozes = nomesDosFalantes(meeting.speakerNames);
+  // Os nomes das vozes como a dona as vê (H3c: com as contas ligadas; o
+  // servidor de antes manda só os nomes livres), com as vozes juntadas
+  // mostradas como a principal, e o nome na tela da voz que toca sozinha (D2).
+  const vozesDaDona = meeting.vozes ?? { nomes: nomesDosFalantes(meeting.speakerNames), juntadas: {} };
+  const nomesDasVozes = nomesComJuntadas(vozesDaDona.nomes, vozesDaDona.juntadas, n => t("meetings.speakerLabel", { n }));
   const rotuloDaVoz = (falante: string) => nomesDasVozes[falante] ?? t("meetings.speakerLabel", { n: Number(falante.replace(/^F/, "")) || 0 });
   const displayTranscript = translationLanguage === idiomaOriginal ? transcript?.transcript : translatedText;
   // A tela mostra a tradução da IA, ou espera a da reunião longa (T25): o aviso
@@ -1417,8 +1429,12 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       detalhes={{ titulo: meeting.title, etiquetas: meeting.etiquetas, ondeFoi: meeting.ondeFoi, contato: meeting.contato, contexto: meeting.contexto }}/>
     {/* Só reunião pronta tem link aberto: o servidor recusa as outras. */}
     {meeting.status === "ready" && <CompartilharReuniao meetingId={meetingId} titulo={meeting.title} token={meeting.shareToken ?? null}
-      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(nomesDosFalantes(meeting.speakerNames)).length > 0}
+      linkMostraNomes={!!meeting.linkMostraNomes} temNomes={Object.keys(vozesDaDona.nomes).length > 0}
       comSenha={!!meeting.linkComSenha} comAudio={meeting.linkComAudio !== false} documento={ehDocumento} youtube={!!idDoVideo}/>}
+    {/* As participantes e "Quem é cada voz" (R1b e H3c): só na reunião pronta, como o link. */}
+    {meeting.status === "ready" && <ParticipantesDaReuniao meetingId={meetingId} titulo={meeting.title} falas={falas}
+      nomes={vozesDaDona.nomes} nomesLivres={nomesDosFalantes(meeting.speakerNames)} contas={meeting.contasDasVozes ?? {}} juntadas={vozesDaDona.juntadas}
+      aoOuvir={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined}/>}
     {/* H22: o resumo por e-mail, quando já há um resumo gravado (o pronto, ou o anterior enquanto é refeito). A
         origem vai junto, como no Compartilhar: o documento e o vídeo não têm gravação a prometer. */}
     {meeting.status === "ready" && (resumoGuardado.data?.estado === "pronto" || resumoGuardado.data?.versaoAnterior) &&
@@ -1489,7 +1505,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
       {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
-      <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
+      <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDasVozes} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken} documento={ehDocumento}/>
       {/* As fotos e os desenhos do resumo (H4g e H4h). */}
@@ -1497,8 +1513,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       {/* O e-mail de retorno sai dos itens confirmados: só com o resumo pronto. */}
       {resumoGuardado.data?.estado === "pronto" && <EmailDeRetorno meetingId={meetingId} idiomaDoResumo={resumoGuardado.data.idioma}
         confirmados={resumoGuardado.data.itens.filter(item => item.status === "confirmed").length}
-        nomes={nomesDosFalantes(meeting.speakerNames)} guarda={emailDeRetorno}/>}
-      <PergunteAReuniao meetingId={meetingId} nomes={nomesDosFalantes(meeting.speakerNames)} documento={ehDocumento}
+        nomes={nomesDasVozes} guarda={emailDeRetorno}/>}
+      <PergunteAReuniao meetingId={meetingId} nomes={nomesDasVozes} documento={ehDocumento}
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{ehDocumento ? t("meetings.document.entitiesHeading") : t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
@@ -1527,7 +1543,9 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       </> : (
         <p className="text-sm text-white/50 mt-3">{t("meetings.noRecordingStored")}</p>
       )}
-      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p></>}</section>}</div>}
+      <p className="text-sm text-white/50 mt-3">{t("meetings.privacyNotice")}</p>
+      {/* As datas das consultas da administração (R1a): só a data, nunca o motivo nem quem. */}
+      <ConsultasDaAdministracao meetingId={meetingId}/></>}</section>}</div>}
     {tab === "transcript" && <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="text-base font-semibold mb-4">{ehDocumento ? t("meetings.document.textTab") : t("meetings.transcriptTab")}</h2>
       {transcript ? <>
@@ -1568,7 +1586,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
                   originais: originaisDaEdicao, editando: editandoATranscricao, aoSalvarTrecho: salvarTrecho,
                   aoRestaurar: indice => edicaoDaTranscricao.editar({ tipo: "restaurar", indice }),
                 } : undefined}
-                nomes={nomesDosFalantes(meeting.speakerNames)} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
+                nomes={nomesDasVozes} nomeNoLink={!meeting.shareToken ? undefined : meeting.linkMostraNomes ? "aparece" : "naoAparece"} aoNomear={async (falante, nome) => {
                   try {
                     await utils.client.meetings.nomearFalante.mutate({ meetingId, falante, nome });
                     await utils.meetings.get.invalidate({ meetingId });
