@@ -1829,6 +1829,7 @@
       "blockersHeading": "障害・依存関係・制約",
       "openQuestionsHeading": "未解決の課題",
       "toReview": "要確認",
+      "backFromIgnored": "この項目は無視されていましたが、要約を作り直したときに AI が再び追加しました。確認するか、もう一度無視してください。",
       "confirm": "確定",
       "ignore": "無視",
       "assignee": "担当：{{nome}}",

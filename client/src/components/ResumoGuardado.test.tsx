@@ -187,6 +187,23 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(screen.queryByText(/Escrito pela IA/)).not.toBeInTheDocument();
   });
 
+  it("o item que a dona ignorou e a IA repetiu no refazer volta para conferir, com o aviso de que voltou (T29)", () => {
+    const voltou = { ...ITENS[5], voltouDoIgnorado: true };
+    daDona(pronto(ITENS.map(item => item.id === voltou.id ? voltou : item)));
+    const item = itemDoTexto("Não renovar com a transportadora antiga.");
+    expect(within(item).getByText("Para conferir")).toBeInTheDocument();
+    expect(within(item).getByText(/Você tinha ignorado este item, e a IA o trouxe de volta/)).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: /Confirmar/ })).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: /Ignorar/ })).toBeInTheDocument();
+    // Só nele: os outros pendentes não têm o aviso.
+    expect(screen.getAllByText(/a IA o trouxe de volta/)).toHaveLength(1);
+  });
+
+  it("o aviso de que voltou é só do item pendente: confirmado, ele some", () => {
+    daDona(pronto(ITENS.map(item => item.id === "i-decisao" ? { ...item, status: "confirmed", voltouDoIgnorado: true } : item)));
+    expect(screen.queryByText(/a IA o trouxe de volta/)).not.toBeInTheDocument();
+  });
+
   it("os ignorados ficam recolhidos; abertos, o Desfazer volta o item a pendente", () => {
     daDona(pronto());
     expect(screen.queryByText("Abrir um escritório em Berlim.")).not.toBeInTheDocument();

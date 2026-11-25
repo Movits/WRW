@@ -1742,7 +1742,11 @@ export const meetingSummaryItems = mysqlTable("meeting_summary_items", {
   // status (pending ou confirmed) e a hora em que a ação foi marcada feita
   // (nula: não estava feita). Gravado ao ignorar e só lido enquanto o item
   // está ignorado. Nulo no item ignorado antes destas colunas, quando só o
-  // item pendente tinha Ignorar: o Desfazer o devolve pendente.
+  // item pendente tinha Ignorar: o Desfazer o devolve pendente. Exceção: o
+  // item pendente com pending aqui é o que a dona ignorou e a IA repetiu no
+  // "Refazer como…" (server/fila-do-resumo.ts, defeito do T29): a tela avisa
+  // que ele voltou. A marca só vale no item pendente: decidir o item a apaga
+  // ou a regrava, e o confirmado não a mostra.
   statusBeforeIgnore: varchar("status_before_ignore", { length: 12, enum: ["pending", "confirmed"] }),
   doneAtBeforeIgnore: bigint("done_at_before_ignore", { mode: "number" }),
   // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
