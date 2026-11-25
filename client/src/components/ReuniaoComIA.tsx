@@ -235,7 +235,8 @@ export function PergunteAReuniao(fonte: FonteDaReuniao) {
     {resposta && <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/10 p-4">
       {perguntaFeita && <p dir="auto" className="text-xs text-white/45">{perguntaFeita}</p>}
       {resposta.respondida ? <>
-        <p dir="auto" className="text-sm leading-6 text-white/85">{comVozes(resposta.resposta)}</p>
+        {/* A resposta que é uma lista (as ações da reunião inteira, defeito 3 do T50) vem um item por linha. */}
+        <p dir="auto" data-resposta-da-reuniao className="whitespace-pre-line text-sm leading-6 text-white/85">{comVozes(resposta.resposta)}</p>
         {/* H6d: a tabela ou o gráfico, quando a pergunta pede; desenhado aqui com os números que o servidor conferiu. */}
         {resposta.visual && <VisualDaResposta visual={resposta.visual} comVozes={comVozes} />}
         {/* Os trechos ficam como a transcrição os tem: é por eles que se confere. */}

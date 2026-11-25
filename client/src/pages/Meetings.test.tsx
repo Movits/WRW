@@ -1275,12 +1275,17 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     }
   });
 
-  it("o link com ?q abre a transcrição já filtrada pelo termo", () => {
+  // Defeito 1 do teste manual T50 (23/11): o resultado da busca entre as
+  // reuniões (?q) abria a reunião sem ir ao trecho encontrado.
+  it("o link com ?q abre a transcrição no trecho do termo: a fala marcada e o player no tempo dela", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const antes = window.location.href;
     try {
       abrirPeloLink("?q=frete");
-      expect(document.querySelectorAll("ol li")).toHaveLength(1);
       expect(screen.getByRole("searchbox")).toHaveValue("frete");
+      expect(document.querySelector("[data-fala-do-link]")).toHaveTextContent("O frete fica para sexta.");
+      // A fala do frete começa aos 620 s, na segunda parte.
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
     } finally {
       window.history.replaceState(null, "", antes);
     }
@@ -1301,7 +1306,9 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
       abrirPeloLink("?q=contract", EM_INGLES);
       expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
       expect(screen.getByRole("combobox", { name: /Idioma/ })).toHaveValue("en");
-      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      // A transcrição inteira, com a fala do termo marcada (defeito 1 do T50).
+      expect(document.querySelectorAll("ol li")).toHaveLength(2);
+      expect(document.querySelector("[data-fala-do-link]")).toHaveTextContent("We will sign the contract on Monday.");
       expect(screen.getByRole("searchbox")).toHaveValue("contract");
       expect(document.querySelector("mark")).toHaveTextContent("contract");
       // A dona ainda escolhe a tradução: aí, sim, o pedido sai.

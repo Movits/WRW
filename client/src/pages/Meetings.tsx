@@ -28,6 +28,7 @@ import { DicaDeInstalacao } from "@/components/DicaDeInstalacao";
 import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
+import { primeiraFalaComOTermo } from "@shared/busca-de-reunioes";
 import { AvisoDeResumoDeOutraVersao, BarraDaEdicao, EDICAO_VAZIA, EditorDoTextoCorrido, useEdicaoDaTranscricao } from "@/components/EditarTranscricao";
 import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
@@ -1098,16 +1099,27 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   // a busca e não pula outra vez — o "▶" dentro da reunião fala direto com o
   // player, sem passar por aqui.
   const buscaJaAtendida = useRef<string | null>(null);
+  // O ?q sem ?t (o resultado da busca entre as reuniões, defeito 1 do teste
+  // manual T50): o player vai ao começo da primeira fala com o termo, a mesma
+  // que a transcrição rola até a vista e marca.
+  const segmentosDoDado = data?.transcript?.segments;
+  const segundoDoTermo = useMemo(() => {
+    if (!termoPedido.trim()) return NaN;
+    const segmentos = segmentosValidos(segmentosDoDado);
+    const indice = primeiraFalaComOTermo(segmentos, termoPedido);
+    return indice >= 0 ? segmentos[indice].inicio : NaN;
+  }, [segmentosDoDado, termoPedido]);
+  const segundoDoLink = Number.isFinite(segundoPedido) && segundoPedido > 0 ? segundoPedido : segundoDoTermo;
   const partesDoDado = data?.recording?.partes ?? (data?.recording ? [{ inicioSegundos: 0, duracaoSegundos: data.recording.durationSeconds }] : []);
-  const cobreOPedido = partesDoDado.some(parte => segundoPedido >= parte.inicioSegundos && segundoPedido < parte.inicioSegundos + parte.duracaoSegundos);
+  const cobreOPedido = partesDoDado.some(parte => segundoDoLink >= parte.inicioSegundos && segundoDoLink < parte.inicioSegundos + parte.duracaoSegundos);
   const statusDaReuniao = data?.meeting.status;
   const aindaChegando = statusDaReuniao === "recording" || statusDaReuniao === "uploading" || statusDaReuniao === "processing";
   useEffect(() => {
-    if (!player.current || buscaJaAtendida.current === busca || !(Number.isFinite(segundoPedido) && segundoPedido > 0)) return;
+    if (!player.current || buscaJaAtendida.current === busca || !(Number.isFinite(segundoDoLink) && segundoDoLink > 0)) return;
     if (!cobreOPedido && aindaChegando) return;
     buscaJaAtendida.current = busca;
-    player.current.irPara(segundoPedido);
-  }, [busca, partesDoDado.length, cobreOPedido, aindaChegando]);
+    player.current.irPara(segundoDoLink);
+  }, [busca, partesDoDado.length, cobreOPedido, aindaChegando, segundoDoLink]);
   const [falhaNoAudio, setFalhaNoAudio] = useState(false);
   // D2: a voz que o player toca sozinha (nula: todas). A transcrição a escolhe
   // e mostra só as falas dela; a barra do player diz qual é, em qualquer aba.

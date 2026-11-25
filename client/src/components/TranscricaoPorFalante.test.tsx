@@ -34,9 +34,49 @@ describe("TranscricaoPorFalante (D1)", () => {
     expect(screen.getByText("Nada encontrado com esse termo.")).toBeInTheDocument();
   });
 
-  it("o termo do link (?q) já abre filtrado", () => {
-    render(<TranscricaoPorFalante segmentos={FALAS} termoInicial="frete" />);
+  // Defeito 1 do teste manual T50 (23/11): o resultado da busca entre as
+  // reuniões abria a reunião sem ir ao trecho encontrado.
+  it("o termo do link (?q) abre a transcrição inteira no ponto: a primeira fala com o termo rolada até a vista, marcada e destacada", () => {
+    const rolar = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = rolar;
+    try {
+      render(<TranscricaoPorFalante segmentos={FALAS} termoInicial="frete" />);
+      expect(document.querySelectorAll("ol li")).toHaveLength(FALAS.length);
+      const marcada = document.querySelector("[data-fala-do-link]")!;
+      expect(marcada).toHaveTextContent("O frete fica para sexta.");
+      expect(marcada).toHaveAttribute("aria-current", "location");
+      expect(rolar).toHaveBeenCalledTimes(1);
+      expect(rolar.mock.contexts[0]).toBe(marcada);
+      expect(within(marcada as HTMLElement).getByText("frete").tagName).toBe("MARK");
+      // Mexer na busca volta a filtrar, e a marca do link sai.
+      fireEvent.change(screen.getByRole("searchbox"), { target: { value: "contrato" } });
+      expect(document.querySelectorAll("ol li")).toHaveLength(2);
+      expect(document.querySelector("[data-fala-do-link]")).toBeNull();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("a busca e o termo do link não ligam para acento nem caixa, como a busca do servidor", () => {
+    const comAcento: SegmentoDaTela[] = [
+      { inicio: 0, fim: 10, falante: "F1", texto: "Bom dia." },
+      { inicio: 10, fim: 20, falante: "F2", texto: "A REUNIÃO de São Paulo ficou para sexta." },
+    ];
+    render(<TranscricaoPorFalante segmentos={comAcento} termoInicial="reuniao de sao" />);
+    const marcada = document.querySelector("[data-fala-do-link]")!;
+    expect(marcada).toHaveTextContent("A REUNIÃO de São Paulo");
+    expect(within(marcada as HTMLElement).getByText("REUNIÃO de São").tagName).toBe("MARK");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sao paulo" } });
     expect(document.querySelectorAll("ol li")).toHaveLength(1);
+    expect(screen.getByText("São Paulo").tagName).toBe("MARK");
+  });
+
+  it("o termo do link que não está em fala nenhuma diz isso e mostra a transcrição inteira", () => {
+    render(<TranscricaoPorFalante segmentos={FALAS} termoInicial="inexistente" />);
+    expect(screen.getByText("Nada encontrado com esse termo.")).toBeInTheDocument();
+    expect(document.querySelectorAll("ol li")).toHaveLength(FALAS.length);
+    expect(document.querySelector("[data-fala-do-link]")).toBeNull();
   });
 
   it("tempo de fala por voz, da que mais falou para a que menos, sem contar a lacuna", () => {
