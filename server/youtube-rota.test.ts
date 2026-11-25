@@ -12,6 +12,15 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  * traduz. O banco, o teto e o trabalho estão em server/youtube.integracao.test.ts.
  */
 const servico = vi.hoisted(() => ({ pedirResumoDoVideo: vi.fn(), refazerResumoDoVideo: vi.fn() }));
+
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
+vi.mock("./db", () => ({
+  getDb: async () => null,
+  exigirDb: async () => { throw new Error("este teste não usa banco"); },
+}));
 vi.mock("./youtube", async original => ({
   ...(await original<typeof import("./youtube")>()),
   pedirResumoDoVideo: (...a: unknown[]) => servico.pedirResumoDoVideo(...a),
