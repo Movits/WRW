@@ -152,7 +152,10 @@ export function PerfilDeVoz() {
             <button type="button" className={CLASSE_SECUNDARIA} onClick={() => ouvir.mutate()} disabled={ouvir.isPending}>
               <Play size={14} aria-hidden="true" /> {t("perfilDeVoz.listen")}
             </button>
-            <button type="button" className={CLASSE_SECUNDARIA} onClick={() => setRegravando(true)}>
+            {/* Regravar fecha a amostra que tocava e a confirmação de desligar:
+                sem isso, o Cancelar remontava o player com autoPlay (a amostra
+                voltava a tocar sozinha) e reabria a confirmação. */}
+            <button type="button" className={CLASSE_SECUNDARIA} onClick={() => { setUrlDaAmostra(null); setConfirmandoDesligar(false); setRegravando(true); }}>
               <RotateCcw size={14} aria-hidden="true" /> {t("perfilDeVoz.rerecord")}
             </button>
             <button type="button" className={CLASSE_SECUNDARIA} onClick={() => setConfirmandoDesligar(true)}>

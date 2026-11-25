@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PerfilDeVoz } from "./PerfilDeVoz";
@@ -125,5 +125,26 @@ describe("com perfil", () => {
     duble.aoTerminar!({ blob: new Blob(["audio"], { type: "audio/mp4" }), mimeType: "audio/mp4", duracaoMs: 25_000 });
     await vi.waitFor(() => expect(duble.gravar).toHaveBeenCalledTimes(1));
     expect(duble.gravar.mock.calls[0][0].consentimento).toBeUndefined();
+  });
+
+  it("regravar e cancelar não volta a tocar a amostra sozinha nem reabre a confirmação de desligar (conferência de tela de 25/11)", () => {
+    duble.estado.mockReturnValue(consulta({ ativo: true, duracaoMs: 30_000, criadoEm: Date.now(), atualizadoEm: Date.now() }));
+    globalThis.URL.createObjectURL ??= () => "";
+    globalThis.URL.revokeObjectURL ??= () => {};
+    const criarUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:amostra");
+    const revogarUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const { container } = render(<PerfilDeVoz />);
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir" }));
+    act(() => { duble.opcoes.ouvir.onSuccess?.({ audioBase64: btoa("audio"), mimeType: "audio/mp4" }); });
+    expect(container.querySelector("audio")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Desligar e excluir/ }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Regravar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(container.querySelector("audio")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    criarUrl.mockRestore();
+    revogarUrl.mockRestore();
   });
 });
