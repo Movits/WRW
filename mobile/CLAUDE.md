@@ -39,5 +39,10 @@ npx eas-cli@latest submit --platform ios|android                # envia para as 
 - O texto de permissão do microfone (`NSMicrophoneUsageDescription`) aparece na revisão
   da Apple. Precisa dizer para que o microfone serve.
 - O user agent termina em `WRWApp/1.0`, para o site saber que está dentro do app.
+- **Barra de abas** (`abas.ts` e `BarraDeAbas.tsx`): nativa, leva a WebView às rotas do
+  site e usa os nomes do site nos 10 idiomas (copiados das chaves citadas em `abas.ts`;
+  mudou lá, mude aqui). O app grava as rotas da barra em `window.__wrwRotasDaBarraDoApp`,
+  e o Menu do site deixa de repeti-las (`client/src/lib/barra-do-app.ts`). Mudou uma aba,
+  confira os dois lados.
 - Nenhuma credencial vai no repositório: as chaves das lojas ficam no EAS (`eas credentials`).
   O `.gitignore` desta pasta já recusa `*.p8`, `*.p12`, `*.jks` e `*.key`.

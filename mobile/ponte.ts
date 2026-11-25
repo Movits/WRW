@@ -9,12 +9,17 @@
 //   não apagar durante a gravação e para o aviso do segundo plano no iPhone.
 // - Diagnóstico: console.error, console.warn, erros soltos e o que acontece com
 //   o microfone vão para o log do app (o terminal do `npx expo start`).
+// - Rota e idioma: avisa ao app a página aberta (também quando o site troca de
+//   rota sem recarregar) e o idioma e a direção do texto, para a barra de abas
+//   marcar a aba certa e falar a língua do site.
 
 /** Mensagens que a página manda ao app. */
 export type MensagemDaPagina =
   | { tipo: 'log'; nivel: string; texto: string }
   | { tipo: 'microfone'; id: number }
-  | { tipo: 'gravando'; ativo: boolean };
+  | { tipo: 'gravando'; ativo: boolean }
+  | { tipo: 'rota'; caminho: string }
+  | { tipo: 'idioma'; lang: string; dir: string };
 
 export function lerMensagem(dados: string): MensagemDaPagina | null {
   try {
@@ -69,6 +74,52 @@ export function scriptDaPonte(pedeMicrofone: boolean): string {
   });
 
   log('info', 'ponte instalada em ' + location.pathname + ' | mediaDevices: ' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) + ' | MediaRecorder: ' + (typeof window.MediaRecorder) + ' | ' + navigator.userAgent);
+
+  // A rota: o site troca de página pelo history (wouter) sem recarregar, e a
+  // WebView nem sempre avisa o app disso. Vale o pushState, o replaceState, o
+  // voltar (popstate) e a âncora.
+  var ultimaRota = null;
+  function avisarRota() {
+    var caminho = location.pathname;
+    if (caminho === ultimaRota) return;
+    ultimaRota = caminho;
+    enviar({ tipo: 'rota', caminho: caminho });
+  }
+  ['pushState', 'replaceState'].forEach(function (nome) {
+    var original = window.history && window.history[nome];
+    if (typeof original !== 'function') return;
+    window.history[nome] = function () {
+      var resultado = original.apply(this, arguments);
+      try { avisarRota(); } catch (e) {}
+      return resultado;
+    };
+  });
+  window.addEventListener('popstate', avisarRota);
+  window.addEventListener('hashchange', avisarRota);
+  avisarRota();
+
+  // O idioma: o site grava o idioma e a direção no <html> (lang e dir; o árabe
+  // é RTL) quando carrega e quando a pessoa troca de idioma.
+  var ultimoIdioma = null;
+  function avisarIdioma() {
+    var raiz = document.documentElement;
+    if (!raiz) return;
+    var lang = raiz.getAttribute('lang') || '';
+    var dir = raiz.getAttribute('dir') || 'ltr';
+    if (lang + '|' + dir === ultimoIdioma) return;
+    ultimoIdioma = lang + '|' + dir;
+    enviar({ tipo: 'idioma', lang: lang, dir: dir });
+  }
+  function vigiarIdioma() {
+    var raiz = document.documentElement;
+    if (!raiz) return;
+    avisarIdioma();
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(avisarIdioma).observe(raiz, { attributes: true, attributeFilter: ['lang', 'dir'] });
+    }
+  }
+  if (document.documentElement) vigiarIdioma();
+  else document.addEventListener('DOMContentLoaded', vigiarIdioma);
 
   var pedidos = {};
   var proximo = 0;

@@ -9,6 +9,7 @@ import {
   Alert,
   AppState,
   BackHandler,
+  Keyboard,
   Linking,
   PermissionsAndroid,
   Platform,
@@ -20,10 +21,13 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import { abaDoCaminho, barraAparece, scriptDasRotasDaBarra, scriptParaAbrir, type Aba } from './abas';
+import { BarraDeAbas } from './BarraDeAbas';
 import { lerMensagem, respostaDoMicrofone, scriptDaPonte } from './ponte';
 
 const ETIQUETA_DA_GRAVACAO = 'wrw-gravacao';
-const SCRIPT_DA_PONTE = scriptDaPonte(Platform.OS === 'android');
+// A ponte e a lista das telas da barra, que o Menu do site deixa de repetir.
+const SCRIPT_DA_PONTE = scriptDaPonte(Platform.OS === 'android') + scriptDasRotasDaBarra();
 
 /**
  * No Android, a WebView só entrega o microfone se o app tiver a permissão do
@@ -66,6 +70,16 @@ function ehDaWrw(url: string): boolean {
   }
 }
 
+/** O caminho de uma URL da WRW ("/dashboard"); null para o resto. */
+function caminhoDaWrw(url: string): string | null {
+  if (!ehDaWrw(url)) return null;
+  try {
+    return new URL(url).pathname || '/';
+  } catch {
+    return null;
+  }
+}
+
 function TelaDeErro({ aoTentarDeNovo }: { aoTentarDeNovo: () => void }) {
   return (
     <View style={estilos.erro}>
@@ -103,6 +117,30 @@ export default function App() {
   const saiuGravando = useRef(false);
   const avisouDoSegundoPlano = useRef(false);
 
+  // Barra de abas (abas.ts): segue a página aberta e o idioma do site, que a
+  // ponte avisa, e sai durante a gravação, com o teclado aberto e sem conexão.
+  const [caminho, setCaminho] = useState<string | null>(null);
+  const [idioma, setIdioma] = useState<{ lang: string; rtl: boolean }>({ lang: 'pt-BR', rtl: false });
+  const [gravandoAgora, setGravandoAgora] = useState(false);
+  const [semConexao, setSemConexao] = useState(false);
+  const [tecladoAberto, setTecladoAberto] = useState(false);
+
+  useEffect(() => {
+    const abriu = Keyboard.addListener('keyboardDidShow', () => setTecladoAberto(true));
+    const fechou = Keyboard.addListener('keyboardDidHide', () => setTecladoAberto(false));
+    return () => {
+      abriu.remove();
+      fechou.remove();
+    };
+  }, []);
+
+  const mostrarBarra = barraAparece({ caminho, gravando: gravandoAgora, semConexao, tecladoAberto });
+
+  const aoTocarNaAba = useCallback((aba: Aba) => {
+    setCaminho(aba.caminho);
+    webview.current?.injectJavaScript(scriptParaAbrir(aba.caminho, ORIGEM));
+  }, []);
+
   useEffect(() => {
     const assinatura = AppState.addEventListener('change', estado => {
       if (estado === 'background' && gravando.current && Platform.OS === 'ios') {
@@ -124,6 +162,7 @@ export default function App() {
   const aoMudarGravacao = useCallback((ativo: boolean) => {
     if (ativo === gravando.current) return;
     gravando.current = ativo;
+    setGravandoAgora(ativo);
     if (!ativo) {
       void deactivateKeepAwake(ETIQUETA_DA_GRAVACAO);
       return;
@@ -152,6 +191,14 @@ export default function App() {
         aoMudarGravacao(mensagem.ativo);
         return;
       }
+      if (mensagem.tipo === 'rota') {
+        if (typeof mensagem.caminho === 'string') setCaminho(mensagem.caminho);
+        return;
+      }
+      if (mensagem.tipo === 'idioma') {
+        if (typeof mensagem.lang === 'string') setIdioma({ lang: mensagem.lang, rtl: mensagem.dir === 'rtl' });
+        return;
+      }
       if (mensagem.tipo === 'microfone') {
         console.log(`[app ${Platform.OS}] pedido de microfone ${mensagem.id}`);
         liberarMicrofone()
@@ -170,6 +217,8 @@ export default function App() {
 
   const aoNavegar = useCallback((estado: WebViewNavigation) => {
     setPodeVoltar(estado.canGoBack);
+    const novo = caminhoDaWrw(estado.url);
+    if (novo) setCaminho(novo);
   }, []);
 
   // Só páginas da WRW abrem dentro do app; o resto vai para o navegador ou o
@@ -185,7 +234,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={estilos.tela} edges={['top', 'bottom']}>
+      {/* Com a barra, a margem de baixo do aparelho fica com ela, na cor dela. */}
+      <SafeAreaView style={estilos.tela} edges={mostrarBarra ? ['top'] : ['top', 'bottom']}>
         <StatusBar style="light" />
         <WebView
           ref={webview}
@@ -201,6 +251,8 @@ export default function App() {
           injectedJavaScript={SCRIPT_DA_PONTE}
           onMessage={aoReceberMensagem}
           onLoadEnd={evento => console.log(`[app ${Platform.OS}] página carregada: ${evento.nativeEvent.url}`)}
+          onLoad={() => setSemConexao(false)}
+          onError={() => setSemConexao(true)}
           webviewDebuggingEnabled={__DEV__}
           renderError={() => <TelaDeErro aoTentarDeNovo={() => webview.current?.reload()} />}
           applicationNameForUserAgent="WRWApp/1.0"
@@ -213,6 +265,9 @@ export default function App() {
           setSupportMultipleWindows={false}
           startInLoadingState
         />
+        {mostrarBarra ? (
+          <BarraDeAbas ativa={abaDoCaminho(caminho)} lang={idioma.lang} rtl={idioma.rtl} aoTocar={aoTocarNaAba} />
+        ) : null}
       </SafeAreaView>
     </SafeAreaProvider>
   );
