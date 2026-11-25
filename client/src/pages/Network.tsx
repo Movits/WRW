@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { EnrichmentChat } from "@/components/EnrichmentChat";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { trpc } from "@/lib/trpc";
+import { PossuiProcuraDaFicha } from "@/components/PossuiProcuraDaFicha";
 import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import {
   prepararImagemParaEnvio,
@@ -806,36 +807,9 @@ function ContactDetail({ contact: contatoDaLista, onEdit, onClose }: {
                   {t("errorBoundary.retryButton")}
                 </button>
               </div>
-            ) : possuiProcura.possui.length === 0 && possuiProcura.procura.length === 0 ? (
-              <p className="text-xs text-white/35">{t("network.semPossuiProcura")}</p>
             ) : (
-              <div className="space-y-3">
-                {([
-                  { rotulo: t("network.rotuloPossui"), itens: possuiProcura.possui, cor: "border-emerald-400/30 text-emerald-200/80", remover: (id: number) => removeAssetMut.mutate({ id }) },
-                  { rotulo: t("network.rotuloProcura"), itens: possuiProcura.procura, cor: "border-sky-300/30 text-sky-200/80", remover: (id: number) => removeNeedMut.mutate({ id }) },
-                ] as const).filter(grupo => grupo.itens.length > 0).map(grupo => (
-                  <div key={grupo.rotulo}>
-                    <p className="text-xs text-white/50 mb-1.5">{grupo.rotulo}</p>
-                    <ul className="flex flex-wrap gap-2">
-                      {grupo.itens.map(item => (
-                        <li key={item.id} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${grupo.cor}`}>
-                          {item.label}{item.category ? <span className="text-white/35"> · {item.category}</span> : null}
-                          <button
-                            type="button"
-                            aria-label={t("intelligentMatches.removerAriaLabel", { label: item.label })}
-                            title={t("intelligentMatches.removerTooltip")}
-                            disabled={removendoItem}
-                            onClick={() => grupo.remover(item.id)}
-                            className="rounded-full p-0.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
-                          >
-                            <X size={12} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
+              <PossuiProcuraDaFicha contactId={contact.id} possui={possuiProcura.possui} procura={possuiProcura.procura}
+                removerPossui={id => removeAssetMut.mutate({ id })} removerProcura={id => removeNeedMut.mutate({ id })} removendo={removendoItem}/>
             )}
           </div>
         )}

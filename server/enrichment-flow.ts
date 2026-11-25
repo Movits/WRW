@@ -9,6 +9,79 @@ export const ENRICHMENT_STEPS = [
 
 export type EnrichmentField = (typeof ENRICHMENT_STEPS)[number]["fieldType"];
 
+/** O que cada pergunta pede, dito para explicar à dona o que falta na resposta (T45, 24/11). */
+const O_QUE_A_ETAPA_PEDE: Record<EnrichmentField, string> = {
+  phone: "um número de telefone",
+  company: "o nome da empresa",
+  assets: "algo que essa pessoa pode oferecer",
+  needs: "algo que essa pessoa está procurando",
+  how_met: "como vocês se conheceram",
+  relationship_type: "se o relacionamento é pessoal, profissional ou ambos",
+};
+
+/** O nome curto de cada pergunta, para dizer o que foi anotado ou pulado. */
+const NOME_DA_ETAPA: Record<EnrichmentField, string> = {
+  phone: "o telefone",
+  company: "a empresa",
+  assets: "o que essa pessoa oferece",
+  needs: "o que essa pessoa procura",
+  how_met: "como vocês se conheceram",
+  relationship_type: "o tipo de relacionamento",
+};
+
+/** "a, b e c". */
+function juntarNomes(nomes: string[]) {
+  return nomes.length <= 1 ? nomes.join("") : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
+}
+
+export const DICA_DO_NAO_SEI = "Se não souber, responda \"não sei\" e eu passo para a próxima pergunta.";
+
+/**
+ * A resposta não trouxe o dado da pergunta da vez (T45, 24/11: o chat repetia a
+ * mesma pergunta sem dizer por quê). Diz o que faltou, refaz a pergunta e
+ * ensina a pular. Quando a resposta era de OUTRA pergunta (guardada para quando
+ * o roteiro chegar lá, `anotadas`), diz que anotou, em vez de dar a entender
+ * que ela se perdeu.
+ */
+export function explicarOQueFalta(fieldType: EnrichmentField, pergunta: string, anotadas: EnrichmentField[] = []) {
+  const unicas = Array.from(new Set(anotadas)).filter(campo => campo !== fieldType);
+  const inicio = unicas.length
+    ? `Anotei o que você contou sobre ${juntarNomes(unicas.map(campo => NOME_DA_ETAPA[campo]))} para quando chegarmos lá. Para esta pergunta, ainda preciso de ${O_QUE_A_ETAPA_PEDE[fieldType]}.`
+    : `Não encontrei ${O_QUE_A_ETAPA_PEDE[fieldType]} na sua resposta.`;
+  return `${inicio} ${pergunta} ${DICA_DO_NAO_SEI}`;
+}
+
+/** A resposta trouxe algo da pergunta, mas sem a confiança de um cartão. */
+export function pedirDeOutroJeito(fieldType: EnrichmentField) {
+  return `Não tenho certeza se entendi. Preciso de ${O_QUE_A_ETAPA_PEDE[fieldType]}: pode dizer de outro jeito? ${DICA_DO_NAO_SEI}`;
+}
+
+/**
+ * O aviso das perguntas puladas porque o contato já as tem respondidas (T45,
+ * 24/11), antes da pergunta seguinte. O que já está na ficha se muda nela.
+ */
+export function avisoDasJaPreenchidas(puladas: EnrichmentField[]) {
+  if (!puladas.length) return "";
+  return `Este contato já tem ${juntarNomes(puladas.map(campo => NOME_DA_ETAPA[campo]))} na ficha, então pulei ${puladas.length === 1 ? "essa pergunta" : "essas perguntas"} (para mudar, edite a ficha do contato).`;
+}
+
+/**
+ * A próxima pergunta a fazer a partir de `aPartirDe`: pula as que o contato já
+ * tem respondidas (`preenchidas`), menos a que tem resposta dita antes da vez
+ * (`comAntecipadas`), que precisa virar cartão lá. Devolve o índice (o tamanho
+ * do roteiro quando não sobra pergunta) e as puladas.
+ */
+export function proximaEtapaAPerguntar(aPartirDe: number, preenchidas: ReadonlySet<string>, comAntecipadas: ReadonlySet<string> = new Set()) {
+  const puladas: EnrichmentField[] = [];
+  let indice = Math.max(0, aPartirDe);
+  for (; indice < ENRICHMENT_STEPS.length; indice++) {
+    const campo = ENRICHMENT_STEPS[indice].fieldType;
+    if (!preenchidas.has(campo) || comAntecipadas.has(campo)) break;
+    puladas.push(campo);
+  }
+  return { indice, puladas };
+}
+
 export function getEnrichmentStep(index: number) {
   return ENRICHMENT_STEPS[index] ?? null;
 }

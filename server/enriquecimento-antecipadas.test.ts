@@ -48,6 +48,8 @@ vi.mock("./db", async () => ({
   saveEnrichmentMessage: (...args: unknown[]) => saveEnrichmentMessage(...(args as [never])),
   saveEnrichmentSuggestions: (...args: unknown[]) => saveEnrichmentSuggestions(...(args as [unknown[]])),
   advanceEnrichmentSession: (...args: unknown[]) => advanceEnrichmentSession(...(args as [string, string, number])),
+  // T45 (24/11): o contato sem nada preenchido; o roteiro não pula nenhuma pergunta.
+  camposPreenchidosDoContato: vi.fn(async () => []),
   completeEnrichmentSession: vi.fn(async () => true),
   getActiveEnrichmentSession: vi.fn(async () => null),
   createEnrichmentSession: vi.fn(),
@@ -194,13 +196,40 @@ describe("'Não sei o telefone. O que ela tem para oferecer: Exportação de caf
 });
 
 describe("pular só quando a resposta diz que não sabe", () => {
-  it("nada da pergunta da vez e nenhum 'não sei': pede de novo, como antes", async () => {
+  it("nada da pergunta da vez e nenhum 'não sei': pede de novo, dizendo o que faltou e como pular (T45: antes, só repetia a pergunta)", async () => {
     invokeLLM.mockResolvedValue(respostaDaIA({}));
 
     const r = await enviar("Ela é ótima, conheci numa feira");
 
-    expect(r.aiResponse).toBe(PERGUNTA.phone);
+    expect(r.aiResponse).toBe(`Não encontrei um número de telefone na sua resposta. ${PERGUNTA.phone} Se não souber, responda "não sei" e eu passo para a próxima pergunta.`);
     expect(advanceEnrichmentSession).not.toHaveBeenCalled();
+  });
+
+  it("a resposta era de outra pergunta (o que ela oferece, na vez do telefone): diz que anotou para depois e o que ainda falta (T45)", async () => {
+    invokeLLM.mockResolvedValue(respostaDaIA({ outros_campos: [{ field_type: "assets", value: "Exportação de café", confidence: 0.9 }] }));
+
+    const r = await enviar("Ela oferece exportação de café");
+
+    expect(r.aiResponse).toBe(`Anotei o que você contou sobre o que essa pessoa oferece para quando chegarmos lá. Para esta pergunta, ainda preciso de um número de telefone. ${PERGUNTA.phone} Se não souber, responda "não sei" e eu passo para a próxima pergunta.`);
+    expect(advanceEnrichmentSession).not.toHaveBeenCalled();
+    expect(gravadas()[0]).toMatchObject({ role: "user", metadata: { antecipadas: [{ field_type: "assets", value: "Exportação de café" }] } });
+  });
+
+  it("a empresa vaga ('tem uma empresa'): pede o nome, dizendo o que faltou (T45)", async () => {
+    estado.etapa = 1;
+    invokeLLM.mockResolvedValue(respostaDaIA({}));
+
+    const r = await enviar("tem uma empresa");
+
+    expect(r.aiResponse).toBe('Não encontrei o nome da empresa na sua resposta. Qual é o nome da empresa em que trabalha? Se não souber, responda "não sei" e eu passo para a próxima pergunta.');
+  });
+
+  it("o dado com confiança baixa: pede de outro jeito, dizendo o que precisa e como pular (T45)", async () => {
+    invokeLLM.mockResolvedValue(respostaDaIA({ extracted_entities: [{ field_type: "phone", value: "talvez 9999", confidence: 0.4 }] }));
+
+    const r = await enviar("acho que é 9999, sei lá");
+
+    expect(r.aiResponse).toBe('Não tenho certeza se entendi. Preciso de um número de telefone: pode dizer de outro jeito? Se não souber, responda "não sei" e eu passo para a próxima pergunta.');
   });
 
   it("'não sei o celular, o fixo é 3333-4444': a IA tirou o fixo, e o fixo vira cartão (não pula)", async () => {

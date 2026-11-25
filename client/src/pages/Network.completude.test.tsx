@@ -46,6 +46,8 @@ vi.mock("@/lib/trpc", () => ({
       uploadCard: duble.registrar(),
       removeAsset: duble.registrar(),
       removeNeed: duble.registrar(),
+      addItem: duble.registrar(),
+      editItem: duble.registrar(),
     },
     enrichment: {
       startSession: duble.registrar(),

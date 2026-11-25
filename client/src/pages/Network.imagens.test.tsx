@@ -55,6 +55,8 @@ vi.mock("@/lib/trpc", () => ({
       uploadCard: { useMutation: () => ({ mutate: duble.enviarCartao, isPending: false }) },
       removeAsset: duble.registrar(),
       removeNeed: duble.registrar(),
+      addItem: duble.registrar(),
+      editItem: duble.registrar(),
     },
     enrichment: {
       startSession: duble.registrar(),

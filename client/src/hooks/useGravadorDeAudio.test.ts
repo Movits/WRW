@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { motivoDaOcupacao, sessaoOcupada } from "@/lib/sessao-ocupada";
 import {
   ATRASO_MAXIMO_MS, ESPERA_PELA_PAUSA_MS, ESPERA_PELO_MICROFONE_MAXIMA_MS, PARTE_MINIMA_DA_QUEDA_MS, PAUSA_MAXIMA_MS, PREPARO_DO_DETECTOR_MS, TENTATIVA_DO_MICROFONE_MS,
-  useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador,
+  restricoesDoMicrofone, useGravadorDeAudio, type AudioGravado, type OpcoesDoGravador,
 } from "./useGravadorDeAudio";
 
 /** O MediaRecorder do navegador, que grava só os formatos da lista. */
@@ -221,6 +221,36 @@ describe("useGravadorDeAudio — o formato", () => {
     expect(gravadores[0].opcoes).toEqual({ audioBitsPerSecond: 64_000 });
     act(() => result.current.parar());
     expect(aoTerminar.mock.calls[0][0].mimeType).toBe("audio/webm");
+  });
+});
+
+describe("useGravadorDeAudio — o que se pede ao microfone (T51, 24/11)", () => {
+  it("a reunião pede o microfone sem cancelamento de eco, redução de ruído e ganho automático, num canal só e sem forçar a taxa de amostragem", () => {
+    const audio = restricoesDoMicrofone("reuniao").audio as MediaTrackConstraints;
+    expect(audio).toEqual({ echoCancellation: { ideal: false }, noiseSuppression: { ideal: false }, autoGainControl: { ideal: false }, channelCount: { ideal: 1 } });
+    expect(audio).not.toHaveProperty("sampleRate");
+    expect(restricoesDoMicrofone("reuniao").video).toBe(false);
+  });
+
+  it("o ditado e a voz do contato (uma pessoa perto do aparelho) seguem com os três ligados", () => {
+    expect(restricoesDoMicrofone("voz")).toEqual({
+      audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } }, video: false,
+    });
+  });
+
+  it("nada é pedido como 'exact': o navegador que não desliga um deles grava assim mesmo, em vez de recusar o microfone", () => {
+    for (const uso of ["voz", "reuniao"] as const) expect(JSON.stringify(restricoesDoMicrofone(uso))).not.toContain("exact");
+  });
+
+  it("o gravador com usoDoMicrofone 'reuniao' abre o microfone com as restrições da reunião; sem a opção, com as da voz", async () => {
+    const reuniao = montar({ usoDoMicrofone: "reuniao" });
+    await act(async () => { await reuniao.result.current.comecar(); });
+    expect(getUserMedia).toHaveBeenLastCalledWith(restricoesDoMicrofone("reuniao"));
+    act(() => reuniao.result.current.parar());
+    reuniao.unmount();
+    const voz = montar();
+    await act(async () => { await voz.result.current.comecar(); });
+    expect(getUserMedia).toHaveBeenLastCalledWith(restricoesDoMicrofone("voz"));
   });
 });
 
@@ -1397,6 +1427,16 @@ describe("useGravadorDeAudio — o microfone que cai (G17)", () => {
     await act(async () => { await montado.result.current.comecar(); });
     return { ...montado, primeira, segunda, fluxo1, fluxo2, aoFecharParte, aoCairOMicrofone, aoVoltarOMicrofone, aoDesistirDoMicrofone };
   }
+
+  it("o microfone que volta na gravação de reunião abre com as mesmas restrições da reunião (sem o processamento da voz)", async () => {
+    const g = await gravandoEmPartes({ usoDoMicrofone: "reuniao" });
+    act(() => g.primeira.cair());
+    await andarAsPromessas();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    for (const chamada of getUserMedia.mock.calls) expect(chamada[0]).toEqual(restricoesDoMicrofone("reuniao"));
+    expect(g.result.current.estado).toBe("gravando");
+    act(() => g.result.current.parar());
+  });
 
   it("a trilha que cai: a parte fecha sem ser a última, a gravação espera outro microfone com o relógio parado e segue numa parte nova quando ele abre", async () => {
     const g = await gravandoEmPartes();

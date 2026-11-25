@@ -37,6 +37,8 @@ vi.mock("./db", async () => ({
   saveEnrichmentMessage: (...args: unknown[]) => saveEnrichmentMessage(...(args as [])),
   saveEnrichmentSuggestions: (...args: unknown[]) => saveEnrichmentSuggestions(...(args as [unknown[]])),
   advanceEnrichmentSession: vi.fn(async () => ({ questionsAnswered: 3 })),
+  // T45 (24/11): o contato sem nada preenchido; o roteiro não pula nenhuma pergunta.
+  camposPreenchidosDoContato: vi.fn(async () => []),
   completeEnrichmentSession: vi.fn(),
   getActiveEnrichmentSession: vi.fn(async () => null),
   createEnrichmentSession: vi.fn(),
