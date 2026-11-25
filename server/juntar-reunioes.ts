@@ -30,7 +30,10 @@ import { RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX, type CodigoDaRecusaDaJuncao
  *    reuniões seguintes começam depois dos da anterior (o F1 da segunda vira
  *    F3, se a primeira tinha F1 e F2): a mesma pessoa pode ganhar dois rótulos,
  *    mas duas pessoas nunca se fundem num só. Os nomes que a dona deu às vozes
- *    (H3) vão junto, nos rótulos novos.
+ *    (H3) vão junto, nos rótulos novos. A primeira parte de cada reunião
+ *    seguinte leva a marca de outra conversa (MARCA_DE_OUTRA_REUNIAO), com as
+ *    falas: o reprocesso a transcreve sem as vozes da reunião de antes, e o
+ *    resumo separa as reuniões (iniciosDasReunioesJuntadas, na fila do resumo).
  *    As falas das reuniões com idioma escolhido levam esse idioma (o campo
  *    `idioma` da fala, que a G16 grava no "Detectar sozinho"): com o alvo em
  *    "Detectar sozinho", o idioma da reunião juntada é o que mais aparece em
@@ -181,6 +184,12 @@ export function deslocarResultado(result: unknown, rotulos: number, segundos: nu
   return saida;
 }
 
+/** O result da parte com a marca de outra conversa (MARCA_DE_OUTRA_REUNIAO); o que não é objeto vira só a marca. */
+function comAMarcaDeOutraReuniao(result: unknown): Record<string, unknown> {
+  const base = result && typeof result === "object" && !Array.isArray(result) ? (result as Record<string, unknown>) : {};
+  return { ...base, [MARCA_DE_OUTRA_REUNIAO]: true };
+}
+
 /** O maior rótulo de voz que a reunião usa: nas falas guardadas das partes, no contexto delas e nos nomes que a dona deu. */
 export function maiorRotuloDaReuniao(reuniao: Pick<ReuniaoParaJuntar, "partes" | "speakerNames">): number {
   let maior = 0;
@@ -256,6 +265,12 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
     const ficaComoEsta = indice === 0 && !retranscrever;
     // A primeira parte retranscrita desta reunião começa outra conversa.
     let marcarOutraConversa = retranscrever && indice > 0;
+    // Sem retranscrever, a primeira parte desta reunião (indice > 0) também
+    // leva a marca, com as falas: o reprocesso da reunião juntada, que
+    // transcreve tudo de novo, a transcreve como outra conversa (sem os
+    // rótulos das vozes da reunião de antes, defeito 4 do teste manual T50,
+    // 23/11), e o resumo sabe onde cada reunião começa (defeito 2).
+    let marcarAPrimeiraTranscrita = !retranscrever && indice > 0;
     // O idioma escolhido para esta reunião vai às falas dela que não o têm.
     const idiomaDaReuniao = idiomaFalado(reuniao.language ?? IDIOMA_DA_REUNIAO_PADRAO);
     let tempoDaReuniaoMs = 0;
@@ -274,12 +289,14 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
             : { id: parte.id, seq: seqBase + seq, offsetMs: null, result: marcarOutraConversa ? { [MARCA_DE_OUTRA_REUNIAO]: true } : null, status: "received", retranscrever: true });
           if (!semAudio) marcarOutraConversa = false;
         } else if (!ficaComoEsta) {
+          const deslocado = deslocarResultado(parte.result, deslocamentoDosRotulos, tempoMs / 1000, idiomaDaReuniao);
           partes.push({
             id: parte.id, seq: seqBase + seq,
             offsetMs: parte.offsetMs === null ? null : Number(parte.offsetMs) + tempoMs,
-            result: deslocarResultado(parte.result, deslocamentoDosRotulos, tempoMs / 1000, idiomaDaReuniao),
+            result: marcarAPrimeiraTranscrita ? comAMarcaDeOutraReuniao(deslocado) : deslocado,
             status: parte.status, retranscrever: false,
           });
+          marcarAPrimeiraTranscrita = false;
         }
       }
       tempoDaReuniaoMs += duracao;

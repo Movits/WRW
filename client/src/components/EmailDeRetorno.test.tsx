@@ -237,7 +237,7 @@ describe("E-mail de retorno — a prévia", () => {
       "Olá, Carla,\n\nObrigada pela reunião.\nAna manda a minuta até sexta.\nFalante 2 confirma o prazo.\n\nAbraços,",
     );
     expect(screen.getByText(/Sem nome na reunião: Falante 2\./)).toBeInTheDocument();
-    expect(screen.getByText("Rascunho da IA: confira e ajuste antes de enviar. Ele não fica guardado na MarquesaMatch.")).toBeInTheDocument();
+    expect(screen.getByText("Rascunho da IA: confira e ajuste antes de enviar. Ele não fica guardado na Marquesa Global Match.")).toBeInTheDocument();
     // Depois do primeiro rascunho, o botão refaz.
     fireEvent.click(screen.getByRole("button", { name: /Refazer rascunho/ }));
     await waitFor(() => expect(rede.chamadas).toHaveLength(2));

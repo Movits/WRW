@@ -45,25 +45,25 @@ describe("montarEmailDoResumo", () => {
   it("às participantes: o nome da dona no assunto e na abertura, o título só no corpo, o link aberto no botão e no texto", () => {
     const email = montarEmailDoResumo({ ...base, modelo: "participante" });
     expect(email.assunto).toBe("Glenda compartilhou com você o resumo de uma reunião");
-    expect(email.html).toContain("Glenda compartilhou com você o resumo da reunião “Reunião com a Apex”, gravada na MarquesaMatch.");
+    expect(email.html).toContain("Glenda compartilhou com você o resumo da reunião “Reunião com a Apex”, gravada na Marquesa Global Match.");
     expect(email.html).toContain(`href="${ABERTO}"`);
     expect(email.text).toContain(`Abrir o resumo: ${ABERTO}`);
     expect(email.html).toContain("Quem tiver este link abre a reunião.");
-    expect(email.text).toContain("Você recebeu este e-mail porque Glenda o mandou a você pela MarquesaMatch.");
+    expect(email.text).toContain("Você recebeu este e-mail porque Glenda o mandou a você pela Marquesa Global Match.");
     expect(email.html).toContain('<html lang="pt-BR" dir="ltr">');
   });
 
   it("conta sem nome: o texto que não fala de ninguém, e não uma marca vazia", () => {
     const email = montarEmailDoResumo({ ...base, dona: "   ", modelo: "participante" });
     expect(email.assunto).toBe("O resumo de uma reunião foi compartilhado com você");
-    expect(email.text).toContain("Você recebeu o resumo da reunião “Reunião com a Apex”, gravada na MarquesaMatch.");
+    expect(email.text).toContain("Você recebeu o resumo da reunião “Reunião com a Apex”, gravada na Marquesa Global Match.");
     expect(email.text).not.toMatch(/\{\{|\}\}/);
   });
 
   it("à própria dona: o link aberto, para guardar ou encaminhar, sem o texto de quem recebe de outra pessoa", () => {
     const email = montarEmailDoResumo({ ...base, modelo: "dona" });
     expect(email.assunto).toBe("O link aberto da sua reunião “Reunião com a Apex”");
-    expect(email.text).toContain("Você recebeu este e-mail porque pediu à MarquesaMatch que o mandasse a você.");
+    expect(email.text).toContain("Você recebeu este e-mail porque pediu à Marquesa Global Match que o mandasse a você.");
     expect(email.text).not.toContain("Glenda o mandou");
   });
 
@@ -104,7 +104,7 @@ describe("montarEmailDoResumo", () => {
     expect(participante.assunto).toBe("Glen da compartilhou com você o resumo de uma reunião");
   });
 
-  it("endereço web no título ou no nome não chega ao e-mail: o único link é o da MarquesaMatch", () => {
+  it("endereço web no título ou no nome não chega ao e-mail: o único link é o da Marquesa Global Match", () => {
     const email = montarEmailDoResumo({ ...base, titulo: "Oferta em https://golpe.example/x e WWW.golpe.example", dona: "Glenda http://golpe.example", modelo: "participante" });
     for (const parte of [email.assunto, email.html, email.text]) {
       expect(parte).not.toMatch(/golpe\.example/i);
@@ -127,7 +127,7 @@ describe("montarEmailDoResumo", () => {
       for (const parte of [email.assunto, email.html, email.text]) {
         expect(parte, titulo).not.toMatch(/golpe|bit\.ly|premio-pix/i);
       }
-      // Os únicos links seguem os dois da MarquesaMatch: o botão e o endereço por extenso.
+      // Os únicos links seguem os dois da Marquesa Global Match: o botão e o endereço por extenso.
       expect(email.html.match(/href="/g), titulo).toHaveLength(2);
     }
     const primeiro = montarEmailDoResumo({ ...base, titulo: golpes[0][0], dona: golpes[0][1], modelo: "participante" });
@@ -145,7 +145,7 @@ describe("montarEmailDoResumo", () => {
 
   // Pacote 4d: o e-mail (H22) segue a senha e o áudio do link aberto (H23).
   const COM_AUDIO = "Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião.";
-  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.";
+  const SEM_AUDIO = "Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na Marquesa Global Match.";
   const SENHA = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.";
   const SENHA_SEM_NOME = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem gravou a reunião.";
   const SENHA_DA_DONA = "Este link pede a senha de 6 dígitos que você criou, e ela não vai neste e-mail. Ao encaminhar o link, mande a senha à parte.";
@@ -164,7 +164,7 @@ describe("montarEmailDoResumo", () => {
 
   it("o link com a senha (H23): um parágrafo diz que ela não vai no e-mail e a quem pedi-la; à dona, que ela a manda à parte", () => {
     const comNome = montarEmailDoResumo({ ...base, modelo: "participante", link: { comSenha: true, comAudio: true } });
-    expect(comNome.text).toContain(`${COM_AUDIO} Não precisa ter conta na MarquesaMatch.\n\n${SENHA}\n\nAbrir o resumo: ${ABERTO}`);
+    expect(comNome.text).toContain(`${COM_AUDIO} Não precisa ter conta na Marquesa Global Match.\n\n${SENHA}\n\nAbrir o resumo: ${ABERTO}`);
     expect(comNome.html).toContain(SENHA);
     const semNome = montarEmailDoResumo({ ...base, dona: null, modelo: "participante", link: { comSenha: true, comAudio: false } });
     expect(semNome.text).toContain(`${SEM_AUDIO}\n\n${SENHA_SEM_NOME}`);
@@ -239,13 +239,13 @@ describe("montarEmailDoResumo", () => {
   });
 
   // A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
-  // vídeo do YouTube (H13) não têm gravação, e o e-mail dizia "gravada na MarquesaMatch",
+  // vídeo do YouTube (H13) não têm gravação, e o e-mail dizia "gravada na Marquesa Global Match",
   // "ouve a gravação" (com o link ligado com o áudio) e "quem gravou a reunião".
   const GRAVACAO = /gravaç|gravad|gravou/i;
-  const ABERTURA_SEM_GRAVACAO = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na MarquesaMatch.";
-  const ABERTURA_SEM_GRAVACAO_SEM_NOME = "Você recebeu o resumo de “Reunião com a Apex”, feito na MarquesaMatch.";
+  const ABERTURA_SEM_GRAVACAO = "Glenda compartilhou com você o resumo de “Reunião com a Apex”, feito na Marquesa Global Match.";
+  const ABERTURA_SEM_GRAVACAO_SEM_NOME = "Você recebeu o resumo de “Reunião com a Apex”, feito na Marquesa Global Match.";
   const SENHA_SEM_NOME_SEM_GRAVACAO = "Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.";
-  const POR_QUE_SEM_NOME_SEM_GRAVACAO = "Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela MarquesaMatch. Se não esperava por ele, pode ignorá-lo.";
+  const POR_QUE_SEM_NOME_SEM_GRAVACAO = "Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela Marquesa Global Match. Se não esperava por ele, pode ignorá-lo.";
 
   it("a reunião sem gravação (documento e vídeo): nem a promessa da gravação, nem 'gravada', nem 'quem gravou', com o link como estiver", () => {
     const links = [{ comSenha: true, comAudio: true }, { comSenha: false, comAudio: true }, { comSenha: true, comAudio: false }, { comSenha: false, comAudio: false }, undefined];

@@ -4,18 +4,18 @@ import i18n from "@/i18n";
 import { BrandLogo, BrandMark } from "./BrandLogo";
 
 /**
- * Marca (WRW em 15/09; o nome visível é MarquesaMatch desde 23/11, com as artes da WRW até a logo nova): o nome é marca e não se traduz. Antes a
+ * Marca (WRW em 15/09; o nome visível é Marquesa Global Match desde 24/11 (MarquesaMatch em 23/11), com as artes da WRW até a logo nova): o nome é marca e não se traduz. Antes a
  * arte e o alt mudavam com o idioma (lockup PT × EN, "Mulheres que Movem o Mundo" ×
  * "Women Moving the World"); aqui se prova que os 10 idiomas recebem a mesma peça.
  */
 
-const ALT = "MarquesaMatch";
+const ALT = "Marquesa Global Match";
 
 afterEach(async () => {
   await i18n.changeLanguage("pt-BR");
 });
 
-describe("BrandLogo — a mesma marca MarquesaMatch em todo idioma", () => {
+describe("BrandLogo — a mesma marca Marquesa Global Match em todo idioma", () => {
   const ARTES = [
     ["monograma", "/brand/monograma-branco.png"],
     ["wordmark", "/brand/wordmark-branco.png"],
@@ -25,7 +25,7 @@ describe("BrandLogo — a mesma marca MarquesaMatch em todo idioma", () => {
   ] as const;
 
   for (const idioma of ["pt-BR", "en", "zh"]) {
-    it(`em ${idioma}: cada variante aponta para a arte da marca, com o alt MarquesaMatch`, async () => {
+    it(`em ${idioma}: cada variante aponta para a arte da marca, com o alt Marquesa Global Match`, async () => {
       await i18n.changeLanguage(idioma);
       for (const [variante, src] of ARTES) {
         const { unmount } = render(<BrandLogo variante={variante} />);

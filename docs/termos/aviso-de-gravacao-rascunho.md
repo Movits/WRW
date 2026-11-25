@@ -17,6 +17,21 @@ anteriores a 14/11/2026 ficam com a versão nula.
 O português é o texto de referência. Os outros 9 idiomas são tradução e precisam de
 revisão de tradução.
 
+## Versão 2026-11-24 (nome Marquesa Global Match)
+
+A Cris escreveu em 24/11/2026 que, em todos os lugares da plataforma em que constar o nome
+anterior, entra Marquesa Global Match (o nome fantasia; a empresa continua a mesma). A
+única mudança no aviso curto é o nome na frase da administração; o resto é o da versão
+2026-11-23, abaixo, que segue aceita (como a 2026-11-14) para a aba aberta antes do deploy.
+
+> Somente grave com o consentimento de todas as pessoas. O áudio é transcrito pela IA do
+> Google (Gemini), que pode processá-lo fora do Brasil e separar as falas por pessoa. O
+> áudio fica na sua conta por 30 dias, e a transcrição até você excluir a reunião. Só
+> você acessa, a menos que ligue o link de compartilhamento da reunião (o que pede nova
+> autorização de quem falou). A administração da Marquesa Global Match só acessa gravações
+> por motivo justificado, registrado antes do acesso, e a organizadora é informada da data
+> de cada consulta.
+
 ## Versão 2026-11-23 (frase da Cris sobre o acesso da administração)
 
 A Cris mandou em 23/11/2026 o texto da revisão das gravações pela administração, e o
@@ -106,6 +121,18 @@ autorizaram a gravação e o tratamento privado deste áudio para esta reunião.
   primeira vez de cada versão (pergunta em aberto com a cliente);
 - a redação do Termo de Gravação de Reuniões a partir dos pontos acima.
 
+## Aviso do resumo de vídeo do YouTube — versão `youtube-2026-11-24` (nome Marquesa Global Match)
+
+Pelo mesmo pedido da Cris de 24/11/2026, o nome no aviso passa a Marquesa Global Match.
+Nada mais muda; a versão `youtube-2026-11-20`, abaixo, segue aceita para a aba aberta
+antes do deploy.
+
+> O vídeo é lido pela IA do Google (Gemini) direto do YouTube, pelo link, e pode ser
+> processado fora do Brasil. Só vídeos públicos funcionam, e só os primeiros 60 minutos
+> são transcritos. A Marquesa Global Match não guarda o vídeo: guarda o link, a
+> transcrição e o resumo na sua conta até você excluir a reunião. Só você acessa, a menos
+> que ligue o link de compartilhamento. Limite: 5 vídeos a cada 24 horas.
+
 ## Aviso do resumo de vídeo do YouTube — versão `youtube-2026-11-20`
 
 A H13 resume um vídeo público do YouTube: a dona cola o link, e a IA do Google lê o
@@ -151,6 +178,24 @@ A caixa que a dona marca antes de enviar (`meetings.youtube.consentLabel`): "Li 
   vídeo público de terceiros para uso próprio);
 - se a caixa do link aberto de uma reunião feita de vídeo (a frase do item 5, desde a
   conferência de tela de 20/11/2026) pede alguma ressalva além dessa.
+
+## Aviso da legenda ao vivo — versão `legenda-2026-11-24` (nome Marquesa Global Match)
+
+Pelo mesmo pedido da Cris de 24/11/2026, o nome no texto dela passa a Marquesa Global
+Match. Nada mais muda; as versões `legenda-2026-11-23` e `legenda-2026-11-22`, abaixo,
+seguem aceitas para a aba aberta antes do deploy.
+
+> **Ligar a legenda ao vivo?**
+>
+> A legenda ao vivo usa o reconhecimento de voz do navegador. No Google Chrome, o áudio
+> pode ser enviado aos servidores do Google para ser convertido em texto. A legenda não é
+> guardada pela Marquesa Global Match e desaparece ao fim da reunião.
+>
+> A legenda não separa quem fala e pode errar palavras.
+>
+> A transcrição da reunião continua sendo a da IA, que chega por partes.
+
+Botões: [Ativar legenda] [Agora não].
 
 ## Aviso da legenda ao vivo — versão `legenda-2026-11-23` (texto da Cris)
 

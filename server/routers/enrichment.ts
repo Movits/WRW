@@ -320,7 +320,7 @@ export const enrichmentRouter = router({
       const historyAsc = [...history].reverse();
 
       const { invokeLLM } = await import("../_core/llm");
-      const systemPrompt = `Você é o Assistente de Enriquecimento da MarquesaMatch. Sua única função é extrair dados estruturados de respostas em português e conduzir um roteiro de 6 perguntas.
+      const systemPrompt = `Você é o Assistente de Enriquecimento da Marquesa Global Match. Sua única função é extrair dados estruturados de respostas em português e conduzir um roteiro de 6 perguntas.
 
 ROTEIRO OBRIGATÓRIO (nunca fuja disso):
 1. phone → "Qual é o telefone dele/dela?"

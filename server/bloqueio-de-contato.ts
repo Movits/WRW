@@ -39,7 +39,7 @@ export async function exigirTextoSemContato(
   throw new TRPCError({
     code: "BAD_REQUEST",
     message:
-      `Sua mensagem parece conter ${tipos.join(" e ")}. Pelas regras da MarquesaMatch, dados de contato ` +
+      `Sua mensagem parece conter ${tipos.join(" e ")}. Pelas regras da Marquesa Global Match, dados de contato ` +
       "não circulam entre as partes — as tratativas acontecem pela plataforma, com o consultor " +
       "de negócios. Remova o contato e envie de novo. A tentativa fica registrada.",
   });

@@ -35,6 +35,7 @@ const {
   platformNotifications, proximasAcoes, resumoEmAudio, users,
 } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
+const filaDoResumo = await import("./fila-do-resumo");
 const { appRouter } = await import("./routers");
 const { tetoDaJuncao } = await import("./routers/meetings");
 const { iniciarReprocessamento, limparGravacoesVencidas } = await import("./meeting-service");
@@ -441,6 +442,64 @@ describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
       { id: nova.id, consentAt: horaDaNova, consentNoticeVersion: "2026-11-14" },
       { id: antiga.id, consentAt: horaDaAntiga, consentNoticeVersion: null },
     ]);
+  });
+
+  // Defeito 2 do teste manual T50 (23/11): o resumo da reunião juntada
+  // parecia usar só o conteúdo da segunda reunião.
+  it("o resumo da reunião juntada lê a transcrição INTEIRA, das duas reuniões, na ordem, com cada reunião separada e o pedido de cobrir todas", async () => {
+    const a = await emPartes(DONA, [[fala(5, "F1", "Ana abre a reunião do frete marítimo"), fala(300, "F2", "Bia aprova o orçamento de março")]]);
+    const b = await emPartes(DONA, [[fala(3, "F1", "Caio apresenta a feira de Hannover"), fala(50, "F2", "Duda fecha o estande")]]);
+    await juntar([a.id, b.id]);
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect((await reuniaoDe(a.id)).status).toBe("ready");
+    invokeLLM.mockClear();
+    invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ emoji: null, titulo: null, decisoes: [], acoes: [], destaques: [], resumo: [] }) } }] });
+    await filaDoResumo.rodarUmaVez({ ownerId: DONA });
+    const pedidos = invokeLLM.mock.calls.map(([pedido]) => (pedido as { messages: Array<{ content: string }> }).messages.map(m => m.content).join("\n"));
+    const doResumo = pedidos.filter(texto => texto.includes("Você escreve as notas de uma reunião"));
+    expect(doResumo.length).toBeGreaterThan(0);
+    for (const texto of doResumo) {
+      const ordem = ["=== Reunião 1 de 2 ===", "Ana abre a reunião do frete marítimo", "Bia aprova o orçamento de março", "=== Reunião 2 de 2 ===", "Caio apresenta a feira de Hannover", "Duda fecha o estande"]
+        .map(fala => texto.indexOf(fala));
+      expect(ordem.every(posicao => posicao >= 0)).toBe(true);
+      expect([...ordem].sort((x, y) => x - y)).toEqual(ordem);
+      expect(texto).toContain("Esta transcrição junta 2 reuniões gravadas em separado");
+    }
+    // A marca fica na primeira parte da segunda reunião: o reprocesso a
+    // transcreve como outra conversa (defeito 4).
+    const partes = await partesDe(a.id);
+    expect(partes.map(parte => (parte.result as Record<string, unknown>)[MARCA_DE_OUTRA_REUNIAO] === true)).toEqual([false, true]);
+  });
+
+  // Defeito 4 do teste manual T50 (23/11): falas atribuídas à pessoa errada.
+  // Juntada sem retranscrever, a primeira parte da segunda reunião não levava
+  // a marca de outra conversa. Se ela tinha falhado (a IA fora do ar, por
+  // exemplo), o "Tentar de novo" da reunião juntada a transcrevia com o
+  // contexto da primeira reunião ("use os mesmos rótulos"), e as vozes da
+  // segunda reunião herdavam os rótulos das pessoas da primeira.
+  it("a parte da segunda reunião que falhou é retranscrita, no reprocesso da juntada, sem o contexto da primeira, com os rótulos depois dos já usados", async () => {
+    const a = await emPartes(DONA, [[fala(5, "F1", "Ana abre"), fala(300, "F2", "Bia comenta")]]);
+    const b = await emPartes(DONA, [[fala(3, "F1", "Caio começa")]]);
+    await (await db()).update(meetingAudioSlices).set({ status: "failed", result: null, lastError: "IA_INDISPONIVEL" }).where(eq(meetingAudioSlices.meetingId, b.id));
+    await juntar([a.id, b.id]);
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect((await reuniaoDe(a.id)).status).toBe("ready");
+    // A dona pede "Tentar de novo" na reunião juntada (que falhou depois, na
+    // montagem de uma nova tentativa, por exemplo): a parte que falhou volta à fila.
+    await (await db()).update(meetings).set({ status: "failed", processingError: "ERRO_INTERROMPIDO" }).where(eq(meetings.id, a.id));
+    transcreverFatia.mockReset();
+    transcreverFatia.mockImplementation(async ({ inicioSegundos }: { inicioSegundos: number }) => ({
+      segmentos: [fala(inicioSegundos + 3, "F1", "Caio começa")], idioma: "pt-BR", modelo: "gemini-teste",
+    }));
+    await iniciarReprocessamento(DONA, a.id);
+    for (let i = 0; i < 4 && (await reuniaoDe(a.id)).status !== "ready"; i++) await fila.rodarUmaVez({ ownerId: DONA });
+    expect((await reuniaoDe(a.id)).status).toBe("ready");
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    const pedido = transcreverFatia.mock.calls[0][0] as { inicioSegundos: number; anterior?: unknown };
+    expect(pedido.inicioSegundos).toBe(600);
+    expect(pedido.anterior).toBeUndefined();
+    const [transcricao] = await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, a.id));
+    expect((transcricao.segments as Array<{ falante: string; texto: string }>).filter(s => s.texto).map(s => [s.falante, s.texto])).toEqual([["F1", "Ana abre"], ["F2", "Bia comenta"], ["F3", "Caio começa"]]);
   });
 
   it("a lacuna de uma reunião de origem segue lacuna, e a fila monta na hora, sem esperar por ela de novo", async () => {

@@ -365,7 +365,7 @@ describe("montarAvisoDeChaveCadastrada — o e-mail à dona a cada chave cadastr
   it("diz quando (no horário de Brasília), o apelido e o que fazer, com o link do \"Esqueci minha senha\"", () => {
     const { assunto, text, html } = montarAvisoDeChaveCadastrada({ nome: "Beatriz", apelido: "iPhone", quando: QUANDO, site: "https://wrwglobal.org/" });
 
-    expect(assunto).toBe("Nova chave de acesso na sua conta MarquesaMatch");
+    expect(assunto).toBe("Nova chave de acesso na sua conta Marquesa Global Match");
     expect(text).toContain("Olá, Beatriz.");
     expect(text).toContain("16/11/2026");
     expect(text).toContain("10:05");

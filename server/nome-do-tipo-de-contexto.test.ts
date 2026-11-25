@@ -3,12 +3,12 @@ import { nomeDoTipoDeContexto } from "./nome-do-tipo-de-contexto";
 
 /**
  * O tipo "Evento do MMM" foi semeado no banco (migração 0003) antes de a marca
- * virar WRW (15/09/2026) e depois MarquesaMatch (23/11/2026). A leitura troca o nome da semente; o slug, que é
+ * virar WRW (15/09/2026) e depois MarquesaMatch (23/11/2026) e Marquesa Global Match (24/11/2026). A leitura troca o nome da semente; o slug, que é
  * chave, fica como está.
  */
 describe("nomeDoTipoDeContexto", () => {
-  it("o tipo semeado com a marca antiga chega à tela como Evento da MarquesaMatch", () => {
-    expect(nomeDoTipoDeContexto("evento-mmm", "Evento do MMM")).toBe("Evento da MarquesaMatch");
+  it("o tipo semeado com a marca antiga chega à tela como Evento da Marquesa Global Match", () => {
+    expect(nomeDoTipoDeContexto("evento-mmm", "Evento do MMM")).toBe("Evento da Marquesa Global Match");
   });
 
   it("nome renomeado no banco prevalece, mesmo com o slug antigo", () => {

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
-import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
+import { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { idiomaFalado, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
 import { sugestaoDoResumoNovo } from "@shared/titulo-sugerido";
 import { ESTILO_DO_RESUMO_PADRAO, MODELO_DE_RESUMO_PADRAO, estiloDoResumo, modeloDeResumo, type EscolhaDoModelo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
@@ -19,6 +19,7 @@ import { escolherModeloDoResumo } from "./escolha-do-modelo";
 import { contextoDaGeracao } from "./modelos-proprios";
 import { numeracaoDoResumoRefeito } from "./resumo-refeito";
 import { envioAutomaticoDoResumo } from "./resumo-por-email";
+import { iniciosDasReunioesJuntadas } from "./transcricao-de-fatia";
 
 /**
  * A fila do resumo guardado da reunião (H4 do desenho do gravador,
@@ -313,9 +314,18 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
     escolhaDaIA = { template: modelo, customTemplateId: modeloProprio?.id ?? null };
   }
 
+  // A reunião juntada (H17): onde começa cada reunião depois da primeira,
+  // pelas partes com a marca de outra conversa. O resumo as separa e cobre
+  // todas (defeito 2 do teste manual T50, 23/11).
+  const partes = await db.select({ seq: meetingAudioSlices.seq, durationMs: meetingAudioSlices.durationMs, result: meetingAudioSlices.result })
+    .from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, alvo.meetingId), eq(meetingAudioSlices.ownerId, alvo.ownerId)));
+  const iniciosDeReuniao = iniciosDasReunioesJuntadas(partes);
+
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
     resumo = await gerarResumoDaReuniao({
+      iniciosDeReuniao,
       transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma,
       modelo, itensQueFicam,
       preferencias: {

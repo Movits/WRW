@@ -109,11 +109,11 @@ function semPortugues(onde: string) {
 }
 
 // "match" virou "conexão" em todas as telas (grupo Projetos IA, 14/09). Ficam de
-// fora só os nomes próprios Smart Match, Business Match e a marca MarquesaMatch. A saudação e o convite
+// fora só os nomes próprios Smart Match, Business Match e a marca Marquesa Global Match. A saudação e o convite
 // de boas-vindas são conferidos palavra por palavra, e a varredura garante que
 // "match" não sobrou em canto nenhum da tela.
 function semMatch(onde: string) {
-  const texto = (document.body.textContent ?? "").replace(/MarquesaMatch|Smart Match|Business Match(es)?/g, "");
+  const texto = (document.body.textContent ?? "").replace(/Marquesa Global Match|Smart Match|Business Match(es)?/g, "");
   expect(texto, onde).not.toMatch(/match/i);
 }
 
@@ -246,13 +246,13 @@ describe("Dashboard em inglês — nada em português fixo", () => {
     await i18n.changeLanguage("en");
     render(<Dashboard />);
 
-    expect(screen.getByText("Welcome to MarquesaMatch! Generate your first suggested connections below")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to Marquesa Global Match! Generate your first suggested connections below")).toBeInTheDocument();
     semMatch("boas-vindas em inglês");
     // O banner entra meio segundo depois (tempo real: por isso a ESPERA de 3 s).
     // Ouro é categoria premium (Governança, 14/09/2026): o banner fala de
     // status ativo, não de selo concedido por reconhecimento.
     expect(await screen.findByText("Welcome to Gold Status!", {}, ESPERA)).toBeInTheDocument();
-    expect(screen.getByText("Your Gold Status, MarquesaMatch's premium tier, is now active.")).toBeInTheDocument();
+    expect(screen.getByText("Your Gold Status, Marquesa Global Match's premium tier, is now active.")).toBeInTheDocument();
     expect(screen.queryByText(/Seal/)).not.toBeInTheDocument();
     expect(screen.getByTitle("Close")).toBeInTheDocument();
     expect(screen.queryByText(/Status Ouro/)).not.toBeInTheDocument();
@@ -290,7 +290,7 @@ describe("Dashboard em português — o que a usuária lia continua igual", () =
     duble.respostas["matches.list"] = { data: [] };
     duble.respostas["connections.list"] = { data: [] };
     render(<Dashboard />);
-    expect(screen.getByText("Boas-vindas à MarquesaMatch! Gere suas primeiras conexões sugeridas abaixo")).toBeInTheDocument();
+    expect(screen.getByText("Boas-vindas à Marquesa Global Match! Gere suas primeiras conexões sugeridas abaixo")).toBeInTheDocument();
     semMatch("boas-vindas em português");
   });
 

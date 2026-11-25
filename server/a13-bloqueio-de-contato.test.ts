@@ -199,7 +199,7 @@ describe("A13 — chat do Deal Room recusa contato e registra", () => {
   it("mensagem com telefone é recusada, nada é gravado, e a tentativa vai para a auditoria", async () => {
     const caller = dealRoomRouter.createCaller(ctx(1));
     await expect(caller.sendMessage({ roomId: 7, content: "fecha comigo direto: (11) 99999-8888" }))
-      .rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Pelas regras da MarquesaMatch, dados de contato") });
+      .rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Pelas regras da Marquesa Global Match, dados de contato") });
     expect(inserido).not.toHaveBeenCalled();
     // o registro diz QUEM tentou e PARA ONDE o contato iria (sala 7)
     expect(createAuditLog).toHaveBeenCalledWith(expect.objectContaining({

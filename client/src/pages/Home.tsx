@@ -1266,7 +1266,7 @@ export default function Home() {
           </a>
           <div className="text-center">
             <div className="text-white/40 text-xs mb-1">{t("footer.tagline")}</div>
-            <div>© 2026 MarquesaMatch. {t("footer.rights")}</div>
+            <div>© 2026 Marquesa Global Match. {t("footer.rights")}</div>
           </div>
           <div className="flex gap-6">
             {/* O link de contato volta quando houver e-mail ou WhatsApp
