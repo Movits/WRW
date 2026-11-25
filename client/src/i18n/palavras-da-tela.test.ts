@@ -41,8 +41,12 @@ function texto(idioma: string, chave: string): string {
 }
 
 // Os nomes próprios da plataforma: Business Match, Smart Match e a marca
-// MarquesaMatch (nome visível desde 23/11/2026). Saem do texto antes da conferência.
-const NOMES_PROPRIOS = /\b(?:(?:business|smart)[\s-]*match(?:es)?|MarquesaMatch)\b/gi;
+// Marquesa Global Match (nome visível desde 24/11/2026; MarquesaMatch em 23/11). Saem do
+// texto antes da conferência. A marca só sai inteira e escrita como é, com as três palavras
+// separadas por espaço (no alemão, "Konto bei Marquesa Global Match", e não o composto com
+// hífen, que muda o nome): "match" solto, "MarquesaMatch", "Marquesa Match" e
+// "Marquesa-Global-Match" continuam barrados.
+const NOMES_PROPRIOS = /\b(?:(?:business|smart)[\s-]*match(?:es)?|Marquesa Global Match)\b/gi;
 const PALAVRA_PROIBIDA = /match/i;
 
 /**
@@ -87,6 +91,19 @@ describe("palavras que a tela não diz mais", () => {
       .filter(([, valor]) => PALAVRA_PROIBIDA.test(valor.replace(NOMES_PROPRIOS, "")))
       .map(([chave, valor]) => `${chave} = ${JSON.stringify(valor)}`);
     expect(sobraram, `${idioma}: diga "conexão"`).toEqual([]);
+  });
+
+  it("a marca Marquesa Global Match sai como nome próprio, sem abrir brecha para 'match' solto", () => {
+    const sobra = (valor: string) => valor.replace(NOMES_PROPRIOS, "");
+    expect(sobra("Boas-vindas à Marquesa Global Match!")).not.toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Noch kein Konto bei Marquesa Global Match?")).not.toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Marquesa Global Matchのアカウント")).not.toMatch(PALAVRA_PROIBIDA);
+    // O que não é a marca inteira continua sendo "match".
+    expect(sobra("Veja o seu match na Marquesa Global Match")).toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Conta na MarquesaMatch")).toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Conta na Marquesa Match")).toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Global Match")).toMatch(PALAVRA_PROIBIDA);
+    expect(sobra("Noch kein Marquesa-Global-Match-Konto?")).toMatch(PALAVRA_PROIBIDA);
   });
 
   it("as exceções existem e são só o verbo inglês de senha (se sumirem, tire-as da lista)", () => {

@@ -87,7 +87,7 @@ export const matchingRouter = router({
           // precisar" dele. A regra da demanda expressa é o contrário disso, e
           // vale só para serviço — os outros tipos seguem com sinônimos e
           // setores relacionados.
-          content: `Você é o motor semântico de recomendação da plataforma MarquesaMatch. Analise o perfil da usuária e as oportunidades disponíveis. Retorne um JSON com os índices das oportunidades mais compatíveis e o score de compatibilidade (0-100) para cada uma. Para produtos, ativos, investimento, conexões, tecnologia e imóveis, considere sinônimos, setores relacionados e a sinergia entre "O que tenho" e "O que preciso". Retorne apenas as oportunidades com score >= 40. Máximo de 10 resultados. A usuária lê o "reason": nele (e só nele) nunca use a palavra "match"; se precisar nomear a sugestão, diga "conexão sugerida"; "compatibilidade" continua "compatibilidade". Isso não muda "tipoDaOferta": "conexao" continua sendo só o item que oferece contatos/networking.
+          content: `Você é o motor semântico de recomendação da plataforma Marquesa Global Match. Analise o perfil da usuária e as oportunidades disponíveis. Retorne um JSON com os índices das oportunidades mais compatíveis e o score de compatibilidade (0-100) para cada uma. Para produtos, ativos, investimento, conexões, tecnologia e imóveis, considere sinônimos, setores relacionados e a sinergia entre "O que tenho" e "O que preciso". Retorne apenas as oportunidades com score >= 40. Máximo de 10 resultados. A usuária lê o "reason": nele (e só nele) nunca use a palavra "match"; se precisar nomear a sugestão, diga "conexão sugerida"; "compatibilidade" continua "compatibilidade". Isso não muda "tipoDaOferta": "conexao" continua sendo só o item que oferece contatos/networking.
 
 ${REGRA_DA_DEMANDA_EXPRESSA}`,
         },
@@ -245,7 +245,7 @@ export async function notifyHighCompatibilityForOpportunity(opportunityId: numbe
             role: "system",
             // A mesma regra da recomendação: o "tenho" de um perfil que é
             // serviço só rende alerta se a oportunidade DECLARA precisar dele.
-            content: `Você é o motor de alertas da MarquesaMatch. Analise uma oportunidade e os perfis de usuárias para identificar quem tem alta compatibilidade (>= 80%). Retorne apenas os índices dos perfis compatíveis com score >= 80.
+            content: `Você é o motor de alertas da Marquesa Global Match. Analise uma oportunidade e os perfis de usuárias para identificar quem tem alta compatibilidade (>= 80%). Retorne apenas os índices dos perfis compatíveis com score >= 80.
 
 ${REGRA_DA_DEMANDA_EXPRESSA}`,
           },

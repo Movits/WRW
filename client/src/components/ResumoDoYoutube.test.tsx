@@ -65,7 +65,7 @@ describe("Resumir um vídeo do YouTube: a janela", () => {
     expect(within(janela).getByRole("heading", { name: "Resumir um vídeo do YouTube" })).toBeInTheDocument();
     expect(within(janela).getByText(/só os primeiros 60 minutos são transcritos/)).toBeInTheDocument();
     expect(within(janela).getByText(/Limite: 5 vídeos a cada 24 horas\./)).toBeInTheDocument();
-    expect(within(janela).getByText(/A MarquesaMatch não guarda o vídeo: guarda o link, a transcrição e o resumo/)).toBeInTheDocument();
+    expect(within(janela).getByText(/A Marquesa Global Match não guarda o vídeo: guarda o link, a transcrição e o resumo/)).toBeInTheDocument();
     expect(within(janela).getByRole("checkbox")).not.toBeChecked();
     // O idioma falado começa no da tela.
     expect(within(janela).getByLabelText("Idioma falado no vídeo")).toHaveValue("pt-BR");

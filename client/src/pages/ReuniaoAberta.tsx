@@ -28,7 +28,7 @@ import { linkDoYoutubeNoSegundo } from "@shared/youtube";
  * A reunião aberta pelo link (pedido do Roberto em 12/11/2026, "por enquanto"):
  * quem recebeu o endereço /r/{token} ouve a gravação, lê e traduz a
  * transcrição, lê o resumo guardado e o mapa mental (e pede o que a reunião
- * ainda não tem) e faz perguntas à IA, sem conta na MarquesaMatch. Só leitura:
+ * ainda não tem) e faz perguntas à IA, sem conta na Marquesa Global Match. Só leitura:
  * excluir, reprocessar e o que é da rede particular da dona (contatos e
  * entidades) ficam no detalhe dela, em Meetings.tsx, e o servidor nem manda
  * esses dados para cá (server/link-aberto-da-reuniao.ts). Os nomes que a dona
@@ -85,7 +85,7 @@ function mensagemDaTraducao(t: TranslateFn, erro: unknown) {
 function Moldura({ children, comPlayer = false }: { children: React.ReactNode; comPlayer?: boolean }) {
   // Com o player fixo no rodapé, o fim da página fica livre embaixo dele.
   return <main className={`min-h-screen p-4 md:p-8 text-white bg-transparent ${comPlayer ? ESPACO_DA_BARRA_DO_PLAYER : ""}`}><div className="max-w-5xl mx-auto">
-    <a href="/" aria-label="MarquesaMatch" className="inline-block mb-8"><BrandLogo variante="lockup" className="w-36"/></a>
+    <a href="/" aria-label="Marquesa Global Match" className="inline-block mb-8"><BrandLogo variante="lockup" className="w-36"/></a>
     {children}
   </div></main>;
 }

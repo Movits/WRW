@@ -15,7 +15,7 @@ export const presidentRouter = router({
   grantGold: presidentProcedure
     .input(z.object({
       userId: z.number().int(),
-      reason: z.string().max(500).optional().default("Promovido pelo Presidente da MarquesaMatch"),
+      reason: z.string().max(500).optional().default("Promovido pelo Presidente da Marquesa Global Match"),
     }))
     .mutation(async ({ ctx, input }) => {
       // Buscar nome da usuária para personalizar a mensagem
@@ -23,7 +23,7 @@ export const presidentRouter = router({
       const [targetUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, input.userId)).limit(1);
       const userName = targetUser?.name || "";
       const firstName = userName.split(" ")[0] || "";
-      await grantGoldAccess(input.userId, ctx.user.id, input.reason || "Promovido pelo Presidente da MarquesaMatch");
+      await grantGoldAccess(input.userId, ctx.user.id, input.reason || "Promovido pelo Presidente da Marquesa Global Match");
       await createAuditLog({ userId: ctx.user.id, action: "PRESIDENT_GRANT_GOLD", resource: "users", resourceId: String(input.userId), details: { reason: input.reason }, status: "success", riskLevel: "high" });
       // Notificar a usuária promovida com mensagem automática
       try {
@@ -40,7 +40,7 @@ export const presidentRouter = router({
       // Enviar mensagem direta na caixa de mensagens da usuária promovida
       try {
         const { directMessages } = await import("../../drizzle/schema");
-        const goldMsg = `⭐ Boas-vindas ao Status Ouro${firstName ? ", " + firstName : ""}!\n\nO Status Ouro é a categoria premium da MarquesaMatch. A partir de agora você tem acesso em primeira mão a oportunidades selecionadas, a Deal Rooms, Conexões Estratégicas, ao Painel Ouro e aos encontros estratégicos nacionais e internacionais da rede, conforme disponibilidade e regras da plataforma.\n\nObservação: ${input.reason || "Promovido pelo Presidente da MarquesaMatch"}\n\nEsteja onde as grandes oportunidades chegam primeiro. 🌟`;
+        const goldMsg = `⭐ Boas-vindas ao Status Ouro${firstName ? ", " + firstName : ""}!\n\nO Status Ouro é a categoria premium da Marquesa Global Match. A partir de agora você tem acesso em primeira mão a oportunidades selecionadas, a Deal Rooms, Conexões Estratégicas, ao Painel Ouro e aos encontros estratégicos nacionais e internacionais da rede, conforme disponibilidade e regras da plataforma.\n\nObservação: ${input.reason || "Promovido pelo Presidente da Marquesa Global Match"}\n\nEsteja onde as grandes oportunidades chegam primeiro. 🌟`;
         await db.insert(directMessages).values({
           senderId: ctx.user.id, // mensagem enviada pela presidente
           recipientId: input.userId,
@@ -66,7 +66,7 @@ export const presidentRouter = router({
           userId: input.userId,
           type: "gold_revoked",
           title: "Status Ouro revogado",
-          body: `Seu Status Ouro, a categoria premium da MarquesaMatch, foi revogado por um Presidente da MarquesaMatch. Sua conta continua ativa como ${novoNivel === "bronze" ? "Bronze" : "Prata"}. Motivo: ${input.reason}`,
+          body: `Seu Status Ouro, a categoria premium da Marquesa Global Match, foi revogado por um Presidente da Marquesa Global Match. Sua conta continua ativa como ${novoNivel === "bronze" ? "Bronze" : "Prata"}. Motivo: ${input.reason}`,
           actionUrl: "/dashboard",
         });
       } catch (_) { /* não bloquear se notificação falhar */ }

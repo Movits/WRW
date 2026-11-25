@@ -78,7 +78,7 @@ describe("LegendaAoVivo (G15b)", () => {
     expect(within(aviso).getByText("Ligar a legenda ao vivo?")).toBeInTheDocument();
     expect(aviso).toHaveTextContent("No Google Chrome, o áudio pode ser enviado aos servidores do Google para ser convertido em texto");
     expect(aviso).toHaveTextContent("A legenda não separa quem fala");
-    expect(aviso).toHaveTextContent("A legenda não é guardada pela MarquesaMatch e desaparece ao fim da reunião");
+    expect(aviso).toHaveTextContent("A legenda não é guardada pela Marquesa Global Match e desaparece ao fim da reunião");
     expect(aviso).toHaveTextContent("A transcrição da reunião continua sendo a da IA");
     // Sem a caixa marcada, não liga.
     const confirmar = within(aviso).getByRole("button", { name: "Ativar legenda" });

@@ -158,8 +158,8 @@ export function erroDoYoutubeSeRepete(codigo: string | null | undefined): codigo
  * continuam aceitas. O rascunho de cada versão, para a revisão jurídica, fica
  * em docs/termos/aviso-de-gravacao-rascunho.md.
  */
-export const VERSOES_DO_AVISO_DO_YOUTUBE = ["youtube-2026-11-20"] as const;
+export const VERSOES_DO_AVISO_DO_YOUTUBE = ["youtube-2026-11-20", "youtube-2026-11-24"] as const;
 
 export type VersaoDoAvisoDoYoutube = (typeof VERSOES_DO_AVISO_DO_YOUTUBE)[number];
 
-export const VERSAO_VIGENTE_DO_AVISO_DO_YOUTUBE: VersaoDoAvisoDoYoutube = "youtube-2026-11-20";
+export const VERSAO_VIGENTE_DO_AVISO_DO_YOUTUBE: VersaoDoAvisoDoYoutube = "youtube-2026-11-24";
