@@ -15,7 +15,7 @@ import {
   mediumtext,
   date,
 } from "drizzle-orm/mysql-core";
-import { decimal } from "drizzle-orm/mysql-core";
+import { decimal, primaryKey } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { customType } from "drizzle-orm/mysql-core";
 
@@ -2559,7 +2559,10 @@ export const importacaoDocumentosVistos = mysqlTable("importacao_documentos_vist
   documentoHmac: varchar("documento_hmac", { length: 64 }).notNull(),
   linha:         int("linha").notNull(),
 }, (table) => ({
-  vistoUnique: uniqueIndex("idv_importacao_documento_unique").on(table.importacaoId, table.documentoHmac),
+  // Chave primária composta, não só índice único: o MySQL do Aiven roda com
+  // sql_require_primary_key e recusa tabela sem chave primária (a 0030 caiu no
+  // deploy de 25/11 por isso). O par continua único, como antes.
+  pk: primaryKey({ name: "idv_pk", columns: [table.importacaoId, table.documentoHmac] }),
   ownerIdx:    index("idv_owner_idx").on(table.ownerId),
 }));
 
