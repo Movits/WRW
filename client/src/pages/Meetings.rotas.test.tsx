@@ -606,6 +606,17 @@ describe("Reuniões — gravação em curso", () => {
     expect(encerrarGravacao.mutate).toHaveBeenLastCalledWith({ meetingId: VINICOLA, partes: 1 });
   });
 
+  it("o gravador de reunião pede o microfone sem cancelamento de eco, redução de ruído e ganho automático (T51: no Android, cortavam e faziam chiar a gravação)", async () => {
+    const pedirMicrofone = vi.fn(async (_restricoes: MediaStreamConstraints) => ({ getTracks: () => [trilha] }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
+    abrirEm("/gravar");
+    await comecarAGravar();
+    expect(pedirMicrofone).toHaveBeenCalledTimes(1);
+    expect(pedirMicrofone.mock.calls[0][0]).toEqual({
+      audio: { echoCancellation: { ideal: false }, noiseSuppression: { ideal: false }, autoGainControl: { ideal: false }, channelCount: { ideal: 1 } }, video: false,
+    });
+  });
+
   it("em partes, sair da tela com o Iniciar esperando o servidor criar a reunião: ela é excluída quando nasce, nenhuma parte sobe e o microfone nem é pedido (revisão da G13b)", async () => {
     let criar: (reuniao: { id: string }) => void = () => {};
     iniciarGravacao.mutate.mockImplementation(() => new Promise(resolver => { criar = resolver; }));

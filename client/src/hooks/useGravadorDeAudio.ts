@@ -44,6 +44,12 @@ export type OpcoesDoGravador = {
   limiteSegundos: number;
   bitsPorSegundo: number;
   /**
+   * Como o microfone ouve (restricoesDoMicrofone): "voz" por padrão (o ditado e
+   * a voz do contato); a gravação de reunião pede "reuniao", sem o
+   * processamento que corta e faz chiar a voz que vem de longe no Android.
+   */
+  usoDoMicrofone?: UsoDoMicrofone;
+  /**
    * Conferido quando o microfone chega: false solta o microfone, sem gravar nem
    * avisar. A reunião diz false quando a dona saiu do gravador com o pedido de
    * permissão ainda aberto.
@@ -191,10 +197,43 @@ async function haMicrofoneNaLista() {
   }
 }
 
-const RESTRICOES_DO_MICROFONE: MediaStreamConstraints = {
-  audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } },
-  video: false,
-};
+/**
+ * O que o site pede ao microfone. Há dois jeitos de ouvir:
+ *
+ * - "voz" (o ditado e a voz do contato): uma pessoa perto do aparelho, falando
+ *   para ele. O cancelamento de eco, a redução de ruído e o ganho automático
+ *   ajudam: tiram o barulho de fundo e igualam o volume de quem fala baixo.
+ * - "reuniao" (o gravador de reunião): a sala inteira, gente longe do
+ *   aparelho, às vezes uma chamada tocando no alto-falante de outro aparelho.
+ *   No teste T51 (24/11, Moto g82 5G, Chrome e o APK da casca), com os três
+ *   ligados o áudio saiu cortando e chiando o tempo todo, e o gravador do
+ *   próprio celular gravou o mesmo som limpo. No Android, pedir o cancelamento
+ *   de eco leva o Chrome a abrir o microfone no modo de chamada de voz, com o
+ *   processamento do telefone: ele trata a voz que vem de longe, ou do
+ *   alto-falante de outro aparelho, como eco ou ruído e a corta aos pedaços; e o
+ *   ganho automático sobe o chiado de fundo nos silêncios. A gravação de
+ *   reunião pede os três desligados, como o gravador nativo, e deixa a voz
+ *   para a transcrição, que lida bem com volume baixo e ruído. Pede ainda um
+ *   canal só (a fala não ganha nada em estéreo, e o arquivo fica menor) e NÃO
+ *   pede taxa de amostragem: forçar uma taxa que o aparelho não tem faz o
+ *   navegador reamostrar o áudio, e é mais um lugar para chiar.
+ *
+ * Tudo como "ideal", nunca "exact": o navegador que não sabe desligar um deles
+ * grava assim mesmo, em vez de recusar o microfone.
+ */
+export type UsoDoMicrofone = "voz" | "reuniao";
+export function restricoesDoMicrofone(uso: UsoDoMicrofone): MediaStreamConstraints {
+  if (uso === "reuniao") {
+    return {
+      audio: { echoCancellation: { ideal: false }, noiseSuppression: { ideal: false }, autoGainControl: { ideal: false }, channelCount: { ideal: 1 } },
+      video: false,
+    };
+  }
+  return {
+    audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } },
+    video: false,
+  };
+}
 
 /** O navegador grava? Com um MediaStream de fora, só o MediaRecorder importa. */
 export function gravacaoDeAudioSuportada(comMicrofone = true) {
@@ -498,7 +537,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       // O toque pede direto: esperar a lista antes tiraria o pedido de dentro dele.
       if (!porToque && !(await haMicrofoneNaLista())) return;
       if (!vigente()) return;
-      novo = await navigator.mediaDevices.getUserMedia(RESTRICOES_DO_MICROFONE);
+      novo = await navigator.mediaDevices.getUserMedia(restricoesDoMicrofone(atuais.current.usoDoMicrofone ?? "voz"));
       if (!vigente() || !fluxoVivo(novo)) {
         pararTrilhas(novo);
         return;
@@ -687,7 +726,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     mudarEstado("pedindoMicrofone");
     let aberto: MediaStream | null = null;
     try {
-      const fluxo = fluxoDeFora ?? (aberto = await navigator.mediaDevices.getUserMedia(RESTRICOES_DO_MICROFONE));
+      const fluxo = fluxoDeFora ?? (aberto = await navigator.mediaDevices.getUserMedia(restricoesDoMicrofone(atuais.current.usoDoMicrofone ?? "voz")));
       // Saiu da tela, ou do gravador, enquanto o navegador pedia o microfone: solta e não grava.
       if (!vigente() || !(atuais.current.podeGravar?.() ?? true)) {
         pararTrilhas(aberto);

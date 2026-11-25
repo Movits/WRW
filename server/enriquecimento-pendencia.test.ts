@@ -39,6 +39,8 @@ const db = {
   saveEnrichmentMessage: vi.fn(),
   saveEnrichmentSuggestions: vi.fn(),
   advanceEnrichmentSession: vi.fn(),
+  // T45 (24/11): o contato sem nada preenchido; o roteiro não pula nenhuma pergunta.
+  camposPreenchidosDoContato: vi.fn(async () => []),
   completeEnrichmentSession: vi.fn(),
   getActiveEnrichmentSession: vi.fn(),
   createEnrichmentSession: vi.fn(),
