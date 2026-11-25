@@ -54,7 +54,7 @@ CREATE TABLE `importacao_documentos_vistos` (
 	`owner_id` varchar(128) NOT NULL,
 	`documento_hmac` varchar(64) NOT NULL,
 	`linha` int NOT NULL,
-	CONSTRAINT `idv_importacao_documento_unique` UNIQUE(`importacao_id`,`documento_hmac`)
+	CONSTRAINT `idv_pk` PRIMARY KEY(`importacao_id`,`documento_hmac`)
 );
 --> statement-breakpoint
 CREATE TABLE `importacoes_de_entidade` (

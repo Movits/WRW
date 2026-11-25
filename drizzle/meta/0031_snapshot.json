@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "b4f939a7-2544-4909-bb7e-c1241cbfaffb",
-  "prevId": "89023d9f-1806-4b7d-9fc2-4b1ef0b909c2",
+  "id": "be9379e3-d2b3-4ce5-a337-ed7211d76fe4",
+  "prevId": "8933699a-215e-4463-9c4c-570fcb31c4ad",
   "tables": {
     "agenda_reunioes": {
       "name": "agenda_reunioes",
@@ -3660,14 +3660,6 @@
         }
       },
       "indexes": {
-        "idv_importacao_documento_unique": {
-          "name": "idv_importacao_documento_unique",
-          "columns": [
-            "importacao_id",
-            "documento_hmac"
-          ],
-          "isUnique": true
-        },
         "idv_owner_idx": {
           "name": "idv_owner_idx",
           "columns": [
@@ -3677,7 +3669,15 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "idv_pk": {
+          "name": "idv_pk",
+          "columns": [
+            "importacao_id",
+            "documento_hmac"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
