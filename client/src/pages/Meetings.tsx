@@ -29,7 +29,7 @@ import type { ControleDoPlayer } from "@/components/PlayerDasPartes";
 import { BarraDoPlayer, ESPACO_DA_BARRA_DO_PLAYER } from "@/components/BarraDoPlayer";
 import { mmss, segmentosValidos, TranscricaoPorFalante } from "@/components/TranscricaoPorFalante";
 import { primeiraFalaComOTermo } from "@shared/busca-de-reunioes";
-import { AvisoDeResumoDeOutraVersao, BarraDaEdicao, EDICAO_VAZIA, EditorDoTextoCorrido, useEdicaoDaTranscricao } from "@/components/EditarTranscricao";
+import { AvisoDeResumoDeOutraVersao, BarraDaEdicao, AvisoDoResumoSendoRefeito, EDICAO_VAZIA, EditorDoTextoCorrido, useEdicaoDaTranscricao } from "@/components/EditarTranscricao";
 import { AvisoDeTraducao } from "@/components/AvisoDeTraducao";
 import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/AvisoDeHoraDeGravacao";
 import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
@@ -391,6 +391,10 @@ export default function Meetings() {
     aoVoltarOMicrofone: () => toast.success(t("meetings.micLost.back"), { id: ID_DO_AVISO_DO_MICROFONE }),
     aoDesistirDoMicrofone: () => toast.info(t("meetings.micLost.gaveUp", { minutos: ESPERA_PELO_MICROFONE_MAXIMA_MS / 60_000 }), { id: ID_DO_AVISO_DO_MICROFONE, duration: Infinity, closeButton: true }),
     bitsPorSegundo: 64_000,
+    // A sala inteira, e não uma pessoa perto do aparelho: sem o cancelamento de
+    // eco, a redução de ruído e o ganho automático, que no Android cortavam e
+    // faziam chiar a gravação (T51, 24/11; ver restricoesDoMicrofone).
+    usoDoMicrofone: "reuniao",
     // Saiu do gravador enquanto o navegador pedia o microfone (o pedido de
     // permissão ainda aberto, por exemplo): solta e não grava. Vale para a
     // ida à lista ou a um detalhe na mesma instância e para o desmonte, porque
@@ -1387,6 +1391,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   // O resumo pronto saiu de uma versão da transcrição anterior à edição da
   // dona: a tela oferece refazê-lo, no resumo e na transcrição.
   const resumoDeOutraVersao = meeting.status === "ready" && !!resumoGuardado.data?.transcricaoEditadaDepois;
+  // O resumo na fila com a versão anterior guardada: é o refazer (o "Refazer o
+  // resumo" depois da edição, ou o "Refazer como…"). A aba Resumo já diz isso;
+  // a da transcrição também, porque é nela que a dona edita e pede (T51).
+  const resumoSendoRefeito = meeting.status === "ready" && !!resumoGuardado.data?.versaoAnterior
+    && (resumoGuardado.data.estado === "pendente" || resumoGuardado.data.estado === "gerando");
   // O emoji do resumo vai antes do título, como no app de referência da cliente.
   const emojiDoResumo = meeting.status === "ready" ? resumoGuardado.data?.emoji ?? null : null;
   // Quem participou primeiro; quem só foi citada, à parte. Sugestão sem a marca
@@ -1500,7 +1509,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
     {tab === "summary" && prontaComTranscricao && <div className="mb-4 space-y-4">
       {/* N5: as conexões privadas que nasceram do que a dona confirmou desta reunião. */}
       <ConexoesGeradasPelaReuniao meetingId={meetingId}/>
-      {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
+      {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} resumo={resumoGuardado.data}/>}
       <ResumoGuardado meetingId={meetingId} consulta={resumoGuardado} nomes={nomesDosFalantes(meeting.speakerNames)} itemDestacado={itemPedido || null} registroDoDestaque={itemJaDestacado}
         falantes={falas.map(fala => fala.falante)} aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo} traducao={traducaoDoResumo}
         comLinkAberto={!!meeting.shareToken} documento={ehDocumento}/>
@@ -1556,7 +1565,8 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
           </label>
         </div>
         {traducaoNaTela && <AvisoDeTraducao idioma={translationLanguage} aoVerOriginal={() => setTranslationLanguage(idiomaOriginal)} focoDepois={seletorDaTraducao}/>}
-        {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} modelo={resumoGuardado.data?.modelo ?? null}/>}
+        {resumoDeOutraVersao && <AvisoDeResumoDeOutraVersao meetingId={meetingId} resumo={resumoGuardado.data}/>}
+        {resumoSendoRefeito && <AvisoDoResumoSendoRefeito/>}
         {transcricaoEditavel && <BarraDaEdicao edicao={edicaoLida} textos={textosDaEdicao} editando={editandoATranscricao} naTraducao={naTraducaoDaTranscricao}
           aoMudarEditando={editando => {
             // Na tradução, editar volta ao original: a dona edita o que foi falado.

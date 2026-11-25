@@ -8,12 +8,12 @@ import {
   saveEnrichmentMessage, saveEnrichmentSuggestions, getEnrichmentSuggestion,
   applyEnrichmentSuggestion, ignoreEnrichmentSuggestion, completeEnrichmentSession,
   getEnrichmentHistory, getEnrichmentSessionById, advanceEnrichmentSession,
-  getPendingEnrichmentSuggestions, undoEnrichmentSuggestion, criarContextoOferecido,
+  getPendingEnrichmentSuggestions, undoEnrichmentSuggestion, criarContextoOferecido, camposPreenchidosDoContato,
 } from "../db";
 import { contextoParaOferecer } from "../contexto-oferecido";
 import {
-  dizQueNaoSabe, ENRICHMENT_STEPS, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField, isSkipResponse, limiteDoValor,
-  valorQueNaoInforma, type EnrichmentField,
+  avisoDasJaPreenchidas, dizQueNaoSabe, ENRICHMENT_STEPS, explicarOQueFalta, getEnrichmentStep, indiceDaEtapaDoCampo, isExpectedField,
+  isSkipResponse, limiteDoValor, pedirDeOutroJeito, proximaEtapaAPerguntar, valorQueNaoInforma, type EnrichmentField,
 } from "../enrichment-flow";
 
 // A IA tem um teto por chamada e um orçamento total (com as retentativas):
@@ -127,18 +127,45 @@ async function antecipadasDaEtapa(sessionId: string, ownerId: string, fieldType:
   return ETAPAS_DE_LISTA.has(fieldType) ? semRepetidas(ditas) : ditas.slice(-1);
 }
 
+/** As perguntas que têm resposta dita antes da vez, guardada na sessão (não se pulam: precisam virar cartão lá). */
+async function camposComAntecipadas(sessionId: string, ownerId: string): Promise<Set<string>> {
+  const mensagens = await getEnrichmentMessages(sessionId, ownerId, 50);
+  const campos = new Set<string>();
+  for (const mensagem of mensagens) {
+    const guardadas = (mensagem.metadata as { antecipadas?: unknown } | null)?.antecipadas;
+    for (const antecipada of Array.isArray(guardadas) ? guardadas as Antecipada[] : []) {
+      const indice = indiceDaEtapaDoCampo(String(antecipada?.field_type ?? ""));
+      if (indice >= 0) campos.add(ENRICHMENT_STEPS[indice].fieldType);
+    }
+  }
+  return campos;
+}
+
+/**
+ * Para onde o roteiro anda depois da etapa `etapa`: a pergunta seguinte que o
+ * contato ainda não tem respondida (T45, 24/11: o chat perguntava de novo o
+ * telefone e a empresa que a ficha já tinha), e as puladas, para a pergunta
+ * dizer por quê. Banco fora do ar é erro, como em qualquer passo do chat.
+ */
+async function destinoDoAvanco(sessionId: string, ownerId: string, contactId: number, etapa: number) {
+  const preenchidas = new Set(await camposPreenchidosDoContato(ownerId, contactId));
+  return proximaEtapaAPerguntar(etapa + 1, preenchidas, await camposComAntecipadas(sessionId, ownerId));
+}
+
 /**
  * Faz a pergunta da etapa `indice` (que acabou de chegar). Com antecipadas
  * para ela, a pergunta já vem com os cartões delas, na mesma mensagem — o que
  * getMessages devolve ao reidratar —, e a tela espera a decisão em vez do campo
  * de digitar.
  */
-async function perguntarEtapa(sessionId: string, ownerId: string, contactId: number, indice: number, metadataExtra: Record<string, unknown> = {}) {
+async function perguntarEtapa(sessionId: string, ownerId: string, contactId: number, indice: number, metadataExtra: Record<string, unknown> = {}, puladas: EnrichmentField[] = []) {
   const step = getEnrichmentStep(indice)!;
   const antecipadas = await antecipadasDaEtapa(sessionId, ownerId, step.fieldType);
-  const pergunta = antecipadas.length
+  const aviso = avisoDasJaPreenchidas(puladas);
+  const pergunta = (aviso ? `${aviso} ` : "") + (antecipadas.length
     ? `${step.question} Você já tinha contado isto antes: confirme o que vale ou ignore.`
-    : step.question;
+    : step.question);
+  if (puladas.length) metadataExtra = { ...metadataExtra, jaPreenchidas: puladas };
   const messageId = await saveEnrichmentMessage({
     sessionId, ownerId, role: "assistant", content: pergunta,
     metadata: {
@@ -172,7 +199,8 @@ async function avancarOuEsperarOsOutros(sessionId: string, ownerId: string, fiel
   // Avança a etapa LIDA acima, sem reler: entre a checagem de pendentes e o
   // UPDATE, outra aba pode ter confirmado o outro último cartão e avançado —
   // relendo, as duas avançariam (2 → 4, pulando uma pergunta).
-  const advanced = await advanceEnrichmentSession(sessionId, ownerId, etapa, skipped);
+  const { indice: destino, puladas } = await destinoDoAvanco(sessionId, ownerId, contactId, etapa);
+  const advanced = await advanceEnrichmentSession(sessionId, ownerId, etapa, skipped, ...(puladas.length ? [destino] : []));
   // Outra aba avançou primeiro: a pergunta seguinte já está gravada por ela;
   // esta tela a recebe ao reidratar (getMessages), sem duplicar nem concluir.
   if (!advanced) return { success: true, status, nextQuestion: null, sessionComplete: false, pendentesRestantes: 0 };
@@ -182,7 +210,7 @@ async function avancarOuEsperarOsOutros(sessionId: string, ownerId: string, fiel
     return { success: true, status, nextQuestion: null, sessionComplete: true, pendentesRestantes: 0 };
   }
   // A pergunta seguinte, com os cartões do que a usuária já tinha dito para ela.
-  const proxima = await perguntarEtapa(sessionId, ownerId, contactId, advanced.questionsAnswered);
+  const proxima = await perguntarEtapa(sessionId, ownerId, contactId, advanced.questionsAnswered, {}, puladas);
   return {
     success: true, status, nextQuestion: proxima.pergunta, nextMessageId: proxima.messageId, nextSuggestions: proxima.cartoes,
     sessionComplete: false, pendentesRestantes: 0,
@@ -204,11 +232,18 @@ export const enrichmentRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await getActiveEnrichmentSession(ctx.user.openId, input.contactId);
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "SESSION_ALREADY_ACTIVE" });
-      const sessionId = await createEnrichmentSession(ctx.user.openId, input.contactId);
-      const firstQuestion = ENRICHMENT_STEPS[0].question;
+      // T45 (24/11): começa na primeira pergunta que o contato ainda não tem
+      // respondida, e diz o que pulou. Com tudo respondido, começa do início:
+      // a dona abriu o chat para acrescentar algo (o possui e o procura são listas).
+      const preenchidas = new Set(await camposPreenchidosDoContato(ctx.user.openId, input.contactId));
+      const inicio = proximaEtapaAPerguntar(0, preenchidas);
+      const { indice, puladas } = inicio.indice < ENRICHMENT_STEPS.length ? inicio : { indice: 0, puladas: [] as EnrichmentField[] };
+      const sessionId = await createEnrichmentSession(ctx.user.openId, input.contactId, ...(indice ? [indice] : []));
+      const aviso = avisoDasJaPreenchidas(puladas);
+      const firstQuestion = (aviso ? `${aviso} ` : "") + ENRICHMENT_STEPS[indice].question;
       const msgId = await saveEnrichmentMessage({
         sessionId, ownerId: ctx.user.openId, role: "assistant", content: firstQuestion,
-        metadata: { questionIndex: 0, fieldType: ENRICHMENT_STEPS[0].fieldType },
+        metadata: { questionIndex: indice, fieldType: ENRICHMENT_STEPS[indice].fieldType, ...(puladas.length ? { jaPreenchidas: puladas } : {}) },
       });
       return { sessionId, firstQuestion, firstMessageId: msgId };
     }),
@@ -254,7 +289,8 @@ export const enrichmentRouter = router({
       // Pular a pergunta da vez (a resposta da usuária já está gravada): a
       // seguinte, com os cartões do que ela já tinha dito para ela, ou o fim.
       const pularAPergunta = async () => {
-        const advanced = await advanceEnrichmentSession(input.sessionId, ctx.user.openId, session.questionsAnswered ?? 0, true);
+        const { indice: destino, puladas } = await destinoDoAvanco(input.sessionId, ctx.user.openId, session.contactId, session.questionsAnswered ?? 0);
+        const advanced = await advanceEnrichmentSession(input.sessionId, ctx.user.openId, session.questionsAnswered ?? 0, true, ...(puladas.length ? [destino] : []));
         // Outra aba avançou primeiro: nada a gravar; a tela reidrata pelo getMessages.
         if (!advanced) {
           return { messageId: null, aiResponse: null, suggestions: [], sessionComplete: false, completionSummary: null, awaitingConfirmation: false };
@@ -263,7 +299,7 @@ export const enrichmentRouter = router({
           await completeEnrichmentSession(input.sessionId, ctx.user.openId, "Cadastro enriquecido com sucesso!");
           return { messageId: null, aiResponse: null, suggestions: [], sessionComplete: true, completionSummary: "Cadastro enriquecido com sucesso!", awaitingConfirmation: false };
         }
-        const proxima = await perguntarEtapa(input.sessionId, ctx.user.openId, session.contactId, advanced.questionsAnswered, { skippedPrevious: true });
+        const proxima = await perguntarEtapa(input.sessionId, ctx.user.openId, session.contactId, advanced.questionsAnswered, { skippedPrevious: true }, puladas);
         return {
           messageId: proxima.messageId, aiResponse: proxima.pergunta, suggestions: proxima.cartoes, sessionComplete: false, completionSummary: null,
           awaitingConfirmation: proxima.cartoes.length > 0,
@@ -369,9 +405,14 @@ FORMATO DE SAÍDA (JSON obrigatório):
         // "não sei" sozinho: nada saiu da pergunta da vez e quem responde disse
         // que não sabe. Repetir a pergunta aqui a repetia para sempre.
         if (dizQueNaoSabe(input.content)) return pularAPergunta();
-        const repeatQuestion = step.fieldType === "company"
-          ? "Qual é o nome da empresa em que trabalha?"
-          : step.question;
+        // T45 (24/11): repetir a pergunta sem dizer por quê deixava a dona
+        // sem saída. A mensagem diz o que faltou, se a resposta era de outra
+        // pergunta (anotada para quando o roteiro chegar lá) e como pular.
+        const repeatQuestion = explicarOQueFalta(
+          step.fieldType,
+          step.fieldType === "company" ? "Qual é o nome da empresa em que trabalha?" : step.question,
+          antecipadas.map(antecipada => antecipada.field_type),
+        );
         const messageId = await saveEnrichmentMessage({
           sessionId: input.sessionId, ownerId: ctx.user.openId, role: "assistant", content: repeatQuestion,
           metadata: { questionIndex: session.questionsAnswered, fieldType: step.fieldType, needsClarification: true },
@@ -386,7 +427,7 @@ FORMATO DE SAÍDA (JSON obrigatório):
       // página destravava a conversa.
       const suggestions = extracted.filter(e => e.confidence >= 0.7);
       if (suggestions.length === 0) {
-        const pedido = "Não tenho certeza se entendi. Pode dizer de outro jeito?";
+        const pedido = pedirDeOutroJeito(step.fieldType);
         const messageId = await saveEnrichmentMessage({
           sessionId: input.sessionId, ownerId: ctx.user.openId, role: "assistant", content: pedido,
           metadata: { questionIndex: session.questionsAnswered, fieldType: step.fieldType, needsClarification: true, lowConfidence: true },

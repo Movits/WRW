@@ -245,6 +245,26 @@ describe("Reuniões — editar a transcrição (H18)", () => {
     expect(screen.getByText(/Você editou a transcrição depois deste resumo/)).toBeInTheDocument();
   });
 
+  it("o resumo sendo refeito (na fila, com a versão anterior): a aba da transcrição diz que ele está sendo refeito (T51: antes, nada aparecia ali)", () => {
+    duble.resumoGuardado.mockReturnValue(resumo({ estado: "pendente", versaoAnterior: true }));
+    abrirATranscricao();
+    expect(screen.getByText("Refazendo o resumo com a transcrição de agora. A versão nova aparece na aba Resumo quando terminar.")).toBeInTheDocument();
+    expect(screen.queryByText(/Você editou a transcrição depois deste resumo/)).not.toBeInTheDocument();
+  });
+
+  it("o primeiro resumo na fila (sem versão anterior) e o resumo pronto não dizem que estão sendo refeitos", () => {
+    duble.resumoGuardado.mockReturnValue(resumo({ estado: "gerando", versaoAnterior: false }));
+    const { unmount } = render(<Meetings />);
+    fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.queryByText(/Refazendo o resumo com a transcrição de agora/)).not.toBeInTheDocument();
+    unmount();
+    window.history.replaceState(null, "", "/meetings");
+    duble.resumoGuardado.mockReturnValue(resumo());
+    abrirATranscricao();
+    expect(screen.queryByText(/Refazendo o resumo com a transcrição de agora/)).not.toBeInTheDocument();
+  });
+
   it("sem edição depois do resumo, nenhum aviso", () => {
     abrirATranscricao();
     expect(screen.queryByText(/Você editou a transcrição depois deste resumo/)).not.toBeInTheDocument();

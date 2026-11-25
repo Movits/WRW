@@ -22,10 +22,12 @@ vi.mock("./routers/consent", () => ({
 
 const db = {
   getEnrichmentSessionById: vi.fn(),
-  getEnrichmentMessages: vi.fn(),
+  getEnrichmentMessages: vi.fn(async () => []),
   saveEnrichmentMessage: vi.fn(),
   saveEnrichmentSuggestions: vi.fn(),
   advanceEnrichmentSession: vi.fn(),
+  // T45 (24/11): o contato sem nada preenchido; o roteiro não pula nenhuma pergunta.
+  camposPreenchidosDoContato: vi.fn(async () => []),
   completeEnrichmentSession: vi.fn(),
   getActiveEnrichmentSession: vi.fn(),
   createEnrichmentSession: vi.fn(),
@@ -67,6 +69,9 @@ beforeEach(() => {
   db.getEnrichmentSessionById.mockResolvedValue(sessao);
   db.getPendingEnrichmentSuggestions.mockResolvedValue([]);
   db.applyEnrichmentSuggestion.mockResolvedValue(true);
+  // T45 (24/11): o avanço lê o que o contato já tem e as respostas ditas antes da vez.
+  db.getEnrichmentMessages.mockResolvedValue([]);
+  db.camposPreenchidosDoContato.mockResolvedValue([]);
 });
 
 describe("confirmSuggestion — oferece, nunca cria", () => {
