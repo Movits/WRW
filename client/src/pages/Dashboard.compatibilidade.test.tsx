@@ -78,25 +78,31 @@ beforeEach(() => {
   duble.respostas["notifications.list"] = { data: [] };
 });
 
-function valorDoCartao(rotulo: string) {
-  const etiqueta = screen.getAllByText(rotulo).find(el => el.previousElementSibling);
-  return etiqueta?.previousElementSibling?.textContent ?? "";
-}
-
-describe("item 6.3 — o '%' da Compatibilidade Média", () => {
-  it("o cartão de compatibilidade mostra o número com '%' e os outros não", async () => {
-    duble.respostas["matches.list"] = { data: [cartao({ matchId: 1, overallScore: 80 }), cartao({ matchId: 2, overallScore: 60 })] };
+// Desde 25/11 o item 6.3 vale para o resumo em frases (components/ResumoDasConexoes.tsx):
+// a afinidade média é a única porcentagem, e sai com "%" na frase.
+describe("item 6.3 — o '%' da afinidade média, no resumo em frases", () => {
+  it("a frase diz quantas pessoas combinam, e a afinidade média sai com '%'", async () => {
+    duble.respostas["matches.list"] = { data: [cartao({ matchId: 1, overallScore: 70 }), cartao({ matchId: 2, overallScore: 60 })] };
     render(<Dashboard />);
 
-    await waitFor(() => expect(valorDoCartao(i18n.t("dashboard.compatibility"))).toBe("70%"), { timeout: 4000 });
-    expect(valorDoCartao(i18n.t("dashboard.matches"))).not.toContain("%");
-    expect(valorDoCartao(i18n.t("dashboard.topMatches"))).not.toContain("%");
+    await waitFor(() => expect(screen.getByText("2 pessoas combinam com você")).toBeInTheDocument(), { timeout: 4000 });
+    expect(screen.getByText("65% de afinidade em média")).toBeInTheDocument();
   });
 
-  it("consulta que falhou continua no traço, sem '%' pendurado", async () => {
+  it("com alguém de 80% ou mais, o detalhe diz quantas combinam muito", async () => {
+    duble.respostas["matches.list"] = { data: [cartao({ matchId: 1, overallScore: 85 }), cartao({ matchId: 2, overallScore: 60 })] };
+    render(<Dashboard />);
+
+    await waitFor(() => expect(screen.getByText("1 delas combina muito")).toBeInTheDocument(), { timeout: 4000 });
+    expect(screen.queryByText(/de afinidade em média/)).not.toBeInTheDocument();
+  });
+
+  it("consulta que falhou diz que não carregou: nem zero, nem '%' pendurado", async () => {
     duble.respostas["matches.list"] = { isError: true, error: new Error("banco fora"), data: undefined };
     render(<Dashboard />);
-    await waitFor(() => expect(valorDoCartao(i18n.t("dashboard.compatibility"))).toBe("—"), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByText("Não deu para carregar suas sugestões agora")).toBeInTheDocument(), { timeout: 4000 });
+    expect(screen.queryByText(/de afinidade em média/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Nenhuma sugestão nova por enquanto")).not.toBeInTheDocument();
   });
 });
 

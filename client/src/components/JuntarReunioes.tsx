@@ -109,6 +109,7 @@ export function JuntarReunioes({ reunioes, aoFechar, aoJuntar }: {
         <ul className="mt-4 list-disc space-y-1.5 ps-5 text-sm text-white/60">
           <li>{t("meetings.join.warningSummary")}</li>
           <li>{t("meetings.join.warningLink")}</li>
+          <li>{t("meetings.join.warningPeople")}</li>
           <li>{t("meetings.join.warningAudio")}</li>
           {juncaoTranscreveDeNovo(ordem) && <li>{t("meetings.join.warningOld")}</li>}
           {juncaoPerdeEdicoes(ordem) && <li>{t("meetings.join.warningEdits")}</li>}

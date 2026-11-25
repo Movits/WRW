@@ -40,6 +40,8 @@
 //   sondagem do alerta espera os 120 s.
 // - As linhas GOLD_ACERVO_READ e REVOKED_SESSION_ACCESS_ATTEMPT das contas QA ficam
 //   na trilha de auditoria (decisão do Roberto, 02/09/2026); o resto do ruído sai.
+//   (MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ, da consulta das reuniões, R1a,
+//   também ficariam: por isso o exame não abre a consulta.)
 // - Os routers de rede/contextos devolvem HTTP 500 com "NOT_FOUND" para contato de
 //   outra dona (dívida conhecida); o exame aceita exatamente isso, não "qualquer erro".
 // - Não rode do mesmo IP de saída de quem está usando o site: o limite da API é por

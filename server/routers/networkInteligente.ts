@@ -30,6 +30,7 @@ import { anotarConexoesComEntidade, contatoPeloPedido, pedirContatoPelaEntidade 
 import { MENSAGEM_DO_PEDIDO_MAX } from "@shared/pedidos-pela-entidade";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import { hasValidConsent } from "./consent";
+import { plataformaProcedure } from "./_procedures";
 
 /**
  * Meu Network Inteligente — a rede particular da dona como inteligência
@@ -76,21 +77,8 @@ const termoDoSmartMatch = (userId: number) => hasValidConsent(userId, "termo_sma
 /** As 17 categorias de "O que preciso", na forma que o z.enum pede (a lista é a de shared/o-que-preciso.ts). */
 const CHAVES_DO_PRECISO = CHAVES_O_QUE_PRECISO as unknown as [ChaveOQuePreciso, ...ChaveOQuePreciso[]];
 
-/**
- * A rastreabilidade das conexões é da PLATAFORMA, e a plataforma aqui é a
- * staff: admin e presidente — a mesma régua de `isStaff` em
- * oportunidade-acesso.ts. Não é o `adminProcedure`, que aceita Ouro: Ouro é a
- * categoria premium paga (Governança, 14/09), e a lista atravessa a rede
- * particular de TODAS as donas (o que os contatos têm e procuram, e qual conta
- * responde por cada ID anônimo), por fora das travas do acervo Ouro (nível
- * 'ouro' no contato, termo da dona, GOLD_ACERVO_READ).
- */
-const plataformaProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "president") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito à administração da plataforma." });
-  }
-  return next({ ctx });
-});
+// A rastreabilidade das conexões é da PLATAFORMA (admin e presidente):
+// plataformaProcedure, em routers/_procedures.ts.
 
 export const MENSAGEM_INTERPRETACAO_FALHOU = "Não foi possível interpretar as informações agora. Tente de novo em alguns minutos.";
 

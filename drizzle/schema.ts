@@ -1163,6 +1163,19 @@ export const meetings = mysqlTable("meetings", {
   // Conferido de novo na hora de usar (server/modelos-proprios.ts): o modelo
   // da dona apagado depois do pedido volta ao padrão dela.
   summaryRequest: jsonCompat("summary_request"),
+  // As vozes ligadas às contas (H3c do desenho de 16/11): { "F1": "owner",
+  // "F2": "<id de meeting_participants>" }. O valor é "owner" (a própria dona)
+  // ou o id da PARTICIPAÇÃO, nunca o users.id: a participação que sai, ou a
+  // conta excluída, deixa uma referência que a leitura ignora, sem dado
+  // pessoal. O nome da conta é resolvido na hora de ler
+  // (server/vozes-da-reuniao.ts). Nula: nenhuma voz ligada a conta.
+  speakerAccounts: jsonCompat("speaker_accounts").$type<Record<string, string>>(),
+  // As vozes juntadas (H3c, "F3 é a mesma pessoa que F1"): { "F3": "F1" }, a
+  // voz juntada apontando para a principal, sem cadeia. O nome e a conta da
+  // voz juntada ficam guardados, sem uso, e "Separar" os devolve. Reprocessar
+  // zera esta coluna, a de cima e speaker_names: a transcrição nova renumera
+  // as vozes.
+  speakerMerges: jsonCompat("speaker_merges").$type<Record<string, string>>(),
 }, (table) => ({
   ownerCreatedIdx: index("meetings_owner_created_idx").on(table.ownerId, table.createdAt),
   ownerStatusIdx: index("meetings_owner_status_idx").on(table.ownerId, table.status),
@@ -1199,6 +1212,102 @@ export const meetingFolders = mysqlTable("meeting_folders", {
 }, (table) => ({
   // As pastas da dona, na ordem em que nasceram.
   ownerCreatedIdx: index("meeting_folders_owner_created_idx").on(table.ownerId, table.createdAt),
+}));
+
+// As participantes da reunião (R1b do desenho de 16/11; decisão do Roberto de
+// 22/11): a dona convida por um link de uso único (source link) ou uma das
+// conexões aceitas dela (source connection), e a convidada que aceita passa a
+// ler a reunião na conta dela: resumo, transcrição, gravação e o Pergunte, sem
+// mudar nada. Uma linha por convite; a do link nasce sem userId, só com o hash
+// do token (sha256, o token nunca é guardado), e o aceite preenche o userId,
+// apaga o hash e a ativa. O convite pendente vence em expires_at (7 dias) e sai
+// quando a dona abre o painel ou cria outro (limpeza preguiçosa). Sair, ser
+// removida, a reunião excluída e a conta excluída (das duas pontas) apagam a
+// linha. Nomes em inglês, como as irmãs meeting_*; a coluna da conta chama
+// "userId", como as outras que apontam para users.id.
+export const meetingParticipants = mysqlTable("meeting_participants", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  userId: int("userId"),
+  status: mysqlEnum("status", ["invited", "active"]).notNull(),
+  source: mysqlEnum("source", ["link", "connection"]).notNull(),
+  inviteTokenHash: varchar("invite_token_hash", { length: 64 }),
+  invitedAt: bigint("invited_at", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }),
+  acceptedAt: bigint("accepted_at", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma participação por conta em cada reunião (o MySQL aceita vários nulos:
+  // os convites por link ainda não usados).
+  meetingUserUnique: uniqueIndex("meeting_participants_meeting_user_unique").on(table.meetingId, table.userId),
+  // O convite por link é achado pelo hash do token.
+  tokenUnique: uniqueIndex("meeting_participants_token_unique").on(table.inviteTokenHash),
+  // As reuniões compartilhadas com a conta e os convites dela.
+  userStatusIdx: index("meeting_participants_user_status_idx").on(table.userId, table.status),
+  // O painel da dona e a exclusão da reunião.
+  ownerMeetingIdx: index("meeting_participants_owner_meeting_idx").on(table.ownerId, table.meetingId),
+}));
+
+// Os espaços de equipe (R2 do plano do gravador; HN-62 no app de referência
+// da cliente): a pasta da dona (meeting_folders) vira o espaço de uma equipe
+// quando ela convida alguém, por um link de uso único (source link) ou uma das
+// conexões aceitas dela (source connection), como as participantes da reunião
+// (R1b). Cada linha diz o papel: "member" lê as reuniões da pasta e escreve as
+// tarefas da equipe; "reader" só lê. A dona da pasta é a dona da equipe e não
+// tem linha aqui. A do link nasce sem userId, só com o hash do token (sha256),
+// e o aceite preenche o userId, apaga o hash e a ativa. O convite pendente
+// vence em expires_at (7 dias) e sai quando a dona abre a equipe ou cria outro
+// (limpeza preguiçosa). Sair, ser removida, a pasta apagada e a conta excluída
+// (das duas pontas) apagam a linha.
+export const meetingFolderMembers = mysqlTable("meeting_folder_members", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  folderId: varchar("folder_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  userId: int("userId"),
+  role: mysqlEnum("role", ["member", "reader"]).notNull(),
+  status: mysqlEnum("status", ["invited", "active"]).notNull(),
+  source: mysqlEnum("source", ["link", "connection"]).notNull(),
+  inviteTokenHash: varchar("invite_token_hash", { length: 64 }),
+  invitedAt: bigint("invited_at", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }),
+  acceptedAt: bigint("accepted_at", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma linha por conta em cada equipe (o MySQL aceita vários nulos: os
+  // convites por link ainda não usados).
+  folderUserUnique: uniqueIndex("meeting_folder_members_folder_user_unique").on(table.folderId, table.userId),
+  // O convite por link é achado pelo hash do token.
+  tokenUnique: uniqueIndex("meeting_folder_members_token_unique").on(table.inviteTokenHash),
+  // As equipes da conta e os convites dela.
+  userStatusIdx: index("meeting_folder_members_user_status_idx").on(table.userId, table.status),
+  // A tela da equipe para a dona, a pasta apagada e a exclusão da conta.
+  ownerFolderIdx: index("meeting_folder_members_owner_folder_idx").on(table.ownerId, table.folderId),
+}));
+
+// As tarefas da equipe (R2): o que a equipe tem a fazer, com o texto, quem
+// ficou responsável (como foi escrito), o prazo e se já foi feita. A dona e as
+// membras de papel "member" escrevem; as de papel "reader" só leem. São da
+// pasta, não das próximas ações da dona (proximas_acoes): não vão à Google
+// Agenda de ninguém nem se ligam a contato da rede particular. owner_id é a
+// dona da pasta, quem quer que tenha escrito (a auditoria guarda quem foi):
+// saem com a conta dela e com a pasta apagada.
+export const meetingFolderTasks = mysqlTable("meeting_folder_tasks", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  folderId: varchar("folder_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  texto: varchar("texto", { length: 500 }).notNull(),
+  responsavel: varchar("responsavel", { length: 120 }),
+  prazo: date("prazo", { mode: "string" }),
+  feita: boolean("feita").default(false).notNull(),
+  feitaEm: bigint("feita_em", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // A lista da equipe: as abertas primeiro, por prazo.
+  ownerFolderIdx: index("meeting_folder_tasks_owner_folder_idx").on(table.ownerId, table.folderId, table.feita, table.prazo),
 }));
 
 export const meetingRecordings = mysqlTable("meeting_recordings", {
@@ -1760,6 +1869,11 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   // Falso por padrão: o evento fica só na agenda dela, sem convidados, e a WRW
   // não faz a Google mostrar nem mandar nada a terceiros sem ela marcar.
   googleConvites:  boolean("google_convites").default(false).notNull(),
+  // A agenda da equipe (R2): a reunião marcada que a dona pôs numa pasta dela
+  // com equipe. As membras veem o título, a hora, a duração, o fuso e o local,
+  // nunca os participantes (nome e e-mail de terceiros). Apagar a pasta volta a
+  // nulo, na mesma transação.
+  folderId:        varchar("folder_id", { length: 36 }),
   createdAt:       bigint("created_at", { mode: "number" }).notNull(),
   updatedAt:       bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -1767,6 +1881,8 @@ export const agendaReunioes = mysqlTable("agenda_reunioes", {
   ownerInicioIdx: index("agenda_reunioes_owner_inicio_idx").on(table.ownerId, table.inicioEm),
   // Uma gravação liga a uma reunião da agenda só; o MySQL aceita vários nulos.
   meetingUnique:  uniqueIndex("agenda_reunioes_meeting_unique").on(table.meetingId),
+  // A agenda da equipe, pela pasta.
+  ownerFolderIdx: index("agenda_reunioes_owner_folder_idx").on(table.ownerId, table.folderId),
 }));
 
 // A conta Google que a dona conectou para a Google Agenda (H16b do plano do
@@ -1806,6 +1922,30 @@ export const googleAgendaConexoes = mysqlTable("google_agenda_conexoes", {
   // Antes de revogar, a WRW procura outra conexão com a mesma conta Google.
   // Não é único: duas contas da WRW podem ligar a mesma conta Google.
   subIdx: index("google_agenda_conexoes_sub_idx").on(table.googleSub),
+}));
+
+// Entrar com a conta Google (A8; server/entrar-com-google.ts). A linha liga UMA
+// conta Google a UMA conta da WRW, pelo `sub` do id_token (o id da conta
+// Google, que nunca muda nem é reusado). Nenhum token da Google fica guardado:
+// a entrada só precisa saber quem é a pessoa, e o token de acesso da troca é
+// descartado na hora (sem revogar: a Google revoga por conta Google e projeto,
+// e revogar derrubaria a conexão da Google Agenda da mesma conta). Sai com a
+// exclusão da conta, com "Desligar" no Perfil e com a redefinição de senha
+// (como as chaves de acesso).
+export const contasGoogle = mysqlTable("contas_google", {
+  id:          varchar("id", { length: 36 }).primaryKey(),
+  userId:      int("userId").notNull(),
+  // O `sub` do id_token. Único: uma conta Google entra numa conta da WRW só.
+  googleSub:   varchar("google_sub", { length: 255 }).notNull(),
+  // O e-mail verificado da conta Google na hora de ligar, só para a dona saber
+  // qual conta está ligada. Nada decide por ele depois de ligada.
+  emailGoogle: varchar("email_google", { length: 320 }),
+  createdAt:   bigint("created_at", { mode: "number" }).notNull(),
+  ultimoUsoEm: bigint("ultimo_uso_em", { mode: "number" }),
+}, (table) => ({
+  // Uma conta Google por conta da WRW: ligar outra pede desligar a de antes.
+  userUnique: uniqueIndex("contas_google_user_unique").on(table.userId),
+  subUnique: uniqueIndex("contas_google_sub_unique").on(table.googleSub),
 }));
 
 // Os lembretes no sino (H15 do plano do gravador): o da próxima ação com prazo

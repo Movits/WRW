@@ -4,13 +4,13 @@ import { Check, Loader2, PencilLine, RefreshCw, Replace, RotateCcw } from "lucid
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
-import { mensagemDoRefazer } from "@/components/ModeloDoResumo";
+import { mensagemDoRefazer, pedidoParaEnviar } from "@/components/ModeloDoResumo";
 import { BOTAO_PRINCIPAL, BOTAO_SECUNDARIO, CAMPO, ROTULO } from "@/components/FormularioDoTrecho";
 import {
   contarNoTexto, LOCALIZAR_MAX, RECUSAS_DA_EDICAO, SUBSTITUIR_POR_MAX, TEXTO_CORRIDO_MAX,
   type CodigoDaRecusaDaEdicao, type OperacaoDaEdicao,
 } from "@shared/editar-transcricao";
-import { MODELO_DE_RESUMO_PADRAO, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import { ESTILO_DO_RESUMO_PADRAO, MODELO_DE_RESUMO_PADRAO, estiloDoResumo } from "@shared/modelos-de-resumo";
 
 /**
  * Editar a transcrição (H18; HN-23 e HN-27 do app de referência da cliente),
@@ -291,24 +291,68 @@ export function EditorDoTextoCorrido({ texto, editar, salvando }: {
 }
 
 /**
+ * O pedido do resumo de agora, como o servidor o devolve (resumoGuardado): o
+ * modelo escolhido (o pronto, um da dona ou o que a IA escolheu), o estilo e as
+ * instruções.
+ */
+export type PedidoDoResumoDeAgora = { escolha?: string | null; modelo?: string | null; estilo?: string | null; instrucoes?: string | null };
+
+/**
+ * O refazer depois da edição pede o MESMO resumo de agora, só que lido da
+ * transcrição editada: o modelo da escolha (o da dona, ou o que a IA escolheu,
+ * e não só o código do pronto, que levaria o resumo de um modelo próprio para
+ * o Geral), o estilo e as instruções.
+ */
+export function pedidoDoRefazerDepoisDaEdicao(resumo: PedidoDoResumoDeAgora | null | undefined) {
+  return pedidoParaEnviar({
+    modelo: resumo?.escolha ?? resumo?.modelo ?? MODELO_DE_RESUMO_PADRAO,
+    estilo: estiloDoResumo(resumo?.estilo ?? undefined) ?? ESTILO_DO_RESUMO_PADRAO,
+    instrucoes: resumo?.instrucoes ?? "",
+  });
+}
+
+/**
  * A dona editou a transcrição depois que o resumo foi escrito: o resumo, o
  * mapa mental e o que o link aberto mostra deles saíram da versão anterior.
- * "Refazer o resumo" manda a fila escrever de novo, no mesmo modelo, a partir
+ * "Refazer o resumo" manda a fila escrever de novo, no mesmo pedido, a partir
  * da versão editada; os itens que ela confirmou ficam, e o mapa é refeito.
  * Gasta uma vaga do teto de pedidos à IA, como o "Refazer como…".
+ *
+ * T51 (24/11): o toque não mostrava nada. O pedido aceito tira este aviso (o
+ * resumo volta à fila), e a versão nova só aparece na aba Resumo quando a IA
+ * termina; na aba da transcrição, onde a dona acabou de editar, nada dizia
+ * que o resumo estava sendo refeito. Agora o pedido aceito avisa na hora (e a
+ * aba da transcrição mostra AvisoDoResumoSendoRefeito enquanto a fila trabalha), e a
+ * recusa fica escrita no próprio aviso, além do aviso flutuante.
  */
-export function AvisoDeResumoDeOutraVersao({ meetingId, modelo }: { meetingId: string; modelo: ModeloDeResumo | null }) {
+export function AvisoDeResumoDeOutraVersao({ meetingId, resumo }: { meetingId: string; resumo: PedidoDoResumoDeAgora | null | undefined }) {
   const { t } = useTranslation();
   const utils = trpc.useUtils();
   const refazer = trpc.meetings.refazerResumo.useMutation({
+    onSuccess: () => toast.success(t("meetings.editTranscript.redoStarted")),
     onError: erro => toast.error(mensagemDoRefazer(t, erro)),
     onSettled: () => Promise.all([utils.meetings.resumoGuardado.invalidate({ meetingId }), utils.meetings.mapaMental.invalidate({ meetingId })]),
   });
-  return <div role="status" className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center">
-    <p className="min-w-0 flex-1">{t("meetings.editTranscript.staleSummary")}</p>
-    <button type="button" disabled={refazer.isPending} onClick={() => refazer.mutate({ meetingId, modelo: modelo ?? MODELO_DE_RESUMO_PADRAO })}
-      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
-      {refazer.isPending ? <Loader2 size={15} className="animate-spin" aria-hidden/> : <RefreshCw size={15} aria-hidden/>} {t("meetings.editTranscript.redoSummary")}
-    </button>
+  return <div role="status" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <p className="min-w-0 flex-1">{t("meetings.editTranscript.staleSummary")}</p>
+      <button type="button" disabled={refazer.isPending} onClick={() => refazer.mutate({ meetingId, ...pedidoDoRefazerDepoisDaEdicao(resumo) })}
+        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
+        {refazer.isPending ? <Loader2 size={15} className="animate-spin" aria-hidden/> : <RefreshCw size={15} aria-hidden/>} {t("meetings.editTranscript.redoSummary")}
+      </button>
+    </div>
+    {refazer.isError && <p role="alert" className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{mensagemDoRefazer(t, refazer.error)}</p>}
   </div>;
+}
+
+/**
+ * O resumo sendo refeito (na fila, com a versão anterior guardada), dito na aba
+ * da transcrição: é lá que a dona toca "Refazer o resumo" depois de editar, e a
+ * versão nova só aparece na aba Resumo quando a IA termina (T51, 24/11).
+ */
+export function AvisoDoResumoSendoRefeito() {
+  const { t } = useTranslation();
+  return <p role="status" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+    <Loader2 size={15} className="mr-2 inline animate-spin" aria-hidden/>{t("meetings.editTranscript.redoingSummary")}
+  </p>;
 }

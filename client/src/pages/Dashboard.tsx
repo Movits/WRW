@@ -20,6 +20,7 @@ import { BrandMark } from "@/components/BrandLogo";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { CartaoDeProximasAcoes } from "@/components/ProximasAcoes";
 import { ConexoesPossiveis } from "@/components/ConexoesPossiveis";
+import { ResumoDasConexoes } from "@/components/ResumoDasConexoes";
 import { mensagemDeErroParaTela, traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import {
@@ -1164,6 +1165,11 @@ export default function Dashboard() {
     setTabVisible(false);
     setTimeout(() => { setActiveTab(tab); setTabVisible(true); }, 180);
   };
+  // O toque do resumo das conexões: abre a aba e desce até ela, que fica abaixo da dobra no celular.
+  const irParaAba = (tab: typeof activeTab) => {
+    switchTab(tab);
+    document.getElementById("abas-do-inicio")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
 
   if (loading || profileQuery.isLoading) {
     return (
@@ -1281,35 +1287,33 @@ export default function Dashboard() {
             reuniões e do que anotou; a lista inteira mora em /proximas-acoes. */}
         <CartaoDeProximasAcoes />
 
-        {/* ─── STATS ─── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          {[
-            // Consulta falhou não é "0 matches": o traço diz que o número não veio
-            // (o erro com "tentar de novo" está na aba de matches, logo abaixo).
-            { label: t("dashboard.matches"), value: totalDeSugestoesFalhou ? "—" : totalDeSugestoes ?? 0, color: "#c98f70", icon: "🎯", suffix: "" },
-            // O único dos quatro que é porcentagem, e o único que saía sem
-            // unidade nenhuma ao lado de três contagens (item 6.3).
-            // U3: para a Bronze, as duas notas da lista ficam trancadas (🔒, e
-            // não o traço, que aqui quer dizer "a consulta falhou").
-            { label: t("dashboard.compatibility"), value: !listaLiberada ? "🔒" : statsQuery.isError ? "—" : stats?.avgScore ?? 0, color: "#3b82f6", icon: "📊", suffix: "%" },
-            { label: t("dashboard.topMatches"), value: !listaLiberada ? "🔒" : statsQuery.isError ? "—" : stats?.highScore ?? 0, color: "#10b981", icon: "⭐", suffix: "" },
-            { label: t("dashboard.connectionsEstablished"), value: connectionsQuery.isError ? "—" : conexoesEfetivadas, color: "#8b5cf6", icon: "🤝", suffix: "" },
-          ].map((s, i) => (
-            <StatCard key={s.label} {...s} index={i} />
-          ))}
-        </div>
+        {/* ─── RESUMO DAS CONEXÕES ───
+            Frases no lugar dos quatro cartões de número (pedido do Nicolas,
+            25/11): cada linha diz o que há e leva aonde agir, e zero não vira
+            linha. Os números vêm das mesmas consultas de antes; a regra das
+            efetivadas (item 6.1) é a mesma da aba Conexões. */}
+        <ResumoDasConexoes
+          listaLiberada={listaLiberada}
+          sugestoes={totalDeSugestoes}
+          sugestoesFalharam={totalDeSugestoesFalhou}
+          afinidadeMedia={stats?.avgScore}
+          combinamMuito={stats?.highScore}
+          conexoesFeitas={connectionsQuery.isError || connectionsQuery.data === undefined ? undefined : conexoesEfetivadas}
+          pedidosParaResponder={pendingConnections.length}
+          zeroPorque={aguardandoTermo ? "termo" : (redeQuery.data?.ocultas ?? 0) > 0 ? "rede" : undefined}
+          aoVerSugestoes={() => irParaAba("matches")}
+          aoVerConexoes={() => irParaAba("connections")}
+        />
 
         {/* ─── A REDE INTEIRA ───
             Os quatro indicadores que ficavam na Hero pública. Aqui eles fazem
             sentido: quem já entrou lê o tamanho da rede em que está, em vez de
             ver o número servir de vitrine na primeira tela.
-            O título existe porque a grade acima também tem um cartão
-            "Conexões" — lá é a da usuária, aqui é a da plataforma; sem a
-            separação os dois números pareceriam o mesmo, contraditório.
-            Mesmo StatCard, mesmas quatro cores e mesma grade da grade de cima:
-            nenhum componente novo, nenhuma cor fora da identidade. O índice
-            começa em 4 para a entrada escalonada continuar a de cima em vez de
-            recomeçar.
+            O título existe porque o resumo acima também fala de conexões — lá
+            são as da usuária, aqui as da plataforma; sem a separação os dois
+            números pareceriam o mesmo, contraditório. Desde o resumo em frases
+            (25/11), o StatCard e a grade de quatro ficaram só aqui. O índice
+            começa em 4 por herança da grade que ficava acima.
             Escondida, com "Membros por nível", até os números serem atraentes
             (Rosber, 16/09): ver MOSTRAR_NUMEROS_DA_REDE em lib/numeros-da-rede.ts. */}
         {MOSTRAR_NUMEROS_DA_REDE && (<div className="mb-8">
@@ -1377,7 +1381,7 @@ export default function Dashboard() {
         </Link>
 
         {/* ─── TABS ─── */}
-        <div className="flex gap-1 mb-6 bg-white/4 rounded-xl p-1 w-fit border border-white/5 flex-wrap">
+        <div id="abas-do-inicio" className="flex gap-1 mb-6 bg-white/4 rounded-xl p-1 w-fit border border-white/5 flex-wrap scroll-mt-20">
           {(["matches", "connections", "dealrooms", "profile"] as const).map(tab => (
             <button key={tab} onClick={() => switchTab(tab as any)}
               // O número da aba Conexões conta as EFETIVADAS, como o cartão de

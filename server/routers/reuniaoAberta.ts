@@ -9,6 +9,7 @@ import { entrarNoLink } from "../entrada-no-link-aberto";
 import { chaveDeRede, ipDaCliente } from "../ip-da-cliente";
 import { exigirReuniaoDoLink, verReuniaoPeloLink } from "../link-aberto-da-reuniao";
 import { comCookiesDoPedido } from "../senha-do-link-aberto";
+import { reuniaoDaCredencial } from "@shared/participantes-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, translatePrivateMeetingTranscript } from "../meeting-service";
 import { perguntarAReuniao, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
 import { pedirResumoPeloLink, resumoGuardadoPeloLink } from "../resumo-guardado";
@@ -36,7 +37,10 @@ const tokenDoLink = z.string().max(128);
 // Todo procedimento que lê a reunião pelo token passa por aqui: os cookies do
 // pedido ficam à vista de reuniaoDoLink, que confere a entrada no link com
 // senha. `entrar`, que é quem grava a entrada, não precisa.
-const procedimentoDoLink = publicProcedure.use(({ ctx, next }) => comCookiesDoPedido(ctx.req.headers.cookie, () => next()));
+// A conta logada vai junto: é ela que abre a reunião pela credencial da
+// participante (R1b, "participante:<id>"); o link de sempre não a usa.
+const procedimentoDoLink = publicProcedure.use(({ ctx, next }) => comCookiesDoPedido(ctx.req.headers.cookie, () => next(),
+  ctx.user ? { id: ctx.user.id, openId: ctx.user.openId } : null));
 
 // A senha como a tela a manda, com os algarismos de outros teclados já em
 // 0-9 (normalizarSenhaDoLink). Fora do formato, BAD_REQUEST, sem gastar
@@ -74,8 +78,10 @@ type Pedido = Parameters<typeof ipDaCliente>[0];
  * tomada depois de ler a transcrição, quando o tamanho é conhecido (ver
  * `perguntar`, abaixo).
  */
-function reservarVagaDaIA(reuniaoId: string, pedido: Pedido): () => void {
-  const daVisitante = `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
+function reservarVagaDaIA(reuniaoId: string, pedido: Pedido, token: string, conta: { id: number } | null): () => void {
+  // A participante (R1b) tem o balde dela, pela conta, e não pela rede: duas
+  // participantes no mesmo escritório não dividem a vaga.
+  const daVisitante = reuniaoDaCredencial(token) && conta ? `${reuniaoId}:conta:${conta.id}` : `${reuniaoId}:${chaveDeRede(ipDaCliente(pedido))}`;
   tetoDaIADoVisitanteDoLink.conferir(daVisitante);
   tetoDaIADoLinkAberto.conferir(reuniaoId);
   const soltarDaVisitante = tetoDaIADoVisitanteDoLink.reservar(daVisitante);
@@ -113,7 +119,7 @@ export const reuniaoAbertaRouter = router({
       const reuniao = await exigirReuniaoDoLink(input.token);
       try {
         return await translatePrivateMeetingTranscript(reuniao.ownerId, reuniao.id, input.language,
-          () => reservarVagaDaIA(reuniao.id, ctx.req));
+          () => reservarVagaDaIA(reuniao.id, ctx.req, input.token, ctx.user));
       } catch (erro) {
         // O teto sai como está, e o erro do BANCO (queda ou não) segue para o
         // middleware, que o traduz. Não basta olhar o código de conexão: a
@@ -137,7 +143,7 @@ export const reuniaoAbertaRouter = router({
 
   pedirResumo: procedimentoDoLink
     .input(z.object({ token: tokenDoLink }))
-    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirResumoPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req, input.token, ctx.user)))),
 
   // As fotos e os desenhos do resumo (H4g e H4h), só leitura: o id, o tipo e
   // o endereço pela rota do link, que confere a entrada a cada imagem.
@@ -154,7 +160,7 @@ export const reuniaoAbertaRouter = router({
 
   pedirMapa: procedimentoDoLink
     .input(z.object({ token: tokenDoLink }))
-    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirMapaPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req)))),
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => pedirMapaPeloLink(input.token, reuniaoId => reservarVagaDaIA(reuniaoId, ctx.req, input.token, ctx.user)))),
 
   // A tradução do resumo guardado (H11): o resumo inteiro no idioma de quem lê,
   // sem ids e sem os ignorados, como o resumoGuardado. Gasta uma vaga dos dois
@@ -165,7 +171,7 @@ export const reuniaoAbertaRouter = router({
     .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
       const reuniao = await exigirReuniaoDoLink(input.token);
       try {
-        return await traduzirResumoPeloLink(reuniao, input.idioma, () => { reservarVagaDaIA(reuniao.id, ctx.req); });
+        return await traduzirResumoPeloLink(reuniao, input.idioma, () => { reservarVagaDaIA(reuniao.id, ctx.req, input.token, ctx.user); });
       } catch (erro) {
         // Como na tradução da transcrição: o teto e a IA fora saem com o código,
         // e o erro do banco segue para o middleware. O resto não vai cru a quem
@@ -201,7 +207,7 @@ export const reuniaoAbertaRouter = router({
     }))
     .mutation(({ ctx, input }) => comRecusaTraduzida(async () => {
       const reuniao = await exigirReuniaoDoLink(input.token);
-      const soltarVaga = reservarVagaDaIA(reuniao.id, ctx.req);
+      const soltarVaga = reservarVagaDaIA(reuniao.id, ctx.req, input.token, ctx.user);
       return perguntarAReuniao(reuniao.ownerId, reuniao.id, input.pergunta, input.idioma,
         segundaVagaDaPerguntaLonga(() => tetoDaIADoLinkAberto.reservar(reuniao.id), soltarVaga));
     })),

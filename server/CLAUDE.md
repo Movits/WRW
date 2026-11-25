@@ -57,16 +57,16 @@ Manus, commit `5bce2aa`, 02/09/2026). As procedures de acesso ficam em
 "Ouro = Presidente = administradora": toda conta Ouro tem o painel administrativo. Por isso
 contas Ouro criadas só para teste (inclusive a do Roberto) voltam a Prata antes da entrega.
 
-**Mas Ouro NÃO é staff em tudo.** São QUATRO os pontos em que admin e president valem
+**Mas Ouro NÃO é staff em tudo.** São CINCO os pontos em que admin e president valem
 mais que Ouro (a frase "a única assimetria é `isStaff`" era falsa). Antes de repetir
 qualquer contagem, rode `grep -rn "role ===\|role !==\|users.role" server --include=*.ts`
 e confira:
 
 1. **Abrir oportunidade que não é sua**: `isStaff` em `oportunidade-acesso.ts` — uma conta
    Ouro APROVA uma oportunidade pendente e leva 403 ao tentar ABRI-LA.
-2. **Rastreabilidade das conexões**: `plataformaProcedure` em
-   `routers/networkInteligente.ts` (a lista de conexões registradas de todas as donas e a
-   apuração de comissão, com auditoria `NETWORK_CONNECTIONS_READ`; a aba some do Painel
+2. **Rastreabilidade das conexões**: `plataformaProcedure` em `routers/_procedures.ts`,
+   usado em `routers/networkInteligente.ts` (a lista de conexões registradas de todas as
+   donas e a apuração de comissão, com auditoria `NETWORK_CONNECTIONS_READ`; a aba some do Painel
    Ouro para Ouro sem cargo).
 3. **Bloqueio automático por eventos críticos**: `checkAutoLockThreshold` em
    `server/security.ts` isenta president e admin — conta Ouro é desativada como qualquer
@@ -75,6 +75,13 @@ e confira:
    (`routers/opportunities.ts`) e de "não há distribuidor" (`idsDaPresidenciaAtiva` em
    `db.ts`) são president e admin; Ouro não recebe nenhum dos dois, embora possa agir
    sobre o primeiro.
+5. **Consultar a reunião gravada de outra conta** (R1a): `routers/consultaDeReunioes.ts`,
+   com o mesmo `plataformaProcedure`. Abrir pede o motivo e grava `MEETING_ADMIN_READ` na
+   transação antes de ler (`server/consulta-da-administracao.ts`); a lista grava
+   `MEETINGS_ADMIN_LIST`; as duas sobrevivem à exclusão da conta de quem consultou; a
+   reunião gravada antes do aviso 2026-11-23 fica fechada; o áudio sai por
+   `/consulta-da-administracao/{id}/audio`, com a consulta aberta na última hora; a dona vê
+   só as datas (`meetings.consultasDaAdministracao`).
 
 Outra armadilha: `grantGoldAccess` grava `role = "gold"` por cima do que havia, e
 `revokeGoldAccess` grava o nível que o perfil sustenta (`"silver"` se
@@ -452,6 +459,43 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   link desligado; apagar de vez, esvaziar e o fim dos 30 dias (a varredura das gravações,
   `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. A lixeira não muda o prazo
   do áudio.
+
+## As participantes da reunião e as vozes ligadas às contas (R1b e H3c)
+
+`server/participantes-da-reuniao.ts` e `server/vozes-da-reuniao.ts`, tabela
+`meeting_participants` e as colunas `meetings.speaker_accounts` e `speaker_merges`. A dona
+convida por link de uso único (`/convite/{token}`, 192 bits, só o sha256 no banco, 7 dias) ou
+uma conexão ACEITA dela; nunca por e-mail digitado (revelaria quem é membro, e o e-mail não é
+verificado). A primeira vez em cada reunião pede a confirmação de que as pessoas que falaram
+autorizaram (`MEETING_PARTICIPANTS_AUTHORIZED`, por `tx.insert(auditLogs)`). Até 50 por
+reunião e 30 convites a cada 10 min por dona. A participante LÊ pelas mesmas consultas do link
+aberto, com a credencial `participante:<id da reunião>` no lugar do token: `reuniaoDoLink`
+abre pela participação ATIVA da conta logada (a leitora, que `procedimentoDoLink` e as rotas
+do áudio e da imagem põem no contexto do pedido) e nunca pelo token; a reunião na lixeira, a
+dona desativada, a saída e a remoção cortam na próxima leitura. A participante não muda nada:
+todo procedimento que muda a reunião tem a dona no WHERE. As vozes guardam `"owner"` ou o id
+da PARTICIPAÇÃO (nunca o `users.id`), e o nome da conta é resolvido na leitura
+(`vozesParaQuemLe`); reprocessar e juntar reuniões zeram as três colunas das vozes
+(`VOZES_ZERADAS`). A exclusão da reunião e da conta (das duas pontas) levam as participações.
+
+## Os espaços de equipe (R2)
+
+`server/espacos-de-equipe.ts` (router `equipes`), tabelas `meeting_folder_members` e
+`meeting_folder_tasks` e a coluna `agenda_reunioes.folder_id`. A equipe é uma pasta da
+dona (H7d) com membras, que entram como as participantes da R1b (link de uso único ou
+conexão ACEITA, nunca e-mail digitado; 192 bits, só o sha256, 7 dias; até 50 por equipe e 30
+convites a cada 10 min) com um papel: `member` lê as reuniões e escreve as tarefas, `reader`
+só lê. O primeiro convite de cada pasta pede a confirmação de que as pessoas que falaram
+autorizaram (`MEETING_FOLDER_TEAM_AUTHORIZED`, por `tx.insert(auditLogs)`). A membra LÊ as
+reuniões prontas da pasta pela mesma credencial da participante (`reuniaoDaMembra`, chamada
+em `leituraDaParticipante` quando não há participação): a reunião que sai da pasta ou vai
+para a lixeira, a dona desativada, a saída e a remoção cortam na próxima leitura. Nenhum
+procedimento de `equipes` recebe o id de uma reunião. Anonimato: a membra vê a dona e só as
+membras ATIVAS (sem ids nem convites); o convite por link não tem nome até ser aceito. A
+agenda da equipe nunca seleciona os participantes da reunião marcada. O papel de quem escreve
+uma tarefa é conferido no banco, na transação, com a linha da membra travada. Apagar a pasta
+leva as membras e as tarefas e solta a agenda (`apagarEquipeDaPasta`, na transação de
+`apagarPasta`); a exclusão de conta leva as linhas das duas pontas.
 
 ## Editar a transcrição (H18)
 

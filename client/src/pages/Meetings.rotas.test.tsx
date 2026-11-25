@@ -77,6 +77,8 @@ vi.mock("@/lib/partes-no-aparelho", () => ({
 }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
@@ -92,6 +94,9 @@ vi.mock("@/lib/trpc", () => ({
       delete: duble.registrar("delete"),
       // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       mandarParaALixeira: duble.registrar("mandarParaALixeira"),
       // A tela da lixeira (?lixeira=1), vazia: o que ela faz está em components/LixeiraDeReunioes.test.tsx.
       lixeira: { useQuery: () => ({ data: [], isLoading: false, isError: false, error: null, refetch: () => undefined, dataUpdatedAt: 0 }) },
@@ -102,6 +107,8 @@ vi.mock("@/lib/trpc", () => ({
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
       refazerVideoDoYoutube: duble.registrar("refazerVideoDoYoutube"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
       // N5: a linha "Conexões geradas por esta reunião" (sem conexões, não aparece).
       conexoes: { useQuery: () => ({ data: undefined }) },
       pedirResumo: duble.registrar("pedirResumo"),
@@ -597,6 +604,17 @@ describe("Reuniões — gravação em curso", () => {
     abrirEm("/meetings");
     await waitFor(() => expect(localStorage.getItem(FINS)).toBeNull());
     expect(encerrarGravacao.mutate).toHaveBeenLastCalledWith({ meetingId: VINICOLA, partes: 1 });
+  });
+
+  it("o gravador de reunião pede o microfone sem cancelamento de eco, redução de ruído e ganho automático (T51: no Android, cortavam e faziam chiar a gravação)", async () => {
+    const pedirMicrofone = vi.fn(async (_restricoes: MediaStreamConstraints) => ({ getTracks: () => [trilha] }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: pedirMicrofone } });
+    abrirEm("/gravar");
+    await comecarAGravar();
+    expect(pedirMicrofone).toHaveBeenCalledTimes(1);
+    expect(pedirMicrofone.mock.calls[0][0]).toEqual({
+      audio: { echoCancellation: { ideal: false }, noiseSuppression: { ideal: false }, autoGainControl: { ideal: false }, channelCount: { ideal: 1 } }, video: false,
+    });
   });
 
   it("em partes, sair da tela com o Iniciar esperando o servidor criar a reunião: ela é excluída quando nasce, nenhuma parte sobe e o microfone nem é pedido (revisão da G13b)", async () => {

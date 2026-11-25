@@ -636,7 +636,18 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
     // importacoes_de_entidade e importacao_documentos_vistos (owner_id).
     // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
-    expect(paresDeUsuariaNoSchema).toHaveLength(89);
+    // 85 (na main, em paralelo): os 83, mais as participantes da reunião (R1b, meeting_participants.owner_id e
+    // meeting_participants.userId).
+    // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
+    // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
+    // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
+    expect(paresDeUsuariaNoSchema).toHaveLength(95);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_participants", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_participants", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "contas_google", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
@@ -719,11 +730,11 @@ describe("planejarLimpeza: SQL parametrizado, sem LIKE global, users por último
     expect(comandos.filter((c: any) => c.sql.startsWith("DELETE FROM `users`"))).toHaveLength(1);
   });
 
-  it("audit_logs leva `action` NOT IN com as duas ações preservadas nos params", () => {
+  it("audit_logs leva `action` NOT IN com as quatro ações preservadas nos params", () => {
     const audit = comandos.filter((c: any) => c.sql.startsWith("DELETE FROM `audit_logs`"));
     expect(audit).toHaveLength(1);
-    expect(audit[0].sql).toContain("`action` NOT IN (?, ?)");
-    expect(ACOES_DE_AUDITORIA_PRESERVADAS).toEqual(["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"]);
+    expect(audit[0].sql).toContain("`action` NOT IN (?, ?, ?, ?)");
+    expect(ACOES_DE_AUDITORIA_PRESERVADAS).toEqual(["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"]);
     expect(audit[0].params).toEqual([1, 2, ...ACOES_DE_AUDITORIA_PRESERVADAS]);
     expect(audit[0].sql).not.toMatch(/UPDATE/i);
   });

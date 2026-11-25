@@ -49,6 +49,8 @@ vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetin
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
@@ -57,9 +59,14 @@ vi.mock("@/lib/trpc", () => ({
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
       conexoes: { useQuery: () => ({ data: undefined }) },
       // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       ...Object.fromEntries([
         "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
         "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "audioDoResumo", "pedirComplemento", "decidirComplemento",
@@ -243,6 +250,26 @@ describe("Reuniões — editar a transcrição (H18)", () => {
     expect(duble.mutacoes.refazerResumo).toHaveBeenCalledWith({ meetingId: MEETING_ID, modelo: "sales" });
     fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
     expect(screen.getByText(/Você editou a transcrição depois deste resumo/)).toBeInTheDocument();
+  });
+
+  it("o resumo sendo refeito (na fila, com a versão anterior): a aba da transcrição diz que ele está sendo refeito (T51: antes, nada aparecia ali)", () => {
+    duble.resumoGuardado.mockReturnValue(resumo({ estado: "pendente", versaoAnterior: true }));
+    abrirATranscricao();
+    expect(screen.getByText("Refazendo o resumo com a transcrição de agora. A versão nova aparece na aba Resumo quando terminar.")).toBeInTheDocument();
+    expect(screen.queryByText(/Você editou a transcrição depois deste resumo/)).not.toBeInTheDocument();
+  });
+
+  it("o primeiro resumo na fila (sem versão anterior) e o resumo pronto não dizem que estão sendo refeitos", () => {
+    duble.resumoGuardado.mockReturnValue(resumo({ estado: "gerando", versaoAnterior: false }));
+    const { unmount } = render(<Meetings />);
+    fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    expect(screen.queryByText(/Refazendo o resumo com a transcrição de agora/)).not.toBeInTheDocument();
+    unmount();
+    window.history.replaceState(null, "", "/meetings");
+    duble.resumoGuardado.mockReturnValue(resumo());
+    abrirATranscricao();
+    expect(screen.queryByText(/Refazendo o resumo com a transcrição de agora/)).not.toBeInTheDocument();
   });
 
   it("sem edição depois do resumo, nenhum aviso", () => {

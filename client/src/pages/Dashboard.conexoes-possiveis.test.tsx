@@ -126,9 +126,8 @@ afterEach(async () => {
 
 const ESPERA = { timeout: 3000 };
 
-/** O cartão de um indicador: o número mora no mesmo bloco que o rótulo (e entra animado). */
-// Para a Bronze a aba também se chama "Conexões sugeridas" (sem a contagem): o indicador é o que não é botão.
-const indicador = (rotulo: string) => screen.getAllByText(rotulo).find(elemento => elemento.tagName !== "BUTTON")!.parentElement as HTMLElement;
+/** O resumo das conexões do Início, em frases (components/ResumoDasConexoes.tsx). */
+const resumo = () => screen.getByRole("region", { name: "Resumo das suas conexões" });
 
 describe("U3 — a Bronze vê quantas conexões são possíveis, e não quem", () => {
   it("mostra o número, o que falta para a Prata, e nenhum cartão da lista", () => {
@@ -146,14 +145,14 @@ describe("U3 — a Bronze vê quantas conexões são possíveis, e não quem", (
     expect(screen.queryByText("Distribuição de Compatibilidade")).not.toBeInTheDocument();
   });
 
-  it("os indicadores: o número no lugar das sugestões, e as notas da lista trancadas", async () => {
+  it("o resumo: quantas pessoas combinam e o convite a completar o perfil, sem nada das notas da lista", async () => {
     render(<Dashboard />);
 
-    await waitFor(() => {
-      expect(within(indicador("Conexões sugeridas")).getByText("3")).toBeInTheDocument();
-      expect(within(indicador("Compatibilidade Média")).getByText("🔒")).toBeInTheDocument();
-      expect(within(indicador("Conexões sugeridas acima de 80%")).getByText("🔒")).toBeInTheDocument();
-    }, ESPERA);
+    await waitFor(() => expect(within(resumo()).getByText("3 pessoas combinam com você")).toBeInTheDocument(), ESPERA);
+    expect(within(resumo()).getByText("Complete seu perfil para ver quem são")).toBeInTheDocument();
+    expect(within(resumo()).getByRole("link", { name: "Completar: 3 pessoas combinam com você" })).toHaveAttribute("href", "/profile");
+    // A afinidade e o "combinam muito" são da lista, que a Bronze não vê.
+    expect(within(resumo()).queryByText(/afinidade|combina muito|combinam muito/)).not.toBeInTheDocument();
     expect(screen.getByText("3 oportunidades compatíveis encontradas para você")).toBeInTheDocument();
     // A aba não conta a lista que ela não vê (nem a que ficou no cache).
     expect(screen.queryByText("Conexões sugeridas (1)")).not.toBeInTheDocument();
@@ -227,13 +226,20 @@ describe("U3 — a Bronze vê quantas conexões são possíveis, e não quem", (
     expect(screen.getByRole("button", { name: "Completar perfil" })).toBeInTheDocument();
   });
 
-  it("consulta que falhou não vira 'nenhuma possível': erro com tentar de novo, e traço no indicador", async () => {
+  it("consulta que falhou não vira 'nenhuma possível': erro com tentar de novo, e o resumo diz que não carregou", async () => {
     duble.respostas["matches.conexoesPossiveis"] = { isError: true, error: new Error("queda") };
     render(<Dashboard />);
 
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /conexões possíveis/ })).not.toBeInTheDocument();
-    await waitFor(() => expect(within(indicador("Conexões sugeridas")).getByText("—")).toBeInTheDocument(), ESPERA);
+    await waitFor(() => expect(within(resumo()).getByText("Não deu para carregar suas sugestões agora")).toBeInTheDocument(), ESPERA);
+    expect(within(resumo()).queryByText("Complete seu perfil para ver quem combina com você")).not.toBeInTheDocument();
+  });
+
+  it("nenhuma possível: o resumo convida a completar o perfil", async () => {
+    duble.respostas["matches.conexoesPossiveis"] = { data: { total: 0, listaLiberada: false } };
+    render(<Dashboard />);
+    await waitFor(() => expect(within(resumo()).getByText("Complete seu perfil para ver quem combina com você")).toBeInTheDocument(), ESPERA);
   });
 
   it("em árabe: o plural do árabe, da direita para a esquerda", async () => {
@@ -255,8 +261,9 @@ describe("U3 — a Prata, a Ouro, a presidente e a admin veem a lista", () => {
     expect(screen.getByRole("button", { name: "Demonstrar Interesse" })).toBeInTheDocument();
     expect(screen.getByText("Conexões sugeridas (1)")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /conexões possíveis/ })).not.toBeInTheDocument();
-    await waitFor(() => expect(within(indicador("Conexões sugeridas")).getByText("1")).toBeInTheDocument(), ESPERA);
-    expect(screen.queryByText("🔒")).not.toBeInTheDocument();
+    await waitFor(() => expect(within(resumo()).getByText("1 pessoa combina com você")).toBeInTheDocument(), ESPERA);
+    expect(within(resumo()).queryByText("Complete seu perfil para ver quem são")).not.toBeInTheDocument();
+    expect(within(resumo()).getByRole("button", { name: "Ver: 1 pessoa combina com você" })).toBeInTheDocument();
   });
 
   // A conta caiu para Bronze (Ouro revogado, nível mudado pela admin) com o cartão

@@ -54,3 +54,28 @@ export function partesComVozes(
   if (de < texto.length) partes.push({ texto: texto.slice(de), voz: false });
   return partes;
 }
+
+/**
+ * Os nomes que a tela usa, já com as vozes juntadas (H3c, "F3 é a mesma pessoa
+ * que F1"): a voz juntada leva o nome da principal ou, sem nome, o rótulo da
+ * principal ("Falante 1"). Com este mapa, vozesNoTexto, partesComVozes e a
+ * transcrição por falante mostram {F3} como a principal sem saber das
+ * juntadas. As vozes que não estão juntadas ficam como estão.
+ */
+export function nomesComJuntadas(
+  nomes: Readonly<Record<string, string>>,
+  juntadas: Readonly<Record<string, string>>,
+  rotuloDaVoz: (numero: number) => string,
+): Record<string, string> {
+  const saida: Record<string, string> = { ...nomes };
+  for (const [voz, principal] of Object.entries(juntadas)) {
+    saida[voz] = nomes[principal]?.trim() || rotuloDaVoz(Number(principal.slice(1)));
+  }
+  return saida;
+}
+
+/** As falas com a voz juntada trocada pela principal: o tempo de fala e o "ouvir só esta voz" somam as duas. */
+export function falasComJuntadas<T extends { falante: string }>(falas: readonly T[], juntadas: Readonly<Record<string, string>>): T[] {
+  if (!Object.keys(juntadas).length) return falas as T[];
+  return falas.map(fala => (fala.falante in juntadas ? { ...fala, falante: juntadas[fala.falante] } : fala));
+}

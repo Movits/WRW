@@ -9,7 +9,7 @@ import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { lerPlanilha, PlanilhaIlegivel, sha256DoArquivo } from "@/lib/ler-planilha";
 import {
   ehErroDaEntidade, linhaDaPlanilha, linhasComProblema, mapearCabecalho, ordenarProblemas, passaDoTeto, planilhaDeLinks,
-  ASSOCIADOS_MAX_ATE_N4B, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO,
+  ASSOCIADOS_MAX_ATE_N4B, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO, ROTA_DO_CONVITE_DA_ENTIDADE,
   type LinhaBruta, type ProblemaDaLinha,
 } from "@shared/entidades";
 
@@ -435,7 +435,7 @@ function Convite({ habilitado, nome }: { habilitado: boolean; nome: string }) {
   const revogar = trpc.entidades.revogarConvite.useMutation({
     onSuccess: () => void utils.entidades.convite.invalidate(), onError: e => toast.error(traduzErro(e)),
   });
-  const link = convite.data ? `${window.location.origin}/convite/${convite.data.token}` : null;
+  const link = convite.data ? `${window.location.origin}${ROTA_DO_CONVITE_DA_ENTIDADE}/${convite.data.token}` : null;
   // Texto a terceiros: marcado para a Cris revisar (docs/arquitetura/entidades.md, seção 9).
   const texto = link ? t("entidade.convite.texto", { nome, link }) : "";
 

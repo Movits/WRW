@@ -129,7 +129,7 @@ describe("PainelDaEntidade", () => {
   it("o convite mostra o link e o texto pronto para o WhatsApp", () => {
     duble.convite.mockReturnValue(consulta({ token: "tok_ABCDEFGHIJKLMNOPQRSTUVWX", geradoEm: 1 }));
     render(<PainelDaEntidade />);
-    expect(screen.getByText(`${window.location.origin}/convite/tok_ABCDEFGHIJKLMNOPQRSTUVWX`)).toBeInTheDocument();
+    expect(screen.getByText(`${window.location.origin}/convite-da-entidade/tok_ABCDEFGHIJKLMNOPQRSTUVWX`)).toBeInTheDocument();
     const whatsapp = screen.getByRole("link", { name: "Mandar pelo WhatsApp" });
     expect(decodeURIComponent(whatsapp.getAttribute("href")!)).toContain("Associação Teste convida a sua empresa para o Marquesa Global Match");
   });

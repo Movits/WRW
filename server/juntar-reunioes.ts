@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { auditLogs, meetingAttachments, meetingAudioSlices, meetingRecordings, meetings } from "../drizzle/schema";
+import { auditLogs, meetingAttachments, meetingAudioSlices, meetingFolderMembers, meetingParticipants, meetingRecordings, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { foraDaLixeira } from "./reuniao-visivel";
 import { ALLOWED_MEETING_AUDIO_TYPES, apagarDerivadosDaReuniaoJuntada, apagarDerivadosDoAlvoDaJuncao, MAX_MEETING_AUDIO_BYTES } from "./meeting-service";
@@ -360,6 +360,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       consentGranted: meetings.consentGranted, expectedSlices: meetings.expectedSlices, speakerNames: meetings.speakerNames,
       etiquetas: meetings.etiquetas, ondeFoi: meetings.ondeFoi, contactId: meetings.contactId, contextId: meetings.contextId,
       shareToken: meetings.shareToken, language: meetings.language, consentAt: meetings.consentAt, consentNoticeVersion: meetings.consentNoticeVersion,
+      folderId: meetings.folderId,
       // A reunião na lixeira (H7d) não entra: é "não encontrada", como a de outra conta.
     }).from(meetings).where(and(eq(meetings.ownerId, ownerId), inArray(meetings.id, ids), foraDaLixeira())).orderBy(asc(meetings.id)).for("update");
     if (linhas.length !== ids.length) throw new RecusaDaJuncao("NOT_FOUND", "REUNIAO_NAO_ENCONTRADA");
@@ -381,7 +382,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
 
     const porId = new Map(linhas.map(linha => [linha.id, linha]));
     const reunioes: ReuniaoParaJuntar[] = ids.map(id => {
-      const { consentAt: _hora, consentNoticeVersion: _versao, ...linha } = porId.get(id)!;
+      const { consentAt: _hora, consentNoticeVersion: _versao, folderId: _pasta, ...linha } = porId.get(id)!;
       return {
         ...linha, contactId: linha.contactId === null ? null : Number(linha.contactId),
         partes: linha.audioPipeline === "slices" ? partes.filter(parte => parte.meetingId === id).map(parte => ({
@@ -424,11 +425,30 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
 
     // Antes de trocar os nomes: as próximas ações do alvo se soltam com os nomes de antes.
     await apagarDerivadosDoAlvoDaJuncao(tx, ownerId, alvo.id);
+    // Quem lia o alvo pela confirmação da dona deixa de ler, pelo mesmo motivo
+    // do link desligado: a confirmação de que as pessoas que falaram
+    // autorizaram era do conteúdo de antes, e o áudio e as falas das outras
+    // reuniões entram agora. As participações e os convites do alvo (R1b) saem,
+    // e o alvo sai da pasta que é espaço de equipe (R2), com membra ou convite;
+    // a pasta só pessoal fica. Convidar de novo pede a confirmação outra vez
+    // (jaAutorizou, em participantes-da-reuniao.ts, olha a junção).
+    const participacoesDoAlvo = await tx.select({ id: meetingParticipants.id }).from(meetingParticipants)
+      .where(and(eq(meetingParticipants.meetingId, alvo.id), eq(meetingParticipants.ownerId, ownerId)));
+    if (participacoesDoAlvo.length) {
+      await tx.delete(meetingParticipants).where(and(eq(meetingParticipants.meetingId, alvo.id), eq(meetingParticipants.ownerId, ownerId)));
+    }
+    const pastaDoAlvo = porId.get(alvo.id)!.folderId;
+    const [daEquipe] = pastaDoAlvo
+      ? await tx.select({ id: meetingFolderMembers.id }).from(meetingFolderMembers)
+        .where(and(eq(meetingFolderMembers.folderId, pastaDoAlvo), eq(meetingFolderMembers.ownerId, ownerId))).limit(1)
+      : [];
+    const saiuDaEquipe = !!daEquipe;
     // O link desligado como no "Desligar" da dona (LINK_DESLIGADO): sem token e sem a senha (H23).
     await tx.update(meetings).set({
       audioPipeline: "slices", status: "uploading", expectedSlices: plano.linhas, attempts: 0, lockToken: null, lockedUntil: null,
-      processingError: null, updatedAt: agora, speakerNames: plano.nomes, ...LINK_DESLIGADO,
+      processingError: null, updatedAt: agora, speakerNames: plano.nomes, speakerAccounts: null, speakerMerges: null, ...LINK_DESLIGADO,
       etiquetas: plano.etiquetas, ondeFoi: plano.ondeFoi, contactId: plano.contactId, contextId: plano.contextId,
+      ...(saiuDaEquipe ? { folderId: null } : {}),
     }).where(and(eq(meetings.id, alvo.id), eq(meetings.ownerId, ownerId)));
 
     if (fontes.length) {
@@ -452,6 +472,7 @@ export async function juntarReunioes(ownerId: string, idsPedidos: readonly strin
       details: {
         juntadas: fontes.map(fonte => fonte.id), partes: plano.esperadas, duracaoSegundos: plano.duracaoSegundos,
         retranscreve: plano.retranscreve, linkAbertoDesligado,
+        participacoesRemovidas: participacoesDoAlvo.length, saiuDaEquipe,
         avisosDeGravacao: ids.map(id => {
           const linha = porId.get(id)!;
           return { id, consentAt: linha.consentAt === null ? null : Number(linha.consentAt), consentNoticeVersion: linha.consentNoticeVersion };

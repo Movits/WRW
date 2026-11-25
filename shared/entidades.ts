@@ -479,6 +479,15 @@ export function convenioVigente(convenio: { estado: string; fim: number | null }
   return convenio.fim === null || convenio.fim + 86_400_000 > agora;
 }
 
+// ─── O convite da entidade ao app (N1) ────────────────────────────────────────
+
+/**
+ * O caminho do convite que a entidade divulga: `/convite-da-entidade/<token>`.
+ * Não é `/convite`: esse é o convite para uma reunião (R1b, ROTA_DO_CONVITE de
+ * shared/rotas.ts), já em produção.
+ */
+export const ROTA_DO_CONVITE_DA_ENTIDADE = "/convite-da-entidade";
+
 // ─── A ativação do cadastro importado (N3) ───────────────────────────────────
 
 /** O caminho do link de ativação que a entidade distribui: `/ativar/<token>`. */

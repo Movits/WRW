@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Lock, Mail, ArrowRight, Shield, Sparkles, Fingerprint } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
-import { destinoDepoisDoLogin, PARAMETRO_ENTRAR } from "@/lib/caminho-de-volta";
+import { caminhoDeVoltaSeguro, destinoDepoisDoLogin, PARAMETRO_ENTRAR } from "@/lib/caminho-de-volta";
+import { ContinuarComGoogle } from "@/components/ContinuarComGoogle";
 import {
   apelidoSugerido,
   avisarChaveDesconhecida,
@@ -343,6 +344,13 @@ export default function Login() {
                   </Link>
                 </p>
               </div>
+
+              {/* Continuar com Google (A8): some sem a função no servidor e dentro de WebView. */}
+              <ContinuarComGoogle
+                modo="entrar"
+                voltar={caminhoDeVoltaSeguro(new URLSearchParams(window.location.search).get("voltar"))}
+                desligado={ocupado}
+              />
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 {/* Email */}

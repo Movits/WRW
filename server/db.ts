@@ -1839,10 +1839,16 @@ export async function getEnrichmentSessionById(sessionId: string, ownerId: strin
  * exige o valor que o chamador leu; quem chega depois não pega linha e recebe
  * null. O contador de puladas anda no próprio UPDATE, sem leitura antes.
  */
-export async function advanceEnrichmentSession(sessionId: string, ownerId: string, etapaEsperada: number, skipped = false) {
+/**
+ * Avança o roteiro da etapa lida (`etapaEsperada`) para `destino` (por padrão,
+ * a seguinte). O destino maior pula as perguntas que o contato já tem
+ * respondidas (T45, 24/11; ver proximaEtapaAPerguntar em
+ * server/routers/enrichment.ts): só a pergunta da vez conta como pulada.
+ */
+export async function advanceEnrichmentSession(sessionId: string, ownerId: string, etapaEsperada: number, skipped = false, destino = etapaEsperada + 1) {
   const db = await exigirDb();
   const now = Date.now();
-  const questionsAnswered = etapaEsperada + 1;
+  const questionsAnswered = Math.max(destino, etapaEsperada + 1);
   const [r] = await db.update(enrichmentSessions)
     .set({
       questionsAnswered,
@@ -1858,14 +1864,46 @@ export async function advanceEnrichmentSession(sessionId: string, ownerId: strin
   return { questionsAnswered };
 }
 
-export async function createEnrichmentSession(ownerId: string, contactId: number): Promise<string> {
+export async function createEnrichmentSession(ownerId: string, contactId: number, etapaInicial = 0): Promise<string> {
   const db = await exigirDb();
   const id = crypto.randomUUID();
   const now = Date.now();
-  await db.insert(enrichmentSessions).values({ id, ownerId, contactId, status: "active", questionsAnswered: 0, questionsSkipped: 0, lastActivityAt: now, createdAt: now, updatedAt: now });
+  await db.insert(enrichmentSessions).values({ id, ownerId, contactId, status: "active", questionsAnswered: etapaInicial, questionsSkipped: 0, lastActivityAt: now, createdAt: now, updatedAt: now });
   // Atualizar enrichment_status no contato
   await db.update(privateContacts).set({ enrichmentStatus: "active" }).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId)));
   return id;
+}
+
+/**
+ * As perguntas do Chat de Enriquecimento que o contato já tem respondidas
+ * (T45, 24/11: o chat perguntava de novo o que a ficha já tinha). Os nomes são
+ * os do roteiro (server/enrichment-flow.ts): "phone" (o telefone ou o
+ * WhatsApp), "company", "assets" e "needs" (ao menos um item no possui ou no
+ * procura), "how_met" (a anotação "Como se conheceram:" que o chat grava, ou
+ * um contexto ligado) e "relationship_type" (a anotação "Relacionamento:").
+ * Só do contato da dona; o contato de outra dona, ou apagado, não tem nada.
+ */
+export async function camposPreenchidosDoContato(ownerId: string, contactId: number): Promise<string[]> {
+  const db = await exigirDb();
+  const [contato] = await db.select({ phone: privateContacts.phone, whatsapp: privateContacts.whatsapp, company: privateContacts.company, notes: privateContacts.notes })
+    .from(privateContacts).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId))).limit(1);
+  if (!contato) return [];
+  const [possui] = await db.select({ id: contactAssets.id }).from(contactAssets)
+    .where(and(eq(contactAssets.ownerId, ownerId), eq(contactAssets.contactId, contactId))).limit(1);
+  const [procura] = await db.select({ id: contactNeeds.id }).from(contactNeeds)
+    .where(and(eq(contactNeeds.ownerId, ownerId), eq(contactNeeds.contactId, contactId))).limit(1);
+  const [contexto] = await db.select({ id: contactContexts.id }).from(contactContexts)
+    .where(and(eq(contactContexts.ownerId, ownerId), eq(contactContexts.contactId, contactId))).limit(1);
+  const preenchido = (valor: string | null | undefined) => !!valor && valor.trim().length > 0;
+  const notas = contato.notes ?? "";
+  const campos: string[] = [];
+  if (preenchido(contato.phone) || preenchido(contato.whatsapp)) campos.push("phone");
+  if (preenchido(contato.company)) campos.push("company");
+  if (possui) campos.push("assets");
+  if (procura) campos.push("needs");
+  if (notas.includes("Como se conheceram:") || contexto) campos.push("how_met");
+  if (notas.includes("Relacionamento:")) campos.push("relationship_type");
+  return campos;
 }
 
 export async function getEnrichmentMessages(sessionId: string, ownerId: string, limit = 10) {

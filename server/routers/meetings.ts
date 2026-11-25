@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
+import { CONTA_DA_DONA, FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
@@ -12,6 +12,11 @@ import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
 import { procedimentoDaReuniao } from "../guarda-da-lixeira";
+import {
+  aceitarConvite, compartilhadasComigo, convidarConexao, criarConvite, participantesDaReuniao, removerParticipante,
+  responderConviteDeConexao, sairDaReuniao, verConvite,
+} from "../participantes-da-reuniao";
+import { juntarVozes, ligarVozAConta, separarVoz } from "../vozes-da-reuniao";
 import { createAuditLog } from "../security";
 import { decidirPendenciasDaPessoaSugerida } from "../network-extracao";
 import { candidatosParaVincular, conexoesDaReuniao } from "../reuniao-no-match";
@@ -66,6 +71,7 @@ import {
   EDICOES_DO_MAPA_POR_JANELA, ESTILOS_DO_MAPA, JANELA_DA_EDICAO_DO_MAPA_MS, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA, REFAZERES_DO_MAPA_POR_JANELA,
 } from "@shared/mapa-mental-edicao";
 import { traduzirResumoDaDona } from "../traducao-do-resumo";
+import { consultasDaAdministracaoDaDona } from "../consulta-da-administracao";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
@@ -156,6 +162,13 @@ async function comRecusaDoAnexo<T>(trabalho: () => Promise<T>): Promise<T> {
     throw erro;
   }
 }
+
+// A confirmação da dona de que as pessoas que falaram autorizaram (R1b), uma
+// vez por reunião: a frase que ela viu, no idioma da tela, vai para a prova.
+const autorizacaoDasParticipantes = z.object({
+  idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+  textoExibido: z.string().trim().min(1).max(1000),
+}).optional();
 
 /** Quem pede, para a auditoria da lixeira. */
 function provaDaDona(ctx: { user: { id: number }; req: Parameters<typeof ipDaCliente>[0] & { headers: Record<string, unknown> } }): ProvaDaLixeira {
@@ -621,6 +634,13 @@ export const meetingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       return translatePrivateMeetingTranscript(ctx.user.openId, input.meetingId, input.language);
     }),
+
+  // As datas em que a administração consultou a reunião (R1a): só a data,
+  // nunca o motivo nem quem consultou. Só a dona, com a dona no WHERE
+  // (server/consulta-da-administracao.ts).
+  consultasDaAdministracao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => consultasDaAdministracaoDaDona(ctx.user.openId, input.meetingId)),
 
   // O resumo GUARDADO (H4): gerado em segundo plano pela fila do resumo, cada
   // item pendente até a dona confirmar. Toda reunião que fica pronta já ganha
@@ -1492,6 +1512,75 @@ export const meetingsRouter = router({
   // curso (useGravacaoEmPartes, os descartes pendentes e a retomada), do
   // documento que não subiu e da gravação ainda no ar. A tela da reunião
   // pronta manda para a lixeira (mandarParaALixeira).
+  // ── As participantes (R1b) e as vozes ligadas às contas (H3c) ──────────
+  // Todos pela guarda da lixeira: para a dona, a reunião dela na lixeira é
+  // REUNIAO_NA_LIXEIRA; para a participante, a guarda não acha nada (só lê as
+  // reuniões da própria conta) e o serviço recusa pela reuniaoVisivel().
+  // Recusas como código que a tela traduz (shared/participantes-da-reuniao.ts
+  // e shared/vozes-da-reuniao.ts).
+
+  /** A dona vê todas e os convites pendentes; a participante, só os nomes das que aceitaram e o da dona. */
+  participantes: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => participantesDaReuniao(ctx.user, input.meetingId)),
+
+  /** Um convite por link de uso único (o token sai só nesta resposta). A primeira vez na reunião pede a confirmação da dona. */
+  criarConvite: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), autorizacao: autorizacaoDasParticipantes }))
+    .mutation(({ ctx, input }) => criarConvite(ctx.user.openId, input.meetingId, provaDaDona(ctx), input.autorizacao)),
+
+  /** Convida uma conexão aceita da dona; o convite aparece na conta dela. */
+  convidarConexao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), conexaoId: z.number().int().positive(), autorizacao: autorizacaoDasParticipantes }))
+    .mutation(({ ctx, input }) => convidarConexao(ctx.user, input.meetingId, input.conexaoId, provaDaDona(ctx), input.autorizacao)),
+
+  /** A dona tira o convite ainda não aceito. */
+  cancelarConvite: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => removerParticipante(ctx.user.openId, input.participanteId, provaDaDona(ctx), { soConvite: true })),
+
+  /** A dona tira uma participante: o acesso acaba na hora, e as vozes dela saem. */
+  removerParticipante: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => removerParticipante(ctx.user.openId, input.participanteId, provaDaDona(ctx))),
+
+  /** A página do convite: o título, o nome da dona e se o convite ainda vale. */
+  verConvite: procedimentoDaReuniao
+    .input(z.object({ token: z.string().max(64) }))
+    .query(({ ctx, input }) => verConvite(input.token, ctx.user)),
+
+  aceitarConvite: procedimentoDaReuniao
+    .input(z.object({ token: z.string().max(64) }))
+    .mutation(({ ctx, input }) => aceitarConvite(input.token, ctx.user, provaDaDona(ctx))),
+
+  responderConviteDeConexao: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid(), aceitar: z.boolean() }))
+    .mutation(({ ctx, input }) => responderConviteDeConexao(ctx.user, input.participanteId, input.aceitar, provaDaDona(ctx))),
+
+  /** As reuniões compartilhadas com a conta e os convites de conexão pendentes. */
+  compartilhadasComigo: procedimentoDaReuniao.query(({ ctx }) => compartilhadasComigo(ctx.user)),
+
+  sairDaReuniao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await sairDaReuniao(ctx.user, input.meetingId, provaDaDona(ctx));
+      return { success: true };
+    }),
+
+  /** H3c: liga uma voz à conta de quem falou ("owner" ou o id de uma participante ativa); null desliga. */
+  ligarVozAConta: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), falante: z.string().regex(FORMATO_DO_FALANTE), conta: z.union([z.literal(CONTA_DA_DONA), z.string().uuid()]).nullable() }))
+    .mutation(async ({ ctx, input }) => ({ contas: await ligarVozAConta(ctx.user.openId, input.meetingId, input.falante, input.conta) })),
+
+  /** H3c: "F3 é a mesma pessoa que F1". */
+  juntarVozes: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), voz: z.string().regex(FORMATO_DO_FALANTE), principal: z.string().regex(FORMATO_DO_FALANTE) }))
+    .mutation(async ({ ctx, input }) => ({ juntadas: await juntarVozes(ctx.user.openId, input.meetingId, input.voz, input.principal) })),
+
+  separarVoz: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), voz: z.string().regex(FORMATO_DO_FALANTE) }))
+    .mutation(async ({ ctx, input }) => ({ juntadas: await separarVoz(ctx.user.openId, input.meetingId, input.voz) })),
+
   //
   // Sem a guarda da lixeira, de propósito: quem chama quer a reunião fora
   // agora, e a que foi para a lixeira por outro aparelho no meio também sai

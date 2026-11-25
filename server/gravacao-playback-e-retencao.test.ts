@@ -374,11 +374,13 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
     // O hash da senha e o freio da força bruta ficam no servidor: a tela recebe só os dois sim ou não.
-    for (const coluna of ["sharePasswordHash", "sharePasswordFailures", "sharePasswordFailedAt", "sharePasswordLockedUntil", "shareAudio"]) {
+    for (const coluna of ["sharePasswordHash", "sharePasswordFailures", "sharePasswordFailedAt", "sharePasswordLockedUntil", "shareAudio", "speakerAccounts", "speakerMerges"]) {
       expect(dados?.meeting).not.toHaveProperty(coluna);
     }
     expect(JSON.stringify(dados)).not.toContain("hash-da-senha");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, ...SO_NO_DETALHE, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio"].sort());
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, ...SO_NO_DETALHE, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio",
+      // As vozes como a dona as vê e a conta ligada a cada uma (H3c): speaker_accounts e speaker_merges não saem crus.
+      "vozes", "contasDasVozes"].sort());
     expect(dados?.meeting).toMatchObject({
       id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false, linkComSenha: true, linkComAudio: false,
     });
@@ -600,6 +602,8 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       [schema.meetingSummaryTranslations, derivadaDaReuniaoDaDona("meeting_summary_translations")],
       [schema.meetingSummaryItems, derivadaDaReuniaoDaDona("meeting_summary_items")],
       [schema.meetingSummaries, derivadaDaReuniaoDaDona("meeting_summaries")],
+      // As participantes e os convites da reunião (R1b) saem com ela, da reunião DA dona.
+      [schema.meetingParticipants, derivadaDaReuniaoDaDona("meeting_participants")],
       // A linha do áudio sai pelo id (e pela dona), e só a do arquivo que saiu.
       // Sem partes nesta reunião, não há DELETE em meeting_audio_slices.
       [schema.meetingRecordings, { sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: ["dona-1", "grav-1"] }],
@@ -651,10 +655,11 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(typeof atualizacoes[0].valores.updatedAt).toBe("number");
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
-    // e a linha da reunião só sai por último, depois dos derivados (10: os oito
-    // derivados da IA, com as traduções do resumo da H11, a gravação cujo
-    // arquivo saiu e a reunião; sem partes, não há DELETE de partes)
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(10);
+    // e a linha da reunião só sai por último, depois dos derivados (11: os oito
+    // derivados da IA, com as traduções do resumo da H11, as participantes da
+    // R1b, a gravação cujo arquivo saiu e a reunião; sem partes, não há DELETE
+    // de partes)
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(11);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 

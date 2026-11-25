@@ -124,6 +124,7 @@ describe("a varredura do router: quem leva a guarda", () => {
   it("fora de meetings, o procedimento que aponta para uma reunião está na lista, com o filtro que o serviço dele aplica", () => {
     // O motivo de cada um: o serviço filtra a lixeira na consulta, ou o campo é de outra tabela.
     const CONFERIDOS: Record<string, string> = {
+      "consultaDeReunioes.abrir": "registrarConsulta lê a reunião com reuniaoVisivel no WHERE; a da lixeira é CONSULTA_REUNIAO_NAO_ENCONTRADA (consulta-da-administracao.integracao.test.ts)",
       "agenda.ligarGravacao": "ligarGravacaoNaAgenda só liga a gravação visível (reuniaoVisivel)",
       "perguntasEntreReunioes.perguntar": "reunioesDaEscolha e lerAsQueCabem filtram por reuniaoVisivel; a da lixeira é VARIAS_REUNIAO_NAO_ENCONTRADA (perguntar-a-varias-reunioes.integracao.test.ts)",
       "networkInteligente.pendencias": "listarPendencias tira as da reunião na lixeira (semReuniaoNaLixeira)",

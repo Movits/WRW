@@ -490,7 +490,8 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     // longa da exclusão).
     expect(apagarAudio).toHaveBeenCalledWith(CHAVE);
     expect(storageDelete).not.toHaveBeenCalled();
-    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
+    // A exclusão leva também as participantes (R1b); o reprocesso, não (linha acima).
+    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingParticipants, schema.meetingRecordings]);
     expect(soPredicado(de("delete", schema.meetingRecordings)[0])).toEqual({
       sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: [DONA, "gravacao-1"],
     });

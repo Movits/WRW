@@ -685,6 +685,26 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `LixeiraDeReunioes.tsx`. Migração só aditiva (`meeting_folders`, `meetings.folder_id` e
   `meetings.trashed_at`, na 0025 do pacote).
 
+## 24/11/2026 — a sala de vídeo dentro do app, pelo Daily em São Paulo
+
+- **Quem:** o Roberto, no grupo "Projetos IA" (24/11, 21:38), respondendo às perguntas do
+  estudo [sala-de-video.md](./sala-de-video.md) (PR #243). O motivo é da Glenda: manter as
+  reuniões online dentro do app, por causa da taxa da plataforma em cada negócio fechado.
+- **O quê:**
+  - serviço pronto com a tela nossa: o Daily, com o vídeo passando pelo servidor de São
+    Paulo;
+  - a sala entra depois da R1b (participantes da reunião, no Pacote 6, PR #247);
+  - tetos para começar: até 8 pessoas e 2 horas por sala, abre sala quem é Prata ou
+    acima, e orçamento de US$ 50 por mês;
+  - quem não tem conta entra só com o nome, como no link aberto;
+  - só a dona aperta "Gravar", e grava só o áudio, na mesma fila de partes do gravador;
+  - o aviso de gravação da sala é texto da Cris.
+- **O que sai da fila:** a gravação da aba (H14) continua fora, porque é tudo dentro do
+  app, e o robô de reunião (H21) segue parado.
+- **Onde:** ainda em nenhum código. O desenho e as PRs (V1 a V5 e a da casca) estão em
+  `sala-de-video.md`, com o que ainda falta decidir: compartilhar a tela, a conta no
+  Daily, a senha do link de visitante e o que acontece no teto do orçamento.
+
 ---
 
 ## Lições sem data registrada

@@ -166,6 +166,8 @@ describe("o appRouter inteiro", () => {
     "conviteDeEntidade.ver",
     // A ativação do cadastro importado (N3): quem abre o link ainda não tem conta.
     "ativacaoDeCadastro.ver", "ativacaoDeCadastro.ativar",
+    // Entrar com a conta Google (A8): o login e o cadastro perguntam se o botão aparece.
+    "contaGoogle.disponivel",
   ]);
   let caminhos: string[] = [];
 

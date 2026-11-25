@@ -38,6 +38,11 @@ diverge do código, vale o código.
   (DOC-4): a entidade como conta, o ID interno de cada associado, o CNPJ só em HMAC e
   cifrado, a CNAE só como oferta, o convênio, a importação de 30 mil cadastros e as
   pendências de LGPD do Dr. Ronei (decisões de 22/11/2026; o código é a N1).
+- [arquitetura/sala-de-video.md](./arquitetura/sala-de-video.md): a sala de vídeo dentro
+  do app, estudada e decidida pelo Roberto em 24/11/2026 (Daily em São Paulo, depois da
+  R1b): opções, custo por hora de reunião e o orçamento, o que muda no Render, gravação
+  na fila de partes, quem entra (com visitante sem conta), LGPD, app das lojas e PRs.
+  Nada dele está no código ainda.
 
 ## Operação
 

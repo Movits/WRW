@@ -57,7 +57,7 @@ e `contact_needs`) e herda do Meu Network Inteligente o código anônimo, o SIM 
 cruzamento e o registro de conexões, com a entidade como dona. O que só a entidade vê fica
 numa linha de `entidade_membros`.
 
-| Tabela (migração `0029_assoc-n1`) | O que guarda |
+| Tabela (migração `0030_pacote-associacoes`) | O que guarda |
 |---|---|
 | `entidades` | nome, tipo, país (decide o documento), a conta (`owner_id`, única), o convênio (estado, início, fim, referência), `mostrar_nome_no_match`, `disponivel_por_padrao`, o convite (hash para achar, cifrado para mostrar de novo) |
 | `entidade_membros` (1:1 com o contato) | país e tipo do documento, `documento_hmac`, `documento_cifrado`, `contato_cifrado` (telefone e e-mail), CNAE principal e secundárias, referência na entidade, a origem e a data do "preciso", o lote, o estado (`importado`, `ativado`, `removido`) |
@@ -221,9 +221,10 @@ sem biblioteca nova). O arquivo não sobe; vão as linhas já mapeadas e o SHA-2
 
 ## 9. O convite ao app
 
-A entidade gera um link (`/convite/<token>`, 24 bytes aleatórios, guardado como hash para
-achar e cifrado para mostrar de novo), copia o texto pronto ou o manda pelo WhatsApp ou por
-e-mail, abertos no app dela. Trocar invalida o anterior na hora; desligar apaga. Quem abre vê
+A entidade gera um link (`/convite-da-entidade/<token>`, 24 bytes aleatórios, guardado
+como hash para achar e cifrado para mostrar de novo; `/convite/<token>` é o convite para uma
+reunião, da R1b), copia o texto pronto ou o manda pelo WhatsApp ou por e-mail, abertos no
+app dela. Trocar invalida o anterior na hora; desligar apaga. Quem abre vê
 o nome da entidade e vai ao cadastro ou à entrada (`conviteDeEntidade.ver`, público, só com o
 convênio vigente; token errado, trocado ou de convênio encerrado respondem igual). Ligar a
 conta criada ao associado importado é a N3 (seção 9a).
@@ -231,8 +232,9 @@ conta criada ao associado importado é a N3 (seção 9a).
 ## 9a. A ativação do cadastro importado (N3)
 
 Linhas R-46 (o cadastro incompleto que a empresa completa ao entrar) e R-48 (a entidade
-divulga o app com o link) da auditoria. Código em `server/entidades-ativacao.ts`, migração
-`0030_assoc-n3` (só aditiva: quatro colunas em `entidade_membros` e dois índices).
+divulga o app com o link) da auditoria. Código em `server/entidades-ativacao.ts`, a mesma migração
+`0030_pacote-associacoes` (só aditiva: as quatro colunas da ativação em `entidade_membros` e
+dois índices).
 
 - **O link é por associado, de uso único e com validade** (`/ativar/<token>`, 24 bytes
   aleatórios). Só o hash fica no banco (`ativacao_hash`, único), com o vencimento
@@ -327,8 +329,8 @@ pendências a, b e e respondidas. Ensaio, leitura do relatório, e só então a 
 
 ## 12. O pedido de contato pela entidade (N2)
 
-Linhas N2, R-41 e R-47 da auditoria. Migração `0030_assoc-n2`, só aditiva: a tabela
-`pedidos_pela_entidade`.
+Linhas N2, R-41 e R-47 da auditoria. A tabela `pedidos_pela_entidade` entra na mesma
+migração `0030_pacote-associacoes`, só aditiva.
 
 **O que quem está do outro lado vê.** Numa conexão da rede global (`NETWORK_NETWORK_MATCH`
 ou `NETWORK_PLATFORM_MATCH`) cujo outro lado é associado de uma entidade, o cartão mostra,

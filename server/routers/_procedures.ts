@@ -26,6 +26,23 @@ export const goldProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+/**
+ * A rastreabilidade das conexões é da PLATAFORMA, e a plataforma aqui é a
+ * staff: admin e presidente — a mesma régua de `isStaff` em
+ * oportunidade-acesso.ts. Serve também à consulta das reuniões (R1a,
+ * routers/consultaDeReunioes.ts): a 5ª exceção ao "Ouro = Presidente".
+ * Não é o `adminProcedure`, que aceita Ouro: Ouro é a categoria premium paga
+ * (Governança, 14/09), e a lista atravessa a rede particular de TODAS as donas
+ * (o que os contatos têm e procuram, e qual conta responde por cada ID anônimo), por fora das travas do acervo Ouro (nível
+ * 'ouro' no contato, termo da dona, GOLD_ACERVO_READ).
+ */
+export const plataformaProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin" && ctx.user.role !== "president") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito à administração da plataforma." });
+  }
+  return next({ ctx });
+});
+
 // Distribuidor do Smart Match: a pessoa real que confere cada pedido de interesse
 // antes de encaminhá-lo. É um PODER da conta (`users.isDistributor`), não um nível:
 // Ouro, presidente ou admin SEM a flag levam 403 aqui, e uma Prata COM a flag passa.

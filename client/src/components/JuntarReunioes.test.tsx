@@ -107,6 +107,7 @@ describe("JuntarReunioes", () => {
     expect(avisoDeArquivoUnico()).not.toBeInTheDocument();
     // Os outros avisos continuam.
     expect(within(screen.getByRole("dialog")).getByText(/O link aberto destas reuniões é desligado/)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText(/deixam de ver a reunião juntada, e ela sai do espaço de equipe/)).toBeInTheDocument();
     cleanup();
     // Uma de arquivo único entre as escolhidas: o aviso aparece.
     abrir([{ ...A, audioPipeline: "slices" }, { ...B, audioPipeline: "single" }]);

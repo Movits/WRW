@@ -97,6 +97,20 @@ describe("a página /r/{token}", () => {
     expect(resposta.headers.get("x-robots-tag")).toBe("noindex, nofollow");
   });
 
+  it("o convite (/convite/{token}) e a reunião compartilhada (R1b) também ganham a marca", async () => {
+    for (const caminho of [`/convite/${"B".repeat(32)}`, "/reunioes-compartilhadas/00000000-0000-4000-8000-000000000000"]) {
+      const resposta = await pedir(caminho);
+      expect(resposta.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    }
+  });
+
+  it("o convite da equipe (/convite-da-equipe/{token}) e as páginas da equipe (R2) também ganham a marca", async () => {
+    for (const caminho of [`/convite-da-equipe/${"C".repeat(32)}`, "/equipes/00000000-0000-4000-8000-000000000000", "/equipes/00000000-0000-4000-8000-000000000000/reunioes/00000000-0000-4000-8000-000000000001"]) {
+      const resposta = await pedir(caminho);
+      expect(resposta.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    }
+  });
+
   it("outras páginas não ganham a marca", async () => {
     const app = express();
     registrarRotasDoLinkAberto(app, { acharChave, assinar });
@@ -126,5 +140,30 @@ describe("o log da rota do áudio não leva o token", () => {
     expect(registrado).toContain("[LinkAberto]");
     expect(registrado).toContain("ER_CRASHED_ON_USAGE");
     expect(registrado).not.toContain(token);
+  });
+});
+
+describe("a credencial da participante (R1b) na rota do áudio", () => {
+  it("a conta logada chega à busca da chave pelo contexto do pedido; sem ela, nada (o 404 do link desligado)", async () => {
+    const { leitoraDoPedido } = await import("./senha-do-link-aberto");
+    const app = express();
+    const vistas: Array<unknown> = [];
+    const lerLeitora = vi.fn(async (_req: unknown, token: string) => (token.startsWith("participante:") ? { id: 7, openId: "conta-7" } : null));
+    registrarRotasDoLinkAberto(app, {
+      acharChave: async () => { vistas.push(leitoraDoPedido()); return vistas.length === 1 ? "meetings/dona/m-1/recording.mp4" : null; },
+      assinar: async () => "https://bucket.exemplo/assinada",
+      lerLeitora,
+    });
+    const outro = await new Promise<Server>(pronto => { const s = app.listen(0, "127.0.0.1", () => pronto(s)); });
+    try {
+      const em = `http://127.0.0.1:${(outro.address() as AddressInfo).port}`;
+      const credencial = "participante:8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+      expect((await fetch(`${em}/reuniao-aberta/${credencial}/audio`, { redirect: "manual" })).status).toBe(307);
+      expect((await fetch(`${em}/reuniao-aberta/${"A".repeat(32)}/audio`, { redirect: "manual" })).status).toBe(404);
+      expect(vistas).toEqual([{ id: 7, openId: "conta-7" }, null]);
+      expect(lerLeitora.mock.calls.map(([, token]) => token)).toEqual([credencial, "A".repeat(32)]);
+    } finally {
+      await new Promise(fim => outro.close(fim));
+    }
   });
 });

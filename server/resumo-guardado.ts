@@ -707,7 +707,16 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
-  const db = await exigirDb();
+  return resumoParaLeitura(await exigirDb(), reuniao.ownerId, reuniao.id);
+}
+
+/**
+ * A projeção de leitura do resumo guardado: a do link aberto, e a mesma da
+ * consulta da administração (R1a, server/consulta-da-administracao.ts). Sem
+ * ids, sem os itens ignorados e só o complemento confirmado pela dona.
+ */
+export async function resumoParaLeitura(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string) {
+  const reuniao = { ownerId, id: meetingId };
   const linha = await linhaDoResumo(db, reuniao.ownerId, reuniao.id);
   const estado = estadoDe(linha, Date.now());
   const versaoAnterior = temVersaoAnterior(linha);

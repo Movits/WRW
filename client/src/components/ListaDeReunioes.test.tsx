@@ -431,6 +431,14 @@ describe("ListaDeReunioes — a seleção de várias: juntar (H17), mover e mand
     expect(rede.chamadas.find(c => c.path === "meetings.mandarParaALixeira")?.input).toEqual({ meetingIds: [REUNIOES[0].id] });
   });
 
+  it("a pasta aberta tem o botão da equipe (R2), que abre o espaço de equipe da pasta", async () => {
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Pastas" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Clientes/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Equipe" }));
+    expect(aoAbrir).toHaveBeenCalledWith(`/equipes/${PASTA_CLIENTES}`);
+  });
+
   it("a escolhida que a busca escondeu não vai junto: as ações valem só para as marcadas que estão na tela", async () => {
     rede.respostas["meetings.moverParaPasta"] = { movidas: 1 };
     abrir();

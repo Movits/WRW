@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "28bb2921-2452-49bc-8e6a-550028b3ee83",
+  "id": "93dafdda-23f7-45b5-9332-f5c14e9425eb",
   "prevId": "41fb8a2f-b7da-4b98-9543-7834e7de3a36",
   "tables": {
     "agenda_reunioes": {
@@ -92,6 +92,13 @@
           "autoincrement": false,
           "default": false
         },
+        "folder_id": {
+          "name": "folder_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -122,6 +129,14 @@
             "meeting_id"
           ],
           "isUnique": true
+        },
+        "agenda_reunioes_owner_folder_idx": {
+          "name": "agenda_reunioes_owner_folder_idx",
+          "columns": [
+            "owner_id",
+            "folder_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -1358,13 +1373,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "origem": {
-          "name": "origem",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -1635,6 +1643,80 @@
       "compositePrimaryKeys": {
         "contact_needs_id": {
           "name": "contact_needs_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "contas_google": {
+      "name": "contas_google",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "google_sub": {
+          "name": "google_sub",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email_google": {
+          "name": "email_google",
+          "type": "varchar(320)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ultimo_uso_em": {
+          "name": "ultimo_uso_em",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "contas_google_user_unique": {
+          "name": "contas_google_user_unique",
+          "columns": [
+            "userId"
+          ],
+          "isUnique": true
+        },
+        "contas_google_sub_unique": {
+          "name": "contas_google_sub_unique",
+          "columns": [
+            "google_sub"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "contas_google_id": {
+          "name": "contas_google_id",
           "columns": [
             "id"
           ]
@@ -2983,377 +3065,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "entidade_membros": {
-      "name": "entidade_membros",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "entidade_id": {
-          "name": "entidade_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "pais_documento": {
-          "name": "pais_documento",
-          "type": "varchar(2)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tipo_documento": {
-          "name": "tipo_documento",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "documento_hmac": {
-          "name": "documento_hmac",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "documento_cifrado": {
-          "name": "documento_cifrado",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contato_cifrado": {
-          "name": "contato_cifrado",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "cnae_principal": {
-          "name": "cnae_principal",
-          "type": "varchar(7)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "cnaes_secundarios": {
-          "name": "cnaes_secundarios",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "referencia_da_entidade": {
-          "name": "referencia_da_entidade",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "preciso_origem": {
-          "name": "preciso_origem",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "preciso_declarado_em": {
-          "name": "preciso_declarado_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lote_id": {
-          "name": "lote_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "estado": {
-          "name": "estado",
-          "type": "varchar(12)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'importado'"
-        },
-        "ativacao_hash": {
-          "name": "ativacao_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ativacao_expira_em": {
-          "name": "ativacao_expira_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ativado_user_id": {
-          "name": "ativado_user_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ativado_em": {
-          "name": "ativado_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "em_ativacao_unique": {
-          "name": "em_ativacao_unique",
-          "columns": [
-            "ativacao_hash"
-          ],
-          "isUnique": true
-        },
-        "em_ativado_user_idx": {
-          "name": "em_ativado_user_idx",
-          "columns": [
-            "ativado_user_id"
-          ],
-          "isUnique": false
-        },
-        "em_contact_unique": {
-          "name": "em_contact_unique",
-          "columns": [
-            "contact_id"
-          ],
-          "isUnique": true
-        },
-        "em_entidade_documento_unique": {
-          "name": "em_entidade_documento_unique",
-          "columns": [
-            "entidade_id",
-            "documento_hmac"
-          ],
-          "isUnique": true
-        },
-        "em_documento_idx": {
-          "name": "em_documento_idx",
-          "columns": [
-            "documento_hmac"
-          ],
-          "isUnique": false
-        },
-        "em_entidade_estado_idx": {
-          "name": "em_entidade_estado_idx",
-          "columns": [
-            "entidade_id",
-            "estado"
-          ],
-          "isUnique": false
-        },
-        "em_owner_idx": {
-          "name": "em_owner_idx",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "entidade_membros_id": {
-          "name": "entidade_membros_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "entidades": {
-      "name": "entidades",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "nome": {
-          "name": "nome",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tipo": {
-          "name": "tipo",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pais": {
-          "name": "pais",
-          "type": "varchar(2)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "convenio_estado": {
-          "name": "convenio_estado",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'em_negociacao'"
-        },
-        "convenio_inicio": {
-          "name": "convenio_inicio",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "convenio_fim": {
-          "name": "convenio_fim",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "convenio_referencia": {
-          "name": "convenio_referencia",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "mostrar_nome_no_match": {
-          "name": "mostrar_nome_no_match",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "disponivel_por_padrao": {
-          "name": "disponivel_por_padrao",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "convite_hash": {
-          "name": "convite_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "convite_cifrado": {
-          "name": "convite_cifrado",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "convite_gerado_em": {
-          "name": "convite_gerado_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "entidades_owner_unique": {
-          "name": "entidades_owner_unique",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": true
-        },
-        "entidades_convite_unique": {
-          "name": "entidades_convite_unique",
-          "columns": [
-            "convite_hash"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "entidades_id": {
-          "name": "entidades_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "gold_access_grants": {
       "name": "gold_access_grants",
       "columns": {
@@ -3530,197 +3241,6 @@
       "compositePrimaryKeys": {
         "google_agenda_conexoes_id": {
           "name": "google_agenda_conexoes_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "importacao_documentos_vistos": {
-      "name": "importacao_documentos_vistos",
-      "columns": {
-        "importacao_id": {
-          "name": "importacao_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "documento_hmac": {
-          "name": "documento_hmac",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "linha": {
-          "name": "linha",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idv_importacao_documento_unique": {
-          "name": "idv_importacao_documento_unique",
-          "columns": [
-            "importacao_id",
-            "documento_hmac"
-          ],
-          "isUnique": true
-        },
-        "idv_owner_idx": {
-          "name": "idv_owner_idx",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "importacoes_de_entidade": {
-      "name": "importacoes_de_entidade",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "entidade_id": {
-          "name": "entidade_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "arquivo_sha256": {
-          "name": "arquivo_sha256",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "modo": {
-          "name": "modo",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "estado": {
-          "name": "estado",
-          "type": "varchar(15)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'em_andamento'"
-        },
-        "total_linhas": {
-          "name": "total_linhas",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "linhas_processadas": {
-          "name": "linhas_processadas",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "criados": {
-          "name": "criados",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "atualizados": {
-          "name": "atualizados",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "recusados": {
-          "name": "recusados",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "com_aviso": {
-          "name": "com_aviso",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "por_codigo": {
-          "name": "por_codigo",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "iniciada_em": {
-          "name": "iniciada_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "concluida_em": {
-          "name": "concluida_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "ie_entidade_idx": {
-          "name": "ie_entidade_idx",
-          "columns": [
-            "entidade_id",
-            "iniciada_em"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "importacoes_de_entidade_id": {
-          "name": "importacoes_de_entidade_id",
           "columns": [
             "id"
           ]
@@ -4747,6 +4267,245 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "meeting_folder_members": {
+      "name": "meeting_folder_members",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "folder_id": {
+          "name": "folder_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "enum('member','reader')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('invited','active')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "enum('link','connection')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invite_token_hash": {
+          "name": "invite_token_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "invited_at": {
+          "name": "invited_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_folder_members_folder_user_unique": {
+          "name": "meeting_folder_members_folder_user_unique",
+          "columns": [
+            "folder_id",
+            "userId"
+          ],
+          "isUnique": true
+        },
+        "meeting_folder_members_token_unique": {
+          "name": "meeting_folder_members_token_unique",
+          "columns": [
+            "invite_token_hash"
+          ],
+          "isUnique": true
+        },
+        "meeting_folder_members_user_status_idx": {
+          "name": "meeting_folder_members_user_status_idx",
+          "columns": [
+            "userId",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "meeting_folder_members_owner_folder_idx": {
+          "name": "meeting_folder_members_owner_folder_idx",
+          "columns": [
+            "owner_id",
+            "folder_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_folder_members_id": {
+          "name": "meeting_folder_members_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "meeting_folder_tasks": {
+      "name": "meeting_folder_tasks",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "folder_id": {
+          "name": "folder_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "texto": {
+          "name": "texto",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "responsavel": {
+          "name": "responsavel",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "prazo": {
+          "name": "prazo",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "feita": {
+          "name": "feita",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "feita_em": {
+          "name": "feita_em",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_folder_tasks_owner_folder_idx": {
+          "name": "meeting_folder_tasks_owner_folder_idx",
+          "columns": [
+            "owner_id",
+            "folder_id",
+            "feita",
+            "prazo"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_folder_tasks_id": {
+          "name": "meeting_folder_tasks_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "meeting_folders": {
       "name": "meeting_folders",
       "columns": {
@@ -4814,6 +4573,139 @@
       "compositePrimaryKeys": {
         "meeting_folders_id": {
           "name": "meeting_folders_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "meeting_participants": {
+      "name": "meeting_participants",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('invited','active')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "enum('link','connection')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invite_token_hash": {
+          "name": "invite_token_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "invited_at": {
+          "name": "invited_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_participants_meeting_user_unique": {
+          "name": "meeting_participants_meeting_user_unique",
+          "columns": [
+            "meeting_id",
+            "userId"
+          ],
+          "isUnique": true
+        },
+        "meeting_participants_token_unique": {
+          "name": "meeting_participants_token_unique",
+          "columns": [
+            "invite_token_hash"
+          ],
+          "isUnique": true
+        },
+        "meeting_participants_user_status_idx": {
+          "name": "meeting_participants_user_status_idx",
+          "columns": [
+            "userId",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "meeting_participants_owner_meeting_idx": {
+          "name": "meeting_participants_owner_meeting_idx",
+          "columns": [
+            "owner_id",
+            "meeting_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_participants_id": {
+          "name": "meeting_participants_id",
           "columns": [
             "id"
           ]
@@ -5995,6 +5887,20 @@
         },
         "summary_request": {
           "name": "summary_request",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "speaker_accounts": {
+          "name": "speaker_accounts",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "speaker_merges": {
+          "name": "speaker_merges",
           "type": "json",
           "primaryKey": false,
           "notNull": false,
@@ -7254,155 +7160,6 @@
           ]
         }
       },
-      "checkConstraint": {}
-    },
-    "pedidos_pela_entidade": {
-      "name": "pedidos_pela_entidade",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "entidade_id": {
-          "name": "entidade_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "membro_id": {
-          "name": "membro_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conexao_id": {
-          "name": "conexao_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mensagem": {
-          "name": "mensagem",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "estado": {
-          "name": "estado",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'na_entidade'"
-        },
-        "canal": {
-          "name": "canal",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expira_em": {
-          "name": "expira_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "encaminhado_em": {
-          "name": "encaminhado_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "decidido_em": {
-          "name": "decidido_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "pe_conexao_solicitante_unique": {
-          "name": "pe_conexao_solicitante_unique",
-          "columns": [
-            "conexao_id",
-            "userId",
-            "membro_id"
-          ],
-          "isUnique": true
-        },
-        "pe_entidade_estado_idx": {
-          "name": "pe_entidade_estado_idx",
-          "columns": [
-            "entidade_id",
-            "estado"
-          ],
-          "isUnique": false
-        },
-        "pe_solicitante_idx": {
-          "name": "pe_solicitante_idx",
-          "columns": [
-            "userId",
-            "created_at"
-          ],
-          "isUnique": false
-        },
-        "pe_owner_idx": {
-          "name": "pe_owner_idx",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "pedidos_pela_entidade_id": {
-          "name": "pedidos_pela_entidade_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "checkConstraint": {}
     },
     "perguntas_entre_reunioes": {
@@ -9971,14 +9728,6 @@
         },
         "resumoPorEmailAutomatico": {
           "name": "resumoPorEmailAutomatico",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "isEntidade": {
-          "name": "isEntidade",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

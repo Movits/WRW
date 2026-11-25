@@ -118,9 +118,20 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
     // importacoes_de_entidade e importacao_documentos_vistos, todas por owner_id.
     // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
-    expect(PARES).toHaveLength(89);
     expect(PARES).toContainEqual({ tabela: "entidade_membros", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "entidades", coluna: "owner_id" });
+    // 85 (na main, em paralelo): os 83, mais as participantes das reuniões (R1b): meeting_participants.owner_id
+    // (a dona) e meeting_participants.userId (a conta como participante).
+    // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
+    // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
+    // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
+    expect(PARES).toHaveLength(95);
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_participants", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_participants", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "contas_google", coluna: "userId" });
     expect(PARES).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
@@ -339,7 +350,7 @@ describe("B) excluirConta apaga o que é da conta, na ordem, e nada além", () =
     expect(delecoes[delecoes.length - 1].tabela).toBe(users);
   });
 
-  it("o passo de audit_logs preserva as duas ações da decisão de 02/09", async () => {
+  it("o passo de audit_logs preserva as ações da decisão de 02/09 e as da consulta das reuniões (R1a)", async () => {
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     const auditoria = delecoes.find(d => d.colunas.includes("action"));
     expect(auditoria, "nenhum DELETE em audit_logs com filtro por ação").toBeDefined();
@@ -833,11 +844,11 @@ describe("C) cada passo gera um DELETE parametrizado com a coluna certa", () => 
     },
   );
 
-  it("o passo de audit_logs preserva as duas ações, com placeholder para cada uma", () => {
+  it("o passo de audit_logs preserva as quatro ações, com placeholder para cada uma", () => {
     const passo = PLANO_DE_EXCLUSAO.find(p => nomeDoPasso(p) === "audit_logs.userId")!;
     const { sql: texto, params } = db.delete(passo.tabela)
       .where(and(eq(passo.coluna, 7), passo.filtro!(chaves as never)!)).toSQL();
-    expect(texto).toMatch(/`action` NOT IN \(\?, \?\)/i);
+    expect(texto).toMatch(/`action` NOT IN \(\?, \?, \?, \?\)/i);
     expect(params).toEqual([7, ...ACOES_DE_AUDITORIA_PRESERVADAS]);
   });
 
