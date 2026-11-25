@@ -273,11 +273,15 @@ OPOSTAS, ou mesma categoria; duas pontas que querem a mesma coisa são concorren
 **`server/matching.ts`** cruza perfis de usuárias em 6 dimensões ponderadas, com LLM só no
 insight: complementaridade 30, setor 20, investimento 20, especialidade 15, valores 10,
 localização 5 (somam 100), com corte em 40 — um par vira match sem nenhum termo cruzado.
-**Este motor não aplica a regra dos concorrentes:** `satisfaz` devolve `true` já no
-`have === need` e no slug igual, sem passar por `saoConcorrentes`, então "exportar" ×
-"exportar" conta como necessidade atendida e ainda SOBE a complementaridade, a dimensão de
-maior peso. Uniformizar os dois motores é decisão de produto, não ajuste local: a nota do
-motor de perfis mudaria para todas. **`routers/profileMatches.ts`** expõe esses matches no
+**Desde o N6 (decisão do Roberto de 11/11) este motor aplica as duas regras do privado** no
+cruzamento de "o que tenho" com "o que preciso": `satisfaz` pergunta `saoConcorrentes`
+ANTES de tudo (antes do texto igual, do mapa curado e do slug), então concorrentes não
+contam como necessidade atendida nem sobem a complementaridade ("exportar" × "exportar" e
+"Exportar vinho" × "Exportar vinho" não casam; "exportar vinho" × "importar vinho" casa), e
+palavra solta não casa (o que sobra é o mapa curado, o slug, `nomeiamAMesmaCoisa` e as
+regras da demanda expressa; teste em `server/motor-de-perfis-concorrentes.test.ts`). As
+outras dimensões não leem termo: a especialidade igual continua valendo 60 e o setor igual
+70, mesmo entre concorrentes. **`routers/profileMatches.ts`** expõe esses matches no
 Dashboard com trava de consentimento dos dois lados.
 
 **Regra da demanda expressa, nos três motores e nos prompts.** Item de "o que tenho"

@@ -138,8 +138,8 @@ faz parte do trabalho.
   "não fazemos match porque alguém poderia precisar; fazemos match porque alguém declarou
   que precisa". Setor, porte, cargo ou obrigação legal não são necessidade.
 - **Match nunca cruza por palavra solta, e concorrentes zeram** ("exportar vinho" ×
-  "importar vinho" casam; "exportar" × "exportar" não). Hoje só o motor privado aplica;
-  uniformizar com o de perfis é decisão de produto. Os três motores: `server/CLAUDE.md`.
+  "importar vinho" casam; "exportar" × "exportar" não). Valem no motor privado e, desde o
+  N6 (decisão do Roberto de 11/11), no de perfis. Os três motores: `server/CLAUDE.md`.
 - **Banco fora do ar é ERRO, nunca "sem dados".** Não crie `catch` que devolva vazio; se
   precisar de um, relance quando `ehErroDeBancoIndisponivel`.
 - **A suíte NUNCA lê `DATABASE_URL`** (só `DATABASE_URL_TESTES`, banco descartável): o

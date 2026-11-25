@@ -77,7 +77,8 @@ Codex/OpenAI e do SDK da Anthropic"), `server/_core/trpc.ts` deixou de exportar 
      `server/CLAUDE.md`.
   3. O motor de perfis (`server/matching.ts`) não aplica a regra dos concorrentes:
      `satisfaz` devolve `true` no `have === need` sem passar por `saoConcorrentes`.
-     Uniformizar com o motor privado é decisão de produto.
+     Uniformizar com o motor privado é decisão de produto. (Decidido em 11/11, N6:
+     ver a entrada de 11/11/2026 abaixo.)
 
 ## 12/09/2026 — regra da demanda expressa
 
@@ -704,6 +705,20 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Onde:** ainda em nenhum código. O desenho e as PRs (V1 a V5 e a da casca) estão em
   `sala-de-video.md`, com o que ainda falta decidir: compartilhar a tela, a conta no
   Daily, a senha do link de visitante e o que acontece no teto do orçamento.
+
+## 11/11/2026 — o motor de perfis aplica a regra dos concorrentes (N6)
+
+- **Quem:** o Roberto, em 11/11, confirmado depois (item N6 do plano).
+- **O quê:** o motor de PERFIS (`server/matching.ts`, que cruza usuárias entre si) passa a
+  aplicar as duas regras que o motor privado já aplicava no cruzamento de "o que tenho" com
+  "o que preciso": concorrentes não se atendem (`saoConcorrentes`, antes de qualquer outro
+  critério) e nada casa por palavra solta. "exportar vinho" × "importar vinho" casa;
+  "exportar" × "exportar" não. Fecha a lição 3 da lista de 28/08 a 02/09, acima.
+- **O que não muda:** as outras dimensões do motor de perfis não leem termo (a
+  especialidade igual vale 60, o setor igual 70), e o portão da IA
+  (`server/portao-da-demanda-expressa.ts`) não entrou nesta decisão.
+- **Onde:** `satisfaz` em `server/matching.ts`, com o teste
+  `server/motor-de-perfis-concorrentes.test.ts`.
 
 ---
 
