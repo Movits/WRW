@@ -24,6 +24,8 @@ vi.mock("@/lib/trpc", () => ({
     },
   },
 }));
+// "Continuar com Google" (A8) tem o teste dele (components/ContinuarComGoogle.test.tsx).
+vi.mock("@/components/ContinuarComGoogle", () => ({ ContinuarComGoogle: () => null }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import Register from "./Register";

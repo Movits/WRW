@@ -49,6 +49,8 @@ vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetin
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
@@ -57,9 +59,14 @@ vi.mock("@/lib/trpc", () => ({
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },
       resumoGuardado: { useQuery: () => duble.resumoGuardado() },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
       conexoes: { useQuery: () => ({ data: undefined }) },
       // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       ...Object.fromEntries([
         "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
         "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "audioDoResumo", "pedirComplemento", "decidirComplemento",

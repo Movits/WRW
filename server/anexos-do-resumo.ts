@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { and, asc, count, eq, gt } from "drizzle-orm";
 import {
   ANEXO_BYTES_MAX, ANEXOS_POR_JANELA, ANEXOS_POR_REUNIAO_MAX, enderecoDoAnexoDoLink, JANELA_DOS_ANEXOS_MS, RECUSAS_DOS_ANEXOS, ROTA_DO_ANEXO_DO_LINK,
@@ -12,7 +12,8 @@ import { exigirDb } from "./db";
 import { exigirReuniaoDoLink, LinkAbertoRecusado } from "./link-aberto-da-reuniao";
 import { MEETING_AUDIO_TTL_MS } from "./meeting-service";
 import { reuniaoVisivel } from "./reuniao-visivel";
-import { comCookiesDoPedido } from "./senha-do-link-aberto";
+import { comCookiesDoPedido, type LeitoraDoLink } from "./senha-do-link-aberto";
+import { leitoraDaRota } from "./leitora-do-link";
 import { CACHE_DE_ARQUIVO_PRIVADO, storageApagarTodasAsVersoes, storageGetSignedUrl, storagePut } from "./storage";
 
 /**
@@ -371,15 +372,20 @@ export async function chaveDoAnexoDoLink(token: string, anexoId: string): Promis
  */
 export function registrarRotaDoAnexoDoLink(
   app: Express,
-  { acharChave, assinar }: { acharChave: (token: string, anexoId: string) => Promise<string | null>; assinar: (chave: string) => Promise<string> } =
-    { acharChave: chaveDoAnexoDoLink, assinar: storageGetSignedUrl },
+  { acharChave, assinar, lerLeitora = leitoraDaRota }: {
+    acharChave: (token: string, anexoId: string) => Promise<string | null>; assinar: (chave: string) => Promise<string>;
+    lerLeitora?: (req: Request, token: string) => Promise<LeitoraDoLink | null>;
+  } = { acharChave: chaveDoAnexoDoLink, assinar: storageGetSignedUrl },
 ) {
   app.get(`${ROTA_DO_ANEXO_DO_LINK}/:token/anexo/:anexoId`, async (req, res) => {
     res.set("Cache-Control", "no-store");
     res.set("X-Robots-Tag", "noindex, nofollow");
     let chave: string | null;
     try {
-      chave = await comCookiesDoPedido(req.headers.cookie, () => acharChave(String(req.params.token ?? ""), String(req.params.anexoId ?? "")));
+      // A participante (R1b) abre a imagem pela sessão dela, com a credencial no endereço.
+      const token = String(req.params.token ?? "");
+      const leitora = await lerLeitora(req, token);
+      chave = await comCookiesDoPedido(req.headers.cookie, () => acharChave(token, String(req.params.anexoId ?? "")), leitora);
     } catch (erro) {
       if (ehErroDeBancoIndisponivel(erro)) {
         console.error(`[Anexos] banco indisponível ao achar a imagem do link: ${descreverErroDeBanco(erro)}`);

@@ -256,3 +256,13 @@ function ler(): EstadoDaInstalacao {
 export function useInstalacaoDoApp(): EstadoDaInstalacao {
   return useSyncExternalStore(assinar, ler, ler);
 }
+
+/**
+ * A Google recusa entrar de dentro de uma WebView (disallowed_useragent): na
+ * casca das lojas e nos navegadores de dentro de outros apps (Instagram,
+ * Facebook, a WebView do Android), "Continuar com Google" pararia numa página
+ * de erro da Google. Lá o botão não aparece (A8, components/ContinuarComGoogle.tsx).
+ */
+export function googleRecusaEntrarAqui(userAgent: string): boolean {
+  return CASCA_DAS_LOJAS.test(userAgent) || NAVEGADOR_EMBUTIDO.test(userAgent);
+}

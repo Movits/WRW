@@ -1132,3 +1132,21 @@ describe("Reunião aberta pelo link — o documento e o vídeo com o áudio fora
     expect(screen.queryByText(i18n.t("meetings.openLink.audioNotIncluded"))).not.toBeInTheDocument();
   });
 });
+
+describe("as vozes juntadas pela dona (H3c)", () => {
+  it("a voz juntada aparece como a principal: o nome dela no resumo e na transcrição", () => {
+    duble.ver.mockReturnValue(pronta({
+      ...VISTA,
+      transcricao: { texto: "Oi. Tchau.", idioma: "pt-BR", segmentos: [
+        { inicio: 0, fim: 4, falante: "F1", texto: "Oi." }, { inicio: 4, fim: 10, falante: "F3", texto: "Tchau." },
+      ] },
+      vozes: { F1: "Ana" }, juntadas: { F3: "F1", F4: "F2" },
+    }));
+    abrir();
+    // O resumo recebe o mapa com a juntada: {F3} vira Ana, e {F4} vira "Falante 2" (a principal sem nome).
+    expect((duble.propsDoResumo as { nomes?: Record<string, string> }).nomes).toEqual({ F1: "Ana", F3: "Ana", F4: "Falante 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+    expect(screen.queryByText("Falante 3")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Ana").length).toBeGreaterThan(0);
+  });
+});

@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
 import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
 import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
+import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
@@ -760,6 +761,10 @@ export default function Profile() {
         {/* As chaves de acesso (A7): entrar com Face ID ou digital. Só aparece
             com a função disponível neste endereço e fora da casca das lojas. */}
         {!editing && <ChavesDeAcesso />}
+
+        {/* Entrar com a conta Google (A8): ligar e desligar. Aparece com a função
+            ligada no servidor ou com uma conta Google já ligada. */}
+        {!editing && <ContaGoogleNoPerfil />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}

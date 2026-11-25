@@ -17,6 +17,7 @@ import { buildPasswordResetEmail, sendEmail } from "../_core/email";
 import { users, passwordResetTokens, passwordResetRequests, sessions } from "../../drizzle/schema";
 import { registerUser, loginUser, toPublicUser } from "../auth";
 import { apagarChavesNaRedefinicaoDeSenha } from "../chaves-de-acesso";
+import { apagarContaGoogleNaRedefinicaoDeSenha } from "../entrar-com-google";
 import { gravarCookieDaSessao, limparCookieDaSessao, cookieDaSessao } from "../sessao";
 import {
   hashPasswordResetToken,
@@ -376,6 +377,9 @@ export const authRouter = router({
         // encontra a sessão derrubada.
         await tx.update(sessions).set({ isActive: false }).where(eq(sessions.userId, resetToken.userId));
         await apagarChavesNaRedefinicaoDeSenha(tx, resetToken.userId, { ip: ipAddress, userAgent });
+        // A conta Google ligada (A8) sai junto: quem tomou a conta e ligou a dele
+        // não fica com essa porta depois que a dona a recupera pelo e-mail.
+        await apagarContaGoogleNaRedefinicaoDeSenha(tx, resetToken.userId, { ip: ipAddress, userAgent });
       });
       // (5) Todas as sessões caem de novo, fora da transação: a do passo (4b)
       // já derrubou as que existiam, e esta é a de sempre. Um login que conferiu

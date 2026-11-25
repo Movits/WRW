@@ -6,6 +6,7 @@ import {
   type CorDaPasta, type IconeDaPasta,
 } from "@shared/pastas-de-reunioes";
 import { exigirDb } from "./db";
+import { apagarEquipeDaPasta } from "./espacos-de-equipe";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { reuniaoVisivel } from "./reuniao-visivel";
 
@@ -110,7 +111,8 @@ export async function editarPasta(ownerId: string, pastaId: string, dados: { nom
 /**
  * Apaga a pasta da dona. As reuniões dela NÃO saem: ficam sem pasta, na mesma
  * transação (também as que estão na lixeira, que voltariam a uma pasta que não
- * existe mais).
+ * existe mais). A equipe da pasta (R2) sai junto: as membras, os convites e as
+ * tarefas, e a agenda fica sem equipe.
  */
 export async function apagarPasta(ownerId: string, pastaId: string): Promise<{ soltas: number }> {
   const db = await exigirDb();
@@ -119,6 +121,7 @@ export async function apagarPasta(ownerId: string, pastaId: string): Promise<{ s
     const [pasta] = await tx.select({ id: meetingFolders.id }).from(meetingFolders).where(daDona).limit(1).for("update");
     if (!pasta) throw new RecusaDaPasta("NOT_FOUND", RECUSAS_DAS_PASTAS.naoEncontrada);
     const soltas = await tx.update(meetings).set({ folderId: null }).where(and(eq(meetings.ownerId, ownerId), eq(meetings.folderId, pastaId)));
+    await apagarEquipeDaPasta(tx, ownerId, pastaId);
     await tx.delete(meetingFolders).where(daDona);
     return { soltas: linhasAfetadas(soltas) };
   });

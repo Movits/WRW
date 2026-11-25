@@ -53,10 +53,17 @@ abaixo, que segue aceita para a aba aberta antes do deploy.
 - "Só você acessa" e a frase nova convivem: a frase nova é a exceção da administração.
   Se a Cris preferir, a frase anterior pode passar a "Fora a administração (abaixo), só
   você acessa".
-- O app ainda não tem a tela de acesso da administração às gravações, nem o registro do
-  motivo, nem o aviso da data à organizadora: hoje a administração não abre gravações pelo
-  app. Quando esse acesso entrar, ele precisa cumprir a frase (motivo registrado antes,
-  data visível para a organizadora).
+- Desde a R1a, a administração (admin e presidência; nunca Ouro sem cargo) consulta pelo app
+  a reunião gravada com esta versão do aviso: escolhe o motivo (apuração de denúncia,
+  segurança, suporte pedido pela usuária, obrigação legal ou ordem judicial) e escreve o
+  porquê, e o registro é gravado antes de qualquer leitura. A organizadora vê no detalhe da
+  reunião a data de cada consulta, sem o motivo nem quem consultou. A reunião gravada com a
+  versão 2026-11-14, que dizia "Só você acessa", fica fechada à administração.
+- **Para a Cris revisar** (textos que dizem à usuária quem vê o quê): a frase nova do aviso de
+  privacidade no detalhe da reunião (`meetings.privacyNotice`, "A administração da Marquesa
+  Global Match só consulta uma reunião por motivo justificado, registrado antes do acesso, e
+  você vê aqui a data de cada consulta") e a linha "A administração da Marquesa Global Match
+  consultou esta reunião em: …" (`meetings.adminReads.notice`), nos 10 idiomas.
 
 ## Versão 2026-11-14
 

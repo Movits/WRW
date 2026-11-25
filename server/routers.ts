@@ -3,6 +3,7 @@ import { router } from "./_core/trpc";
 import { authRouter } from "./routers/auth";
 import { chavesDeAcessoRouter } from "./routers/chavesDeAcesso";
 import { contaRouter } from "./routers/conta";
+import { contaGoogleRouter } from "./routers/contaGoogle";
 import { profileRouter } from "./routers/profile";
 import { opportunitiesRouter } from "./routers/opportunities";
 import { notificationsRouter } from "./routers/notifications";
@@ -29,8 +30,10 @@ import { networkInteligenteRouter } from "./routers/networkInteligente";
 import { assistenteTextoRouter } from "./routers/assistenteTexto";
 import { proximasAcoesRouter } from "./routers/proximasAcoes";
 import { agendaRouter } from "./routers/agenda";
+import { equipesRouter } from "./routers/equipes";
 import { googleAgendaRouter } from "./routers/googleAgenda";
 import { perguntasEntreReunioesRouter } from "./routers/perguntasEntreReunioes";
+import { consultaDeReunioesRouter } from "./routers/consultaDeReunioes";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -42,6 +45,8 @@ export const appRouter = router({
   auth: authRouter,
   // Entrar com Face ID ou digital (chaves de acesso, A6): server/chaves-de-acesso.ts.
   chavesDeAcesso: chavesDeAcessoRouter,
+  // Entrar com a conta Google (A8): server/entrar-com-google.ts.
+  contaGoogle: contaGoogleRouter,
   conta: contaRouter,
   profile: profileRouter,
   opportunities: opportunitiesRouter,
@@ -76,6 +81,10 @@ export const appRouter = router({
   googleAgenda: googleAgendaRouter,
   // O Pergunte a várias reuniões (H6c): escolher por etiqueta ou uma a uma, perguntar e avaliar.
   perguntasEntreReunioes: perguntasEntreReunioesRouter,
+  // Os espaços de equipe (R2): a pasta com membras, as reuniões, as tarefas e a agenda da equipe.
+  equipes: equipesRouter,
+  // A consulta das reuniões pela administração (R1a): só admin e presidente, com motivo e auditoria.
+  consultaDeReunioes: consultaDeReunioesRouter,
 });
 
 export type AppRouter = typeof appRouter;

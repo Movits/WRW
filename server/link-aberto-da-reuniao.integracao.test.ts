@@ -163,7 +163,11 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
     // `documento` (H12): só o sim ou não de a reunião ter nascido de um
     // documento, para a página trocar "Transcrição" por "Texto do documento";
     // o arquivo dele nunca sai pelo link (documento-da-reuniao.integracao.test.ts).
-    expect(Object.keys(vista).sort()).toEqual(["audioIncluido", "criadaEm", "documento", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "videoDoYoutube", "vozes"]);
+    // `juntadas` (H3c): as vozes que a dona juntou ({ F3: "F1" }), sem dado pessoal;
+    // `participante` (R1b): falso no link, verdadeiro na leitura da participante.
+    expect(Object.keys(vista).sort()).toEqual(["audioIncluido", "criadaEm", "documento", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "juntadas", "participante", "titulo", "transcricao", "videoDoYoutube", "vozes"]);
+    expect(vista.participante).toBe(false);
+    expect(vista.juntadas).toEqual({});
     expect(vista.documento).toBe(false);
     // A reunião gravada não veio de um vídeo do YouTube (H13): o id do vídeo é nulo.
     expect(vista.videoDoYoutube).toBeNull();

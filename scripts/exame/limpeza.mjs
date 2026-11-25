@@ -26,7 +26,8 @@
 
 export const CHAVES = ["openId", "id", "email", "opp", "conexao"];
 
-export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"];
+// A mesma lista de server/exclusao-de-conta.ts (a R1a somou as duas da consulta das reuniões).
+export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"];
 
 /** Um par por coluna; a ordem é a ordem de execução. */
 export const PLANO_DE_LIMPEZA = [
@@ -78,7 +79,16 @@ export const PLANO_DE_LIMPEZA = [
   // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
   // marcar sai com o resto.
   { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As participantes das reuniões (R1b): as da dona QA e a conta QA como
+  // participante. O exame não convida ninguém; a conta QA que convidar sai com o resto.
+  { tabela: "meeting_participants", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_participants", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os espaços de equipe (R2): o exame não cria equipe, mas a conta QA que
+  // criar, ou que entrar numa, sai com o resto. Antes das pastas.
+  { tabela: "meeting_folder_members", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_folder_members", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "meeting_folder_tasks", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // As pastas das reuniões (H7d): o exame não cria pasta, mas a conta QA que
   // criar sai com o resto. Depois das reuniões, que apontam para elas.
   { tabela: "meeting_folders", coluna: "owner_id", chave: "openId", acao: "apagar" },
@@ -149,6 +159,8 @@ export const PLANO_DE_LIMPEZA = [
   // chave sintética sai junto com o resto.
   { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  // A conta Google ligada para entrar (A8). O exame não entra com o Google.
+  { tabela: "contas_google", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "resolvedBy", chave: "id", acao: "alertar", excetoSe: { coluna: "userId", chave: "id" } },
@@ -186,7 +198,7 @@ export const PLANO_DE_LIMPEZA = [
  */
 export const EXCECOES = [
   { tabela: "strategic_groups", coluna: "memberIds", motivo: "array JSON de ids; o exame não cria nem entra em grupos, e um DELETE por coluna não se aplica" },
-  { tabela: "audit_logs", coluna: "userId", motivo: "coberta pelo plano com filtro que preserva GOLD_ACERVO_READ e REVOKED_SESSION_ACCESS_ATTEMPT (ver ACOES_DE_AUDITORIA_PRESERVADAS)", cobertaComFiltro: true },
+  { tabela: "audit_logs", coluna: "userId", motivo: "coberta pelo plano com filtro que preserva GOLD_ACERVO_READ, REVOKED_SESSION_ACCESS_ATTEMPT, MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ (ver ACOES_DE_AUDITORIA_PRESERVADAS)", cobertaComFiltro: true },
 ];
 
 /** Colunas do schema que apontam para usuária; o teste deriva os pares a partir delas. */

@@ -9,8 +9,10 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { CHAMADAS_POR_LOTE_MAX } from "@shared/lote-do-trpc";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotaDoAudioDaConsulta } from "../consulta-da-administracao";
 import { registrarRotaDoAnexoDoLink } from "../anexos-do-resumo";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
+import { registrarRotasDeEntrarComGoogle } from "../rotas-de-entrar-com-google";
 import { registrarAssetLinks } from "../assetlinks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -259,6 +261,8 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // O áudio da consulta da administração (R1a): sessão de staff e consulta aberta na última hora.
+  registrarRotaDoAudioDaConsulta(app);
   // As fotos e os desenhos do resumo pelo link aberto (H4g e H4h), com a mesma senha.
   registrarRotaDoAnexoDoLink(app);
   // O download do áudio da reunião (H8c): só com a ficha de uso único que
@@ -269,6 +273,10 @@ async function startServer() {
   // Vite e do estático, que responderiam a página no lugar delas. Sem as
   // variáveis, 404 (server/rotas-da-google-agenda.ts).
   registrarRotasDaGoogleAgenda(app);
+  // Continuar com Google (A8): a ida e a volta da entrada, do cadastro e do
+  // ligar no Perfil. Sem ENTRAR_COM_GOOGLE=ligado e o cliente OAuth, 404
+  // (server/rotas-de-entrar-com-google.ts).
+  registrarRotasDeEntrarComGoogle(app);
   // O Digital Asset Links do app das lojas (M1), antes do Vite e do estático:
   // o express.static ignora /.well-known e o pedido cairia no index.html
   // (server/assetlinks.ts).

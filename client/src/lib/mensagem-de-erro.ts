@@ -28,6 +28,9 @@ import { RECUSAS_DA_JUNCAO } from "@shared/juntar-reunioes";
 import { RECUSAS_DA_LEGENDA } from "@shared/legenda-ao-vivo";
 import { RECUSAS_DA_EDICAO } from "@shared/editar-transcricao";
 import { RECUSAS_DA_LIXEIRA } from "@shared/lixeira-de-reunioes";
+import { RECUSAS_DOS_PARTICIPANTES } from "@shared/participantes-da-reuniao";
+import { RECUSAS_DAS_VOZES } from "@shared/vozes-da-reuniao";
+import { RECUSAS_DA_EQUIPE } from "@shared/espacos-de-equipe";
 import { RECUSAS_DOS_MODELOS } from "@shared/modelos-de-resumo";
 import { RECUSAS_DO_MAPA } from "@shared/mapa-mental-edicao";
 import {
@@ -133,6 +136,39 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   // A reunião da dona que está na lixeira (H7d): a guarda da lixeira devolve
   // este código a uns 50 procedimentos (server/guarda-da-lixeira.ts).
   [RECUSAS_DA_LIXEIRA.naLixeira]: "meetings.trash.inTrash",
+  // As participantes (R1b) e as vozes ligadas às contas (H3c): os códigos de
+  // shared/participantes-da-reuniao.ts e de shared/vozes-da-reuniao.ts.
+  [RECUSAS_DOS_PARTICIPANTES.reuniaoNaoEncontrada]: "meetings.participants.errMeetingNotFound",
+  [RECUSAS_DOS_PARTICIPANTES.soReuniaoPronta]: "meetings.participants.errOnlyReady",
+  [RECUSAS_DOS_PARTICIPANTES.reuniaoCheia]: "meetings.participants.errFull",
+  [RECUSAS_DOS_PARTICIPANTES.conviteInvalido]: "meetings.participants.errInviteInvalid",
+  [RECUSAS_DOS_PARTICIPANTES.conviteDaPropriaDona]: "meetings.participants.errOwnInvite",
+  [RECUSAS_DOS_PARTICIPANTES.conexaoInvalida]: "meetings.participants.errConnectionInvalid",
+  [RECUSAS_DOS_PARTICIPANTES.jaParticipa]: "meetings.participants.errAlreadyIn",
+  [RECUSAS_DOS_PARTICIPANTES.autorizacaoPedida]: "meetings.participants.errAuthorizationNeeded",
+  [RECUSAS_DOS_PARTICIPANTES.muitosConvites]: "meetings.participants.errTooManyInvites",
+  [RECUSAS_DOS_PARTICIPANTES.participanteNaoEncontrada]: "meetings.participants.errParticipantNotFound",
+  [RECUSAS_DAS_VOZES.reuniaoNaoEncontrada]: "meetings.participants.errVoiceMeetingNotFound",
+  [RECUSAS_DAS_VOZES.soReuniaoPronta]: "meetings.participants.errVoiceOnlyReady",
+  [RECUSAS_DAS_VOZES.vozInvalida]: "meetings.participants.errVoiceInvalid",
+  [RECUSAS_DAS_VOZES.contaInvalida]: "meetings.participants.errVoiceAccountInvalid",
+  [RECUSAS_DAS_VOZES.juntarASiMesma]: "meetings.participants.errVoiceSelf",
+  [RECUSAS_DAS_VOZES.principalJuntada]: "meetings.participants.errVoiceMainMerged",
+  // Os espaços de equipe (R2): os códigos de shared/espacos-de-equipe.ts.
+  [RECUSAS_DA_EQUIPE.equipeNaoEncontrada]: "teams.notFound",
+  [RECUSAS_DA_EQUIPE.equipeCheia]: "teams.errFull",
+  [RECUSAS_DA_EQUIPE.conviteInvalido]: "teams.inviteInvalid",
+  [RECUSAS_DA_EQUIPE.conviteDaPropriaDona]: "teams.inviteOwn",
+  [RECUSAS_DA_EQUIPE.conexaoInvalida]: "teams.errConnectionInvalid",
+  [RECUSAS_DA_EQUIPE.jaEstaNaEquipe]: "teams.errAlreadyIn",
+  [RECUSAS_DA_EQUIPE.autorizacaoPedida]: "teams.errAuthorizationNeeded",
+  [RECUSAS_DA_EQUIPE.muitosConvites]: "teams.errTooManyInvites",
+  [RECUSAS_DA_EQUIPE.membraNaoEncontrada]: "teams.errMemberNotFound",
+  [RECUSAS_DA_EQUIPE.soLeitura]: "teams.errReadOnly",
+  [RECUSAS_DA_EQUIPE.tarefaNaoEncontrada]: "teams.errTaskNotFound",
+  [RECUSAS_DA_EQUIPE.tarefasDemais]: "teams.errTooManyTasks",
+  [RECUSAS_DA_EQUIPE.prazoInvalido]: "teams.errDueInvalid",
+  [RECUSAS_DA_EQUIPE.agendaNaoEncontrada]: "teams.errAgendaNotFound",
   // O interesse da conta que caiu para Bronze com o cartão aberto (U3, server/routers/connections.ts).
   [MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO]: "dashboard.interestNeedsSilver",
   // Os detalhes da reunião (H7c): o contato ou o contexto que não é da dona, em

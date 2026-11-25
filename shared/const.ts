@@ -221,3 +221,38 @@ export function nomesDosFalantes(bruto: unknown): Record<string, string> {
   }
   return saida;
 }
+
+/** A conta ligada a uma voz (H3c): a própria dona. */
+export const CONTA_DA_DONA = "owner";
+const FORMATO_DA_PARTICIPACAO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * As vozes ligadas às contas (H3c, meetings.speaker_accounts), só os pares
+ * válidos: a chave F1 a F99, e o valor "owner" (a dona) ou o id de uma
+ * participação (meeting_participants.id). A coluna é JSON livre.
+ */
+export function contasDasVozes(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const saida: Record<string, string> = {};
+  for (const [falante, conta] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(falante) && typeof conta === "string" && (conta === CONTA_DA_DONA || FORMATO_DA_PARTICIPACAO.test(conta))) saida[falante] = conta.toLowerCase() === CONTA_DA_DONA ? CONTA_DA_DONA : conta.toLowerCase();
+  }
+  return saida;
+}
+
+/**
+ * As vozes juntadas (H3c, meetings.speaker_merges): { "F3": "F1" }, a voz
+ * juntada apontando para a principal. Só os pares válidos, e sem cadeia nem
+ * ciclo: a voz que aponta para si mesma cai, e a que aponta para uma voz que
+ * também está juntada cai (o servidor nunca grava assim; a coluna é JSON livre).
+ */
+export function vozesJuntadas(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const pares: Record<string, string> = {};
+  for (const [voz, principal] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(voz) && typeof principal === "string" && FORMATO_DO_FALANTE.test(principal) && voz !== principal) pares[voz] = principal;
+  }
+  const saida: Record<string, string> = {};
+  for (const [voz, principal] of Object.entries(pares)) if (!(principal in pares)) saida[voz] = principal;
+  return saida;
+}

@@ -31,9 +31,11 @@ vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) 
 
 const { getDb } = await import("./db");
 const {
-  agendaReunioes, auditLogs, meetingAttachments, meetingAudioSlices, meetingRecordings, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts,
-  platformNotifications, proximasAcoes, resumoEmAudio, users,
+  agendaReunioes, auditLogs, meetingAttachments, meetingAudioSlices, meetingFolderMembers, meetingFolders, meetingParticipants, meetingRecordings, meetings,
+  meetingSummaries, meetingSummaryItems, meetingTranscripts, platformNotifications, proximasAcoes, resumoEmAudio, users,
 } = await import("../drizzle/schema");
+const { ACAO_PARTICIPANTES_AUTORIZADAS, criarConvite } = await import("./participantes-da-reuniao");
+const { RECUSAS_DOS_PARTICIPANTES } = await import("@shared/participantes-da-reuniao");
 const fila = await import("./fila-de-transcricao");
 const filaDoResumo = await import("./fila-do-resumo");
 const { appRouter } = await import("./routers");
@@ -133,13 +135,13 @@ const partesDe = async (id: string) => (await db()).select().from(meetingAudioSl
 async function limpar() {
   const banco = await db();
   const donas = [DONA, OUTRA];
-  for (const tabela of [resumoEmAudio, meetingAttachments, meetingSummaryItems, meetingSummaries, meetingTranscripts, meetingAudioSlices, meetingRecordings, proximasAcoes, agendaReunioes] as const) {
+  for (const tabela of [meetingParticipants, meetingFolderMembers, meetingFolders, resumoEmAudio, meetingAttachments, meetingSummaryItems, meetingSummaries, meetingTranscripts, meetingAudioSlices, meetingRecordings, proximasAcoes, agendaReunioes] as const) {
     await apagarPelaChave(banco, tabela, inArray(tabela.ownerId, donas));
   }
   await apagarPelaChave(banco, meetings, inArray(meetings.ownerId, donas));
   const contas = await banco.select({ id: users.id }).from(users).where(inArray(users.openId, donas));
   if (contas.length) await banco.delete(platformNotifications).where(inArray(platformNotifications.userId, contas.map(c => c.id)));
-  await banco.delete(auditLogs).where(and(eq(auditLogs.action, "MEETINGS_JOINED"), inArray(auditLogs.userId, [ID_DA_DONA, ID_DA_DONA + 1])));
+  await banco.delete(auditLogs).where(and(inArray(auditLogs.action, ["MEETINGS_JOINED", ACAO_PARTICIPANTES_AUTORIZADAS]), inArray(auditLogs.userId, [ID_DA_DONA, ID_DA_DONA + 1])));
 }
 
 describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
@@ -201,7 +203,7 @@ describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
     expect(prova).toMatchObject({ userId: ID_DA_DONA, resource: "meetings", status: "success" });
     const [linhaDeA] = await banco.select({ consentAt: meetings.consentAt }).from(meetings).where(eq(meetings.id, a.id));
     expect(prova.details).toEqual({
-      juntadas: [b.id], partes: 3, duracaoSegundos: 1800, retranscreve: false, linkAbertoDesligado: true,
+      juntadas: [b.id], partes: 3, duracaoSegundos: 1800, retranscreve: false, linkAbertoDesligado: true, participacoesRemovidas: 0, saiuDaEquipe: false,
       avisosDeGravacao: [{ id: a.id, consentAt: Number(linhaDeA.consentAt), consentNoticeVersion: null }, expect.objectContaining({ id: b.id })],
     });
 
@@ -425,6 +427,52 @@ describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
     expect(await reuniaoDe(a.id)).toMatchObject({
       shareToken: null, sharePasswordHash: null, sharePasswordFailures: 0, sharePasswordFailedAt: null, sharePasswordLockedUntil: null,
     });
+  });
+
+  it("as participantes e os convites do alvo saem, o alvo sai da pasta de equipe, e convidar de novo pede a confirmação outra vez", async () => {
+    const banco = await db();
+    const outra = await idDaConta(OUTRA);
+    const pastaDaEquipe = crypto.randomUUID();
+    const pastaPessoal = crypto.randomUUID();
+    await banco.insert(meetingFolders).values([
+      { id: pastaDaEquipe, ownerId: DONA, name: "Equipe", icon: "pasta", color: "ambar", createdAt: AGORA(), updatedAt: AGORA() },
+      { id: pastaPessoal, ownerId: DONA, name: "Minha", icon: "pasta", color: "ambar", createdAt: AGORA(), updatedAt: AGORA() },
+    ]);
+    const a = await emPartes(DONA, [[fala(1, "F1", "x")]], { folderId: pastaDaEquipe });
+    const b = await emPartes(DONA, [[fala(1, "F1", "y")]]);
+    await banco.insert(meetingFolderMembers).values({
+      id: crypto.randomUUID(), folderId: pastaDaEquipe, ownerId: DONA, userId: outra, role: "reader", status: "active", source: "connection",
+      invitedAt: AGORA(), acceptedAt: AGORA(), createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    // A confirmação da dona (dada antes da junção), uma participante ativa e um convite pendente.
+    const prova = { userId: ID_DA_DONA, ipAddress: "203.0.113.30", userAgent: "teste" };
+    await criarConvite(DONA, a.id, prova, { idioma: "pt-BR", textoExibido: "Confirmo." });
+    await banco.insert(meetingParticipants).values({
+      id: crypto.randomUUID(), meetingId: a.id, ownerId: DONA, userId: outra, status: "active", source: "connection",
+      invitedAt: AGORA(), acceptedAt: AGORA(), createdAt: AGORA(), updatedAt: AGORA(),
+    });
+
+    await juntar([a.id, b.id]);
+    expect(await banco.select().from(meetingParticipants).where(eq(meetingParticipants.meetingId, a.id))).toEqual([]);
+    expect(await reuniaoDe(a.id)).toMatchObject({ folderId: null });
+    // A membra da equipe segue na equipe: só a reunião juntada saiu da pasta.
+    expect(await banco.select().from(meetingFolderMembers).where(eq(meetingFolderMembers.folderId, pastaDaEquipe))).toHaveLength(1);
+    const [registro] = await banco.select().from(auditLogs).where(and(eq(auditLogs.action, "MEETINGS_JOINED"), eq(auditLogs.resourceId, a.id)));
+    expect(registro.details).toMatchObject({ participacoesRemovidas: 2, saiuDaEquipe: true });
+
+    // A confirmação de antes da junção não vale para o conteúdo novo; a de depois vale.
+    await banco.update(meetings).set({ status: "ready" }).where(eq(meetings.id, a.id));
+    await expect(criarConvite(DONA, a.id, prova)).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DOS_PARTICIPANTES.autorizacaoPedida });
+    await criarConvite(DONA, a.id, prova, { idioma: "pt-BR", textoExibido: "Confirmo de novo." });
+    await criarConvite(DONA, a.id, prova);
+
+    // A pasta só pessoal (sem equipe) fica com a reunião juntada.
+    const c = await emPartes(DONA, [[fala(1, "F1", "z")]], { folderId: pastaPessoal });
+    const d = await emPartes(DONA, [[fala(1, "F1", "w")]]);
+    await juntar([c.id, d.id]);
+    expect(await reuniaoDe(c.id)).toMatchObject({ folderId: pastaPessoal });
+    const [daPessoal] = await banco.select().from(auditLogs).where(and(eq(auditLogs.action, "MEETINGS_JOINED"), eq(auditLogs.resourceId, c.id)));
+    expect(daPessoal.details).toMatchObject({ participacoesRemovidas: 0, saiuDaEquipe: false });
   });
 
   it("a prova do aviso de gravação de cada reunião fica na auditoria da junção, também a da reunião que sai", async () => {

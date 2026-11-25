@@ -326,6 +326,53 @@ WRW só mexe nos eventos das reuniões da agenda e das próximas ações com pra
 Política de Privacidade (Cris) e a descrição do uso da agenda na verificação da Google
 precisam dizer o mesmo.
 
+### Só para "Continuar com Google" (opcional)
+
+Entrar e se cadastrar com a conta Google, e ligar a conta Google a uma conta de e-mail
+que já existe, no Perfil (A8; `server/entrar-com-google.ts` e
+`server/rotas-de-entrar-com-google.ts`). Usa o MESMO cliente OAuth da Google Agenda,
+com um URI de retorno próprio e só os escopos `openid` e `email` (nenhum token da
+Google fica guardado). Só existe com as quatro variáveis abaixo; sem qualquer uma, o
+botão some do login, do cadastro e do Perfil, e `/api/entrar-com-google/ir` e
+`/api/entrar-com-google/retorno` dão 404. O Desligar do Perfil continua valendo para
+quem já ligou.
+
+| Variável | Para quê | Valor |
+|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | o mesmo cliente da Google Agenda | o ID do cliente |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | o segredo do mesmo cliente | o segredo do cliente |
+| `FRONTEND_URL` | vira o URI de retorno, `<FRONTEND_URL>/api/entrar-com-google/retorno` | https; http só em `localhost` |
+| `ENTRAR_COM_GOOGLE` | liga a função | `ligado`; qualquer outro valor, ou nenhum, a desliga |
+
+**Antes de pôr `ENTRAR_COM_GOOGLE=ligado`:**
+
+1. Cadastre no cliente OAuth do Google Cloud (Credenciais, o cliente "Aplicativo da
+   Web", "URIs de redirecionamento autorizados") o endereço
+   `https://wrwglobal.org/api/entrar-com-google/retorno`, exatamente assim (o
+   `FRONTEND_URL` de produção mais o caminho). Sem ele, a Google para numa página de
+   erro (`redirect_uri_mismatch`).
+2. **Enquanto o app do Google Cloud estiver em modo Teste, só os testadores entram.** As
+   contas Google fora da lista de usuários de teste param na página "Acesso bloqueado"
+   da própria Google, sem voltar à WRW. Diferente da Google Agenda, aqui não há lista
+   de contas da WRW: o botão aparece antes de a pessoa entrar, para todo mundo. Por isso
+   a chave fica desligada até a Google verificar o app, ou ligada só enquanto a Glenda e
+   o time testam com as contas Google deles na lista de testadores.
+
+**Como funciona:** state, PKCE (S256) e nonce na ida, num cookie cifrado de 10 min só no
+caminho das rotas; na volta, o `id_token` vem do endpoint de token da Google (pelo
+TLS) e são conferidos o destinatário, o emissor, o prazo, o nonce e o
+`email_verified`. A conta decide pelo `sub` (`contas_google`), nunca pelo e-mail: a
+conta da WRW que já tem o e-mail da conta Google NÃO é ligada sozinha; a pessoa entra
+com a senha e liga no Perfil (ligar pede uma entrada dos últimos 10 minutos). O login
+nunca cria conta: só o botão do cadastro cria (Bronze, sem senha, cadastro por concluir).
+A sessão é a do login por senha (90 dias), com o mesmo bloqueio por tentativas, e há um
+teto de 60 idas e voltas por rede a cada 15 min. Entrada, ligar e desligar vão à
+auditoria (`LOGIN` com `metodo: "google"`, `GOOGLE_ACCOUNT_LINKED`,
+`GOOGLE_ACCOUNT_UNLINKED`), na transação. A redefinição de senha tira a conta Google
+ligada, como tira as chaves de acesso. No app das lojas e nos navegadores de dentro de
+outros apps (Instagram, Facebook), o botão não aparece: a Google recusa entrar de
+dentro de WebView.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

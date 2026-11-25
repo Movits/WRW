@@ -101,6 +101,8 @@ vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("@/components/AnexosDoResumo", () => ({ AnexosDoResumo: (props: { meetingId?: string; comLinkAberto?: boolean }) => <div data-testid="anexos-do-resumo" data-reuniao={props.meetingId} data-link={String(!!props.comLinkAberto)}/> }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
@@ -116,12 +118,17 @@ vi.mock("@/lib/trpc", () => ({
       delete: duble.registrar("delete"),
       // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       mandarParaALixeira: duble.registrar("mandarParaALixeira"),
       reprocess: duble.registrar("reprocess"),
       // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
       refazerVideoDoYoutube: duble.registrar("refazerVideoDoYoutube"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
       // N5: as conexões que nasceram da reunião e o "Vincular a um contato".
       conexoes: { useQuery: (...args: unknown[]) => duble.conexoes(...args) },
       candidatosParaVincular: { useQuery: (...args: unknown[]) => duble.candidatos(...args) },
@@ -1501,6 +1508,30 @@ describe("Detalhe da reunião — durante a gravação e ouvir só uma voz (G15a
     fireEvent.click(within(barra).getByRole("button", { name: "Ouvir todas as vozes" }));
     expect(within(barra).queryByText(/Ouvindo só/)).not.toBeInTheDocument();
     expect(within(document.querySelector("ol")!).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
+  });
+
+  it("H3c: a voz juntada pela dona soma com a principal no tempo de fala e no ouvir só esta voz", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const segments = [
+      { inicio: 0, fim: 25, falante: "F1", texto: "Bom dia a todas." },
+      { inicio: 25, fim: 75, falante: "F2", texto: "Vamos fechar o contrato." },
+      { inicio: 75, fim: 100, falante: "F3", texto: "O frete fica para sexta." },
+    ];
+    abrirDetalhe({ status: "ready", vozes: { nomes: { F2: "Participante Teste" }, juntadas: { F3: "F2" } } } as never,
+      { transcript: { id: "t1", transcript: "x", language: "pt-BR", segments }, recording: GRAVACAO });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcrição$/ }));
+    const tempo = screen.getByText("Tempo de fala").parentElement!;
+    // Uma linha só para a voz 2, com os 75 s dela e da voz 3 juntos (75%), e não 50% e 25%.
+    expect(within(tempo).getAllByText("Participante Teste")).toHaveLength(1);
+    expect(within(tempo).getByText(/· 75%/)).toBeInTheDocument();
+    expect(within(tempo).queryByText(/· 50%/)).not.toBeInTheDocument();
+    expect(within(tempo).queryByText("Falante 3")).not.toBeInTheDocument();
+    // Ouvir só a voz dela mostra as falas das duas vozes juntadas.
+    fireEvent.click(within(tempo).getByRole("button", { name: "Ouvir só a voz de Participante Teste" }));
+    const falas = document.querySelector("ol")!;
+    expect(within(falas).getByText("Vamos fechar o contrato.")).toBeInTheDocument();
+    expect(within(falas).getByText("O frete fica para sexta.")).toBeInTheDocument();
+    expect(within(falas).queryByText("Bom dia a todas.")).not.toBeInTheDocument();
   });
 });
 

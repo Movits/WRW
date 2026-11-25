@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Lock, Mail, User, ArrowRight, Shield, CheckCircle2, Sparkles } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { LOGIN_COM_FORMULARIO } from "@/lib/caminho-de-volta";
+import { ContinuarComGoogle } from "@/components/ContinuarComGoogle";
 
 function PasswordStrength({ password, t }: { password: string; t: (key: string) => string }) {
   const checks = [
@@ -150,6 +151,9 @@ export default function Register() {
               </Link>
             </p>
           </div>
+
+          {/* Continuar com Google (A8): cria a conta pelo e-mail verificado da Google; some sem a função e dentro de WebView. */}
+          <ContinuarComGoogle modo="cadastrar" desligado={registerMutation.isPending} />
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Nome */}

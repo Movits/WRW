@@ -77,6 +77,8 @@ vi.mock("@/lib/partes-no-aparelho", () => ({
 }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
@@ -92,6 +94,9 @@ vi.mock("@/lib/trpc", () => ({
       delete: duble.registrar("delete"),
       // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
       pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       mandarParaALixeira: duble.registrar("mandarParaALixeira"),
       // A tela da lixeira (?lixeira=1), vazia: o que ela faz está em components/LixeiraDeReunioes.test.tsx.
       lixeira: { useQuery: () => ({ data: [], isLoading: false, isError: false, error: null, refetch: () => undefined, dataUpdatedAt: 0 }) },
@@ -102,6 +107,8 @@ vi.mock("@/lib/trpc", () => ({
       resumirVideoDoYoutube: duble.registrar("resumirVideoDoYoutube"),
       refazerVideoDoYoutube: duble.registrar("refazerVideoDoYoutube"),
       resumoGuardado: { useQuery: (...args: unknown[]) => duble.resumoGuardado(...args) },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
       // N5: a linha "Conexões geradas por esta reunião" (sem conexões, não aparece).
       conexoes: { useQuery: () => ({ data: undefined }) },
       pedirResumo: duble.registrar("pedirResumo"),

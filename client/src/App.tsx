@@ -38,6 +38,11 @@ const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork
 const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
 const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
 const Agenda = lazy(() => import("./pages/Agenda"));
+const ConviteDaReuniao = lazy(() => import("./pages/ConviteDaReuniao"));
+const ReuniaoCompartilhada = lazy(() => import("./pages/ReuniaoCompartilhada"));
+const EquipeDaPasta = lazy(() => import("./pages/EquipeDaPasta"));
+const ConviteDaEquipe = lazy(() => import("./pages/ConviteDaEquipe"));
+const ReuniaoDaEquipe = lazy(() => import("./pages/ReuniaoDaEquipe"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -248,6 +253,43 @@ function Router() {
         <Route path="/meetings">
           <TelaAutenticada cabecalhoProprio>
             <Meetings />
+          </TelaAutenticada>
+        </Route>
+
+        {/* As participantes (R1b): o convite por link (/convite/{token}, só
+            logada; o login volta para cá) e a reunião compartilhada com a
+            participante, a leitura dela, fora do detalhe da dona. Os caminhos
+            são ROTA_DO_CONVITE e ROTA_DA_REUNIAO_COMPARTILHADA, de shared/rotas.ts. */}
+        <Route path="/convite/:token">
+          <TelaAutenticada>
+            <ConviteDaReuniao />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/reunioes-compartilhadas/:id">
+          <TelaAutenticada>
+            <ReuniaoCompartilhada />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Os espaços de equipe (R2): o convite (/convite-da-equipe/{token}, só
+            logada), a equipe da pasta (reuniões, tarefas, agenda e membras) e a
+            reunião da equipe lida pela membra. Os caminhos são de shared/rotas.ts. */}
+        <Route path="/convite-da-equipe/:token">
+          <TelaAutenticada>
+            <ConviteDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId/reunioes/:id">
+          <TelaAutenticada>
+            <ReuniaoDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId">
+          <TelaAutenticada>
+            <EquipeDaPasta />
           </TelaAutenticada>
         </Route>
 
