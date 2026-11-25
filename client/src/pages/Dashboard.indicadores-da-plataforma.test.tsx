@@ -152,11 +152,11 @@ describe("indicadores da plataforma no Dashboard", () => {
   it("as conexões da plataforma não se confundem com as da usuária", async () => {
     render(<Dashboard />);
 
-    // Dois cartões de conexão na tela, com rótulos e números diferentes: o da
-    // usuária ("Conexões efetivadas", 1 aceita — o rótulo ficou explícito no
-    // item 6.1 do reteste v4) e o da rede inteira ("Conexões realizadas", 42).
+    // Duas contagens de conexão na tela, ditas de jeitos diferentes: a da
+    // usuária, no resumo em frases ("1 conexão feita", a regra do item 6.1 do
+    // reteste v4), e a da rede inteira ("Conexões realizadas", 42).
     expect(await screen.findByText("Conexões realizadas", {}, ESPERA)).toBeInTheDocument();
-    expect(screen.getAllByText("Conexões efetivadas").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 conexão feita")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("42")).toBeInTheDocument(), ESPERA);
   });
 

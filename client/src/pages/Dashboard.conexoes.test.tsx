@@ -83,20 +83,16 @@ beforeEach(() => {
   duble.respostas["notifications.list"] = { data: [] };
 });
 
-/** O número que um StatCard mostra, lido ao lado do rótulo dele. */
-function valorDoCartao(rotulo: string) {
-  const etiqueta = screen.getAllByText(rotulo).find(el => el.previousElementSibling);
-  return etiqueta?.previousElementSibling?.textContent ?? "";
-}
-
 function abrirConexoes() {
   const aba = screen.getAllByRole("button").find(b => /^Conexões( \(|$)/.test(b.textContent ?? ""));
   if (!aba) throw new Error("aba Conexões não encontrada");
   aba.click();
 }
 
-describe("item 6.1 — o cartão e a aba contam a mesma coisa", () => {
-  it("as duas contagens são as conexões efetivadas, e o rótulo diz isso", async () => {
+// Desde 25/11 o "cartão" do item 6.1 é a linha de conexões feitas do resumo em
+// frases (components/ResumoDasConexoes.tsx): a regra continua a mesma da aba.
+describe("item 6.1 — o resumo e a aba contam a mesma coisa", () => {
+  it("as duas contagens são as conexões efetivadas, e a aba diz isso a quem passa o mouse", async () => {
     duble.respostas["connections.list"] = { data: [
       conexao({ id: 1, status: "accepted", displayName: "Bia", souDestinataria: 1 }),
       conexao({ id: 2, status: "pending", souDestinataria: 0 }),
@@ -105,15 +101,41 @@ describe("item 6.1 — o cartão e a aba contam a mesma coisa", () => {
     ] };
     render(<Dashboard />);
 
-    const rotulo = i18n.t("dashboard.connectionsEstablished");
-    expect(rotulo).not.toBe("dashboard.connectionsEstablished");
-    expect(screen.getAllByText(rotulo).length).toBeGreaterThan(0);
-
-    // A aba conta o mesmo que o cartão: 1 efetivada entre as 4 linhas.
-    expect(screen.getAllByRole("button").some(b => b.textContent === `${i18n.t("dashboard.connections")} (1)`)).toBe(true);
+    // A aba conta o mesmo que o resumo: 1 efetivada entre as 4 linhas.
+    const aba = screen.getAllByRole("button").find(b => b.textContent === `${i18n.t("dashboard.connections")} (1)`);
+    expect(aba).toHaveAttribute("title", i18n.t("dashboard.connectionsEstablished"));
     expect(screen.getAllByRole("button").some(b => (b.textContent ?? "").includes("(4)"))).toBe(false);
 
-    await waitFor(() => expect(valorDoCartao(rotulo)).toBe("1"), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByText("1 conexão feita")).toBeInTheDocument(), { timeout: 4000 });
+    // O pendente enviado por mim (souDestinataria 0) não é pedido para eu responder.
+    expect(screen.queryByText(/quer(em)? se conectar com você/)).not.toBeInTheDocument();
+  });
+});
+
+describe("resumo em frases — o pedido que espera a minha resposta", () => {
+  it("vem primeiro, e 'Responder' abre a aba Conexões", async () => {
+    duble.respostas["connections.list"] = { data: [
+      conexao({ id: 1, status: "pending", souDestinataria: 1 }),
+      conexao({ id: 2, status: "pending", souDestinataria: 1 }),
+    ] };
+    render(<Dashboard />);
+
+    const resumo = await screen.findByRole("region", { name: "Resumo das suas conexões" });
+    expect(resumo.querySelector("li")?.textContent).toContain("2 pessoas querem se conectar com você");
+    screen.getByRole("button", { name: "Responder: 2 pessoas querem se conectar com você" }).click();
+    expect(await screen.findAllByRole("button", { name: i18n.t("dashboard.acceptReveal") }, { timeout: 2000 })).toHaveLength(2);
+  });
+
+  it("sem conexão feita e com sugestões, a linha é o próximo passo; sem sugestões, ela some", async () => {
+    duble.respostas["matches.list"] = { data: [{ matchId: 9, overallScore: 70, userSeen: true }] };
+    const { unmount } = render(<Dashboard />);
+    expect(await screen.findByText("Aceite uma sugestão para fazer sua primeira conexão")).toBeInTheDocument();
+    unmount();
+
+    duble.respostas["matches.list"] = { data: [] };
+    render(<Dashboard />);
+    expect(await screen.findByText("Nenhuma sugestão nova por enquanto")).toBeInTheDocument();
+    expect(screen.queryByText("Aceite uma sugestão para fazer sua primeira conexão")).not.toBeInTheDocument();
   });
 });
 
