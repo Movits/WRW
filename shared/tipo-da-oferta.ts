@@ -645,7 +645,8 @@ const familiaDaPalavra = (palavra: string) => FAMILIA_DA_PALAVRA.get(palavra) ??
 
 /** Depois de uma destas, o que vem é complemento da cabeça, não a coisa oferecida. */
 const PREPOSICOES = new Set([
-  ...Array.from(GENITIVOS), "para", "em", "no", "na", "nos", "nas", "com", "por", "sobre", "ao", "aos", "a", "as",
+  // "pra" é o "para" falado, e sem ele "Contador pra MEI" lia o destinatário como especialidade.
+  ...Array.from(GENITIVOS), "para", "pra", "em", "no", "na", "nos", "nas", "com", "por", "sobre", "ao", "aos", "a", "as",
   "for", "to", "in", "on", "with", "from", "at", "en", "con", "al", "del", "desde", "hacia",
   // O "para" e o "com" do francês, do alemão e do russo, e o "sobre" do russo: sem eles "Bureaux POUR avocats" e
   // "Software FÜR Buchhaltung" liam o serviço no fim, como se fossem o pedido (116bb56 da #127, trava de `regraNaoLeOPar`).
@@ -891,6 +892,7 @@ const tipoNaoServico = (palavra: string): TipoDaOferta | null => {
 /** Verbos de quem pede, que saem da frente do termo como os marcadores fracos. */
 const VERBOS_DE_NECESSIDADE = new Set([
   "precisamos", "buscamos", "procuramos", "queremos", "necessitamos", "desejamos", "gostariamos",
+  "preciso", "busco", "procuro", "quero", "necessito", "desejo", "necesito", "busca", "procura",
   "contratar", "contratamos", "contrata", "contratando", "estamos", "estou", "gostaria", "se",
   "necesitamos", "necesitan", "we", "are", "am",
   // Nos idiomas novos (e6ddfa4 da #127): sem estes, "Suche Steuerberater" lia "suche" como especialidade.
@@ -1953,11 +1955,9 @@ function cobrePublico(oferecida: EspecialidadeDoServico, pedida: EspecialidadeDo
  * exportar meu café" tinha caído de 60 para 0 (item 4 da revisão do Nicolas na
  * #135, 15/09).
  *
- * Vale a nota da FAMÍLIA (60), nunca a de serviço igual: quem escreveu o
- * público disse algo a mais que a oferta genérica não promete. Dar 100 quando o
- * público é um dos destinatários comuns é a outra metade do item 4, e depende
- * de decisão do Roberto — a lista DESTINATARIOS_COMUNS está marcada no código
- * como a confirmar, e 100 dispara e-mail.
+ * A nota sai em `comoAtende`: 100 quando o público é só destinatário comum
+ * (`DESTINATARIOS_COMUNS`), 60 quando é finalidade ou outro público — decisão
+ * do Roberto de 16/09, ver `soAcrescentaDestinatarioComum`.
  */
 function ofertaGenericaCobreOPublico(oferecido: ServicoNomeado, pedida: EspecialidadeDoServico): boolean {
   return oferecido.especialidades.length === 0
@@ -1965,11 +1965,110 @@ function ofertaGenericaCobreOPublico(oferecido: ServicoNomeado, pedida: Especial
     && Array.from(pedida.publico).some(lema => !LEMAS_DE_ATIVIDADE.has(lema));
 }
 
-function atendeEspecialidades(oferecido: ServicoNomeado, pedido: ServicoNomeado): boolean {
+/**
+ * O destinatário escrito SEM "para" — "Contador DE MEI", "Contador MEI", "Contador de PEQUENAS EMPRESAS" — é só o
+ * INEQUÍVOCO: sem o "para", o "de" e a justaposição também apresentam o ASSUNTO e a MODALIDADE, e a lista inteira de
+ * `DESTINATARIOS_COMUNS` levava a 100, com e-mail, "Consultoria de NEGÓCIOS" (a consultoria empresarial),
+ * "Advogado de CLIENTES", "Tradutor PARTICULAR" e "Mentoria INDIVIDUAL" (revisão cética de 16/09 da
+ * `fix/delta-do-nicolas`). Negócio, business, company, cliente, particular, individual e profissional valem só no
+ * público, depois de "para".
+ *
+ * Sozinhos: MEI, ME, EPP, PME, microempresa, microempreendedor, startup, pyme, SME e "small" (o "business" de "Small
+ * business accountant" sai da leitura como cabeça neutra). Em par: o PORTE com a empresa ou o negócio ("pequenas
+ * empresas", "médias empresas", "pequenos negócios") e "pessoa física". "Empresas" sem porte é a especialidade
+ * curada "empresarial" ("Advogado de empresas" é o direito empresarial), e "grandes empresas" também não entra: o
+ * adjetivo desconhecido contornava a guarda que havia aqui ("Advogado de grandes empresas" valia 100).
+ */
+const DESTINATARIOS_SEM_PARA = new Set([
+  "mei", "meis", "me", "epp", "epps", "pme", "pmes", "microempresa", "microempresas",
+  "microempreendedor", "microempreendedores", "microempreendedora", "microempreendedoras",
+  "startup", "startups", "pyme", "pymes", "sme", "smes", "small",
+].map(palavra => lemaDaEspecialidade(palavra)));
+const PORTES_DO_DESTINATARIO = new Set(["pequena", "pequeno", "media", "medio", "micro", "mediana", "mediano"].map(palavra => lemaDaEspecialidade(palavra)));
+const QUEM_TEM_PORTE = new Set(["empresa", "negocio"].map(palavra => lemaDaEspecialidade(palavra)));
+const PESSOA_FISICA = ["pessoa", "fisica"].map(palavra => lemaDaEspecialidade(palavra));
+
+function destinatarioNosLemas(lemas: readonly string[]): boolean {
+  const tem = (lista: ReadonlySet<string>) => lemas.some(lema => lista.has(lema));
+  return lemas.length > 0 && lemas.every(lema => DESTINATARIOS_SEM_PARA.has(lema)
+    || (PORTES_DO_DESTINATARIO.has(lema) && tem(QUEM_TEM_PORTE))
+    || (QUEM_TEM_PORTE.has(lema) && tem(PORTES_DO_DESTINATARIO))
+    || (PESSOA_FISICA.includes(lema) && PESSOA_FISICA.every(parte => lemas.includes(parte))));
+}
+
+/**
+ * A oferta com público ("Contabilidade para MEI") cobre o mesmo destinatário escrito sem "para" na necessidade
+ * ("Contador de MEI", "Contador MEI"), como já cobria "Contador para MEI" (`cobrePublico`). Sem isto o par dava 0 e
+ * a documentação dizia "com qualquer preposição, dos dois lados" (revisão cética de 16/09).
+ */
+function cobreDestinatarioNosLemas(oferecida: EspecialidadeDoServico, pedida: EspecialidadeDoServico): boolean {
+  const lemas = Array.from(pedida.lemas);
+  return pedida.servicos.size === 0 && pedida.publico.size === 0 && destinatarioNosLemas(lemas)
+    && lemas.every(lema => oferecida.publico.has(lema) || oferecida.lemas.has(lema));
+}
+
+/**
+ * O complemento nomeia uma CONTRAPARTE — quem tem a mercadoria, o canal ou o capital, e que serviço nenhum entrega.
+ * A lista é a do portão (`PAPEIS_DE_COMERCIO` e `SOCIOS`, em lema), mais o que a decisão do Roberto de 16/09 (D1)
+ * nomeia e ela não tem: o representante, o agente e o parceiro COMERCIAIS (só em par com "comercial": "representante
+ * legal" e "parceiro de tecnologia" são outra coisa), o atacadista, o varejista, o franqueado, o patrocinador e o
+ * CLIENTE, que é quem compra ("Preciso de consultoria de clientes" valia 100 pelo destinatário; o cliente só é
+ * destinatário depois de "para"). Ficam só aqui, nos motores determinísticos: pôr essas palavras em
+ * `PAPEIS_DE_COMERCIO` mudaria também o portão da IA, onde elas são ambíguas.
+ */
+const CONTRAPARTE_EM_PAR_COM_COMERCIAL = new Set(["representante", "agente", "parceiro", "parceira"].map(palavra => lemaDaEspecialidade(palavra)));
+const COMERCIAL_EM_LEMA = lemaDaEspecialidade("comercial");
+const CONTRAPARTE_QUE_O_PORTAO_NAO_LISTA = new Set([
+  "atacadista", "atacadistas", "varejista", "varejistas", "franqueado", "franqueada", "franqueados", "franqueadas",
+  "patrocinador", "patrocinadora", "patrocinadores", "patrocinadoras",
+  "cliente", "clientes", "client", "clients", "customer", "customers",
+].map(palavra => lemaDaEspecialidade(palavra)));
+function nomeiaContraparte(lemas: ReadonlySet<string>): boolean {
+  return Array.from(lemas).some(lema => CONTRAPARTE_EM_LEMA.has(lema) || CONTRAPARTE_QUE_O_PORTAO_NAO_LISTA.has(lema)
+    || (CONTRAPARTE_EM_PAR_COM_COMERCIAL.has(lema) && lemas.has(COMERCIAL_EM_LEMA)));
+}
+
+/**
+ * A abertura do D1 (decisão do Roberto de 16/09) vale para a necessidade INTEIRA: o texto pede o serviço
+ * (`pedidoPedeOServico`) e NENHUMA alternativa de nenhum serviço pedido nomeia especialidade curada, outro serviço
+ * ou contraparte. `comoAtende` julga cada alternativa sozinha, e sem isto "Preciso de advogado marítimo E
+ * TRIBUTARISTA", "... marítimo E INVESTIDOR" e "Preciso de consultoria de moda E DISTRIBUIDORES" valiam 60 pela
+ * alternativa desconhecida (revisão cética de 16/09).
+ */
+function abreComplementoDesconhecido(palavras: string[], pedidos: readonly ServicoNomeado[]): boolean {
+  return pedidoPedeOServico(palavras) && pedidos.every(pedido => pedido.especialidades.every(pedida =>
+    pedida.servicos.size === 0
+    && Array.from(pedida.lemas).every(lema => !pedida.conhecidos.has(lema))
+    && !nomeiaContraparte(pedida.lemas)));
+}
+
+function atendeEspecialidades(oferecido: ServicoNomeado, pedido: ServicoNomeado, complementoDesconhecido = false): boolean {
   if (ehGenerico(pedido)) return true;
+  // Oferta GENÉRICA ("Contabilidade", "Advocacia", "Logística") diante de pedido da mesma família que acrescenta
+  // alguma coisa. A nota (100 ou 60) sai em `comoAtende`; aqui só se decide se atende. Pedido com ESPECIALIDADE
+  // curada continua sem casar, e é regra da casa congelada em teste: "Advocacia" não atende "Advogado
+  // tributarista" (defeito c da #101).
+  if (ehGenerico(oferecido)) {
+    // 1. O público ou a finalidade depois de "para" ("Contador para MEI", "logística para exportar meu café"), e o
+    //    destinatário inequívoco escrito sem "para" ("Contador de MEI", "Contador MEI": `destinatarioNosLemas`).
+    if (pedido.especialidades.some(pedida => ofertaGenericaCobreOPublico(oferecido, pedida)
+      || (pedida.servicos.size === 0 && destinatarioNosLemas(Array.from(pedida.lemas))))) return true;
+    // 2. O texto PEDE a família, com complemento que as listas não conhecem ("Preciso de advogado marítimo",
+    //    "Procuro contador rural", "Preciso de logística de exportação para meu café"): quem oferece a família
+    //    atende quem declarou precisar dela, com a nota da família — decisão do Roberto de 16/09 (D1). Quem decide
+    //    é `comoAtende`, sobre o texto inteiro (`abreComplementoDesconhecido`): a marca de pedido vem ANTES do
+    //    serviço e o pedido cai nele ("Quero vender minha consultoria", "We are maritime lawyers" e "Consultoria de
+    //    moda que se destaca" não pedem nada), e nenhuma alternativa nomeia especialidade curada, outro serviço ou
+    //    contraparte ("Preciso de consultoria de distribuidor", "Procuro advogado de investidor"). As duas linhas
+    //    abaixo repetem a trava da alternativa para quem chama sem o texto.
+    return complementoDesconhecido && pedido.especialidades.length > 0 && pedido.especialidades.every(pedida =>
+      pedida.servicos.size === 0
+      && pedida.lemas.size > 0
+      && Array.from(pedida.lemas).every(lema => !pedida.conhecidos.has(lema)) && !nomeiaContraparte(pedida.lemas));
+  }
   return pedido.especialidades.some(pedida => (pedida.lemas.size > 0
-    ? oferecido.especialidades.some(oferecida => cobre(oferecida, pedida))
-    : oferecido.especialidades.some(oferecida => cobrePublico(oferecida, pedida)) || ofertaGenericaCobreOPublico(oferecido, pedida)));
+    ? oferecido.especialidades.some(oferecida => cobre(oferecida, pedida) || cobreDestinatarioNosLemas(oferecida, pedida))
+    : oferecido.especialidades.some(oferecida => cobrePublico(oferecida, pedida))));
 }
 
 const semOLema = (especialidade: EspecialidadeDoServico, lema: string): EspecialidadeDoServico => ({
@@ -1992,13 +2091,96 @@ function naoAconselha(especialidade: EspecialidadeDoServico, lista: ReadonlySet<
     && !Array.from(especialidade.conhecidos).some(lema => LEMAS_DE_ACONSELHAMENTO.has(lema));
 }
 
+/** "busca", "procura" e "need" também são substantivos: "Advogado DE BUSCA e apreensão", "para PROCURA de bens". */
+const MARCAS_QUE_TAMBEM_SAO_SUBSTANTIVO = new Set(["busca", "procura", "need", "needs"]);
+/** Antes destas a marca continua pedido: "EM busca de", "À procura de", "IN need of". */
+const LOCUCOES_DE_PEDIDO = new Set(["em", "a", "in"]);
+
+/** A palavra em `k` é marca de pedido usada como pedido, e não o substantivo depois de preposição ou artigo. */
+function marcaDePedidoEm(palavras: readonly string[], k: number): boolean {
+  const palavra = palavras[k];
+  if (!MARCAS_DE_PEDIDO.has(palavra)) return false;
+  const anterior = palavras[k - 1];
+  if (!MARCAS_QUE_TAMBEM_SAO_SUBSTANTIVO.has(palavra) || anterior === undefined || LOCUCOES_DE_PEDIDO.has(anterior)) return true;
+  return !PREPOSICOES.has(anterior) && !ARTIGOS.has(anterior);
+}
+
+/** As marcas de pedido do inglês, que põe o qualificador ANTES do serviço: "We need a MARITIME lawyer". */
+const MARCAS_DE_PEDIDO_EM_INGLES = new Set(["need", "needs", "want", "wants", "looking", "seeking", "seeks", "seek", "require", "requires", "hiring"]);
+/** Entre o pedido e o serviço, abrem outra coisa que não é o serviço: "Procuro QUEM compre consultoria", "We need SOMEONE to...". */
+const QUEM_NAO_E_O_SERVICO = new Set(["quem", "alguem", "quien", "alguien", "someone", "somebody", "anyone", "anybody", "people", "pessoas"]);
+
+/** Palavra que cabe entre o começo do pedido e o núcleo do serviço, em qualquer língua: "um BOM escritório DE advocacia". */
+const cabeAntesDoServico = (palavra: string) =>
+  ARTIGOS.has(palavra) || GENITIVOS.has(palavra) || PALAVRAS_SEM_ESPECIALIDADE.has(palavra) || MARCADORES_FRACOS.has(palavra)
+  || CABECAS_NEUTRAS.has(palavra) || GENERICAS_DEMAIS.has(palavra) || ESPECIALISTA.has(palavra) || qualificaAntes(palavra);
+
+/**
+ * O texto PEDE o serviço que nomeia? A abertura do D1 (decisão do Roberto de 16/09) exige isso, e a leitura
+ * anterior — qualquer palavra de `VERBOS_DE_NECESSIDADE` em qualquer lugar — aceitava a autodescrição e a oferta:
+ * "WE ARE maritime lawyers", "ESTAMOS oferecendo consultoria de moda", "QUERO vender minha consultoria", "Contador
+ * rural SE oferece", "Consultoria de moda que SE destaca" (revisão cética de 16/09). Agora:
+ *   - há marca de pedido (`MARCAS_DE_PEDIDO`, pt/en/es) usada como pedido, ANTES do núcleo do serviço — "Consultoria
+ *     de moda se PRECISAR" e "Contador PROCURA clientes" não pedem o serviço;
+ *   - o pedido (`cabecaDoPedido`) cai no serviço: entre ele e o núcleo só cabe o que qualifica o serviço
+ *     ("Preciso de um bom ESCRITÓRIO de advocacia"), e não "Procuro QUEM COMPRE consultoria" nem "Quero VENDER";
+ *   - em inglês o qualificador desconhecido vem antes do serviço e também cabe ("We need a MARITIME lawyer"), salvo
+ *     depois de "to" ("We need TO SELL consulting") e o que abre outra coisa (preposição, conjunção, pronome,
+ *     contraparte).
+ * Nos idiomas novos não há marca aqui, e a abertura não vale: a trava da contraparte é só pt/en/es.
+ */
+function pedidoPedeOServico(palavras: string[]): boolean {
+  const nucleo = nucleoDoServico(palavras);
+  if (!nucleo) return false;
+  const marca = palavras.findIndex((_, k) => marcaDePedidoEm(palavras, k));
+  if (marca < 0 || marca >= nucleo.indice) return false;
+  const { indice: cabeca } = cabecaDoPedido(palavras);
+  if (cabeca > nucleo.indice) return false;
+  const emIngles = MARCAS_DE_PEDIDO_EM_INGLES.has(palavras[marca]) && !palavras.slice(marca + 1, cabeca).includes("to");
+  return palavras.slice(cabeca, nucleo.indice).every(palavra => cabeAntesDoServico(palavra)
+    || (emIngles && !PREPOSICOES.has(palavra) && !CONJUNCOES.has(palavra) && !ABRE_ORACAO.has(palavra)
+      && !QUEM_NAO_E_O_SERVICO.has(palavra) && !PAPEIS_DE_COMERCIO.has(palavra) && !MARCAS_DE_PEDIDO.has(palavra)));
+}
+
+/** O texto pede o serviço que nomeia (`pedidoPedeOServico`)? Para a guarda de concorrência do portão. */
+export function textoPedeOServico(texto: string): boolean {
+  return pedidoPedeOServico(palavrasDe(texto));
+}
+
+/**
+ * O serviço é QUEM PEDE, e não o que se pede: a marca de pedido vem DEPOIS do núcleo e pede outra coisa —
+ * "Contador PROCURA clientes", "Consultoria BUSCA startups", "Escritório de advocacia BUSCA clientes", "Lawyer
+ * SEEKING business clients", "Somos uma consultoria de moda e BUSCAMOS clientes". É a prestadora falando de si, e
+ * a necessidade é o cliente, não o serviço. A leitura do serviço tira a marca de qualquer posição (é marcador
+ * fraco), e sem isto "Contador procura MEI" era lido como "Contador MEI" e valia 100, com e-mail, diante da
+ * concorrente (revisão cética de 16/09).
+ *
+ * Fica como era quando não se sabe o que se pede: sem objeto ("Advogado procura-se"), com o serviço anteposto ao
+ * pedido ("Consultoria tributária: procuro PARA minha empresa") e pedindo outro serviço ("Contador procura
+ * ADVOGADO").
+ */
+function servicoEhQuemPede(palavras: string[]): boolean {
+  const nucleo = nucleoDoServico(palavras);
+  if (!nucleo) return false;
+  const marca = palavras.findIndex((_, k) => k > nucleo.indice && marcaDePedidoEm(palavras, k));
+  if (marca < 0) return false;
+  let objeto = marca + 1;
+  while (objeto < palavras.length && (SAI_DA_FRENTE_DO_PEDIDO.has(palavras[objeto]) || ARTIGOS.has(palavras[objeto])
+    || GENITIVOS.has(palavras[objeto]) || PALAVRAS_SEM_ESPECIALIDADE.has(palavras[objeto]) || MARCADORES_FRACOS.has(palavras[objeto]))) objeto += 1;
+  const pedido = palavras[objeto];
+  if (pedido === undefined || PREPOSICOES.has(pedido) || CONJUNCOES.has(pedido)) return false;
+  return !ehSubstantivoDeServico(pedido) && !ADJETIVOS_DE_SERVICO.has(pedido) && areaDoDireito(palavras, objeto) === null;
+}
+
 /**
  * O serviço oferecido atende a necessidade? A regra dos motores
  * determinísticos (privado e perfis), sobre cada serviço coordenado:
  *   1. a oferta é serviço pela classificação; a necessidade nomeia serviço pelo texto;
  *   2. mesma família: necessidade genérica ("Advogado") é atendida; com
  *      especialidade, a oferta precisa cobri-la (`cobre`); só com público,
- *      precisa tratar daquele público (`cobrePublico`);
+ *      precisa tratar daquele público (`cobrePublico`); a oferta genérica
+ *      atende o público, o destinatário comum e, quando o texto pede o
+ *      serviço, o complemento que as listas não conhecem (`atendeEspecialidades`);
  *   3. "Assessoria jurídica" e "Suporte contábil" pedidos nomeiam a profissão
  *      (Lei 8.906/94, art. 1º, II): atendidos pela advocacia e pela contabilidade;
  *   4. consultoria e assessoria se atendem só com especialidade, e nunca a
@@ -2007,8 +2189,8 @@ function naoAconselha(especialidade: EspecialidadeDoServico, lista: ReadonlySet<
  *      tributária") é atendida pela advocacia e pela contabilidade que cobrem a
  *      área (`AREAS_DAS_PROFISSOES`, exemplo 1 da spec da Glenda, 14/09).
  */
-function umServicoAtende(oferecido: ServicoNomeado, pedido: ServicoNomeado): boolean {
-  if (oferecido.familia === pedido.familia) return atendeEspecialidades(oferecido, pedido);
+function umServicoAtende(oferecido: ServicoNomeado, pedido: ServicoNomeado, complementoDesconhecido = false): boolean {
+  if (oferecido.familia === pedido.familia) return atendeEspecialidades(oferecido, pedido, complementoDesconhecido);
   if (FAMILIAS_DE_APOIO.has(pedido.familia) && PROFISSOES_PELO_ADJETIVO.has(oferecido.familia)) {
     const comoProfissao = pedido.especialidades.filter(pedida => pedida.lemas.has(oferecido.familia)).map(pedida => semOLema(pedida, oferecido.familia));
     const restantes = comoProfissao.filter(pedida => pedida.lemas.size > 0 || pedida.publico.size > 0);
@@ -2016,7 +2198,12 @@ function umServicoAtende(oferecido: ServicoNomeado, pedido: ServicoNomeado): boo
   }
   if (SINONIMOS_PROXIMOS.has(`${oferecido.familia}|${pedido.familia}`)) {
     const pedidas = pedido.especialidades.filter(pedida => pedida.lemas.size > 0 && !naoAconselha(pedida, ASSESSORIAS_QUE_NAO_ACONSELHAM));
-    if (pedidas.length === 0 || oferecido.especialidades.some(oferecida => naoAconselha(oferecida, ASSESSORIAS_QUE_NAO_ACONSELHAM))) return false;
+    // Consultoria e assessoria só se atendem pela especialidade, e a oferta genérica não tem nenhuma: o que
+    // `atendeEspecialidades` abre para a oferta genérica da MESMA família não vale aqui. Sem esta linha
+    // "Consultoria" × "Assessoria de MEI" valia 60 no delta da validação de 16/09 (e valeria 100 com o
+    // destinatário comum); na main é 0.
+    if (pedidas.length === 0 || ehGenerico(oferecido)) return false;
+    if (oferecido.especialidades.some(oferecida => naoAconselha(oferecida, ASSESSORIAS_QUE_NAO_ACONSELHAM))) return false;
     return atendeEspecialidades(oferecido, { familia: pedido.familia, especialidades: pedidas });
   }
   const areas = AREAS_DAS_PROFISSOES[oferecido.familia];
@@ -2035,8 +2222,15 @@ function umServicoAtende(oferecido: ServicoNomeado, pedido: ServicoNomeado): boo
  * Os destinatários que não dizem O QUE se presta, só a quem: "para PEQUENAS
  * EMPRESAS", "para MEI", "for SMALL BUSINESSES". Em lema, como o público da
  * leitura do serviço. Fundadoras, abertura de empresas, exportação e setores
- * não estão aqui de propósito: lista a confirmar com o Roberto (revisão de
- * 15/09 na #127).
+ * não estão aqui de propósito: dizem O QUE se presta, e ficam na nota da
+ * família (revisão de 15/09 na #127).
+ *
+ * Decisão do Roberto de 16/09 (D2 e D4 da validação da #135): o destinatário
+ * desta lista vale 100 dos DOIS lados diante da oferta ou da necessidade que só
+ * nomeia a família, com "para", com "de" ou justaposto — "Contabilidade para
+ * MEI" × "Contador", "Contabilidade" × "Contador para MEI", "Contador de MEI" e
+ * "Contador MEI", "Advocacia" × "Assessoria jurídica para pequenas empresas".
+ * 100 passa do corte de e-mail (70): a lista é o que decide quem recebe aviso.
  */
 const DESTINATARIOS_COMUNS = new Set([
   "empresa", "empresas", "pequena", "pequenas", "pequeno", "pequenos", "media", "medias", "medio", "medios", "grande", "grandes",
@@ -2060,13 +2254,34 @@ const QUALIFICA_QUEM_PRESTA = new Set([
   "bom", "boa", "bons", "boas", "confiavel", "confiaveis", "confianca", "online",
   "senior", "junior", "pleno", "bilingue", "trilingue", "altamente", "freelancer", "autonomo", "autonoma",
   "inscrito", "inscrita", "registrado", "registrada", "habilitado", "habilitada", "oab", "crc", "crea",
+  // A modalidade, como "online" e "autônomo": "Contador PARTICULAR", "Mentoria INDIVIDUAL" (revisão cética de 16/09).
+  "particular", "individual",
   "experienced", "reliable", "good", "qualified", "trusted",
 ]);
 const qualificaQuemPresta = (necessidade: string) => palavrasDe(necessidade).some(palavra => QUALIFICA_QUEM_PRESTA.has(palavra));
 
-/** O serviço oferecido não tem especialidade, e o público dele (se houver) é só destinatário comum. */
+/**
+ * O pedido só acrescenta à família o DESTINATÁRIO comum — com "para" ("Contador para MEI", no público) ou sem ("Contador
+ * de MEI", "Contador MEI", nos lemas) —, fora a profissão que o apoio nomeia ("Assessoria JURÍDICA para MEI" diante de
+ * "Advocacia"). Diante da oferta genérica, vale 100: decisão do Roberto de 16/09 (D2 e D4). Finalidade e outro
+ * público ("para exportar meu café", "para restaurantes", "para pequenas empresas do agronegócio") não passam aqui.
+ */
+function soAcrescentaDestinatarioComum(pedida: EspecialidadeDoServico, familia: string): boolean {
+  if (pedida.servicos.size > 0) return false;
+  const lemas = Array.from(pedida.lemas).filter(lema => lema !== familia);
+  const publico = Array.from(pedida.publico);
+  if (lemas.length === 0 && publico.length === 0) return false;
+  return (lemas.length === 0 || destinatarioNosLemas(lemas)) && publico.every(lema => DESTINATARIOS_COMUNS.has(lema));
+}
+
+/**
+ * O serviço oferecido não tem especialidade, e o que ele acrescenta (se acrescenta) é só destinatário comum — com
+ * "para" ou sem ("Contabilidade para MEI", "Contabilidade de MEI"): o lado da oferta da decisão de 16/09.
+ */
 const soDestinatarioComum = (servico: ServicoNomeado) => servico.especialidades.every(especialidade =>
-  especialidade.lemas.size === 0 && Array.from(especialidade.publico).every(lema => DESTINATARIOS_COMUNS.has(lema)));
+  especialidade.servicos.size === 0
+  && (especialidade.lemas.size === 0 || destinatarioNosLemas(Array.from(especialidade.lemas)))
+  && Array.from(especialidade.publico).every(lema => DESTINATARIOS_COMUNS.has(lema)));
 
 /**
  * Como a necessidade é atendida pelo serviço oferecido:
@@ -2088,6 +2303,10 @@ function comoAtende(oferta: string, categoriaDaOferta: string | null | undefined
   // Chinês e japonês entram pela leitura do serviço (`entenderServico`), com a especialidade de antes do serviço
   // (e6ddfa4 da #127): "律师事务所" oferecido é a advocacia sem especialidade, "税务咨询" a consultoria tributária.
   const oferecidos = servicosDoRotulo(oferta);
+  const palavrasDaNecessidade = palavrasDe(necessidade);
+  // A prestadora que procura clientes não pede o serviço que ela mesma presta: ver `servicoEhQuemPede`.
+  if (servicoEhQuemPede(palavrasDaNecessidade)) return null;
+  const complementoDesconhecido = abreComplementoDesconhecido(palavrasDaNecessidade, pedidos);
   // Os DOIS lados nomeiam a família e nada além dela: "Contabilidade" oferecida diante de "Contador" procurado,
   // "Advocacia" diante de "Advogado", "Empresa de consultoria" diante de "Procura consultoria". Não há o que
   // distinguir — a necessidade nomeia exatamente o que está sendo oferecido, e não uma família da qual a oferta
@@ -2114,7 +2333,8 @@ function comoAtende(oferta: string, categoriaDaOferta: string | null | undefined
   // a leitura do serviço descarta essas palavras sem virar especialidade, e com ele o par valia 100 e mandava
   // e-mail. Ficam em 100 aqui, por decisão já fixada nos testes da #135, o adjetivo sozinho ("Contabilidade" ×
   // "Contábil") e o lugar ("Contador em Campinas/SP"), que na #127 valem 60 (revisão de 15/09 do porte).
-  const nadaAlemDaFamilia = oferecidos.length === 1 && soDestinatarioComum(oferecidos[0]) && !qualificaQuemPresta(necessidade);
+  const semQualificador = !qualificaQuemPresta(necessidade);
+  const nadaAlemDaFamilia = oferecidos.length === 1 && soDestinatarioComum(oferecidos[0]) && semQualificador;
   let melhor: ComoAtende | null = null;
   for (const pedido of pedidos) {
     // Cada alternativa por si: em "Assessoria jurídica e tributária" diante de "Advocacia trabalhista", só a parte
@@ -2124,17 +2344,28 @@ function comoAtende(oferta: string, categoriaDaOferta: string | null | undefined
       : pedido.especialidades.map(especialidade => ({ familia: pedido.familia, especialidades: [especialidade] }));
     for (const oferecido of oferecidos) {
       for (const alternativa of alternativas) {
-        if (!umServicoAtende(oferecido, alternativa)) continue;
+        if (!umServicoAtende(oferecido, alternativa, complementoDesconhecido)) continue;
         const soAFamilia = alternativa.especialidades.every(especialidade =>
           especialidade.publico.size === 0 && Array.from(especialidade.lemas).every(lema => lema === oferecido.familia));
-        // Oferta genérica que cobriu só o público da necessidade fica na nota da
-        // família: ver `ofertaGenericaCobreOPublico`. Sem esta linha ela cairia
-        // no "especifico" abaixo e valeria 100, com e-mail, o que é justamente
-        // o que a outra metade do item 4 põe em decisão.
-        const soPeloPublicoDaOfertaGenerica = alternativa.especialidades.some(especialidade =>
-          ofertaGenericaCobreOPublico(oferecido, especialidade));
-        if (!soAFamilia && !soPeloPublicoDaOfertaGenerica) return "especifico";
-        if (soAFamilia && nadaAlemDaFamilia && pedidos.length === 1 && ehGenerico(pedido) && pedido.familia === oferecido.familia) return "especifico";
+        // Quem oferece a família inteira diante do pedido que acrescenta alguma coisa (decisão do Roberto de 16/09):
+        //   - só o DESTINATÁRIO comum, com "para", "de" ou justaposto, é o mesmo serviço e vale 100 — "Contabilidade"
+        //     × "Contador para MEI", "Contador de MEI", "Contador MEI"; "Advocacia" × "Assessoria jurídica para
+        //     pequenas empresas" (D2 e D4). É o espelho do lado da oferta ("Contabilidade para MEI" × "Contador"),
+        //     e passa do corte de e-mail;
+        //   - com qualificador de quem presta ("Preciso de um bom contador para MEI") fica na nota da família, como
+        //     "Contador sênior" diante de "Contabilidade";
+        //   - finalidade, outro público ou complemento que as listas não conhecem ("logística para exportar meu
+        //     café", "Marketing para restaurantes", "Preciso de advogado marítimo") vale a família (60): a oferta
+        //     genérica não provou o que o pedido acrescenta (D1).
+        if (!soAFamilia && ehGenerico(oferecido)) {
+          if (semQualificador && alternativa.especialidades.every(especialidade => soAcrescentaDestinatarioComum(especialidade, oferecido.familia))) {
+            return "especifico";
+          }
+          melhor = "familia";
+          continue;
+        }
+        if (!soAFamilia) return "especifico";
+        if (nadaAlemDaFamilia && pedidos.length === 1 && ehGenerico(pedido) && pedido.familia === oferecido.familia) return "especifico";
         melhor = "familia";
       }
     }
@@ -3027,6 +3258,12 @@ export const PAPEIS_DE_COMERCIO: ReadonlySet<string> = new Set([
   "distributor", "distributors", "supplier", "suppliers", "buyer", "buyers", "importer", "importers", "exporter", "exporters",
   "reseller", "resellers", "investor", "investors", "proveedor", "proveedores", "inversor", "inversores",
 ]);
+/**
+ * A contraparte (`PAPEIS_DE_COMERCIO` e `SOCIOS`) em lema, a forma em que ela chega às especialidades da leitura do
+ * serviço: "Preciso de consultoria de DISTRIBUIDOR" e "Procuro advogado de INVESTIDOR" não abrem a nota da família
+ * pelo complemento desconhecido (`nomeiaContraparte`, decisão do Roberto de 16/09), pela mesma lista do portão.
+ */
+const CONTRAPARTE_EM_LEMA: ReadonlySet<string> = new Set([...Array.from(PAPEIS_DE_COMERCIO), ...Array.from(SOCIOS)].map(lemaDaEspecialidade));
 /** Distribuidor e fornecedor são o que a logística atende (decisão de 14/09; HAVE_SATISFIES_NEED em server/matching.ts). */
 const PAPEIS_QUE_A_LOGISTICA_ATENDE = new Set([
   "distribuidor", "distribuidora", "distribuidores", "distribuidoras", "fornecedor", "fornecedora", "fornecedores", "fornecedoras",

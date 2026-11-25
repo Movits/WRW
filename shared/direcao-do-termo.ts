@@ -852,10 +852,10 @@ export function mesmoObjetoAMenosDoLugar(objetoA: string, objetoB: string): bool
  * como "Exportação de café do Brasil" × "Importação de café para a Europa",
  * que dizem a rota (`mesmaSubstanciaAMenosDoLugar`, com a mesma guarda).
  *
- * Só fora da concorrência: tirar o lugar nunca junta dois concorrentes. O
- * motor privado já os zera antes de perguntar isto, mas o motor de perfis
- * (`satisfaz`, em server/matching.ts) não aplica a regra dos concorrentes, e o
- * lugar não pode aumentar o que ele já deixa passar: "Exportar café" ×
+ * Só fora da concorrência: tirar o lugar nunca junta dois concorrentes. Os
+ * dois motores (o privado e, desde o N6, o de perfis, em `satisfaz` de
+ * server/matching.ts) já os zeram antes de perguntar isto; a guarda fica aqui
+ * para quem chama esta função sozinha (o portão da IA e a tela): "Exportar café" ×
  * "Exportar café do Brasil" e "Buy coffee" × "Buy coffee from Angola" seguem
  * sem nomear a mesma coisa, como antes do qualificador.
  */
