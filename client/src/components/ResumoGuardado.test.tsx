@@ -682,7 +682,7 @@ describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)",
     expect(duble.utils.googleAgenda.estado.invalidate).toHaveBeenCalled();
     act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", feito: false }));
     expect(toast.warning).toHaveBeenLastCalledWith(
-      "A ação está salva na MarquesaMatch, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+      "A ação está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
   });
 
   // A junção com a H4f: o item que a dona escreveu não volta a "para
@@ -726,7 +726,7 @@ describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)",
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, {}));
     expect(toast.warning).toHaveBeenLastCalledWith(
-      "A ação está salva na MarquesaMatch, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+      "A ação está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
     vi.mocked(toast.warning).mockClear();
     act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "ok" }, {}));
     expect(toast.warning).not.toHaveBeenCalled();

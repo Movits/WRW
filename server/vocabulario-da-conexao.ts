@@ -34,7 +34,7 @@ const CONTEUDO_QUE_O_INSIGHT_NAO_TRAZ: readonly RegExp[] = [
   // Telefone: nove dígitos ou mais separados só por espaço, hífen ou parêntese (valor em reais usa ponto).
   /\d(?:[\s()-]*\d){8,}/,
   /\bsem\s+ressalvas?\b/i,
-  /\b(?:verificad|validad|aprovad|certificad|garantid|confirmad|atestad|auditad)[ao]s?\s+(?:pela|pelo)\s+(?:plataforma|marquesa\s*match|wrw|women\s+rocking|mmm|sistema|equipe|ia\b|intelig)/i,
+  /\b(?:verificad|validad|aprovad|certificad|garantid|confirmad|atestad|auditad)[ao]s?\s+(?:pela|pelo)\s+(?:plataforma|marquesa[\s-]*(?:global[\s-]*)?match|wrw|women\s+rocking|mmm|sistema|equipe|ia\b|intelig)/i,
   new RegExp(String.raw`\b(?:encaminh|aprov|recus|rejeit)\p{L}*\s+(?:\p{L}+\s+){0,3}(?:pedido|solicita\p{L}*|interesse)`, "iu"),
   /\b(?:ignore|ignorar|desconsidere|desconsiderar)\b/i,
   /\binstru[cç](?:ão|ões|ao|oes)\b/i,

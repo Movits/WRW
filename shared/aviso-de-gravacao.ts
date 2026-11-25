@@ -10,8 +10,8 @@
  * versão que não é a vigente. O rascunho jurídico completo de cada versão
  * fica em docs/termos/aviso-de-gravacao-rascunho.md, para a Cris.
  */
-export const VERSOES_DO_AVISO_DE_GRAVACAO = ["2026-11-14", "2026-11-23"] as const;
+export const VERSOES_DO_AVISO_DE_GRAVACAO = ["2026-11-14", "2026-11-23", "2026-11-24"] as const;
 
 export type VersaoDoAvisoDeGravacao = (typeof VERSOES_DO_AVISO_DE_GRAVACAO)[number];
 
-export const VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO: VersaoDoAvisoDeGravacao = "2026-11-23";
+export const VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO: VersaoDoAvisoDeGravacao = "2026-11-24";

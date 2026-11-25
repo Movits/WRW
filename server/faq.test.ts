@@ -46,14 +46,17 @@ async function promptEnviado(pergunta: string) {
 describe("faq.ask: o prompt não nega o que a plataforma já oferece", () => {
   beforeEach(() => llm.invokeLLM.mockClear());
 
-  it("apresenta a plataforma como MarquesaMatch (nome visível desde 23/11/2026)", async () => {
-    const prompt = await promptEnviado("O que é a MarquesaMatch?");
-    expect(prompt).toMatch(/^Você é a assistente virtual da plataforma MarquesaMatch,/);
+  it("apresenta a plataforma como Marquesa Global Match (nome visível desde 24/11/2026)", async () => {
+    const prompt = await promptEnviado("O que é a Marquesa Global Match?");
+    expect(prompt).toMatch(/^Você é a assistente virtual da plataforma Marquesa Global Match,/);
     // Os nomes anteriores (WRW e a sigla MMM) só aparecem na linha que ensina a responder
     // a quem ainda os usa; o MMM por extenso não vai ao prompt, para a IA não repeti-lo.
     const comNomeAntigo = prompt.split("\n").filter(l => /\bMMM\b|\bWRW\b|Women Rocking|Mulheres que Movem/.test(l));
     expect(comNomeAntigo).toHaveLength(1);
-    expect(comNomeAntigo[0]).toMatch(/use sempre MarquesaMatch/);
+    expect(comNomeAntigo[0]).toMatch(/use sempre Marquesa Global Match/);
+    // MarquesaMatch, o nome de 23/11/2026, também é antigo: só na mesma linha.
+    expect(comNomeAntigo[0]).toMatch(/já se chamou MarquesaMatch/);
+    expect(prompt.split("\n").filter(l => /MarquesaMatch/.test(l))).toEqual(comNomeAntigo);
     expect(prompt).not.toMatch(/Mulheres que Movem|Women Moving/i);
   });
 
@@ -122,7 +125,7 @@ describe("faq.ask: teto por IP real", () => {
         res: {},
         user: null,
       } as never)
-      .ask({ question: "O que é a MarquesaMatch?" });
+      .ask({ question: "O que é a Marquesa Global Match?" });
 
   it("60 perguntas do mesmo IP passam; a 61ª leva TOO_MANY_REQUESTS mesmo trocando o X-Forwarded-For", async () => {
     expect(FAQ_LIMIT).toBe(60);
