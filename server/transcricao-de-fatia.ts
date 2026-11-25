@@ -197,6 +197,18 @@ export function tempoEmTexto(segundos: number, comHoras = segundos >= 3600): str
   return comHoras || horas ? `${horas}:${minutosESegundos}` : minutosESegundos;
 }
 
+/**
+ * A regra das vozes do prompt da parte. A mesma voz mantém o rótulo também
+ * quando interrompe, fala por cima ou só responde "sim": no teste manual T22
+ * (25/11/2026), o Falante 2 que interrompeu o Falante 3 virou um Falante 4. A
+ * regra não manda ficar com um rótulo antigo "na dúvida": juntar duas pessoas
+ * num rótulo só não tem conserto pelo texto, e o rótulo a mais a dona corrige
+ * na edição da transcrição (H18), trocando o falante da fala. Quem separa as
+ * vozes é o modelo, ouvindo o áudio; o servidor não tem como juntar rótulos
+ * depois sem o áudio (o perfil de voz é outro trabalho, H3d).
+ */
+export const REGRA_DAS_VOZES = '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo, do começo ao fim do trecho, também quando interrompe outra pessoa, fala ao mesmo tempo que ela, volta depois de um tempo calada ou diz uma palavra só ("sim", "isso", "não"). Interrupção, fala sobreposta e resposta curta não são sinal de voz nova: antes de criar um rótulo, compare a voz com as que já têm rótulo, e crie um novo só para uma voz que ainda não falou. Na fala sobreposta, cada voz é um item, com o próprio rótulo. Nunca use nomes de pessoas no rótulo.';
+
 export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
   // As partes têm até 12 min (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS); o "H:MM:SS"
   // só vale para a bancada, que aceita parte de qualquer tamanho.
@@ -215,14 +227,14 @@ export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos:
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
     `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${tamanhoDoTrecho} de áudio: transcreva até o fim dele.`,
-    '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo. Nunca use nomes de pessoas no rótulo.',
+    REGRA_DAS_VOZES,
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
     "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
   ];
   let proximaRegra = 6;
   if (input.idioma === IDIOMA_AUTOMATICO) linhas.push(`${proximaRegra++}) ${REGRA_DO_IDIOMA_DA_FALA}`);
   if (input.anterior && (input.anterior.falantes.length || input.anterior.ultimasFalas.length)) {
-    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
+    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos, também quando a voz só reaparece no meio de uma interrupção; voz nova (que não é nenhuma destas) recebe o próximo número livre.`);
     // Sem o tempo: o da fala anterior é absoluto (passa dos 600 s), e a regra 2
     // pede o tempo DENTRO do trecho; um exemplo com [10:23] ensinaria o modelo
     // a devolver tempos que o teto da parte achataria.
