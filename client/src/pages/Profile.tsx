@@ -9,12 +9,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
+import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
+import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
+import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
+import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
 import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
 import { DemandasDoPerfil, EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, lerDemandas, type DemandaDetalhada } from "@shared/o-que-preciso";
 import { toast } from "sonner";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { exigeCadastroEmpresarial, mascararCadastroEmpresarial, normalizarCadastroEmpresarial } from "@shared/business-registration";
 import { sortOptionsAlphabetically, sortTextAlphabetically } from "@shared/option-sorting";
 import { rotulosComLegado } from "@shared/setores";
@@ -99,6 +104,38 @@ function TagButton({
   );
 }
 
+// ─── "O que tenho" escrito à mão ou vindo das reuniões ────────────────────────
+// A lista grava os ids das opções fixas e, como mais um item, o texto livre: o
+// "Outros" do cadastro e, desde a N5, o que a dona confirmou das reuniões. A
+// tela mostrava só as opções fixas, e o texto ficava invisível (achado 6 do
+// desenho da N5).
+const IDS_DAS_OPCOES_DO_QUE_TENHO = new Set(WHAT_I_HAVE_OPTIONS.map(opcao => opcao.id));
+function itensEscritos(lista: string[]): string[] {
+  return lista.filter(item => typeof item === "string" && item.trim() && !IDS_DAS_OPCOES_DO_QUE_TENHO.has(item));
+}
+
+function ItensEscritosDoQueTenho({ itens, aoRemover }: { itens: string[]; aoRemover?: (item: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <p className="text-xs text-white/30 uppercase tracking-wider mb-2">{t("reuniaoNoMatch.outrosItens")}</p>
+      <ul className="flex flex-wrap gap-2">
+        {itens.map(item => (
+          <li key={item} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/8 py-1 ps-3 pe-1.5 text-sm text-amber-200/85">
+            <span dir="auto" className="min-w-0 break-words">{item}</span>
+            {aoRemover && (
+              <button type="button" onClick={() => aoRemover(item)} aria-label={t("reuniaoNoMatch.removerItem", { item })}
+                className="rounded-full p-1 text-amber-200/70 hover:bg-white/10 hover:text-white">
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ─── Componente de Seção ──────────────────────────────────────────────────────
 function Section({
   icon, title, subtitle, children,
@@ -159,6 +196,11 @@ export default function Profile() {
   // A segunda camada (14/09): as demandas detalhadas e as categorias que já estavam gravadas ao abrir a edição.
   const [whatINeedDetails, setWhatINeedDetails] = useState<DemandaDetalhada[]>([]);
   const [categoriasJaSalvas, setCategoriasJaSalvas] = useState<string[]>([]);
+  // A versão de "O que tenho" e "O que preciso" que ESTA edição carregou, guardada ao abrir
+  // a edição junto com as listas, e não lida de `data` ao salvar: o perfil pode ser relido
+  // no meio (a reunião confirmou um item em outra aba). O servidor a usa para acrescentar
+  // o que entrou depois, em vez de apagar (server/listas-do-perfil.ts).
+  const [versaoDasListas, setVersaoDasListas] = useState<string | undefined>(undefined);
 
   const startEditing = () => {
     setDisplayName(profile?.displayName || user?.name || "");
@@ -184,6 +226,7 @@ export default function Profile() {
     setWhatINeed(necessidadesSalvas);
     setWhatINeedDetails(lerDemandas((profile as any)?.whatINeedDetails));
     setCategoriasJaSalvas(necessidadesSalvas);
+    setVersaoDasListas(data?.versaoDasListas);
     setEditing(true);
   };
 
@@ -204,7 +247,9 @@ export default function Profile() {
       // primeira mensagem em vez do array cru.
       let msg = err.message;
       try { const issues = JSON.parse(err.message); if (Array.isArray(issues) && issues[0]?.message) msg = issues[0].message; } catch { /* mensagem simples */ }
-      toast.error(msg);
+      // As frases conhecidas do servidor saem no idioma da tela: entre elas, a do perfil
+      // que mudou em outra tela com a edição aberta (CONFLICT; nada foi salvo).
+      toast.error(traduzirMensagemDoServidor(msg, t));
     },
   });
 
@@ -240,6 +285,7 @@ export default function Profile() {
       whatINeed,
       // Cada demanda separada, sem as em branco; o servidor valida de novo.
       whatINeedDetails: demandasParaGravar(whatINeed, whatINeedDetails),
+      versaoDasListas,
     });
   };
 
@@ -380,6 +426,11 @@ export default function Profile() {
           perfil={editing ? { ...(profile ?? {}), displayName, city, activityArea, whatIHave, whatINeed, bio } : profile}
           onCompletar={editing ? undefined : startEditing}
         />
+
+        {/* N5: o que a dona disse nas reuniões ("Sou eu"), esperando a
+            confirmação dela para entrar no perfil. Fora da edição: confirmar
+            grava no perfil, e o Salvar da edição regravaria a lista velha. */}
+        {!editing && <SugestoesDasReunioes />}
 
         {/* ── SEÇÃO 1: QUEM SOU ── */}
         <Section
@@ -621,19 +672,28 @@ export default function Profile() {
           subtitle={t("profile.sections.whatIHaveSubtitle")}
         >
           {editing ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
-                <TagButton
-                  key={opt.id}
-                  icon={opt.icon}
-                  label={opt.label}
-                  selected={whatIHave.includes(opt.id)}
-                  onClick={() => toggleTag(whatIHave, setWhatIHave, opt.id)}
-                />
-              ))}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
+                  <TagButton
+                    key={opt.id}
+                    icon={opt.icon}
+                    label={opt.label}
+                    selected={whatIHave.includes(opt.id)}
+                    onClick={() => toggleTag(whatIHave, setWhatIHave, opt.id)}
+                  />
+                ))}
+              </div>
+              {/* Os itens escritos ("Outros" do cadastro e os que a dona
+                  confirmou das reuniões, N5): cada um com o X, que tira da
+                  lista no Salvar. */}
+              {itensEscritos(whatIHave).length > 0 && (
+                <ItensEscritosDoQueTenho itens={itensEscritos(whatIHave)} aoRemover={item => setWhatIHave(whatIHave.filter(atual => atual !== item))} />
+              )}
             </div>
           ) : (
             profileWhatIHave.length > 0 ? (
+              <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {sortOptionsAlphabetically(WHAT_I_HAVE_OPTIONS.filter(o => profileWhatIHave.includes(o.id)).map(o => ({ ...o, label: t(o.chave) })), i18n.language).map(opt => (
                   <div key={opt.id} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20">
@@ -645,6 +705,8 @@ export default function Profile() {
                     <CheckCircle size={13} className="text-amber-400 ml-auto" />
                   </div>
                 ))}
+              </div>
+              {itensEscritos(profileWhatIHave).length > 0 && <ItensEscritosDoQueTenho itens={itensEscritos(profileWhatIHave)} />}
               </div>
             ) : (
               <div className="text-center py-6">
@@ -691,6 +753,18 @@ export default function Profile() {
             )
           )}
         </Section>
+
+        {/* A Google Agenda (H16b): só aparece com a função disponível no
+            servidor; fora da edição, como a zona de risco abaixo. */}
+        {!editing && <ConexaoGoogleAgenda />}
+
+        {/* As chaves de acesso (A7): entrar com Face ID ou digital. Só aparece
+            com a função disponível neste endereço e fora da casca das lojas. */}
+        {!editing && <ChavesDeAcesso />}
+
+        {/* Entrar com a conta Google (A8): ligar e desligar. Aparece com a função
+            ligada no servidor ou com uma conta Google já ligada. */}
+        {!editing && <ContaGoogleNoPerfil />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}

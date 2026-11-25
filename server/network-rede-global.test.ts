@@ -74,6 +74,8 @@ function redeDeTeste(opcoes: {
     new Set(ids.filter(id => !(opcoes.outraSemTermo && id === 20))));
   estado.responder = (sql, params) => {
     if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return []; // garantirCodigosAnonimos
+    // A janela das contas de entidade (a que traz o not exists do convênio): sem entidade nesta rede.
+    if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
     if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return [[2, OUTRA, "NW-BBBBBB"]];
     if (/from `private_contacts`/.test(sql)) return [[1, DONA, "NW-AAAAAA"]];
     if (/from `users`/.test(sql)) return opcoes.outraInativa && filtraAtivas(sql) ? [[10, DONA]] : [[10, DONA], [20, OUTRA]];
@@ -121,12 +123,37 @@ describe("rede global — privacidade é regra de consulta", () => {
     redeDeTeste();
     await lerRedeGlobalAnonima({ excetoDona: DONA });
     const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
-    expect(leituras).toHaveLength(1);
-    const [leitura] = leituras;
-    expect(leitura.sql).toMatch(/^select `id`, `ownerId`, `codigo_anonimo` from `private_contacts`/);
-    expect(leitura.sql).toContain("`private_contacts`.`disponivel_rede_global` = ?");
-    expect(leitura.sql).toContain("`private_contacts`.`codigo_anonimo` is not null");
-    for (const coluna of COLUNAS_PESSOAIS) expect(leitura.sql).not.toContain(`\`${coluna}\``);
+    // Duas janelas: a das donas comuns e a das contas de entidade.
+    expect(leituras).toHaveLength(2);
+    for (const leitura of leituras) {
+      expect(leitura.sql).toMatch(/^select `private_contacts`\.`id`, `private_contacts`\.`ownerId`, `private_contacts`\.`codigo_anonimo` from `private_contacts`/);
+      expect(leitura.sql).toContain("`private_contacts`.`disponivel_rede_global` = ?");
+      expect(leitura.sql).toContain("`private_contacts`.`codigo_anonimo` is not null");
+      for (const coluna of COLUNAS_PESSOAIS) expect(leitura.sql).not.toContain(`\`${coluna}\``);
+    }
+  });
+
+  it("a autorização da dona filtra no SQL, antes do teto; a entidade tem janela própria, sem convênio vencido nem associado ativado", async () => {
+    redeDeTeste();
+    estado.responder = (sql) => {
+      if (/from `document_versions`/.test(sql)) return [["termo-vigente"]];
+      return undefined;
+    };
+    await lerRedeGlobalAnonima({ excetoDona: DONA });
+    const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
+    expect(leituras).toHaveLength(2);
+    for (const leitura of leituras) {
+      // A conta ativa e o termo do Smart Match entram ANTES do limit (sem isto, a janela vinha de donas descartadas depois).
+      const antesDoLimit = leitura.sql.slice(0, leitura.sql.lastIndexOf(" limit "));
+      expect(antesDoLimit).toContain("`users`.`isActive` = ?");
+      expect(antesDoLimit).toMatch(/exists \(select .* from `consents`/);
+      expect(leitura.params).toContain("termo-vigente");
+    }
+    const [comuns, deEntidades] = leituras;
+    expect(comuns.sql).toContain("`users`.`isEntidade` = ?");
+    expect(comuns.sql).not.toContain("not exists");
+    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidades`/);
+    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidade_membros`/);
   });
 
   it("a projeção que pode sair tem só ID anônimo, O que tenho e O que preciso", async () => {
@@ -398,6 +425,7 @@ describe("rede global — tetos de trabalho", () => {
     const naoCasam = (ids: number[]) => ids.filter(id => id >= 10_000 && id < 10_000 + (opcoes.casamAPartirDe ?? 0));
     estado.responder = (sql, params) => {
       if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return [];
+      if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
       if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return outrosIds.map(id => [id, donaDe(id), `NW-${id}`]);
       if (/from `private_contacts`/.test(sql)) return meusIds.map(id => [id, DONA, `NW-${id}`]);
       if (/from `users`/.test(sql)) {
@@ -474,5 +502,43 @@ describe("rede global — SIM/NÃO por contato", () => {
   it("contato de outra dona (0 linhas): não encontrado, sem revelar se existe", async () => {
     estado.responder = sql => (/^update/.test(sql) ? { affectedRows: 0 } : undefined);
     await expect(definirDisponibilidade(DONA, 999, true)).rejects.toBeInstanceOf(ContatoNaoEncontrado);
+  });
+
+  it("o associado ativado (N3) decide por si: a entidade não devolve a cópia à rede, e nada é gravado", async () => {
+    estado.responder = sql => (/from `entidade_membros`/.test(sql) ? [[7]] : undefined);
+    await expect(definirDisponibilidade(DONA, 5, true)).rejects.toMatchObject({ name: "AssociadoAtivado", message: "ASSOCIADO_ATIVADO" });
+    const [leitura] = estado.consultas.filter(c => /from `entidade_membros`/.test(c.sql));
+    expect(leitura.sql).toContain("`entidade_membros`.`owner_id` = ?");
+    expect(leitura.sql).toContain("`entidade_membros`.`estado` = ?");
+    expect(leitura.params).toEqual(expect.arrayContaining([DONA, 5, "ativado"]));
+    expect(estado.consultas.some(c => /^update `private_contacts`/.test(c.sql))).toBe(false);
+  });
+
+  it("tirar o associado ativado da rede continua livre (o NÃO não consulta a base da entidade)", async () => {
+    estado.responder = sql => (/from `entidade_membros`/.test(sql) ? [[7]] : undefined);
+    await expect(definirDisponibilidade(DONA, 5, false)).resolves.toEqual({ disponivel: false });
+  });
+});
+
+// Revisão da N5: a reunião acrescenta no fim de "O que tenho" e das demandas da dona; acima do teto de itens por
+// lado, o corte pelos primeiros tirava do cruzamento justamente o item que ela acabou de confirmar.
+describe("rede global — o perfil da membra acima do teto de itens: o mais novo cruza", () => {
+  it("o item mais novo de O que tenho entra no cruzamento; o corte tira os mais antigos", async () => {
+    const antigos = Array.from({ length: TETO_DE_ITENS_POR_LADO }, (_, i) => `Item antigo número ${i + 1}`);
+    redeDeTeste({ membra: { userId: 30, whatIHave: JSON.stringify([...antigos, "Capital para expansão"]), whatINeed: "[]" } });
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    const comMembra = resposta.conexoes.find(c => c.origem === "NETWORK_PLATFORM_MATCH");
+    expect(comMembra?.encontros).toEqual([expect.objectContaining({ tem: "Capital para expansão", precisa: "Capital para expansão" })]);
+  });
+
+  it("a demanda mais nova de O que preciso também", async () => {
+    const antigas = Array.from({ length: TETO_DE_ITENS_POR_LADO }, (_, i) => ({ id: `d${i}`, category: "outra_necessidade", description: `Demanda antiga número ${i + 1}` }));
+    redeDeTeste({ membra: {
+      userId: 30, whatIHave: "[]", whatINeed: JSON.stringify(["outra_necessidade"]),
+      whatINeedDetails: JSON.stringify([...antigas, { id: "nova", category: "outra_necessidade", description: "Distribuição de medicamentos" }]),
+    } });
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    const comMembra = resposta.conexoes.find(c => c.origem === "NETWORK_PLATFORM_MATCH");
+    expect(comMembra?.encontros).toEqual([expect.objectContaining({ tem: "Distribuição de medicamentos", precisa: "Distribuição de medicamentos" })]);
   });
 });

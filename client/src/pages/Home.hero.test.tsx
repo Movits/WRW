@@ -125,7 +125,7 @@ describe("Home — Hero", () => {
     const texto = document.body.textContent ?? "";
     // Anti-vacuidade: a página renderizou e o nome próprio continua lá.
     expect(texto).toMatch(/Business Match/);
-    expect(texto.replace(/Smart Match|Business Match(es)?/gi, "")).not.toMatch(/match/i);
+    expect(texto.replace(/Marquesa Global Match|Smart Match|Business Match(es)?/gi, "")).not.toMatch(/match/i);
   });
 
   it("nenhum lugar da página fala em 33 países", () => {

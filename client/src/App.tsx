@@ -4,7 +4,8 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
-import InactivityGuard from "./components/InactivityGuard";
+import { RetomadaDasPartes } from "./components/RetomadaDasPartes";
+import { RetomadaDosDescartes } from "./components/RetomadaDosDescartes";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { PageTransition } from "./components/PageTransition";
 import { PrivacyPage, TermsPage } from "@/pages/LegalPage";
@@ -34,6 +35,17 @@ const Memory = lazy(() => import("./pages/Memory"));
 const IntelligentMatches = lazy(() => import("./pages/IntelligentMatches"));
 const MeuNetworkInteligente = lazy(() => import("./pages/MeuNetworkInteligente"));
 const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork"));
+const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
+const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
+const Agenda = lazy(() => import("./pages/Agenda"));
+const PainelDaEntidade = lazy(() => import("./pages/PainelDaEntidade"));
+const ConviteDaEntidade = lazy(() => import("./pages/ConviteDaEntidade"));
+const AtivarCadastro = lazy(() => import("./pages/AtivarCadastro"));
+const ConviteDaReuniao = lazy(() => import("./pages/ConviteDaReuniao"));
+const ReuniaoCompartilhada = lazy(() => import("./pages/ReuniaoCompartilhada"));
+const EquipeDaPasta = lazy(() => import("./pages/EquipeDaPasta"));
+const ConviteDaEquipe = lazy(() => import("./pages/ConviteDaEquipe"));
+const ReuniaoDaEquipe = lazy(() => import("./pages/ReuniaoDaEquipe"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -49,15 +61,17 @@ function PageLoader() {
           <div className="w-12 h-12 rounded-full border-2 border-amber-500/20 border-t-amber-500 animate-spin" />
           <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-amber-500/10 border-b-amber-400/50 animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.5s" }} />
         </div>
-        <span className="text-sm font-medium tracking-wide text-white">WRW</span>
+        <span className="text-sm font-medium tracking-wide text-white">Marquesa Global Match</span>
       </div>
     </div>
   );
 }
 
 /**
- * Uma tela autenticada: a guarda de acesso, o corte por inatividade e o
- * cabeçalho com o menu global, montado UMA vez, aqui.
+ * Uma tela autenticada: a guarda de acesso e o cabeçalho com o menu global,
+ * montado UMA vez, aqui. Não há mais corte por inatividade (saiu em 10/11/2026,
+ * pedido do Roberto): a sessão dura 90 dias desde o último uso, e quem decide
+ * quando ela acaba é o servidor (server/duracao-da-sessao.ts).
  *
  * Pedido do Rosber em 14/09/2026: "o ideal é que o menu fique sempre visível na
  * página. Entra em oportunidades: o menu some. Para acessar o menu de novo ele
@@ -73,6 +87,12 @@ function PageLoader() {
  *
  * Exportada só para o teste montá-la sozinha (App.tela-autenticada.test.tsx);
  * quem usa é o Router logo abaixo.
+ *
+ * Aqui também moram as retomadas da gravação em partes: a dos descartes que não
+ * terminaram (G13b, components/RetomadaDosDescartes.tsx) e a das partes que
+ * ficaram no aparelho e dos fins que o servidor não confirmou (G13c,
+ * components/RetomadaDasPartes.tsx). Uma vez por tela logada, no mesmo lugar em
+ * todas, para elas seguirem montadas de uma tela a outra.
  */
 export function TelaAutenticada({
   children,
@@ -88,10 +108,10 @@ export function TelaAutenticada({
 }) {
   return (
     <ProtectedRoute {...guarda}>
-      <InactivityGuard>
-        {!cabecalhoProprio && <AppHeader />}
-        {children}
-      </InactivityGuard>
+      <RetomadaDosDescartes />
+      <RetomadaDasPartes />
+      {!cabecalhoProprio && <AppHeader />}
+      {children}
     </ProtectedRoute>
   );
 }
@@ -113,7 +133,20 @@ function Router() {
         <Route path={"/forgot-password"} component={ForgotPassword} />
         <Route path={"/reset-password"} component={ResetPassword} />
 
-        {/* Rota de onboarding — protegida, mas sem InactivityGuard e, de
+        {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
+            caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
+        <Route path="/r/:token" component={ReuniaoAberta} />
+
+        {/* O convite de uma entidade ao app (a base das associações, N1): público, sem conta.
+            O caminho é ROTA_DO_CONVITE_DA_ENTIDADE, de shared/entidades.ts; /convite/:token é
+            o convite para uma reunião (R1b), mais abaixo. */}
+        <Route path="/convite-da-entidade/:token" component={ConviteDaEntidade} />
+
+        {/* A ativação do cadastro importado (N3): o link de uso único que a entidade
+            distribui; público, sem conta. O caminho é ROTA_DA_ATIVACAO, de shared/entidades.ts. */}
+        <Route path="/ativar/:token" component={AtivarCadastro} />
+
+        {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra
             rota protegida devolve a pessoa para cá (ver ProtectedRoute), e um
             menu aqui seria um beco sem saída. */}
@@ -210,16 +243,97 @@ function Router() {
         {/* Assistente de Reuniões — gravação e transcrição privada. A isenção
             vale para a tela inteira: a página monta o cabeçalho ACIMA dos seus
             três ramos (lista, nova reunião, detalhe), e não dentro de um deles
-            — montado só na lista, os outros dois ficavam sem menu nenhum. */}
+            — montado só na lista, os outros dois ficavam sem menu nenhum.
+            A URL escolhe o ramo (shared/rotas.ts): /gravar é o gravador, o
+            link exclusivo e a primeira tela depois do login (pedido da cliente
+            de 20/10/2026); /meetings/:id é o detalhe; /meetings, a lista.
+            Os três blocos ficam idênticos, sem key: assim montam a MESMA
+            instância da página, e a gravação em curso não se perde entre eles
+            (App.cabecalho-de-todas-as-telas.test.ts confere). */}
+        <Route path="/gravar">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/meetings/:id">
+          <TelaAutenticada cabecalhoProprio>
+            <Meetings />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/meetings">
           <TelaAutenticada cabecalhoProprio>
             <Meetings />
           </TelaAutenticada>
         </Route>
 
+        {/* As participantes (R1b): o convite por link (/convite/{token}, só
+            logada; o login volta para cá) e a reunião compartilhada com a
+            participante, a leitura dela, fora do detalhe da dona. Os caminhos
+            são ROTA_DO_CONVITE e ROTA_DA_REUNIAO_COMPARTILHADA, de shared/rotas.ts. */}
+        <Route path="/convite/:token">
+          <TelaAutenticada>
+            <ConviteDaReuniao />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/reunioes-compartilhadas/:id">
+          <TelaAutenticada>
+            <ReuniaoCompartilhada />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Os espaços de equipe (R2): o convite (/convite-da-equipe/{token}, só
+            logada), a equipe da pasta (reuniões, tarefas, agenda e membras) e a
+            reunião da equipe lida pela membra. Os caminhos são de shared/rotas.ts. */}
+        <Route path="/convite-da-equipe/:token">
+          <TelaAutenticada>
+            <ConviteDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId/reunioes/:id">
+          <TelaAutenticada>
+            <ReuniaoDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId">
+          <TelaAutenticada>
+            <EquipeDaPasta />
+          </TelaAutenticada>
+        </Route>
+
+        {/* A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora",
+            que abre o /gravar com a reunião marcada. O caminho é
+            ROTA_DA_AGENDA, de shared/rotas.ts. */}
+        {/* O painel da entidade (a base das associações, N1): só a conta com o poder
+            de entidade; o servidor recusa as outras (entidadeProcedure). */}
+        <Route path="/entidade">
+          <TelaAutenticada>
+            <PainelDaEntidade />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/agenda">
+          <TelaAutenticada>
+            <Agenda />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/memory">
           <TelaAutenticada cabecalhoProprio>
             <Memory />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Próximas ações (H5a): o que a dona confirmou nos resumos das reuniões
+            e o que anotou à mão. O caminho é ROTA_DAS_PROXIMAS_ACOES, de
+            shared/proximas-acoes.ts. */}
+        <Route path="/proximas-acoes">
+          <TelaAutenticada>
+            <ProximasAcoes />
           </TelaAutenticada>
         </Route>
 

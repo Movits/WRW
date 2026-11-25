@@ -11,6 +11,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { rotuloDoCampo } from "@/components/CompletudeDoContato";
 import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
+import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
 
 /**
  * Meu Network Inteligente — o painel da rede particular (pedido do Nicolas,
@@ -34,6 +35,12 @@ import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
 // 20 s de reunião não são "0 min".
 function emMinutos(segundos: number) {
   return segundos > 0 ? Math.max(1, Math.round(segundos / 60)) : 0;
+}
+
+// O limite por reunião é o da gravação em partes desde a G13b (12 h): em horas
+// inteiras e para baixo, para a tela nunca prometer mais do que o servidor aceita.
+function emHoras(segundos: number) {
+  return Math.floor(segundos / 3600);
 }
 
 const CARTAO = "rounded-2xl border border-white/[0.08] bg-[#211e1b]/90";
@@ -149,7 +156,7 @@ export default function MeuNetworkInteligente() {
     onError: () => toast.error(t("networkInteligente.global.error")),
   });
   const dados = resumo.data;
-  const limite = emMinutos(minutos.data?.limitePorReuniaoSegundos ?? dados?.minutos.limitePorReuniaoSegundos ?? 0);
+  const limiteEmHoras = emHoras(minutos.data?.limitePorReuniaoSegundos ?? dados?.minutos.limitePorReuniaoSegundos ?? 0);
   const registro = conexoes.data;
   const contagem = registro?.termoAceito ? registro.contagem : null;
   // Com o termo e o registro lido, o número; sem o termo, o traço; em erro ou carregando, o traço também — nunca um zero inventado.
@@ -178,7 +185,7 @@ export default function MeuNetworkInteligente() {
           ) : (
             <>
               <section aria-label={t("networkPanel.title")} className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
-                <Indicador rotulo={t("networkPanel.meetings")} valor={dados.reunioes.total} icone={Mic} href="/meetings"
+                <Indicador rotulo={t("networkPanel.meetings")} valor={dados.reunioes.total} icone={Mic} href={ROTA_DAS_REUNIOES}
                   detalhe={t("networkPanel.meetingsDetail", { transcritas: dados.reunioes.transcritas })} />
                 <Indicador rotulo={t("networkPanel.contacts")} valor={dados.contatos.total} icone={Users} href="/network"
                   detalhe={t("networkPanel.contactsDetail")} />
@@ -232,7 +239,8 @@ export default function MeuNetworkInteligente() {
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/50">{t("networkPanel.minutesLimit")}</p>
-                    <p className="mt-1 text-2xl font-black tabular-nums">{t("networkPanel.minutesValue", { minutos: limite })}</p>
+                    <p className="mt-1 text-2xl font-black tabular-nums">{t("networkPanel.hoursValue", { horas: limiteEmHoras })}</p>
+                    {/* O limite em horas vale para a gravação e para o arquivo enviado, que vão em partes (H9a, H9b, H9c e G14). */}
                     <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkPanel.minutesLimitHelp")}</p>
                   </div>
                   <div>
@@ -245,7 +253,7 @@ export default function MeuNetworkInteligente() {
                 </div>
                 <div className="mt-5 rounded-xl border border-[#c98f70]/25 bg-[#c98f70]/[0.06] p-4">
                   <p className="font-semibold text-[#efcba8]">{t("networkPanel.moreTime")}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-white/55">{t("networkPanel.moreTimeUnavailable", { minutos: limite })}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-white/55">{t("networkPanel.moreTimeUnavailable", { horas: limiteEmHoras })}</p>
                   {(!minutos.data || !minutos.data.ampliacao.disponivel) && (
                     <p className="mt-1 text-xs leading-relaxed text-white/45">{t("networkInteligente.minutes.dependsOnPayment")}</p>
                   )}
@@ -255,8 +263,8 @@ export default function MeuNetworkInteligente() {
               <section aria-labelledby="nwi-atalhos" className="mt-8">
                 <h2 id="nwi-atalhos" className="mb-3 text-lg font-bold">{t("networkPanel.actionsTitle")}</h2>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Atalho href="/meetings" icone={Mic} titulo={t("networkPanel.actionRecord")}
-                    descricao={t("networkPanel.actionRecordDesc", { minutos: limite })}>
+                  <Atalho href={ROTA_GRAVAR} icone={Mic} titulo={t("networkPanel.actionRecord")}
+                    descricao={t("networkPanel.actionRecordDesc", { horas: limiteEmHoras })}>
                     <span className="mt-3 block rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-white/50">
                       {t("networkPanel.consentNotice")}
                     </span>

@@ -19,7 +19,7 @@ import { nucleoDoTermo } from "../shared/direcao-do-termo";
 import {
   contactAssets, contactNeeds, aiMatchSuggestions, contactContexts,
   enrichmentSessions, enrichmentMessages, enrichmentSuggestions,
-  meetings, meetingContactSuggestions, contextParticipants,
+  meetings, meetingContactSuggestions, contextParticipants, proximasAcoes, entidadeMembros,
 } from "../drizzle/schema";
 
 /**
@@ -119,6 +119,26 @@ describe("Exclusão — o contato leva TODO o rastro junto (executado)", () => {
     expect(reuniao?.colunas).toContain("owner_id");
     // e a reunião em si nunca é apagada
     expect(tabelasApagadas()).not.toContain(meetings);
+  });
+
+  it("as próximas ações (H5a) ficam com a dona, sem o contato: o ponteiro é anulado, só nas ações dela", async () => {
+    await apagarRastroDoContato(fakeDb, "dona-1", 42);
+    const acoes = atualizacoes.find(operacao => operacao.tabela === proximasAcoes);
+    expect(acoes?.valores).toEqual({ contactId: null, updatedAt: expect.any(Number) });
+    expect(acoes?.colunas).toEqual(["owner_id", "contact_id"]);
+    expect(tabelasApagadas()).not.toContain(proximasAcoes);
+  });
+
+  it("o associado de uma entidade vira removido: some o documento, o contato e a CNAE cifrados, fica só o HMAC (lista de bloqueio)", async () => {
+    await apagarRastroDoContato(fakeDb, "dona-1", 42);
+    const membro = atualizacoes.find(operacao => operacao.tabela === entidadeMembros);
+    expect(membro?.valores).toMatchObject({
+      estado: "removido", contactId: null, documentoCifrado: null, contatoCifrado: null,
+      cnaePrincipal: null, cnaesSecundarios: null, referenciaDaEntidade: null, ativacaoHash: null,
+    });
+    expect(Object.keys(membro?.valores ?? {})).not.toContain("documentoHmac");
+    expect(membro?.colunas).toEqual(["owner_id", "contact_id"]);
+    expect(tabelasApagadas()).not.toContain(entidadeMembros);
   });
 
   it("as mensagens do enriquecimento caem ANTES das sessões — queda no meio não deixa órfão inalcançável", async () => {

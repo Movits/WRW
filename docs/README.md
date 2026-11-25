@@ -26,9 +26,23 @@ diverge do código, vale o código.
 - [arquitetura/decisoes-em-aberto.md](./arquitetura/decisoes-em-aberto.md): as
   decisões de produto (D1, D2…) que travam ou mudam a implementação.
 - [arquitetura/decisoes-tomadas.md](./arquitetura/decisoes-tomadas.md): as decisões
-  datadas que já valem no código (quando, quem decidiu e onde está).
+  datadas que já valem no código, ou nas PRs já planejadas (quando, quem decidiu e onde
+  está).
 - [arquitetura/modelo-de-dados.md](./arquitetura/modelo-de-dados.md): é **projeto em
   Postgres**. A fonte do banco real é `drizzle/schema.ts`, com as migrações de `drizzle/`.
+- [arquitetura/gravador-de-reunioes.md](./arquitetura/gravador-de-reunioes.md): o
+  gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
+  agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
+  em 10/11, 12/11 e 15/11).
+- [arquitetura/entidades.md](./arquitetura/entidades.md): a base das associações
+  (DOC-4): a entidade como conta, o ID interno de cada associado, o CNPJ só em HMAC e
+  cifrado, a CNAE só como oferta, o convênio, a importação de 30 mil cadastros e as
+  pendências de LGPD do Dr. Ronei (decisões de 22/11/2026; o código é a N1).
+- [arquitetura/sala-de-video.md](./arquitetura/sala-de-video.md): a sala de vídeo dentro
+  do app, estudada e decidida pelo Roberto em 24/11/2026 (Daily em São Paulo, depois da
+  R1b): opções, custo por hora de reunião e o orçamento, o que muda no Render, gravação
+  na fila de partes, quem entra (com visitante sem conta), LGPD, app das lojas e PRs.
+  Nada dele está no código ainda.
 
 ## Operação
 
@@ -162,6 +176,17 @@ uma faixa no topo que diz isso.
   F1: traduzir as três telas em português fixo).
 - **D1, D2…:** as decisões de produto em
   [decisoes-em-aberto.md](./arquitetura/decisoes-em-aberto.md).
+- **Códigos do gravador:** os códigos de PR do plano do gravador de reuniões, em
+  [gravador-de-reunioes.md](./arquitetura/gravador-de-reunioes.md): A1 a A8 (acesso e
+  navegação); G1a, G1b, G2 a G10, G13 e G14 (o gravador e a transcrição de reuniões
+  longas); H1r, H3 a H16 e H9b (resumo, perguntas, agenda e as outras funções em volta
+  da reunião); R1 (reunião compartilhada); D1 (detalhe da reunião); S (sessão ocupada);
+  DOC-0 (o próprio desenho); e DOC-1 e DOC-2 (as decisões de 12/11 a 15/11 e o desenho
+  atualizado depois da fila). A numeração tem lacunas: a G1 virou G1a e G1b, da H1 sobrou
+  a H1r, a H2 e a G11 foram absorvidas pela D1, e a G12 saiu do plano. Em 15/11, algumas
+  foram divididas em PRs menores, como a H4 (H4a1, H4a2, H4b, H4c e H4d) e a G13 (G13a e
+  G13b). Valem só dentro desse plano e não são os ajustes A1 a A14 nem as decisões D1, D2…
+  acima.
 
 **Processo e operação**
 

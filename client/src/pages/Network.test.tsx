@@ -60,6 +60,8 @@ vi.mock("@/lib/trpc", () => ({
       assetsNeeds: { useQuery: () => ({ data: { possui: [], procura: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() }) },
       removeAsset: duble.registrar("removeAsset"),
       removeNeed: duble.registrar("removeNeed"),
+      addItem: duble.registrar("addItem"),
+      editItem: duble.registrar("editItem"),
       create: duble.registrar("create"),
       update: duble.registrar("update"),
       delete: duble.registrar("delete"),
@@ -282,7 +284,7 @@ describe("Minha Rede — erro de consulta não é rede vazia", () => {
     expect(duble.refetch).toHaveBeenCalledTimes(1);
   });
 
-  it("erro fora do envelope tRPC (rede fora, 429 em texto puro): o genérico traduzido, nunca 'Failed to fetch'", () => {
+  it("erro fora do envelope tRPC (rede fora, 502 em HTML): o genérico traduzido, nunca 'Failed to fetch'", () => {
     servidorResponde(() => ({ isError: true, error: { message: "Failed to fetch" } }));
     render(<Network />);
 

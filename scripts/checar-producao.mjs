@@ -32,14 +32,16 @@
 //   aprovada (não nasce rejeitada pelo compliance) E há ao menos uma conta Ouro/
 //   presidente/admin REAL com perfil, e o prompt dele leva setor/possui/procura
 //   dessas contas ao Gemini. O exame imprime esse número como INFO antes de criar.
-// - O Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega
-//   não é verificada.
+// - O Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o
+//   manda à Resend (TLD reservado, nunca entrega), então não há envio nem devolução.
 // - O contato QA fica marcado 'ouro' por poucos segundos; a oportunidade QA
 //   (confidencial, ativa) fica visível para contas Ouro reais até o fim da
 //   execução: dezenas de segundos, mais de dois minutos com --com-ia ou quando a
 //   sondagem do alerta espera os 120 s.
 // - As linhas GOLD_ACERVO_READ e REVOKED_SESSION_ACCESS_ATTEMPT das contas QA ficam
 //   na trilha de auditoria (decisão do Roberto, 02/09/2026); o resto do ruído sai.
+//   (MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ, da consulta das reuniões, R1a,
+//   também ficariam: por isso o exame não abre a consulta.)
 // - Os routers de rede/contextos devolvem HTTP 500 com "NOT_FOUND" para contato de
 //   outra dona (dívida conhecida); o exame aceita exatamente isso, não "qualquer erro".
 // - Não rode do mesmo IP de saída de quem está usando o site: o limite da API é por
@@ -53,7 +55,7 @@ import { randomBytes } from "node:crypto";
 import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { parse as analisarEnv } from "dotenv";
-import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente } from "./exame/relatorio.mjs";
+import { Relatorio, Ritmo, avaliar, avaliarNegativa, avaliarTermoGeralVigente, avaliarRedirecionamentoComCache } from "./exame/relatorio.mjs";
 import { planejarLimpeza, planejarFaxinaDuravel, planejarColetaDeConexoes } from "./exame/limpeza.mjs";
 
 // ── Argumentos e ambiente ────────────────────────────────────────────────────
@@ -524,7 +526,7 @@ async function blocoMatch() {
     const itens = lista(d);
     return itens.length >= 1 && itens.every(m => estado.contatos.S.includes(m.contactAId) && estado.contatos.S.includes(m.contactBId));
   });
-  rel.info("o Smart Match dispara um e-mail para o endereço .invalid da conta QA; a entrega não é verificada pelo exame");
+  rel.info("o Smart Match tenta um e-mail para o endereço .invalid da conta QA; o servidor não o manda à Resend (TLD reservado), e o notified_at fica vazio");
   const notificadas = await contar("SELECT COUNT(*) n FROM `ai_match_suggestions` WHERE `owner_id` = ? AND `notified_at` IS NOT NULL", [QA.P.openId]);
   rel.info(`sugestões da presidente QA com notified_at preenchido: ${notificadas}`);
 }
@@ -545,9 +547,17 @@ async function blocoContextosEStorage() {
   if (!checar("upload para o storage (contexts.uploadMedia)", up, d => typeof d?.storagePath === "string" && d.storagePath.startsWith("/manus-storage/contexts/"))) return;
 
   pararSeInterrompido();
-  const proxy = await fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const abrirComoDona = () => fetch(BASE + caminho, { headers: { cookie: P.cookie }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const proxy = await abrirComoDona();
   const location = proxy.headers.get("location") || "";
-  rel.ok("proxy autenticado redireciona a dona (307 + no-store)", proxy.status === 307 && /no-store/.test(proxy.headers.get("cache-control") || "") && !!location, `status ${proxy.status}`);
+  // Segunda abertura, como a tela reaberta: imagem da dona volta com a MESMA URL
+  // assinada e o mesmo cache curto (ver avaliarRedirecionamentoComCache).
+  const proxyDeNovo = await abrirComoDona();
+  const redirecionamento = avaliarRedirecionamentoComCache(
+    { status: proxy.status, cacheControl: proxy.headers.get("cache-control"), location },
+    { status: proxyDeNovo.status, location: proxyDeNovo.headers.get("location") },
+  );
+  rel.ok("proxy autenticado redireciona a dona (307 + private, max-age=300) e repete a URL assinada", redirecionamento.ok, redirecionamento.detalhe);
   if (location) {
     const objeto = await fetch(location, { signal: AbortSignal.timeout(30_000) });
     const bytes = Buffer.from(await objeto.arrayBuffer());
@@ -700,13 +710,28 @@ async function blocoOuro(oppId) {
 }
 
 async function blocoConsentimentoFecho() {
-  const S = estado.sessao.S;
+  const S = estado.sessao.S, P = estado.sessao.P;
   checar("revogar o termo do Smart Match", await S.post("consent.revoke", { type: "termo_smart_match" }), d => d?.success === true);
   checarNegativa("Smart Match volta a barrar após a revogação", await S.get("intelligentMatches.list"), [SEM_CONSENTIMENTO]);
   checar("histórico guarda a revogação (revokedAt)", await S.get("consent.history"), d => lista(d).some(h => h.revokedAt));
-  // A conta QA nunca tem linha em `matches`, então [] não distingue trava de tabela
-  // vazia; o que esta linha prova é que a rota DEGRADA com 200 em vez de 403.
-  checar("matches.list degrada (200 com lista) em vez de 403 sem termo", await S.get("matches.list", {}), d => Array.isArray(d) && d.length === 0);
+  // A conta S chega aqui Bronze (o blocoOuro a revoga, e sem perfil ela cai em
+  // Bronze), e desde a U3 matches.list sai vazio para a Bronze ANTES de olhar o
+  // termo: esta linha prova só a trava do nível, e diz isso.
+  checar("matches.list da Bronze: 200 e lista vazia, antes do termo (U3)", await S.get("matches.list", {}), d => Array.isArray(d) && d.length === 0);
+  // O número das conexões possíveis passa pela trava do termo em qualquer nível:
+  // sem termo, 200 e zero, e não 403.
+  checar("matches.conexoesPossiveis sem termo (Bronze): 200, zero e a lista trancada", await S.get("matches.conexoesPossiveis"),
+    d => d?.total === 0 && d?.listaLiberada === false);
+  // A degradação da LISTA sem termo se prova com quem vê a lista: a presidente QA
+  // também revoga o dela. A conta QA nunca tem linha em `matches`, então [] não
+  // distingue trava de tabela vazia; o que estas linhas provam é que as rotas
+  // DEGRADAM com 200 em vez de 403.
+  if (checar("revogar o termo do Smart Match (presidente QA)", await P.post("consent.revoke", { type: "termo_smart_match" }), d => d?.success === true)) {
+    checar("matches.list degrada (200 com lista) em vez de 403 sem termo (presidente QA, que vê a lista)", await P.get("matches.list", {}),
+      d => Array.isArray(d) && d.length === 0);
+    checar("matches.conexoesPossiveis sem termo (presidente QA): 200, zero e a lista liberada", await P.get("matches.conexoesPossiveis"),
+      d => d?.total === 0 && d?.listaLiberada === true);
+  }
 }
 
 async function blocoSessao() {
@@ -721,7 +746,7 @@ async function blocoSessao() {
 
 async function blocoIA() {
   const P = estado.sessao.P;
-  const faq = await chamar("POST", "faq.ask", { question: "O que é a WRW?" });
+  const faq = await chamar("POST", "faq.ask", { question: "O que é a Marquesa Global Match?" });
   const faqErro = faq.erro || "";
   const emCota = /429|quota|RESOURCE_EXHAUSTED|limite|rate/i.test(faqErro) || faq.status === 429;
   if (emCota) rel.pulado("IA responde (FAQ)", "cota por minuto do Gemini");

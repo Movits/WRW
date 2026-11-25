@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 // abaixo, para não encostar na linha que a PR #117 (Hero) altera.
 import { Mic } from "lucide-react";
 import { montarPracasDoGlobo, type Ligacao, type Praca } from "@/lib/pracas-do-globo";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import {
   Package, BriefcaseBusiness, HandCoins, Handshake, Radar,
   MapPin, MapIcon, Plane, Earth,
@@ -1101,7 +1102,9 @@ export default function Home() {
                     <span className="text-white/15 font-extrabold text-sm tracking-widest" aria-hidden="true">{card.num}</span>
                   </div>
                   <h3 className="font-extrabold text-white text-sm tracking-wide mb-2 leading-snug">{t(`smartNetwork.${card.key}.title`)}</h3>
-                  <p className="text-sm text-white/45 leading-relaxed">{t(`smartNetwork.${card.key}.desc`)}</p>
+                  {/* As horas vão a todos os cartões, e só o de gravar as usa: a
+                      gravação vai até o teto técnico da gravação em partes (G13b). */}
+                  <p className="text-sm text-white/45 leading-relaxed">{t(`smartNetwork.${card.key}.desc`, { horas: GRAVACAO_EM_PARTES_SEGUNDOS_MAX / 3600 })}</p>
                 </div>
               ))}
             </div>
@@ -1263,7 +1266,7 @@ export default function Home() {
           </a>
           <div className="text-center">
             <div className="text-white/40 text-xs mb-1">{t("footer.tagline")}</div>
-            <div>© 2026 WRW — Women Rocking the World. {t("footer.rights")}</div>
+            <div>© 2026 Marquesa Global Match. {t("footer.rights")}</div>
           </div>
           <div className="flex gap-6">
             {/* O link de contato volta quando houver e-mail ou WhatsApp

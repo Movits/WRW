@@ -1,47 +1,45 @@
 import { trpc } from "@/lib/trpc";
-import { UNAUTHED_ERR_MSG } from '@shared/const';
+import { escutarPedidoDeInstalacao } from "@/lib/instalacao-do-app";
+import { destinoPorSessaoVencida } from "@/lib/sessao-vencida";
+import { tratarChunkAntigo } from "@/lib/versao-nova";
+import { toast } from "sonner";
+import i18n from "./i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpBatchLink, TRPCClientError } from "@trpc/client";
+import { httpBatchLink } from "@trpc/client";
+import { CHAMADAS_POR_LOTE_NO_NAVEGADOR } from "@shared/lote-do-trpc";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import "./i18n"; // must be imported before App
 import App from "./App";
-import { getLoginUrl } from "./const";
 import "./index.css";
 
 const queryClient = new QueryClient();
 
-// Depois de um deploy, uma aba aberta antes dele ainda pede os chunks antigos
-// (nomes com hash) e o servidor responde 404 de propósito (fallthrough:false
-// em server/_core/vite.ts); o Vite avisa por este evento antes de a tela cair
-// no ErrorBoundary. Recarregar uma vez traz o index.html novo (que sai com
-// no-cache). A marca no sessionStorage evita laço se a causa for outra.
+// Chunk antigo depois de um deploy: recarrega uma vez, menos com a sessão
+// ocupada (gravando, enviando ou com áudio por enviar), quando avisa e espera a
+// sessão desocupar. As regras e o porquê estão em lib/versao-nova.ts, com teste.
 window.addEventListener("vite:preloadError", event => {
-  const marca = "mmm:recarregado-por-chunk-antigo";
-  try {
-    if (sessionStorage.getItem(marca) === window.location.href) return;
-    sessionStorage.setItem(marca, window.location.href);
-  } catch {
-    // sessionStorage bloqueado: recarrega assim mesmo, uma vez por aba nova.
-  }
-  event.preventDefault();
-  window.location.reload();
+  tratarChunkAntigo(event, {
+    recarregar: () => window.location.reload(),
+    enderecoAtual: () => window.location.href,
+    armazenamento: () => window.sessionStorage,
+    avisar: () => toast.info(i18n.t("sessaoOcupada.versaoNovaDepoisDoEnvio"), { id: "versao-nova", duration: Infinity }),
+    dispensarAviso: () => toast.dismiss("versao-nova"),
+  });
 });
 
+// O Chromium oferece a instalação do app uma vez por carga, às vezes antes de
+// o gravador (carregado sob demanda) montar: a escuta começa aqui, e o pedido
+// fica guardado para a dica do /gravar (lib/instalacao-do-app.ts).
+escutarPedidoDeInstalacao();
+
+// A sessão que vence no meio do uso volta à mesma tela depois do login; as
+// regras (só o "não autenticada" do tRPC, nunca nas páginas públicas) estão em
+// lib/sessao-vencida.ts, com teste.
 const redirectToLoginIfUnauthorized = (error: unknown) => {
-  if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
-
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
-  if (!isUnauthorized) return;
-
-  // Não redirecionar se já está em páginas públicas (evita loop de login duplo)
-  const publicPaths = ["/login", "/register", "/forgot-password", "/reset-password", "/"];
-  const currentPath = window.location.pathname;
-  const isPublicPage = publicPaths.some(p => currentPath === p || currentPath.startsWith(p + "?"));
-  if (isPublicPage) return;
-
-  window.location.href = getLoginUrl();
+  const destino = destinoPorSessaoVencida(error, window.location);
+  if (destino) window.location.href = destino;
 };
 
 queryClient.getQueryCache().subscribe(event => {
@@ -65,6 +63,8 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // O servidor recusa o lote grande demais (shared/lote-do-trpc.ts): o navegador corta antes.
+      maxItems: CHAMADAS_POR_LOTE_NO_NAVEGADOR,
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

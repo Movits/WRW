@@ -212,7 +212,7 @@ describe("PresidentPanel — abas no celular (print de 16/09, 360 px)", () => {
   // `.flex { min-width: 0 }` (index.css) deixava cada botão encolher abaixo do
   // próprio rótulo. O jsdom não calcula layout, então o teste prende as classes
   // que impedem o encolhimento e dão a área de toque; a medição fica no smoke.
-  const ABAS = ["Visão Geral", "Gestão Ouro", "Líderes", "Validações", "Compliance", "Conexões registradas", "Distribuição"];
+  const ABAS = ["Visão Geral", "Gestão Ouro", "Líderes", "Validações", "Compliance", "Conexões registradas", "Reuniões", "Distribuição"];
 
   it("cada aba não encolhe, não quebra e tem 44 px de altura mínima; a fileira rola na horizontal", () => {
     render(<PresidentPanel />);
@@ -242,6 +242,6 @@ describe("PresidentPanel — abas no celular (print de 16/09, 360 px)", () => {
     // O quadrado da coroa não encolhe, e a legenda decorativa só aparece a partir de 640 px.
     const grupo = titulo.parentElement!.parentElement as HTMLElement;
     expect(grupo.firstElementChild).toHaveClass("shrink-0", "w-8", "h-8");
-    expect(screen.getByText("WRW · Backoffice Institucional")).toHaveClass("hidden", "sm:block");
+    expect(screen.getByText("Marquesa Global Match · Backoffice Institucional")).toHaveClass("hidden", "sm:block");
   });
 });

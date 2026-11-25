@@ -46,14 +46,17 @@ async function promptEnviado(pergunta: string) {
 describe("faq.ask: o prompt não nega o que a plataforma já oferece", () => {
   beforeEach(() => llm.invokeLLM.mockClear());
 
-  it("apresenta a plataforma como WRW — Women Rocking the World (marca de 15/09/2026)", async () => {
-    const prompt = await promptEnviado("O que é a WRW?");
-    expect(prompt).toMatch(/^Você é a assistente virtual da plataforma WRW — Women Rocking the World —/);
-    // A sigla antiga só aparece na linha que ensina a responder a quem ainda a usa;
-    // o nome antigo por extenso não vai ao prompt, para a IA não repeti-lo ao visitante.
-    const comNomeAntigo = prompt.split("\n").filter(l => /\bMMM\b|Mulheres que Movem/.test(l));
+  it("apresenta a plataforma como Marquesa Global Match (nome visível desde 24/11/2026)", async () => {
+    const prompt = await promptEnviado("O que é a Marquesa Global Match?");
+    expect(prompt).toMatch(/^Você é a assistente virtual da plataforma Marquesa Global Match,/);
+    // Os nomes anteriores (WRW e a sigla MMM) só aparecem na linha que ensina a responder
+    // a quem ainda os usa; o MMM por extenso não vai ao prompt, para a IA não repeti-lo.
+    const comNomeAntigo = prompt.split("\n").filter(l => /\bMMM\b|\bWRW\b|Women Rocking|Mulheres que Movem/.test(l));
     expect(comNomeAntigo).toHaveLength(1);
-    expect(comNomeAntigo[0]).toMatch(/use sempre WRW/);
+    expect(comNomeAntigo[0]).toMatch(/use sempre Marquesa Global Match/);
+    // MarquesaMatch, o nome de 23/11/2026, também é antigo: só na mesma linha.
+    expect(comNomeAntigo[0]).toMatch(/já se chamou MarquesaMatch/);
+    expect(prompt.split("\n").filter(l => /MarquesaMatch/.test(l))).toEqual(comNomeAntigo);
     expect(prompt).not.toMatch(/Mulheres que Movem|Women Moving/i);
   });
 
@@ -72,6 +75,19 @@ describe("faq.ask: o prompt não nega o que a plataforma já oferece", () => {
     expect(linha).toMatch(/começa em NÃO/);
     expect(linha).toMatch(/ID anônimo/);
     expect(linha).toMatch(/nunca nome, telefone, e-mail, áudio, transcrição ou notas/);
+  });
+
+  it("a gravação vai até 12 horas, com o aviso de hora; o arquivo de áudio ou vídeo, em todos os formatos da tela, também (H9a, H9b, H9c e G14)", async () => {
+    const linha = (await promptEnviado("Quanto tempo posso gravar?")).split("\n").find(l => l.includes("Meu Network Inteligente")) ?? "";
+    expect(linha).toMatch(/grava reuniões gratuitamente, cada uma com até 12 horas/);
+    expect(linha).toMatch(/a cada hora de gravação, a plataforma pede que ela confirme que a gravação continua/);
+    expect(linha).toMatch(/sem a confirmação em 10 minutos, a gravação para e o que foi gravado segue para a transcrição/);
+    expect(linha).toContain("um arquivo de áudio ou vídeo pronto também pode ser enviado (MP3, M4A, MP4, MOV, WAV, OGG, WebM, FLAC ou AAC), também com até 12 horas");
+    // Os 10 minutos e 10 MB eram do envio único, que saiu do gravador na G14:
+    // nem a gravação nem o arquivo os têm mais.
+    expect(linha).not.toMatch(/10 MB/);
+    expect(linha).not.toMatch(/nos outros formatos/);
+    expect(linha).not.toMatch(/grava ou envia reuniões de até 10 minutos/);
   });
 
   it("registro com status de comissão, sem percentual; planos pagos e minutos extras continuam inexistentes", async () => {
@@ -109,7 +125,7 @@ describe("faq.ask: teto por IP real", () => {
         res: {},
         user: null,
       } as never)
-      .ask({ question: "O que é a WRW?" });
+      .ask({ question: "O que é a Marquesa Global Match?" });
 
   it("60 perguntas do mesmo IP passam; a 61ª leva TOO_MANY_REQUESTS mesmo trocando o X-Forwarded-For", async () => {
     expect(FAQ_LIMIT).toBe(60);

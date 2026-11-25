@@ -40,13 +40,15 @@ afterEach(async () => {
 });
 
 describe("AppHeader — o menu global fala o idioma da usuária", () => {
-  it("getMenuItems em inglês: 8 itens, nenhum rótulo ou descrição em português", () => {
+  it("getMenuItems em inglês: 9 itens, nenhum rótulo ou descrição em português", () => {
     const itens = getMenuItems(i18n.getFixedT("en"));
+    // Reuniões em primeiro: o gravador é a primeira tela do app (30/10/2026).
+    // A agenda (H16a) logo depois: é dela que sai o "Gravar agora".
     expect(itens.map(i => i.href)).toEqual([
-      "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/meetings", "/memory", "/intelligent-matches",
+      "/meetings", "/agenda", "/meu-network-inteligente", "/opportunities", "/verification", "/network", "/contexts", "/memory", "/intelligent-matches",
     ]);
     expect(itens.map(i => i.label)).toEqual([
-      "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "Meetings", "AI Memory", "Smart Connections",
+      "Meetings", "Schedule", "My Smart Network", "Opportunities", "Verification", "My Network", "Timeline", "AI Memory", "Smart Connections",
     ]);
     for (const item of itens) {
       for (const pt of PORTUGUES) {
@@ -82,5 +84,24 @@ describe("AppHeader — o menu global fala o idioma da usuária", () => {
     expect(screen.getByText("菜单")).toBeInTheDocument();
     expect(screen.queryByText("Menu")).not.toBeInTheDocument();
     expect(screen.getByTitle("我的资料")).toBeInTheDocument();
+  });
+
+  it("a conta de entidade (N1) vê o Painel da entidade; a conta comum não", async () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: { id: 2, name: "Associação", role: "silver", isEntidade: true },
+      loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    const { unmount } = render(<AppHeader title="Rede" />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /menu/i }), { key: "Enter" });
+    expect((await screen.findByText("Painel da entidade")).closest("a")).toHaveAttribute("href", "/entidade");
+    unmount();
+    vi.mocked(useAuth).mockReturnValue({
+      user: { id: 3, name: "Prata", role: "silver" },
+      loading: false, error: null, isAuthenticated: true, refresh: vi.fn(), logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    render(<AppHeader title="Rede" />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /menu/i }), { key: "Enter" });
+    await screen.findByText("Navegação");
+    expect(screen.queryByText("Painel da entidade")).not.toBeInTheDocument();
   });
 });

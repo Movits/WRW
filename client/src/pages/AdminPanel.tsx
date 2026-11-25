@@ -1,22 +1,30 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useAvisoDeSairFalhou, useSairDaConta } from "@/components/SairDaConta";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import {
   Shield, Users, FileText, AlertTriangle, Activity, Lock,
   Eye, CheckCircle, XCircle, RefreshCw, LogOut, Wifi, Ban,
   Trash2, Server, Clock, Globe, Monitor, Package, Star,
-  ShieldCheck, AlertCircle
+  ShieldCheck, AlertCircle, Building2
 } from "lucide-react";
+import { EntidadesAdmin } from "@/components/admin/EntidadesAdmin";
 import { toast } from "sonner";
 
 const playfairStyle = { fontFamily: '"Playfair Display", serif' };
 
-type TabType = "overview" | "users" | "audit" | "security" | "sessions" | "opportunities";
+type TabType = "overview" | "users" | "audit" | "security" | "sessions" | "opportunities" | "entidades";
 
 export default function AdminPanel() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, navigate] = useLocation();
+  // O Sair confirma antes com gravação, envio ou áudio por enviar nesta aba
+  // (components/SairDaConta.tsx). O diálogo é traduzido; o painel segue em pt-BR.
+  // Se a revogação no servidor falhar, o aviso traduzido diz (o logout do
+  // useAuth relança o erro); a aba sai assim mesmo, como no menu global.
+  const avisarQueSairFalhou = useAvisoDeSairFalhou();
+  const sairDaConta = useSairDaConta(() => { logout().catch(avisarQueSairFalhou); navigate("/"); });
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [lockReason, setLockReason] = useState<Record<number, string>>({});
   const utils = trpc.useUtils();
@@ -103,7 +111,7 @@ export default function AdminPanel() {
 
   const revokeSessionMutation = trpc.admin.revokeUserSessions.useMutation({
     onSuccess: () => {
-      toast.success("Sessão revogada com sucesso");
+      toast.success("Sessões do usuário revogadas");
       sessionsQuery.refetch();
       statsQuery.refetch();
     },
@@ -201,6 +209,7 @@ export default function AdminPanel() {
     { id: "opportunities" as TabType, label: "Oportunidades", icon: Package },
     { id: "audit" as TabType, label: "Auditoria", icon: FileText },
     { id: "security" as TabType, label: "Alertas", icon: AlertTriangle },
+    { id: "entidades" as TabType, label: "Entidades", icon: Building2 },
   ];
 
   return (
@@ -222,7 +231,7 @@ export default function AdminPanel() {
                 style={playfairStyle}
                 className="text-xl font-bold text-white hover:text-[#C98F70] transition-colors"
               >
-                WRW
+                Marquesa Global Match
               </button>
               <p className="text-xs text-gray-400 truncate">Painel Administrativo Seguro</p>
             </div>
@@ -240,12 +249,13 @@ export default function AdminPanel() {
               Dashboard
             </button>
             <button
-              onClick={() => { logout(); navigate("/"); }}
+              onClick={sairDaConta.pedirSaida}
               className="flex flex-shrink-0 items-center gap-2 px-4 py-2 text-sm bg-red-900/30 text-red-400 border border-red-700/50 rounded-lg hover:bg-red-900/50 transition-colors"
             >
               <LogOut className="w-4 h-4" />
               Sair
             </button>
+            {sairDaConta.dialogo}
           </div>
         </div>
       </header>
@@ -268,6 +278,9 @@ export default function AdminPanel() {
             </button>
           ))}
         </div>
+
+        {/* A base das associações (N1): as entidades e o convênio de cada uma. */}
+        {activeTab === "entidades" && <EntidadesAdmin />}
 
         {/* ====================================================
             VISÃO GERAL
@@ -323,14 +336,13 @@ export default function AdminPanel() {
                     { layer: "Rate Limiting API (100 req/min/IP)", status: "Ativo" },
                     { layer: "Rate Limiting OAuth (10 req/min/IP)", status: "Ativo" },
                     { layer: "Logs de Auditoria Imutáveis", status: "Ativo" },
-                    { layer: "Sessões com Expiração (8h)", status: "Ativo" },
+                    { layer: "Sessões com Expiração (90 dias sem uso)", status: "Ativo" },
                     { layer: "RBAC (5 níveis de permissão)", status: "Ativo" },
                     { layer: "Detecção de IP Suspeito", status: "Ativo" },
                     { layer: "Detecção de Múltiplas Sessões", status: "Ativo" },
                     { layer: "Bloqueio por Brute Force (5 tentativas)", status: "Ativo" },
                     { layer: "Headers HTTP (Helmet + HSTS)", status: "Ativo" },
                     { layer: "Anti-Scanner (Nikto, SQLMap, etc.)", status: "Ativo" },
-                    { layer: "Auto-Logout por Inatividade (30min)", status: "Ativo" },
                     { layer: "Revogação Real de Sessão no Banco", status: "Ativo" },
                     { layer: "Verificação de Integridade SHA-256", status: "Ativo" },
                     { layer: "Cookie SameSite=Lax + HttpOnly", status: "Ativo" },
@@ -543,8 +555,10 @@ export default function AdminPanel() {
                           <td className="px-6 py-4">
                             <button
                               onClick={() => {
-                                if (confirm(`Revogar sessão #${session.id}? O usuário será desconectado imediatamente.`)) {
-                                  revokeSessionMutation.mutate({ userId: session.id });
+                                // revokeUserSessions recebe o id da CONTA: era o
+                                // id da linha de sessions, e caía a conta errada.
+                                if (confirm(`Revogar todas as sessões de ${session.userName ?? `#${session.userId}`}? O usuário será desconectado imediatamente.`)) {
+                                  revokeSessionMutation.mutate({ userId: session.userId });
                                 }
                               }}
                               disabled={revokeSessionMutation.isPending}

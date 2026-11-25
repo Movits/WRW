@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PedidoPelaEntidade, type PedidoNaTela } from "@/components/PedidoPelaEntidade";
 
 /**
  * Uma conexão registrada pela plataforma — Meu Network Inteligente, spec da
@@ -20,7 +21,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
  * descarte de quem pede (avancarConexao), e a sincronização não recria o par.
  */
 
-type Lado = { lado: "a" | "b"; tipo: "contato" | "membro"; contactId: number | null; codigoAnonimo: string | null; meu: boolean; originador: boolean; statusComissaoOriginador: string | null };
+type Lado = {
+  lado: "a" | "b"; tipo: "contato" | "membro"; contactId: number | null; codigoAnonimo: string | null; meu: boolean; originador: boolean; statusComissaoOriginador: string | null;
+  /** N2: o lado alheio é associado de uma entidade; o nome dela só com a autorização do convênio. */
+  entidade?: { nome: string | null };
+};
 
 export type ConexaoNaTela = {
   id: string;
@@ -47,6 +52,9 @@ export type ConexaoNaTela = {
   /** A dona já confirmou o fechamento; a conexão espera a confirmação do outro lado. */
   fechamentoConfirmadoPorMim?: boolean;
   lados: Lado[];
+  /** N2: o pedido de contato pela entidade que quem pergunta fez, e se ainda pode pedir. */
+  pedidoPelaEntidade?: PedidoNaTela | null;
+  podePedirPelaEntidade?: boolean;
 };
 
 /**
@@ -106,9 +114,14 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
                 {lado.codigoAnonimo ?? "—"}
               </Link>
             ) : (
-              <span className={`rounded-md border px-2 py-0.5 ${lado.meu ? "border-[#c98f70]/30 bg-[#c98f70]/10 text-[#efcba8]" : "border-white/10 text-white/55"}`}>
+              // inline-block: com o nome da entidade o selo quebra em duas linhas (375 px), e a borda
+              // precisa envolver o bloco inteiro, não cada pedaço da linha.
+              <span data-selo className={`inline-block max-w-full break-words rounded-md border px-2 py-0.5 ${lado.meu ? "border-[#c98f70]/30 bg-[#c98f70]/10 text-[#efcba8]" : "border-white/10 text-white/55"}`}>
                 {lado.tipo === "contato"
                   ? t("networkInteligente.connections.contactSide", { codigo: lado.codigoAnonimo ?? "—" })
+                    + (lado.entidade && !lado.meu
+                      ? ` · ${lado.entidade.nome ? t("pedidoPelaEntidade.membroDe", { nome: lado.entidade.nome }) : t("pedidoPelaEntidade.membroDeEntidade")}`
+                      : "")
                   : t(lado.meu ? "networkInteligente.connections.mySide" : "networkInteligente.connections.memberSide")}
               </span>
             )}
@@ -138,7 +151,12 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
           {conexao.detalhesVisiveis === false
             ? t("networkInteligente.connections.reasonNoAuthorization")
             : conexao.origem === "PLATFORM_MATCH"
-              ? t("networkInteligente.connections.reasonPlatformMatch", { pontuacao: Math.round(conexao.pontuacao ?? 0) })
+              // U3: a nota não chega a quem ainda não vê a lista das conexões
+              // sugeridas (o servidor a manda nula); a frase diz quando ela aparece,
+              // em vez de mostrar "compatibilidade de 0%".
+              ? conexao.pontuacao == null
+                ? t("networkInteligente.connections.reasonPlatformMatchLocked")
+                : t("networkInteligente.connections.reasonPlatformMatch", { pontuacao: Math.round(conexao.pontuacao) })
               : conexao.motivo}
         </p>
       )}
@@ -157,6 +175,10 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
           <>{" · "}{t("networkInteligente.connections.originatorCommission", { status: t(`networkInteligente.connections.commission.${meuOriginador.statusComissaoOriginador}`) })}</>
         )}
       </p>
+
+      {conexao.lados.some(lado => !lado.meu && lado.entidade) && (conexao.pedidoPelaEntidade || conexao.podePedirPelaEntidade) && (
+        <PedidoPelaEntidade conexaoId={conexao.id} pedido={conexao.pedidoPelaEntidade ?? null} podePedir={conexao.podePedirPelaEntidade === true} />
+      )}
 
       {aguardandoOutroLado && (
         <p className="mt-2 text-xs text-[#efcba8]">{t("networkInteligente.connections.closingAwaiting")}</p>

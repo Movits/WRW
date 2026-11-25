@@ -263,10 +263,15 @@ export const contaRouter = router({
           arquivosComFalha: relatorio.arquivosComFalha.length,
           ...chavesParaAuditoria(relatorio.arquivosComFalha),
           passos: relatorio.passos.map(passo => `${passo.nome}=${passo.linhas}`),
+          // A revogação do token da Google Agenda (H16b): "falhou" quer dizer que
+          // a Google não confirmou; a conexão saiu do banco assim mesmo.
+          googleAgenda: relatorio.googleAgenda,
         },
         ipAddress,
         userAgent,
-        status: relatorio.arquivosComFalha.length ? "failure" : "success",
+        // Algo ficou fora do nosso alcance (objeto no bucket, token na Google):
+        // o registro diz "failure", sem esconder que a conta saiu.
+        status: relatorio.arquivosComFalha.length || relatorio.googleAgenda === "falhou" ? "failure" : "success",
         riskLevel: "high",
       });
 
@@ -281,6 +286,10 @@ export const contaRouter = router({
         linhasApagadas: relatorio.linhasApagadas,
         arquivosApagados: relatorio.arquivosApagados,
         arquivosComFalha: relatorio.arquivosComFalha.length,
+        // A Google não confirmou a revogação do token da agenda (H16b): a WRW
+        // esqueceu o token, mas a autorização pode seguir na conta Google da
+        // dona, e a tela diz como tirá-la.
+        googleNaoConfirmou: relatorio.googleAgenda === "falhou",
       };
     }),
 });

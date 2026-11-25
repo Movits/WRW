@@ -103,6 +103,11 @@ export const adminRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await exigirDb();
       await db.update(users).set({ isActive: input.isActive }).where(eq(users.id, input.userId));
+      // Desativar derruba as sessões. Só a conta inativa não bastava: as linhas
+      // em sessions seguiam ativas, e ao reativar a conta qualquer sessão usada
+      // nos últimos 90 dias (server/duracao-da-sessao.ts) voltava a valer —
+      // inclusive a de quem motivou a desativação.
+      if (!input.isActive) await revokeAllUserSessions(input.userId);
       await createAuditLog({ userId: ctx.user.id, action: input.isActive ? "ADMIN_ACTIVATE_USER" : "ADMIN_DEACTIVATE_USER", resource: "users", resourceId: String(input.userId), status: "success", riskLevel: "high" });
       return { success: true };
     }),

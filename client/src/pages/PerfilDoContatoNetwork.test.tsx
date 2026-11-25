@@ -17,31 +17,44 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
  *   corrigido pela dona) e ignorar chamam o servidor — nada é gravado pela tela;
  * - completar por texto chama a interpretação; por voz, avisa que o áudio não
  *   é guardado;
- * - reuniões vinculadas e a linha do tempo;
+ * - reuniões vinculadas e a linha do tempo, com o link que abre a reunião;
+ * - as próximas ações ligadas ao contato (H5b): a lista, o "Nova ação" já
+ *   ligado a ele e os eventos da ação na linha do tempo;
  * - contato de outra dona (NOT_FOUND) é "não encontrado", não erro genérico;
  * - na reunião, o que a transcrição não sustentou aparece como FALTANDO.
  */
 
+type OpcoesDaMutacao = { onSuccess?: (...args: unknown[]) => unknown; onError?: (erro: unknown) => unknown; onSettled?: (...args: unknown[]) => unknown };
 const duble = vi.hoisted(() => ({
   contato: vi.fn(),
   params: { id: "5" } as { id: string },
   mutacoes: {} as Record<string, ReturnType<typeof vi.fn>>,
+  // As opções da última montagem de cada mutação, para o teste chamar o onSettled.
+  opcoes: {} as Record<string, OpcoesDaMutacao>,
+  // O mesmo objeto em toda montagem: o teste confere o que a tela mandou reler.
+  utils: {
+    networkInteligente: {
+      contato: { invalidate: vi.fn() }, resumo: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
+    },
+    proximasAcoes: { invalidate: vi.fn() },
+    meetings: { resumoGuardado: { invalidate: vi.fn() } },
+    googleAgenda: { estado: { invalidate: vi.fn() } },
+  },
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/components/AppHeader", () => ({ AppHeader: () => null }));
 vi.mock("wouter", async importOriginal => ({ ...await importOriginal<typeof import("wouter")>(), useParams: () => duble.params }));
 vi.mock("@/lib/trpc", () => {
   const mutacao = (nome: string) => ({
-    useMutation: () => ({ mutate: (duble.mutacoes[nome] ??= vi.fn()), isPending: false }),
+    useMutation: (opcoes: OpcoesDaMutacao = {}) => {
+      duble.opcoes[nome] = opcoes;
+      return { mutate: (duble.mutacoes[nome] ??= vi.fn()), isPending: false };
+    },
   });
   return {
     trpc: {
-      useUtils: () => ({
-        networkInteligente: {
-          contato: { invalidate: vi.fn() }, resumo: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
-        },
-      }),
+      useUtils: () => duble.utils,
       networkInteligente: {
         contato: { useQuery: (...args: unknown[]) => duble.contato(...args) },
         definirDisponibilidade: mutacao("definirDisponibilidade"),
@@ -52,9 +65,23 @@ vi.mock("@/lib/trpc", () => {
         procurarNaRedeGlobal: mutacao("procurarNaRedeGlobal"),
         avancarConexao: mutacao("avancarConexao"),
       },
+      proximasAcoes: {
+        criar: mutacao("criar"),
+        marcarFeita: mutacao("marcarFeita"),
+        ligarContato: mutacao("ligarContato"),
+        editar: mutacao("editar"),
+        apagar: mutacao("apagar"),
+        mandarParaGoogle: mutacao("mandarParaGoogle"),
+        tirarDaGoogle: mutacao("tirarDaGoogle"),
+      },
+      network: { list: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }) } },
+      googleAgenda: { estado: { useQuery: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }) } },
     },
   };
 });
+
+/** O que toda mutação que pode levar a ação à Google manda (H5c): o fuso do aparelho e os rótulos da tela, em pt-BR. */
+const PEDIDO = { fuso: expect.any(String), rotulos: { voz: "Falante {n}", responsavel: "Responsável: {nome}" } };
 
 function perfil(parcial: Record<string, unknown> = {}) {
   return {
@@ -70,6 +97,7 @@ function perfil(parcial: Record<string, unknown> = {}) {
       { id: "p-1", contactId: 5, meetingId: "m-1", meetingSuggestionId: "s-1", origem: "reuniao", campo: "preciso", valor: "Fornecedores internacionais", categoria: null, trecho: "procurando novos fornecedores internacionais", confianca: 0.85, criadaEm: 1 },
     ],
     reunioes: [{ id: "m-1", titulo: "Café na feira", status: "ready", em: Date.UTC(2026, 8, 1), assuntos: ["Distribuição", "Fornecedores"] }],
+    proximasAcoes: { lista: [], limite: 100 },
     conexoes: { termoAceito: true, lista: [] },
     linhaDoTempo: [
       { tipo: "reuniao", em: Date.UTC(2026, 8, 1), meetingId: "m-1", titulo: "Café na feira", assuntos: [] },
@@ -85,6 +113,11 @@ beforeEach(async () => {
   await i18n.changeLanguage("pt-BR");
   duble.params = { id: "5" };
   for (const m of Object.values(duble.mutacoes)) m.mockReset();
+  for (const chave of Object.keys(duble.opcoes)) delete duble.opcoes[chave];
+  const { networkInteligente, proximasAcoes, meetings } = duble.utils;
+  for (const m of [networkInteligente.contato, networkInteligente.resumo, networkInteligente.conexoes, proximasAcoes, meetings.resumoGuardado]) {
+    m.invalidate.mockClear();
+  }
 });
 
 describe("perfil do contato — Quem Sou, Tenho, Preciso", () => {
@@ -120,6 +153,22 @@ describe("perfil do contato — Quem Sou, Tenho, Preciso", () => {
   });
 });
 
+// N5: de qual reunião veio cada item, pela linha que a dona confirmou.
+describe("perfil do contato — a origem do item (N5)", () => {
+  it("o item que veio de reunião leva o título e a data, com o link; o digitado fica sem origem", () => {
+    responde(perfil({ tenho: [
+      { id: 1, label: "Distribuição de medicamentos", category: null, origem: { meetingId: "m-1", titulo: "Café na feira", em: Date.UTC(2026, 8, 1, 12), trecho: "distribuímos medicamentos" } },
+      { id: 2, label: "Armazém em Santos", category: null, origem: null },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const tenho = screen.getByRole("heading", { name: "O Que Tenho" }).closest("section")!;
+    const link = within(tenho).getByRole("link", { name: /Reunião “Café na feira”/ });
+    expect(link).toHaveAttribute("href", "/meetings/m-1");
+    expect(link.closest("li")).toHaveAttribute("title", "distribuímos medicamentos");
+    expect(within(tenho).getAllByRole("link")).toHaveLength(1);
+  });
+});
+
 describe("perfil do contato — nada entra sem confirmação", () => {
   it("a sugestão mostra origem, confiança e trecho; confirmar envia o valor corrigido; ignorar envia o id", () => {
     responde(perfil());
@@ -135,6 +184,19 @@ describe("perfil do contato — nada entra sem confirmação", () => {
 
     fireEvent.click(within(sugestoes).getByRole("button", { name: "Ignorar" }));
     expect(duble.mutacoes.ignorarPendencia).toHaveBeenCalledWith({ id: "p-1" });
+  });
+
+  it("cargo e empresa que vieram da reunião aparecem com o nome do campo e se confirmam como as outras", () => {
+    responde(perfil({ pendencias: [
+      { id: "p-c", contactId: 5, meetingId: "m-1", meetingSuggestionId: "s-1", origem: "reuniao", campo: "cargo", valor: "Diretora comercial", categoria: null, trecho: null, confianca: 0.8, criadaEm: 1 },
+      { id: "p-e", contactId: 5, meetingId: "m-1", meetingSuggestionId: "s-1", origem: "reuniao", campo: "empresa", valor: "Farmabras", categoria: null, trecho: null, confianca: 0.8, criadaEm: 1 },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const sugestoes = screen.getByRole("heading", { name: "Sugestões da IA para confirmar" }).closest("section")!;
+    expect(within(sugestoes).getByText("Cargo")).toBeInTheDocument();
+    expect(within(sugestoes).getByText("Empresa")).toBeInTheDocument();
+    fireEvent.click(within(sugestoes).getAllByRole("button", { name: "Confirmar" })[0]);
+    expect(duble.mutacoes.confirmarPendencia).toHaveBeenCalledWith({ id: "p-c" });
   });
 
   it("confirmar sem mudar o valor não manda valor: vale o que a IA propôs", () => {
@@ -212,6 +274,22 @@ describe("perfil do contato — completar por voz", () => {
     expect(trilhaParada).toHaveBeenCalled();
   });
 
+  it("o navegador que grava mp4 manda mp4 para interpretação", async () => {
+    vi.stubGlobal("MediaRecorder", class extends GravadorFalso {
+      static isTypeSupported = (tipo: string) => tipo === "audio/mp4;codecs=mp4a.40.2" || tipo === "audio/webm;codecs=opus";
+    });
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    await comecarAGravar();
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Parar e enviar/ })); });
+    await waitFor(() => expect(duble.mutacoes.complementarPorVoz).toHaveBeenCalledTimes(1));
+    expect(gravadores[0].mimeType).toBe("audio/mp4;codecs=mp4a.40.2");
+    expect(duble.mutacoes.complementarPorVoz).toHaveBeenCalledWith(expect.objectContaining({
+      contactId: 5, mimeType: "audio/mp4", audioBase64: expect.stringMatching(/^data:audio\/mp4;codecs=mp4a\.40\.2;base64,/),
+    }));
+    expect(trilhaParada).toHaveBeenCalledTimes(1);
+  });
+
   it("sair da tela gravando para o gravador e o microfone e NÃO envia o áudio", async () => {
     responde(perfil());
     const { unmount } = render(<PerfilDoContatoNetwork />);
@@ -278,6 +356,21 @@ describe("perfil do contato — reuniões, conexões e memória de relacionament
     expect(within(linha).getByText("Contato cadastrado")).toBeInTheDocument();
   });
 
+  // Revisão da IA3: cargo e empresa nunca são QUEM SOU (item 6 da spec da Glenda).
+  it("cargo e empresa confirmados aparecem na linha do tempo com o nome deles, não como Quem Sou", () => {
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "apoio_confirmado", em: Date.UTC(2026, 10, 16), campo: "cargo", valor: "gerente de compras", origem: "reuniao" },
+      { tipo: "apoio_confirmado", em: Date.UTC(2026, 10, 16), campo: "empresa", valor: "Farmabras", origem: "reuniao" },
+      { tipo: "quem_sou_confirmado", em: Date.UTC(2026, 10, 15), campo: "telefone", valor: "+55 11 98765-4321", origem: "voz" },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText("Cargo confirmado: gerente de compras")).toBeInTheDocument();
+    expect(within(linha).getByText("Empresa confirmada: Farmabras")).toBeInTheDocument();
+    expect(within(linha).getByText("Quem Sou confirmado: +55 11 98765-4321")).toBeInTheDocument();
+    expect(within(linha).queryByText(/Quem Sou confirmado: (gerente|Farmabras)/)).not.toBeInTheDocument();
+  });
+
   it("sem o termo do Smart Match: sem conexões e sem busca na rede global", () => {
     responde(perfil({ conexoes: { termoAceito: false }, contato: { ...perfil().contato, disponivelRedeGlobal: true } }));
     render(<PerfilDoContatoNetwork />);
@@ -290,6 +383,137 @@ describe("perfil do contato — reuniões, conexões e memória de relacionament
     render(<PerfilDoContatoNetwork />);
     fireEvent.click(screen.getByRole("button", { name: "Procurar conexões deste contato na rede global" }));
     expect(duble.mutacoes.procurarNaRedeGlobal).toHaveBeenCalledWith({ contactId: 5 });
+  });
+});
+
+describe("perfil do contato — próximas ações e o link das reuniões (H5b)", () => {
+  const acao = (extra: Record<string, unknown> = {}) => ({
+    id: "acao-1", texto: "{F2} envia a proposta revisada", detalhe: null, responsavel: "{F2}", prazo: null, prazoDito: null,
+    origem: "reuniao", feita: false, feitaEm: null, trecho: null, createdAt: 1,
+    reuniao: { id: "m-1", titulo: "Café na feira", itemId: "item-1" }, vozes: { F2: "Carla" }, contato: { id: 5, nome: "Maria Silva" },
+    ...extra,
+  });
+  const secaoDasAcoes = () => screen.getByRole("heading", { name: "Próximas ações" }).closest("section")!;
+
+  it("o título da reunião vinculada abre a reunião, e a reunião da linha do tempo também", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const reunioes = screen.getByRole("heading", { name: "Reuniões vinculadas" }).closest("section")!;
+    expect(within(reunioes).getByRole("link", { name: "Café na feira" })).toHaveAttribute("href", "/meetings/m-1");
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByRole("link", { name: "Reunião: Café na feira" })).toHaveAttribute("href", "/meetings/m-1");
+    // O que não é reunião continua texto.
+    expect(within(linha).queryByRole("link", { name: "Contato cadastrado" })).not.toBeInTheDocument();
+  });
+
+  it("sem ação ligada: o convite a anotar aqui ou a vincular em Próximas ações, e o caminho para a lista inteira", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    expect(within(secao).getByText(/^Nenhuma próxima ação ligada a este contato\./)).toBeInTheDocument();
+    expect(within(secao).getByRole("link", { name: "Ver todas as suas próximas ações" })).toHaveAttribute("href", "/proximas-acoes");
+  });
+
+  it("'Nova ação' anota uma ação já ligada a este contato; Cancelar fecha sem gravar", () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.click(within(secao).getByRole("button", { name: "Cancelar" }));
+    expect(within(secao).queryByLabelText("O que fazer")).not.toBeInTheDocument();
+    expect(duble.mutacoes.criar).not.toHaveBeenCalled();
+
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.change(within(secao).getByLabelText("O que fazer"), { target: { value: "Mandar o catálogo" } });
+    fireEvent.change(within(secao).getByLabelText("Prazo (opcional)"), { target: { value: "2026-11-30" } });
+    fireEvent.click(within(secao).getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacoes.criar).toHaveBeenCalledWith(
+      // Com o fuso do aparelho e os rótulos da tela: o lembrete às 9h (H15) e o evento na Google Agenda (H5c).
+      { texto: "Mandar o catálogo", detalhe: "", responsavel: "", prazo: "2026-11-30", contactId: 5, ...PEDIDO },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("salvar a 'Nova ação' relê o perfil deste contato (a seção e a linha do tempo) e as listas de ações", async () => {
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    fireEvent.click(within(secao).getByRole("button", { name: "Nova ação" }));
+    fireEvent.change(within(secao).getByLabelText("O que fazer"), { target: { value: "Mandar o catálogo" } });
+    fireEvent.click(within(secao).getByRole("button", { name: "Salvar" }));
+    expect(duble.mutacoes.criar).toHaveBeenCalledTimes(1);
+    expect(duble.utils.networkInteligente.contato.invalidate).not.toHaveBeenCalled();
+
+    // Deu certo ou não, a tela relê: sem isso, a ação salva só aparece aqui ao recarregar a página.
+    await act(async () => { await duble.opcoes.criar.onSettled?.(); });
+    expect(duble.utils.networkInteligente.contato.invalidate).toHaveBeenCalledWith({ contactId: 5 });
+    expect(duble.utils.proximasAcoes.invalidate).toHaveBeenCalled();
+  });
+
+  it("as ações ligadas: o nome da voz no lugar do rótulo, a caixa marca pela ação, o link do item na reunião e nenhum link para o próprio contato", () => {
+    responde(perfil({ proximasAcoes: { lista: [
+      acao(),
+      acao({ id: "acao-2", texto: "Revisar o contrato", origem: "manual", reuniao: null, vozes: {}, responsavel: null, feita: true, feitaEm: 9 }),
+    ], limite: 100 } }));
+    render(<PerfilDoContatoNetwork />);
+    const secao = secaoDasAcoes();
+    expect(within(secao).getByText("Abertas: 1")).toBeInTheDocument();
+    expect(within(secao).queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+    expect(within(secao).getByRole("link", { name: "Da reunião: Café na feira" })).toHaveAttribute("href", "/meetings/m-1?item=item-1");
+    expect(within(secao).queryByRole("link", { name: "Contato: Maria Silva" })).not.toBeInTheDocument();
+    expect(within(secao).queryByText(/Nenhuma próxima ação ligada/)).not.toBeInTheDocument();
+    expect(within(secao).getByRole("checkbox", { name: "Revisar o contrato" })).toBeChecked();
+    fireEvent.click(within(secao).getByRole("checkbox", { name: "Carla envia a proposta revisada" }));
+    expect(duble.mutacoes.marcarFeita).toHaveBeenCalledWith({ id: "acao-1", feita: true, ...PEDIDO });
+    // Tirar o vínculo daqui manda null: a ação sai deste perfil.
+    const primeira = within(secao).getByText("Carla envia a proposta revisada").closest("li")!;
+    fireEvent.click(within(primeira).getByRole("button", { name: "Tirar o vínculo" }));
+    expect(duble.mutacoes.ligarContato).toHaveBeenCalledWith({ id: "acao-1", contactId: null });
+  });
+
+  it("no teto da leitura, avisa que mostra só as primeiras", () => {
+    responde(perfil({ proximasAcoes: { lista: [acao(), acao({ id: "acao-2" })], limite: 2 } }));
+    render(<PerfilDoContatoNetwork />);
+    expect(within(secaoDasAcoes()).getByText("Mostrando as primeiras 2.")).toBeInTheDocument();
+  });
+
+  it("a linha do tempo mostra a ação anotada e a feita, com o nome dado à voz ou 'Falante n', nunca o rótulo cru", () => {
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "proxima_acao_feita", em: Date.UTC(2026, 10, 12), acaoId: "a-2", texto: "{F3} liga para o importador", vozes: {} },
+      { tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "a-1", texto: "{F2} envia a proposta", vozes: { F2: "Carla" } },
+      { tipo: "contato_criado", em: Date.UTC(2026, 0, 10) },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText("Próxima ação feita: Falante 3 liga para o importador")).toBeInTheDocument();
+    expect(within(linha).getByText("Próxima ação: Carla envia a proposta")).toBeInTheDocument();
+    expect(within(linha).queryByText(/\{F\d\}/)).not.toBeInTheDocument();
+  });
+
+  it("um e-mail longo na ação quebra a linha em vez de passar da largura do celular, na seção e na linha do tempo", () => {
+    const texto = "Mandar a proposta para joana.representante@farmabras.com.br";
+    responde(perfil({
+      proximasAcoes: { lista: [acao({ texto, responsavel: null, vozes: {} })], limite: 100 },
+      linhaDoTempo: [{ tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "acao-1", texto, vozes: {} }],
+    }));
+    render(<PerfilDoContatoNetwork />);
+    // O jsdom não calcula layout: o que se trava é a regra de CSS de cada lugar.
+    const naSecao = within(secaoDasAcoes()).getByText(texto);
+    expect(naSecao).toHaveClass("min-w-0");
+    expect(naSecao.closest("li")).toHaveClass("wrap-anywhere");
+    const linha = screen.getByRole("heading", { name: "Memória de relacionamento" }).closest("section")!;
+    expect(within(linha).getByText(`Próxima ação: ${texto}`)).toHaveClass("break-words");
+  });
+
+  it("em inglês, os textos novos saem traduzidos", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    responde(perfil({ linhaDoTempo: [
+      { tipo: "proxima_acao", em: Date.UTC(2026, 10, 10), acaoId: "a-1", texto: "{F2} sends the proposal", vozes: { F2: "Carla" } },
+    ] }));
+    render(<PerfilDoContatoNetwork />);
+    expect(screen.getByText("Next action: Carla sends the proposal")).toBeInTheDocument();
+    expect(screen.getByText(/^No next actions linked to this contact\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See all your next actions" })).toBeInTheDocument();
   });
 });
 
@@ -328,5 +552,28 @@ describe("a pessoa sugerida pela reunião", () => {
   it("contato criado: leva ao perfil no Meu Network Inteligente", () => {
     render(<PessoaSugeridaNaReuniao sugestao={{ ...sugestao, status: "created", existingContactId: 42 }} pendencias={[]} />);
     expect(screen.getByRole("link", { name: "Revisar no Meu Network Inteligente" })).toHaveAttribute("href", "/meu-network-inteligente/contatos/42");
+  });
+
+  // Achado 6 da bancada de 16/11: criar o contato não grava cargo nem empresa.
+  it("com cargo ou empresa, o cartão avisa que eles esperam a confirmação no perfil, mesmo sem Tenho nem Preciso", () => {
+    render(<PessoaSugeridaNaReuniao sugestao={{ ...sugestao, jobTitle: "Diretora comercial" }} pendencias={[]} />);
+    expect(screen.getByText("Diretora comercial · Farmabras")).toBeInTheDocument();
+    expect(screen.getByText("Ao criar o contato, cargo, empresa, O Que Tenho e O Que Preciso ficam esperando a sua confirmação no perfil dele.")).toBeInTheDocument();
+  });
+
+  // Achado 7: a pessoa só citada não vira um cartão igual ao das participantes.
+  it("a pessoa só citada na reunião: cartão compacto e marcado, sem Quem Sou, FALTANDO nem alerta", () => {
+    render(<PessoaSugeridaNaReuniao sugestao={{ ...sugestao, id: "s-9", fullName: "Sônia Pacheco", company: "Embalagens Girassol", email: null, presence: "mentioned" }} pendencias={[
+      { id: "p-9", meetingSuggestionId: "s-9", campo: "tenho", valor: "Caixa de papelão reciclado", trecho: "Ela faz caixa de papelão reciclado" },
+    ]} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Sônia Pacheco" })).toBeInTheDocument();
+    expect(screen.getByText("Não participou")).toBeInTheDocument();
+    expect(screen.getByText("Embalagens Girassol")).toBeInTheDocument();
+    expect(screen.getByText("Caixa de papelão reciclado")).toBeInTheDocument();
+    expect(screen.queryByText("Quem Sou")).not.toBeInTheDocument();
+    expect(screen.queryByText("FALTANDO")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Faltam informações importantes/)).not.toBeInTheDocument();
+    // o lado vazio (O Que Preciso) nem aparece
+    expect(screen.queryByText("O Que Preciso")).not.toBeInTheDocument();
   });
 });

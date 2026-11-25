@@ -1,4 +1,4 @@
-// Cria todas as tabelas do MMM num banco MySQL vazio.
+// Cria todas as tabelas da WRW num banco MySQL vazio.
 //
 // Hoje é um atalho para `node scripts/migrar.mjs`: o schema vive nas migrações
 // de drizzle/, geradas a partir de drizzle/schema.ts, e este script só mantém o

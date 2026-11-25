@@ -13,8 +13,8 @@ import { opcoesBase } from "./index";
  * (11–99); o i18next NÃO cai de _many/_few para _other — cai para o idioma de
  * fallback. Uma forma faltando em ru.json devolveria o texto em português.
  *
- * Instância própria com os 10 JSONs e as opções do app (opcoesBase, molde
- * aviso-de-sessao-plural.test.ts), MENOS o fallback: `fallbackLng: false`.
+ * Instância própria com os 10 JSONs e as opções do app (opcoesBase, mesmo
+ * molde de deteccao-de-idioma.test.ts), MENOS o fallback: `fallbackLng: false`.
  * Com o fallback do app (pt-BR), uma forma faltando em ru.json devolvia o
  * texto em português — o teste só pegava porque o regex PORTUGUES reconhece
  * "novo"/"convite" — e `exists("…_many", { lng: "ru" })` respondia true

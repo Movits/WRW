@@ -20,7 +20,19 @@ const duble = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   pendencias: vi.fn(),
+  resumoGuardado: vi.fn(),
   mutacao: () => ({ useMutation: () => ({ mutate: () => {}, mutateAsync: async () => {}, isPending: false }) }),
+  // O MESMO objeto a cada render, como o useUtils do tRPC. A gravação em partes,
+  // o padrão desde a G13b, retoma o que ficou no aparelho ao montar a página:
+  // lê a conta e fala com o servidor por aqui.
+  utils: {
+    meetings: { list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+    reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
+    networkInteligente: { pendencias: { reset: vi.fn() } },
+    auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
+    client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
+  },
 }));
 
 // O AppHeader de verdade lê sessão e notificações pelo tRPC; aqui ele vira uma
@@ -31,11 +43,13 @@ vi.mock("@/components/AppHeader", () => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({
-      meetings: { list: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() } },
-      networkInteligente: { pendencias: { reset: vi.fn() } },
-    }),
+    // As equipes da conta e os convites (R2): nenhuma, nesta tela.
+    equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
+    useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },
       create: duble.mutacao(),
@@ -44,8 +58,43 @@ vi.mock("@/lib/trpc", () => ({
       decideContactSuggestion: duble.mutacao(),
       translateTranscript: duble.mutacao(),
       delete: duble.mutacao(),
+      // As pastas e a lixeira (H7d): a lista lê as pastas, e o "Excluir" do detalhe manda para a lixeira.
+      pastas: { useQuery: () => ({ data: [], isLoading: false, isSuccess: true, isError: false, error: null, refetch: () => undefined }) },
+      // As reuniões compartilhadas com a conta e os convites (R1b): nenhum, nesta tela.
+      compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
+      responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+      mandarParaALixeira: duble.mutacao(),
       reprocess: duble.mutacao(),
+      // O vídeo do YouTube (H13): o botão da lista e o "Tentar de novo" do detalhe.
+      resumirVideoDoYoutube: duble.mutacao(),
+      refazerVideoDoYoutube: duble.mutacao(),
+      resumoGuardado: { useQuery: () => duble.resumoGuardado() },
+      // R1a: as datas das consultas da administração (nenhuma).
+      consultasDaAdministracao: { useQuery: () => ({ data: [], isError: false, error: null, refetch: () => undefined }) },
+      // N5: a linha "Conexões geradas por esta reunião" (sem conexões, não aparece).
+      conexoes: { useQuery: () => ({ data: undefined }) },
+      pedirResumo: duble.mutacao(),
+      decidirItemDoResumo: duble.mutacao(),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.mutacao(),
+      pedirComplemento: duble.mutacao(),
+      decidirComplemento: duble.mutacao(),
+      confirmarItensDoResumo: duble.mutacao(),
+      marcarAcaoFeita: duble.mutacao(),
+      traduzirResumo: duble.mutacao(),
+      perguntar: duble.mutacao(),
+      perguntarDuranteAGravacao: duble.mutacao(),
+      rascunharEmailDeRetorno: duble.mutacao(),
+      ligarLinkAberto: duble.mutacao(),
+      desligarLinkAberto: duble.mutacao(),
+      // A senha e o áudio do link ligado (H23).
+      novaSenhaDoLink: duble.mutacao(),
+      tirarSenhaDoLink: duble.mutacao(),
+      mudarAudioDoLink: duble.mutacao(),
     },
+    reuniaoAberta: { pedirResumo: duble.mutacao(), perguntar: duble.mutacao(), traduzirResumo: duble.mutacao() },
+    // O "Tentar de novo" do evento da próxima ação que ficou na Google Agenda (H5c): o resumo guardado o monta.
+    proximasAcoes: { tirarDaGoogle: duble.mutacao() },
     networkInteligente: { pendencias: { useQuery: () => duble.pendencias() } },
   },
 }));
@@ -63,6 +112,10 @@ beforeEach(() => {
     isLoading: false, isError: false, error: null, refetch: vi.fn(),
   });
   duble.pendencias.mockReturnValue({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // O resumo guardado da reunião (H4c): sem resumo, salvo o teste que diz outro.
+  duble.resumoGuardado.mockReturnValue({ data: { estado: "sem_resumo", emoji: null, idioma: null, erro: null, itens: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  // A URL escolhe o ramo; o setup limpa só o state do histórico.
+  window.history.replaceState(null, "", "/meetings");
 });
 
 describe("Reuniões — o menu fica visível nos três ramos", () => {
@@ -97,6 +150,8 @@ describe("Reuniões — o menu fica visível nos três ramos", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reunião com a vinícola/ }));
     expect(cabecalhos()).toHaveLength(1);
     unmount();
+    // O clique deixou a URL no detalhe: a segunda montagem volta a partir da lista.
+    window.history.replaceState(null, "", "/meetings");
 
     duble.get.mockReturnValue({
       data: undefined, isLoading: false, isError: true,

@@ -50,7 +50,7 @@ dumps/
 .claude/worktrees/
 CLAUDE.local.md
 
-# Dumps de banco — o dump do MMM contém dados pessoais reais
+# Dumps de banco — o dump da WRW contém dados pessoais reais
 *.sql
 *.sql.gz
 *.dump

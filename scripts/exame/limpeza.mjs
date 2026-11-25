@@ -26,7 +26,8 @@
 
 export const CHAVES = ["openId", "id", "email", "opp", "conexao"];
 
-export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"];
+// A mesma lista de server/exclusao-de-conta.ts (a R1a somou as duas da consulta das reuniões).
+export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"];
 
 /** Um par por coluna; a ordem é a ordem de execução. */
 export const PLANO_DE_LIMPEZA = [
@@ -39,8 +40,58 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcript_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_transcripts", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As próximas ações (H5a), que nascem dos itens do resumo ou à mão.
+  { tabela: "proximas_acoes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os lembretes no sino (H15) da próxima ação e da agenda.
+  { tabela: "lembretes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens.
+  { tabela: "meeting_summary_translations", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O resumo por e-mail (H22): o exame não manda e-mail, mas a conta QA que mandar sai com o resto.
+  { tabela: "resumo_por_email", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O Pergunte a várias reuniões (H6c): uma linha por pergunta, sem o conteúdo. O exame
+  // não pergunta, mas a conta QA que perguntar sai com o resto.
+  { tabela: "perguntas_entre_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).
+  { tabela: "modelos_de_resumo_proprios", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "preferencias_do_resumo", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "resumos_refeitos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O áudio do resumo (H19b) e as buscas do complemento (H4i), só para o teto de 24 h.
+  // O exame não gera áudio nem busca; a conta QA que fizer sai com o resto.
+  { tabela: "resumo_em_audio", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "buscas_do_complemento", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Partes do áudio da gravação em partes. O exame não grava reunião, então as
+  // contas QA não têm parte nem objeto no bucket, e este DELETE não olha o
+  // bucket. Se o exame passar a gravar, a linha é o ponteiro para o objeto:
+  // crie em checar-producao.mjs a guarda que context_media tem, para ela só
+  // sair depois dele.
+  { tabela: "meeting_audio_slices", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_recordings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O PDF da reunião de documento (H12). O exame não envia documento, então as
+  // contas QA não têm linha nem objeto no bucket; se passar a enviar, vale o
+  // mesmo aviso das partes acima: a linha só sai depois do objeto.
+  { tabela: "meeting_documents", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As fotos e os desenhos do resumo (H4g e H4h). O exame não anexa imagem, então as
+  // contas QA não têm linha nem objeto no bucket; se passar a anexar, vale o mesmo
+  // aviso das partes acima: a linha só sai depois do objeto.
+  { tabela: "meeting_attachments", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A agenda de reuniões (H16a): o exame não marca reunião, mas a conta QA que
+  // marcar sai com o resto.
+  { tabela: "agenda_reunioes", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As participantes das reuniões (R1b): as da dona QA e a conta QA como
+  // participante. O exame não convida ninguém; a conta QA que convidar sai com o resto.
+  { tabela: "meeting_participants", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_participants", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // Os espaços de equipe (R2): o exame não cria equipe, mas a conta QA que
+  // criar, ou que entrar numa, sai com o resto. Antes das pastas.
+  { tabela: "meeting_folder_members", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_folder_members", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "meeting_folder_tasks", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // As pastas das reuniões (H7d): o exame não cria pasta, mas a conta QA que
+  // criar sai com o resto. Depois das reuniões, que apontam para elas.
+  { tabela: "meeting_folders", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_messages", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "enrichment_sessions", coluna: "owner_id", chave: "openId", acao: "apagar" },
@@ -57,7 +108,13 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "conexoes_registradas", coluna: "id", chave: "conexao", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "consumo_de_minutos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A base das associações (N1): o exame não cria entidade, mas a conta QA não pode deixar rastro.
+  { tabela: "pedidos_pela_entidade", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "importacao_documentos_vistos", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "importacoes_de_entidade", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "entidade_membros", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "private_contacts", coluna: "ownerId", chave: "openId", acao: "apagar" },
+  { tabela: "entidades", coluna: "owner_id", chave: "openId", acao: "apagar" },
 
   // ── oportunidade do exame: chave opp ────────────────────────────────────
   { tabela: "president_validations", coluna: "opportunityId", chave: "opp", acao: "apagar" },
@@ -71,7 +128,12 @@ export const PLANO_DE_LIMPEZA = [
 
   // ── módulo institucional: chave id (int) ────────────────────────────────
   { tabela: "consents", coluna: "userId", chave: "id", acao: "apagar" },
+  // A conexão com a Google Agenda (H16b). O exame não conecta conta Google,
+  // então o DELETE não encontra nada; se um dia conectar, a linha sai com o
+  // resto (a revogação na Google fica com a exclusão de conta, não com o exame).
+  { tabela: "google_agenda_conexoes", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "conexoes_participantes", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "pedidos_pela_entidade", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "assinaturas_de_minutos", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_documents", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "sivc_consents", coluna: "userId", chave: "id", acao: "apagar" },
@@ -99,6 +161,13 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "matches", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "matches", coluna: "matchedUserId", chave: "id", acao: "apagar" },
   { tabela: "password_reset_tokens", coluna: "userId", chave: "id", acao: "apagar" },
+  // As chaves de acesso (A6) e os desafios de cadastro delas. O exame não
+  // cadastra chave, então os DELETEs não encontram nada; se um dia cadastrar, a
+  // chave sintética sai junto com o resto.
+  { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  // A conta Google ligada para entrar (A8). O exame não entra com o Google.
+  { tabela: "contas_google", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "security_events", coluna: "resolvedBy", chave: "id", acao: "alertar", excetoSe: { coluna: "userId", chave: "id" } },
@@ -136,7 +205,7 @@ export const PLANO_DE_LIMPEZA = [
  */
 export const EXCECOES = [
   { tabela: "strategic_groups", coluna: "memberIds", motivo: "array JSON de ids; o exame não cria nem entra em grupos, e um DELETE por coluna não se aplica" },
-  { tabela: "audit_logs", coluna: "userId", motivo: "coberta pelo plano com filtro que preserva GOLD_ACERVO_READ e REVOKED_SESSION_ACCESS_ATTEMPT (ver ACOES_DE_AUDITORIA_PRESERVADAS)", cobertaComFiltro: true },
+  { tabela: "audit_logs", coluna: "userId", motivo: "coberta pelo plano com filtro que preserva GOLD_ACERVO_READ, REVOKED_SESSION_ACCESS_ATTEMPT, MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ (ver ACOES_DE_AUDITORIA_PRESERVADAS)", cobertaComFiltro: true },
 ];
 
 /** Colunas do schema que apontam para usuária; o teste deriva os pares a partir delas. */

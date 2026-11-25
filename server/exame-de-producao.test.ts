@@ -615,7 +615,56 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 63: o Meu Network Inteligente somou network_sugestoes.owner_id,
     // conexoes_participantes.owner_id e .userId, consumo_de_minutos.owner_id e
     // assinaturas_de_minutos.userId.
-    expect(paresDeUsuariaNoSchema).toHaveLength(63);
+    // 64: as partes do áudio da gravação longa somaram meeting_audio_slices.owner_id.
+    // 66: o resumo guardado da reunião (H4) somou meeting_summaries.owner_id e
+    // meeting_summary_items.owner_id.
+    // 68: as chaves de acesso (A6) somaram chaves_de_acesso.userId e
+    // desafios_de_chave_de_acesso.userId.
+    // 69: a tradução do resumo (H11) somou meeting_summary_translations.owner_id.
+    // 70: as próximas ações (H5a) somaram proximas_acoes.owner_id.
+    // 71: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
+    // 72: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
+    // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
+    // 75: os 73 de antes, mais o documento da reunião (H12, meeting_documents.owner_id)
+    // e o resumo por e-mail (H22, resumo_por_email.owner_id).
+    // 77: as pastas das reuniões (H7d) somaram meeting_folders.owner_id, e o Pergunte
+    // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
+    // 81: os 77, mais os modelos de resumo, as preferências e o teto do refazer (H4e, três
+    // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
+    // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
+    // complemento (H4i, buscas_do_complemento.owner_id).
+    // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
+    // importacoes_de_entidade e importacao_documentos_vistos (owner_id).
+    // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
+    // 85 (na main, em paralelo): os 83, mais as participantes da reunião (R1b, meeting_participants.owner_id e
+    // meeting_participants.userId).
+    // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
+    // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
+    // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
+    expect(paresDeUsuariaNoSchema).toHaveLength(95);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_participants", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_participants", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "contas_google", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
+    // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "modelos_de_resumo_proprios", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "preferencias_do_resumo", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumos_refeitos", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "proximas_acoes", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "agenda_reunioes", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "lembretes", coluna: "owner_id" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_audio_slices", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "private_contacts", coluna: "ownerId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "gold_access_grants", coluna: "revokedBy" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "nda_acceptances", coluna: "userId" });
@@ -681,11 +730,11 @@ describe("planejarLimpeza: SQL parametrizado, sem LIKE global, users por último
     expect(comandos.filter((c: any) => c.sql.startsWith("DELETE FROM `users`"))).toHaveLength(1);
   });
 
-  it("audit_logs leva `action` NOT IN com as duas ações preservadas nos params", () => {
+  it("audit_logs leva `action` NOT IN com as quatro ações preservadas nos params", () => {
     const audit = comandos.filter((c: any) => c.sql.startsWith("DELETE FROM `audit_logs`"));
     expect(audit).toHaveLength(1);
-    expect(audit[0].sql).toContain("`action` NOT IN (?, ?)");
-    expect(ACOES_DE_AUDITORIA_PRESERVADAS).toEqual(["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"]);
+    expect(audit[0].sql).toContain("`action` NOT IN (?, ?, ?, ?)");
+    expect(ACOES_DE_AUDITORIA_PRESERVADAS).toEqual(["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"]);
     expect(audit[0].params).toEqual([1, 2, ...ACOES_DE_AUDITORIA_PRESERVADAS]);
     expect(audit[0].sql).not.toMatch(/UPDATE/i);
   });
@@ -898,5 +947,84 @@ describe("Termo Geral de Uso vigente: o exame reprova sem exatamente uma versão
     expect(fonte).toMatch(
       /avaliarTermoGeralVigente\(\s*await contar\("SELECT COUNT\(\*\) n FROM `document_versions` WHERE `type` = \? AND `isCurrent` = 1", \["termo_geral_de_uso"\]\)/,
     );
+  });
+});
+
+// ═══════════════════════════ 11. O 307 do proxy para imagem da dona ═════════
+// Desde a #149 o proxy responde `private, max-age=300` e repete a URL assinada
+// para imagem de contexts/ (a do exame). A checagem antiga exigia `no-store` e
+// reprovaria o primeiro exame depois do merge, sem nenhum teste ver: nada aqui
+// rodava aquela linha. A igualdade com o valor do PROXY está em
+// server/storage-proxy-cache.test.ts, que já carrega o storageProxy com os
+// dublês de sessão e banco.
+describe("avaliarRedirecionamentoComCache: 307 com o cache curto e a MESMA URL na segunda abertura", () => {
+  const { avaliarRedirecionamentoComCache, CACHE_DO_307_DE_IMAGEM_DA_DONA } = relatorioMod as any;
+  const URL_ASSINADA = "https://bucket.exemplo/contexts/qa/ctx/exame_ab12cd34.png?X-Amz-Signature=segredo";
+  const primeira = (extra: Record<string, unknown> = {}) => ({
+    status: 307, cacheControl: CACHE_DO_307_DE_IMAGEM_DA_DONA, location: URL_ASSINADA, ...extra,
+  });
+  const segunda = (extra: Record<string, unknown> = {}) => ({ status: 307, location: URL_ASSINADA, ...extra });
+
+  it("o cabeçalho esperado é exatamente o cache curto e privado", () => {
+    expect(CACHE_DO_307_DE_IMAGEM_DA_DONA).toBe("private, max-age=300");
+  });
+
+  it("307, cabeçalho exato e o mesmo Location duas vezes: passa", () => {
+    expect(avaliarRedirecionamentoComCache(primeira(), segunda())).toEqual({
+      ok: true,
+      detalhe: "307 e a mesma URL assinada nas duas aberturas",
+    });
+  });
+
+  it("no-store (o proxy de antes da #149, ou uma regressão) reprova", () => {
+    const r = avaliarRedirecionamentoComCache(primeira({ cacheControl: "no-store" }), segunda());
+    expect(r.ok).toBe(false);
+    expect(r.detalhe).toContain('Cache-Control "no-store"');
+  });
+
+  it("CDN ou borda que reescreva o cabeçalho reprova: public, outro max-age, ausente", () => {
+    for (const cacheControl of ["public, max-age=300", "private, max-age=14400", "private, max-age=300, public", null]) {
+      expect(avaliarRedirecionamentoComCache(primeira({ cacheControl }), segunda()).ok, String(cacheControl)).toBe(false);
+    }
+  });
+
+  it("URL nova na segunda abertura reprova: o reaproveitamento é o que poupa o download", () => {
+    const r = avaliarRedirecionamentoComCache(primeira(), segunda({ location: URL_ASSINADA.replace("segredo", "outra") }));
+    expect(r.ok).toBe(false);
+    expect(r.detalhe).toContain("outra URL assinada");
+  });
+
+  it("status diferente de 307 em qualquer abertura, ou sem Location, reprova", () => {
+    expect(avaliarRedirecionamentoComCache(primeira({ status: 403 }), segunda()).detalhe).toContain("status 403");
+    expect(avaliarRedirecionamentoComCache(primeira(), segunda({ status: 503 })).detalhe).toContain("segunda abertura: status 503");
+    expect(avaliarRedirecionamentoComCache(primeira({ location: "" }), segunda()).detalhe).toContain("sem Location");
+  });
+
+  it("o detalhe nunca carrega a URL assinada (a saída vai para PR pública) e corta o cabeçalho em 40 caracteres", () => {
+    const casos = [
+      avaliarRedirecionamentoComCache(primeira({ cacheControl: "x".repeat(60) }), segunda({ location: "https://outra" })),
+      avaliarRedirecionamentoComCache(primeira(), segunda()),
+    ];
+    for (const r of casos) {
+      expect(r.detalhe).not.toContain("X-Amz-Signature");
+      expect(r.detalhe).not.toContain("https://");
+    }
+    expect(casos[0].detalhe).toContain("x".repeat(40));
+    expect(casos[0].detalhe).not.toContain("x".repeat(41));
+  });
+
+  it("dentro do relatório, a reprovação é FALHA com código 1", () => {
+    const r = new Relatorio();
+    const v = avaliarRedirecionamentoComCache(primeira({ cacheControl: "no-store" }), segunda());
+    r.ok("proxy", v.ok, v.detalhe);
+    expect(r.codigoDeSaida()).toBe(1);
+  });
+
+  it("checar-producao.mjs abre a imagem duas vezes e julga pelo avaliador, sem exigir no-store", () => {
+    const fonte = readFileSync(path.resolve(RAIZ, "scripts", "checar-producao.mjs"), "utf8");
+    expect(fonte).toMatch(/import \{[^}]*\bavaliarRedirecionamentoComCache\b[^}]*\} from "\.\/exame\/relatorio\.mjs"/);
+    expect(fonte).toMatch(/const proxy = await abrirComoDona\(\);[\s\S]{0,400}const proxyDeNovo = await abrirComoDona\(\);/);
+    expect(fonte).toMatch(/rel\.ok\("proxy autenticado redireciona a dona \(307 \+ private, max-age=300\) e repete a URL assinada", redirecionamento\.ok, redirecionamento\.detalhe\)/);
+    expect(fonte).not.toMatch(/\/no-store\/\.test\(/);
   });
 });

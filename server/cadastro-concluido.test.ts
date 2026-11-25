@@ -146,7 +146,29 @@ describe("o middleware do protectedProcedure", () => {
 describe("o appRouter inteiro", () => {
   // Os únicos procedimentos públicos fora das áreas liberadas. Procedimento
   // público novo precisa entrar aqui (e não passar pela trava é decisão sua).
-  const PUBLICOS = new Set(["faq.ask", "stats.platform", "stats.presencaPorPais"]);
+  const PUBLICOS = new Set([
+    "faq.ask", "stats.platform", "stats.presencaPorPais",
+    // O link aberto da reunião (12/11/2026): quem abre o link não tem conta.
+    "reuniaoAberta.ver", "reuniaoAberta.traduzir", "reuniaoAberta.perguntar",
+    // O resumo guardado (H4), só leitura, e o pedido dele pelo link.
+    "reuniaoAberta.resumoGuardado", "reuniaoAberta.pedirResumo",
+    // As chaves de acesso (A6): o estado e a entrada são de quem ainda não entrou.
+    "chavesDeAcesso.estado", "chavesDeAcesso.opcoesDeEntrada", "chavesDeAcesso.entrar",
+    // O mapa mental (H10), só leitura, e o pedido dele pelo link.
+    "reuniaoAberta.mapaMental", "reuniaoAberta.pedirMapa",
+    // A tradução do resumo guardado (H11), pelo link.
+    "reuniaoAberta.traduzirResumo",
+    // A senha do link (H23): quem a digita não tem conta.
+    "reuniaoAberta.entrar",
+    // As fotos e os desenhos do resumo (H4g e H4h), pelo link.
+    "reuniaoAberta.anexos",
+    // O convite da entidade ao app (N1): quem abre o link ainda não tem conta.
+    "conviteDeEntidade.ver",
+    // A ativação do cadastro importado (N3): quem abre o link ainda não tem conta.
+    "ativacaoDeCadastro.ver", "ativacaoDeCadastro.ativar",
+    // Entrar com a conta Google (A8): o login e o cadastro perguntam se o botão aparece.
+    "contaGoogle.disponivel",
+  ]);
   let caminhos: string[] = [];
 
   beforeAll(() => {

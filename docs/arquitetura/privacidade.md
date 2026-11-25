@@ -355,6 +355,30 @@ duas linhas de `MATCH_IDENTITY_REVEALED` (`via: "distribuidor"`).
 **Limite conhecido**: o termo do Smart Match não diz, hoje, que uma pessoa lê os
 dois perfis antes da entrega. Registrado em decisoes-em-aberto.md (D7).
 
+## A consulta das reuniões pela administração (R1a)
+
+A reunião gravada é da dona: toda consulta da dona leva a dona no WHERE, e o link aberto
+lê só pelo token. A única leitura sem a dona é a consulta da administração
+(`server/consulta-da-administracao.ts`, router `consultaDeReunioes`), com estas regras, todas
+na consulta:
+
+- só admin e presidente (`plataformaProcedure`); Ouro sem cargo leva FORBIDDEN;
+- abrir pede o motivo (apuração de denúncia, segurança, suporte pedido pela usuária,
+  obrigação legal ou ordem judicial, mais o porquê em texto), e a linha
+  `MEETING_ADMIN_READ` (motivo, conta da dona, IP e navegador) vai por `tx.insert` na
+  transação que confere a reunião, antes de qualquer leitura do conteúdo;
+- a lista também fica registrada (`MEETINGS_ADMIN_LIST`, com a busca e as contas que
+  apareceram), e as duas ações sobrevivem à exclusão da conta de quem consultou;
+- só a reunião visível (nem excluída nem na lixeira) e gravada com um aviso que anuncia a
+  consulta (`VERSOES_QUE_PREVEEM_O_ACESSO`, hoje 2026-11-23); a juntada com uma reunião
+  anterior ao aviso também fica fechada;
+- sai o que a dona vê da reunião (transcrição, resumo na projeção do link, nomes das vozes e
+  o áudio pela rota `/consulta-da-administracao/{id}/audio`, que pede a consulta aberta na
+  última hora); nunca a rede particular (contatos, entidades, sugestões, pendências), o
+  `owner_id`, o `contact_id`, o `context_id` nem o token do link;
+- a dona vê a data de cada consulta (`meetings.consultasDaAdministracao`), sem o motivo
+  nem quem consultou.
+
 ## Checklist antes de qualquer publicação
 
 - [ ] A aplicação conecta com `mmm_app`, nunca com a dona das tabelas
@@ -372,4 +396,6 @@ dois perfis antes da entrega. Registrado em decisoes-em-aberto.md (D7).
       cofre das partes
 - [ ] Revogar autorização tira o acesso na consulta seguinte
 - [ ] Áudio de reunião e cartões de visita ficam em storage cifrado, com URL
-      temporária, não em link público permanente
+      temporária, não em link público permanente (exceção desde 12/11/2026: a reunião
+      que a dona compartilha por link aberto, enquanto o link estiver ligado; ver
+      decisoes-tomadas.md)

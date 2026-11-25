@@ -1,0 +1,1 @@
+ALTER TABLE `meeting_summaries` ADD `transcript_edited` boolean;

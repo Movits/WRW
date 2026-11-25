@@ -39,11 +39,17 @@ function responderCom(payload: unknown) {
 beforeEach(() => {
   fetchOriginal = globalThis.fetch;
   ambiente.ENV.llmApiKey = "chave-de-teste-que-nunca-sai-daqui";
+  // O modelo de áudio sai do ambiente (LLM_AUDIO_MODEL): o .env de quem roda a
+  // suíte não pode trocar o modelo que o teste espera.
+  vi.stubEnv("LLM_AUDIO_MODEL", undefined);
   urlPedida = "";
   corpoPedido = null;
 });
 
-afterEach(() => { globalThis.fetch = fetchOriginal; });
+afterEach(() => {
+  globalThis.fetch = fetchOriginal;
+  vi.unstubAllEnvs();
+});
 
 describe("Gemini — o pedido que montamos e a resposta que lemos", () => {
   it("pede o embedding ao modelo certo e devolve o vetor", async () => {
@@ -64,6 +70,81 @@ describe("Gemini — o pedido que montamos e a resposta que lemos", () => {
 
     expect(resultado.text).toBe("Transcrição de teste");
     expect(urlPedida).toContain("models/gemini-3.5-flash:generateContent");
+  });
+
+  it("o prompt leva o NOME do idioma, e a resposta devolve o código normalizado", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: "Talk" }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "en-US" });
+    expect(JSON.stringify(corpoPedido)).toContain("O idioma predominante esperado é inglês.");
+    expect(JSON.stringify(corpoPedido)).not.toContain("en-US");
+    expect(resultado.language).toBe("en");
+  });
+
+  it("sem idioma, ou com um que a IA não transcreve, o prompt não pede idioma e o código é o padrão pt-BR", async () => {
+    for (const language of [undefined, "xx"]) {
+      responderCom({ candidates: [{ content: { parts: [{ text: "Fala" }] } }] });
+      const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language });
+      expect(JSON.stringify(corpoPedido)).not.toContain("idioma predominante");
+      expect(resultado.language).toBe("pt-BR");
+    }
+  });
+
+  it("G16: um idioma fora dos 10 da tela (italiano) vai pelo nome em português e volta com o código dele", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: "Buongiorno" }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "it" });
+    expect(JSON.stringify(corpoPedido)).toContain("O idioma predominante esperado é italiano.");
+    expect(resultado.language).toBe("it");
+  });
+
+  it("G16: \"Detectar sozinho\" não diz o idioma, pede o JSON com o idioma e grava o código que a IA reconheceu", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: JSON.stringify({ transcricao: "Hello everyone. Bom dia a todos.", idioma: "en-GB" }) }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "auto" });
+    expect(resultado).toEqual({ text: "Hello everyone. Bom dia a todos.", language: "en", segments: [] });
+    const pedido = corpoPedido as { contents: Array<{ parts: Array<{ text?: string }> }>; generationConfig: Record<string, any> };
+    expect(pedido.contents[0].parts[0].text).toContain("O idioma não foi informado");
+    expect(pedido.contents[0].parts[0].text).not.toContain("predominante esperado");
+    expect(pedido.generationConfig.responseMimeType).toBe("application/json");
+    expect(pedido.generationConfig.responseSchema.required).toEqual(["transcricao", "idioma"]);
+  });
+
+  it("G16: em \"Detectar sozinho\", o idioma que não veio (ou não é da lista) vira o padrão, e a resposta sem JSON é erro", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: JSON.stringify({ transcricao: "Fala.", idioma: "klingon" }) }] } }] });
+    expect((await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "auto" })).language).toBe("pt-BR");
+    responderCom({ candidates: [{ content: { parts: [{ text: "não é json" }] } }] });
+    await expect(transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "auto" })).rejects.toThrow("O Gemini não retornou uma transcrição válida.");
+    responderCom({ candidates: [{ content: { parts: [{ text: JSON.stringify({ transcricao: "   ", idioma: "pt" }) }] } }] });
+    await expect(transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "auto" })).rejects.toThrow("O Gemini não retornou uma transcrição válida.");
+  });
+
+  it("a reunião antiga, gravada como 'pt', pede português do Brasil", async () => {
+    responderCom({ candidates: [{ content: { parts: [{ text: "Fala" }] } }] });
+    const resultado = await transcribeWithGemini({ audio: Buffer.from("audio"), mimeType: "audio/mpeg", language: "pt" });
+    expect(JSON.stringify(corpoPedido)).toContain("O idioma predominante esperado é português do Brasil.");
+    expect(resultado.language).toBe("pt-BR");
+  });
+
+  it("o embedding com pressa (a ordem da Memória na pergunta a várias reuniões, H6c): uma tentativa só, com o prazo pedido; sem as opções, as retentativas de sempre", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let tentativas = 0;
+    let prazo: AbortSignal | null | undefined = null;
+    globalThis.fetch = (async (_entrada: RequestInfo | URL, init?: RequestInit) => {
+      tentativas++;
+      prazo = init?.signal;
+      return new Response("sobrecarga", { status: 503 });
+    }) as typeof globalThis.fetch;
+    await expect(embedWithGemini("O que decidimos?", "RETRIEVAL_QUERY", { tentativas: 1, timeoutMs: 8_000 })).rejects.toThrow();
+    expect(tentativas).toBe(1);
+    expect(prazo).toBeInstanceOf(AbortSignal);
+
+    // Sem as opções, o 503 é passageiro e a chamada tenta de novo (as esperas
+    // entre as tentativas são as do módulo; o relógio falso as pula).
+    vi.useFakeTimers();
+    tentativas = 0;
+    const semPressa = embedWithGemini("O que decidimos?", "RETRIEVAL_QUERY").catch(erro => erro);
+    await vi.runAllTimersAsync();
+    expect(await semPressa).toBeInstanceOf(Error);
+    expect(tentativas).toBeGreaterThan(1);
+    vi.useRealTimers();
   });
 
   it("recusa antes de sair de casa quando não há chave", async () => {

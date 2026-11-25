@@ -17,7 +17,7 @@ import {
 import type { Ligacao, Praca } from "@/lib/pracas-do-globo";
 
 /**
- * O planeta do MMM — a Rede viva: o Brasil no centro e as linhas saindo dele
+ * O planeta da WRW — a Rede viva: o Brasil no centro e as linhas saindo dele
  * para os continentes e, de cada continente, para os países.
  *
  * Tudo que se move aqui se move PELA ROLAGEM, e só por ela (a viagem está em
@@ -37,7 +37,7 @@ const RAIO = 1;
 const OURO = new THREE.Color(0xc98f70);
 const GRAU = Math.PI / 180;
 
-// Onde o MMM faz negócio, de verdade: as praças chegam por props, do agregado
+// Onde a WRW faz negócio, de verdade: as praças chegam por props, do agregado
 // por país das usuárias reais (stats.presencaPorPais, montado por
 // montarPracasDoGlobo) — nunca por pessoa. Sem dado, sem praça: o planeta
 // continua inteiro. Os padrões são constantes de módulo de propósito: um []

@@ -94,8 +94,8 @@ describe("Dashboard — números da rede escondidos até serem atraentes (Rosber
 
   it("\"A rede hoje\" e \"Membros por nível\" não aparecem, nem os rótulos e números delas", async () => {
     render(<Dashboard />);
-    // Anti-vacuidade: o Dashboard renderizou (o título da grade da usuária está lá).
-    expect(await screen.findAllByText("Conexões efetivadas")).not.toHaveLength(0);
+    // Anti-vacuidade: o Dashboard renderizou (o resumo das conexões da usuária está lá).
+    expect(await screen.findByRole("region", { name: "Resumo das suas conexões" })).toBeInTheDocument();
 
     for (const texto of [
       "A rede hoje", "Pessoas cadastradas", "Oportunidades ativas", "Conexões realizadas", "Países representados",

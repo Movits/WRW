@@ -104,14 +104,14 @@ describe("pularNoLimiteGeral", () => {
   const pedido = (method: string, url: string) => ({ method, url, path: url.split("?")[0] });
 
   it("pula estáticos do build e de client/public em GET e HEAD", () => {
-    for (const url of ["/assets/index-DpIvNu2D.js", "/brand/favicon-32.png", "/images/hero-globo.webp"]) {
+    for (const url of ["/assets/index-DpIvNu2D.js", "/brand/favicon-32.png", "/images/hero-globo.webp", "/manifest.webmanifest"]) {
       expect(pularNoLimiteGeral(pedido("GET", url), FORA_DO_RENDER)).toBe(true);
       expect(pularNoLimiteGeral(pedido("HEAD", url), FORA_DO_RENDER)).toBe(true);
     }
   });
 
   it("conta a página, o storage, o cron e qualquer POST, mesmo em caminho de estático", () => {
-    for (const url of ["/", "/dashboard", "/manus-storage/x.png", "/api/scheduled/cleanup-sessions", "/assetsX", "/favicon.ico"]) {
+    for (const url of ["/", "/dashboard", "/manus-storage/x.png", "/api/scheduled/cleanup-sessions", "/assetsX", "/favicon.ico", "/manifest.json"]) {
       expect(pularNoLimiteGeral(pedido("GET", url), FORA_DO_RENDER)).toBe(false);
     }
     expect(pularNoLimiteGeral(pedido("POST", "/assets/x.js"), FORA_DO_RENDER)).toBe(false);
@@ -313,8 +313,12 @@ describe("o 429 da API chega à tela com mensagem", () => {
     expect(clientError.message).toBe(MENSAGEM_DO_LIMITE);
     expect(clientError.data?.code).toBe("TOO_MANY_REQUESTS");
     expect(clientError.data?.httpStatus).toBe(429);
-    // A tela mostra a frase do servidor, e não o genérico de "servidor indisponível".
-    expect(mensagemDeErroParaTela(clientError, chave => `[${chave}]`)).toBe(MENSAGEM_DO_LIMITE);
+    // Sem path: ForgotPassword e ResetPassword usam a falta dele para separar
+    // este 429 do TOO_MANY_REQUESTS lançado dentro da rota.
+    expect(clientError.data?.path).toBeUndefined();
+    // A tela traduz a frase do servidor (no pt-BR, a mesma frase), e não mostra
+    // o genérico de "servidor indisponível".
+    expect(mensagemDeErroParaTela(clientError, chave => `[${chave}]`)).toBe("[errors.tooManyRequests]");
   });
 
   it("num lote, todas as chamadas recebem a mesma mensagem", async () => {

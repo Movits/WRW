@@ -4,7 +4,8 @@ import {
 } from "../drizzle/schema";
 import { camposFaltantes, type CampoDaCompletude } from "../shared/completude-do-contato";
 import { exigirDb } from "./db";
-import { MAX_MEETING_DURATION_SECONDS } from "./meeting-service";
+import { reuniaoVisivel } from "./reuniao-visivel";
+import { LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS } from "./minutos-de-reuniao";
 
 /**
  * Meu Network Inteligente — o resumo do painel (pedido do Nicolas, 13/09/2026,
@@ -30,7 +31,11 @@ export type ResumoDoNetworkInteligente = {
   minutos: {
     /** Soma da duração das reuniões transcritas que continuam na conta (não é consumo mensal). */
     segundosEmReunioesGuardadas: number;
-    /** O mesmo teto que o servidor aplica ao receber a gravação. */
+    /**
+     * O teto da reunião gravada (12 h desde a G13b, o da gravação em partes), o
+     * mesmo do plano gratuito em networkInteligente.minutos. Vale também para o
+     * arquivo enviado, que vai em partes (H9a, H9b e H9c), e a tela diz os dois.
+     */
     limitePorReuniaoSegundos: number;
   };
   /** `disponibilizados`: contatos com SIM em "Disponibilizar este contato para oportunidades da rede" (spec de 14/09, item 14). */
@@ -48,11 +53,11 @@ export async function resumoDoNetworkInteligente(
   const db = await exigirDb();
 
   // Reuniões por status. 'deleted' é a exclusão em curso: para a dona, a
-  // reunião já não existe.
+  // reunião já não existe; a da lixeira (H7d) também não conta.
   const reunioesPorStatus = await db
     .select({ status: meetings.status, total: sql<number>`COUNT(*)` })
     .from(meetings)
-    .where(and(eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .groupBy(meetings.status);
   const porStatus = new Map(reunioesPorStatus.map(linha => [linha.status, numero(linha.total)]));
   const doStatus = (status: string) => porStatus.get(status as never) ?? 0;
@@ -72,7 +77,7 @@ export async function resumoDoNetworkInteligente(
     .where(and(
       eq(meetingTranscripts.ownerId, ownerId),
       eq(meetings.ownerId, ownerId),
-      ne(meetings.status, "deleted"),
+      reuniaoVisivel(),
     ));
 
   // Completude. A régua é a função pura de shared/, a mesma do alerta no
@@ -132,7 +137,7 @@ export async function resumoDoNetworkInteligente(
     reunioes,
     minutos: {
       segundosEmReunioesGuardadas: numero(duracao?.segundos),
-      limitePorReuniaoSegundos: MAX_MEETING_DURATION_SECONDS,
+      limitePorReuniaoSegundos: LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS,
     },
     contatos: {
       total: contatos.length,

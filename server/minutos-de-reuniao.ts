@@ -1,15 +1,21 @@
 import crypto from "node:crypto";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { assinaturasDeMinutos, consumoDeMinutos, planosDeMinutos } from "../drizzle/schema";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } from "@shared/const";
 import { exigirDb } from "./db";
 
 /**
  * Minutos de reunião — Meu Network Inteligente, spec da Glenda de 14/09,
  * itens 3, 4 e 25.
  *
- * O GRATUITO é real e já é aplicado pelo servidor: até 10 minutos por reunião
- * (MAX_MEETING_DURATION_SECONDS em meeting-service.ts, que o teste deste
- * módulo amarra a este número).
+ * O GRATUITO é real e já é aplicado: desde a G13b a gravação de todas é em
+ * partes, sem o teto de 10 minutos, e cada reunião gravada vai até 12 horas
+ * (GRAVACAO_EM_PARTES_SEGUNDOS_MAX em shared/const.ts, o teto técnico que a tela
+ * e server/fatias-de-reuniao.ts conferem; o teste deste módulo amarra os dois
+ * números). O arquivo de áudio ou vídeo enviado também vai em partes, até 12 h
+ * (H9a, H9b e H9c); desde a G14 o envio único, com os 10 minutos e 10 MB dele
+ * (meeting-service.ts), só sobra no recuo do corte do arquivo de um formato que
+ * o corte não lê.
  *
  * A MENSALIDADE que amplia os minutos é ESTRUTURA, não recurso (decisão do
  * Roberto de 14/09 e item 4: "Se não existir [infraestrutura de pagamento],
@@ -26,13 +32,13 @@ import { exigirDb } from "./db";
  * O contador de consumo (consumo_de_minutos) é real: uma linha por reunião
  * transcrita e por áudio curto de complemento por voz.
  *
- * O que ainda falta para um plano pago valer de verdade, além do pagamento:
- * subir o teto técnico do áudio (10 MB em MAX_MEETING_AUDIO_BYTES e o limite
- * de corpo de 15 MB de meetings.submitRecording) — 10 minutos a 64 kbps já
- * ocupam cerca de 5 MB.
+ * O que ainda falta para um plano pago acima das 12 h valer de verdade, além do
+ * pagamento: subir o teto técnico da gravação em partes
+ * (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, que a tela e o servidor conferem, e
+ * PARTES_NO_MAXIMO em server/fatias-de-reuniao.ts).
  */
 
-export const LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS = 10 * 60;
+export const LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS = GRAVACAO_EM_PARTES_SEGUNDOS_MAX;
 
 /** Não há provedor de pagamento no sistema. Virar `true` é trabalho da integração, não desta constante. */
 export const INTEGRACAO_DE_PAGAMENTO_CONFIGURADA = false;

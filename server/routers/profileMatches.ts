@@ -2,43 +2,90 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { hasValidConsent, usersComConsentimento } from "./consent";
 import { insightParaExibir } from "../vocabulario-da-conexao";
+import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
+
+// Quantas conexões a leitura entrega no máximo: o teto de `list` e o número da
+// Bronze. As travas vêm ANTES deste corte: a linha bloqueada pelo portão fica
+// no banco com a nota velha e alta, e com o corte antes do filtro ela ocupava a
+// vaga de uma conexão legítima, que sumia da tela (revisão adversarial de 12/09).
+const JANELA = 50;
+
+/**
+ * As conexões sugeridas que a usuária vê, com as três travas da LEITURA, antes
+ * de cortar no limite e de escolher as colunas que vão ao navegador.
+ *
+ * É a mesma função para `list` e para `conexoesPossiveis` (U3): o número que a
+ * Bronze vê é o tamanho exato da lista que ela veria como Prata, com as linhas
+ * que o motor gravou, o termo dos dois lados, o portão da demanda expressa e a
+ * janela. Regra que o motor passar a aplicar (a dos concorrentes, que hoje só o
+ * motor privado aplica: server/CLAUDE.md) vale para os dois de uma vez. Duas
+ * cópias destas travas já divergiram uma vez (a auditoria da etapa 8 achou a
+ * trava de consentimento numa função que nenhum router chamava).
+ *
+ * As linhas da dona vêm em páginas de JANELA, na ordem do motor (nota, e na
+ * mesma nota o id menor), e a leitura segue para a página seguinte até juntar
+ * JANELA visíveis ou acabar as linhas. Era UMA leitura de 50, e as travas vinham
+ * depois: o motor não regrava nem apaga o par que o portão passou a bloquear (ou
+ * cujo outro lado revogou o termo), para a dispensa da dona sobreviver, então a
+ * linha velha fica com a nota alta para sempre. Com 50 dessas no topo, as
+ * válidas da 51ª em diante sumiam da lista e do número, e "Buscar" não resolvia
+ * (achado 1 da revisão do pacote do match, 20/11: o motor guarda até 100 por
+ * rodada, mais as que a dona já tem).
+ */
+async function sugestoesVisiveis(userId: number) {
+  // Etapa 11 na LEITURA, no caminho que o Dashboard chama de verdade:
+  // revogar o termo esconde na hora o que já tinha sido cruzado — dos dois
+  // lados. A primeira versão desta trava foi parar numa função que nenhum
+  // router usava; a auditoria da etapa 8 flagrou o desvio, e a trava mora
+  // agora aqui, colada nos procedimentos vivos.
+  if (!(await hasValidConsent(userId, "termo_smart_match"))) return [];
+  const { getMatchesForUser } = await import("../db");
+  const { matchesBloqueadosPelaDemandaExpressa } = await import("../matching");
+  const visiveis: Awaited<ReturnType<typeof getMatchesForUser>> = [];
+  // A mesma linha não entra duas vezes: uma rodada do motor que regrave notas
+  // entre uma página e outra pode empurrar uma linha para a página seguinte.
+  const jaLidas = new Set<number>();
+  for (let pulo = 0; visiveis.length < JANELA; pulo += JANELA) {
+    const lidas = await getMatchesForUser(userId, JANELA, pulo);
+    const pagina = lidas.filter(m => !jaLidas.has(m.matchId));
+    for (const m of pagina) jaLidas.add(m.matchId);
+    const ids = pagina.map(m => m.matchedUserId).filter((id): id is number => id !== null);
+    const comTermo = ids.length ? await usersComConsentimento(ids, "termo_smart_match") : new Set<number>();
+    // Regra da demanda expressa (12/09/2026), também na LEITURA: a linha
+    // gravada antes da regra (ou antes de o perfil mudar) não volta à tela
+    // como recomendação — serviço casado por presunção some na hora, como
+    // o cruzamento some quando o termo é revogado, sem esperar "Reanalisar".
+    // Só os ids COM termo chegam ao portão: ele lê o perfil estratégico da
+    // outra usuária para decidir, e cruzar o dado de quem revogou é o que a
+    // etapa 11 proíbe — quem não tem termo já saiu da lista de qualquer modo.
+    const autorizados = ids.filter(id => comTermo.has(id));
+    const bloqueados = await matchesBloqueadosPelaDemandaExpressa(userId, autorizados);
+    visiveis.push(...pagina.filter(m => m.matchedUserId !== null && comTermo.has(m.matchedUserId) && !bloqueados.has(m.matchedUserId)));
+    // A página incompleta é a última.
+    if (lidas.length < JANELA) break;
+  }
+  return visiveis.slice(0, JANELA);
+}
 
 // ============================================================
-// MATCHES DE PERFIS (sistema original MMM)
+// MATCHES DE PERFIS (sistema original da plataforma)
 // ============================================================
 export const profileMatchesRouter = router({
   list: protectedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))
     .query(async ({ ctx, input }) => {
-      // Etapa 11 na LEITURA, no caminho que o Dashboard chama de verdade:
-      // revogar o termo esconde na hora o que já tinha sido cruzado — dos dois
-      // lados. A primeira versão desta trava foi parar numa função que nenhum
-      // router usava; a auditoria da etapa 8 flagrou o desvio, e a trava mora
-      // agora aqui, colada no procedimento vivo.
-      if (!(await hasValidConsent(ctx.user.id, "termo_smart_match"))) return [];
-      const { getMatchesForUser } = await import("../db");
-      // Lê a janela inteira (50, o teto da procedure) e só depois corta no
-      // limite pedido: a linha bloqueada pelo portão fica no banco com a nota
-      // velha e alta, e com LIMIT antes do filtro ela ocupava a vaga de um
-      // match legítimo, que sumia da tela (revisão adversarial de 12/09).
-      const JANELA = 50;
-      const lista = await getMatchesForUser(ctx.user.id, JANELA);
-      const ids = lista.map(m => m.matchedUserId).filter((id): id is number => id !== null);
-      const comTermo = await usersComConsentimento(ids, "termo_smart_match");
-      // Regra da demanda expressa (12/09/2026), também na LEITURA: a linha
-      // gravada antes da regra (ou antes de o perfil mudar) não volta à tela
-      // como recomendação — serviço casado por presunção some na hora, como
-      // o cruzamento some quando o termo é revogado, sem esperar "Reanalisar".
-      // Só os ids COM termo chegam ao portão: ele lê o perfil estratégico da
-      // outra usuária para decidir, e cruzar o dado de quem revogou é o que a
-      // etapa 11 proíbe — quem não tem termo já saiu da lista de qualquer modo.
-      const { matchesBloqueadosPelaDemandaExpressa } = await import("../matching");
-      const autorizados = ids.filter(id => comTermo.has(id));
-      const bloqueados = await matchesBloqueadosPelaDemandaExpressa(ctx.user.id, autorizados);
-      return lista
-        .filter(m => m.matchedUserId !== null && comTermo.has(m.matchedUserId) && !bloqueados.has(m.matchedUserId))
+      // U3: a Bronze vê só QUANTAS são (`conexoesPossiveis`), nunca a lista. É
+      // regra de consulta, não de tela: a resposta sai vazia antes de ler o
+      // banco. Vazia, e não 403, de propósito: a tela de antes, aberta durante
+      // o deploy, mostra o vazio em vez de um erro. Esta saída vem ANTES da
+      // trava do termo: o exame de produção prova a degradação sem termo com a
+      // presidente QA, que vê a lista, e não com a conta S, que chega Bronze ao
+      // bloco do termo (scripts/checar-producao.mjs, blocoConsentimentoFecho).
+      if (!veAsConexoesSugeridas(ctx.user.role)) return [];
+      const visiveis = await sugestoesVisiveis(ctx.user.id);
+      return visiveis
         .slice(0, input.limit)
-        // O `matchedUserId` serviu às três travas acima e PARA AQUI: ele não
+        // O `matchedUserId` serviu às três travas de `sugestoesVisiveis` e PARA AQUI: ele não
         // atravessa para o navegador. É id real, e toda conta Ouro tem o painel
         // administrativo, que lista usuárias por nome — id na mão de uma Ouro é
         // deanonimização de um salto. O cartão age pelo `matchId`, que já usava
@@ -69,6 +116,31 @@ export const profileMatchesRouter = router({
           souDestinataria: m.souDestinataria,
           displayName: m.displayName,
         }));
+    }),
+
+  // U3, "matches possíveis" (R-51 da reunião de 11/11/2026): a Bronze sabe que
+  // há conexões para ela, e a lista se libera com o cadastro completo (a régua
+  // da Prata, `veAsConexoesSugeridas`). O número é o tamanho da lista que ela
+  // veria como Prata NESTE momento, contado por `sugestoesVisiveis` — a mesma
+  // função de `list` —: as linhas que a última rodada do motor gravou para ela,
+  // com as travas da leitura aplicadas agora (o termo dos dois lados e o portão
+  // da demanda expressa, que lê o perfil de hoje).
+  //
+  // Cadastro parcial: o motor pontua qualquer perfil gravado, e a dimensão sem
+  // dado fica neutra (server/matching.ts); não há conta à parte para o perfil
+  // incompleto. A rodada acontece ao concluir o cadastro, no botão "Buscar
+  // novas conexões sugeridas" e no "Sou eu" da reunião (N5). Salvar o Perfil
+  // NÃO roda o motor, nem quando promove a Prata: a lista que a promoção libera
+  // é a mesma que o número contava.
+  //
+  // A resposta é só o número e se a lista está liberada: nenhuma linha, nenhum
+  // id (nem o `matchId`, que deixaria a Bronze agir sobre o cartão que não vê),
+  // nenhuma coluna do perfil de ninguém. Vale para todos os níveis, com a mesma
+  // conta; quem já vê a lista recebe `listaLiberada: true`.
+  conexoesPossiveis: protectedProcedure
+    .query(async ({ ctx }) => {
+      const visiveis = await sugestoesVisiveis(ctx.user.id);
+      return { total: visiveis.length, listaLiberada: veAsConexoesSugeridas(ctx.user.role) };
     }),
 
   // Etapa 13 (prontidão): quantos matches EXISTEM mas estão ocultos porque o
