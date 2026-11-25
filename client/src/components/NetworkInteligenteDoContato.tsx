@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Loader2, Mic, Send, ShieldCheck, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { ehErroDaEntidade } from "@shared/entidades";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { gravacaoDeAudioSuportada, useGravadorDeAudio, type AudioGravado } from "@/hooks/useGravadorDeAudio";
 
@@ -68,7 +69,8 @@ export function DisponibilidadeDoContato({ contactId, codigoAnonimo, disponivel,
       void utils.networkInteligente.contato.invalidate({ contactId });
       void utils.networkInteligente.resumo.invalidate();
     },
-    onError: () => toast.error(t("networkInteligente.availability.error")),
+    // O associado ativado (N3) decide por si: a conta da entidade lê o porquê, traduzido.
+    onError: e => toast.error(ehErroDaEntidade(e.message) ? t(`entidade.erros.${e.message}`) : t("networkInteligente.availability.error")),
   });
   const escolher = (valor: boolean) => {
     if (valor !== disponivel && !definir.isPending) definir.mutate({ contactId, disponivel: valor });

@@ -1,5 +1,8 @@
-import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
-import { contactAssets, contactNeeds, privateContacts, userProfiles, users } from "../drizzle/schema";
+import { and, eq, exists, inArray, isNotNull, isNull, lte, ne, notExists, or } from "drizzle-orm";
+import {
+  consents, contactAssets, contactNeeds, documentVersions, entidadeMembros, entidades, privateContacts, userProfiles, users,
+} from "../drizzle/schema";
+import { ERROS_DA_ENTIDADE } from "../shared/entidades";
 import { criarTeto } from "./assistente-de-texto";
 import { exigirDb } from "./db";
 import { scoreMatch, slugifyMatchTag, type MatchReason } from "./match-service";
@@ -46,8 +49,15 @@ import { mascararContatosEmTexto } from "../shared/contato-em-texto";
 
 /** O mesmo corte do motor privado (SAVE_THRESHOLD): scoreMatch devolve 0, 45, 60 ou 100. */
 export const LIMIAR_DA_CONEXAO = 50;
-/** Teto de leitura: o cruzamento é uma consulta, não uma exportação da rede. */
-const TETO_DE_CONTATOS = 1000;
+/**
+ * Teto de leitura: o cruzamento é uma consulta, não uma exportação da rede.
+ * Os contatos das contas de ENTIDADE (a base das associações) têm janela
+ * própria: uma entidade com milhares de associados enchia sozinha a janela de
+ * 1000 e tirava do cruzamento os contatos de todas as outras donas. O índice
+ * invertido da N4b troca as duas janelas (docs/arquitetura/entidades.md, seção 8).
+ */
+export const TETO_DE_CONTATOS = 1000;
+export const TETO_DE_CONTATOS_DE_ENTIDADES = 1000;
 const TETO_DE_MEMBROS = 1000;
 export const TETO_DE_REGISTROS_POR_RODADA = 100;
 /**
@@ -87,9 +97,24 @@ export class ContatoNaoEncontrado extends Error {
   constructor() { super("Contato não encontrado na sua rede."); this.name = "ContatoNaoEncontrado"; }
 }
 
+/**
+ * O associado que ativou o próprio cadastro (N3) decide por si na conta dele:
+ * a cópia na rede da entidade saiu da rede global na ativação e não volta,
+ * nem com os itens que a empresa desmarcou, nem sem o Termo do Smart Match dela.
+ */
+export class AssociadoAtivado extends Error {
+  constructor() { super(ERROS_DA_ENTIDADE.associadoAtivado); this.name = "AssociadoAtivado"; }
+}
+
 /** SIM/NÃO por contato. Só a dona muda, e o efeito vale na leitura seguinte. */
 export async function definirDisponibilidade(ownerId: string, contactId: number, disponivel: boolean) {
   const db = await exigirDb();
+  if (disponivel) {
+    const [ativado] = await db.select({ id: entidadeMembros.id }).from(entidadeMembros)
+      .where(and(eq(entidadeMembros.ownerId, ownerId), eq(entidadeMembros.contactId, contactId), eq(entidadeMembros.estado, "ativado")))
+      .limit(1);
+    if (ativado) throw new AssociadoAtivado();
+  }
   const [resultado] = await db.update(privateContacts)
     .set({ disponivelRedeGlobal: disponivel, disponibilidadeAlteradaEm: Date.now() })
     .where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId)));
@@ -138,15 +163,44 @@ async function itensDosContatos(db: Awaited<ReturnType<typeof exigirDb>>, ids: n
  */
 export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; somenteDona?: string; contactId?: number } = {}): Promise<ContatoDaRede[]> {
   const db = await exigirDb();
-  const condicoes = [eq(privateContacts.disponivelRedeGlobal, true), isNotNull(privateContacts.codigoAnonimo)];
+  const agora = Date.now();
+  // A autorização da dona (conta ativa e termo do Smart Match) e o convênio da entidade
+  // filtram NO SQL, ANTES do teto: filtrados depois, as 1000 linhas da janela podiam vir
+  // todas de uma dona sem autorização, ser descartadas, e o cruzamento ficava vazio para
+  // todas as usuárias, sem erro. O filtro em memória abaixo continua como segunda trava.
+  const condicoes = [eq(privateContacts.disponivelRedeGlobal, true), isNotNull(privateContacts.codigoAnonimo), eq(users.isActive, true)];
   if (opcoes.excetoDona) condicoes.push(ne(privateContacts.ownerId, opcoes.excetoDona));
   if (opcoes.somenteDona) condicoes.push(eq(privateContacts.ownerId, opcoes.somenteDona));
   if (opcoes.contactId !== undefined) condicoes.push(eq(privateContacts.id, opcoes.contactId));
-  const linhas = await db
+  const [termo] = await db.select({ id: documentVersions.id }).from(documentVersions)
+    .where(and(eq(documentVersions.type, "termo_smart_match"), eq(documentVersions.isCurrent, true))).limit(1);
+  if (termo) {
+    condicoes.push(exists(db.select({ um: consents.userId }).from(consents).where(and(
+      eq(consents.userId, users.id), eq(consents.documentVersionId, termo.id), isNull(consents.revokedAt),
+    ))));
+  }
+  const ler = (extra: ReturnType<typeof and>, teto: number) => db
     .select({ id: privateContacts.id, ownerId: privateContacts.ownerId, codigoAnonimo: privateContacts.codigoAnonimo })
     .from(privateContacts)
-    .where(and(...condicoes))
-    .limit(TETO_DE_CONTATOS);
+    .innerJoin(users, eq(users.openId, privateContacts.ownerId))
+    .where(and(...condicoes, extra))
+    .limit(teto);
+  const [comuns, deEntidades] = await Promise.all([
+    ler(and(eq(users.isEntidade, false)), TETO_DE_CONTATOS),
+    ler(and(
+      eq(users.isEntidade, true),
+      // Convênio que não vale hoje (o mesmo corte de convenioVigente: o dia do fim ainda vale).
+      notExists(db.select({ um: entidades.id }).from(entidades).where(and(
+        eq(entidades.ownerId, privateContacts.ownerId),
+        or(ne(entidades.convenioEstado, "ativo"), lte(entidades.convenioFim, agora - 86_400_000)),
+      ))),
+      // O associado ativado cruza pela conta dele, não pela cópia da entidade.
+      notExists(db.select({ um: entidadeMembros.id }).from(entidadeMembros).where(and(
+        eq(entidadeMembros.contactId, privateContacts.id), eq(entidadeMembros.estado, "ativado"),
+      ))),
+    ), TETO_DE_CONTATOS_DE_ENTIDADES),
+  ]);
+  const linhas = [...comuns, ...deEntidades];
   if (!linhas.length) return [];
 
   // A dona autoriza o cruzamento pelo termo do Smart Match, conferido agora; conta desativada não entra.
@@ -157,7 +211,7 @@ export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; soment
   // A conta de entidade (a base das associações, N1) só cruza com o convênio vigente: encerrado, os associados
   // saem do cruzamento na leitura seguinte, sem apagar nada (docs/arquitetura/entidades.md, seção 3).
   const { entidadesSemConvenio } = await import("./entidades");
-  const semConvenio = await entidadesSemConvenio(db, donas.map(d => d.openId));
+  const semConvenio = await entidadesSemConvenio(db, donas.map(d => d.openId), agora);
   const donaAutorizada = new Set(donas.filter(d => autorizadas.has(d.id) && !semConvenio.has(d.openId)).map(d => d.openId));
   const validas = linhas.filter(l => donaAutorizada.has(l.ownerId));
 

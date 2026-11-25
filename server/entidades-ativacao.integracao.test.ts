@@ -16,6 +16,7 @@ const {
 const ativacao = await import("./entidades-ativacao");
 const { entidadeDaConta } = await import("./entidades");
 const { excluirConta } = await import("./exclusao-de-conta");
+const { lerRedeGlobalAnonima } = await import("./network-rede-global");
 const { appRouter } = await import("./routers");
 const { VALIDADE_DA_ATIVACAO_MS } = await import("../shared/entidades");
 
@@ -207,6 +208,23 @@ describe.skipIf(!temBanco)("Ativação do cadastro importado (integração)", ()
     await expect(publico().ativacaoDeCadastro.ativar({ token: link.token, ...formulario("2") })).rejects.toMatchObject({ code: "NOT_FOUND" });
     // Ativado não ganha link novo.
     expect((await rota.entidades.gerarLinksDeAtivacao({ membroIds: [membro("Empresa Um")] })).links).toEqual([]);
+  });
+
+  it("a entidade não devolve à rede a cópia do associado ativado; a leitura global também não a lê", async () => {
+    const db = (await getDb())!;
+    const [m] = await db.select().from(entidadeMembros).where(eq(entidadeMembros.id, membro("Empresa Um")));
+    const contactId = Number(m.contactId);
+    await expect(rotaDe(CONTA_A, { isEntidade: true }).networkInteligente.definirDisponibilidade({ contactId, disponivel: true }))
+      .rejects.toMatchObject({ code: "CONFLICT", message: "ASSOCIADO_ATIVADO" });
+    const [c] = await db.select().from(privateContacts).where(eq(privateContacts.id, contactId));
+    expect(c.disponivelRedeGlobal).toBe(false);
+    // Defesa na consulta: mesmo com o SIM gravado por fora, a cópia com os itens importados não cruza.
+    await db.update(privateContacts).set({ disponivelRedeGlobal: true }).where(eq(privateContacts.id, contactId));
+    expect(await lerRedeGlobalAnonima({ contactId })).toEqual([]);
+    await db.update(privateContacts).set({ disponivelRedeGlobal: false }).where(eq(privateContacts.id, contactId));
+    // Tirar da rede continua livre.
+    await expect(rotaDe(CONTA_A, { isEntidade: true }).networkInteligente.definirDisponibilidade({ contactId, disponivel: false }))
+      .resolves.toEqual({ disponivel: false });
   });
 
   it("e-mail que já tem conta recusa com código e não gasta o link", async () => {

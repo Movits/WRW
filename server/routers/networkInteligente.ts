@@ -19,7 +19,7 @@ import { ALVOS_DO_ITEM } from "@shared/reuniao-no-match";
 import { resumoDoNetworkInteligente } from "../network-inteligente";
 import { garantirCodigosAnonimos } from "../network-codigo-anonimo";
 import { perfilDoContato } from "../network-perfil-do-contato";
-import { ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlobal } from "../network-rede-global";
+import { AssociadoAtivado, ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlobal } from "../network-rede-global";
 import {
   avancarConexao, ComissaoAntesDoFechamento, ConexaoNaoEncontrada, contarConexoes, definirStatusDeComissao,
   ETAPAS_DA_CONEXAO, EtapaForaDeOrdem, listarConexoesDaSolicitante, listarTodasAsConexoes, ORIGENS_DA_CONEXAO, sincronizarConexoesInternas,
@@ -133,7 +133,7 @@ function traduzirErro(erro: unknown): never {
   if (erro instanceof ContatoNaoEncontrado || erro instanceof ConexaoNaoEncontrada || erro instanceof PendenciaNaoEncontrada) {
     throw new TRPCError({ code: "NOT_FOUND", message: erro.message });
   }
-  if (erro instanceof EtapaForaDeOrdem || erro instanceof ComissaoAntesDoFechamento) {
+  if (erro instanceof EtapaForaDeOrdem || erro instanceof ComissaoAntesDoFechamento || erro instanceof AssociadoAtivado) {
     throw new TRPCError({ code: "CONFLICT", message: erro.message });
   }
   if (erro instanceof ValorInvalido) throw new TRPCError({ code: "BAD_REQUEST", message: erro.message });

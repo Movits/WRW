@@ -12,7 +12,7 @@ import {
   cifrar, decifrar, exigirChavesDaEntidade, gerarTokenDeConvite, hashDoConvite, hmacDoDocumento,
 } from "./entidades-cofre";
 import {
-  DOCUMENTO_DO_PAIS, ERROS_DA_ENTIDADE, ITENS_POR_LADO_MAX, LINHAS_POR_BLOCO, LINHAS_POR_ARQUIVO_MAX, MEMBROS_POR_PAGINA,
+  ASSOCIADOS_MAX_ATE_N4B, DOCUMENTO_DO_PAIS, ERROS_DA_ENTIDADE, ITENS_POR_LADO_MAX, LINHAS_POR_BLOCO, LINHAS_POR_ARQUIVO_MAX, MEMBROS_POR_PAGINA,
   convenioVigente, formatarDocumento, normalizarDocumento, validarLinha,
   type EstadoDoConvenio, type LinhaBruta, type LinhaValida, type ProblemaDaLinha, type TipoDeDocumento, type TipoDeEntidade,
 } from "../shared/entidades";
@@ -131,7 +131,10 @@ export async function contatoDoMembro(entidade: EntidadeDaConta, userId: number,
   exigirChavesDaEntidade();
   const db = await exigirDb();
   return db.transaction(async tx => {
+    // Só o associado cujo contato ainda existe na rede da entidade: o contato apagado leva
+    // o membro a "removido" (apagarRastroDoContato), e o join é a segunda trava.
     const [membro] = await tx.select({ cifrado: entidadeMembros.contatoCifrado }).from(entidadeMembros)
+      .innerJoin(privateContacts, and(eq(privateContacts.id, entidadeMembros.contactId), eq(privateContacts.ownerId, entidade.ownerId)))
       .where(and(eq(entidadeMembros.id, membroId), eq(entidadeMembros.entidadeId, entidade.id), ne(entidadeMembros.estado, "removido")))
       .limit(1);
     if (!membro) throw erro("NOT_FOUND", ERROS_DA_ENTIDADE.membroNaoEncontrado);
@@ -154,6 +157,8 @@ export async function iniciarImportacao(
   exigirChavesDaEntidade();
   if (!DOCUMENTO_DO_PAIS[entidade.pais]) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.paisSemDocumento);
   const totalLinhas = Math.min(Math.max(0, Math.floor(entrada.totalLinhas)), LINHAS_POR_ARQUIVO_MAX);
+  // O arquivo maior que o teto nem começa a gravar (o bloco confere de novo, contando a base).
+  if (entrada.modo === "aplicar" && totalLinhas > ASSOCIADOS_MAX_ATE_N4B) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
   const db = await exigirDb();
   return db.transaction(async tx => {
     const agora = Date.now();
@@ -279,6 +284,12 @@ export async function processarBloco(
       // Importado cujo contato a entidade apagou pela Rede: o contato volta, com o mesmo registro.
       if (e.contactId !== null && contatosVivos.has(Number(e.contactId))) atualizar.push({ v, membroId: Number(e.id), contactId: Number(e.contactId) });
       else recriar.push({ v, membroId: Number(e.id) });
+    }
+
+    if (aplicar && novas.length) {
+      const [{ naBase }] = await tx.select({ naBase: count() }).from(entidadeMembros)
+        .where(and(eq(entidadeMembros.entidadeId, entidade.id), ne(entidadeMembros.estado, "removido")));
+      if (Number(naBase) + novas.length > ASSOCIADOS_MAX_ATE_N4B) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
     }
 
     if (aplicar) {
@@ -607,9 +618,17 @@ export async function criarEntidade(staffUserId: number, entrada: DadosDaEntidad
     const [resultado] = await tx.insert(entidades).values({ ...dados, ownerId: conta.openId, createdAt: agora, updatedAt: agora });
     const id = Number((resultado as unknown as { insertId: number }).insertId);
     await tx.update(users).set({ isEntidade: true }).where(eq(users.id, conta.id));
+    // A conta de entidade só tem contato privado (docs/arquitetura/entidades.md, seção 1). As
+    // rotas network.create e network.update recusam ouro e público; os contatos que a conta
+    // já tinha nesses níveis voltam a privado aqui, na mesma transação.
+    const [rebaixados] = await tx.update(privateContacts).set({ nivelVisibilidade: "privado", updatedAt: agora })
+      .where(and(eq(privateContacts.ownerId, conta.openId), ne(privateContacts.nivelVisibilidade, "privado")));
     await tx.insert(auditLogs).values({
       userId: staffUserId, action: "ENTIDADE_CRIADA", resource: "entidade", resourceId: String(id),
-      details: { contaUserId: conta.id, nome: entrada.nome, pais: entrada.pais, convenioEstado: entrada.convenioEstado }, riskLevel: "high",
+      details: {
+        contaUserId: conta.id, nome: entrada.nome, pais: entrada.pais, convenioEstado: entrada.convenioEstado,
+        contatosRebaixadosParaPrivado: Number((rebaixados as unknown as { affectedRows?: number }).affectedRows ?? 0),
+      }, riskLevel: "high",
     });
     return { id };
   });

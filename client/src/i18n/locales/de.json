@@ -4127,7 +4127,9 @@
       "PEDIDOS_DEMAIS": "Zu viele Anfragen heute. Versuchen Sie es morgen erneut.",
       "CANAL_INDISPONIVEL": "Die Organisation hat diesen Kanal des Unternehmens nicht. Wählen Sie einen anderen.",
       "ATIVACAO_NAO_ENCONTRADA": "Dieser Aktivierungslink ist nicht mehr gültig. Bitten Sie die Organisation um einen neuen.",
-      "ATIVACAO_EMAIL_JA_CADASTRADO": "Für diese E-Mail gibt es schon ein Konto. Verwenden Sie eine andere E-Mail, um diese Registrierung zu aktivieren."
+      "ATIVACAO_EMAIL_JA_CADASTRADO": "Für diese E-Mail gibt es schon ein Konto. Verwenden Sie eine andere E-Mail, um diese Registrierung zu aktivieren.",
+      "ASSOCIADO_ATIVADO": "Dieses Unternehmen hat seine eigene Registrierung aktiviert und entscheidet in seinem Konto selbst. Die Kopie der Organisation kehrt nicht ins Netzwerk zurück.",
+      "BASE_ACIMA_DO_TETO": "Vorerst umfasst der Bestand einer Organisation höchstens 1.000 Mitglieder. Sprechen Sie mit dem Team, bevor Sie mehr importieren."
     },
     "membros": {
       "titulo": "Mitglieder",

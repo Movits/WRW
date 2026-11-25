@@ -4127,7 +4127,9 @@
       "PEDIDOS_DEMAIS": "今天的请求太多。请明天再试。",
       "CANAL_INDISPONIVEL": "机构没有该公司的这个渠道。请选择其他渠道。",
       "ATIVACAO_NAO_ENCONTRADA": "此激活链接已失效。请向机构索取新的链接。",
-      "ATIVACAO_EMAIL_JA_CADASTRADO": "此邮箱已有账户。请使用其他邮箱激活此注册。"
+      "ATIVACAO_EMAIL_JA_CADASTRADO": "此邮箱已有账户。请使用其他邮箱激活此注册。",
+      "ASSOCIADO_ATIVADO": "这家公司已自行激活注册，并在自己的账户中自行决定。机构的副本不会回到网络中。",
+      "BASE_ACIMA_DO_TETO": "目前，一个机构的会员库最多 1,000 个。导入更多之前，请先联系团队。"
     },
     "membros": {
       "titulo": "会员",

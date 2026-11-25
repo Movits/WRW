@@ -180,6 +180,12 @@ sem biblioteca nova). O arquivo não sobe; vão as linhas já mapeadas e o SHA-2
   em blocos diferentes. Na mesma entidade: `importado` é atualizado (V7), `ativado` não é
   tocado (aviso) e `removido` é recusado (lista de bloqueio só pelo HMAC, pendência e). Em
   outra entidade é outro registro, e o relatório cala.
+- **Tirar um associado da base:** a entidade apaga o contato pela Rede (`network.delete`).
+  `apagarRastroDoContato` leva o associado a `removido` e apaga o documento, o telefone e o
+  e-mail cifrados, a CNAE, a referência e o link de ativação; fica só o HMAC do documento,
+  que é a lista de bloqueio (a reimportação recusa com `MEMBRO_REMOVIDO`). O contato do
+  associado só se lê com o contato vivo na rede da entidade. Desfazer a remoção ainda não
+  tem caminho (pendência e).
 - **Ensaio e aplicar:** o ensaio relata tudo sem gravar contato; a importação só libera na tela
   depois de um ensaio concluído do mesmo arquivo.
 
@@ -195,16 +201,23 @@ sem biblioteca nova). O arquivo não sobe; vão as linhas já mapeadas e o SHA-2
   parte do nome (LIKE parametrizado sobre os contatos da entidade).
 - **Os motores, o que a N1 e a N4 NÃO resolvem (vai à N4b, que traz o índice invertido
   `chaves_de_cruzamento` e a fila):**
-  1. A leitura global tem `.limit(1000)` sem ordem (`network-rede-global.ts`): com 30 mil
-     associados disponíveis (decisão 4), quase nenhum é lido e os contatos das outras donas
-     podem ficar de fora da janela. **Não carregar base real antes da N4b.**
+  1. A leitura global tem teto, sem ordem (`network-rede-global.ts`). Desde a revisão do
+     pacote, a autorização (conta ativa, termo do Smart Match e convênio vigente) filtra no
+     SQL, antes do teto, e os contatos das contas de entidade têm janela própria de 1000
+     (`TETO_DE_CONTATOS_DE_ENTIDADES`): a entidade não tira mais da janela os contatos das
+     outras donas, nem com o convênio encerrado. Mas, com 30 mil associados disponíveis
+     (decisão 4), só 1000 seriam lidos. Por isso o servidor trava a base de cada entidade em
+     1000 associados até a N4b (`ASSOCIADOS_MAX_ATE_N4B`; o aplicar recusa com
+     `BASE_ACIMA_DO_TETO`, o ensaio lê o arquivo inteiro). **Não carregar base real antes da N4b.**
   2. O motor privado (`match-service.ts`) compara todos os "tenho" com todos os "preciso" da
      dona a cada item novo: na conta da entidade, isso é quadrático em 30 mil. A carga não o
      chama; mexer num contato pela Rede da entidade, sim.
   3. O painel do Meu Network Inteligente lê todos os contatos da dona sem teto
      (`network-inteligente.ts`); na conta da entidade, a lista própria do painel da entidade é
      o caminho.
-  4. O motor de perfis compara cada usuária com só 50 perfis, sem ordem (`matching.ts`).
+  4. O motor de perfis já pagina todos os perfis por id (`matching.ts`, sem o antigo teto de
+     50). O custo de escala é outro: cada regeneração percorre todas as contas, e as contas
+     ativadas pela N3 passam a pesar nele.
 
 ## 9. O convite ao app
 
@@ -240,7 +253,9 @@ divulga o app com o link) da auditoria. Código em `server/entidades-ativacao.ts
   Numa transação, com o associado travado: o associado vira `ativado` (com a conta e a
   hora), o hash some (uso único; o segundo envio simultâneo cai em NOT_FOUND), o contato da
   entidade sai da rede global (a empresa agora cruza como membra, também fora da entidade,
-  R-42) e a auditoria `ENTIDADE_CADASTRO_ATIVADO` vai junto. A sessão abre na hora e a tela
+  R-42) e a auditoria `ENTIDADE_CADASTRO_ATIVADO` vai junto. A cópia não volta: a entidade
+  que tenta disponibilizá-la de novo recebe `ASSOCIADO_ATIVADO`, e a leitura global não lê
+  contato de associado ativado. A sessão abre na hora e a tela
   segue para o cadastro, já preenchido, onde ficam o Termo Geral e a maioridade.
 - **Excluir a conta ativada** anula `ativado_user_id`; o associado segue `ativado` na base da
   entidade (a reimportação não o recria).
@@ -304,7 +319,7 @@ Leitura técnica do fluxo, para orientar as perguntas. Não é parecer.
    o teto de 1000 da leitura global pelo índice. **Antes da primeira carga real.**
 3. **N2** `feat/assoc-n2`: o pedido de contato pela entidade. Feita: seção 12. Os textos
    seguem marcados para a Cris, e as pendências a, d e g seguem com o Dr. Ronei.
-4. **`fix/motor-de-perfis-sem-teto-de-50`**. A **N3** (`feat/assoc-n3`, a ativação do cadastro
+4. ~~`fix/motor-de-perfis-sem-teto-de-50`~~: já estava feito na `main` (seção 8). A **N3** (`feat/assoc-n3`, a ativação do cadastro
    importado) já está desenhada e feita: seção 9a.
 
 **A primeira carga real é operação, não PR:** depois da N4b, com o convênio assinado e as

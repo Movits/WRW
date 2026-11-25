@@ -4127,7 +4127,9 @@
       "PEDIDOS_DEMAIS": "Muitos pedidos hoje. Tente de novo amanhã.",
       "CANAL_INDISPONIVEL": "A entidade não tem esse canal da empresa. Escolha outro.",
       "ATIVACAO_NAO_ENCONTRADA": "Este link de ativação não vale mais. Peça um novo à entidade.",
-      "ATIVACAO_EMAIL_JA_CADASTRADO": "Este e-mail já tem conta. Use outro e-mail para ativar este cadastro."
+      "ATIVACAO_EMAIL_JA_CADASTRADO": "Este e-mail já tem conta. Use outro e-mail para ativar este cadastro.",
+      "ASSOCIADO_ATIVADO": "Esta empresa ativou o próprio cadastro e decide por si na conta dela. A cópia da entidade não volta à rede.",
+      "BASE_ACIMA_DO_TETO": "Por enquanto, a base de uma entidade vai até 1.000 associados. Fale com a equipe antes de importar mais."
     },
     "membros": {
       "titulo": "Associados",

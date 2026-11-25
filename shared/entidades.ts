@@ -21,6 +21,14 @@ import { encontrarContatosEmTexto, mascararContatosEmTexto } from "./contato-em-
 
 /** Linhas de uma planilha (a meta da reunião de 11/11 é de ~30 mil cadastros por convênio). */
 export const LINHAS_POR_ARQUIVO_MAX = 50_000;
+/**
+ * Associados por entidade até a N4b (o índice de cruzamento). A leitura global lê
+ * no máximo 1000 contatos de entidade por vez (network-rede-global.ts): uma base
+ * maior não cruzaria, e o desenho manda não carregar base real antes da N4b
+ * (docs/arquitetura/entidades.md, seção 8). O ensaio lê o arquivo inteiro; o
+ * aplicar recusa com BASE_ACIMA_DO_TETO. Decisão vetável (24/11): sobe com a N4b.
+ */
+export const ASSOCIADOS_MAX_ATE_N4B = 1000;
 /** Linhas por bloco: cada bloco é uma chamada e uma transação no servidor. */
 export const LINHAS_POR_BLOCO = 500;
 /** Itens por lado ("o que tem" e "o que precisa") de cada empresa. */
@@ -431,6 +439,10 @@ export const ERROS_DA_ENTIDADE = {
   // A ativação do cadastro importado (N3).
   ativacaoNaoEncontrada: "ATIVACAO_NAO_ENCONTRADA",
   ativacaoEmailJaCadastrado: "ATIVACAO_EMAIL_JA_CADASTRADO",
+  // O associado ativado decide por si: a entidade não devolve a cópia dele à rede global.
+  associadoAtivado: "ASSOCIADO_ATIVADO",
+  // Até a N4b (o índice de cruzamento), a base de uma entidade tem teto (ASSOCIADOS_MAX_ATE_N4B).
+  baseAcimaDoTeto: "BASE_ACIMA_DO_TETO",
 } as const;
 export type CodigoDeErroDaEntidade = (typeof ERROS_DA_ENTIDADE)[keyof typeof ERROS_DA_ENTIDADE];
 const CODIGOS = new Set<string>(Object.values(ERROS_DA_ENTIDADE));
