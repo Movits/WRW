@@ -111,6 +111,8 @@ const {
   MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR,
   MENSAGEM_SEM_TRANSCRICAO,
   perguntarAReuniao,
+  REGRA_DA_LISTA,
+  RESPOSTA_DA_PERGUNTA_MAX,
   trechoApareceNaTranscricao,
 } = await import("./reuniao-com-ia");
 const { SCHEMA_DO_VISUAL } = await import("./resposta-visual");
@@ -632,5 +634,33 @@ describe("a resposta em forma visual (H6d): a tabela ou o gráfico vêm num form
     comFalas();
     invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta: "O frete custa 10 mil.", citacoes: [{ trecho: "o frete custa dez mil reais" }], visual: tabelaDaIA("{F1}") }));
     await expect(perguntar()).resolves.toEqual({ respondida: false });
+  });
+});
+
+// Defeito 3 do teste manual T50 (23/11): a sugestão "Ações e responsáveis"
+// veio incompleta. A transcrição já ia inteira à IA; o que cortava era a
+// resposta, com "no máximo 3 frases" e 1.000 letras para toda pergunta.
+describe("a pergunta que pede uma lista (as ações e os responsáveis) cobre a reunião inteira", () => {
+  const PERGUNTA_DAS_ACOES = "Quais ações ficaram combinadas, com quem é responsável e o prazo de cada uma?";
+
+  it("as instruções pedem a reunião inteira, um item por linha, sem o limite de 3 frases", async () => {
+    invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    await rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: PERGUNTA_DAS_ACOES });
+    const [sistema] = mensagens();
+    expect(sistema.content).toContain(REGRA_DA_LISTA);
+    expect(REGRA_DA_LISTA).toMatch(/transcrição inteira/);
+    expect(REGRA_DA_LISTA).toMatch(/linha própria/);
+  });
+
+  it("o schema e a conferência deixam passar a lista longa: 30 ações, bem acima das 1.000 letras de antes, chegam inteiras", async () => {
+    const acoes = Array.from({ length: 30 }, (_, i) => `- A Carla manda a proposta revisada número ${i + 1} ao importador alemão até sexta-feira`);
+    const lista = acoes.join("\n");
+    expect(lista.length).toBeGreaterThan(2_000);
+    respondeCom(lista, "Então fica decidido que a Carla fecha o contrato com o importador até sexta-feira.");
+    banco.segmentos = [];
+    const resposta = await rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: PERGUNTA_DAS_ACOES });
+    expect(resposta.respondida).toBe(true);
+    expect((resposta as { resposta: string }).resposta).toBe(lista);
+    expect(invokeLLM.mock.calls[0][0].response_format.json_schema.schema.properties.resposta.maxLength).toBe(RESPOSTA_DA_PERGUNTA_MAX);
   });
 });

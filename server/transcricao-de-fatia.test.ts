@@ -9,7 +9,7 @@ const ambiente = vi.hoisted(() => ({ ENV: { llmApiKey: "chave-de-teste-que-nunca
 vi.mock("./_core/env", () => ambiente);
 
 const { gerarComAudioNoGemini, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, raciocinioBaixo } = await import("./gemini");
-const { contextoParaAProxima, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, TemposForaDaParteError, transcreverFatia } = await import("./transcricao-de-fatia");
+const { contextoParaAProxima, iniciosDasReunioesJuntadas, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, TemposForaDaParteError, transcreverFatia } = await import("./transcricao-de-fatia");
 
 let fetchOriginal: typeof globalThis.fetch;
 let pedidos: Array<{ url: string; corpo: Record<string, any> }> = [];
@@ -623,5 +623,20 @@ describe("G16: \"Detectar sozinho\" e os outros idiomas que a IA transcreve", ()
     responder({ corpo: respostaJson({ segmentos: [] }) });
     const padrao = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "xx", inicioSegundos: 0, duracaoSegundos: 600 });
     expect(padrao.idioma).toBe("pt-BR");
+  });
+});
+
+// Defeito 2 do teste manual T50 (23/11): onde começa cada reunião da juntada.
+describe("iniciosDasReunioesJuntadas", () => {
+  it("o início das partes com a marca, pela soma das anteriores; a que não chegou vale a duração padrão", async () => {
+    const { MARCA_DE_OUTRA_REUNIAO, DURACAO_DA_FATIA_SEGUNDOS } = await import("./transcricao-de-fatia");
+    const comMarca = { [MARCA_DE_OUTRA_REUNIAO]: true };
+    expect(iniciosDasReunioesJuntadas([
+      { seq: 0, durationMs: 300_000, result: {} },
+      { seq: 1, durationMs: 120_000, result: comMarca },
+      // seq 2 não chegou
+      { seq: 3, durationMs: 60_000, result: comMarca },
+    ])).toEqual([300, 300 + 120 + DURACAO_DA_FATIA_SEGUNDOS]);
+    expect(iniciosDasReunioesJuntadas([{ seq: 0, durationMs: 1, result: comMarca }, { seq: 1, durationMs: 1, result: null }])).toEqual([]);
   });
 });
