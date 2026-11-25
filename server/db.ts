@@ -20,6 +20,7 @@ import {
   meetings, meetingContactSuggestions,
   networkSugestoes, conexoesParticipantes,
   proximasAcoes,
+  entidadeMembros,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import nodeCrypto from "node:crypto";
@@ -1300,6 +1301,18 @@ export async function apagarRastroDoContato(
   // As próximas ações (H5a) também são da dona: ficam, sem o contato.
   await db.update(proximasAcoes).set({ contactId: null, updatedAt: Date.now() })
     .where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.contactId, contactId)));
+  // O associado de uma entidade (a base das associações, N1): apagar o contato pela Rede é
+  // tirar a empresa da base. O membro vira "removido" e perde o documento e o telefone e o
+  // e-mail cifrados, o CNAE e a referência; fica só o HMAC do documento, que é a lista de
+  // bloqueio: a reimportação do mesmo documento recusa com MEMBRO_REMOVIDO, em vez de
+  // devolver à rede quem pediu para sair. Sem isto, contatoDoMembro seguia decifrando o
+  // telefone e o e-mail de um contato que já não existia.
+  await db.update(entidadeMembros).set({
+    estado: "removido", contactId: null, documentoCifrado: null, contatoCifrado: null,
+    cnaePrincipal: null, cnaesSecundarios: null, referenciaDaEntidade: null,
+    precisoOrigem: null, precisoDeclaradoEm: null, ativacaoHash: null, ativacaoExpiraEm: null,
+    updatedAt: Date.now(),
+  }).where(and(eq(entidadeMembros.ownerId, ownerId), eq(entidadeMembros.contactId, contactId)));
 }
 
 export async function deletePrivateContact(

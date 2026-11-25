@@ -62,6 +62,11 @@ export const users = mysqlTable("users", {
   // própria dona o link de cada reunião cujo primeiro resumo ficar pronto.
   // Desligado por padrão; só ela liga, no painel do resumo por e-mail.
   resumoPorEmailAutomatico: boolean("resumoPorEmailAutomatico").default(false).notNull(),
+  // A conta de uma ENTIDADE (federação, associação, sindicato: a base das
+  // associações, N1). É um PODER, como o distribuidor: marca a conta que tem uma
+  // linha em `entidades` e abre o painel da entidade. Gravado junto com a linha,
+  // na mesma transação, pela equipe (`entidades.admin.criar`).
+  isEntidade: boolean("isEntidade").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -2146,6 +2151,10 @@ export const contactAssets = mysqlTable("contact_assets", {
   tagLabel: varchar("tag_label", { length: 200 }).notNull(),
   category: varchar("category", { length: 120 }),
   description: text("description"),
+  // De onde o item veio, quando não foi a dona que escreveu: "entidade" (a planilha da
+  // entidade, N1) ou "cnae" (a atividade da empresa pela tabela do IBGE, N4). Nulo = a dona.
+  // A CNAE só preenche este lado ("o que tem"); contact_needs não tem a coluna de propósito.
+  origem: varchar("origem", { length: 20 }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => ({
@@ -2442,3 +2451,150 @@ export const consents = mysqlTable("consents", {
 
 export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type Consent = typeof consents.$inferSelect;
+
+// ============================================================
+// A BASE DAS ASSOCIAÇÕES (N1, docs/arquitetura/entidades.md)
+// A entidade é uma conta; cada associado é um contato da rede dela
+// (private_contacts + contact_assets/contact_needs), com o ID anônimo do Meu
+// Network Inteligente, e uma linha em entidade_membros com o que só a entidade
+// vê: o documento (HMAC para achar repetidos, cifrado para mostrar), os
+// contatos cifrados e as CNAEs. Nada daqui é lido pelo cruzamento global.
+// ============================================================
+export const entidades = mysqlTable("entidades", {
+  id:                 int("id").autoincrement().primaryKey(),
+  // A conta da entidade (openId). Uma conta por entidade (decisão de 22/11).
+  ownerId:            varchar("owner_id", { length: 128 }).notNull(),
+  nome:               varchar("nome", { length: 200 }).notNull(),
+  tipo:               varchar("tipo", { length: 20, enum: ["federacao", "associacao", "confederacao", "sindicato", "outra"] }).notNull(),
+  // ISO 3166-1 alfa-2: decide o documento dos associados (BR: CNPJ; MZ: NUIT).
+  pais:               varchar("pais", { length: 2 }).notNull(),
+  convenioEstado:     varchar("convenio_estado", { length: 20, enum: ["em_negociacao", "ativo", "encerrado"] }).default("em_negociacao").notNull(),
+  convenioInicio:     bigint("convenio_inicio", { mode: "number" }),
+  convenioFim:        bigint("convenio_fim", { mode: "number" }),
+  convenioReferencia: varchar("convenio_referencia", { length: 120 }),
+  // "Membro da Associação X" no match (N2): só com autorização no convênio.
+  mostrarNomeNoMatch: boolean("mostrar_nome_no_match").default(false).notNull(),
+  // Os associados entram disponíveis para a rede (decisão de 22/11).
+  disponivelPorPadrao: boolean("disponivel_por_padrao").default(true).notNull(),
+  // O link de convite ao app: o hash acha o convite; o cifrado o mostra de novo à entidade.
+  conviteHash:        varchar("convite_hash", { length: 64 }),
+  conviteCifrado:     text("convite_cifrado"),
+  conviteGeradoEm:    bigint("convite_gerado_em", { mode: "number" }),
+  createdAt:          bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:          bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerUnique:  uniqueIndex("entidades_owner_unique").on(table.ownerId),
+  conviteUnique: uniqueIndex("entidades_convite_unique").on(table.conviteHash),
+}));
+
+export const entidadeMembros = mysqlTable("entidade_membros", {
+  id:                  bigint("id", { mode: "number" }).primaryKey().autoincrement(),
+  ownerId:             varchar("owner_id", { length: 128 }).notNull(),
+  entidadeId:          int("entidade_id").notNull(),
+  // O contato da rede da entidade. Nulo só no removido (fica a lista de bloqueio pelo HMAC).
+  contactId:           bigint("contact_id", { mode: "number" }),
+  paisDocumento:       varchar("pais_documento", { length: 2 }).notNull(),
+  tipoDocumento:       varchar("tipo_documento", { length: 10 }).notNull(),
+  // HMAC-SHA256 com ENTIDADES_HMAC_KEY: acha o repetido sem guardar o número em claro.
+  documentoHmac:       varchar("documento_hmac", { length: 64 }).notNull(),
+  documentoCifrado:    text("documento_cifrado"),
+  // Telefone e e-mail da empresa, cifrados juntos (JSON); só a entidade decifra, com auditoria.
+  contatoCifrado:      text("contato_cifrado"),
+  cnaePrincipal:       varchar("cnae_principal", { length: 7 }),
+  cnaesSecundarios:    jsonCompat("cnaes_secundarios").$type<string[]>(),
+  referenciaDaEntidade: varchar("referencia_da_entidade", { length: 100 }),
+  // A necessidade foi declarada à entidade (origem) nesta data; nunca inferida da CNAE.
+  precisoOrigem:       varchar("preciso_origem", { length: 20 }),
+  precisoDeclaradoEm:  bigint("preciso_declarado_em", { mode: "number" }),
+  loteId:              int("lote_id"),
+  estado:              varchar("estado", { length: 12, enum: ["importado", "ativado", "removido"] }).default("importado").notNull(),
+  // A ativação do cadastro importado (N3): o link de uso único que a entidade
+  // distribui. Só o hash do token fica aqui (o token sai uma vez, na hora de
+  // gerar); gerar de novo troca o hash, e o link anterior deixa de abrir.
+  // Ativado, o hash some e fica a conta que nasceu dele (nula se ela for excluída).
+  ativacaoHash:        varchar("ativacao_hash", { length: 64 }),
+  ativacaoExpiraEm:    bigint("ativacao_expira_em", { mode: "number" }),
+  ativadoUserId:       int("ativado_user_id"),
+  ativadoEm:           bigint("ativado_em", { mode: "number" }),
+  createdAt:           bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:           bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ativacaoUnique:  uniqueIndex("em_ativacao_unique").on(table.ativacaoHash),
+  ativadoIdx:      index("em_ativado_user_idx").on(table.ativadoUserId),
+  contatoUnique:   uniqueIndex("em_contact_unique").on(table.contactId),
+  documentoUnique: uniqueIndex("em_entidade_documento_unique").on(table.entidadeId, table.documentoHmac),
+  documentoIdx:    index("em_documento_idx").on(table.documentoHmac),
+  estadoIdx:       index("em_entidade_estado_idx").on(table.entidadeId, table.estado),
+  ownerIdx:        index("em_owner_idx").on(table.ownerId),
+}));
+
+export const importacoesDeEntidade = mysqlTable("importacoes_de_entidade", {
+  id:                 int("id").autoincrement().primaryKey(),
+  ownerId:            varchar("owner_id", { length: 128 }).notNull(),
+  entidadeId:         int("entidade_id").notNull(),
+  // SHA-256 do arquivo (calculado na tela): o arquivo em si nunca chega ao servidor.
+  arquivoSha256:      varchar("arquivo_sha256", { length: 64 }).notNull(),
+  modo:               varchar("modo", { length: 10, enum: ["ensaio", "aplicar"] }).notNull(),
+  estado:             varchar("estado", { length: 15, enum: ["em_andamento", "concluida"] }).default("em_andamento").notNull(),
+  totalLinhas:        int("total_linhas").notNull(),
+  linhasProcessadas:  int("linhas_processadas").default(0).notNull(),
+  criados:            int("criados").default(0).notNull(),
+  atualizados:        int("atualizados").default(0).notNull(),
+  recusados:          int("recusados").default(0).notNull(),
+  comAviso:           int("com_aviso").default(0).notNull(),
+  // Quantas linhas por código de recusa ou aviso; os números das linhas ficam na tela.
+  porCodigo:          jsonCompat("por_codigo").$type<Record<string, number>>(),
+  iniciadaEm:         bigint("iniciada_em", { mode: "number" }).notNull(),
+  concluidaEm:        bigint("concluida_em", { mode: "number" }),
+}, (table) => ({
+  entidadeIdx: index("ie_entidade_idx").on(table.entidadeId, table.iniciadaEm),
+}));
+
+// Os documentos já vistos numa importação, para recusar a segunda linha com o
+// mesmo documento mesmo em blocos diferentes (e no ensaio, que não grava
+// membros). Só o HMAC; apagados ao concluir.
+export const importacaoDocumentosVistos = mysqlTable("importacao_documentos_vistos", {
+  importacaoId:  int("importacao_id").notNull(),
+  ownerId:       varchar("owner_id", { length: 128 }).notNull(),
+  documentoHmac: varchar("documento_hmac", { length: 64 }).notNull(),
+  linha:         int("linha").notNull(),
+}, (table) => ({
+  vistoUnique: uniqueIndex("idv_importacao_documento_unique").on(table.importacaoId, table.documentoHmac),
+  ownerIdx:    index("idv_owner_idx").on(table.ownerId),
+}));
+
+export type Entidade = typeof entidades.$inferSelect;
+export type EntidadeMembro = typeof entidadeMembros.$inferSelect;
+
+// O pedido de contato pela entidade (N2, docs/arquitetura/entidades.md, seção 11).
+// Quem está do outro lado de uma conexão com um associado pede o contato; a
+// entidade recebe, fala com a empresa fora do app e registra o que houve. O nome
+// e o canal da empresa só saem no "aceito" (shared/pedidos-pela-entidade.ts).
+export const pedidosPelaEntidade = mysqlTable("pedidos_pela_entidade", {
+  id:            varchar("id", { length: 36 }).primaryKey(),
+  // A conta da entidade (openId) que recebe o pedido.
+  ownerId:       varchar("owner_id", { length: 128 }).notNull(),
+  entidadeId:    int("entidade_id").notNull(),
+  // O associado (entidade_membros.id) e a conexão registrada em que ele apareceu.
+  membroId:      bigint("membro_id", { mode: "number" }).notNull(),
+  conexaoId:     varchar("conexao_id", { length: 36 }).notNull(),
+  // Quem pede (users.id): a membra, a dona do contato do outro lado, ou outra entidade.
+  userId:        int("userId").notNull(),
+  // A mensagem opcional de quem pede, com telefone e e-mail escondidos.
+  mensagem:      varchar("mensagem", { length: 500 }),
+  estado:        varchar("estado", { length: 16, enum: ["na_entidade", "encaminhado", "aceito", "recusado", "nao_encaminhado", "expirado"] }).default("na_entidade").notNull(),
+  // O canal que a empresa escolheu (só no aceito), entre os que a entidade tem dela.
+  canal:         varchar("canal", { length: 10, enum: ["telefone", "email", "ambos"] }),
+  expiraEm:      bigint("expira_em", { mode: "number" }).notNull(),
+  encaminhadoEm: bigint("encaminhado_em", { mode: "number" }),
+  decididoEm:    bigint("decidido_em", { mode: "number" }),
+  createdAt:     bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt:     bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  pedidoUnique:      uniqueIndex("pe_conexao_solicitante_unique").on(table.conexaoId, table.userId, table.membroId),
+  entidadeEstadoIdx: index("pe_entidade_estado_idx").on(table.entidadeId, table.estado),
+  solicitanteIdx:    index("pe_solicitante_idx").on(table.userId, table.createdAt),
+  ownerIdx:          index("pe_owner_idx").on(table.ownerId),
+}));
+
+export type PedidoPelaEntidade = typeof pedidosPelaEntidade.$inferSelect;
