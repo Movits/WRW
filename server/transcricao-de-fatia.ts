@@ -60,6 +60,26 @@ export function ehInicioDeOutraReuniao(result: unknown): boolean {
   return !!result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>)[MARCA_DE_OUTRA_REUNIAO] === true;
 }
 
+/**
+ * Na reunião juntada (H17), o segundo em que começa cada reunião depois da
+ * primeira: o início das partes com a marca de outra conversa, contado como a
+ * fila conta (a soma das partes anteriores; a que não chegou vale a duração
+ * padrão). O resumo separa as reuniões por eles (defeito 2 do teste manual
+ * T50). Reunião que não foi juntada: lista vazia.
+ */
+export function iniciosDasReunioesJuntadas(partes: ReadonlyArray<{ seq: number; durationMs: number; result: unknown }>): number[] {
+  const porSeq = new Map(partes.map(parte => [parte.seq, parte]));
+  const marcadas = partes.filter(parte => parte.seq > 0 && ehInicioDeOutraReuniao(parte.result)).map(parte => parte.seq).sort((a, b) => a - b);
+  const inicios: number[] = [];
+  let inicioMs = 0;
+  let seq = 0;
+  for (const marcada of marcadas) {
+    for (; seq < marcada; seq++) inicioMs += porSeq.get(seq)?.durationMs ?? DURACAO_DA_FATIA_SEGUNDOS * 1000;
+    inicios.push(inicioMs / 1000);
+  }
+  return inicios;
+}
+
 /** O número do rótulo da voz ("F3" é 3); o que não é rótulo vale 0. */
 export function numeroDoRotulo(falante: unknown): number {
   const casou = typeof falante === "string" ? /^F([1-9]\d*)$/.exec(falante) : null;

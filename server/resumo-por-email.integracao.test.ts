@@ -489,7 +489,7 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
 
   // A junção do Pacote 4c com o 4d: a reunião de documento (H12 e H12b) e a de
   // vídeo do YouTube (H13) não têm gravação. O envio ligava o link delas com o
-  // áudio, e o e-mail prometia a gravação, dizia "gravada na MarquesaMatch" e mandava
+  // áudio, e o e-mail prometia a gravação, dizia "gravada na Marquesa Global Match" e mandava
   // pedir a senha a "quem gravou a reunião".
   describe("a reunião sem gravação: o documento (H12) e o vídeo do YouTube (H13)", () => {
     const VIDEO = { origem: "youtube" as const, sourceUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
@@ -521,7 +521,7 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
         expect(item.text, item.to).toContain(SEM_AUDIO);
         for (const parte of [item.subject, item.text, item.html]) expect(parte, item.to).not.toMatch(GRAVACAO);
       }
-      expect(lote.find(item => item.to === ana)!.text).toContain("Glenda Teste compartilhou com você o resumo de “Reunião com a Apex”, feito na MarquesaMatch.");
+      expect(lote.find(item => item.to === ana)!.text).toContain("Glenda Teste compartilhou com você o resumo de “Reunião com a Apex”, feito na Marquesa Global Match.");
     });
 
     it.each(SEM_GRAVACAO)("reunião %s com o link antigo, ligado com o áudio (o padrão da 0023): o e-mail não promete a gravação, nem no Tentar de novo", async (_caso, origem) => {
@@ -551,9 +551,9 @@ describe.skipIf(!temBanco)("Resumo por e-mail no banco (integração)", () => {
       const ana = participantes[0].email!;
       await mandarResumoPorEmail(dona, meetingId, pedido({ participantes: [ana] }), REQUISICAO);
       const [item] = loteMandado();
-      expect(item.text).toContain("Você recebeu o resumo de “Reunião com a Apex”, feito na MarquesaMatch.");
+      expect(item.text).toContain("Você recebeu o resumo de “Reunião com a Apex”, feito na Marquesa Global Match.");
       expect(item.text).toContain("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a quem compartilhou o resumo com você.");
-      expect(item.text).toContain("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela MarquesaMatch.");
+      expect(item.text).toContain("Você recebeu este e-mail porque quem compartilhou o resumo o mandou a você pela Marquesa Global Match.");
       for (const parte of [item.subject, item.text, item.html]) expect(parte).not.toMatch(GRAVACAO);
     });
 

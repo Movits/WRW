@@ -10,22 +10,23 @@
  * versão que não é a vigente. O rascunho jurídico completo de cada versão
  * fica em docs/termos/aviso-de-gravacao-rascunho.md, para a Cris.
  */
-export const VERSOES_DO_AVISO_DE_GRAVACAO = ["2026-11-14", "2026-11-23"] as const;
+export const VERSOES_DO_AVISO_DE_GRAVACAO = ["2026-11-14", "2026-11-23", "2026-11-24"] as const;
 
 export type VersaoDoAvisoDeGravacao = (typeof VERSOES_DO_AVISO_DE_GRAVACAO)[number];
 
-export const VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO: VersaoDoAvisoDeGravacao = "2026-11-23";
+export const VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO: VersaoDoAvisoDeGravacao = "2026-11-24";
 
 /**
  * As versões do aviso que anunciam a consulta da administração (R1a, a frase
  * da Cris de 23/11/2026: "só acessa gravações por motivo justificado,
  * registrado antes do acesso, e a organizadora é informada da data de cada
- * consulta"). Só a reunião gravada com uma delas pode ser consultada pela
- * administração: a gravada antes, quando o aviso dizia "Só você acessa", fica
- * FECHADA (server/consulta-da-administracao.ts). Versão nova do aviso que
- * mantenha a consulta entra aqui também.
+ * consulta"). A 2026-11-24 repete a frase com o nome Marquesa Global Match.
+ * Só a reunião gravada com uma delas pode ser consultada pela administração: a
+ * gravada antes, quando o aviso dizia "Só você acessa", fica FECHADA
+ * (server/consulta-da-administracao.ts). Versão nova do aviso que mantenha a
+ * consulta entra aqui também.
  */
-export const VERSOES_QUE_PREVEEM_O_ACESSO: readonly string[] = ["2026-11-23"];
+export const VERSOES_QUE_PREVEEM_O_ACESSO: readonly string[] = ["2026-11-23", "2026-11-24"];
 
 export function avisoPreveOAcesso(versao: string | null | undefined): boolean {
   return typeof versao === "string" && VERSOES_QUE_PREVEEM_O_ACESSO.includes(versao);

@@ -1380,7 +1380,7 @@ export default function PresidentPanel() {
               <div>
                 <h1 className="text-sm font-bold text-white whitespace-nowrap">Painel Ouro</h1>
                 {/* Legenda decorativa: fica de fora no celular, onde não cabe ao lado do "← Dashboard". */}
-                <p className="hidden sm:block text-xs text-amber-400/70">MarquesaMatch · Backoffice Institucional</p>
+                <p className="hidden sm:block text-xs text-amber-400/70">Marquesa Global Match · Backoffice Institucional</p>
               </div>
             </div>
           </div>

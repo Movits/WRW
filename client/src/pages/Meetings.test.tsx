@@ -520,7 +520,7 @@ describe("Detalhe da reunião — o 'Baixar o áudio' (4b) e o resumo por e-mail
     abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: true, linkComAudio: false } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
     fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
     const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
-    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.")).toBeInTheDocument();
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na Marquesa Global Match.")).toBeInTheDocument();
     expect(painel.textContent).not.toMatch(/ouve a gravação/);
 
     // Com o painel do e-mail aberto, o botão da seção Gravação segue lá.
@@ -538,7 +538,7 @@ describe("Detalhe da reunião — o 'Baixar o áudio' (4b) e o resumo por e-mail
     abrirDetalhe({ status: "ready", shareToken: TOKEN_DO_LINK, linkComSenha: false, linkComAudio: true } as never, { recording: GRAVACAO, audioParaBaixar: PARA_BAIXAR });
     fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
     const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
-    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.")).toBeInTheDocument();
+    expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição, ouve a gravação enquanto ela estiver guardada e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na Marquesa Global Match.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Baixar o áudio" })).toBeInTheDocument();
   });
 });
@@ -1282,12 +1282,17 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
     }
   });
 
-  it("o link com ?q abre a transcrição já filtrada pelo termo", () => {
+  // Defeito 1 do teste manual T50 (23/11): o resultado da busca entre as
+  // reuniões (?q) abria a reunião sem ir ao trecho encontrado.
+  it("o link com ?q abre a transcrição no trecho do termo: a fala marcada e o player no tempo dela", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const antes = window.location.href;
     try {
       abrirPeloLink("?q=frete");
-      expect(document.querySelectorAll("ol li")).toHaveLength(1);
       expect(screen.getByRole("searchbox")).toHaveValue("frete");
+      expect(document.querySelector("[data-fala-do-link]")).toHaveTextContent("O frete fica para sexta.");
+      // A fala do frete começa aos 620 s, na segunda parte.
+      expect(document.querySelector("audio")!.getAttribute("src")).toBe(PARTES[1].url);
     } finally {
       window.history.replaceState(null, "", antes);
     }
@@ -1308,7 +1313,9 @@ describe("Detalhe da reunião — falantes, partes e andamento (D1)", () => {
       abrirPeloLink("?q=contract", EM_INGLES);
       expect(duble.mutacoes.translateTranscript.mutate).not.toHaveBeenCalled();
       expect(screen.getByRole("combobox", { name: /Idioma/ })).toHaveValue("en");
-      expect(document.querySelectorAll("ol li")).toHaveLength(1);
+      // A transcrição inteira, com a fala do termo marcada (defeito 1 do T50).
+      expect(document.querySelectorAll("ol li")).toHaveLength(2);
+      expect(document.querySelector("[data-fala-do-link]")).toHaveTextContent("We will sign the contract on Monday.");
       expect(screen.getByRole("searchbox")).toHaveValue("contract");
       expect(document.querySelector("mark")).toHaveTextContent("contract");
       // A dona ainda escolhe a tradução: aí, sim, o pedido sai.
@@ -1925,7 +1932,7 @@ describe("Detalhe da reunião — compartilhar por link (12/11/2026)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
     expect(duble.painelDoEmail).toHaveBeenCalledWith({ meetingId: REUNIAO.id });
     expect(screen.getByText("O link desta reunião pede senha, e a senha não vai no e-mail: mande-a à parte a quem receber.")).toBeInTheDocument();
-    expect(screen.getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.")).toBeInTheDocument();
+    expect(screen.getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na Marquesa Global Match.")).toBeInTheDocument();
     expect(screen.getByText("Este link pede uma senha de 6 dígitos, que não vai neste e-mail: peça a senha a Glenda.")).toBeInTheDocument();
   });
 });
@@ -2172,7 +2179,7 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
       abrirDetalhe({ status: "ready", ...VIDEO }, { transcript: TRANSCRICAO });
       fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
       const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
-      expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Reunião com a vinícola”, feito na MarquesaMatch.")).toBeInTheDocument();
+      expect(within(painel).getByText("Glenda compartilhou com você o resumo de “Reunião com a vinícola”, feito na Marquesa Global Match.")).toBeInTheDocument();
       expect(painel.textContent).not.toMatch(GRAVACAO);
       const frase = "Confirmo que posso compartilhar a transcrição deste vídeo e autorizo que quem receber o link a leia, com o resumo e os nomes que eu der às vozes.";
       fireEvent.click(within(painel).getByRole("checkbox", { name: /Para mim/ }));
@@ -2188,7 +2195,7 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
       abrirDetalhe({ status: "ready", ...VIDEO, shareToken: "AbCdEfGhIjKlMnOpQrStUvWxYz012345", linkComAudio: true } as never, { transcript: TRANSCRICAO });
       fireEvent.click(screen.getByRole("button", { name: "Mandar por e-mail" }));
       const painel = screen.getByRole("region", { name: "Mandar o resumo por e-mail" });
-      expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na MarquesaMatch.")).toBeInTheDocument();
+      expect(within(painel).getByText("Pelo link, você lê o resumo e a transcrição e pode fazer perguntas à IA sobre a reunião. Não precisa ter conta na Marquesa Global Match.")).toBeInTheDocument();
       expect(painel.textContent).not.toMatch(GRAVACAO);
     });
   });

@@ -83,6 +83,17 @@ describe("Pergunte à reunião", () => {
     expect(screen.getByText("Quando sai o contêiner?")).toBeInTheDocument();
   });
 
+  // Defeito 3 do teste manual T50 (23/11): a lista das ações vinha numa linha só, cortada.
+  it("a resposta que é uma lista mostra um item por linha, inteira", () => {
+    const lista = Array.from({ length: 12 }, (_, i) => `- Ação ${i + 1}: a Carla manda a proposta até sexta`).join("\n");
+    duble.respostas.perguntar = respondida(lista, semTempo("a Carla manda a proposta até sexta"));
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ações e responsáveis" }));
+    const resposta = document.querySelector("[data-resposta-da-reuniao]")!;
+    expect(resposta.textContent).toBe(lista);
+    expect(resposta).toHaveClass("whitespace-pre-line");
+  });
+
   it("a transcrição não responde: a tela diz isso", () => {
     duble.respostas.perguntar = { respondida: false };
     render(<PergunteAReuniao meetingId={ID} />);

@@ -29,7 +29,7 @@ const invokeLLM = vi.fn();
 vi.mock("./_core/llm", () => ({ invokeLLM: (...args: unknown[]) => invokeLLM(...args) }));
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("o resumo não lê o banco"); } }));
 
-const { gerarResumoDaReuniao, entradaDoResumo } = await import("./resumo-da-reuniao");
+const { gerarResumoDaReuniao, entradaDoResumo, separadorDaReuniao } = await import("./resumo-da-reuniao");
 const { FalhaDaIA } = await import("./ia-em-json");
 
 const FALAS: Segmento[] = [
@@ -69,7 +69,7 @@ describe("o que vai à IA", () => {
   });
 
   it("sem falas (envio único), o texto corrido, sem rótulo e sem vozes", () => {
-    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false, vozes: new Set() });
+    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false, vozes: new Set(), reunioes: 1 });
   });
 
   it("as vozes da entrada são as que ela rotulou: a voz que só tem fala vazia fica de fora", () => {
@@ -770,5 +770,39 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
       await resumir({});
       expect(pedido().messages[0].content).toContain("não emenda com reticências (\"[...]\") partes distantes da reunião");
     });
+  });
+});
+
+// Defeito 2 do teste manual T50 (23/11): o resumo da reunião juntada parecia
+// usar só o conteúdo da segunda reunião. A entrada separa as reuniões, e o
+// pedido manda cobrir todas.
+describe("a reunião juntada (H17): cada reunião separada na entrada do resumo", () => {
+  const falas: Segmento[] = [
+    { inicio: 5, fim: 9, falante: "F1", texto: "Ana abre a reunião do frete." },
+    { inicio: 300, fim: 304, falante: "F2", texto: "Bia aprova o orçamento." },
+    { inicio: 603, fim: 607, falante: "F3", texto: "Caio apresenta a feira." },
+    { inicio: 650, fim: 654, falante: "F3", texto: "E fecha o estande." },
+  ];
+
+  it("uma linha antes da primeira fala de cada reunião; a divisa fora das falas não conta", () => {
+    const { texto, reunioes } = entradaDoResumo("", falas, [600, 99_999, Number.NaN, 600]);
+    expect(reunioes).toBe(2);
+    expect(texto.split("\n")).toEqual([
+      separadorDaReuniao(1, 2), "{F1}: Ana abre a reunião do frete.", "{F2}: Bia aprova o orçamento.",
+      separadorDaReuniao(2, 2), "{F3}: Caio apresenta a feira. E fecha o estande.",
+    ]);
+    expect(entradaDoResumo("", falas).texto).not.toContain("===");
+  });
+
+  it("o pedido à IA leva a instrução de cobrir todas as reuniões, e a transcrição das duas", async () => {
+    invokeLLM.mockResolvedValue(resposta(VAZIO));
+    await gerarResumoDaReuniao({ transcricao: "", segmentos: falas, idioma: "pt-BR", iniciosDeReuniao: [600] });
+    const [sistema, usuario] = pedido().messages;
+    expect(sistema.content).toContain("Esta transcrição junta 2 reuniões gravadas em separado");
+    expect(usuario.content).toContain("Ana abre a reunião do frete.");
+    expect(usuario.content).toContain("Caio apresenta a feira.");
+    invokeLLM.mockClear();
+    await gerarResumoDaReuniao({ transcricao: "", segmentos: falas, idioma: "pt-BR" });
+    expect(pedido().messages[0].content).not.toContain("reuniões gravadas em separado");
   });
 });

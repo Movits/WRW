@@ -128,18 +128,49 @@ const PROXIMO = new Set([
  * este conjunto, e não refaz o filtro das falas, para as duas listas nunca
  * divergirem.
  */
-export function entradaDoResumo(transcricao: string, segmentos: readonly Segmento[]): { texto: string; rotulada: boolean; vozes: ReadonlySet<string> } {
+export function entradaDoResumo(
+  transcricao: string,
+  segmentos: readonly Segmento[],
+  iniciosDeReuniao: readonly number[] = [],
+): { texto: string; rotulada: boolean; vozes: ReadonlySet<string>; reunioes: number } {
   const falas = segmentos.filter(s => !s.lacuna && typeof s.texto === "string" && s.texto.trim() && FALANTE_VALIDO.test(s.falante));
-  if (!falas.length) return { texto: transcricao.trim(), rotulada: false, vozes: new Set() };
-  const linhas: string[] = [];
+  if (!falas.length) return { texto: transcricao.trim(), rotulada: false, vozes: new Set(), reunioes: 1 };
+  // A reunião juntada (H17): uma linha "=== Reunião n de N ===" antes da
+  // primeira fala de cada reunião (defeito 2 do teste manual T50). Só as
+  // divisas que caem depois da primeira fala e até a última contam.
+  const divisas = Array.from(new Set(iniciosDeReuniao.filter(Number.isFinite))).sort((a, b) => a - b)
+    .filter(divisa => divisa > falas[0].inicio && divisa <= falas[falas.length - 1].inicio);
+  const total = divisas.length + 1;
+  const linhas: string[] = total > 1 ? [separadorDaReuniao(1, total)] : [];
+  let proxima = 0;
   let anterior = "";
   for (const fala of falas) {
+    while (proxima < divisas.length && fala.inicio >= divisas[proxima]) {
+      proxima++;
+      linhas.push(separadorDaReuniao(proxima + 1, total));
+      anterior = "";
+    }
     const texto = fala.texto.trim().replace(/\s+/g, " ");
     if (fala.falante === anterior && linhas[linhas.length - 1].length + texto.length < LETRAS_POR_LINHA) linhas[linhas.length - 1] += ` ${texto}`;
     else linhas.push(`{${fala.falante}}: ${texto}`);
     anterior = fala.falante;
   }
-  return { texto: linhas.join("\n"), rotulada: true, vozes: new Set(falas.map(fala => fala.falante)) };
+  return { texto: linhas.join("\n"), rotulada: true, vozes: new Set(falas.map(fala => fala.falante)), reunioes: total };
+}
+
+/** A linha que abre cada reunião na entrada da reunião juntada (entradaDoResumo). */
+export function separadorDaReuniao(n: number | string, total: number): string {
+  return `=== Reunião ${n} de ${total} ===`;
+}
+
+/**
+ * A instrução da reunião juntada (H17), quando a entrada separa as reuniões:
+ * o resumo cobre todas, e não só a última (defeito 2 do teste manual T50,
+ * 23/11: a IA lia a transcrição inteira, mas as notas pareciam sair só da
+ * segunda reunião, e nada dizia a ela que eram conversas diferentes).
+ */
+export function linhaDasReunioesJuntadas(total: number): string {
+  return `Esta transcrição junta ${total} reuniões gravadas em separado, na ordem em que aconteceram, e cada uma começa pela linha "${separadorDaReuniao("n", total)}". Cubra TODAS: as ações, as tarefas, as decisões, os bloqueios e as questões de cada reunião entram nas notas, e não só os da última; o foco, o emoji e o título valem para o conjunto. A linha que abre cada reunião não é fala de ninguém.`;
 }
 
 /**
@@ -548,14 +579,19 @@ export async function gerarResumoDaReuniao(
     itensQueFicam?: readonly ItemQueFicaNoResumo[];
     /** O modelo da dona, o estilo, o ajuste do tamanho e as instruções do pedido (H4e). */
     preferencias?: PreferenciasDoPedido;
+    /** Na reunião juntada (H17), o segundo em que cada reunião depois da primeira começa (iniciosDasReunioesJuntadas). */
+    iniciosDeReuniao?: readonly number[];
   },
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<ResumoGerado> {
-  const { texto: paraAIA, rotulada, vozes } = entradaDoResumo(entrada.transcricao, entrada.segmentos);
+  const { texto: paraAIA, rotulada, vozes, reunioes } = entradaDoResumo(entrada.transcricao, entrada.segmentos, entrada.iniciosDeReuniao);
   if (!paraAIA) return { emoji: null, titulo: null, modelo: null, itens: [], recebidos: 0 };
   const limite = opcoes.limiteDaEntrada ?? LIMITE_DA_ENTRADA_DO_RESUMO;
   const queFicam = blocoDosItensQueFicam(entrada.itensQueFicam ?? []);
-  const sistema = instrucoes(entrada.idioma, rotulada, entrada.modelo ?? MODELO_DE_RESUMO_PADRAO, queFicam !== "", entrada.preferencias);
+  const sistema = [
+    instrucoes(entrada.idioma, rotulada, entrada.modelo ?? MODELO_DE_RESUMO_PADRAO, queFicam !== "", entrada.preferencias),
+    ...(reunioes > 1 ? [linhaDasReunioesJuntadas(reunioes)] : []),
+  ].join("\n");
 
   let resposta: Awaited<ReturnType<typeof pedirResumo>>;
   if (paraAIA.length <= limite) {

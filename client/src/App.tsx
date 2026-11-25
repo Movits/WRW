@@ -58,7 +58,7 @@ function PageLoader() {
           <div className="w-12 h-12 rounded-full border-2 border-amber-500/20 border-t-amber-500 animate-spin" />
           <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-amber-500/10 border-b-amber-400/50 animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.5s" }} />
         </div>
-        <span className="text-sm font-medium tracking-wide text-white">MarquesaMatch</span>
+        <span className="text-sm font-medium tracking-wide text-white">Marquesa Global Match</span>
       </div>
     </div>
   );

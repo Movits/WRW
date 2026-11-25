@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUSCAS_RECENTES_MAX, comBuscaRecente, filtrarReunioesNaTela, grupoDaOrigem, inicioDoPeriodo, padraoDoLike, passaNosFiltros,
-  semAcento, temFiltro, termoProntoParaOServidor, type ReuniaoParaFiltrar,
+  primeiraFalaComOTermo, semAcento, temFiltro, temOTermo, termoProntoParaOServidor, trechosDoTermo, type ReuniaoParaFiltrar,
 } from "@shared/busca-de-reunioes";
 
 /**
@@ -97,5 +97,35 @@ describe("comBuscaRecente", () => {
 
   it("semAcento é a régua da comparação", () => {
     expect(semAcento("AÇÃO Ñandú")).toBe("acao nandu");
+  });
+});
+
+// Defeito 1 do teste manual T50 (23/11): a busca do servidor acha sem acento e
+// sem caixa (a colação da coluna); a transcrição tem de achar a mesma fala.
+describe("trechosDoTermo, temOTermo e primeiraFalaComOTermo", () => {
+  it("acha o termo sem acento e sem caixa, com as posições no texto original", () => {
+    const texto = "A REUNIÃO de São Paulo e a reunião de Brasília.";
+    const trechos = trechosDoTermo(texto, "reuniao");
+    expect(trechos.map(([i, f]) => texto.slice(i, f))).toEqual(["REUNIÃO", "reunião"]);
+    expect(trechosDoTermo(texto, "  sao paulo ").map(([i, f]) => texto.slice(i, f))).toEqual(["São Paulo"]);
+    expect(trechosDoTermo(texto, "brasilia.").map(([i, f]) => texto.slice(i, f))).toEqual(["Brasília."]);
+    expect(trechosDoTermo(texto, "")).toEqual([]);
+    expect(temOTermo(texto, "SAO")).toBe(true);
+    expect(temOTermo(texto, "recife")).toBe(false);
+  });
+
+  it("o acento separado da letra (NFD) e as letras fora do plano básico não desalinham o destaque", () => {
+    const decomposto = "Reunião 😀 café forte";
+    expect(trechosDoTermo(decomposto, "reuniao").map(([i, f]) => decomposto.slice(i, f))).toEqual(["Reunião"]);
+    expect(trechosDoTermo(decomposto, "café forte").map(([i, f]) => decomposto.slice(i, f))).toEqual(["café forte"]);
+  });
+
+  it("a primeira fala com o termo, pulando a lacuna; sem termo ou sem fala, -1", () => {
+    const falas = [
+      { texto: "Bom dia." }, { texto: "", lacuna: true }, { texto: "A reunião de sexta." }, { texto: "Outra REUNIAO." },
+    ];
+    expect(primeiraFalaComOTermo(falas, "reuniao")).toBe(2);
+    expect(primeiraFalaComOTermo(falas, "nada disso")).toBe(-1);
+    expect(primeiraFalaComOTermo(falas, "  ")).toBe(-1);
   });
 });

@@ -143,3 +143,57 @@ export function comBuscaRecente(recentes: readonly string[], termo: string): str
   const chave = semAcento(limpo);
   return [limpo, ...recentes.filter(anterior => semAcento(anterior) !== chave)].slice(0, BUSCAS_RECENTES_MAX);
 }
+
+/**
+ * Onde o termo aparece no texto, sem acento e sem caixa (a régua da busca do
+ * servidor, que segue a colação utf8mb4 da coluna): os pedaços [início, fim)
+ * no texto ORIGINAL, para a tela destacar "Reunião" quando a busca foi
+ * "reuniao". Defeito 1 do teste manual T50 (23/11): a busca do servidor achava
+ * a reunião sem o acento, e a transcrição, que comparava com o acento, não
+ * achava a fala.
+ */
+export function trechosDoTermo(texto: string, termo: string): Array<[number, number]> {
+  const procurado = semAcento(termo.trim());
+  if (!procurado || !texto) return [];
+  // Letra a letra (por ponto de código), o texto sem acento e, para cada letra
+  // dele, a posição da letra original de onde ela saiu.
+  let normalizado = "";
+  const origem: number[] = [];
+  let posicao = 0;
+  for (const letra of Array.from(texto)) {
+    const sem = semAcento(letra);
+    for (let i = 0; i < sem.length; i++) origem.push(posicao);
+    normalizado += sem;
+    posicao += letra.length;
+  }
+  origem.push(texto.length);
+  const trechos: Array<[number, number]> = [];
+  for (let i = normalizado.indexOf(procurado); i >= 0; i = normalizado.indexOf(procurado, i + procurado.length)) {
+    const fimNormalizado = i + procurado.length;
+    // O fim é o começo da letra original seguinte à última que casou.
+    let fim = origem[fimNormalizado];
+    if (fim === origem[fimNormalizado - 1]) fim = proximaLetra(texto, fim);
+    trechos.push([origem[i], fim]);
+  }
+  return trechos;
+}
+
+function proximaLetra(texto: string, posicao: number): number {
+  const codigo = texto.codePointAt(posicao);
+  return codigo === undefined ? texto.length : posicao + (codigo > 0xffff ? 2 : 1);
+}
+
+/** O termo aparece no texto (sem acento e sem caixa)? */
+export function temOTermo(texto: string, termo: string): boolean {
+  const procurado = semAcento(termo.trim());
+  return !!procurado && semAcento(texto).includes(procurado);
+}
+
+/**
+ * A posição da primeira fala (que não é lacuna) com o termo, ou -1: é onde o
+ * resultado da busca entre as reuniões abre a transcrição e o player.
+ */
+export function primeiraFalaComOTermo(segmentos: ReadonlyArray<{ texto: string; lacuna?: boolean }>, termo: string): number {
+  if (!semAcento(termo.trim())) return -1;
+  return segmentos.findIndex(segmento => !segmento.lacuna && temOTermo(segmento.texto, termo));
+}

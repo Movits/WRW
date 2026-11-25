@@ -220,7 +220,7 @@ describe("Reuniões — a URL escolhe a tela", () => {
   it("fechar a dica de instalação no gravador devolve o foco ao último botão antes dela, o 'Resumir um PDF ou fotos de um texto'", () => {
     abrirEm("/gravar");
     fireEvent.click(screen.getByRole("button", { name: "Fechar a dica de instalação" }));
-    expect(screen.queryByRole("region", { name: "Instale a MarquesaMatch como app" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Instale a Marquesa Global Match como app" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Resumir um PDF ou fotos de um texto/ })).toHaveFocus();
     expect(localStorage.getItem("mmm:dica-de-instalacao")).toBe("fechada");
   });
@@ -647,10 +647,10 @@ describe("Reuniões — gravação em curso", () => {
 
   it("a dica de instalação fica abaixo dos botões, invisível no mesmo lugar enquanto grava, e volta quando a gravação é descartada", async () => {
     abrirEm("/gravar");
-    const dica = () => screen.queryByRole("region", { name: "Instale a MarquesaMatch como app" });
+    const dica = () => screen.queryByRole("region", { name: "Instale a Marquesa Global Match como app" });
     // Pelo título, e não pela primeira seção: gravando, o texto das partes já
     // transcritas (G15a) também é uma seção, acima da dica.
-    const secaoDaDica = () => Array.from(document.querySelectorAll<HTMLElement>("section[aria-labelledby]")).find(secao => secao.textContent?.includes("Instale a MarquesaMatch como app"));
+    const secaoDaDica = () => Array.from(document.querySelectorAll<HTMLElement>("section[aria-labelledby]")).find(secao => secao.textContent?.includes("Instale a Marquesa Global Match como app"));
     expect(dica()).toBeInTheDocument();
     const enviar = screen.getByRole("button", { name: /Enviar arquivo de áudio/ });
     expect(enviar.compareDocumentPosition(dica()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
