@@ -26,6 +26,7 @@ import { reuniaoAbertaRouter } from "./routers/reuniaoAberta";
 import { memoryRouter } from "./routers/memory";
 import { intelligentMatchesRouter } from "./routers/matches";
 import { distribuicaoRouter } from "./routers/distribuicao";
+import { entidadesRouter, conviteDeEntidadeRouter, ativacaoDeCadastroRouter } from "./routers/entidades";
 import { networkInteligenteRouter } from "./routers/networkInteligente";
 import { assistenteTextoRouter } from "./routers/assistenteTexto";
 import { proximasAcoesRouter } from "./routers/proximasAcoes";
@@ -70,6 +71,11 @@ export const appRouter = router({
   memory: memoryRouter,
   intelligentMatches: intelligentMatchesRouter,
   distribuicao: distribuicaoRouter,
+  // A base das associações (N1): a conta da entidade, a equipe e o convite público.
+  entidades: entidadesRouter,
+  conviteDeEntidade: conviteDeEntidadeRouter,
+  // A ativação do cadastro importado (N3): público, pelo link de uso único.
+  ativacaoDeCadastro: ativacaoDeCadastroRouter,
   networkInteligente: networkInteligenteRouter,
   // "Gravar áudio" e "Revisar texto" dos campos livres (cadastro, Perfil, oportunidade).
   assistenteTexto: assistenteTextoRouter,

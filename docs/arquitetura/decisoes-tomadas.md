@@ -719,7 +719,7 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   entra nas partes seguintes dela; o rótulo fixo é F1; desligar o perfil não muda as
   reuniões já transcritas.
 - **Onde:** `server/perfil-de-voz.ts`, `server/fila-de-transcricao.ts`, migração
-  `0030_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
+  `0031_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
 
 ---
 
