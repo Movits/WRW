@@ -56,6 +56,16 @@ describe("ResumoDasConexoes", () => {
     expect(linhas()).toEqual(["Não deu para carregar suas sugestões agoraVer"]);
   });
 
+  it("zero porque o outro lado ainda não aceitou o termo: 'a caminho', nem 'nenhuma' nem 'complete o perfil'", () => {
+    resumo({ listaLiberada: false, sugestoes: 0, zeroPorque: "rede" });
+    expect(linhas()).toEqual(["Suas conexões estão a caminho"]);
+  });
+
+  it("zero porque a conta não aceitou o termo: o resumo cala, e a aba pede o aceite", () => {
+    resumo({ sugestoes: 0, zeroPorque: "termo" });
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  });
+
   it("em árabe: o plural do árabe nas frases", async () => {
     await i18n.changeLanguage("ar");
     resumo({ sugestoes: 2, conexoesFeitas: 11 });

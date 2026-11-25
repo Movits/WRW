@@ -1300,6 +1300,7 @@ export default function Dashboard() {
           combinamMuito={stats?.highScore}
           conexoesFeitas={connectionsQuery.isError || connectionsQuery.data === undefined ? undefined : conexoesEfetivadas}
           pedidosParaResponder={pendingConnections.length}
+          zeroPorque={aguardandoTermo ? "termo" : (redeQuery.data?.ocultas ?? 0) > 0 ? "rede" : undefined}
           aoVerSugestoes={() => irParaAba("matches")}
           aoVerConexoes={() => irParaAba("connections")}
         />

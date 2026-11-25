@@ -32,6 +32,12 @@ export type PropsDoResumo = {
   conexoesFeitas: number | undefined;
   /** Os pedidos de conexão que esperam a resposta desta conta. */
   pedidosParaResponder: number;
+  /**
+   * Zero sugestões que não são "nenhuma": a conta ainda não aceitou o termo do
+   * Smart Match ("termo", a lista vem vazia de propósito e a aba pede o aceite)
+   * ou as conexões esperam o outro lado aceitar ("rede", Etapa 13).
+   */
+  zeroPorque?: "termo" | "rede";
   aoVerSugestoes: () => void;
   aoVerConexoes: () => void;
 };
@@ -57,7 +63,13 @@ export function ResumoDasConexoes(props: PropsDoResumo) {
     linhas.push({ chave: "pedidos", Icone: UserPlus, frase, acao: botao(t("dashboard.resumo.responder"), frase, props.aoVerConexoes) });
   }
 
-  if (props.sugestoesFalharam) {
+  if (!props.sugestoesFalharam && props.sugestoes === 0 && props.zeroPorque) {
+    // Nem "nenhuma sugestão" nem "complete o perfil": a causa não é o perfil.
+    // Com o termo pendente, quem fala é a aba logo abaixo, que pede o aceite.
+    if (props.zeroPorque === "rede") {
+      linhas.push({ chave: "sugestoes", Icone: Sparkles, frase: t("dashboard.redeAutorizandoTitulo") });
+    }
+  } else if (props.sugestoesFalharam) {
     const frase = t("dashboard.resumo.falhou");
     linhas.push({ chave: "sugestoes", Icone: CircleAlert, frase, acao: botao(t("dashboard.resumo.ver"), frase, props.aoVerSugestoes, true) });
   } else if (props.sugestoes !== undefined && !props.listaLiberada) {
