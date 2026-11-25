@@ -1,51 +1,75 @@
-# Sala de vídeo dentro do MarquesaMatch: estudo para decisão
+# Sala de vídeo dentro do Marquesa Global Match: estudo e decisão
 
-Estudo de 24/11/2026, para o Roberto decidir. Vem do cartão do Notion "Sala de vídeo
-própria dentro do WRW: estudar e implementar (reuniões online no próprio app)", com o
-Nicolas, passado pelo Roberto no grupo em 16/11 e hoje em "Em andamento". O cartão ainda
-diz WRW; desde 23/11 o nome na tela é MarquesaMatch, e o WRW segue no domínio
-(`wrwglobal.org`) e na infraestrutura. **Nada daqui está implementado, e nada entra no
-código antes da decisão.** Enquanto isso, a gravação da aba (H14) e o robô nas reuniões
-(H21) ficam parados, esperando a mesma decisão.
+Estudo de 24/11/2026. O Roberto decidiu no mesmo dia, e esta versão, de 25/11, traz a
+decisão. Vem do cartão do Notion "Sala de vídeo própria dentro do WRW: estudar e
+implementar (reuniões online no próprio app)", com o Nicolas, passado pelo Roberto no grupo
+em 16/11. O cartão ainda diz WRW. O nome na tela passou a MarquesaMatch em 23/11 e, pela
+confirmação da Cris em 24/11, passa a **Marquesa Global Match** (a troca no código está na
+PR #246); o WRW segue no domínio (`wrwglobal.org`) e na infraestrutura. **Nada daqui está
+implementado.** A primeira PR de código começa depois da R1b, que está na PR #247
+(Pacote 6).
 
 Os preços e as regiões foram vistos nas páginas oficiais dos fornecedores em 24/11/2026,
 em dólar, sem impostos nem câmbio, e mudam sem aviso: confira de novo antes de contratar.
 O que não deu para confirmar numa página oficial vem marcado como "não conferido".
 
-## Resumo para decidir
+## A decisão (24/11)
+
+O Roberto respondeu às perguntas do estudo no grupo "Projetos IA", em 24/11, às 21:38:
+
+| Pergunta | Decisão |
+|---|---|
+| Qual caminho | **B com o Daily**, com o vídeo passando pelo servidor de São Paulo |
+| Antes ou depois | a sala entra **depois da R1b**, que está no Pacote 6 (PR #247) |
+| Tetos | até **8 pessoas** e **2 horas** por sala; abre sala quem é **Prata ou acima**; orçamento de **US$ 50 por mês** no começo |
+| Quem não tem conta | **entra só com o nome**, como no link aberto |
+| Gravar | **só a dona** aperta "Gravar", e grava **só o áudio** |
+| Aviso de gravação | o texto é da **Cris** |
+| H14 e H21 | a gravação da aba (H14) **continua fora**: é tudo dentro do app. O robô de reunião (H21) **segue parado** |
+
+O que a decisão muda neste estudo:
+
+- **a entrada sem conta**, que o estudo deixava de fora, passa a existir: um link de
+  visitante da sala, com o nome e o aceite do aviso, sem acesso a mais nada da reunião
+  (ver "Quem entra na sala");
+- **os tetos e o orçamento** viram regra do servidor, e não só da tela (ver "O orçamento
+  de US$ 50 por mês" e "O que muda no Render");
+- **a R1b** já tem forma concreta na PR #247, e a sala usa as participantes dela.
+
+O que ainda depende de resposta está em "O que ainda falta decidir", no fim.
+
+## Resumo do estudo
 
 - **Por que a sala:** a Glenda quer manter as pessoas dentro do app, por causa da taxa da
   plataforma em cada negócio fechado (registro da "Próxima ação" do cartão, lida em
   24/11). Uma sala que mande para fora (link do Zoom ou do Meet, app de terceiros) não
   atende.
-- **O que seria:** a dona de uma reunião abre a sala, e as participantes da reunião
-  entram pelo site ou pelo app das lojas, com a conta delas. A conversa acontece dentro
-  do MarquesaMatch, e a gravação entra na mesma fila de partes do gravador, com a mesma
-  transcrição, o mesmo resumo e o mesmo mapa mental das reuniões presenciais.
-- **Recomendação:** serviço pronto, com a tela feita por nós sobre o SDK dele: o **Daily**,
-  com o vídeo passando pelo servidor dele em **São Paulo**. A gravação acontece no
-  aparelho da dona, pelo gravador em partes de hoje, que já aceita um fluxo de áudio de
+- **O que é:** a dona de uma reunião abre a sala. Entram as participantes da reunião, pelo
+  site ou pelo app das lojas, com a conta delas, e visitantes sem conta, só com o nome,
+  pelo link de visitante. A conversa acontece dentro do Marquesa Global Match, e a
+  gravação entra na mesma fila de partes do gravador, com a mesma transcrição, o mesmo
+  resumo e o mesmo mapa mental das reuniões presenciais.
+- **Caminho escolhido:** serviço pronto, com a tela feita por nós sobre o SDK dele: o
+  **Daily**, com o vídeo passando pelo servidor dele em **São Paulo**. A gravação acontece
+  no aparelho da dona, pelo gravador em partes de hoje, que já aceita um fluxo de áudio de
   fora.
 - **Custo por hora de reunião, com vídeo:** US$ 0,24 por pessoa no Daily (US$ 0,96 numa
   reunião de 4 pessoas, US$ 1,44 numa de 6), depois dos 10 mil minutos-pessoa grátis do
-  mês, que cobrem umas 40 reuniões de 1 hora com 4 pessoas. Só com áudio, um quarto
-  disso. A transcrição e o resumo custam o mesmo que uma hora de gravação de hoje. Ver
-  "Quanto custa".
+  mês, que cobrem umas 40 reuniões de 1 hora com 4 pessoas. Uma sala no teto (8 pessoas
+  por 2 horas) custa até US$ 3,84. Só com áudio, um quarto disso. A transcrição e o resumo
+  custam o mesmo que uma hora de gravação de hoje. Ver "Quanto custa".
 - **O que muda no Render:** duas variáveis, a câmera liberada no cabeçalho de
   permissões, uma migração e uma chamada do servidor à API do Daily para criar a sala.
   Nada de porta nova, plano novo nem máquina nova: o vídeo vai do aparelho direto ao
   Daily, sem passar pelo Render. Ver "O que muda no Render".
-- **Alternativa:** o **LiveKit Cloud**, de código aberto (a mesma tela passa depois a um
-  servidor próprio) e mais barato nos minutos, mas sem servidor de vídeo publicado na
-  América do Sul: o vídeo de duas pessoas no Brasil iria e voltaria dos Estados Unidos, e
-  a banda acima da franquia é cobrada à parte.
+- **A alternativa estudada:** o **LiveKit Cloud**, de código aberto (a mesma tela passa
+  depois a um servidor próprio) e mais barato nos minutos, mas sem servidor de vídeo
+  publicado na América do Sul: o vídeo de duas pessoas no Brasil iria e voltaria dos
+  Estados Unidos, e a banda acima da franquia é cobrada à parte.
 - **Por que não um servidor de vídeo próprio agora:** o Render não aceita o tráfego que o
   vídeo usa (UDP), então seria outra máquina, a partir de uns US$ 190 por mês em São
   Paulo, com manutenção e plantão por conta do time.
-- **Tamanho:** 5 PRs de código (V1 a V5) e 1 na casca das lojas, depois da R1b (o acesso
-  por participante, no Notion).
-- **O que precisa de resposta antes da primeira PR** está em "Perguntas para o Roberto e
-  a Glenda", no fim.
+- **Tamanho:** 5 PRs de código (V1 a V5) e 1 na casca das lojas, depois da R1b (PR #247).
 
 ## Os requisitos do cartão e onde cada um está
 
@@ -57,7 +81,7 @@ responde.
 | 1. Manter as pessoas dentro do app (a taxa da plataforma em cada negócio); sala que manda para fora não atende | "As três opções" (critério "fica dentro do app") e "No app das lojas" |
 | 2. Escolher o caminho (servidor de mídia próprio ou serviço por minuto: LiveKit, Daily, Twilio) e levar ao Roberto o custo por hora de reunião e o que muda no Render | "As três opções", "Quanto custa" e "O que muda no Render" |
 | 3. A gravação entra na mesma fila de partes (`POST /api/reunioes/{id}/partes/{seq}`), com transcrição, resumo e mapa iguais aos das reuniões presenciais | "Como a gravação entra no gravador" |
-| 4. Quem entra são as participantes da reunião, pela R1b (acesso por participante) | "Quem entra na sala" |
+| 4. Quem entra são as participantes da reunião, pela R1b (acesso por participante) | "Quem entra na sala", com os visitantes sem conta decididos em 24/11 |
 | 5. Aviso de gravação e consentimento como no gravador, com o texto para a Cris | "Aviso e consentimento" |
 | 6. Testar com duas contas, no computador e no celular, antes do teste do time | "O tamanho, em PRs" (testes) |
 
@@ -87,10 +111,12 @@ O que bloqueia a sala hoje, de propósito, e muda em qualquer opção:
 - **A câmera está proibida no site.** `server/_core/index.ts` manda
   `Permissions-Policy: camera=(), microphone=(self), ...`. Vira `camera=(self)`, com o
   comentário refeito.
-- **A CSP proíbe frames de outros sites** (`frame-src 'none'` em `server/_core/csp.ts`,
-  travada pelo `server/csp.test.ts`; o YouTube da H13 abre em aba nova por causa disso).
-  A opção A, abaixo, exige abrir uma exceção; as opções B e C não. O `connect-src` já
-  aceita `wss:` e `https:`, que é o que o SDK usa para falar com o servidor de vídeo.
+- **A CSP proíbe frames de outros sites** (`frame-src 'none'` em `server/_core/csp.ts`; o
+  YouTube da H13 abre em aba nova por causa disso). Nenhum teste trava o `frame-src` hoje:
+  o `server/csp.test.ts` trava o `frame-ancestors`. A opção A, abaixo, exige abrir uma
+  exceção; as opções B e C não, e a V2 acrescenta o teste que trava o `frame-src 'none'`.
+  O `connect-src` já aceita `wss:` e `https:`, que é o que o SDK usa para falar com o
+  servidor de vídeo.
 - **A casca das lojas só pede o microfone no Android** (`mobile/app.json` tem
   `RECORD_AUDIO`, e não `CAMERA`), a ponte (`mobile/ponte.ts`) só trata o pedido de
   microfone, e toda carga fora de `wrwglobal.org` vai para o navegador do sistema
@@ -109,6 +135,8 @@ O que bloqueia a sala hoje, de propósito, e muda em qualquer opção:
 | Custo | por minuto do fornecedor, mais a gravação dele | por minuto do fornecedor | a máquina, fixa por mês, a saída de dados e o tempo do time |
 | Prende ao fornecedor | muito | médio no Daily, pouco no LiveKit (aberto) | nada |
 
+**Decidido em 24/11: a opção B, com o Daily.** As outras ficam registradas pelo porquê.
+
 **A. Sala pronta embutida.** É o caminho mais curto até "tem vídeo", mas é a que menos
 atende ao motivo da Glenda: a tela, os textos e a marca são do fornecedor, e no app das
 lojas o quadro de outro domínio cai na regra da casca que manda para o navegador (no
@@ -118,7 +146,7 @@ nuvem do fornecedor, paga à parte, chegando depois da reunião por um caminho n
 JaaS, a gravação mostra só a tela de quem gravou.
 
 **B. Serviço pronto com SDK.** O vídeo passa pelos servidores do fornecedor, e o servidor
-do MarquesaMatch só cria a sala e assina a ficha de entrada de cada pessoa (um token
+do Marquesa Global Match só cria a sala e assina a ficha de entrada de cada pessoa (um token
 curto, com a sala, o nome e o que ela pode fazer). A tela é nossa e fica no
 `wrwglobal.org`, também dentro da casca. Como as trilhas de áudio chegam à página, o
 aparelho da dona mistura as vozes e grava pelo gravador de hoje. Das opções, a que mais
@@ -197,6 +225,25 @@ porque é um áudio só, o da mistura.
 | Médio: 100 reuniões, 6 pessoas, 60 min | 36.000 | ~US$ 104 | ~US$ 26 | US$ 50 + banda (estimativa: US$ 20 a 130) |
 | Alto: 400 reuniões, 6 pessoas, 60 min | 144.000 | ~US$ 536, menos o desconto de volume | ~US$ 133 | US$ 50 + banda (estimativa: US$ 160 a 600) |
 
+### O orçamento de US$ 50 por mês
+
+Com vídeo, os US$ 50 pagam 12.500 minutos-pessoa (a US$ 0,004 cada). Somados aos 10 mil
+grátis, são 22.500 minutos-pessoa por mês: cerca de 375 pessoas-hora, ou umas 90
+reuniões de 1 hora com 4 pessoas. Uma sala no teto (8 pessoas por 2 horas) gasta 960
+minutos-pessoa; o mês comporta umas 23 salas assim. O cenário de partida, acima, cabe com
+folga; o médio passa do teto lá pelos 60% do mês, e pediria uns US$ 104.
+
+O Daily cobra pelo uso, e a página de preços vista não fala de um teto de gasto da conta
+(não conferido). Então o teto é nosso, no servidor:
+
+- cada presença na sala guarda a entrada e a saída, e o servidor soma os minutos-pessoa do
+  mês;
+- antes de criar uma sala, ele conta as salas abertas pelo teto delas (8 pessoas por 120
+  minutos) e recusa a sala nova, com a mensagem traduzida, se a soma passar do teto do
+  mês;
+- aos 80% do teto, a administração recebe um aviso;
+- o teto do mês fica numa constante do código, mudada por PR quando o orçamento mudar.
+
 ### Os fornecedores lado a lado
 
 | Fornecedor | Minuto-pessoa | Grátis por mês | Servidor de vídeo no Brasil | Gravação pelo fornecedor (se um dia for usada) | WebView |
@@ -216,24 +263,36 @@ porque é um áudio só, o da mistura.
 O servidor roda no Render pelo `Dockerfile` (Node 20, `EXPOSE 3000`, sem `render.yaml`,
 variáveis no painel). Produção só com o Roberto, como sempre.
 
-**Na opção B com o Daily (a recomendada):**
+**Na opção B com o Daily (a escolhida):**
 
 - **duas variáveis** no painel, só os nomes no código, como `DAILY_API_KEY` e
   `DAILY_DOMINIO`. Sem elas, a sala some da tela, como as passkeys sem `WEBAUTHN_RP_ID`;
 - **o cabeçalho de permissões** passa a `camera=(self)`. A CSP não muda;
-- **uma migração**: a tabela das salas (reunião ligada, dona, nome da sala no Daily,
-  criada, encerrada) e a das presenças com o aceite do aviso. As duas têm coluna de pessoa
-  e entram em `server/exclusao-de-conta.ts` e em `scripts/exame/limpeza.mjs`, com a
-  contagem dos pares subindo, como manda a regra de trânsito do gravador;
+- **uma migração**:
+  - a tabela das salas: a reunião ligada, a dona, o nome da sala no Daily, o link de
+    visitante guardado só pelo hash, criada e encerrada;
+  - a das presenças: a conta ou, no caso do visitante, só o nome digitado; a entrada, a
+    saída e o aceite do aviso.
+
+  As duas têm coluna de pessoa e entram em `server/exclusao-de-conta.ts` e em
+  `scripts/exame/limpeza.mjs`, com a contagem dos pares subindo, como manda a regra de
+  trânsito do gravador. A presença do visitante pertence à reunião da dona e sai com ela;
 - **o servidor chama a API do Daily** para criar cada sala: privada (só entra com ficha),
-  na região de São Paulo, com prazo para expirar e teto de pessoas, contra gasto; e para
-  emitir a ficha de cada pessoa, de validade curta, com o nome dela e, para a dona, o
-  papel de dona da sala. É uma chamada HTTPS de saída, como as do Gemini;
+  na região de São Paulo, com o fim em 2 horas, quem estiver dentro saindo no fim, e o
+  teto de 8 pessoas (no Daily, `exp`, `eject_at_room_exp` e `max_participants`, a
+  conferir na PR). Também emite a ficha de cada pessoa, de validade curta, com o nome dela
+  e, para a dona, o papel de dona da sala. É uma chamada HTTPS de saída, como as do
+  Gemini;
+- **quem abre sala** é conferido no servidor pelo papel da conta (`silver`, `gold`,
+  `president` ou `admin`), e não só na tela. O teto de 8 pessoas também é conferido no
+  servidor, ao emitir a ficha;
+- **o teto do orçamento**, no servidor, como em "O orçamento de US$ 50 por mês";
 - **no cliente**, a biblioteca do Daily (`@daily-co/daily-js`), dentro do aval de 15/11 às
   bibliotecas seguras: licença e data da versão conferidas na PR;
-- **depois, se for preciso**, uma rota de webhook (o Daily avisa reunião encerrada,
-  entrada e saída), montada antes do `express.json`, como a das partes, para conferir a
-  assinatura sobre o corpo cru.
+- **uma rota de webhook** (o Daily avisa a entrada e a saída de cada pessoa e o fim da
+  sala), para a conta do orçamento. Ela é montada antes do `express.json`, como a das
+  partes, para conferir a assinatura sobre o corpo cru. Se a PR preferir, o mesmo dado sai
+  da API do Daily quando a sala fecha.
 
 O que **não** muda: o plano do Render, a porta, o `Dockerfile` e a CPU. O vídeo vai de cada
 aparelho direto ao servidor do Daily; o Render só recebe as partes de áudio da gravação,
@@ -264,7 +323,8 @@ quem está atrás de firewall corporativo, um subdomínio (por exemplo
 
 ### Pelo aparelho da dona, na mesma fila de partes (recomendado)
 
-1. A dona toca em "Gravar" dentro da sala. A sala cria a reunião gravada como hoje
+1. A dona toca em "Gravar" dentro da sala (só ela, pela decisão de 24/11; as
+   participantes e os visitantes não têm o botão). A sala cria a reunião gravada como hoje
    (`meetings.iniciarGravacao`, com `origem: "sala"`, que entra no `z.enum` dela) ou liga
    a gravação à reunião agendada, e o toque libera o `AudioContext` também no iPhone.
 2. Um misturador (Web Audio) junta numa saída só o microfone dela e o áudio de cada
@@ -313,31 +373,50 @@ gravações perdidas por aparelho, sobretudo no iPhone.
 
 ### Vídeo não se grava
 
-A proposta grava só o áudio, como o gravador de hoje. Gravar o vídeo multiplicaria o
-armazenamento, o risco (o rosto das pessoas guardado) e o texto jurídico, sem servir ao
-resumo. Se a cliente quiser o vídeo gravado, é outra decisão, com custo e aviso próprios.
+Decidido em 24/11: a sala grava só o áudio, como o gravador de hoje. Gravar o vídeo
+multiplicaria o armazenamento, o risco (o rosto das pessoas guardado) e o texto jurídico,
+sem servir ao resumo. Se a cliente quiser o vídeo gravado, é outra decisão, com custo e
+aviso próprios.
 
 ## Quem entra na sala
 
-Pelo cartão, entram as participantes da reunião, com o acesso por participante da **R1b**
-(cartão do Notion; ainda não está no repositório, e a R1 do desenho do gravador foi adiada
-em 12/11). A sala não inventa uma lista própria:
+Entram três tipos de pessoa, e a sala não inventa uma lista própria:
 
-- a sala pertence a uma reunião; quem entra é a dona e as participantes que a R1b ligar a
-  ela, cada uma com a própria conta. O servidor só emite a ficha para essas contas;
-- o convite sai como o da agenda (WhatsApp, e-mail, Google Agenda) e leva ao login; quem
-  ainda não tem conta cria uma e passa a ver a sala quando a dona a adicionar. Isso também
-  serve ao motivo da Glenda: a conversa e a pessoa ficam no app;
-- entrar sem conta (como no link aberto) fica de fora, salvo decisão contrária do
-  Roberto (pergunta 4);
-- **a sala mostra só o nome da conta.** E-mail e telefone nunca vão à tela nem ao
-  fornecedor, como manda a D3 ([decisoes-em-aberto.md](./decisoes-em-aberto.md): os
-  contatos das partes não aparecem entre elas). O que as pessoas falam em voz alta não
-  tem filtro. Se um dia a sala ganhar chat de texto, ele passa pelo mesmo bloqueio de
-  e-mail e telefone em texto livre da A13 (PR #48). O primeiro corte não tem chat.
+- **a dona**, que abre a sala. Só abre sala quem é Prata ou acima (decisão de 24/11),
+  conferido no servidor;
+- **as participantes da reunião**, pela **R1b**, que está na PR #247 (Pacote 6). Lá, a
+  dona convida por um link de uso único (`/convite/{token}`, só o hash no banco, válido
+  por 7 dias) ou a uma conexão aceita. A participante tem conta e fica em
+  `meeting_participants`, e a leitura dela usa a credencial `participante:<id>`, conferida
+  a cada leitura. A sala usa a mesma lista: o servidor emite a ficha para a dona e para
+  as participantes ativas. Quem sai da reunião, é removida ou tem a conta desativada perde
+  a sala também;
+- **visitantes sem conta**, só com o nome (decisão de 24/11), pelo link de visitante da
+  sala.
 
-A V1 depende da R1b. Se a R1b demorar, a V1 pode começar só com a dona e entrar com as
-participantes quando a R1b chegar, mas aí a sala não serve a ninguém além dela.
+**O link de visitante**, proposto assim:
+
+- é um link da sala, não da reunião: dá entrada na conversa e em mais nada. O visitante
+  não vê o resumo, a transcrição, a gravação nem o link aberto;
+- o segredo do link tem 192 bits e fica no banco só pelo hash, como o convite da R1b (e
+  não cru, como o token do link aberto). Ele vale até a sala fechar, e a dona pode
+  desligá-lo ou tirar um visitante da sala;
+- o visitante digita o nome, vê o aviso de gravação, aceita e entra. Não pode gravar;
+- conta dentro do teto de 8 pessoas, e as entradas pelo link têm limite de tentativas,
+  contra abuso;
+- a dona manda o link como quiser (WhatsApp, e-mail). A pessoa fica numa página do
+  `wrwglobal.org`, então a conversa continua dentro do Marquesa Global Match, como pede o
+  motivo da Glenda. Convidar o visitante a criar uma conta no fim é uma ideia para depois,
+  não do primeiro corte.
+
+**A sala mostra só o nome:** o da conta, ou o que o visitante digitou. E-mail e telefone
+nunca vão à tela nem ao fornecedor, como manda a D3
+([decisoes-em-aberto.md](./decisoes-em-aberto.md): os contatos das partes não aparecem
+entre elas). O que as pessoas falam em voz alta não tem filtro. Se um dia a sala ganhar
+chat de texto, ele passa pelo mesmo bloqueio de e-mail e telefone em texto livre da A13
+(PR #48). O primeiro corte não tem chat.
+
+A V1 começa depois que a R1b entrar na `main`, como decidido.
 
 ## Aviso e consentimento
 
@@ -345,21 +424,22 @@ Como no gravador: o aviso de gravação é o mesmo, versionado em
 `shared/aviso-de-gravacao.ts`, com a versão gravada em `consent_notice_version` da
 reunião, e a dona confirma, ao gravar, que as pessoas que falam autorizaram (ponto 1 do
 [aviso de gravação](../termos/aviso-de-gravacao-rascunho.md)). Na sala dá para ir além,
-porque todas as pessoas passam pela tela do MarquesaMatch:
+porque todas as pessoas passam pela tela do Marquesa Global Match:
 
-- **antes de entrar**, cada participante vê que a sala pode ser gravada e transcrita pela
-  IA do Google, com o áudio processado fora do Brasil;
+- **antes de entrar**, cada pessoa, participante ou visitante, vê que a sala pode ser
+  gravada e transcrita pela IA do Google, com o áudio processado fora do Brasil;
 - **quando a gravação começa**, todas veem um aviso fixo de "gravando". O estado vem do
   servidor, e não de uma mensagem entre aparelhos, que qualquer participante poderia
   forjar;
 - **quem entra com a gravação em curso** aceita antes de o microfone e a câmera ligarem;
   quem não aceita sai;
-- **o aceite fica guardado** por pessoa: a conta, a versão do aviso e a hora. É dado
-  pessoal: entra na exclusão de conta e na retenção.
+- **o aceite fica guardado** por pessoa: a conta (ou, do visitante, o nome digitado), a
+  versão do aviso e a hora. É dado pessoal: entra na exclusão de conta e na retenção, e o
+  do visitante sai com a reunião da dona.
 
-O aviso ganha versão nova, e o ponto 8 do rascunho, que hoje fala da "gravação da aba de
-uma reunião online (planejado)", passa a falar da sala. O texto vai para a Cris revisar,
-como os outros.
+O aviso ganha versão nova. O ponto 8 do rascunho, que hoje fala da "gravação da aba de uma
+reunião online (planejado)", passa a falar da sala, já que a H14 ficou fora, e o texto
+cobre também o visitante sem conta. O texto é da Cris (decisão de 24/11), como os outros.
 
 ## Privacidade e LGPD
 
@@ -384,6 +464,10 @@ como os outros.
   guardado: não há tratamento de biometria.
 - **O que vai ao fornecedor fora a mídia:** o nome que aparece na sala e um identificador
   da pessoa na ficha. Nada do perfil, da rede particular, do e-mail ou do telefone.
+- **O visitante sem conta** é titular de dado sem ter aceitado o Termo Geral: o que se
+  guarda dele é o nome que digitou, a entrada e a saída e o aceite do aviso, e só pelo
+  tempo da reunião da dona. A Política de Privacidade, quando existir, e o aviso da sala
+  precisam falar dele.
 
 ## No app das lojas
 
@@ -408,21 +492,25 @@ app. A sala roda na WebView sem tela nativa, com estes ajustes, numa PR da casca
   serve) e revisão da Apple, e reforçaria o argumento contra a regra 4.2 (site
   embrulhado). O LiveKit tem plugin oficial do Expo para isso; o SDK de React Native do
   Daily não foi conferido. Fica para depois, se o uso pedir;
+- **visitante:** quem entra pelo link de visitante, sem o app, abre a sala no navegador do
+  celular ou do computador, que também é uma página do `wrwglobal.org`;
 - **testes:** o Expo Go não entrega o microfone à WebView no Android; num APK de verdade,
   sim (teste do Nicolas). A sala se testa com o APK do perfil `preview` e com o build de
   desenvolvimento no iPhone.
 
 ## A sala, a gravação da aba (H14) e o robô (H21)
 
-- **A sala não substitui a H14.** A gravação da aba serve às reuniões que acontecem no
-  Zoom, no Meet ou no Teams de outras pessoas, no Chrome e no Edge do computador. Ela é
-  pequena (o gravador já aceita o fluxo da aba, e o servidor já aceita a origem `aba`) e
-  não depende da sala. Sugestão: a H14 volta à fila, sem esperar a sala. Pelo motivo da
-  Glenda, porém, a sala é que deve ser o caminho oferecido primeiro.
-- **A sala substitui o robô (H21) nas reuniões que a dona marca.** Para as reuniões
-  marcadas por outras pessoas em outras plataformas, o robô continua sendo o único jeito
-  sem a aba, e segue fora do escopo pelo motivo do desenho do gravador: serviço pago por
-  hora, ou software que não cabe no servidor de hoje. Sugestão: o robô continua parado.
+Decidido em 24/11: a gravação da aba (H14) **continua fora**, porque é tudo dentro do
+app, e o robô de reunião (H21) **segue parado**.
+
+- **O que fica sem caminho:** a reunião que acontece no Zoom, no Meet ou no Teams de outra
+  pessoa. Para ela, a H14 era o caminho pequeno (o gravador já aceita o fluxo da aba, e o
+  servidor já aceita a origem `aba`). Pela decisão, a resposta a essa reunião é trazê-la
+  para a sala, ou gravá-la pelo gravador presencial, no celular ao lado.
+- **A sala substitui o robô (H21) nas reuniões que a dona marca.** Para as marcadas por
+  outras pessoas em outras plataformas, o robô seria o único jeito sem a aba, e continua
+  fora do escopo pelo motivo do desenho do gravador: serviço pago por hora, ou software
+  que não cabe no servidor de hoje.
 
 ## O tamanho, em PRs
 
@@ -430,19 +518,19 @@ Pela opção B com o Daily e a gravação pelo aparelho. P é pequena, M é méd
 
 | PR | O que faz | Depende de |
 |---|---|---|
-| V0 (docs) | Este estudo e, depois da decisão, a entrada em `decisoes-tomadas.md`. | — |
-| V1 (M, migração) | Servidor da sala: as tabelas das salas e das presenças, a criação da sala no Daily (privada, em São Paulo, com prazo e teto de pessoas), a ficha só para a dona e as participantes da reunião, as variáveis (sem elas a função some), a exclusão de conta e os testes. | a R1b; conta no Daily, com o Roberto |
-| V2 (M) | Tela da sala em `/sala/:id`: a antessala (testar câmera e microfone, escolher o aparelho), a grade, ligar e desligar câmera e microfone, sair; a Permissions-Policy com `camera=(self)`; os textos nos 10 idiomas. | V1 |
-| V3 (M) | Convite e entrada: o "Abrir sala" na reunião, o convite por WhatsApp, e-mail e Google Agenda, o link que leva ao login e depois à sala, o aviso antes de entrar. | V2 |
-| V4 (M) | Gravar a sala: o misturador, o `comecar(fluxoDeFora)` na mesma fila de partes, a origem `sala`, o estado "gravando" pelo servidor, o aceite de quem está e de quem entra, a versão nova do aviso (texto da Cris). | V3 |
+| V0 (docs) | Este estudo, com a decisão de 24/11, e a entrada em `decisoes-tomadas.md` (PR #243). | — |
+| V1 (M, migração) | Servidor da sala: as tabelas das salas e das presenças, a criação da sala no Daily (privada, em São Paulo, 2 horas, 8 pessoas), quem abre (Prata ou acima), a ficha para a dona, as participantes ativas da R1b e os visitantes, o link de visitante pelo hash, o teto do orçamento com o webhook, as variáveis (sem elas a função some), a exclusão de conta e os testes. | a R1b (PR #247) na `main`; a conta no Daily |
+| V2 (M) | Tela da sala em `/sala/:id`: a antessala (testar câmera e microfone, escolher o aparelho), a grade, ligar e desligar câmera e microfone, sair; a Permissions-Policy com `camera=(self)` e o teste que trava o `frame-src 'none'`; os textos nos 10 idiomas. | V1 |
+| V3 (M) | Convite e entrada: o "Abrir sala" na reunião (só Prata ou acima), as participantes pela R1b, o link de visitante com o nome e o limite de tentativas, o aviso antes de entrar, e a dona desligando o link ou tirando alguém. | V2 |
+| V4 (M) | Gravar a sala (só a dona, só o áudio): o misturador, o `comecar(fluxoDeFora)` na mesma fila de partes, a origem `sala`, o estado "gravando" pelo servidor, o aceite de quem está e de quem entra, a versão nova do aviso (texto da Cris). | V3 |
 | V5 (P) | Agenda: a reunião agendada (H16) ganha a sala como lugar, e o link vai no evento da Google Agenda e no `.ics`. | V3 |
 | M-sala (P, `mobile/`) | Casca: a câmera no Android e na ponte, o texto da câmera no iPhone, o aviso do segundo plano na sala. | V2; a #180 |
 
 Depois, só se o uso pedir: a gravação pelo servidor, as sugestões de nome pela linha do
-tempo de quem fala, o compartilhar tela no computador e a tela nativa no app.
+tempo de quem fala e a tela nativa no app. O compartilhar tela espera decisão (ver o fim).
 
 **Textos de tela:** seguem a `/texto-de-tela`. A marca é a que estiver no código (hoje,
-MarquesaMatch, escrita assim nos 10 idiomas), e há testes que barram o nome antigo.
+Marquesa Global Match, pela PR #246), e há testes que barram o nome antigo.
 
 **Testes, em cada PR:**
 
@@ -452,15 +540,17 @@ MarquesaMatch, escrita assim nos 10 idiomas), e há testes que barram o nome ant
 - a prova de ponta a ponta pode usar o Chrome com câmera e microfone falsos
   (`--use-fake-device-for-media-stream`);
 - **antes do teste do time**, quem fez a PR testa com **duas contas** (a dona e uma
-  participante), **no computador e no celular**: o Chrome do computador com o Android (o
-  APK do perfil `preview`) e com o iPhone, a sala aberta dos dois lados, a gravação, e a
-  reunião pronta com transcrição, resumo e mapa. O resultado vai no "Como verifiquei" da
-  PR. O que precisar de mais gente ou de rede ruim vira cartão de teste no Notion, como na
-  G13.
+  participante) e **um visitante sem conta**, **no computador e no celular**: o Chrome do
+  computador com o Android (o APK do perfil `preview`) e com o iPhone, a sala aberta dos
+  dois lados, a gravação, e a reunião pronta com transcrição, resumo e mapa. Também testa
+  os tetos: a nona pessoa recusada, a sala que fecha em 2 horas e a conta Bronze sem o
+  "Abrir sala". O resultado vai no "Como verifiquei" da PR. O que precisar de mais gente
+  ou de rede ruim vira cartão de teste no Notion, como na G13.
 
 ## Riscos e o que este estudo não conferiu
 
-- **A R1b** não está no repositório: o desenho de "quem entra" depende do que ela fizer.
+- **A R1b** está na PR #247, ainda sem validação: se ela mudar até entrar na `main`, a V1
+  acompanha.
 - **Os preços e as regiões** mudam; os números daqui não são proposta comercial. A banda
   do LiveKit, a saída de dados do servidor próprio e o preço por hora da máquina da AWS
   são estimativas.
@@ -472,29 +562,25 @@ MarquesaMatch, escrita assim nos 10 idiomas), e há testes que barram o nome ant
 - **O plano do Render em vigor** e a cota de saída do B2 não mudam na opção B, mas não
   foram conferidos no painel.
 - **O Notion e o grupo:** este estudo leu o cartão (com a "Próxima ação", repassada em
-  24/11), e não a aba Decisões nem o grupo. Decisões que só estejam lá podem mudar a
-  recomendação.
+  24/11), e não a aba Decisões. O grupo foi lido em 24 e 25/11, e a decisão veio de lá
+  (24/11, 21:38).
 
-## Perguntas para o Roberto e a Glenda
+## O que ainda falta decidir
 
-1. **Qual caminho:** B com o Daily em São Paulo (recomendada), B com o LiveKit Cloud (mais
-   barato nos minutos e com saída para servidor próprio, mas com o vídeo passando pelos
-   EUA e a banda à parte), A (mais rápida, tela e marca do fornecedor, e fora do app na
-   casca sem exceção) ou C (servidor próprio)?
-2. **Antes ou depois:** a sala entra antes ou depois do que está na fila do gravador? E a
-   R1b vem antes dela?
-3. **Tetos contra gasto:** quantas pessoas e quanto tempo por sala? Todos os níveis de
-   conta abrem sala, ou só alguns?
-4. **Quem não tem conta:** precisa criar uma para entrar, como proposto, ou entra só com o
-   nome, como no link aberto?
-5. **Gravar:** só a dona aperta "Gravar", com o aviso a todas, como proposto? Só o áudio,
-   sem o vídeo?
-6. **Dado no Brasil:** há exigência de que o vídeo ao vivo passe só por servidor no Brasil?
-   Ela decide entre o Daily e o LiveKit Cloud.
-7. **Orçamento:** qual o teto mensal para a sala, e em qual cartão fica a conta do
-   fornecedor?
-8. **H14 e H21:** a gravação da aba volta à fila já, sem esperar a sala, e o robô segue
-   parado?
+As oito perguntas da versão de 24/11 foram respondidas (ver "A decisão"). Ficam estas:
+
+1. **Compartilhar a tela.** O Roberto perguntou em 22/11 se alguém na sala pode mostrar o
+   navegador, uma planilha por exemplo. Com o Daily, dá no computador (Chrome, Edge,
+   Firefox e Safari), mas não no celular. Quem está na sala vê a tela compartilhada; a
+   gravação, que é só de áudio, não a guarda. Com a H14 fora, é o jeito de mostrar algo
+   durante a reunião. Sugestão: entra na V2, só no computador, como um botão a mais. Não
+   conferido: se o Daily cobra a tela compartilhada à parte.
+2. **A conta no Daily:** quem cria, em qual cartão e quem aceita o DPA dele. A V1 não
+   começa sem ela.
+3. **O link de visitante:** sem senha, como proposto, ou com senha opcional, como o link
+   aberto já pode ter?
+4. **O teto do orçamento:** recusar sala nova ao chegar no teto, como proposto, ou só
+   avisar a administração?
 
 ## Fontes (vistas em 24/11/2026)
 
