@@ -1829,6 +1829,7 @@
       "blockersHeading": "Blocages, dépendances et contraintes",
       "openQuestionsHeading": "Questions en suspens",
       "toReview": "À vérifier",
+      "backFromIgnored": "Vous aviez ignoré cet élément, et l’IA l’a ramené en refaisant le résumé. Confirmez-le ou ignorez-le à nouveau.",
       "confirm": "Confirmer",
       "ignore": "Ignorer",
       "assignee": "Responsable : {{nome}}",

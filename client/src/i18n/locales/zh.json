@@ -1829,6 +1829,7 @@
       "blockersHeading": "障碍、依赖与限制",
       "openQuestionsHeading": "待解决问题",
       "toReview": "待核对",
+      "backFromIgnored": "你之前忽略了这一项，AI 在重新生成摘要时又把它加了回来。请确认，或再次忽略。",
       "confirm": "确认",
       "ignore": "忽略",
       "assignee": "负责人：{{nome}}",

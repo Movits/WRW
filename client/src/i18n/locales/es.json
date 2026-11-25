@@ -1829,6 +1829,7 @@
       "blockersHeading": "Bloqueos, dependencias y restricciones",
       "openQuestionsHeading": "Cuestiones pendientes",
       "toReview": "Por revisar",
+      "backFromIgnored": "Habías ignorado este elemento y la IA lo volvió a incluir al rehacer el resumen. Confírmalo o vuelve a ignorarlo.",
       "confirm": "Confirmar",
       "ignore": "Ignorar",
       "assignee": "Responsable: {{nome}}",

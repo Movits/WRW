@@ -1829,6 +1829,7 @@
       "blockersHeading": "Blockers, dependencies and constraints",
       "openQuestionsHeading": "Open questions",
       "toReview": "To review",
+      "backFromIgnored": "You had ignored this item, and the AI brought it back when redoing the summary. Confirm it or ignore it again.",
       "confirm": "Confirm",
       "ignore": "Ignore",
       "assignee": "Assigned to: {{nome}}",

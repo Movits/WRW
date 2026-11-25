@@ -1829,6 +1829,7 @@
       "blockersHeading": "Hindernisse, Abhängigkeiten und Einschränkungen",
       "openQuestionsHeading": "Offene Fragen",
       "toReview": "Zu prüfen",
+      "backFromIgnored": "Sie hatten diesen Punkt ignoriert, und die KI hat ihn beim Neuerstellen der Zusammenfassung wieder aufgenommen. Bestätigen Sie ihn oder ignorieren Sie ihn erneut.",
       "confirm": "Bestätigen",
       "ignore": "Ignorieren",
       "assignee": "Verantwortlich: {{nome}}",
