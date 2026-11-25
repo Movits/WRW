@@ -73,7 +73,11 @@ export class RecusaEntreReunioes extends Error {
   }
 }
 
-export type EscolhaDasReunioes = { meetingIds: string[]; etiqueta?: undefined } | { etiqueta: string; meetingIds?: undefined };
+/**
+ * A escolha: as reuniões uma a uma, ou as das etiquetas. Com várias etiquetas
+ * (T52), entram as reuniões com QUALQUER uma delas (a união), sem repetir.
+ */
+export type EscolhaDasReunioes = { meetingIds: string[]; etiquetas?: undefined } | { etiquetas: string[]; meetingIds?: undefined };
 
 /** Uma reunião que a dona pode escolher para perguntar: pronta e com transcrição. */
 export type ReuniaoParaPerguntar = {
@@ -122,8 +126,9 @@ type ReuniaoEscolhida = { id: string; titulo: string; criadaEm: number; nomes: R
 /**
  * As reuniões da escolha, da dona e visíveis. Uma a uma: todas têm de ser
  * dela (senão NOT_FOUND, sem dizer qual); a que não está pronta fica de fora,
- * com o motivo. Pela etiqueta: as prontas com a etiqueta (pela chave, sem
- * caixa), as mais novas primeiro, até REUNIOES_POR_PERGUNTA_MAX.
+ * com o motivo. Pelas etiquetas: as prontas com qualquer uma delas (pela
+ * chave, sem caixa; a união, sem repetir a reunião que tem duas), as mais
+ * novas primeiro, até REUNIOES_POR_PERGUNTA_MAX.
  */
 async function reunioesDaEscolha(db: Banco, ownerId: string, escolha: EscolhaDasReunioes): Promise<{ escolhidas: ReuniaoEscolhida[]; alemDoMaximo: number }> {
   const colunas = {
@@ -143,13 +148,13 @@ async function reunioesDaEscolha(db: Banco, ownerId: string, escolha: EscolhaDas
     if (linhas.length !== ids.length) throw new RecusaEntreReunioes("NOT_FOUND", RECUSAS_ENTRE_REUNIOES.naoEncontrada);
     return { escolhidas: linhas.map(escolhida), alemDoMaximo: 0 };
   }
-  const chave = chaveDaEtiqueta(escolha.etiqueta);
+  const chaves = new Set(escolha.etiquetas.map(chaveDaEtiqueta));
   const linhas = await db.select(colunas).from(meetings)
     .innerJoin(meetingTranscripts, transcricaoDaDona(ownerId))
     .where(and(eq(meetings.ownerId, ownerId), eq(meetings.status, "ready"), isNotNull(meetings.etiquetas), reuniaoVisivel()))
     .orderBy(desc(meetings.createdAt), asc(meetings.id));
   const comAEtiqueta = linhas
-    .filter(linha => Number(linha.caracteres ?? 0) > 0 && etiquetasDaReuniao(linha.etiquetas).some(etiqueta => chaveDaEtiqueta(etiqueta) === chave))
+    .filter(linha => Number(linha.caracteres ?? 0) > 0 && etiquetasDaReuniao(linha.etiquetas).some(etiqueta => chaves.has(chaveDaEtiqueta(etiqueta))))
     .map(escolhida);
   if (!comAEtiqueta.length) throw new RecusaEntreReunioes("PRECONDITION_FAILED", RECUSAS_ENTRE_REUNIOES.semReuniao);
   return { escolhidas: comAEtiqueta.slice(0, REUNIOES_POR_PERGUNTA_MAX), alemDoMaximo: Math.max(0, comAEtiqueta.length - REUNIOES_POR_PERGUNTA_MAX) };

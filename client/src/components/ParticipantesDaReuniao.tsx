@@ -132,7 +132,7 @@ function PainelAberto({ meetingId, titulo, falas, nomes, nomesLivres, contas, ju
           <div className="mt-2 flex flex-wrap gap-2">
             <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(linkNovo); toast.success(t("meetings.participants.copied")); } catch { campoDoLink.current?.select(); } }} className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs"><Copy size={13} aria-hidden="true"/>{t("meetings.participants.copy")}</button>
             <a href={linkDoWhatsApp(mensagem)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs"><MessageCircle size={13} aria-hidden="true"/>WhatsApp</a>
-            <a href={linkDoEmail(titulo, mensagem)} className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs"><Mail size={13} aria-hidden="true"/>{t("meetings.participants.email")}</a>
+            <a href={linkDoEmail(titulo, mensagem)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs"><Mail size={13} aria-hidden="true"/>{t("meetings.participants.email")}</a>
           </div>
         </div>}
         {escolhendoConexao && <div className="rounded-xl border border-white/10 bg-black/10 p-3">

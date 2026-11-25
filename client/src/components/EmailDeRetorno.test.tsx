@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { trpc } from "@/lib/trpc";
 import { MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO } from "@shared/email-de-retorno";
-import { EmailDeRetorno, LIMITE_DO_LINK_DE_EMAIL, linkDoRascunho, useGuardaDoEmailDeRetorno } from "./EmailDeRetorno";
+import { EmailDeRetorno, LIMITE_DO_LINK_DE_EMAIL, LIMITE_DO_LINK_DE_EMAIL_NA_WEB, linkDoRascunho, linksDoRascunhoNaWeb, useGuardaDoEmailDeRetorno } from "./EmailDeRetorno";
 
 /**
  * O rascunho de e-mail de retorno na tela (H20). O React Query e os hooks do
@@ -265,6 +265,30 @@ describe("E-mail de retorno — a prévia", () => {
     expect(abrir.getAttribute("href")).toContain("%0D%0A");
   });
 
+  it("T33: o e-mail abre em outra aba, sem sair da reunião (com a sessão ocupada, o mailto nesta aba parava na pergunta de sair da página)", async () => {
+    escrever();
+    await pedirEVer("Carla");
+    const abrir = screen.getByRole("link", { name: /Abrir no e-mail/ });
+    expect(abrir).toHaveAttribute("target", "_blank");
+    expect(abrir).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("T33: sem app de e-mail no computador, o Gmail e o Outlook na web abrem o mesmo rascunho, em outra aba", async () => {
+    escrever();
+    await pedirEVer("Carla");
+    const titulo = "Retorno para Carla";
+    const corpo = "Olá, Carla,\n\nObrigada pela reunião.\nAna manda a minuta até sexta.\nFalante 2 confirma o prazo.\n\nAbraços,";
+    const gmail = screen.getByRole("link", { name: /Abrir no Gmail/ });
+    const outlook = screen.getByRole("link", { name: /Abrir no Outlook/ });
+    expect(gmail).toHaveAttribute("href", `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`);
+    expect(outlook).toHaveAttribute("href", `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`);
+    for (const link of [gmail, outlook]) {
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    }
+    expect(screen.getByText(/Se o seu app de e-mail não abrir, use o Gmail ou o Outlook na web/)).toBeInTheDocument();
+  });
+
   it("o que a dona ajusta na prévia vale para o link e para a cópia", async () => {
     escrever();
     await pedirEVer("Carla");
@@ -337,6 +361,22 @@ describe("E-mail de retorno — os erros no idioma da tela", () => {
     fireEvent.click(screen.getByRole("button", { name: /Write draft/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent(esperado ?? i18n.t("meetings.meetingNotFound"));
     expect(screen.queryByRole("textbox", { name: "Subject" })).not.toBeInTheDocument();
+  });
+});
+
+describe("linksDoRascunhoNaWeb (T33)", () => {
+  it("o assunto e o texto codificados, com espaço como %20 e o + do texto preservado; longo demais, só o assunto", () => {
+    expect(linksDoRascunhoNaWeb("Oi & tchau", "1 + 1\nfim")).toEqual({
+      gmail: "https://mail.google.com/mail/?view=cm&fs=1&su=Oi%20%26%20tchau&body=1%20%2B%201%0Afim",
+      outlook: "https://outlook.office.com/mail/deeplink/compose?subject=Oi%20%26%20tchau&body=1%20%2B%201%0Afim",
+      completo: true,
+    });
+    const chines = "会议".repeat(Math.ceil(LIMITE_DO_LINK_DE_EMAIL_NA_WEB / 18) + 1);
+    expect(linksDoRascunhoNaWeb("主题", chines)).toEqual({
+      gmail: `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent("主题")}`,
+      outlook: `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent("主题")}`,
+      completo: false,
+    });
   });
 });
 
