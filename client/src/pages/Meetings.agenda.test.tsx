@@ -97,8 +97,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -195,8 +193,6 @@ beforeEach(() => {
   duble.obterDaAgenda.mockReturnValue({ data: DA_AGENDA, isLoading: false, isError: false, error: null });
   duble.listarDaAgenda.mockReturnValue({ data: { proximas: [DA_AGENDA], anteriores: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() });
   duble.duracao.mockResolvedValue(30);
-  duble.mutacao("create").mutateAsync.mockResolvedValue({ id: VINICOLA });
-  duble.mutacao("submitRecording").mutateAsync.mockResolvedValue({ success: true });
   ligar().mockReset().mockResolvedValue({ ok: true });
   duble.utils.client.meetings.iniciarGravacao.mutate.mockReset().mockResolvedValue({ id: VINICOLA });
   duble.utils.client.meetings.definirPedidoDoResumo.mutate.mockReset().mockResolvedValue({ pedido: null });
@@ -258,17 +254,6 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
     rerender(<Meetings />);
     await waitFor(() => expect(screen.getByRole("note")).toHaveTextContent("Da sua agenda:"));
     expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Minha reunião");
-  });
-
-  it("o arquivo pelo recuo do corte: a reunião criada é ligada à reunião marcada, e a agenda se relê", async () => {
-    abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
-    enviarArquivo();
-    await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
-    await waitFor(() => expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalled());
-    expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia" }));
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ recuoDoCorte: true })));
-    expect(duble.utils.client.meetings.iniciarGravacao.mutate).not.toHaveBeenCalled();
   });
 
   it("ir a Reuniões pelo menu no meio da gravação: a URL volta ao gravador com a reunião da agenda, e a faixa com o convite continua", async () => {
@@ -340,14 +325,6 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
     await waitFor(() => expect(duble.utils.client.meetings.encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
   });
 
-  it("a ligação recusada também não trava o arquivo pelo recuo do corte: o envio segue e a dona é avisada", async () => {
-    ligar().mockRejectedValue(Object.assign(new Error("Gravação não encontrada."), { data: { code: "NOT_FOUND" } }));
-    abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
-    enviarArquivo();
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(AVISO_DA_LIGACAO));
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
-  });
 });
 
 // O lembrete da agenda no sino (H15) leva a /gravar?agendada=<id>, que é esta
@@ -532,22 +509,6 @@ describe("a reunião da agenda que carrega depois do Iniciar ou do arquivo", () 
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
     await respirar();
-    expect(ligar()).toHaveBeenCalledTimes(1);
-  });
-
-  it("o arquivo do recuo do corte: a faixa que carrega enquanto o arquivo é lido liga a reunião criada", async () => {
-    duble.obterDaAgenda.mockReturnValue(CARREGANDO);
-    let soltarDuracao: (segundos: number) => void = () => {};
-    duble.duracao.mockImplementation(() => new Promise(resolver => { soltarDuracao = resolver; }));
-    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
-    enviarArquivo();
-    duble.obterDaAgenda.mockReturnValue(CARREGADA);
-    rerender(<Meetings />);
-    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
-    await act(async () => { soltarDuracao(30); });
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
-    expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA });
     expect(ligar()).toHaveBeenCalledTimes(1);
   });
 

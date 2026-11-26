@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { scoreMatch, slugifyMatchTag } from "./match-service";
 
 describe("Match Inteligente — scoring privado", () => {
@@ -29,8 +29,14 @@ describe("Match Inteligente — scoring privado", () => {
     expect(scoreMatch({ slug: "lavra", label: "Lavra", category: null }, { slug: "britagem", label: "Britagem", category: "Mineração" }).score).toBe(0);
   });
 
-  it("aceita similaridade semântica acima de 0,70", () => {
-    expect(scoreMatch({ slug: "a", label: "A" }, { slug: "b", label: "B" }, 0.71)).toEqual({ score: 45, type: "semantic" });
-    expect(scoreMatch({ slug: "a", label: "A" }, { slug: "b", label: "B" }, 0.7).score).toBe(0);
+  it("a similaridade só conta com o critério estreito ligado e acima do limiar (N7)", () => {
+    // Até o N7 valia 45 acima de 0,70, abaixo do corte de 50: desligado por construção. Agora vale 55, só com
+    // MATCH_SEMANTICO_ESTREITO=1, só a partir de LIMIAR_SEMANTICO_ESTREITO e só com as guardas (match-n7-*.test.ts).
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "");
+    expect(scoreMatch({ slug: "vinho", label: "Vinho" }, { slug: "bebidas", label: "Bebidas" }, 1).score).toBe(0);
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "1");
+    expect(scoreMatch({ slug: "vinho", label: "Vinho" }, { slug: "bebidas", label: "Bebidas" }, 0.71).score).toBe(0);
+    expect(scoreMatch({ slug: "vinho", label: "Vinho" }, { slug: "bebidas", label: "Bebidas" }, 0.95)).toEqual({ score: 55, type: "semantic" });
+    vi.unstubAllEnvs();
   });
 });

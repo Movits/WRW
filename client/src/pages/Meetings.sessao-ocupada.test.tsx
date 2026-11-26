@@ -99,8 +99,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -248,22 +246,6 @@ async function encerrarEEntregar(partes = 1) {
 /** O ALAC do Gravador do iPhone: o corte reconhece o M4A e não lê o áudio, e o arquivo curto vai pelo recuo do corte. */
 const arquivoDoRecuo = () => new File(["som"], "memo.m4a", { type: "audio/x-m4a" });
 
-/**
- * O envio no ar: o create e o envio do áudio só terminam quando o teste manda
- * (criar e terminar). As duas promessas nascem já aqui, para o afterEach
- * terminar o que um teste deixou no ar mesmo antes do submitRecording.
- */
-function envioNoAr() {
-  let criar: () => void = () => {};
-  const criado = new Promise<{ id: string }>(resolver => { criar = () => resolver({ id: VINICOLA }); });
-  let terminar: () => void = () => {};
-  const enviado = new Promise<void>(resolver => { terminar = () => resolver(); });
-  duble.mutacao("create").mutateAsync.mockImplementation(() => criado);
-  duble.mutacao("submitRecording").mutateAsync.mockImplementation(() => enviado);
-  pendentes.push(() => { criar(); terminar(); });
-  return { criar: () => criar(), terminar: () => terminar() };
-}
-
 /** O navegador avisa antes de fechar a aba: devolve se a página pediu a confirmação. */
 function fecharAba() {
   const evento = new Event("beforeunload", { cancelable: true });
@@ -290,26 +272,6 @@ describe("Reuniões — o que ocupa a sessão", () => {
     expect(screen.queryByRole("button", { name: /Transcrever áudio/ })).not.toBeInTheDocument();
   });
 
-  it("sair da página no meio do envio do recuo do corte, com o create ainda no ar: o pedido segue e a sessão, ocupada, até ele terminar", async () => {
-    duble.duracao.mockResolvedValue(30);
-    const { unmount } = abrirOGravador();
-    const envio = envioNoAr();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoDoRecuo()] } });
-    await waitFor(() => expect(duble.mutacao("create").mutateAsync).toHaveBeenCalled());
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
-    // O envio é avulso: a página desmontada não o solta.
-    unmount();
-    expect(motivoDaOcupacao()).toBe("enviando");
-    expect(fecharAba()).toBe(true);
-    await act(async () => { envio.criar(); });
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ recuoDoCorte: true })));
-    expect(motivoDaOcupacao()).toBe("enviando");
-    await act(async () => { envio.terminar(); });
-    expect(sessaoOcupada()).toBe(false);
-  });
-
   it("o envio de arquivo ocupa do clique ao fim, inclusive quando termina recusado", async () => {
     // O corte no ar: a sessão já está ocupada enquanto o arquivo é lido.
     let entregarCorte: (corte: unknown) => void = () => {};
@@ -326,28 +288,12 @@ describe("Reuniões — o que ocupa a sessão", () => {
     await act(async () => { entregarCorte({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" }); });
     await waitFor(() => expect(duble.duracao).toHaveBeenCalled());
     expect(motivoDaOcupacao()).toBe("enviando");
-    // Sem duração legível, o envio para antes do servidor: a ocupação sai junto.
-    await act(async () => { entregarDuracao(null); });
+    // Mais de 12 min, que não cabem numa parte: o envio para antes do servidor, e a ocupação sai junto.
+    await act(async () => { entregarDuracao(721); });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa ALAC, que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(sessaoOcupada()).toBe(false);
   });
 
-  it("o envio de arquivo que dá certo também libera no fim", async () => {
-    duble.duracao.mockResolvedValue(30);
-    // Preparado antes de desenhar a página, de propósito: o dublê não depende de
-    // um teste anterior (rodado sozinho, este caía num TypeError).
-    const envio = envioNoAr();
-    envio.criar();
-    abrirOGravador();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    // O recuo do corte, o envio único que a G14 manteve.
-    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoDoRecuo()] } });
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
-    expect(motivoDaOcupacao()).toBe("enviando");
-    await act(async () => { envio.terminar(); });
-    expect(sessaoOcupada()).toBe(false);
-  });
 });
 
 describe("Reuniões — a validação que recusa o envio não ocupa a sessão", () => {
@@ -465,8 +411,6 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
     expect(await screen.findByRole("button", { name: "Descartar gravação" })).toBeInTheDocument();
     await encerrarEEntregar();
     expect(duble.enviarParte).toHaveBeenCalledWith(VINICOLA, 0, expect.any(Blob), expect.any(String));
-    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Transcrever áudio/ })).not.toBeInTheDocument();
   });
 
@@ -950,7 +894,6 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     pagina.unmount();
     await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 
   it("duplo clique no Iniciar: uma reunião só, o botão travado enquanto o servidor cria, e a gravação mantém as partes", async () => {
@@ -1008,7 +951,7 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     expect(duble.enviarParte).toHaveBeenCalledTimes(3);
     expect(toast.warning).toHaveBeenCalledTimes(1);
     expect(toast.warning).toHaveBeenCalledWith(
-      "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.",
+      "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Fique nesta tela até o envio terminar: sair dela ou da conta antes disso perde o trecho que ainda não subiu.",
       { id: "gravacao-sem-copia-no-aparelho", duration: Infinity, closeButton: true },
     );
     await waitFor(() => expect(sessaoOcupada()).toBe(false));

@@ -363,7 +363,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
         className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
         <MessageCircle size={15}/> {t("meetings.share.whatsapp")}
       </a>
-      <a href={linkDoEmail(assunto, mensagem)}
+      <a href={linkDoEmail(assunto, mensagem)} target="_blank" rel="noopener noreferrer"
         className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
         <Mail size={15}/> {t("meetings.share.email")}
       </a>
@@ -386,7 +386,7 @@ export function CompartilharReuniao({ meetingId, titulo, token, linkMostraNomes 
           className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
           <MessageCircle size={15}/> {t("meetings.share.whatsapp")}
         </a>
-        <a href={linkDoEmail(assunto, mensagemComSenha)}
+        <a href={linkDoEmail(assunto, mensagemComSenha)} target="_blank" rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
           <Mail size={15}/> {t("meetings.share.email")}
         </a>

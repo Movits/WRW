@@ -437,3 +437,210 @@ describe("Portão da IA — contraparte e autodescrição barram; o resto segue 
     expect(citando(fonte, citacao, { whatIHave: ["Consultoria em gestão"] })).toBe(true); // nada reconhecido: modelo
   });
 });
+
+describe("Decisões do Roberto de 16/09 na validação da #135 — contraparte e destinatário comum nos motores determinísticos", () => {
+  const privado = (oferta: string, necessidade: string, categoria: string | null = null) =>
+    scoreMatch(item(oferta, categoria), item(necessidade, categoria)) as { score: number; type: string; bloqueio?: string };
+  const pedindo = (necessidade: string) => [
+    perfil({ whatINeed: [necessidade] }),
+    perfil({ whatINeed: ["outra_necessidade"], seekingTypes: ["outra_necessidade"], seekingOtherNeed: necessidade } as Partial<UserProfile>),
+  ];
+
+  // D1: "pedido da família + complemento que as listas não conhecem" vale 60, MAS o complemento que
+  // nomeia uma CONTRAPARTE continua 0 — é a regra da citação de contraparte do portão, pela mesma lista.
+  const CONTRAPARTES: Array<[string, string]> = [
+    ["Consultoria", "Preciso de consultoria de distribuidor"], ["Advocacia", "Procuro advogado de investidor"],
+    ["Consultoria", "Preciso de consultoria de fornecedores"], ["Consultoria", "Busco consultoria de compradores"],
+    ["Advocacia", "Preciso de advogado de importador"], ["Consultoria", "Procuro consultoria de exportadores"],
+    ["Advocacia", "Procuro advogado de sócios"],
+  ];
+
+  it("D1 negativo: o complemento que nomeia contraparte não casa no motor privado, com ou sem categoria em comum", () => {
+    for (const [oferta, necessidade] of CONTRAPARTES) {
+      for (const categoria of [null, "Serviços", "Consultoria"]) {
+        const r = privado(oferta, necessidade, categoria);
+        expect(r.score, `${oferta} × ${necessidade} [${categoria}]`).toBe(0);
+        expect(r.bloqueio, `${oferta} × ${necessidade} [${categoria}]`).toBe("servico-sem-demanda-expressa");
+      }
+    }
+  });
+
+  it("D1 negativo: nem no motor de perfis — bloqueado, nota zero", () => {
+    for (const [oferta, necessidade] of CONTRAPARTES) {
+      for (const outro of pedindo(necessidade)) {
+        const r = calculateCompatibilityScore(perfil({ whatIHave: [oferta] }), outro);
+        expect(r.bloqueio, necessidade).toBe("servico-sem-demanda-expressa");
+        expect(r.overall, necessidade).toBe(0);
+      }
+    }
+  });
+
+  it("D1 positivo: o complemento desconhecido que não é contraparte vale a nota da família (60) e é base expressa no de perfis", () => {
+    for (const [oferta, necessidade] of [
+      ["Advocacia", "Preciso de advogado marítimo"], ["Contabilidade", "Procuro contador rural"], ["Consultoria", "Preciso de consultoria de moda"],
+    ] as Array<[string, string]>) {
+      expect(privado(oferta, necessidade), necessidade).toEqual({ score: 60, type: "category" });
+      for (const outro of pedindo(necessidade)) {
+        const r = calculateCompatibilityScore(perfil({ whatIHave: [oferta] }), outro);
+        expect(r.bloqueio, necessidade).toBeUndefined();
+        expect(r.overall, necessidade).toBeGreaterThanOrEqual(40);
+      }
+    }
+    // Sem verbo, ninguém está pedindo: continua 0.
+    expect(privado("Advocacia", "advogado marítimo").score).toBe(0);
+  });
+
+  // D2 e D4: o público em DESTINATARIOS_COMUNS vale 100 dos dois lados, com qualquer preposição — passa do corte
+  // de e-mail (70). A finalidade e o público que não é destinatário comum ficam em 60.
+  it("D2 e D4 positivo: os seis pares que o delta derrubava para 60 continuam 100, e 'Contador para/de MEI' e 'Contador MEI' sobem a 100", () => {
+    for (const [oferta, necessidade] of [
+      ["Advocacia", "Assessoria jurídica para MEI"], ["Advocacia", "Assessoria jurídica para pequenas empresas"],
+      ["Advocacia", "Suporte jurídico para startups"], ["Contabilidade", "Suporte contábil para MEI"],
+      ["Contabilidade", "Assessoria contábil para pequenas empresas"], ["Contabilidade", "Consultoria contábil para MEI"],
+      ["Contabilidade", "Contador para MEI"], ["Contabilidade", "Contador de MEI"], ["Contabilidade", "Contador MEI"],
+    ] as Array<[string, string]>) {
+      expect(privado(oferta, necessidade), `${oferta} × ${necessidade}`).toEqual({ score: 100, type: "exact" });
+      for (const outro of pedindo(necessidade)) {
+        const r = calculateCompatibilityScore(perfil({ whatIHave: [oferta] }), outro);
+        expect(r.bloqueio, necessidade).toBeUndefined();
+        expect(r.overall, necessidade).toBeGreaterThanOrEqual(40);
+      }
+    }
+    // Os dois lados: a oferta dirigida ao destinatário comum diante de quem só nomeia a família.
+    expect(privado("Contabilidade para MEI", "Contador")).toEqual({ score: 100, type: "exact" });
+    expect(privado("Contabilidade de MEI", "Contador")).toEqual({ score: 100, type: "exact" });
+  });
+
+  it("D2 e D4 controle: finalidade e outro público ficam na nota da família; especialidade diferente segue 0; o mesmo serviço escrito de outro jeito segue 100", () => {
+    for (const [oferta, necessidade] of [
+      ["Logística", "Preciso de logística para exportar meu café"], ["Logística", "Preciso de logística de exportação para meu café"],
+      ["Contabilidade", "Contador para clínicas veterinárias"], ["Marketing", "Marketing para restaurantes"],
+    ] as Array<[string, string]>) {
+      expect(privado(oferta, necessidade), necessidade).toEqual({ score: 60, type: "category" });
+    }
+    expect(privado("Consultoria jurídica", "Consultoria em marketing").score).toBe(0);
+    expect(privado("Advocacia", "Advogado tributarista").score).toBe(0);
+    expect(privado("Advogado tributarista", "Advocacia tributária")).toEqual({ score: 100, type: "exact" });
+  });
+});
+
+describe("Revisão cética de 16/09 da fix/delta-do-nicolas — o que as decisões abriam sem querer", () => {
+  const privado = (oferta: string, necessidade: string, categoria: string | null = null) =>
+    scoreMatch(item(oferta, categoria), item(necessidade, categoria)) as { score: number; type: string; bloqueio?: string };
+  const BARRADO = { score: 0, type: "semantic", bloqueio: "servico-sem-demanda-expressa" };
+  const FAMILIA = { score: 60, type: "category" };
+  const MESMO_SERVICO = { score: 100, type: "exact" };
+  /** O par no motor privado e, com "o que tenho" × "o que preciso", no de perfis: barrado lá também, ou não barrado. */
+  const nosDoisMotores = (pares: Array<[string, string]>, esperado: typeof BARRADO | typeof FAMILIA | typeof MESMO_SERVICO) => {
+    for (const [oferta, necessidade] of pares) {
+      expect(privado(oferta, necessidade), `${oferta} × ${necessidade}`).toEqual(esperado);
+      const r = calculateCompatibilityScore(perfil({ whatIHave: [oferta] }), perfil({ whatINeed: [necessidade] }));
+      if (esperado === BARRADO) {
+        expect(r.bloqueio, `perfis: ${oferta} × ${necessidade}`).toBe("servico-sem-demanda-expressa");
+        expect(r.overall, `perfis: ${oferta} × ${necessidade}`).toBe(0);
+      } else {
+        expect(r.bloqueio, `perfis: ${oferta} × ${necessidade}`).toBeUndefined();
+      }
+    }
+  };
+
+  it("a prestadora que PROCURA clientes não pede o serviço que ela presta: 0 diante da concorrente (no delta, 100 com e-mail)", () => {
+    nosDoisMotores([
+      ["Contabilidade", "Contador procura clientes"], ["Advocacia", "Escritório de advocacia busca clientes"],
+      ["Marketing", "Agência de marketing busca clientes"], ["Consultoria", "Consultoria busca clientes"],
+      ["Consultoria", "Consultoria busca startups"], ["Contabilidade", "Contador procura MEI"],
+      ["Consultoria", "Somos uma consultoria de moda e buscamos clientes"], ["Lawyer", "Lawyer seeking business clients"],
+      ["Consulting", "Consulting firm looking for clients"], ["Contabilidade", "Contador que busca clientes"],
+      ["Contabilidade", "Contador precisa de clientes"],
+    ], BARRADO);
+    // No "Outra necessidade" de outro perfil também: nem pela guarda, nem pelo motor.
+    const r = calculateCompatibilityScore(perfil({ activityArea: "Consultoria" }),
+      perfil({ activityArea: "Marketing", seekingTypes: ["outra_necessidade"], seekingOtherNeed: "Consultoria busca clientes" } as Partial<UserProfile>));
+    expect(r.bloqueio).toBe("servico-sem-demanda-expressa");
+    // Controle: sem objeto, com o serviço anteposto ao pedido e com "busca" substantivo, a leitura segue como era.
+    expect(privado("Advocacia", "Advogado procura-se")).toEqual(MESMO_SERVICO);
+    expect(privado("Advocacia tributária", "Advocacia tributária: procuro para minha empresa")).toEqual(MESMO_SERVICO);
+    expect(privado("Advocacia de busca e apreensão", "Advogado especialista em busca e apreensão")).toEqual(MESMO_SERVICO);
+    expect(privado("Advocacia", "Preciso de advogado de busca e apreensão")).toEqual(FAMILIA);
+  });
+
+  it("sem 'para', o destinatário é só o inequívoco: assunto, modalidade e cliente não sobem a 100", () => {
+    nosDoisMotores([
+      ["Consultoria", "Consultoria de negócios"], ["Advocacia", "Advogado de negócios"], ["Advocacia", "Abogado de negocios"],
+      ["Mentoria", "Mentoria de negócios"], ["Coaching", "Coach de negócios"], ["Advocacia", "Advogado de grandes empresas"],
+      ["Tradução", "Tradutor particular"], ["Mentoria", "Mentoria individual"], ["Consultoria", "Consultoria de clientes"],
+      ["Logística", "Logística de clientes"], ["Accounting", "Client accountant"],
+    ], BARRADO);
+    // Do lado da oferta, o assunto também não é destinatário: fica na nota da família (no delta, 100).
+    expect(privado("Consultoria de negócios", "Consultoria")).toEqual(FAMILIA);
+    // O inequívoco continua 100, com e sem "para", e o negócio depois de "para" é destinatário.
+    nosDoisMotores([
+      ["Contabilidade", "Contador de pequenas empresas"], ["Contabilidade", "Contador de médias empresas"],
+      ["Contabilidade", "Contador de pessoa física"], ["Accounting", "Small business accountant"], ["Advocacia", "Advogado de ME"],
+      ["Contabilidade", "Contador de EPP"], ["Consultoria", "Consultoria de pequenos negócios"], ["Consultoria", "Consultoria para negócios"],
+    ], MESMO_SERVICO);
+    // A modalidade é qualificador de quem presta, como "online": com destinatário, fica na família.
+    expect(privado("Contabilidade", "Preciso de um contador particular para MEI")).toEqual(FAMILIA);
+  });
+
+  it("dos dois lados de verdade: a oferta com 'para' cobre o destinatário escrito sem 'para' (na main e no delta, 0)", () => {
+    nosDoisMotores([
+      ["Contabilidade para MEI", "Contador de MEI"], ["Contabilidade para MEI", "Contador MEI"],
+      ["Contabilidade para pequenas empresas", "Contador de pequenas empresas"], ["Contabilidade tributária para MEI", "Contador de MEI"],
+    ], MESMO_SERVICO);
+    // A especialidade sem o público continua não atendendo o destinatário.
+    expect(privado("Contabilidade tributária", "Contador de MEI")).toEqual(BARRADO);
+  });
+
+  it("D1 só abre para quem PEDE o serviço: autodescrição, oferta e pedido de comprador não valem a nota da família", () => {
+    nosDoisMotores([
+      ["Consultoria", "Quero vender minha consultoria"], ["Consultoria", "Estamos oferecendo consultoria de moda"],
+      ["Consultoria", "Procuro quem compre consultoria de moda"], ["Advocacia", "We are maritime lawyers"],
+      ["Advocacia", "I am a maritime lawyer"], ["Consultoria", "Consultoria de moda que se destaca"],
+      ["Contabilidade", "Contador rural se oferece"], ["Consultoria", "Consultoria de moda se precisar"],
+      ["Consulting", "We need someone to buy our consulting"],
+    ], BARRADO);
+    const r = calculateCompatibilityScore(perfil({ activityArea: "Consultoria" }),
+      perfil({ activityArea: "Consultoria", seekingTypes: ["outra_necessidade"], seekingOtherNeed: "Consultoria de moda que se destaca" } as Partial<UserProfile>));
+    expect(r.bloqueio).toBe("servico-sem-demanda-expressa");
+    // Quem pede continua na nota da família, em pt, en e es, com o qualificador antes do serviço em inglês.
+    nosDoisMotores([
+      ["Advocacia", "Preciso de advogado marítimo"], ["Advocacia", "We need a maritime lawyer"], ["Consulting", "We need fashion consulting"],
+      ["Consultoria", "Busco consultoria de moda"], ["Consultoria", "Estamos procurando consultoria de moda"],
+      ["Advocacia", "Gostaria de contratar um advogado marítimo"], ["Consultoría", "Necesito consultoría de moda"],
+      ["Contabilidade", "Preciso de um bom escritório de contabilidade rural"],
+    ], FAMILIA);
+  });
+
+  it("D1 como a decisão escreveu: representante, agente e parceiro comerciais, atacadista, varejista, franqueado, patrocinador e cliente são contraparte", () => {
+    nosDoisMotores([
+      ["Consultoria", "Preciso de consultoria de representante comercial"], ["Consultoria", "Preciso de consultoria de parceiro comercial"],
+      ["Advocacia", "Preciso de advogado de representante comercial"], ["Consultoria", "Preciso de consultoria de agentes comerciais"],
+      ["Consultoria", "Preciso de consultoria de atacadistas"], ["Consultoria", "Preciso de consultoria de varejistas"],
+      ["Consultoria", "Preciso de consultoria de franqueados"], ["Consultoria", "Preciso de consultoria de patrocinadores"],
+      ["Consultoria", "Preciso de consultoria de clientes"],
+    ], BARRADO);
+    // Só em par com "comercial": a representação comercial é assunto, e o representante legal e o parceiro sozinhos
+    // não são contraparte.
+    nosDoisMotores([
+      ["Consultoria", "Preciso de consultoria de representação comercial"], ["Advocacia", "Preciso de advogado de representante legal"],
+      ["Consultoria", "Preciso de consultoria de parceiros"],
+    ], FAMILIA);
+  });
+
+  it("D1 vale para a necessidade inteira: especialidade ou contraparte em outra alternativa fecha a abertura", () => {
+    nosDoisMotores([
+      ["Advocacia", "Preciso de advogado marítimo e tributarista"], ["Advocacia", "Preciso de advogado marítimo e investidor"],
+      ["Consultoria", "Preciso de consultoria de moda e distribuidores"],
+    ], BARRADO);
+  });
+
+  it("nos idiomas novos a abertura do D1 não vale (a trava da contraparte é só pt/en/es): a nota volta à da main", () => {
+    for (const [oferta, necessidade] of [
+      ["Conseil", "Cherche conseil distributeur"], ["Beratung", "Suche Beratung Händler"], ["Консалтинг", "Ищем консалтинг дистрибьютора"],
+    ] as Array<[string, string]>) {
+      expect(privado(oferta, necessidade).score, necessidade).toBe(0);
+      expect(servicoAtendeNecessidade(oferta, necessidade), necessidade).toBe(false);
+    }
+  });
+});

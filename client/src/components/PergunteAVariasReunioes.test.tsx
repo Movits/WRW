@@ -94,7 +94,7 @@ describe("Perguntar a várias reuniões — a escolha", () => {
     expect(within(etiquetas).getAllByRole("button").map(b => b.textContent)).toEqual(["Clientes", "Logística"]);
     expect(screen.getByRole("button", { name: /^Perguntar$/ })).toBeDisabled();
     fireEvent.click(within(etiquetas).getByRole("button", { name: "Clientes" }));
-    expect(screen.getByText("Reuniões prontas com esta etiqueta: 2")).toBeInTheDocument();
+    expect(screen.getByText("Reuniões prontas com as etiquetas escolhidas: 2")).toBeInTheDocument();
     expect(screen.getByText("Cerca de 1,5 h de fala.")).toBeInTheDocument();
   });
 
@@ -104,7 +104,35 @@ describe("Perguntar a várias reuniões — a escolha", () => {
     fireEvent.click(within(await screen.findByRole("list", { name: "Etiquetas das suas reuniões" })).getByRole("button", { name: "Clientes" }));
     perguntarAgora();
     await screen.findByText("Fontes: 2 de 2 reuniões lidas");
-    expect(chamadas("perguntar")).toEqual([{ etiqueta: "Clientes", idioma: "pt-BR", pergunta: "O que ficou combinado?", fuso: fusoDoAparelho() }]);
+    expect(chamadas("perguntar")).toEqual([{ etiquetas: ["Clientes"], idioma: "pt-BR", pergunta: "O que ficou combinado?", fuso: fusoDoAparelho() }]);
+  });
+
+  it("várias etiquetas (T52): entram as reuniões com qualquer uma delas, sem repetir; tocar de novo tira a etiqueta; a pergunta vai com todas", async () => {
+    rede.respostas["perguntasEntreReunioes.perguntar"] = RESPOSTA;
+    abrir();
+    const etiquetas = await screen.findByRole("list", { name: "Etiquetas das suas reuniões" });
+    expect(screen.getByText(/Toque em uma ou mais etiquetas/)).toBeInTheDocument();
+    fireEvent.click(within(etiquetas).getByRole("button", { name: "Logística" }));
+    expect(screen.getByText("Reuniões prontas com as etiquetas escolhidas: 1")).toBeInTheDocument();
+    // "Frete" tem as duas: conta uma vez só.
+    fireEvent.click(within(etiquetas).getByRole("button", { name: "Clientes" }));
+    expect(within(etiquetas).getByRole("button", { name: "Logística" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(etiquetas).getByRole("button", { name: "Clientes" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Reuniões prontas com as etiquetas escolhidas: 2")).toBeInTheDocument();
+    expect(screen.getByText("Cerca de 1,5 h de fala.")).toBeInTheDocument();
+    perguntarAgora();
+    await screen.findByText("Fontes: 2 de 2 reuniões lidas");
+    expect(chamadas("perguntar")).toEqual([{ etiquetas: ["Logística", "Clientes"], idioma: "pt-BR", pergunta: "O que ficou combinado?", fuso: fusoDoAparelho() }]);
+    // Tocar de novo tira a etiqueta.
+    fireEvent.click(within(etiquetas).getByRole("button", { name: "Clientes" }));
+    expect(within(etiquetas).getByRole("button", { name: "Clientes" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Reuniões prontas com as etiquetas escolhidas: 1")).toBeInTheDocument();
+  });
+
+  it("o pedido de tabela ou gráfico (passo 2 do T52) tem a ajuda na tela", async () => {
+    abrir();
+    await screen.findByRole("list", { name: "Etiquetas das suas reuniões" });
+    expect(screen.getByText(/Para ver em tabela ou gráfico, peça na pergunta/)).toBeInTheDocument();
   });
 
   it("uma a uma: pede ao menos duas; a pergunta vai com os ids; acima de ~7 h, avisa que a IA lê primeiro as mais ligadas", async () => {
@@ -115,7 +143,7 @@ describe("Perguntar a várias reuniões — a escolha", () => {
     fireEvent.click(within(lista).getByRole("checkbox", { name: /Contrato do café/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre as reuniões escolhidas" }), { target: { value: "O que ficou combinado?" } });
     expect(screen.getByRole("button", { name: /^Perguntar$/ })).toBeDisabled();
-    expect(screen.getByText("Escolha uma etiqueta ou pelo menos duas reuniões.")).toBeInTheDocument();
+    expect(screen.getByText("Escolha uma ou mais etiquetas, ou pelo menos duas reuniões.")).toBeInTheDocument();
     fireEvent.click(within(lista).getByRole("checkbox", { name: /Mentoria/ }));
     expect(screen.getByText("Escolhidas: 2 (até 30)")).toBeInTheDocument();
     expect(screen.getByText(/a IA lê primeiro as reuniões mais ligadas à pergunta/)).toBeInTheDocument();
@@ -231,7 +259,7 @@ describe("Perguntar a várias reuniões — a resposta", () => {
   it.each([
     [RECUSAS_ENTRE_REUNIOES.tetoDiario, "TOO_MANY_REQUESTS", `Você chegou ao limite de ${PERGUNTAS_ENTRE_REUNIOES_EM_24H} perguntas a várias reuniões em 24 horas. Tente de novo mais tarde.`],
     [RECUSAS_ENTRE_REUNIOES.naoEncontrada, "NOT_FOUND", "Uma das reuniões escolhidas não foi encontrada. Feche, atualize a lista e escolha de novo."],
-    [RECUSAS_ENTRE_REUNIOES.semReuniao, "PRECONDITION_FAILED", "Nenhuma reunião pronta tem esta etiqueta."],
+    [RECUSAS_ENTRE_REUNIOES.semReuniao, "PRECONDITION_FAILED", "Nenhuma reunião pronta tem as etiquetas escolhidas."],
     [RECUSAS_ENTRE_REUNIOES.longasDemais, "PAYLOAD_TOO_LARGE", "Cada reunião escolhida passa, sozinha, do limite de cerca de 7 h de fala por pergunta."],
     ["O serviço de IA não respondeu agora. Tente de novo em instantes.", "SERVICE_UNAVAILABLE", "O serviço de IA não respondeu agora. Tente de novo em instantes."],
   ])("a recusa %s sai traduzida", async (mensagem, codigo, texto) => {
@@ -247,7 +275,7 @@ describe("Perguntar a várias reuniões — a resposta", () => {
     fireEvent.click(within(await screen.findByRole("list", { name: "وسوم اجتماعاتك" })).getByRole("button", { name: "Clientes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "سؤالك عن الاجتماعات المختارة" }), { target: { value: "ما الذي تقرر؟" } });
     fireEvent.click(screen.getByRole("button", { name: /^اسأل$/ }));
-    await waitFor(() => expect(chamadas("perguntar")).toEqual([{ etiqueta: "Clientes", idioma: "ar", pergunta: "ما الذي تقرر؟", fuso: fusoDoAparelho() }]));
+    await waitFor(() => expect(chamadas("perguntar")).toEqual([{ etiquetas: ["Clientes"], idioma: "ar", pergunta: "ما الذي تقرر؟", fuso: fusoDoAparelho() }]));
     expect(await screen.findByText("المصادر: 2 من 2 من الاجتماعات المقروءة")).toBeInTheDocument();
   });
 });

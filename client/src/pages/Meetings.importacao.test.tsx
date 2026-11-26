@@ -17,9 +17,10 @@ import Meetings from "./Meetings";
  * arquivo vai ao corte (o Worker é um dublê que corta de verdade, na página),
  * que reconhece o formato pelos bytes, e sobe parte a parte pelo caminho da
  * gravação em partes, com o andamento e o Cancelar na tela. Desde a G14 não há
- * outro caminho: o ?envioUnico=1 saiu, e o envio único só sobra no recuo do
- * corte, o arquivo curto de um formato que o corte reconhece mas não lê (o
- * último bloco deste arquivo).
+ * outro caminho: o ?envioUnico=1 saiu, e, desde a parte 2 (25/11/2026), também
+ * o recuo do corte (o arquivo curto de um formato que o corte reconhece mas não
+ * lê) vai pela rota das partes, inteiro, como uma parte só (o último bloco
+ * deste arquivo). O envio único (meetings.submitRecording) saiu do servidor.
  *
  * O tRPC é o dublê de Meetings.agenda.test.tsx.
  */
@@ -96,8 +97,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -169,8 +168,6 @@ beforeEach(() => {
   duble.duracao.mockResolvedValue(30);
   duble.cortar.mockImplementation(corteDeVerdade);
   duble.utils.auth.me.getData.mockReturnValue({ openId: "dona-1" });
-  duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-envio-unico" });
-  duble.mutacao("submitRecording").mutateAsync.mockResolvedValue({ success: true });
   duble.utils.client.agenda.ligarGravacao.mutate.mockResolvedValue({ ok: true });
   duble.utils.client.meetings.definirPedidoDoResumo.mutate.mockReset().mockResolvedValue({ pedido: null });
   iniciarGravacao().mockResolvedValue({ id: VINICOLA });
@@ -250,9 +247,6 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     // As três partes juntas são o áudio do arquivo, sem o ID3 e o Xing.
     const enviado = new Uint8Array(await new Blob(duble.enviarParte.mock.calls.map(c => c[2] as Blob)).arrayBuffer());
     expect(enviado).toEqual(quadros(MPEG1_128K, 90));
-    // Nada pelo envio único.
-    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
     expect(duble.duracao).not.toHaveBeenCalled();
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
@@ -378,7 +372,6 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(aviso));
     expect(duble.cortar).not.toHaveBeenCalled();
     expect(iniciarGravacao()).not.toHaveBeenCalled();
-    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
     expect(screen.getByRole("checkbox")).not.toBeDisabled();
     expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeDisabled();
     expect(sessaoOcupada()).toBe(false);
@@ -422,8 +415,6 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 3 }));
     expect(duble.cortar).toHaveBeenCalled();
     expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ origem: "arquivo" }));
-    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 
   it("o M4A, o vídeo e os outros formatos também vão ao corte, e cada parte sobe no tipo que o corte diz (H9b e H9c)", async () => {
@@ -446,64 +437,68 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     const bytes = async (blob: Blob) => Array.from(new Uint8Array(await blob.arrayBuffer()));
     expect(await bytes(duble.enviarParte.mock.calls[0][2] as Blob)).toEqual([0xa1, 0xa2, ...Array.from({ length: 10 }, (_v, i) => 10 + i)]);
     expect(await bytes(duble.enviarParte.mock.calls[1][2] as Blob)).toEqual([0xb1, 20, 21, 22, 23]);
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("o arquivo curto de um formato que o corte não lê segue no envio único de sempre (o Vorbis no WebM), com a duração lida e a marca do recuo (G14)", async () => {
+  it("o arquivo curto de um formato que o corte não lê (o Vorbis no WebM) vai inteiro, como uma parte só, pela rota das partes (G14, parte 2)", async () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
     duble.duracao.mockResolvedValue(301);
+    encerrarGravacao().mockResolvedValue({ partes: 1 });
+    const arquivo = new File(["som do webm"], "reuniao.webm", { type: "audio/webm" });
     abrir();
-    enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
-    // A marca vai ao log do servidor, que separa o recuo de um cliente de fora do app.
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
-      meetingId: "reuniao-do-envio-unico", mimeType: "audio/webm", durationSeconds: 301, recuoDoCorte: true,
-    })));
+    enviar(arquivo);
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
     // A reunião nasce com a origem do arquivo: sem ela, ficava fora do filtro "Importadas" (H7d).
-    expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ origem: "arquivo" }));
-    expect(duble.cortar).toHaveBeenCalled();
-    expect(iniciarGravacao()).not.toHaveBeenCalled();
+    expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ origem: "arquivo" }));
+    expect(duble.enviarParte.mock.calls.map(c => [c[0], c[1], c[3]])).toEqual([[VINICOLA, 0, "audio/webm"]]);
+    expect(await (duble.enviarParte.mock.calls[0][2] as Blob).text()).toBe("som do webm");
     expect(toast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`));
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
-  // Revisão do pacote 4b: o recuo para o envio único trocava o motivo certo (o
-  // codec) pelo do envio único (os 10 minutos), que a dica da tela não promete
-  // para esse formato.
-  it.each([
-    ["com mais de 10 minutos", 1800],
-    ["com a duração que o navegador não lê", null],
-  ] as const)("o arquivo curto de um formato que o corte não lê, %s: o aviso do formato, e não o do envio único", async (_caso, segundos) => {
+  it("o arquivo curto que o corte não lê e cuja duração o navegador não lê (o ALAC no Chrome) vai do mesmo jeito: o servidor mede nos bytes", async () => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" });
+    duble.duracao.mockResolvedValue(null);
+    encerrarGravacao().mockResolvedValue({ partes: 1 });
+    abrir();
+    enviar(new File(["som"], "memo.m4a", { type: "audio/x-m4a" }));
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    expect(duble.enviarParte.mock.calls.map(c => [c[1], c[3]])).toEqual([[0, "audio/mp4"]]);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  // Revisão do pacote 4b: o recuo trocava o motivo certo (o codec) pelo do
+  // envio (o tempo), que a dica da tela não promete para esse formato.
+  it("o arquivo de um formato que o corte não lê, com mais de 12 minutos: o aviso do formato, sem reunião", async () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" });
-    duble.duracao.mockResolvedValue(segundos);
+    duble.duracao.mockResolvedValue(721);
     abrir();
     enviar(new File(["som"], "reuniao.webm", { type: "audio/webm" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo usa Vorbis (WebM), que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(duble.mutacao("create").mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
+    expect(iniciarGravacao()).not.toHaveBeenCalled();
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
   // O Ogg encadeado (duas gravações emendadas) não tem um nome de formato: o aviso era "Este arquivo usa ?".
-  it("o arquivo sem suporte e sem o nome do formato (o Ogg encadeado, acima de 10 MB): o aviso próprio, sem '?'", async () => {
+  it("o arquivo sem suporte e sem o nome do formato (o Ogg encadeado, acima dos 16 MB de uma parte): o aviso próprio, sem '?'", async () => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "ogg" });
     abrir();
-    enviar(new File([new Uint8Array(11 * 1024 * 1024)], "conversa.ogg", { type: "audio/ogg" }));
+    enviar(new File([new Uint8Array(17 * 1024 * 1024)], "conversa.ogg", { type: "audio/ogg" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Este arquivo junta mais de uma gravação ou traz um áudio que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo."));
     expect(vi.mocked(toast.error).mock.calls.flat().join(" ")).not.toContain("?");
     expect(iniciarGravacao()).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["acima de 10 MB (o ALAC do Gravador do iPhone)", new File([new Uint8Array(11 * 1024 * 1024)], "memo.m4a", { type: "audio/x-m4a" }), "ALAC"],
-    ["num tipo que o envio único não aceita (o AVI)", new File(["x"], "reuniao.avi", { type: "video/x-msvideo" }), "AVI"],
-  ] as const)("o arquivo sem suporte %s recebe o aviso com o formato, sem reunião", async (_caso, arquivo, formato) => {
-    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", detalhe: formato });
+    ["acima dos 16 MB de uma parte (o ALAC do Gravador do iPhone)", new File([new Uint8Array(17 * 1024 * 1024)], "memo.m4a", { type: "audio/x-m4a" }), "mp4", "ALAC"],
+    ["num contêiner que o corte não lê (o AVI)", new File(["x"], "reuniao.avi", { type: "video/x-msvideo" }), undefined, "AVI"],
+  ] as const)("o arquivo sem suporte %s recebe o aviso com o formato, sem reunião", async (_caso, arquivo, conteiner, formato) => {
+    duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", ...(conteiner ? { formato: conteiner } : {}), detalhe: formato });
     abrir();
     enviar(arquivo);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`Este arquivo usa ${formato}, que a Marquesa Global Match ainda não lê. Converta-o para MP3 ou M4A e envie de novo.`));
     expect(iniciarGravacao()).not.toHaveBeenCalled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -515,7 +510,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
  */
 describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do pacote 4a)", () => {
   const FINS = "wrw:fins-de-gravacao-pendentes";
-  const SEM_COPIA = "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.";
+  const SEM_COPIA = "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Fique nesta tela até o envio terminar: sair dela ou da conta antes disso perde o trecho que ainda não subiu.";
 
   it("a parte que não sobe vai de novo, lida do arquivo, antes de a seguinte entrar, mesmo sem a cópia no aparelho; o fim vai com as 3 partes", async () => {
     duble.guardarParte.mockRejectedValue(new Error("QuotaExceededError"));
@@ -688,130 +683,55 @@ describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do p
 });
 
 /**
- * O recuo do corte, que a G14 manteve: o arquivo curto (até 10 MB e 10 min) de
- * um formato que o corte reconhece mas não lê vai inteiro pelo envio único
- * (meetings.submitRecording), como antes da H9b. Os casos vieram do envio de
- * arquivo do ?envioUnico=1 (Meetings.rotas.test.tsx), que saiu: o caminho do
- * recuo é o mesmo daquele envio, da leitura da duração ao aviso da falha.
+ * O recuo do corte pela rota das partes (G14, parte 2): o arquivo curto (até 16
+ * MB, e até 12 min quando o navegador lê a duração) de um formato que o corte
+ * reconhece mas não lê vai inteiro, como uma parte só, pelo caminho da
+ * importação em partes. O servidor converte em MP3 o codec que o Gemini não
+ * lista; o que ele não lê volta como a recusa da parte, traduzida.
  */
-describe("Reuniões — o recuo do corte pelo envio único (o que a G14 manteve)", () => {
+describe("Reuniões — o recuo do corte pela rota das partes (G14, parte 2)", () => {
   /** O ALAC do Gravador do iPhone: o corte reconhece o M4A e não lê o áudio. */
-  const alac = () => new File(["som"], "memo.m4a", { type: "audio/x-m4a" });
+  const alac = () => new File(["som do alac"], "memo.m4a", { type: "audio/x-m4a" });
 
   beforeEach(() => {
     duble.cortar.mockResolvedValue({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" });
+    encerrarGravacao().mockResolvedValue({ partes: 1 });
   });
 
-  async function formularioDestravado() {
-    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
-  }
-
-  it("o formulário trava do começo ao fim do envio: a autorização não se desmarca no meio, e a dica de instalação sai do alcance sem perder o lugar", async () => {
-    let entregarDuracao: (segundos: number | null) => void = () => {};
-    duble.duracao.mockImplementation(() => new Promise(resolver => { entregarDuracao = resolver; }));
-    let entregarCriacao: (reuniao: { id: string }) => void = () => {};
-    duble.mutacao("create").mutateAsync.mockImplementation(() => new Promise(resolver => { entregarCriacao = resolver; }));
+  it("o arquivo inteiro é a parte 0, em audio/mp4, com os bytes do arquivo; a reunião nasce do arquivo e o fim leva ao detalhe", async () => {
     abrir();
     enviar(alac(), "Conversa com a Bia");
-    // Enquanto o navegador lê o arquivo, nada do formulário muda.
-    await waitFor(() => expect(duble.duracao).toHaveBeenCalled());
-    expect(screen.getByRole("checkbox")).toBeDisabled();
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toBeDisabled();
-    expect(screen.queryByRole("region", { name: "Instale a Marquesa Global Match como app" })).not.toBeInTheDocument();
-    expect(document.querySelector("section[aria-labelledby]")).toHaveStyle({ visibility: "hidden" });
-    await act(async () => { entregarDuracao(30); });
-    // Com a reunião sendo criada, também não: a autorização não se desmarca no meio.
-    await waitFor(() => expect(duble.mutacao("create").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia", consentGranted: true })));
-    expect(screen.getByRole("checkbox")).toBeDisabled();
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
-    await act(async () => { entregarCriacao({ id: "reuniao-do-arquivo" }); });
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
-      meetingId: "reuniao-do-arquivo", mimeType: "audio/m4a", durationSeconds: 30, recuoDoCorte: true,
-    })));
-    await formularioDestravado();
-    expect(screen.getByRole("region", { name: "Instale a Marquesa Global Match como app" })).toBeInTheDocument();
-    expect(iniciarGravacao()).not.toHaveBeenCalled();
-  });
-
-  it("o servidor recusa o envio: o aviso leva o id da reunião e o formulário destrava", async () => {
-    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
-    duble.mutacao("submitRecording").mutateAsync.mockRejectedValue(new Error("Não foi possível processar o áudio."));
-    abrir();
-    enviar(alac());
-    // O mesmo id do onError do envio: o sonner troca aquele aviso em vez de empilhar outro igual.
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Não foi possível processar o áudio.", { id: "reuniao-falhou-reuniao-do-arquivo" }));
-    await formularioDestravado();
+    await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia", consentGranted: true, origem: "arquivo" })));
+    await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
+    expect(duble.enviarParte).toHaveBeenCalledTimes(1);
+    expect(duble.enviarParte.mock.calls[0][3]).toBe("audio/mp4");
+    expect(await (duble.enviarParte.mock.calls[0][2] as Blob).text()).toBe("som do alac");
+    await waitFor(() => expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`));
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
-  it("o envio recusado com um erro sem mensagem avisa com a frase genérica, e não com um aviso em branco", async () => {
-    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: "reuniao-do-arquivo" });
-    duble.mutacao("submitRecording").mutateAsync.mockRejectedValue(new Error(""));
+  it("o servidor não lê a parte (FORMATO): o aviso traduzido da recusa, e o envio termina", async () => {
+    duble.enviarParte.mockResolvedValueOnce({ tipo: "recusada", codigo: "FORMATO" });
     abrir();
     enviar(alac());
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.processError"), { id: "reuniao-falhou-reuniao-do-arquivo" }));
-    expect(toast.error).not.toHaveBeenCalledWith("", expect.anything());
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.partRejectedUnreadable"), expect.anything()));
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
-  it("com o banco fora do ar, o aviso sai no idioma da tela, e não na frase do servidor em português", async () => {
+  it("com o banco fora do ar ao criar a reunião, o aviso sai no idioma da tela, e não na frase do servidor em português", async () => {
     await act(async () => { await i18n.changeLanguage("en"); });
     try {
-      duble.mutacao("create").mutateAsync.mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
+      iniciarGravacao().mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
       abrir();
       fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
       fireEvent.click(screen.getByRole("checkbox"));
       fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [alac()] } });
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("errors.databaseUnavailable")));
       expect(i18n.t("errors.databaseUnavailable")).not.toBe(MENSAGEM_BANCO_INDISPONIVEL);
+      expect(duble.enviarParte).not.toHaveBeenCalled();
     } finally {
       cleanup();
       await act(async () => { await i18n.changeLanguage("pt-BR"); });
     }
-  });
-
-  it("a reunião não chega a ser criada: o aviso sai sem id, nada é enviado e o formulário destrava", async () => {
-    duble.mutacao("create").mutateAsync.mockRejectedValue(new Error("Banco de dados indisponível. Tente de novo em instantes."));
-    abrir();
-    enviar(alac());
-    // Só a mensagem: sem reunião criada não há aviso do onError para trocar.
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Banco de dados indisponível. Tente de novo em instantes."));
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
-    await formularioDestravado();
-  });
-
-  it("a reunião não chega a ser criada e o erro vem sem mensagem: a frase genérica do envio do arquivo, sem id", async () => {
-    duble.mutacao("create").mutateAsync.mockRejectedValue(new Error(""));
-    abrir();
-    enviar(alac());
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("meetings.uploadError")));
-    expect(toast.error).not.toHaveBeenCalledWith("");
-    expect(toast.error).not.toHaveBeenCalledWith(i18n.t("meetings.processError"));
-    expect(duble.mutacao("submitRecording").mutateAsync).not.toHaveBeenCalled();
-  });
-
-  it("quem vai à lista durante o envio e volta ao gravador encontra a trava, e o fim do envio a leva ao detalhe", async () => {
-    duble.mutacao("create").mutateAsync.mockResolvedValue({ id: VINICOLA });
-    let entregarEnvio: () => void = () => {};
-    duble.mutacao("submitRecording").mutateAsync.mockImplementation(() => new Promise<void>(resolver => { entregarEnvio = () => resolver(); }));
-    abrir();
-    enviar(alac());
-    await waitFor(() => expect(duble.mutacao("submitRecording").mutateAsync).toHaveBeenCalled());
-    act(() => window.history.pushState(null, "", "/meetings"));
-    fireEvent.click(await screen.findByRole("button", { name: /Nova reunião/ }));
-    expect(window.location.pathname).toBe("/gravar");
-    // O envio ainda está no ar: o gravador continua travado, sem gravar nem enviar outro.
-    expect(screen.getByText(/Transcrevendo e analisando/)).toBeInTheDocument();
-    expect(screen.getByRole("checkbox")).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /Iniciar gravação/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Enviar arquivo de áudio/ })).not.toBeInTheDocument();
-    expect(sessaoOcupada()).toBe(true);
-    await act(async () => {
-      await duble.mutacao("submitRecording").opcoes.onSuccess?.({}, { meetingId: VINICOLA });
-      entregarEnvio();
-    });
-    expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`);
-    await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 });

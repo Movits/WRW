@@ -9,8 +9,13 @@
  * client/src/components/PergunteAVariasReunioes.tsx.
  */
 
-/** Quantas reuniões uma pergunta pode escolher (uma a uma, ou as mais novas da etiqueta). */
+/** Quantas reuniões uma pergunta pode escolher (uma a uma, ou as mais novas das etiquetas). */
 export const REUNIOES_POR_PERGUNTA_MAX = 30;
+/**
+ * Quantas etiquetas uma pergunta pode juntar (T52): as reuniões com QUALQUER
+ * uma delas entram (a união), até REUNIOES_POR_PERGUNTA_MAX.
+ */
+export const ETIQUETAS_POR_PERGUNTA_MAX = 20;
 /** O que a IA lê de uma vez: o teto da pergunta a uma reunião (LIMITE_DA_ENTRADA_DA_PERGUNTA), cerca de 7 h de fala. */
 export const LIMITE_DA_LEITURA_DA_IA = 400_000;
 /** Os caracteres de uma hora de fala, para a tela estimar as horas (o teto dá cerca de 7 h). */
@@ -33,7 +38,7 @@ export type AvaliacaoDaResposta = (typeof AVALIACOES_DA_RESPOSTA)[number];
 export const RECUSAS_ENTRE_REUNIOES = {
   /** Uma das reuniões escolhidas não é da dona, não existe ou está sendo excluída. */
   naoEncontrada: "VARIAS_REUNIAO_NAO_ENCONTRADA",
-  /** Nenhuma reunião pronta da dona tem a etiqueta. */
+  /** Nenhuma reunião pronta da dona tem as etiquetas escolhidas. */
   semReuniao: "VARIAS_SEM_REUNIAO",
   /** Nenhuma das escolhidas tem transcrição pronta. */
   semTranscricao: "VARIAS_SEM_TRANSCRICAO",

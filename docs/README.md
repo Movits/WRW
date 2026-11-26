@@ -10,6 +10,9 @@ estão no [CLAUDE.md](../CLAUDE.md). Cada pasta de código (`client/`, `server/`
 - [guia-de-entrada.md](./guia-de-entrada.md): como trabalhamos, acessos, preparar a
   máquina, banco local, `.env`, o Claude neste repositório e os erros comuns.
 
+- [medir-o-match.md](./medir-o-match.md): a rede de teste com armadilhas (N8) e como ler a
+  precisão e a cobertura de cada motor de match.
+
 ## Desenho do sistema
 
 `arquitetura/` é a referência de projeto, não o retrato do código: descreve para onde o

@@ -14,7 +14,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  *   openId da dona, e grava auditoria sem conteúdo de reunião;
  * - as recusas do serviço chegam com o código que a tela traduz;
  * - o teto de 3 pedidos aceitos a cada 10 minutos por dona, sem contar recusas;
- * - submitRecording numa reunião que já recebeu áudio dá CONFLICT;
+ * - o envio único (submitRecording) saiu do router na G14, parte 2;
  * - decidir sobre sugestão ou entidade com a reunião em 'processing' dá
  *   CONFLICT, sem criar contato nem atualizar nada;
  * - a sugestão de contato só é decidida UMA vez: a tomada leva status
@@ -133,7 +133,7 @@ vi.mock("./meeting-service", async importOriginal => ({
 }));
 
 const { meetingsRouter, esquecerTentativasDeReprocesso, MENSAGEM_REUNIAO_PROCESSANDO, MENSAGEM_SUGESTAO_JA_DECIDIDA } = await import("./routers/meetings");
-const { ReprocessamentoRecusado, ReuniaoForaDoEstado, ReuniaoTomadaPorOutraExecucao } = await import("./meeting-service");
+const { ReprocessamentoRecusado } = await import("./meeting-service");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const contexto = (openId: string) => ({
@@ -254,65 +254,22 @@ describe("meetings.reprocess — teto de 3 pedidos aceitos a cada 10 minutos por
   });
 });
 
-describe("meetings.submitRecording — reunião que já recebeu áudio", () => {
-  it.each([
-    ["ReuniaoForaDoEstado", () => new ReuniaoForaDoEstado()],
-    ["ReuniaoTomadaPorOutraExecucao", () => new ReuniaoTomadaPorOutraExecucao()],
-  ])("%s vira CONFLICT com a frase do serviço", async (_nome, criar) => {
-    const erro = criar();
-    processMeetingRecording.mockRejectedValue(erro);
-    await expect(rota().submitRecording({
-      meetingId: ID, audioBase64: "A".repeat(40), mimeType: "audio/webm", durationSeconds: 30, language: "pt",
-    })).rejects.toMatchObject({ code: "CONFLICT", message: erro.message });
-  });
-});
-
-// A G13a tira o teto de 10 min só da gravação em partes: o envio único (o
-// áudio inteiro num pedido) segue recusando a duração declarada acima de 600 s.
-describe("meetings.submitRecording — o teto de 10 min do envio único continua", () => {
-  const envio = (durationSeconds: number) => rota().submitRecording({
-    meetingId: ID, audioBase64: "A".repeat(40), mimeType: "audio/webm", durationSeconds, language: "pt",
-  });
-
-  it("600 s chega ao serviço; 601 s é BAD_REQUEST sem chegar a ele", async () => {
-    processMeetingRecording.mockResolvedValue({ transcript: "texto", extraction: { entities: [], contacts: [] } });
-    await expect(envio(600)).resolves.toMatchObject({ success: true });
-    expect(processMeetingRecording).toHaveBeenCalledTimes(1);
-    await expect(envio(601)).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(processMeetingRecording).toHaveBeenCalledTimes(1);
-  });
-});
-
-// G14: o gravador do app não usa mais o envio único, que sobra só no recuo do
-// corte (o arquivo de um formato que o corte não lê), com a marca. A rota fica
-// para esse recuo e para um cliente de fora do repositório, que só o log revela:
-// cada chamada deixa uma linha, com a marca ou sem ela.
-describe("meetings.submitRecording — o log separa o recuo do corte de outro cliente (G14)", () => {
-  const entrada = { meetingId: ID, audioBase64: "A".repeat(40), mimeType: "audio/webm" as const, durationSeconds: 30, language: "pt-BR" };
-
-  it("com a marca, a linha diz que é o recuo do corte; sem ela, que pode ser um cliente de fora do app; a marca não chega ao serviço", async () => {
-    processMeetingRecording.mockResolvedValue({ transcript: "texto", extraction: { entities: [], contacts: [] } });
-    const log = vi.spyOn(console, "info").mockImplementation(() => {});
-    try {
-      await expect(rota().submitRecording({ ...entrada, recuoDoCorte: true })).resolves.toMatchObject({ success: true });
-      expect(log).toHaveBeenLastCalledWith("[Reuniões] envio único (submitRecording): recuo do corte do arquivo, audio/webm");
-      expect(processMeetingRecording).toHaveBeenLastCalledWith({ ...entrada, ownerId: "dona-1" });
-      await expect(rota().submitRecording(entrada)).resolves.toMatchObject({ success: true });
-      expect(log).toHaveBeenLastCalledWith("[Reuniões] envio único (submitRecording): sem a marca do recuo do corte (cliente de fora do app?), audio/webm");
-      expect(processMeetingRecording).toHaveBeenLastCalledWith({ ...entrada, ownerId: "dona-1" });
-      // Nada da reunião nem da dona vai à linha: só o caminho e o tipo do áudio.
-      for (const [linha] of log.mock.calls) {
-        expect(String(linha)).not.toContain(ID);
-        expect(String(linha)).not.toContain("dona-1");
-      }
-    } finally {
-      log.mockRestore();
-    }
-  });
-
-  it("a marca só aceita true: false é BAD_REQUEST, sem chegar ao serviço", async () => {
-    await expect(rota().submitRecording({ ...entrada, recuoDoCorte: false as unknown as true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+// G14, parte 2 (25/11/2026): a rota do envio único saiu. Nada novo chega
+// mais em base64 (o recuo do corte vai pela rota das partes), e a reunião
+// antiga, que só tem a gravação inteira, segue reprocessável pelo
+// meetings.reprocess, que lê o áudio guardado (reuniao-reprocessar.test.ts).
+describe("meetings.submitRecording saiu (G14, parte 2)", () => {
+  it("o router não tem mais o envio único, e o reprocesso da reunião antiga continua", async () => {
+    expect(Object.keys(meetingsRouter._def.procedures)).not.toContain("submitRecording");
+    expect(Object.keys(meetingsRouter._def.procedures)).toContain("reprocess");
+    await expect(rota().reprocess({ meetingId: ID })).resolves.toEqual({ status: "processing" });
     expect(processMeetingRecording).not.toHaveBeenCalled();
+  });
+
+  it("nenhuma linha [Reuniões] envio único sobra no router", () => {
+    const fonte = readFileSync(join(__dirname, "routers", "meetings.ts"), "utf8");
+    expect(fonte).not.toContain("envio único (submitRecording)");
+    expect(fonte).not.toContain("recuoDoCorte");
   });
 });
 

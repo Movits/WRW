@@ -1,7 +1,9 @@
 import express from "express";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { corpoGrandeParaUploads, procedimentosDaUrl } from "./_core/corpo-grande-para-uploads";
+import { corpoGrandeParaUploads, PROCEDIMENTOS_COM_ARQUIVO, procedimentosDaUrl } from "./_core/corpo-grande-para-uploads";
 
 // A URL de lote do httpBatchLink ("a,b") não casa com o mount por caminho
 // ("/api/trpc/a"): sem este middleware, um upload dentro de um lote caía no
@@ -62,5 +64,26 @@ describe("corpoGrandeParaUploads", () => {
   it("mantém os 5 MB do parser global para os demais procedimentos", async () => {
     const r = await enviar("/api/trpc/dealRoom.listDocuments", corpoDe(7));
     expect(r.status).toBe(413);
+  });
+});
+
+// Os SEIS procedimentos de upload em base64 (server/CLAUDE.md, "Boot e
+// uploads"): os mesmos no recorte por caminho de server/_core/index.ts e na
+// lista do lote. O meetings.submitRecording (o envio único) saiu dos dois na
+// G14, parte 2 (25/11/2026): o áudio da reunião chega só pela rota binária das partes.
+describe("os procedimentos de upload", () => {
+  const indice = readFileSync(path.resolve(process.cwd(), "server/_core/index.ts"), "utf8");
+  const recortes = Array.from(indice.matchAll(/app\.use\("\/api\/trpc\/([\w.]+)", express\.json\(\{ limit: "15mb" \}\)\)/g), m => m[1]).sort();
+
+  it("são seis, os mesmos na lista do lote e nos recortes por caminho", () => {
+    expect([...PROCEDIMENTOS_COM_ARQUIVO].sort()).toEqual([
+      "contexts.uploadMedia", "dealRoom.uploadDocument", "meetings.anexarAoResumo", "network.uploadCard", "network.uploadPhoto", "sivc.uploadDocument",
+    ]);
+    expect(recortes).toEqual([...PROCEDIMENTOS_COM_ARQUIVO].sort());
+  });
+
+  it("o envio único não tem mais o parser de 15 MB, nem sozinho nem no lote", () => {
+    expect(indice).not.toContain("meetings.submitRecording");
+    expect(PROCEDIMENTOS_COM_ARQUIVO.has("meetings.submitRecording")).toBe(false);
   });
 });

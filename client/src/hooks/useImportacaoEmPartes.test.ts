@@ -176,6 +176,34 @@ describe("useImportacaoEmPartes (H9a)", () => {
     expect(gravacao.partes.iniciar).not.toHaveBeenCalled();
   });
 
+  // G14, parte 2: o recuo do corte vai pelas partes, sem o envio único.
+  it("o recuo do corte: o arquivo que o corte não lê vai inteiro, como a parte 0, no tipo que o recuo diz, e o fim pede 1 parte", async () => {
+    const recusa = { ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" } as const;
+    const recuo = vi.fn(async () => ({ mimeType: "audio/mp4" as const, duracaoMs: 30_000 }));
+    const { result } = montar(async () => recusa);
+    let importacao!: Promise<ResultadoDaImportacao>;
+    act(() => { importacao = result.current.importar(new File(["som do alac"], "memo.m4a", { type: "audio/x-m4a" }), INICIO, undefined, recuo); });
+    await waitFor(() => expect(gravacao.recebidas).toHaveLength(1));
+    expect(recuo).toHaveBeenCalledWith(recusa);
+    expect(gravacao.partes.iniciar).toHaveBeenCalledWith({ ...INICIO, origem: "arquivo" });
+    expect(gravacao.recebidas[0]).toMatchObject({ seq: 0, mimeType: "audio/mp4", duracaoMs: 30_000 });
+    expect(new TextDecoder().decode(await bytesDe(gravacao.recebidas[0].blob))).toBe("som do alac");
+    await gravacao.subir();
+    await expect(importacao).resolves.toEqual({ tipo: "enviada", meetingId: "reuniao-1", fim: "declarado" });
+    expect(gravacao.partes.encerrarArquivo).toHaveBeenCalledWith("reuniao-1", 1);
+  });
+
+  it.each([
+    ["o recuo diz que não cabe", async () => null],
+    ["o recuo falha", async () => { throw new Error("o navegador não leu"); }],
+  ] as const)("%s: a recusa do corte, sem reunião", async (_caso, recuo) => {
+    const { result } = montar(async () => ({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" }));
+    let resultado: ResultadoDaImportacao | undefined;
+    await act(async () => { resultado = await result.current.importar(new File(["x"], "r.webm"), INICIO, undefined, recuo); });
+    expect(resultado).toEqual({ tipo: "recusada", motivo: "SEM_SUPORTE", detalhe: "Vorbis (WebM)" });
+    expect(gravacao.partes.iniciar).not.toHaveBeenCalled();
+  });
+
   it("Cancelar no envio: exclui a reunião na hora (a parte que sobe termina), e nenhuma outra parte entra", async () => {
     const corte = await corteDe(quadros(MPEG1_128K, 150));
     if (!corte.ok) throw new Error("corte");

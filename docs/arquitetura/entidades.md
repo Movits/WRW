@@ -210,16 +210,20 @@ usuárias. Uma entidade grande pode ter dezenas de milhares: o teto por entidade
 `shared/chaves-de-cruzamento.ts`). Cada item de "o que tem" e de "o que precisa" ganha as
 suas chaves, guardadas como hash (16 hex do SHA-256, nunca o texto): o slug (tag exata), as
 substâncias do termo (o objeto sem o verbo, o núcleo sem a cabeça transparente e os dois sem
-o lugar do fim), a família e cada lema da especialidade do serviço (o pedido com
-especialidade só acha a oferta que tem aquele lema; o de apoio também chega à advocacia, à
-contabilidade e ao sinônimo próximo), o assunto curado e a categoria. **Palavra solta nunca é
+o lugar do fim, cada um também na outra grafia do N7: singular, genitivo e a palavra longa com
+erro de digitação), a família e cada lema da especialidade e do público do serviço (o pedido
+com especialidade só acha a oferta que tem aquele lema, ou a oferta genérica da família; o de
+apoio também chega à advocacia, à contabilidade e ao sinônimo próximo), o assunto curado e a
+categoria. **Palavra solta nunca é
 chave**: "Exportar vinho" × "Exportar café" não têm chave em comum. A chave só acha
 candidatos; quem decide cada par continua sendo `scoreMatch`, com os concorrentes zerados e a
 demanda expressa. A garantia é medida: todo par que `scoreMatch` aceita, no vocabulário dos
-testes dos motores (cerca de 1 milhão de pares) e na tabela da CNAE diante desses termos
-(1,7 milhão), tem chave em comum (`server/chaves-de-cruzamento.test.ts`; a suíte roda uma
-amostra, e o par a par inteiro com `CHAVES_DE_CRUZAMENTO_COMPLETO=1`, rodado em 25/11 sem
-nenhum par perdido). Critério novo em `scoreMatch` precisa de chave nova lá.
+testes dos motores (mais de 1 milhão de pares, com os casos do N7), na tabela da CNAE diante
+desses termos (1,7 milhão) e na rede com armadilhas (N8), tem chave em comum
+(`server/chaves-de-cruzamento.test.ts`; a suíte roda uma amostra, e o par a par inteiro com
+`CHAVES_DE_CRUZAMENTO_COMPLETO=1`, rodado em 26/11 sobre a `main` 644b6be sem nenhum par
+perdido; as duas rodadas anteriores acharam os furos que viraram as chaves do público e da
+oferta genérica). Critério novo em `scoreMatch` precisa de chave nova lá.
 
 - **Como o índice se mantém:** os itens só recebem INSERT e DELETE, então as chaves de um item
   nunca mudam. A carga e o "refazer as ofertas da CNAE" indexam na transação
@@ -258,7 +262,7 @@ pares e o processo ficava sem memória (medido: 4 GB de heap e queda). Abaixo de
 de 1000 pela ordem do id, com os "tem" e "preciso" de cada página, e guarda só a amostra dos
 incompletos mais recentes, em vez de segurar a base inteira na memória.
 
-### As medidas (carga local, 25/11)
+### As medidas (carga local, 25 e 26/11)
 
 `server/carga-das-entidades.carga.test.ts`, com `RODAR_CARGA_N4B=1`, num banco novo em utf8mb4
 (MariaDB 11.4 local, notebook; produção é MySQL 8.4 no Aiven): associados fictícios com CNAE
@@ -266,19 +270,22 @@ sorteada da tabela do IBGE (uma principal e até duas secundárias), 20% com "o 
 e 10% com "o que precisa", de um vocabulário de 18 termos comuns de cada lado (denso de
 propósito: o pior caso para o motor privado); uma membra com 40 contatos disponíveis e 20
 perfis. O "antes" é a `main` (ad855b6), com o teto de associados subido só para a medida. O
-"depois" de 50 mil é uma entidade com os 50 mil; o de 100 mil, duas entidades de 50 mil, para
-saber a folga. Os tempos incluem a CPU do teste e do banco na mesma máquina.
+"depois" de 50 mil é uma entidade com os 50 mil, medido em 26/11 sobre a `main` 644b6be (com o
+N7, que deixa o `scoreMatch` mais caro, e com as chaves finais); o de 100 mil, duas entidades
+de 50 mil, para saber a folga, foi medido em 25/11 antes dessa `main` e das chaves do N7, do
+público e da oferta genérica (conte uns 50% a mais de tempo nele, a proporção que a de 50 mil
+subiu). Os tempos incluem a CPU do teste e do banco na mesma máquina.
 
 | Passo | Antes, 50 mil | Depois, 50 mil | Depois, 100 mil |
 |---|---|---|---|
-| Importação pelo painel (blocos de 500) | 25,5 s | 17,9 s | 36,6 s (duas entidades) |
-| Leitura global: associados alcançados | 1000 de 50 mil (janela) | 50 mil de 50 mil (5,0 s, a leitura inteira) | 100 mil de 100 mil (19,1 s) |
-| Busca de uma membra (40 contatos), no pedido | 8,0 s, incompleta | 5,0 s (31 conexões, 10 com associados) | 10,0 s (31 conexões, 20 com associados) |
-| Busca da base inteira da entidade | 6,9 s no pedido, parou no orçamento (100 conexões, uma fração da base) | fila: 251 lotes em 63,5 s, completa, 14.499 conexões | fila: 251 lotes em 28 min (com a outra entidade de 50 mil do outro lado), completa, 9.978 conexões |
-| Motor privado na conta da entidade | 786 milhões de pares; estimativa de 6,5 a 16,5 h (13 a 33 mil pares/s), dentro do pedido | fila: 205 s, 66.660 sugestões, pico de 1,44 GB no processo do teste | fila: 207 s, 66.660 sugestões, pico de 1,47 GB |
-| Resumo do Meu Network da entidade | 0,25 s, 29 MB de heap | 0,62 s, 65 MB de heap, em páginas | 0,62 s, 63 MB de heap |
+| Importação pelo painel (blocos de 500) | 25,5 s | 27,0 s (indexa o bloco na transação) | 36,6 s (duas entidades) |
+| Leitura global: associados alcançados | 1000 de 50 mil (janela) | 50 mil de 50 mil (5,5 s, a leitura inteira) | 100 mil de 100 mil (19,1 s) |
+| Busca de uma membra (40 contatos), no pedido | 8,0 s, incompleta | 6,4 s (22 conexões, 10 com associados) | 10,0 s (31 conexões, 20 com associados) |
+| Busca da base inteira da entidade | 6,9 s no pedido, parou no orçamento (100 conexões, uma fração da base) | fila: 251 lotes em 99 s, completa, 14.499 conexões | fila: 251 lotes em 28 min (com a outra entidade de 50 mil do outro lado), completa, 9.978 conexões |
+| Motor privado na conta da entidade | 786 milhões de pares; estimativa de 6,5 a 16,5 h (13 a 33 mil pares/s), dentro do pedido | fila: 349 s, 66.660 sugestões, pico de 1,44 GB no processo do teste | fila: 207 s, 66.660 sugestões, pico de 1,47 GB |
+| Resumo do Meu Network da entidade | 0,25 s, 29 MB de heap | 1,1 s, 62 MB de heap, em páginas | 0,62 s, 63 MB de heap |
 | Motor de perfis, uma rodada (50 mil / 100 mil usuárias) | — | 1,2 s, memória estável (500 perfis por página) | 2,5 s, memória estável |
-| Tamanho no banco (dados + índices) | — | 454 MB | 652 MB |
+| Tamanho no banco (dados + índices) | — | 571 MB | 652 MB (sem as chaves do N7) |
 
 Leitura das medidas:
 
@@ -290,13 +297,13 @@ Leitura das medidas:
 - **O motor privado em massa** cabe em 2 GB, mas com pouca folga: o pico do processo do teste
   foi 1,44 GB, sobre uma base de 0,85 GB do próprio teste (o vitest e as 50 mil linhas da
   planilha na memória); o acréscimo do recálculo foi de cerca de 0,6 GB.
-- **A busca de uma membra cresce com a rede:** 5 s com 50 mil associados, 10 s com 100 mil,
+- **A busca de uma membra cresce com a rede:** 6,4 s com 50 mil associados, 10 s com 100 mil,
   dentro do pedido. Quase todo o tempo é `scoreMatch` nos candidatos que o índice traz (o
   vocabulário da medida é denso) e a leitura deles. Cabe hoje; é o primeiro a ir para a fila
   se a rede passar de 50 mil (próximos passos).
 - **A busca de uma entidade diante de outra entidade grande é lenta:** com 50 mil de cada
   lado, a base de uma entidade levou 28 min na fila (uns 30 associados por segundo), contra
-  63 s quando do outro lado só havia contas comuns. Roda fora do pedido, mas ocupa a CPU única
+  99 s quando do outro lado só havia contas comuns. Roda fora do pedido, mas ocupa a CPU única
   esse tempo todo.
 - **O motor de perfis não é quadrático numa rodada**: cada rodada lê todos os perfis em
   páginas de 500, pela ordem do id, e guarda só as 100 melhores (1,2 s com 50 mil). O custo
@@ -306,14 +313,15 @@ Leitura das medidas:
 
 ### Cabe no que temos em produção?
 
-- **Disco (Aiven Developer-1, 8 GB):** sim. 454 MB para 50 mil associados e 50 mil usuárias,
-  com as conexões e sugestões da carga; 652 MB para 100 mil. O que mais cresce é o índice
-  (≈ 6 chaves por item, 96 MB a 50 mil) e o registro de conexões. Sobra para áudio? O áudio
-  vai ao Backblaze, não ao banco.
+- **Disco (Aiven Developer-1, 8 GB):** sim. 571 MB para 50 mil associados e 50 mil usuárias,
+  com as conexões e sugestões da carga; 652 MB para 100 mil (medido sem as chaves do N7; com
+  elas, uns 800 MB). O que mais cresce é o índice (≈ 6 chaves por item, 218 MB a 50 mil) e o
+  registro de conexões. O áudio das reuniões fica no Backblaze, fora do banco.
 - **Memória do banco (1 GB):** o conjunto quente (índice, itens, contatos) a 50 mil é de uns
-  300 MB e cabe no buffer do InnoDB; a 100 mil, encosta. Acima disso, Aiven com 2 GB.
+  400 MB e encosta no buffer do InnoDB de uma instância de 1 GB; a 100 mil, passa dele (as
+  leituras vão ao disco e ficam mais lentas, sem quebrar). Para 100 mil, Aiven com 2 GB.
 - **CPU (1 CPU no Aiven e no Render):** a busca na rede e o motor privado da entidade rodam na
-  fila, em lotes, e devolvem a vez ao servidor, mas a CPU é uma só: durante os 205 s do
+  fila, em lotes, e devolvem a vez ao servidor, mas a CPU é uma só: durante os 349 s do
   recálculo privado de uma entidade de 50 mil (e os 28 min da busca de uma entidade diante de
   outra de 50 mil), o servidor fica mais lento para todas. Para a
   primeira carga real, uma janela de pouco uso; com várias entidades grandes, Render com 2
@@ -324,7 +332,7 @@ Leitura das medidas:
 ### Próximos passos, com a medida que os motiva
 
 1. **Teto por contraparte na entidade:** contar a contraparte por associado, e não pela conta
-   da entidade, para a membra ver mais de 10 associados por busca (medida: 10 de 31 conexões).
+   da entidade, para a membra ver mais de 10 associados por busca (medida: 10 de 22 conexões).
    Decisão de produto.
 2. **Índice para os perfis de membras:** a busca global ainda lê no máximo 1000 perfis
    (`TETO_DE_MEMBROS`, agora em ordem de id); com 50 mil usuárias, os perfis acima do id
@@ -332,11 +340,11 @@ Leitura das medidas:
 3. **Oportunidades × perfis** (`routers/matching.ts`): lê 200 perfis sem ordem para sugerir a
    oportunidade; com 50 mil usuárias, a escolha fica no acaso do banco.
 4. **Motor privado em massa:** escolher os 20 pares de nota maior por contato, e não os
-   primeiros; e registrar as conexões internas em lote (hoje uma a uma, boa parte dos 205 s).
+   primeiros; e registrar as conexões internas em lote (hoje uma a uma, boa parte dos 349 s).
 5. **Motor de perfis para todas:** se as contas ativadas pela N3 regenerarem juntas, levar o
    "buscar" à fila (17 h de CPU a 50 mil, uma rodada por conta).
 6. **`scoreMatch` custa 30 a 75 µs por par** (13 a 33 mil pares/s): é o que faz a busca de uma
-   membra levar 5 s (10 s com 100 mil). Guardar a análise do termo por rótulo, como as chaves
+   membra levar 6,4 s (10 s com 100 mil). Guardar a análise do termo por rótulo, como as chaves
    já fazem, e levar a busca da membra à fila quando os candidatos passarem de um teto.
 7. **Entidade × entidade:** 28 min por base de 50 mil quando outra entidade grande está do
    outro lado. Ler os candidatos de cada chave uma vez por trabalho (e não a cada lote) e

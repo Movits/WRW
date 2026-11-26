@@ -101,6 +101,10 @@ vi.mock("./varredura-de-gravacoes", () => ({
 // O laço dos lembretes no sino (H15) liga junto; aqui é dublê.
 const lacoDosLembretes = vi.hoisted(() => ({ iniciarLembretes: vi.fn(), pararLembretes: vi.fn(async () => ({ lembretes: 1 })) }));
 vi.mock("./lembretes", () => lacoDosLembretes);
+// A fila do cruzamento grande (N4b) liga junto; aqui é dublê (o laço em si está em
+// server/indice-e-fila-de-cruzamento.integracao.test.ts).
+const filaDoCruzamento = vi.hoisted(() => ({ iniciarFilaDeCruzamento: vi.fn(), pararFilaDeCruzamento: vi.fn(async () => ({ trabalhos: 0 })) }));
+vi.mock("./fila-de-cruzamento", () => filaDoCruzamento);
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -162,6 +166,7 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     expect(filaDoResumo.iniciarFilaDoResumo).toHaveBeenCalledTimes(1);
     expect(varredura.iniciarVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
     expect(lacoDosLembretes.iniciarLembretes).toHaveBeenCalledTimes(1);
+    expect(filaDoCruzamento.iniciarFilaDeCruzamento).toHaveBeenCalledTimes(1);
     const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const ordem: string[] = [];
     fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
@@ -183,6 +188,7 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     const esperar = async () => { for (let i = 0; i < 20 && ordem.at(-1) !== "exit 0"; i++) await new Promise(resolve => setImmediate(resolve)); };
     await esperar();
     expect(varredura.pararVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
+    expect(filaDoCruzamento.pararFilaDeCruzamento).toHaveBeenCalledTimes(1);
     expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes"]);
     soltarVarredura();
     await esperar();

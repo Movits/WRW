@@ -18,6 +18,8 @@ const ARQUIVOS_DO_VOCABULARIO = [
   "match-etapa7.test.ts", "match-qualificador-de-lugar.test.ts", "match-service.test.ts",
   "match-servico-demanda-expressa.test.ts", "matching-demanda-expressa.test.ts", "o-que-busca-na-demanda-expressa.test.ts",
   "tipo-da-oferta.test.ts", "network-rede-global.test.ts", "rede-possui-procura.test.ts",
+  // N7: a outra grafia (acento, singular, erro de digitação), o verbo conjugado e a oferta escrita como necessidade.
+  "match-n7-grafia-verbo-e-oferta.test.ts", "oferta-generica-e-publico.test.ts", "motor-de-perfis-concorrentes.test.ts",
 ];
 
 function vocabulario(): string[] {
@@ -34,8 +36,8 @@ function vocabulario(): string[] {
 const razao = (label: string, category: string | null = null) => ({ slug: slugifyMatchTag(label), label, category });
 
 /**
- * O par a par inteiro (cerca de 1 milhão de pares no vocabulário e 1,7 milhão na CNAE) leva uns 7 minutos:
- * roda com CHAVES_DE_CRUZAMENTO_COMPLETO=1 (rodado na N4b, 25/11: nenhum par perdido). Na suíte comum, uma
+ * O par a par inteiro (mais de 1 milhão de pares no vocabulário e 1,7 milhão na CNAE) leva uns 7 minutos:
+ * roda com CHAVES_DE_CRUZAMENTO_COMPLETO=1 (rodado na N4b, 26/11: nenhum par perdido). Na suíte comum, uma
  * amostra fixa (um termo a cada N), para o CI não pagar os 7 minutos a cada PR.
  */
 const COMPLETO = process.env.CHAVES_DE_CRUZAMENTO_COMPLETO === "1";
@@ -60,10 +62,28 @@ describe("chaves de cruzamento", () => {
     expect(comum("Contabilidade", "Contador")).toBe(true);
     expect(comum("Advocacia tributária", "Assessoria tributária")).toBe(true);
     expect(comum("Consultoria em internacionalização", "Apoio para estruturar a entrada da minha empresa no Paraguai")).toBe(true);
+    // O público da oferta cobre o lema pedido; a oferta genérica entra pela curinga da família.
+    expect(comum("Contabilidade tributária para MEI", "Contador de MEI")).toBe(true);
+    expect(comum("Escritório de contabilidade", "Contador de MEI")).toBe(true);
+    // A especialidade pedida que a oferta não tem não traz a oferta específica.
+    expect(comum("Advocacia trabalhista", "Advogado tributarista")).toBe(false);
   });
 
   it("a categoria em comum é chave (o motor privado dá 60 fora do serviço)", () => {
     expect(chavesDoItem({ label: "Soja", category: "Agronegócio" }, "tem")).toContain("c:agronegocio");
+  });
+
+  it("a rede com armadilhas (N8): todo par que scoreMatch aceita, com a categoria, tem chave em comum", () => {
+    const rede = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "rede-de-teste", "rede-com-armadilhas.json"), "utf8")) as {
+      pares: Array<{ id: string; oferta: { rotulo: string; categoria: string | null }; procura: { rotulo: string; categoria: string | null } }>;
+    };
+    const perdidos = rede.pares.filter(par => {
+      if (scoreMatch(razao(par.oferta.rotulo, par.oferta.categoria), razao(par.procura.rotulo, par.procura.categoria)).score < 50) return false;
+      const tem = chavesDoItem({ label: par.oferta.rotulo, category: par.oferta.categoria }, "tem");
+      const precisa = new Set(chavesDoItem({ label: par.procura.rotulo, category: par.procura.categoria }, "precisa"));
+      return !tem.some(chave => precisa.has(chave));
+    }).map(par => par.id);
+    expect(perdidos).toEqual([]);
   });
 
   it("todo par que scoreMatch aceita tem uma chave em comum (vocabulário dos testes dos motores)", () => {

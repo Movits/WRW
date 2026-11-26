@@ -9,13 +9,14 @@ import { rotaDaReuniao } from "@shared/rotas";
 import { fusoDoAparelho } from "@shared/agenda";
 import { chaveDaEtiqueta, etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import {
-  horasDeFala, LIMITE_DA_LEITURA_DA_IA, PERGUNTAS_ENTRE_REUNIOES_EM_24H, RECUSAS_ENTRE_REUNIOES, REUNIOES_POR_PERGUNTA_MAX,
+  ETIQUETAS_POR_PERGUNTA_MAX, horasDeFala, LIMITE_DA_LEITURA_DA_IA, PERGUNTAS_ENTRE_REUNIOES_EM_24H, RECUSAS_ENTRE_REUNIOES, REUNIOES_POR_PERGUNTA_MAX,
   vozesEntreReunioesNoTexto, type AvaliacaoDaResposta, type CodigoDaRecusaEntreReunioes,
 } from "@shared/perguntar-a-varias-reunioes";
 
 /**
  * O Pergunte a várias reuniões (H6c; HN-44 no app de referência da cliente):
- * a dona escolhe as reuniões por etiqueta ou uma a uma e pergunta. A IA lê as
+ * a dona escolhe as reuniões por etiqueta (uma ou várias: entram as reuniões
+ * com qualquer uma delas, T52) ou uma a uma e pergunta. A IA lê as
  * transcrições delas no servidor (server/perguntar-a-varias-reunioes.ts), até
  * cerca de 7 h de fala; acima disso, lê primeiro as mais ligadas à pergunta e
  * diz quais ficaram de fora. A resposta traz o número de fontes, os trechos de
@@ -66,7 +67,8 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
   const perguntar = trpc.perguntasEntreReunioes.perguntar.useMutation();
   const avaliar = trpc.perguntasEntreReunioes.avaliar.useMutation();
   const [modo, setModo] = useState<Modo>("etiqueta");
-  const [etiqueta, setEtiqueta] = useState<string | null>(null);
+  // As etiquetas escolhidas (T52): a pergunta junta as reuniões com qualquer uma delas.
+  const [etiquetasEscolhidas, setEtiquetasEscolhidas] = useState<string[]>([]);
   const [escolhidas, setEscolhidas] = useState<string[]>([]);
   const [filtro, setFiltro] = useState("");
   const [pergunta, setPergunta] = useState("");
@@ -83,10 +85,10 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
   const lista = reunioes.data ?? [];
   const etiquetas = useMemo(() => etiquetasDaDona(lista, i18n.language), [lista, i18n.language]);
   const daEtiqueta = useMemo(() => {
-    if (!etiqueta) return [];
-    const chave = chaveDaEtiqueta(etiqueta);
-    return lista.filter(reuniao => reuniao.etiquetas.some(da => chaveDaEtiqueta(da) === chave));
-  }, [lista, etiqueta]);
+    if (!etiquetasEscolhidas.length) return [];
+    const chaves = new Set(etiquetasEscolhidas.map(chaveDaEtiqueta));
+    return lista.filter(reuniao => reuniao.etiquetas.some(da => chaves.has(chaveDaEtiqueta(da))));
+  }, [lista, etiquetasEscolhidas]);
   const visiveis = useMemo(() => {
     const procurado = filtro.trim().toLocaleLowerCase(i18n.language);
     return procurado ? lista.filter(reuniao => reuniao.titulo.toLocaleLowerCase(i18n.language).includes(procurado)) : lista;
@@ -111,12 +113,15 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
     const idioma = idiomaDaTela(i18n);
     // O fuso do aparelho: a IA lê a data de cada reunião no dia que a tela mostra.
     const fuso = fusoDoAparelho();
-    if (modo === "etiqueta" && etiqueta) perguntar.mutate({ etiqueta, idioma, pergunta: texto, fuso });
+    if (modo === "etiqueta" && etiquetasEscolhidas.length) perguntar.mutate({ etiquetas: etiquetasEscolhidas, idioma, pergunta: texto, fuso });
     else perguntar.mutate({ meetingIds: selecionadas.map(reuniao => reuniao.id), idioma, pergunta: texto, fuso });
   }
   function enviar(evento: FormEvent) {
     evento.preventDefault();
     if (podePerguntar) perguntarTexto(pergunta.trim());
+  }
+  function alternarEtiqueta(nome: string) {
+    setEtiquetasEscolhidas(atuais => atuais.includes(nome) ? atuais.filter(atual => atual !== nome) : atuais.length >= ETIQUETAS_POR_PERGUNTA_MAX ? atuais : [...atuais, nome]);
   }
   function alternar(id: string) {
     setEscolhidas(atuais => atuais.includes(id) ? atuais.filter(atual => atual !== id) : atuais.length >= REUNIOES_POR_PERGUNTA_MAX ? atuais : [...atuais, id]);
@@ -140,17 +145,20 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
       {modo === "etiqueta" ? (
         etiquetas.length ? (
           <div className="space-y-2">
+            <p className="text-xs text-white/55">{t("meetings.multiAsk.tagsHint")}</p>
             <ul aria-label={t("meetings.multiAsk.tagsLabel")} className="flex flex-wrap gap-2">
-              {etiquetas.map(nome => (
-                <li key={nome}>
-                  <button type="button" aria-pressed={etiqueta === nome} onClick={() => setEtiqueta(atual => (atual === nome ? null : nome))}
-                    className={`inline-flex max-w-full items-center gap-1 break-words rounded-full border px-3 py-1 text-xs ${etiqueta === nome ? "border-amber-300/60 bg-amber-300/15 text-amber-100" : "border-white/15 text-white/70 hover:bg-white/5"}`}>
+              {etiquetas.map(nome => {
+                const marcada = etiquetasEscolhidas.includes(nome);
+                return <li key={nome}>
+                  <button type="button" aria-pressed={marcada} onClick={() => alternarEtiqueta(nome)}
+                    disabled={!marcada && etiquetasEscolhidas.length >= ETIQUETAS_POR_PERGUNTA_MAX}
+                    className={`inline-flex max-w-full items-center gap-1 break-words rounded-full border px-3 py-1 text-xs disabled:opacity-50 ${marcada ? "border-amber-300/60 bg-amber-300/15 text-amber-100" : "border-white/15 text-white/70 hover:bg-white/5"}`}>
                     <Tag size={11} aria-hidden="true" /><span dir="auto">{nome}</span>
                   </button>
-                </li>
-              ))}
+                </li>;
+              })}
             </ul>
-            {etiqueta && <p className="text-xs text-white/55">{t("meetings.multiAsk.meetingsWithTag", { n: daEtiqueta.length })}</p>}
+            {etiquetasEscolhidas.length > 0 && <p className="text-xs text-white/55">{t("meetings.multiAsk.meetingsWithTag", { n: daEtiqueta.length })}</p>}
             {daEtiqueta.length > REUNIOES_POR_PERGUNTA_MAX && <p className="text-xs text-white/55">{t("meetings.multiAsk.tagOverMax", { max: REUNIOES_POR_PERGUNTA_MAX })}</p>}
           </div>
         ) : <p className="text-sm text-white/55">{t("meetings.multiAsk.noTags")}</p>
@@ -229,6 +237,8 @@ export function PergunteAVariasReunioes({ aoFechar, aoAbrir }: { aoFechar: () =>
             </button>
           </form>
           {!escolheuOBastante && <p className="mt-2 text-xs text-white/45">{t("meetings.multiAsk.chooseFirst")}</p>}
+          {/* O passo da tabela e do gráfico (T52): o pedido vai na própria pergunta. */}
+          <p className="mt-2 text-xs text-white/45">{t("meetings.multiAsk.visualHint")}</p>
         </>}
 
         {perguntar.isPending && <p role="status" className="mt-4 text-sm text-white/55"><Loader2 size={15} className="me-2 inline animate-spin" aria-hidden="true" />{t("meetings.multiAsk.asking")}</p>}

@@ -65,8 +65,8 @@ o banco alvo (local ou remoto).
 | `recuperar-enriquecimento.ts`    | reaplica respostas do enriquecimento                                                       | só grava com `--aplicar`                                     |
 | `demonstrar-etapa-11.ts`         | `--exercitar` revoga e reaceita de verdade (e devolve o estado)                            | sem `--exercitar` só mostra                                  |
 
-**Quem recusa banco remoto:** só o `definir-senha-local.mjs` (recusa host que não seja
-`localhost`, `127.0.0.1` ou `::1`) e o `publicar-documento.mjs` (fora do banco local, exige
+**Quem recusa banco remoto:** só o `definir-senha-local.mjs` e o `semear-rede-com-armadilhas.mjs`
+(recusam host que não seja `localhost`, `127.0.0.1` ou `::1`) e o `publicar-documento.mjs` (fora do banco local, exige
 `--confirmo-producao`). Os dois `.ts` com `--confirmar-banco` só gravam se você repetir o
 alvo que o ensaio mostrou, mas aceitam banco remoto. Todos os outros da tabela gravam no
 banco que recebem (a `DATABASE_URL` ou, no `importar-participantes.mjs`, o arquivo de

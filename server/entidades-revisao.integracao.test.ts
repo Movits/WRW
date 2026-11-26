@@ -15,7 +15,7 @@ const {
 } = await import("../drizzle/schema");
 const { lerRedeGlobalAnonima } = await import("./network-rede-global");
 const { appRouter } = await import("./routers");
-const { ASSOCIADOS_MAX_POR_ENTIDADE } = await import("../shared/entidades");
+const { ASSOCIADOS_MAX_POR_ENTIDADE, LINHAS_POR_ARQUIVO_MAX } = await import("../shared/entidades");
 
 /**
  * Os achados da revisão do pacote da base das associações, contra um banco
@@ -161,9 +161,12 @@ describe.skipIf(!temBanco)("Base das associações: achados da revisão (integra
 
   it("o aplicar recusa a base acima do teto (50 mil desde a N4b); o ensaio lê o arquivo inteiro", async () => {
     const rota = daEntidade();
+    // Desde a N4b o teto da base (50 mil) é o mesmo do arquivo: um arquivo só não passa dele (a entrada recusa
+    // antes); o que passa do teto é a base que já tem associados, recusada no bloco, abaixo.
+    expect(ASSOCIADOS_MAX_POR_ENTIDADE).toBe(LINHAS_POR_ARQUIVO_MAX);
     await expect(rota.entidades.iniciarImportacao({ modo: "aplicar", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_POR_ENTIDADE + 1 }))
-      .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "BASE_ACIMA_DO_TETO" });
-    const ensaio = await rota.entidades.iniciarImportacao({ modo: "ensaio", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_POR_ENTIDADE + 1 });
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const ensaio = await rota.entidades.iniciarImportacao({ modo: "ensaio", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_POR_ENTIDADE });
     expect(ensaio.importacaoId).toBeGreaterThan(0);
     await rota.entidades.concluirImportacao({ importacaoId: ensaio.importacaoId });
 
@@ -201,11 +204,10 @@ describe.skipIf(!temBanco)("Base das associações: achados da revisão (integra
     });
     const leComum = async () => (await lerRedeGlobalAnonima({ excetoDona: QUEM_BUSCA })).some(c => c.codigoAnonimo === codigoDaComum);
 
-    // Convênio vigente: a entidade tem janela própria.
+    // Convênio vigente: a leitura paginada (N4b) alcança os 1200 da entidade E o contato da outra dona.
     expect(await leComum()).toBe(true);
     const daEntidadeLidos = (await lerRedeGlobalAnonima({ somenteDona: ENTIDADE })).length;
-    expect(daEntidadeLidos).toBeGreaterThan(0);
-    expect(daEntidadeLidos).toBeLessThanOrEqual(1000);
+    expect(daEntidadeLidos).toBe(1200);
 
     // Convênio encerrado: os da entidade saem no SQL, antes do teto, e a outra dona segue lida.
     await db.update(entidades).set({ convenioEstado: "encerrado" }).where(eq(entidades.ownerId, ENTIDADE));

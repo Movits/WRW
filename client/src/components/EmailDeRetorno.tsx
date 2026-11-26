@@ -130,6 +130,34 @@ export function linkDoRascunho(assunto: string, corpo: string): { href: string; 
   return { href: `mailto:?subject=${encodeURIComponent(assunto)}`, completo: false };
 }
 
+/**
+ * Acima disto o link do Gmail ou do Outlook na web vai sem o corpo: o endereço
+ * longo demais é recusado pelo servidor deles (o Gmail responde erro 400 perto
+ * de 8 mil caracteres).
+ */
+export const LIMITE_DO_LINK_DE_EMAIL_NA_WEB = 7_000;
+
+/**
+ * Os links que abrem o rascunho no Gmail e no Outlook NA WEB (T33). Quem não
+ * tem app de e-mail no computador (o caso comum no Windows de quem usa o
+ * Gmail no navegador) clicava em "Abrir no e-mail" e nada abria: o mailto: só
+ * funciona com um app de e-mail instalado e escolhido no sistema. Texto longo
+ * demais vai sem o corpo (completo = false), como no mailto.
+ */
+export function linksDoRascunhoNaWeb(assunto: string, corpo: string): { gmail: string; outlook: string; completo: boolean } {
+  const montar = (comCorpo: boolean) => {
+    const gmail = new URLSearchParams({ view: "cm", fs: "1", su: assunto, ...(comCorpo ? { body: corpo } : {}) });
+    const outlook = new URLSearchParams({ subject: assunto, ...(comCorpo ? { body: corpo } : {}) });
+    return {
+      gmail: `https://mail.google.com/mail/?${gmail.toString().replace(/\+/g, "%20")}`,
+      outlook: `https://outlook.office.com/mail/deeplink/compose?${outlook.toString().replace(/\+/g, "%20")}`,
+    };
+  };
+  const completos = montar(true);
+  if (Math.max(completos.gmail.length, completos.outlook.length) <= LIMITE_DO_LINK_DE_EMAIL_NA_WEB) return { ...completos, completo: true };
+  return { ...montar(false), completo: false };
+}
+
 // Cada ramo chama t() com a chave literal, para o teste das chaves usadas
 // (server/i18n-chaves-usadas.test.ts) conferir que todas existem.
 function rotuloDaRelacao(t: TranslateFn, relacao: RelacaoDoEmail) {
@@ -212,6 +240,7 @@ export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, 
   const mudarRascunho = (parcial: { assunto?: string; corpo?: string }) =>
     registro.mudar(anterior => (anterior?.rascunho ? { ...anterior, rascunho: { ...anterior.rascunho, ...parcial } } : anterior ?? estado));
   const link = rascunho ? linkDoRascunho(rascunho.assunto, rascunho.corpo) : null;
+  const naWeb = rascunho ? linksDoRascunhoNaWeb(rascunho.assunto, rascunho.corpo) : null;
 
   async function copiar(paraOEmail: boolean) {
     if (!rascunho) return;
@@ -284,12 +313,26 @@ export function EmailDeRetorno({ meetingId, confirmados, idiomaDoResumo, nomes, 
         {t("meetings.followUp.unnamedVoices", { vozes: rascunho.semNome.join(", ") })}
       </p>}
       {!link.completo && <p className="text-xs text-white/55">{t("meetings.followUp.tooLongForLink")}</p>}
+      <p className="text-xs text-white/55">{t("meetings.followUp.openInEmailHint")}</p>
       <div className="flex flex-wrap gap-2">
-        {/* Longo demais para o link: o assunto vai no link, e o texto, copiado no mesmo toque. */}
-        <a href={link.href} onClick={() => { if (!link.completo) void copiar(true); }}
+        {/* Longo demais para o link: o assunto vai no link, e o texto, copiado no mesmo toque.
+            Em outra aba (T33), como o convite da agenda no gravador: com a sessão
+            ocupada (uma parte de gravação ainda por enviar, por exemplo), o mailto
+            nesta aba dispara a pergunta de sair da página, e o e-mail não abre. */}
+        <a href={link.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (!link.completo) void copiar(true); }}
           className="inline-flex items-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8]">
           <Mail size={15}/> {t("meetings.followUp.openInEmail")}
         </a>
+        {naWeb && <>
+          <a href={naWeb.gmail} target="_blank" rel="noopener noreferrer" onClick={() => { if (!naWeb.completo) void copiar(true); }}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
+            <Mail size={15}/> {t("meetings.followUp.openInGmail")}
+          </a>
+          <a href={naWeb.outlook} target="_blank" rel="noopener noreferrer" onClick={() => { if (!naWeb.completo) void copiar(true); }}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
+            <Mail size={15}/> {t("meetings.followUp.openInOutlook")}
+          </a>
+        </>}
         <button type="button" onClick={() => void copiar(false)}
           className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/85 hover:bg-white/5">
           <Copy size={15}/> {t("meetings.followUp.copy")}

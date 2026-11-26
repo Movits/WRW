@@ -16,22 +16,30 @@ compression, cabeçalhos de segurança, bloqueio de scanners, rate limit global,
 parsers, proxy de storage, tRPC em `/api/trpc` e, por fim, Vite em middleware (dev) ou
 estático de `dist/public` (prod). Não há proxy de dev: front e API na mesma origem.
 
-Body parsers: 5 MB por padrão e 15 MB em SETE procedimentos de upload —
-`meetings.submitRecording`, `meetings.anexarAoResumo` (as fotos e os desenhos do resumo,
-H4g e H4h), `contexts.uploadMedia`, `network.uploadPhoto`,
-`network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
+Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
+`meetings.anexarAoResumo` (as fotos e os desenhos do resumo, H4g e H4h),
+`contexts.uploadMedia`, `network.uploadPhoto`, `network.uploadCard`,
+`dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
-nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto: até
-`CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
-dele em 20, porque o limite da API conta o lote inteiro como um pedido.
+nenhum recorte por caminho). Upload novo entra nos dois lugares, e
+`server/corpo-grande-para-uploads.test.ts` confere que as duas listas batem. O lote tem
+teto: até `CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador
+corta os dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
-`meetings.submitRecording` (o envio único: o áudio inteiro, em base64, até 10 min e 10 MB)
-não é mais caminho do gravador desde a G14: a tela só o chama no recuo do corte (o arquivo
-curto de um formato que o corte reconhece mas não lê), com `recuoDoCorte: true`, e cada
-chamada deixa no log a linha `[Reuniões] envio único (submitRecording)`, com a marca ou sem
-ela (a sem marca é de um cliente de fora do app). Áudio novo de reunião vai pela rota das
-partes, abaixo.
+O envio único (`meetings.submitRecording`: o áudio inteiro, em base64, até 10 min e 10 MB)
+saiu na G14, parte 2 (25/11/2026, com o aval do Roberto). Todo áudio novo de reunião chega
+pela rota das partes, abaixo, também o recuo do corte: o arquivo curto de um formato que o
+corte do navegador reconhece mas não lê (o ALAC do Gravador do iPhone, o AC-3, o Vorbis no
+WebM) vai inteiro, como uma parte só. A rota converte em MP3, com o ffmpeg contido de
+`server/conversao-do-audio.ts` (`converterParteEmMp3`), a parte de um codec que o Gemini não
+lista (`precisaConverterParaOGemini`, em `server/fatias-de-reuniao.ts`; o codec sai de
+`analisarAudio`, em `server/duracao-do-audio.ts`), e a que não converte é recusada com
+`FORMATO`, que a tela traduz. A conversão toma uma vaga do mesmo balcão dos ffmpeg do
+"Baixar o áudio" (`balcaoDoAudio.tentarConverter`, `CONVERSOES_DE_AUDIO_SIMULTANEAS` = 2, a
+instância tem 1 CPU), numa fila curta de até 10 s (`esperarVagaDeConversao`); sem vaga, a
+recusa é passageira (503 `TENTE_DE_NOVO`), e a tela manda a parte de novo. A LEITURA da
+gravação inteira das reuniões antigas (`meeting_recordings`) fica: o reprocesso e a junção a leem com os tetos do envio único.
 
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
@@ -215,8 +223,10 @@ pediu, com a auditoria na transação. A anotação das conexões é uma leitura
 
 **O índice e a fila do cruzamento (N4b):** `chaves_de_cruzamento` guarda, por item de
 `contact_assets` ("tem") e `contact_needs` ("precisa"), o HASH das chaves de
-`shared/chaves-de-cruzamento.ts` (slug, substância, família e especialidade do serviço,
-assunto curado, categoria; nunca palavra solta). A chave só acha candidatos: quem decide o
+`shared/chaves-de-cruzamento.ts` (slug, substância e a outra grafia do N7, família,
+especialidade e público do serviço, assunto curado, categoria; nunca palavra solta). O
+critério semântico estreito (N7) não passa pelo índice: ligado, o par só por semântica
+fica fora do motor privado em massa. A chave só acha candidatos: quem decide o
 par continua sendo `scoreMatch`, e `server/chaves-de-cruzamento.test.ts` confere que todo
 par que ele aceita tem chave em comum (critério novo em `scoreMatch` exige chave nova
 lá). A busca na rede global (`network-rede-global.ts`) pergunta ao índice e lê só os
@@ -257,30 +267,95 @@ qualquer outro critério), slug exato → 100, mesmo objeto do termo → 100, me
 na mesma família, entre consultoria e assessoria, no apoio que nomeia a profissão, na
 assessoria sobre área da profissão — "Assessoria tributária" diante da advocacia ou da
 contabilidade tributária — ou os dois lados só com a família, "Contabilidade" × "Contador"
-e "Serviços contábeis" × "Contador", também com a oferta dirigida só a um destinatário
-comum, "Contabilidade para pequenas empresas" × "Contador", `mesmaFamiliaEEspecialidade`),
-necessidade que nomeia só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`,
-que inclui a oferta GENÉRICA diante da necessidade da mesma família com só público ou
-finalidade — "Contabilidade" × "Contador para pequenas empresas", "Logística" ×
-"logística para exportar meu café"; dar 100 quando o público está em
-`DESTINATARIOS_COMUNS` é decisão em aberto), necessidade que declara o ASSUNTO do serviço
+e "Serviços contábeis" × "Contador", também com o destinatário comum dos dois lados —
+decisão do Roberto de 16/09: "Contabilidade para pequenas empresas" × "Contador",
+"Contabilidade" × "Contador para MEI", "Contador de MEI" ou "Contador MEI", "Contabilidade
+para MEI" × "Contador de MEI"; depois de "para" vale a lista `DESTINATARIOS_COMUNS` (MEI,
+pequenas empresas, startups, negócios, clientes...), e sem "para" só o inequívoco
+(`destinatarioNosLemas`: MEI, EPP, startup, o porte com a empresa, pessoa física), porque
+ali "de" também é assunto: "Consultoria de negócios", "Advogado de empresas" e "Tradutor
+particular" não são destinatário —, `mesmaFamiliaEEspecialidade`), necessidade que nomeia
+só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`, que inclui a oferta
+GENÉRICA diante da necessidade da mesma família com finalidade ou público que não é
+destinatário comum — "Logística" × "logística para exportar meu café", "Marketing" ×
+"Marketing para restaurantes" — e, quando o texto PEDE o serviço (marca de pedido de
+pt/en/es antes dele, `pedidoPedeOServico`), com complemento que as listas não conhecem —
+"Advocacia" × "Preciso de advogado marítimo", "Contabilidade" × "Procuro contador rural" —,
+salvo o complemento que nomeia contraparte em qualquer alternativa (`PAPEIS_DE_COMERCIO`,
+`SOCIOS` e o que a decisão nomeia: representante e parceiro comerciais, atacadista,
+franqueado, cliente...), que dá 0: "Preciso de consultoria de distribuidor"; decisões do
+Roberto de 16/09; sem o pedido, "advogado marítimo" e "We are maritime lawyers" seguem 0; e
+a prestadora que PROCURA clientes — "Contador procura clientes", marca de pedido depois do
+serviço — não pede o serviço e dá 0, `servicoEhQuemPede`), necessidade que declara o ASSUNTO do serviço
 sem nomeá-lo → 60 com tipo `semantic` (`necessidadeDeclaraOAssuntoDoServico`: vocabulário
 curado de tributário, internacionalização e regulatório sanitário, e a necessidade tem de
 pedir ajuda ou uma ação, sem pedir no resto a contraparte, o capital ou o registro de
 marca: "Entrada de investidor internacional" não casa), mesma categoria → 60 (para
-serviço, só no par que a regra não lê num idioma novo, `regraNaoLeOPar`). O critério
-semântico vale 45, abaixo do limiar 50: está desligado por construção e o texto não sai
-para embeddings. A regra da spec é tag exata, mesmo objeto ou mesmo núcleo em direções
-OPOSTAS, ou mesma categoria; duas pontas que querem a mesma coisa são concorrentes.
+serviço, só no par que a regra não lê num idioma novo, `regraNaoLeOPar`) e, por último, o
+critério semântico ESTREITO → 55 (abaixo da categoria e do e-mail). A regra da spec é tag
+exata, mesmo objeto ou mesmo núcleo em direções OPOSTAS, ou mesma categoria; duas pontas
+que querem a mesma coisa são concorrentes.
+
+**N7 (25/11), o que entrou nos motores determinísticos** (valem no privado e, por
+`nomeiamAMesmaCoisa` e `satisfaz`, no de perfis):
+
+- **Verbo conjugado é direção** (`shared/direcao-do-termo.ts`): "Exportamos frutas",
+  "Vendo vinhos", "Fornece embalagens", "Compramos gado", com o pronome ("Nós exportamos")
+  e o "se" ("Vende-se terreno"). "Exportamos frutas" × "Exportar frutas" são concorrentes
+  (achado C06). "Compra" segue substantivo e "contrato" fica fora (é o documento).
+- **O mesmo termo em outra grafia** (`mesmoTermoEmOutraGrafia`): o termo INTEIRO, palavra
+  a palavra e na mesma ordem, igual sem acento, no singular ou com UMA troca de letra numa
+  palavra de 8 letras ou mais, com a mesma inicial, em termo de duas palavras de conteúdo
+  ou mais; também a menos do lugar. "Soja em grão" × "soja em graos", "Embalagens
+  sustentáveis" × "embalagem sustentavel", "Transporte de cargas" × "Trasporte de carga pra
+  Manaus". Nunca palavra solta, nunca palavra de direção, nunca entre concorrentes. Limite
+  aceito: duas palavras longas a uma letra uma da outra ("material" × "maternal") casam
+  dentro do mesmo termo. As capitais sem outra leitura (Manaus, Belém, Curitiba...) viraram
+  lugar; Natal, Salvador, Vitória, Palmas, Recife e Fortaleza não.
+- **Necessidade que na verdade OFERECE** (`necessidadeEhOferta`, `shared/tipo-da-oferta.ts`,
+  validação da #154): marca de oferta ("ofereço", "oferece", "oferecemos", "disponível",
+  "prestamos", "we offer", "ofrecemos") sem nenhuma marca de pedido no texto ("gostaria",
+  "desejo", "quisiera" e "we'd like" são marca de pedido desde a validação da #259). Diante de um
+  SERVIÇO não é necessidade declarada: o privado dá 0 com o bloqueio
+  `servico-sem-demanda-expressa` ANTES do slug, e o `satisfaz` do de perfis devolve falso.
+  "Contabilidade" × "Ofereço contabilidade para MEI" valia 100, com e-mail. "Procuro
+  contador disponível aos sábados" continua pedindo.
+
+**O critério semântico estreito** (`server/match-service.ts`, só no motor privado): a
+similaridade de cosseno dos RÓTULOS (`gemini-embedding-001`, `SEMANTIC_SIMILARITY`; a
+descrição não entra) vale 55 quando chega a `LIMIAR_SEMANTICO_ESTREITO` (0,9, PROVISÓRIO) e
+`semanticoEstreitoPodeValer` passa: não concorrentes, direções efetivas opostas (oferta no
+que possui, procura no que procura, também pelas palavras), oferta que não é serviço (o
+portão da demanda expressa segue com as regras determinísticas) e NENHUMA palavra de
+conteúdo em comum (a parecença viria da palavra solta; o custo é a paráfrase que repete
+uma palavra, P19 da rede). As guardas vêm antes da chamada: o texto só vai ao provedor
+quando a resposta pode mudar alguma coisa. **Desligado por padrão**: só liga com
+`MATCH_SEMANTICO_ESTREITO=1`, porque o limiar ainda não foi calibrado com os vetores do
+gabarito (a fixture sai de `scripts/rede-de-teste/gerar-embeddings-da-rede.mjs`, que o
+Roberto roda com a chave) e porque o termo do Smart Match (`docs/termos/termo-smart-match.md`)
+diz que nada sai da plataforma com ele desligado: ligar em produção exige publicar a versão
+nova do termo antes (jurídico; republicar revoga os aceites). O de perfis não tem critério
+semântico.
+
+**A medida no gabarito** (`server/rede-com-armadilhas.test.ts`, 44 pares,
+`docs/medir-o-match.md`), com o semântico desligado: privado de 78% de precisão e 64% de
+cobertura (4 armadilhas proibidas: C06, S06, S07, S08) para 100% e 77% (nenhuma); perfis de
+79% e 50% (3: S06, S07, S08) para 100% e 64% (nenhuma). Com similaridade 1 para todo par, as
+guardas ainda recusam toda armadilha proibida; só P08, P09, P14, P15, N01 e N02 chegam ao
+limiar.
 
 **`server/matching.ts`** cruza perfis de usuárias em 6 dimensões ponderadas, com LLM só no
 insight: complementaridade 30, setor 20, investimento 20, especialidade 15, valores 10,
 localização 5 (somam 100), com corte em 40 — um par vira match sem nenhum termo cruzado.
-**Este motor não aplica a regra dos concorrentes:** `satisfaz` devolve `true` já no
-`have === need` e no slug igual, sem passar por `saoConcorrentes`, então "exportar" ×
-"exportar" conta como necessidade atendida e ainda SOBE a complementaridade, a dimensão de
-maior peso. Uniformizar os dois motores é decisão de produto, não ajuste local: a nota do
-motor de perfis mudaria para todas. **`routers/profileMatches.ts`** expõe esses matches no
+**Desde o N6 (decisão do Roberto de 11/11) este motor aplica as duas regras do privado** no
+cruzamento de "o que tenho" com "o que preciso": `satisfaz` pergunta `saoConcorrentes`
+ANTES de tudo (antes do texto igual, do mapa curado e do slug), então concorrentes não
+contam como necessidade atendida nem sobem a complementaridade ("exportar" × "exportar" e
+"Exportar vinho" × "Exportar vinho" não casam; "exportar vinho" × "importar vinho" casa), e
+palavra solta não casa (o que sobra é o mapa curado, o slug, `nomeiamAMesmaCoisa` e as
+regras da demanda expressa; teste em `server/motor-de-perfis-concorrentes.test.ts`). As
+outras dimensões não leem termo: a especialidade igual continua valendo 60 e o setor igual
+70, mesmo entre concorrentes. **`routers/profileMatches.ts`** expõe esses matches no
 Dashboard com trava de consentimento dos dois lados.
 
 **Regra da demanda expressa, nos três motores e nos prompts.** Item de "o que tenho"
@@ -302,7 +377,9 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
   oportunidade que declara a necessidade; `server/portao-da-demanda-expressa.ts` confere a
   citação, e que ela pede um serviço que o perfil oferece, antes de exibir (citação de
   contraparte — distribuidor, investidor —, de autodescrição da empresa ou de assunto que
-  nenhum serviço do perfil presta é barrada). Oportunidade que OFERECE serviço só vai a
+  nenhum serviço do perfil presta é barrada quando não nomeia serviço; "Preciso de
+  consultoria de distribuidor" e "Contador procura clientes" ainda passam ali, limite em
+  `docs/arquitetura/README.md` §2c). Oportunidade que OFERECE serviço só vai a
   quem declarou algo que possa ser aquele serviço.
 - **"O que você busca?"** (12 opções, `shared/o-que-busca.ts`): nenhuma opção libera
   serviço sozinha ("Serviço Especializado" é genérica), e o texto de "Outra necessidade"
@@ -411,7 +488,8 @@ sem ele).
 
 ## Reunião que falha na IA se reprocessa pelo áudio guardado
 
-`processMeetingRecording` guarda o áudio no bucket antes da IA; `meetings.reprocess`
+`processMeetingRecording` (o envio único de antes, sem rota desde a G14, parte 2) guardava o
+áudio no bucket antes da IA; `meetings.reprocess`
 (`iniciarReprocessamento` em `server/meeting-service.ts`) lê esses bytes de volta
 (`storageGetBytes`) e roda de novo transcrição e extração, sem gravar áudio nem renovar os
 30 dias. Cada execução tem uma FICHA: o `updated_at` que ela grava ao tomar a reunião para
@@ -493,6 +571,37 @@ todo procedimento que muda a reunião tem a dona no WHERE. As vozes guardam `"ow
 da PARTICIPAÇÃO (nunca o `users.id`), e o nome da conta é resolvido na leitura
 (`vozesParaQuemLe`); reprocessar e juntar reuniões zeram as três colunas das vozes
 (`VOZES_ZERADAS`). A exclusão da reunião e da conta (das duas pontas) levam as participações.
+
+## O perfil de voz da dona (H3d)
+
+`server/perfil-de-voz.ts` (router `perfilDeVoz`), `shared/perfil-de-voz.ts`, tabelas
+`voice_profiles` (uma linha por dona) e `voice_profile_consents`, e a seção do Perfil
+(`client/src/components/PerfilDeVoz.tsx`). A dona grava 10 a 60 s da própria voz (a tela pede
+cerca de 30 s, lendo um texto; até 1 MB, o conteúdo conferido pelos primeiros bytes), guardados
+no bucket sob `perfis-de-voz/<openId>/`, prefixo que o proxy `/manus-storage` nega a todo
+mundo: só a dona ouve, por `perfilDeVoz.ouvir`, e o link aberto, as participantes e a
+consulta da administração (R1a) nunca leem a amostra. É dado biométrico (LGPD art. 11):
+
+- a primeira gravação exige o consentimento da caixa (texto da Cris, desmarcada, separada do
+  aceite dos Termos), com a versão do texto (`VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ`), o idioma e
+  o texto exibido; `voice_profile_consents` guarda cada consentimento e cada revogação (data,
+  hora, versão, idioma, texto e hash, IP e navegador, sem a voz), nunca recebe UPDATE e
+  sobrevive à exclusão do perfil e da conta;
+- desligar é DEFINITIVO: na transação com a linha travada, a linha sai, a revogação entra e a
+  amostra sai do bucket com TODAS as versões (`storageApagarTodasAsVersoes`); se o bucket
+  recusar, a transação desfaz e nada muda. Regravar apaga a antiga do mesmo jeito antes de a
+  troca valer, sem pedir a caixa de novo. A exclusão da conta registra a revogação (origem
+  `exclusao_da_conta`), apaga a amostra com todas as versões e a linha
+  (`server/exclusao-de-conta.ts`, regra 7); o exame de produção não grava perfil;
+- a fila (`server/fila-de-transcricao.ts`) manda a amostra ANTES do trecho em cada parte da
+  reunião da dona (`amostraDaVozDaDona`; cerca de US$ 0,0007 por parte), e o prompt pede o
+  rótulo fixo `F1` (`ROTULO_DA_VOZ_DA_DONA`) para a voz dela, com as outras a partir de F2 e
+  "na dúvida, outro rótulo". A parte guarda a marca `vozDaDona`; a seguinte só leva a amostra
+  se a anterior levou (o perfil gravado no meio de uma reunião não entra nela), e na junção
+  (H17) o F1 fica fixo e as outras vozes vão para depois das usadas. A montagem liga o F1 à
+  conta da dona em `speaker_accounts` (H3c), sem tirar a ligação que já havia
+  (`contasComAVozDaDona`): nada entra sozinho que a dona não corrija no "Quem é cada voz".
+  Desligar o perfil não mexe nas reuniões já transcritas.
 
 ## Os espaços de equipe (R2)
 

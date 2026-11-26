@@ -48,6 +48,18 @@
 //    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo. O PDF da
 //    reunião de documento (meeting_documents, H12) segue a mesma regra, e as
 //    fotos e os desenhos do resumo (meeting_attachments, H4g e H4h) também.
+// 7. O perfil de voz (H3d, server/perfil-de-voz.ts) é dado biométrico: a
+//    amostra sai do bucket com TODAS as versões, como o áudio de reunião, e a
+//    linha sai no plano. Antes, a exclusão registra a revogação do
+//    consentimento (origem "exclusao_da_conta") em voice_profile_consents, que
+//    FICA: é a prova de que houve consentimento e de quando ele acabou, sem a
+//    voz. Se o bucket recusar, a chave vai para `arquivosComFalha` (log e
+//    auditoria, como os outros arquivos) e a linha FICA, como a do áudio na
+//    regra 6: é o único ponteiro para a voz. A linha só sai no plano quando a
+//    chave dela foi lida com as outras e saiu do bucket (`perfisQueSaem`); o
+//    perfil gravado ou regravado depois da leitura também fica. Sem a conta, a
+//    varredura das gravações (`limparGravacoesVencidas`, ramo "perfisDeVoz")
+//    o acha, tenta o bucket de novo e só então tira a linha.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -56,6 +68,7 @@ import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 // Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
 import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
+import { PREFIXO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
@@ -77,6 +90,7 @@ import {
   modelosDeResumoProprios, preferenciasDoResumo, resumosRefeitos,
   resumoEmAudio, buscasDoComplemento,
   meetingParticipants, meetingFolderMembers, meetingFolderTasks,
+  voiceProfiles,
 } from "../drizzle/schema";
 
 /**
@@ -124,6 +138,11 @@ export type ContextoDaExclusao = {
   documentosQueFicam?: string[];
   /** As fotos e os desenhos do resumo (ids de meeting_attachments, H4g e H4h) cujo objeto não saiu. */
   anexosQueFicam?: string[];
+  /**
+   * Os perfis de voz (ids de voice_profiles, H3d) cuja amostra foi lida com as
+   * outras chaves e saiu do bucket: só essas linhas saem no plano (regra 7).
+   */
+  perfisQueSaem?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -205,6 +224,13 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // O áudio do resumo com a voz do Gemini (H19b): a linha (o objeto sai antes, em
   // chavesDeArquivosDaConta) e as buscas do complemento (H4i), só para o teto de 24 h.
   { tabela: resumoEmAudio, coluna: resumoEmAudio.ownerId, origem: "openId" },
+  {
+    tabela: voiceProfiles, coluna: voiceProfiles.ownerId, origem: "openId",
+    // Só a linha cuja amostra saiu do bucket (regra 7): sem o contexto, nada
+    // a filtrar; com ele, a lista vazia não apaga nenhuma (inArray vazio é falso).
+    filtro: (_chaves, contexto) => (contexto?.perfisQueSaem ? inArray(voiceProfiles.id, contexto.perfisQueSaem) : undefined),
+    motivo: "o perfil de voz (H3d), dado biométrico: sai só a linha cuja amostra saiu do bucket com todas as versões; a que ficou é o único ponteiro para a voz, e a varredura a retenta",
+  },
   { tabela: buscasDoComplemento, coluna: buscasDoComplemento.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
@@ -367,6 +393,7 @@ export const ATORES_SECUNDARIOS_PRESERVADOS = [
   { tabela: "security_events", coluna: "resolvedBy", motivo: "quem tratou o evento de segurança de OUTRA" },
   { tabela: "enrichment_suggestions", coluna: "actionedBy", motivo: "sempre a própria dona; a linha sai pelo owner_id" },
   { tabela: "strategic_groups", coluna: "memberIds", motivo: "array JSON: a conta sai da lista com UPDATE (tirarDosGruposAlheios), não com DELETE" },
+  { tabela: "voice_profile_consents", coluna: "owner_id", motivo: "o registro dos consentimentos e das revogações do perfil de voz (H3d, pontos técnicos da Cris): sem a voz, fica como prova; a exclusão grava antes a revogação dela" },
 ] as const;
 
 /** Nome legível do passo, para o relatório e para o teste. */
@@ -466,6 +493,10 @@ export async function chavesDeArquivosDaConta(
   const audiosDoResumo = await db.select({ chave: resumoEmAudio.storageKey })
     .from(resumoEmAudio).where(eq(resumoEmAudio.ownerId, chaves.openId));
   for (const audio of audiosDoResumo) if (audio.chave) guardar(chaveDoStorageDaDona("meetings", chaves.openId, audio.chave));
+  // A amostra do perfil de voz (H3d): montada pelo servidor sob perfis-de-voz/<openId>/.
+  const perfisDeVoz = await db.select({ chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  for (const perfil of perfisDeVoz) guardar(chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave));
 
   // SIVC e Deal Room indexam pelo id (int), não pelo openId: o prefixo é outro,
   // mas a prova de posse é a mesma — foi o servidor que montou a chave.
@@ -521,6 +552,25 @@ export async function tirarDosGruposAlheios(
 
 /** O que fica escrito na parte de áudio que sobra como ponteiro (frase nossa, sem dado de ninguém). */
 export const MOTIVO_DA_PARTE_QUE_FICOU = "conta excluída; o áudio desta parte não saiu do bucket";
+
+/**
+ * Os perfis de voz (H3d) que saem no plano: a chave da amostra estava entre as
+ * lidas antes do bucket (`arquivos`) e não falhou. O perfil cuja amostra o
+ * bucket recusou fica, e também o gravado (ou regravado) depois da leitura das
+ * chaves: a amostra dele não foi tentada, e a linha é o único ponteiro para ela.
+ * Sem a conta, a varredura das gravações tenta o bucket de novo (regra 7).
+ */
+async function perfisDeVozQueSaem(db: Db, chaves: ChavesDaConta, arquivos: string[], arquivosComFalha: string[]): Promise<string[]> {
+  const perfis = await db.select({ id: voiceProfiles.id, chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  if (!perfis.length) return [];
+  const tentadas = new Set(arquivos);
+  const falharam = new Set(arquivosComFalha);
+  return perfis.filter(perfil => {
+    const chave = chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave) ?? "";
+    return !!chave && tentadas.has(chave) && !falharam.has(chave);
+  }).map(perfil => perfil.id);
+}
 
 /**
  * O áudio de reunião cujo objeto NÃO saiu do bucket: os ids das partes
@@ -626,6 +676,7 @@ export async function excluirConta(
   opcoes: {
     apagarArquivo?: (chave: string) => Promise<void>;
     revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
+    registrarRevogacaoDaVoz?: (ownerId: string) => Promise<boolean>;
   } = {},
 ): Promise<RelatorioDeExclusao> {
   // O apagador do bucket só é montado quando o teste não injeta o próprio, e
@@ -636,8 +687,13 @@ export async function excluirConta(
   // DELETE simples.
   const apagarArquivo = opcoes.apagarArquivo ?? await (async () => {
     const bucket = await import("./storage");
-    return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
+    // O áudio de reunião e a amostra do perfil de voz (H3d) saem com todas as versões.
+    const comVersoes = (chave: string) => chave.startsWith("meetings/") || chave.startsWith(`${PREFIXO_DO_PERFIL_DE_VOZ}/`);
+    return (chave: string) => (comVersoes(chave) ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
   })();
+  // Import tardio, como o do bucket: o módulo do perfil de voz traz o banco.
+  const registrarRevogacaoDaVoz = opcoes.registrarRevogacaoDaVoz
+    ?? (async (ownerId: string) => (await import("./perfil-de-voz")).registrarRevogacaoNaExclusao(db, ownerId));
   // Import tardio, como o do bucket: o módulo da Google Agenda só entra quando
   // a exclusão roda de verdade, e o teste injeta o próprio revogador.
   const revogarGoogle = opcoes.revogarGoogle
@@ -700,7 +756,11 @@ export async function excluirConta(
   // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
   // essas linhas de fora.
   const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos };
+  const perfisQueSaem = await perfisDeVozQueSaem(db, chaves, arquivos, arquivosComFalha);
+  const contexto: ContextoDaExclusao = {
+    fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos,
+    perfisQueSaem,
+  };
   if (ficaram.fatias.length) {
     const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
@@ -737,6 +797,10 @@ export async function excluirConta(
       erro instanceof Error ? erro.message : erro,
     );
   }
+
+  // A revogação do consentimento ao perfil de voz (H3d), antes de a linha do
+  // perfil sair no plano: o registro fica (regra 7 no topo).
+  if (await registrarRevogacaoDaVoz(chaves.openId)) passos.push({ nome: "voice_profile_consents (revogação, INSERT)", linhas: 1 });
 
   for (const passo of PLANO_DE_EXCLUSAO) {
     const valores = valoresDaOrigem(chaves, passo.origem);

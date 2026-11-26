@@ -238,15 +238,15 @@ describe("PainelDaEntidade", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("o ensaio já avisa que a base passaria de 1000, e o Importar fica desligado", async () => {
-    duble.minha.mockReturnValue(consulta({ ...MINHA, membros: { importados: 950, ativados: 40 } }));
+  it("o ensaio já avisa que a base passaria do teto (50 mil desde a N4b), e o Importar fica desligado", async () => {
+    duble.minha.mockReturnValue(consulta({ ...MINHA, membros: { importados: 49_950, ativados: 40 } }));
     duble.bloco.mockImplementation(async ({ linhas }: { linhas: unknown[] }) => ({ processadas: linhas.length, criados: 11, atualizados: 0, recusados: 0, comAviso: 0, novos: 11, problemas: [] }));
     render(<PainelDaEntidade />);
     const csv = "Razão Social;CNPJ\nEmpresa Um;11.222.333/0001-81\n";
     fireEvent.change(document.getElementById("arquivo-da-entidade")!, { target: { files: [arquivo("base.csv", csv)] } });
     await screen.findByText("base.csv: 1 linhas");
     fireEvent.click(screen.getByRole("button", { name: "Conferir (ensaio)" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("A base passaria de 1.000 associados: hoje são 990, e esta planilha traz 11 novos.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("A base passaria de 50.000 associados: hoje são 49990, e esta planilha traz 11 novos.");
     expect(screen.getByRole("button", { name: "Importar" })).toBeDisabled();
   });
 

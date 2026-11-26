@@ -9,8 +9,8 @@ import { eq, ne, and, asc, gt, inArray } from "drizzle-orm";
 import crypto from "crypto";
 import { setImmediate as cederAVez } from "node:timers/promises";
 import { hasValidConsent, usersComConsentimento } from "./routers/consent";
-import { nomeiamAMesmaCoisa, slugDoTermo } from "@shared/direcao-do-termo";
-import { classificarOferta, ehServicoDeAssessoria, necessidadeDeclaraOAssuntoDoServico, necessidadeNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
+import { nomeiamAMesmaCoisa, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
+import { classificarOferta, ehServicoDeAssessoria, necessidadeDeclaraOAssuntoDoServico, necessidadeEhOferta, necessidadeNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
 import { chaveAtualDaBusca } from "@shared/o-que-busca";
 import { CATEGORIAS_O_QUE_PRECISO, O_QUE_PRECISO_LEGADO } from "@shared/o-que-preciso";
 import { necessidadesEscritasDoPerfil, rotularBuscas } from "./portao-da-demanda-expressa";
@@ -243,6 +243,24 @@ const HAVE_SATISFIES_NEED: Record<string, string[]> = {
  * tradução.
  */
 function satisfaz(have: string, need: string): boolean {
+  // Concorrentes nunca se atendem (N6, decisão do Roberto de 11/11): a regra
+  // dos concorrentes vem ANTES de tudo, na mesma ordem do motor privado
+  // (`scoreMatch`, server/match-service.ts). Duas pontas com direção explícita
+  // para o mesmo lado querem a mesma coisa: "exportar" × "exportar" e
+  // "Exportar vinho" × "Exportar vinho" não são necessidade atendida, nem pelo
+  // texto igual, nem pelo slug igual. Até o N6 o texto igual passava direto e
+  // ainda subia a complementaridade, a dimensão de maior peso. "Exportar
+  // vinho" × "Importar vinho" segue atendido (mesmo objeto, direções opostas),
+  // e o serviço escrito igual dos dois lados ("Exportação de vinho") também,
+  // como no motor privado. Palavra solta continua sem casar: o que sobra daqui
+  // para baixo é o mapa curado, o slug, o mesmo objeto ou núcleo
+  // (`nomeiamAMesmaCoisa`, que nunca junta pelo lugar em comum) e as regras da
+  // demanda expressa.
+  if (saoConcorrentes(have, need)) return false;
+  // N7 (validação da #154): necessidade que na verdade OFERECE o serviço
+  // ("Ofereço contabilidade para MEI") não é necessidade declarada, como no
+  // motor privado.
+  if (necessidadeEhOferta(need) && classificarOferta(have, null) === "servico") return false;
   if (have === need) return true;
   if (HAVE_SATISFIES_NEED[have]?.includes(need)) return true;
   if (slugDoTermo(have) === slugDoTermo(need) || nomeiamAMesmaCoisa(have, need)) return true;
